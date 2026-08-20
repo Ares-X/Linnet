@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "${repo_root}"
+
+if [[ "$#" -ne 1 ]]; then
+  echo "Usage: scripts/stage-linnet-data GENERATED_ENGLISH_ROOT" >&2
+  exit 2
+fi
+english_root="$1"
+if [[ ! -d "${english_root}" || -L "${english_root}" ]]; then
+  echo "Linnet generated English root is missing or unsafe." >&2
+  exit 1
+fi
+
+assert_file_set() {
+  local directory="$1"
+  shift
+  local expected_files
+  local actual_files
+  expected_files="$(printf '%s\n' "$@" | LC_ALL=C sort)"
+  actual_files="$(find "${directory}" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)"
+  if [[ "${actual_files}" != "${expected_files}" ]]; then
+    echo "Linnet data does not match the allowlist for ${directory}." >&2
+    diff -u <(printf '%s\n' "${expected_files}") \
+      <(printf '%s\n' "${actual_files}") >&2 || true
+    exit 1
+  fi
+}
+
+expected_english_entries="$(printf '%s\n' \
+  linnet.english-data-manifest.json linnet.smart-index.tsv \
+  linnet.smart.db linnet_en.dict.yaml | LC_ALL=C sort)"
+actual_english_entries="$(find "${english_root}" -mindepth 1 -maxdepth 1 \
+  -exec basename {} \; | LC_ALL=C sort)"
+if [[ "${actual_english_entries}" != "${expected_english_entries}" ]]; then
+  echo "Linnet generated English projection has unexpected entries." >&2
+  exit 1
+fi
+for english_file in \
+  linnet.english-data-manifest.json linnet.smart-index.tsv \
+  linnet.smart.db linnet_en.dict.yaml; do
+  if [[ ! -f "${english_root}/${english_file}" || \
+        -L "${english_root}/${english_file}" ]]; then
+    echo "Linnet generated English data is missing or unsafe." >&2
+    exit 1
+  fi
+done
+
+# Canonical byte boundary between pinned upstream output and the files shipped
+# by Linnet. Both product roots are assembled outside their final names; the
+# English dictionary, database and manifest become visible in one directory
+# rename. The build-only TSV is validated above and never copied.
+ice_root="${repo_root}/upstreams/rime-ice"
+wanxiang_root="${repo_root}/upstreams/rime-wanxiang"
+grammar_root="${repo_root}/upstreams/rime-octagram-data"
+wanxiang_dictionary_paths=(
+  dicts/zi.dict.yaml
+  dicts/jichu.dict.yaml
+  dicts/lianxiang.dict.yaml
+  dicts/cuoyin.dict.yaml
+  dicts/duoyin.dict.yaml
+  dicts/shici.dict.yaml
+  dicts/diming.dict.yaml
+  dicts/yixue.dict.yaml
+  dicts/huaxue.dict.yaml
+  dicts/yaopin.dict.yaml
+  dicts/mingren.dict.yaml
+  dicts/yiren.dict.yaml
+  dicts/wuzhong.dict.yaml
+  dicts/renming.dict.yaml
+  dicts/taifeng.dict.yaml
+  dicts/fangyan.dict.yaml
+)
+test -f "${ice_root}/default.yaml"
+test -f data/linnet/default.yaml
+test -f upstreams.lock.json
+for product_target in data/plum data/opencc; do
+  if [[ -L "${product_target}" || \
+        ( -e "${product_target}" && ! -d "${product_target}" ) ]]; then
+    echo "Linnet product data target is unsafe." >&2
+    exit 1
+  fi
+done
+
+# Staging is an immutable projection and must not copy/scan hundreds of MB on
+# every Core build. Hash only its real source bytes; a successful publication
+# writes this stamp, while any source or staging-script change rebuilds once.
+stage_fingerprint_stamp="${repo_root}/build/linnet-stage.fingerprint"
+stage_fingerprint="$({
+  printf '%s\n' 'linnet-stage-fingerprint-v5-direct-upstream'
+  for source in \
+      scripts/stage-linnet-data \
+      patches/rime-wanxiang-linnet-reviewed.patch \
+      data/linnet/linnet_reviewed.dict.yaml \
+      data/linnet/linnet_zh.dict.yaml \
+      data/linnet/linnet_zh_full.dict.yaml \
+      data/chinese/grammar/wanxiang-lts-zh-hans.gram \
+      upstreams/rime-octagram-data/zh-hans-t-essay-bgw.gram \
+      "${english_root}/linnet_en.dict.yaml" \
+      "${english_root}/linnet.smart.db" \
+      "${english_root}/linnet.english-data-manifest.json"; do
+    printf '%s\t%s\n' "${source#"${repo_root}/"}" \
+      "$(shasum -a 256 < "${source}" | awk '{print $1}')"
+  done
+  while IFS= read -r -d '' source; do
+    printf '%s\t%s\n' "${source#"${repo_root}/"}" \
+      "$(shasum -a 256 < "${source}" | awk '{print $1}')"
+  done < <(
+    find data/linnet -type f -name '*.yaml' \
+      ! -name 'linnet_reviewed.dict.yaml' \
+      ! -name 'linnet_zh.dict.yaml' ! -name 'linnet_zh_full.dict.yaml' -print0
+    for relative in "${wanxiang_dictionary_paths[@]}"; do
+      printf '%s\0' "${wanxiang_root}/${relative}"
+    done
+    find "${ice_root}" -maxdepth 1 -type f \
+      \( -name 'radical_pinyin.*.yaml' -o -name 'symbols_v.yaml' \
+         -o -name 'symbols_caps_v.yaml' \) -print0
+    find "${ice_root}/opencc" -maxdepth 1 -type f \
+      \( -name 'emoji.json' -o -name 'emoji.txt' -o -name 'others.txt' \) -print0
+    find librime/share/opencc -maxdepth 1 -type f -print0
+  )
+} | LC_ALL=C sort | shasum -a 256 | awk '{print $1}')"
+
+if [[ -f "${stage_fingerprint_stamp}" && \
+      "$(cat "${stage_fingerprint_stamp}")" == "${stage_fingerprint}" && \
+      -d data/plum && ! -L data/plum && -d data/opencc && ! -L data/opencc && \
+      ! -e data/plum/lua && ! -L data/plum/lua && \
+      -s data/plum/linnet_zh.schema.yaml && -s data/plum/linnet_en.schema.yaml && \
+      -s data/plum/linnet_reviewed.dict.yaml && \
+      -s data/plum/dicts/jichu.dict.yaml && \
+      -s data/plum/linnet.smart.db && -s data/plum/wanxiang-lts-zh-hans.gram ]]; then
+  echo "stage-linnet-data: SKIP (projection inputs unchanged)"
+  exit 0
+fi
+
+stage_root="$(mktemp -d "${repo_root}/data/.linnet-stage.XXXXXX")"
+plum_stage="${stage_root}/plum"
+opencc_stage="${stage_root}/opencc"
+previous_plum="${stage_root}/previous-plum"
+previous_opencc="${stage_root}/previous-opencc"
+publishing=0
+new_plum=0
+new_opencc=0
+had_plum=0
+had_opencc=0
+
+cleanup_stage() {
+  local status=$?
+  trap - EXIT
+  if [[ "${status}" -ne 0 && "${publishing}" -eq 1 ]]; then
+    [[ "${new_opencc}" -eq 0 ]] || rm -rf -- data/opencc
+    [[ "${had_opencc}" -eq 0 ]] || mv "${previous_opencc}" data/opencc
+    [[ "${new_plum}" -eq 0 ]] || rm -rf -- data/plum
+    [[ "${had_plum}" -eq 0 ]] || mv "${previous_plum}" data/plum
+  fi
+  rm -rf -- "${stage_root}"
+  exit "${status}"
+}
+trap cleanup_stage EXIT
+
+mkdir -p "${plum_stage}/dicts" "${opencc_stage}"
+
+cp -X \
+  "${ice_root}/radical_pinyin.dict.yaml" \
+  "${ice_root}/radical_pinyin.schema.yaml" \
+  "${ice_root}/symbols_v.yaml" \
+  "${ice_root}/symbols_caps_v.yaml" \
+  "${plum_stage}/"
+for linnet_yaml in data/linnet/*.yaml; do
+  case "${linnet_yaml##*/}" in
+    linnet_zh.dict.yaml|linnet_zh_full.dict.yaml) continue ;;
+  esac
+  cp -X "${linnet_yaml}" "${plum_stage}/"
+done
+cp -X data/linnet/linnet_zh_full.dict.yaml \
+  "${plum_stage}/linnet_zh.dict.yaml"
+# Standard Rime owns dictionary assembly. Project the exact locked Wanxiang
+# sources, remove the reviewed wrong-code rows at one deterministic patch
+# boundary, and add the declarative Linnet decisions as the highest-priority
+# import table. No generated merge/tier/calibration copy remains.
+for relative in "${wanxiang_dictionary_paths[@]}"; do
+  source="${wanxiang_root}/${relative}"
+  [[ -f "${source}" && ! -L "${source}" ]] || {
+    echo "Locked Wanxiang dictionary is missing or unsafe: ${relative}" >&2
+    exit 1
+  }
+  cp -X "${source}" "${plum_stage}/${relative}"
+done
+/usr/bin/patch --batch --forward --fuzz=0 -s \
+  -d "${plum_stage}" -p1 \
+  < patches/rime-wanxiang-linnet-reviewed.patch
+# Wanxiang LTS grammar model, pinned only by upstreams.lock.json;
+# action-install.sh downloads it on demand from the
+# locked RIME-LMDG release URL and verifies its digest before staging.
+cp -X "${repo_root}/data/chinese/grammar/wanxiang-lts-zh-hans.gram" "${plum_stage}/"
+# Compact octagram model retained only in the source-build projection for
+# runtime/plugin smoke coverage. Public installer membership excludes it.
+cp -X "${repo_root}/upstreams/rime-octagram-data/zh-hans-t-essay-bgw.gram" "${plum_stage}/"
+cp -X \
+  "${english_root}/linnet_en.dict.yaml" \
+  "${english_root}/linnet.smart.db" \
+  "${english_root}/linnet.english-data-manifest.json" \
+  "${plum_stage}/"
+
+cp -X \
+  librime/share/opencc/HKVariants.ocd2 \
+  librime/share/opencc/HKVariantsRev.ocd2 \
+  librime/share/opencc/HKVariantsRevPhrases.ocd2 \
+  librime/share/opencc/JPShinjitaiCharacters.ocd2 \
+  librime/share/opencc/JPShinjitaiPhrases.ocd2 \
+  librime/share/opencc/JPVariants.ocd2 \
+  librime/share/opencc/JPVariantsRev.ocd2 \
+  librime/share/opencc/STCharacters.ocd2 \
+  librime/share/opencc/STPhrases.ocd2 \
+  librime/share/opencc/TSCharacters.ocd2 \
+  librime/share/opencc/TSPhrases.ocd2 \
+  librime/share/opencc/TWPhrases.ocd2 \
+  librime/share/opencc/TWPhrasesRev.ocd2 \
+  librime/share/opencc/TWVariants.ocd2 \
+  librime/share/opencc/TWVariantsRev.ocd2 \
+  librime/share/opencc/TWVariantsRevPhrases.ocd2 \
+  librime/share/opencc/hk2s.json \
+  librime/share/opencc/jp2t.json \
+  librime/share/opencc/s2hk.json \
+  librime/share/opencc/s2t.json \
+  librime/share/opencc/s2tw.json \
+  librime/share/opencc/s2twp.json \
+  librime/share/opencc/t2hk.json \
+  librime/share/opencc/t2jp.json \
+  librime/share/opencc/t2s.json \
+  librime/share/opencc/t2tw.json \
+  librime/share/opencc/tw2s.json \
+  librime/share/opencc/tw2sp.json \
+  "${opencc_stage}/"
+cp -X \
+  "${ice_root}/opencc/emoji.json" \
+  "${ice_root}/opencc/emoji.txt" \
+  "${ice_root}/opencc/others.txt" \
+  "${opencc_stage}/"
+
+assert_file_set "${plum_stage}" \
+  default.yaml linnet_reviewed.dict.yaml \
+  radical_pinyin.dict.yaml radical_pinyin.schema.yaml \
+  linnet_grammar_active.yaml \
+  linnet_algebra.yaml \
+  linnet.english-data-manifest.json linnet.smart.db linnet_en.dict.yaml \
+  linnet_en.schema.yaml linnet_user.yaml \
+  linnet_zh.dict.yaml linnet_zh.schema.yaml \
+  linnet_zh_pinyin.schema.yaml linnet_zh_flypy.schema.yaml \
+  linnet_zh_mspy.schema.yaml linnet_zh_sogou.schema.yaml \
+  linnet_zh_abc.schema.yaml linnet_zh_ziguang.schema.yaml \
+  linnet_zh_jiajia.schema.yaml \
+  symbols_caps_v.yaml symbols_v.yaml \
+  wanxiang-lts-zh-hans.gram zh-hans-t-essay-bgw.gram
+assert_file_set "${plum_stage}/dicts" \
+  zi.dict.yaml jichu.dict.yaml lianxiang.dict.yaml cuoyin.dict.yaml \
+  duoyin.dict.yaml shici.dict.yaml diming.dict.yaml \
+  yixue.dict.yaml huaxue.dict.yaml yaopin.dict.yaml mingren.dict.yaml \
+  yiren.dict.yaml wuzhong.dict.yaml renming.dict.yaml taifeng.dict.yaml \
+  fangyan.dict.yaml
+assert_file_set "${opencc_stage}" \
+  HKVariants.ocd2 HKVariantsRev.ocd2 HKVariantsRevPhrases.ocd2 \
+  JPShinjitaiCharacters.ocd2 JPShinjitaiPhrases.ocd2 JPVariants.ocd2 \
+  JPVariantsRev.ocd2 STCharacters.ocd2 STPhrases.ocd2 TSCharacters.ocd2 \
+  TSPhrases.ocd2 TWPhrases.ocd2 TWPhrasesRev.ocd2 TWVariants.ocd2 \
+  TWVariantsRev.ocd2 TWVariantsRevPhrases.ocd2 emoji.json emoji.txt hk2s.json \
+  jp2t.json others.txt s2hk.json s2t.json s2tw.json s2twp.json t2hk.json \
+  t2jp.json t2s.json t2tw.json tw2s.json tw2sp.json
+
+expected_directories='dicts'
+actual_directories="$(find "${plum_stage}" -mindepth 1 -maxdepth 1 -type d \
+  -exec basename {} \; | LC_ALL=C sort)"
+if [[ "${actual_directories}" != "${expected_directories}" ]]; then
+  echo "Linnet data has an unexpected product directory." >&2
+  diff -u <(printf '%s\n' "${expected_directories}") \
+    <(printf '%s\n' "${actual_directories}") >&2 || true
+  exit 1
+fi
+
+publishing=1
+if [[ -d data/plum ]]; then
+  mv data/plum "${previous_plum}"
+  had_plum=1
+fi
+new_plum=1
+mv "${plum_stage}" data/plum
+if [[ -d data/opencc ]]; then
+  mv data/opencc "${previous_opencc}"
+  had_opencc=1
+fi
+new_opencc=1
+mv "${opencc_stage}" data/opencc
+publishing=0
+
+stage_fingerprint_temp="${stage_fingerprint_stamp}.tmp.$$"
+printf '%s\n' "${stage_fingerprint}" > "${stage_fingerprint_temp}"
+mv "${stage_fingerprint_temp}" "${stage_fingerprint_stamp}"

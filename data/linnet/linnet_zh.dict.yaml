@@ -1,0 +1,22 @@
+# Linnet Chinese dictionary root
+# encoding: utf-8
+#
+# Linnet's reviewed decisions have the highest table priority. The remaining
+# tables are the exact locked Wanxiang sources, compiled and ranked by Rime
+# without an offline merge, tier, or calibration owner.
+
+---
+name: linnet_zh
+version: "1.0.0"
+sort: by_weight
+use_preset_vocabulary: false
+import_tables:
+  - linnet_reviewed
+  - dicts/zi
+  - dicts/jichu
+  - dicts/lianxiang
+  - dicts/cuoyin
+  - dicts/duoyin
+  - dicts/shici
+  - dicts/diming
+...

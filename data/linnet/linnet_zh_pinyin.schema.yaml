@@ -1,0 +1,32 @@
+# Linnet full-pinyin Chinese profile
+# encoding: utf-8
+
+__include: linnet_zh.schema.yaml:/
+
+schema:
+  __include: linnet_zh.schema.yaml:/schema
+  schema_id: linnet_zh_pinyin
+  name: 双韵 全拼
+  description: Linnet 全拼，万象词库为核心，共用词库、用户学习与产品行为。
+switches:
+  __include: linnet_zh.schema.yaml:/switches
+  __patch:
+    "@0/states": [ 中, A ]
+    "@0/abbrev": [ 中, A ]
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA`
+  initials: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA
+  delimiter: " '"
+  algebra:
+    __include: linnet_algebra.yaml:/full_pinyin
+translator:
+  __include: linnet_zh.schema.yaml:/translator
+  prism: linnet_zh_pinyin
+date_translator:
+  date: rq
+  time: sj
+  week: xq
+  datetime: dt
+  timestamp: ts
+  datezh: rqzh
+  dateen: rqen

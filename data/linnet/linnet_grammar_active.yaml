@@ -1,0 +1,4 @@
+# Build-time Standard profile. Release packaging owns the installed
+# Runtime/Active projection and replaces this one selection file for Full.
+grammar:
+  language: zh-hans-t-essay-bgw

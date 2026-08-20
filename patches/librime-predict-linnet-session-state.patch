@@ -1,0 +1,1280 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bc6a095..4914976 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,7 +1,7 @@
+ project(rime-predict)
+ cmake_minimum_required(VERSION 3.10)
+ 
+-option(BUILD_TOOLS "Build tools" ON)
++option(LINNET_BUILD_PREDICT_TOOL "Build Linnet predict database tool" OFF)
+ 
+ aux_source_directory(src predict_src)
+ 
+@@ -17,6 +17,6 @@ set(plugin_objs $<TARGET_OBJECTS:rime-predict-objs> PARENT_SCOPE)
+ set(plugin_deps ${rime_library} PARENT_SCOPE)
+ set(plugin_modules "predict" PARENT_SCOPE)
+ 
+-if(BUILD_TOOLS)
++if(LINNET_BUILD_PREDICT_TOOL)
+   add_subdirectory(tools)
+ endif()
+diff --git a/src/predict_db.cc b/src/predict_db.cc
+index 57872d6..8921fcf 100644
+--- a/src/predict_db.cc
++++ b/src/predict_db.cc
+@@ -1,59 +1,183 @@
+ #include "predict_db.h"
++
+ #include <algorithm>
+-#include <boost/algorithm/string.hpp>
++#include <cmath>
++#include <cstring>
++#include <exception>
++#include <limits>
++
+ #include <darts.h>
+-#include <rime/resource.h>
+ #include <rime/dict/mapped_file.h>
+ #include <rime/dict/string_table.h>
++#include <rime/resource.h>
+ 
+ namespace rime {
+ 
+-const string kPredictFormat = "Rime::Predict/1.0";
+-const string kPredictFormatPrefix = "Rime::Predict/";
++namespace {
++
++const char kPredictFormat[] = "Rime::Predict/2.0";
++const uint32_t kPinyinRankBase = 64;
++
++bool IsPinyinKey(const string& key) {
++  if (key.size() <= 2 || key[0] != 'p' || key[1] != '/')
++    return false;
++  return std::all_of(key.begin() + 2, key.end(),
++                     [](char ch) { return ch >= 'a' && ch <= 'z'; });
++}
++
++bool HasPinyinPrefix(const string& key) {
++  return key.size() >= 2 && key[0] == 'p' && key[1] == '/';
++}
++
++}  // namespace
++
++bool PredictDb::InRange(const void* pointer, size_t bytes) const {
++  if (!pointer || !IsOpen())
++    return false;
++  const uintptr_t base = reinterpret_cast<uintptr_t>(address());
++  const uintptr_t value = reinterpret_cast<uintptr_t>(pointer);
++  return value >= base && value - base <= file_size() &&
++         bytes <= file_size() - (value - base);
++}
+ 
+ bool PredictDb::Load() {
+   LOG(INFO) << "loading predict db: " << file_path();
+ 
+   if (IsOpen())
+     Close();
+-
+   if (!OpenReadOnly()) {
+     LOG(ERROR) << "error opening predict db '" << file_path() << "'.";
+     return false;
+   }
+ 
+-  metadata_ = Find<predict::Metadata>(0);
+-  if (!metadata_) {
+-    LOG(ERROR) << "metadata not found.";
++  const auto reject = [this](const char* message) {
++    LOG(ERROR) << message;
++    metadata_ = nullptr;
++    value_count_ = 0;
++    key_trie_ = make_unique<Darts::DoubleArray>();
++    value_trie_ = make_unique<StringTable>();
+     Close();
+     return false;
++  };
++  if (file_size() < sizeof(predict::Metadata))
++    return reject("metadata not found.");
++  metadata_ = Find<predict::Metadata>(0);
++  if (!metadata_)
++    return reject("metadata not found.");
++  char expected_format[predict::Metadata::kFormatMaxLength] = {};
++  std::memcpy(expected_format, kPredictFormat, sizeof(kPredictFormat) - 1);
++  if (std::memcmp(metadata_->format, expected_format,
++                  sizeof(expected_format)) != 0) {
++    return reject("unsupported predict database format.");
+   }
+ 
+-  if (!boost::starts_with(string(metadata_->format), kPredictFormatPrefix)) {
+-    LOG(ERROR) << "invalid metadata.";
+-    Close();
+-    return false;
++  const size_t key_trie_bytes =
++      static_cast<size_t>(metadata_->key_trie_size) * sizeof(uint32_t);
++  if (!metadata_->key_trie || !metadata_->key_trie_size ||
++      !InRange(metadata_->key_trie.get(), key_trie_bytes)) {
++    return reject("double array image is invalid.");
++  }
++  if (!metadata_->value_trie || !metadata_->value_trie_size ||
++      !InRange(metadata_->value_trie.get(), metadata_->value_trie_size)) {
++    return reject("string table is invalid.");
+   }
+ 
+-  if (!metadata_->key_trie) {
+-    LOG(ERROR) << "double array image not found.";
+-    Close();
+-    return false;
++  try {
++    key_trie_->set_array(metadata_->key_trie.get(), metadata_->key_trie_size);
++    value_trie_ = make_unique<StringTable>(metadata_->value_trie.get(),
++                                           metadata_->value_trie_size);
++  } catch (const std::exception&) {
++    return reject("predict database index could not be loaded.");
+   }
+-  DLOG(INFO) << "found double array image of size " << metadata_->key_trie_size
+-             << ".";
+-  key_trie_->set_array(metadata_->key_trie.get(), metadata_->key_trie_size);
++  value_count_ = value_trie_->NumKeys();
+ 
+-  if (!metadata_->value_trie) {
+-    LOG(ERROR) << "string table not found.";
+-    Close();
+-    return false;
++  if (metadata_->pinyin_key_count == 0) {
++    if (metadata_->pinyin_data || metadata_->pinyin_data_size ||
++        metadata_->pinyin_entry_count || metadata_->pinyin_value_id_bytes ||
++        metadata_->pinyin_rank_base) {
++      return reject("empty pinyin section metadata is inconsistent.");
++    }
++  } else {
++    if (!metadata_->pinyin_data || !metadata_->pinyin_data_size ||
++        metadata_->pinyin_value_id_bytes != sizeof(StringId) ||
++        metadata_->pinyin_rank_base != kPinyinRankBase ||
++        !InRange(metadata_->pinyin_data.get(),
++                 metadata_->pinyin_data_size)) {
++      return reject("pinyin section metadata is invalid.");
++    }
++    const char* data = metadata_->pinyin_data.get();
++    size_t cursor = 0;
++    uint64_t key_count = 0;
++    uint64_t entry_count = 0;
++    while (cursor < metadata_->pinyin_data_size) {
++      const uint8_t count = static_cast<uint8_t>(data[cursor++]);
++      const size_t bytes = static_cast<size_t>(count) * sizeof(StringId);
++      if (count == 0 || count > kPinyinRankBase ||
++          bytes > metadata_->pinyin_data_size - cursor) {
++        return reject("pinyin candidate block is invalid.");
++      }
++      for (uint32_t i = 0; i < count; ++i) {
++        StringId value_id = 0;
++        std::memcpy(&value_id, data + cursor + i * sizeof(StringId),
++                    sizeof(value_id));
++        if (value_id >= value_count_)
++          return reject("pinyin candidate value is invalid.");
++      }
++      cursor += bytes;
++      ++key_count;
++      entry_count += count;
++    }
++    if (cursor != metadata_->pinyin_data_size ||
++        key_count != metadata_->pinyin_key_count ||
++        entry_count != metadata_->pinyin_entry_count) {
++      return reject("pinyin section totals are invalid.");
++    }
+   }
+-  DLOG(INFO) << "found string table of size " << metadata_->value_trie.get()
+-             << ".";
+-  value_trie_ = make_unique<StringTable>(metadata_->value_trie.get(),
+-                                         metadata_->value_trie_size);
+ 
++  if (metadata_->generic_key_count == 0) {
++    if (metadata_->generic_data || metadata_->generic_data_size ||
++        metadata_->generic_entry_count) {
++      return reject("empty generic section metadata is inconsistent.");
++    }
++  } else {
++    if (!metadata_->generic_data || !metadata_->generic_data_size ||
++        !InRange(metadata_->generic_data.get(),
++                 metadata_->generic_data_size)) {
++      return reject("generic section metadata is invalid.");
++    }
++    const char* data = metadata_->generic_data.get();
++    size_t cursor = 0;
++    uint64_t key_count = 0;
++    uint64_t entry_count = 0;
++    while (cursor < metadata_->generic_data_size) {
++      if (sizeof(uint32_t) > metadata_->generic_data_size - cursor)
++        return reject("generic candidate header is truncated.");
++      uint32_t count = 0;
++      std::memcpy(&count, data + cursor, sizeof(count));
++      const size_t available =
++          metadata_->generic_data_size - cursor - sizeof(uint32_t);
++      if (count == 0 || count > available / sizeof(table::Entry))
++        return reject("generic candidate block is invalid.");
++      const size_t bytes = sizeof(uint32_t) +
++                           static_cast<size_t>(count) * sizeof(table::Entry);
++      const auto* entries = reinterpret_cast<const table::Entry*>(
++          data + cursor + sizeof(uint32_t));
++      for (uint32_t i = 0; i < count; ++i) {
++        if (entries[i].text.str_id() >= value_count_ ||
++            !std::isfinite(entries[i].weight) || entries[i].weight <= 0) {
++          return reject("generic candidate value is invalid.");
++        }
++      }
++      cursor += bytes;
++      ++key_count;
++      entry_count += count;
++    }
++    if (cursor != metadata_->generic_data_size ||
++        key_count != metadata_->generic_key_count ||
++        entry_count != metadata_->generic_entry_count) {
++      return reject("generic section totals are invalid.");
++    }
++  }
+   return true;
+ }
+ 
+@@ -69,107 +193,256 @@ bool PredictDb::Save() {
+ int PredictDb::WriteCandidates(const vector<predict::RawEntry>& candidates,
+                                const table::Entry* entry) {
+   auto* array = CreateArray<table::Entry>(candidates.size());
++  if (!array)
++    return -1;
+   auto* next = array->begin();
+-  for (size_t i = 0; i < candidates.size(); ++i) {
++  for (size_t i = 0; i < candidates.size(); ++i)
+     *next++ = *entry++;
+-  }
+-  auto offset = reinterpret_cast<char*>(array) - address();
+-  return int(offset);
++  const size_t offset = reinterpret_cast<char*>(array) - address();
++  if (offset > static_cast<size_t>((std::numeric_limits<int>::max)()))
++    return -1;
++  return static_cast<int>(offset);
+ }
+ 
+ bool PredictDb::Build(const predict::RawData& data) {
+-  // create predict db
+-  int data_size = data.size();
+-  const size_t kReservedSize = 1024;
++  const size_t data_size = data.size();
++  if (data_size == 0)
++    return false;
+ 
+   size_t entry_count = 0;
+-  for (const auto& kv : data) {
+-    entry_count += kv.second.size();
++  size_t pinyin_data_size = 0;
++  uint32_t pinyin_key_count = 0;
++  uint32_t pinyin_entry_count = 0;
++  uint32_t generic_key_count = 0;
++  uint32_t generic_entry_count = 0;
++  for (const auto& [key, candidates] : data) {
++    if (candidates.empty())
++      return false;
++    if (HasPinyinPrefix(key)) {
++      if (!IsPinyinKey(key) || candidates.size() > kPinyinRankBase)
++        return false;
++      for (size_t rank = 0; rank < candidates.size(); ++rank) {
++        if (candidates[rank].weight != kPinyinRankBase - rank)
++          return false;
++      }
++      const size_t bytes =
++          sizeof(uint8_t) + candidates.size() * sizeof(StringId);
++      if (bytes > (std::numeric_limits<size_t>::max)() - pinyin_data_size ||
++          candidates.size() >
++              (std::numeric_limits<uint32_t>::max)() - pinyin_entry_count ||
++          pinyin_key_count == (std::numeric_limits<uint32_t>::max)()) {
++        return false;
++      }
++      pinyin_data_size += bytes;
++      ++pinyin_key_count;
++      pinyin_entry_count += candidates.size();
++    } else {
++      if (candidates.size() >
++              (std::numeric_limits<uint32_t>::max)() - generic_entry_count ||
++          generic_key_count == (std::numeric_limits<uint32_t>::max)()) {
++        return false;
++      }
++      ++generic_key_count;
++      generic_entry_count += candidates.size();
++    }
++    if (candidates.size() >
++        (std::numeric_limits<size_t>::max)() - entry_count) {
++      return false;
++    }
++    entry_count += candidates.size();
+   }
++  if (pinyin_data_size > (std::numeric_limits<uint32_t>::max)() ||
++      entry_count > (std::numeric_limits<int>::max)()) {
++    return false;
++  }
++
+   StringTableBuilder string_table;
+   vector<table::Entry> entries(entry_count);
+   vector<const char*> keys;
+   keys.reserve(data_size);
+-  int i = 0;
+-  for (const auto& kv : data) {
+-    if (kv.second.empty())
+-      continue;
+-    for (const auto& candidate : kv.second) {
++  size_t entry_index = 0;
++  for (const auto& [key, candidates] : data) {
++    for (const auto& candidate : candidates) {
+       string_table.Add(candidate.text, candidate.weight,
+-                       &entries[i].text.str_id());
+-      entries[i].weight = float(candidate.weight);
+-      ++i;
++                       &entries[entry_index].text.str_id());
++      entries[entry_index].weight = float(candidate.weight);
++      ++entry_index;
+     }
+-    keys.push_back(kv.first.c_str());
++    keys.push_back(key.c_str());
+   }
+-  // this writes to entry vector, which should be copied to entry array later
+   string_table.Build();
+-  size_t value_trie_image_size = string_table.BinarySize();
+-  if (!Create(value_trie_image_size)) {
++  const size_t value_trie_image_size = string_table.BinarySize();
++  if (!Create(value_trie_image_size) || !Allocate<predict::Metadata>()) {
+     LOG(ERROR) << "Error creating predict db file '" << file_path() << "'.";
+     return false;
+   }
+-  // create metadata in the beginning of file
+-  if (!Allocate<predict::Metadata>()) {
+-    LOG(ERROR) << "Error creating metadata in file '" << file_path() << "'.";
+-    return false;
++
++  size_t pinyin_data_offset = 0;
++  if (pinyin_data_size) {
++    const size_t allocation_size = RIME_ALIGNED(pinyin_data_size, table::Entry);
++    char* data_image = Allocate<char>(allocation_size);
++    if (!data_image)
++      return false;
++    pinyin_data_offset = data_image - address();
++    size_t cursor = 0;
++    entry_index = 0;
++    for (const auto& [key, candidates] : data) {
++      if (IsPinyinKey(key)) {
++        char* block = Find<char>(pinyin_data_offset + cursor);
++        block[0] = static_cast<char>(candidates.size());
++        ++cursor;
++        for (size_t i = 0; i < candidates.size(); ++i) {
++          const StringId value_id = entries[entry_index + i].text.str_id();
++          std::memcpy(block + 1 + i * sizeof(StringId), &value_id,
++                      sizeof(value_id));
++        }
++        cursor += candidates.size() * sizeof(StringId);
++      }
++      entry_index += candidates.size();
++    }
++    if (cursor != pinyin_data_size)
++      return false;
+   }
+ 
+-  // copy from entry vector to entry array
+-  const table::Entry* available_entries = &entries[0];
+   vector<int> values;
+   values.reserve(data_size);
+-  for (const auto& kv : data) {
+-    if (kv.second.empty())
+-      continue;
+-    values.push_back(WriteCandidates(kv.second, available_entries));
+-    available_entries += kv.second.size();
+-  }
+-  // build real key trie
+-  if (0 != key_trie_->build(data_size, keys.data(), NULL, values.data())) {
++  const table::Entry* available_entries = entries.data();
++  size_t pinyin_cursor = 0;
++  size_t generic_data_offset = 0;
++  size_t generic_data_end = 0;
++  for (const auto& [key, candidates] : data) {
++    if (IsPinyinKey(key)) {
++      const size_t offset = pinyin_data_offset + pinyin_cursor;
++      if (offset > static_cast<size_t>((std::numeric_limits<int>::max)()))
++        return false;
++      values.push_back(static_cast<int>(offset));
++      pinyin_cursor += sizeof(uint8_t) + candidates.size() * sizeof(StringId);
++    } else {
++      const int offset = WriteCandidates(candidates, available_entries);
++      if (offset < 0)
++        return false;
++      if (!generic_data_offset)
++        generic_data_offset = offset;
++      values.push_back(offset);
++      generic_data_end = file_size();
++    }
++    available_entries += candidates.size();
++  }
++  if (pinyin_cursor != pinyin_data_size)
++    return false;
++  if (generic_data_offset &&
++      generic_data_end - generic_data_offset >
++          (std::numeric_limits<uint32_t>::max)()) {
++    return false;
++  }
++
++  if (key_trie_->build(data_size, keys.data(), nullptr, values.data()) != 0) {
+     LOG(ERROR) << "Error building double-array trie.";
+     return false;
+   }
+-  // save double-array image
+-  size_t key_trie_image_size = key_trie_->total_size();
+-  char* key_trie_image = Allocate<char>(key_trie_image_size);
+-  if (!key_trie_image) {
+-    LOG(ERROR) << "Error creating double-array image.";
++  const size_t key_trie_image_size = key_trie_->total_size();
++  if (key_trie_->size() > (std::numeric_limits<uint32_t>::max)() ||
++      value_trie_image_size > (std::numeric_limits<uint32_t>::max)()) {
+     return false;
+   }
++  char* key_trie_image = Allocate<char>(key_trie_image_size);
++  if (!key_trie_image)
++    return false;
+   std::memcpy(key_trie_image, key_trie_->array(), key_trie_image_size);
+-  metadata_ = reinterpret_cast<predict::Metadata*>(address());
+-  metadata_->key_trie = key_trie_image;
+-  // double-array size (number of units)
+-  metadata_->key_trie_size = key_trie_->size();
+-  // save string table
++  const size_t key_trie_offset = key_trie_image - address();
++
+   char* value_trie_image = Allocate<char>(value_trie_image_size);
+-  if (!value_trie_image) {
+-    LOG(ERROR) << "Error creating value trie image.";
++  if (!value_trie_image)
+     return false;
+-  }
++  const size_t value_trie_offset = value_trie_image - address();
+   string_table.Dump(value_trie_image, value_trie_image_size);
+-  metadata_ = reinterpret_cast<predict::Metadata*>(address());
+-  metadata_->value_trie = value_trie_image;
+-  metadata_->value_trie_size = value_trie_image_size;
+   value_trie_ =
+       make_unique<StringTable>(value_trie_image, value_trie_image_size);
+-  // at last, complete the metadata
+-  std::strncpy(metadata_->format, kPredictFormat.c_str(),
+-               kPredictFormat.length());
++  value_count_ = value_trie_->NumKeys();
++
++  metadata_ = reinterpret_cast<predict::Metadata*>(address());
++  metadata_->key_trie = Find<char>(key_trie_offset);
++  metadata_->key_trie_size = key_trie_->size();
++  metadata_->value_trie = Find<char>(value_trie_offset);
++  metadata_->value_trie_size = value_trie_image_size;
++  metadata_->pinyin_data =
++      pinyin_data_size ? Find<char>(pinyin_data_offset) : nullptr;
++  metadata_->pinyin_data_size = pinyin_data_size;
++  metadata_->pinyin_key_count = pinyin_key_count;
++  metadata_->pinyin_entry_count = pinyin_entry_count;
++  metadata_->pinyin_value_id_bytes =
++      pinyin_data_size ? sizeof(StringId) : 0;
++  metadata_->pinyin_rank_base = pinyin_data_size ? kPinyinRankBase : 0;
++  metadata_->generic_data =
++      generic_data_offset ? Find<char>(generic_data_offset) : nullptr;
++  metadata_->generic_data_size =
++      generic_data_offset ? generic_data_end - generic_data_offset : 0;
++  metadata_->generic_key_count = generic_key_count;
++  metadata_->generic_entry_count = generic_entry_count;
++  std::memcpy(metadata_->format, kPredictFormat, sizeof(kPredictFormat) - 1);
+   return true;
+ }
+ 
+-predict::Candidates* PredictDb::Lookup(const string& query) {
+-  int result = key_trie_->exactMatchSearch<int>(query.c_str());
+-  if (result == -1)
+-    return nullptr;
+-  else
+-    return Find<predict::Candidates>(result);
+-}
++bool PredictDb::LookupCopy(const string& query,
++                           vector<predict::RawEntry>* result) {
++  if (!result || !metadata_ || !value_trie_)
++    return false;
++  result->clear();
++  const int matched = key_trie_->exactMatchSearch<int>(query.c_str());
++  if (matched < 0)
++    return false;
++  const size_t offset = static_cast<uint32_t>(matched);
+ 
+-string PredictDb::GetEntryText(const ::rime::table::Entry& entry) {
+-  return value_trie_->GetString(entry.text.str_id());
++  if (HasPinyinPrefix(query)) {
++    if (!metadata_->pinyin_data)
++      return false;
++    const uintptr_t section_begin =
++        reinterpret_cast<uintptr_t>(metadata_->pinyin_data.get());
++    const uintptr_t section_end = section_begin + metadata_->pinyin_data_size;
++    const uintptr_t block = reinterpret_cast<uintptr_t>(address()) + offset;
++    if (block < section_begin || block >= section_end)
++      return false;
++    const size_t available = section_end - block;
++    const uint8_t count = *reinterpret_cast<const uint8_t*>(block);
++    const size_t bytes = sizeof(uint8_t) +
++                         static_cast<size_t>(count) * sizeof(StringId);
++    if (count == 0 || count > kPinyinRankBase || bytes > available)
++      return false;
++    result->reserve(count);
++    const char* ids = reinterpret_cast<const char*>(block + sizeof(uint8_t));
++    for (uint32_t rank = 0; rank < count; ++rank) {
++      StringId value_id = 0;
++      std::memcpy(&value_id, ids + rank * sizeof(StringId), sizeof(value_id));
++      result->push_back({value_trie_->GetString(value_id),
++                         static_cast<double>(kPinyinRankBase - rank)});
++    }
++    return true;
++  }
++
++  if (!metadata_->generic_data)
++    return false;
++  const uintptr_t section_begin =
++      reinterpret_cast<uintptr_t>(metadata_->generic_data.get());
++  const uintptr_t section_end = section_begin + metadata_->generic_data_size;
++  const uintptr_t block = reinterpret_cast<uintptr_t>(address()) + offset;
++  if (block < section_begin || block >= section_end ||
++      sizeof(uint32_t) > section_end - block) {
++    return false;
++  }
++  uint32_t count = 0;
++  std::memcpy(&count, reinterpret_cast<const void*>(block), sizeof(count));
++  const size_t available = section_end - block - sizeof(uint32_t);
++  if (count == 0 || count > available / sizeof(table::Entry))
++    return false;
++  const auto* entries = reinterpret_cast<const table::Entry*>(
++      block + sizeof(uint32_t));
++  result->reserve(count);
++  for (uint32_t i = 0; i < count; ++i) {
++    const auto& entry = entries[i];
++    result->push_back({value_trie_->GetString(entry.text.str_id()),
++                       static_cast<double>(entry.weight)});
++  }
++  return true;
+ }
+ 
+ }  // namespace rime
+diff --git a/src/predict_db.h b/src/predict_db.h
+index 32c7a11..f8da9c8 100644
+--- a/src/predict_db.h
++++ b/src/predict_db.h
+@@ -15,10 +15,20 @@ struct Metadata {
+   static const int kFormatMaxLength = 32;
+   char format[kFormatMaxLength];
+   uint32_t db_checksum;
+-  OffsetPtr<char> key_trie;  // DoubleArray (query -> offset of Candidates)
++  OffsetPtr<char> key_trie;  // DoubleArray (query -> candidate-block offset)
+   uint32_t key_trie_size;
+   OffsetPtr<char> value_trie;  // StringTable
+   uint32_t value_trie_size;
++  OffsetPtr<char> pinyin_data;  // count byte + contiguous StringId values
++  uint32_t pinyin_data_size;
++  uint32_t pinyin_key_count;
++  uint32_t pinyin_entry_count;
++  uint32_t pinyin_value_id_bytes;
++  uint32_t pinyin_rank_base;
++  OffsetPtr<char> generic_data;  // Array<table::Entry> blocks
++  uint32_t generic_data_size;
++  uint32_t generic_key_count;
++  uint32_t generic_entry_count;
+ };
+ 
+ using Candidates = ::rime::Array<::rime::table::Entry>;
+@@ -32,6 +42,8 @@ using RawData = map<string, vector<RawEntry>>;
+ 
+ }  // namespace predict
+ 
++class PredictEngine;
++
+ class PredictDb : public MappedFile {
+  public:
+   PredictDb(const path& file_path)
+@@ -42,16 +54,21 @@ class PredictDb : public MappedFile {
+   bool Load();
+   bool Save();
+   bool Build(const predict::RawData& data);
+-  predict::Candidates* Lookup(const string& query);
+-  string GetEntryText(const ::rime::table::Entry& entry);
+ 
+  private:
++  friend class PredictEngine;
++
++  // PredictDb owns both physical layouts and returns copied values; no caller
++  // retains pointers into the mapped file or reinterprets compact ranks.
+   int WriteCandidates(const vector<predict::RawEntry>& candidates,
+                       const table::Entry* entry);
++  bool LookupCopy(const string& query, vector<predict::RawEntry>* result);
++  bool InRange(const void* pointer, size_t bytes) const;
+ 
+   predict::Metadata* metadata_ = nullptr;
+   the<Darts::DoubleArray> key_trie_;
+   the<StringTable> value_trie_;
++  size_t value_count_ = 0;
+ };
+ 
+ }  // namespace rime
+diff --git a/src/predict_engine.cc b/src/predict_engine.cc
+index a90fcae..edbd5f9 100644
+--- a/src/predict_engine.cc
++++ b/src/predict_engine.cc
+@@ -1,5 +1,7 @@
+ #include "predict_engine.h"
+ 
++#include <algorithm>
++
+ #include "predict_db.h"
+ #include <rime/candidate.h>
+ #include <rime/context.h>
+@@ -15,37 +17,104 @@
+ 
+ namespace rime {
+ 
+-static const ResourceType kPredictDbResourceType = {"predict_db", "", ""};
++namespace {
++
++const ResourceType kPredictDbResourceType = {"predict_db", "", ""};
++const char kPredictDbName[] = "linnet.smart.db";
++
++vector<string> PredictionKeys(const string& context_query) {
++  if (context_query.empty() || context_query.front() == ' ' ||
++      context_query.back() == ' ')
++    return {};
++  vector<string> words;
++  size_t start = 0;
++  while (start < context_query.size()) {
++    const size_t end = context_query.find(' ', start);
++    const string word = context_query.substr(start, end - start);
++    size_t index = !word.empty() && word.front() == '\'' ? 1 : 0;
++    if (index == word.size())
++      return {};
++    for (; index < word.size(); ++index) {
++      const unsigned char ch = word[index];
++      if (ch < 'a' || ch > 'z')
++        return {};
++    }
++    words.push_back(word);
++    if (words.size() > 4)
++      return {};
++    if (end == string::npos)
++      break;
++    start = end + 1;
++  }
++
++  vector<string> keys;
++  const size_t max_words = (std::min)(size_t{4}, words.size());
++  for (size_t count = max_words; count > 0; --count) {
++    string key = "n/";
++    const size_t first = words.size() - count;
++    for (size_t i = first; i < words.size(); ++i) {
++      if (i != first)
++        key.push_back(' ');
++      key += words[i];
++    }
++    keys.push_back(std::move(key));
++  }
++  return keys;
++}
++
++an<PredictDb> SharedPredictDb() {
++  static const an<PredictDb> db = [] {
++    auto resolver = make_unique<ResourceResolver>(kPredictDbResourceType);
++    resolver->set_root_path(Service::instance().deployer().shared_data_dir);
++    return New<PredictDb>(resolver->ResolvePath(kPredictDbName));
++  }();
++  return db;
++}
++
++}  // namespace
+ 
+-PredictEngine::PredictEngine(an<PredictDb> db,
+-                             int max_iterations,
+-                             int max_candidates)
+-    : db_(db),
+-      max_iterations_(max_iterations),
+-      max_candidates_(max_candidates) {}
++PredictEngine::PredictEngine(an<PredictDb> db, int max_candidates)
++    : db_(db), max_candidates_(max_candidates) {}
+ 
+ PredictEngine::~PredictEngine() {}
+ 
+-bool PredictEngine::Predict(Context* ctx, const string& context_query) {
+-  DLOG(INFO) << "PredictEngine::Predict [" << context_query << "]";
+-  if (const auto* candidates = db_->Lookup(context_query)) {
+-    query_ = context_query;
+-    candidates_ = candidates;
+-    return true;
+-  } else {
+-    Clear();
++bool PredictEngine::Resolve(Context* ctx) const {
++  if (!ctx)
++    return false;
++  const string context_query = ctx->get_property(predict::kContextProperty);
++  DLOG(INFO) << "PredictEngine::Resolve [" << context_query << "]";
++  const vector<string> keys = PredictionKeys(context_query);
++  if (keys.empty()) {
++    Clear(ctx);
+     return false;
+   }
++  vector<predict::RawEntry> candidates;
++  for (const auto& query : keys) {
++    if (LookupCopy(query, &candidates) && !candidates.empty()) {
++      ctx->set_property(predict::kStaticKeyProperty, query);
++      return true;
++    }
++  }
++  // A validated full-context key is also the learned-only capability when the
++  // immutable database has no row for any suffix.
++  ctx->set_property(predict::kStaticKeyProperty, keys.front());
++  // A valid context still owns a prediction segment so the session-bigram
++  // translator can produce candidates absent from the immutable database.
++  return true;
+ }
+ 
+-void PredictEngine::Clear() {
++void PredictEngine::Clear(Context* ctx) const {
+   DLOG(INFO) << "PredictEngine::Clear";
+-  query_.clear();
+-  candidates_ = nullptr;
++  if (!ctx)
++    return;
++  if (!ctx->get_property(predict::kStaticKeyProperty).empty())
++    ctx->set_property(predict::kStaticKeyProperty, "");
+ }
+ 
+ void PredictEngine::CreatePredictSegment(Context* ctx) const {
+   DLOG(INFO) << "PredictEngine::CreatePredictSegment";
++  if (!ctx)
++    return;
+   int end = int(ctx->input().length());
+   Segment segment(end, end);
+   segment.tags.insert("prediction");
+@@ -55,49 +124,65 @@ void PredictEngine::CreatePredictSegment(Context* ctx) const {
+   DLOG(INFO) << "segments: " << ctx->composition();
+ }
+ 
+-an<Translation> PredictEngine::Translate(const Segment& segment) const {
++an<Translation> PredictEngine::Translate(Context* ctx,
++                                         const Segment& segment) const {
+   DLOG(INFO) << "PredictEngine::Translate";
++  if (!ctx || !segment.HasTag("prediction"))
++    return nullptr;
++  const string query = ctx->get_property(predict::kStaticKeyProperty);
++  if (query.empty())
++    return nullptr;
++  vector<predict::RawEntry> candidates;
++  if (!LookupCopy(query, &candidates) || candidates.empty())
++    return nullptr;
++
+   auto translation = New<FifoTranslation>();
+   size_t end = segment.end;
+-  int i = 0;
+-  for (auto* it = candidates_->begin(); it != candidates_->end(); ++it) {
++  const size_t limit =
++      max_candidates_ > 0
++          ? (std::min)(candidates.size(), static_cast<size_t>(max_candidates_))
++          : candidates.size();
++  for (size_t i = 0; i < limit; ++i) {
+     translation->Append(
+-        New<SimpleCandidate>("prediction", end, end, db_->GetEntryText(*it)));
+-    i++;
+-    if (max_candidates_ > 0 && i >= max_candidates_)
+-      break;
++        New<SimpleCandidate>("prediction", end, end, candidates[i].text));
+   }
+   return translation;
+ }
+ 
+-PredictEngineComponent::PredictEngineComponent()
+-    : db_pool_(the<ResourceResolver>(
+-          Service::instance().CreateResourceResolver(kPredictDbResourceType))) {
++bool PredictEngine::LookupCopy(
++    const string& query,
++    vector<predict::RawEntry>* result) const {
++  if (!db_ || !result)
++    return false;
++  return db_->LookupCopy(query, result);
++}
++
++an<PredictEngineComponent> PredictEngineComponent::Shared() {
++  static const an<PredictEngineComponent> factory =
++      New<PredictEngineComponent>();
++  return factory;
+ }
+ 
++PredictEngineComponent::PredictEngineComponent() {}
++
+ PredictEngineComponent::~PredictEngineComponent() {}
+ 
+ PredictEngine* PredictEngineComponent::Create(const Ticket& ticket) {
+-  string db_name = "predict.db";
+   int max_candidates = 0;
+-  int max_iterations = 0;
+   if (auto* schema = ticket.schema) {
+     auto* config = schema->config();
+-    if (config->GetString("predictor/db", &db_name)) {
+-      LOG(INFO) << "custom predictor/db: " << db_name;
+-    }
+     if (!config->GetInt("predictor/max_candidates", &max_candidates)) {
+       LOG(INFO) << "predictor/max_candidates is not set in schema";
+     }
+-    if (!config->GetInt("predictor/max_iterations", &max_iterations)) {
+-      LOG(INFO) << "predictor/max_iterations is not set in schema";
+-    }
+   }
+-  if (auto db = db_pool_.GetDb(db_name)) {
++  // Linnet contract: this database is an immutable product resource resolved
++  // only below shared_data_dir. Remove when upstream offers the same fixed,
++  // no-user/no-staging resource boundary and session-state ownership.
++  if (auto db = SharedPredictDb()) {
+     if (db->IsOpen() || db->Load()) {
+-      return new PredictEngine(db, max_iterations, max_candidates);
++      return new PredictEngine(db, max_candidates);
+     } else {
+-      LOG(ERROR) << "failed to load predict db: " << db_name;
++      LOG(ERROR) << "failed to load predict db: " << kPredictDbName;
+     }
+   }
+   return nullptr;
+diff --git a/src/predict_engine.h b/src/predict_engine.h
+index ae62eeb..ac7201a 100644
+--- a/src/predict_engine.h
++++ b/src/predict_engine.h
+@@ -3,7 +3,6 @@
+ 
+ #include "predict_db.h"
+ #include <rime/component.h>
+-#include <rime/dict/db_pool.h>
+ 
+ namespace rime {
+ 
+@@ -12,44 +11,46 @@ struct Segment;
+ struct Ticket;
+ class Translation;
+ 
++namespace predict {
++
++// Linnet's product observer owns the canonical committed-word context.
++// PredictEngine owns the validated immutable-database lookup key.
++inline constexpr char kContextProperty[] = "linnet/predict_context_v1";
++inline constexpr char kStaticKeyProperty[] = "linnet/predict_static_key_v1";
++
++}  // namespace predict
++
+ class PredictEngine : public Class<PredictEngine, const Ticket&> {
+  public:
+-  PredictEngine(an<PredictDb> db, int max_iterations, int max_candidates);
++  PredictEngine(an<PredictDb> db, int max_candidates);
+   virtual ~PredictEngine();
+ 
+-  bool Predict(Context* ctx, const string& context_query);
+-  void Clear();
++  RIME_DLL bool Resolve(Context* ctx) const;
++  RIME_DLL void Clear(Context* ctx) const;
+   void CreatePredictSegment(Context* ctx) const;
+-  an<Translation> Translate(const Segment& segment) const;
+-
+-  int max_iterations() const { return max_iterations_; }
+-  int max_candidates() const { return max_candidates_; }
+-  const string& query() const { return query_; }
+-  int num_candidates() const { return candidates_ ? candidates_->size : 0; }
+-  string candidate(size_t i) const {
+-    return candidates_ ? db_->GetEntryText(candidates_->at[i]) : string();
+-  }
++  an<Translation> Translate(Context* ctx, const Segment& segment) const;
++  // One owned-copy boundary shares the engine's existing immutable mapping
++  // with product metadata and phonetic consumers.
++  RIME_DLL bool LookupCopy(const string& query,
++                           vector<predict::RawEntry>* result) const;
+ 
+  private:
+-  an<PredictDb> db_;
+-  int max_iterations_;  // prediction times limit
+-  int max_candidates_;  // prediction candidate count limit
+-  string query_;        // cache last query
+-  const predict::Candidates* candidates_ = nullptr;  // cache last result
++  const an<PredictDb> db_;
++  const int max_candidates_;  // prediction candidate count limit
+ };
+ 
+ class PredictEngineComponent : public PredictEngine::Component {
+  public:
++  RIME_DLL static an<PredictEngineComponent> Shared();
+   PredictEngineComponent();
+   virtual ~PredictEngineComponent();
+ 
+   PredictEngine* Create(const Ticket& ticket) override;
+ 
+-  an<PredictEngine> GetInstance(const Ticket& ticket);
++  RIME_DLL an<PredictEngine> GetInstance(const Ticket& ticket);
+ 
+  protected:
+   map<string, weak<PredictEngine>> predict_engine_by_schema_id;
+-  DbPool<PredictDb> db_pool_;
+ };
+ 
+ }  // namespace rime
+diff --git a/src/predict_module.cc b/src/predict_module.cc
+index dd43859..a3805b7 100644
+--- a/src/predict_module.cc
++++ b/src/predict_module.cc
+@@ -10,7 +10,7 @@ using namespace rime;
+ 
+ static void rime_predict_initialize() {
+   Registry& r = Registry::instance();
+-  an<PredictEngineComponent> engine_factory = New<PredictEngineComponent>();
++  an<PredictEngineComponent> engine_factory = PredictEngineComponent::Shared();
+   r.Register("predictor", new PredictorComponent(engine_factory));
+   r.Register("predict_translator",
+              new PredictTranslatorComponent(engine_factory));
+diff --git a/src/predict_translator.cc b/src/predict_translator.cc
+index 5768baa..26ec0d3 100644
+--- a/src/predict_translator.cc
++++ b/src/predict_translator.cc
+@@ -20,25 +20,11 @@ PredictTranslator::PredictTranslator(const Ticket& ticket,
+ 
+ an<Translation> PredictTranslator::Query(const string& input,
+                                          const Segment& segment) {
+-  if (!predict_engine_)
++  if (!predict_engine_ || !engine_)
+     return nullptr;
+-  if (predict_engine_->query().empty() || !segment.HasTag("prediction")) {
+-    return nullptr;
+-  }
+-  int num_candidates = predict_engine_->num_candidates();
+-  if (num_candidates > 0) {
+-    int max_candidates = predict_engine_->max_candidates();
+-    auto translation = New<FifoTranslation>();
+-    size_t end = segment.end;
+-    for (int i = 0; i < num_candidates; ++i) {
+-      translation->Append(New<SimpleCandidate>("prediction", end, end,
+-                                               predict_engine_->candidate(i)));
+-      if (max_candidates > 0 && i >= max_candidates)
+-        break;
+-    }
+-    return translation;
+-  }
+-  return nullptr;
++  // Candidate materialization has one owner so translator and engine limits
++  // cannot diverge.
++  return predict_engine_->Translate(engine_->context(), segment);
+ }
+ 
+ PredictTranslatorComponent::PredictTranslatorComponent(
+diff --git a/src/predictor.cc b/src/predictor.cc
+index 84190fc..3a477e1 100644
+--- a/src/predictor.cc
++++ b/src/predictor.cc
+@@ -4,7 +4,6 @@
+ #include <rime/candidate.h>
+ #include <rime/context.h>
+ #include <rime/engine.h>
+-#include <rime/key_event.h>
+ #include <rime/menu.h>
+ #include <rime/segmentation.h>
+ #include <rime/service.h>
+@@ -15,86 +14,49 @@
+ namespace rime {
+ 
+ Predictor::Predictor(const Ticket& ticket, an<PredictEngine> predict_engine)
+-    : Processor(ticket), predict_engine_(predict_engine) {
+-  // update prediction on context change.
++    : Processor(ticket),
++      schema_id_(ticket.schema ? ticket.schema->schema_id() : string()),
++      predict_engine_(predict_engine) {
++  // A real commit arms exactly one projection. Ordinary edits and aborts do
++  // not create a zero-prefix suggestion.
+   auto* context = engine_->context();
+-  select_connection_ = context->select_notifier().connect(
+-      [this](Context* ctx) { OnSelect(ctx); });
++  commit_connection_ = context->commit_notifier().connect(
++      [this](Context* ctx) { OnCommit(ctx); });
+   context_update_connection_ = context->update_notifier().connect(
+       [this](Context* ctx) { OnContextUpdate(ctx); });
+ }
+ 
+ Predictor::~Predictor() {
+-  select_connection_.disconnect();
++  commit_connection_.disconnect();
+   context_update_connection_.disconnect();
+ }
+ 
+-ProcessResult Predictor::ProcessKeyEvent(const KeyEvent& key_event) {
+-  if (!engine_ || !predict_engine_)
+-    return kNoop;
+-  auto keycode = key_event.keycode();
+-  if (keycode == XK_BackSpace || keycode == XK_Escape) {
+-    last_action_ = kDelete;
+-    predict_engine_->Clear();
+-    iteration_counter_ = 0;
+-    auto* ctx = engine_->context();
+-    if (!ctx->composition().empty() &&
+-        ctx->composition().back().HasTag("prediction")) {
+-      ctx->Clear();
+-      return kAccepted;
+-    }
+-  } else {
+-    last_action_ = kUnspecified;
+-  }
+-  return kNoop;
+-}
+-
+-void Predictor::OnSelect(Context* ctx) {
+-  last_action_ = kSelect;
++void Predictor::OnCommit(Context*) {
++  projection_pending_ = true;
+ }
+ 
+ void Predictor::OnContextUpdate(Context* ctx) {
+-  if (self_updating_ || !predict_engine_ || !ctx ||
+-      !ctx->composition().empty() || !ctx->get_option("prediction") ||
+-      last_action_ == kDelete) {
++  if (self_updating_ || !engine_ || !predict_engine_ || !ctx)
+     return;
+-  }
+-  LOG(INFO) << "Predictor::OnContextUpdate";
+-  if (ctx->commit_history().empty()) {
+-    PredictAndUpdate(ctx, "$");
++  if (!engine_->schema() || engine_->schema()->schema_id() != schema_id_) {
++    projection_pending_ = false;
+     return;
+   }
+-  auto last_commit = ctx->commit_history().back();
+-  if (last_commit.type == "punct" || last_commit.type == "raw" ||
+-      last_commit.type == "thru") {
+-    predict_engine_->Clear();
+-    iteration_counter_ = 0;
++  if (!projection_pending_ || !ctx->composition().empty()) {
+     return;
+   }
+-  if (last_commit.type == "prediction") {
+-    int max_iterations = predict_engine_->max_iterations();
+-    iteration_counter_++;
+-    if (max_iterations > 0 && iteration_counter_ >= max_iterations) {
+-      predict_engine_->Clear();
+-      iteration_counter_ = 0;
+-      auto* ctx = engine_->context();
+-      if (!ctx->composition().empty() &&
+-          ctx->composition().back().HasTag("prediction")) {
+-        ctx->Clear();
+-      }
+-      return;
+-    }
+-  }
+-  PredictAndUpdate(ctx, last_commit.text);
+-}
+-
+-void Predictor::PredictAndUpdate(Context* ctx, const string& context_query) {
+-  if (predict_engine_->Predict(ctx, context_query)) {
+-    predict_engine_->CreatePredictSegment(ctx);
+-    self_updating_ = true;
+-    ctx->update_notifier()(ctx);
+-    self_updating_ = false;
++  // Consume the one-shot arm before any nested notifier can run.
++  projection_pending_ = false;
++  if (!ctx->get_option("prediction"))
++    return;
++  LOG(INFO) << "Predictor::OnContextUpdate";
++  if (ctx->get_property(predict::kStaticKeyProperty).empty()) {
++    return;
+   }
++  predict_engine_->CreatePredictSegment(ctx);
++  self_updating_ = true;
++  ctx->update_notifier()(ctx);
++  self_updating_ = false;
+ }
+ 
+ PredictorComponent::PredictorComponent(
+diff --git a/src/predictor.h b/src/predictor.h
+index 655c8cf..855be84 100644
+--- a/src/predictor.h
++++ b/src/predictor.h
+@@ -14,21 +14,17 @@ class Predictor : public Processor {
+   Predictor(const Ticket& ticket, an<PredictEngine> predict_engine);
+   virtual ~Predictor();
+ 
+-  ProcessResult ProcessKeyEvent(const KeyEvent& key_event) override;
+-
+  protected:
++  void OnCommit(Context* ctx);
+   void OnContextUpdate(Context* ctx);
+-  void OnSelect(Context* ctx);
+-  void PredictAndUpdate(Context* ctx, const string& context_query);
+ 
+  private:
+-  enum Action { kUnspecified, kSelect, kDelete };
+-  Action last_action_ = kUnspecified;
+   bool self_updating_ = false;
+-  int iteration_counter_ = 0;  // times has been predicted
++  bool projection_pending_ = false;
++  const string schema_id_;
+ 
+   an<PredictEngine> predict_engine_;
+-  connection select_connection_;
++  connection commit_connection_;
+   connection context_update_connection_;
+ };
+ 
+diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt
+index d04e003..32221a0 100644
+--- a/tools/CMakeLists.txt
++++ b/tools/CMakeLists.txt
+@@ -9,3 +9,7 @@ add_executable(build_predict
+ target_link_libraries(build_predict
+   ${rime_library}
+   ${rime_dict_library})
++set_target_properties(build_predict PROPERTIES
++  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/linnet-tools"
++  BUILD_WITH_INSTALL_RPATH TRUE
++  INSTALL_RPATH "@executable_path/../lib")
+diff --git a/tools/build_predict.cc b/tools/build_predict.cc
+index cb8d660..66c4a8a 100644
+--- a/tools/build_predict.cc
++++ b/tools/build_predict.cc
+@@ -2,23 +2,138 @@
+ // Copyright RIME Developers
+ //
+ #include <algorithm>
++#include <cerrno>
++#include <cmath>
++#include <cstdlib>
+ #include <iostream>
++#include <iterator>
++#include <set>
++#include <utf8.h>
+ #include <rime/common.h>
+ #include "predict_db.h"
+ 
+ using namespace rime;
+ 
++namespace {
++
++bool IsValidRawField(const string& input) {
++  if (input.empty())
++    return false;
++  for (char ch : input) {
++    if (ch == '\0' || ch == '\t' || ch == '\r' || ch == '\n')
++      return false;
++  }
++  return true;
++}
++
++bool ParseWeight(const string& input, double* weight) {
++  if (!weight || input.empty())
++    return false;
++  const auto consume_digits = [&input](size_t* index) {
++    const size_t begin = *index;
++    while (*index < input.size() && input[*index] >= '0' &&
++           input[*index] <= '9') {
++      ++*index;
++    }
++    return *index > begin;
++  };
++  size_t index = 0;
++  if (!consume_digits(&index))
++    return false;
++  if (index < input.size() && input[index] == '.') {
++    ++index;
++    if (!consume_digits(&index))
++      return false;
++  }
++  if (index < input.size() &&
++      (input[index] == 'e' || input[index] == 'E')) {
++    ++index;
++    if (index < input.size() &&
++        (input[index] == '+' || input[index] == '-')) {
++      ++index;
++    }
++    if (!consume_digits(&index))
++      return false;
++  }
++  if (index != input.size())
++    return false;
++  errno = 0;
++  char* end = nullptr;
++  const double parsed = std::strtod(input.c_str(), &end);
++  if (errno == ERANGE || end != input.c_str() + input.size() ||
++      !std::isfinite(parsed) || parsed <= 0.0) {
++    return false;
++  }
++  *weight = parsed;
++  return true;
++}
++
++bool ParseInput(predict::RawData* data) {
++  if (!data)
++    return false;
++  const string input{std::istreambuf_iterator<char>(std::cin),
++                     std::istreambuf_iterator<char>()};
++  if (std::cin.bad() || input.empty() || input.back() != '\n' ||
++      input.find('\r') != string::npos || input.find('\0') != string::npos ||
++      !utf8::is_valid(input.begin(), input.end())) {
++    std::cerr << "input must be UTF-8 LF-terminated data without CR or NUL\n";
++    return false;
++  }
++  set<pair<string, string>> seen;
++  size_t line_number = 0;
++  size_t line_start = 0;
++  while (line_start < input.size()) {
++    ++line_number;
++    const size_t line_end = input.find('\n', line_start);
++    const string line = input.substr(line_start, line_end - line_start);
++    line_start = line_end + 1;
++    const size_t first_tab = line.find('\t');
++    const size_t second_tab = first_tab == string::npos
++                                  ? string::npos
++                                  : line.find('\t', first_tab + 1);
++    if (first_tab == string::npos || second_tab == string::npos ||
++        line.find('\t', second_tab + 1) != string::npos) {
++      std::cerr << "invalid input at line " << line_number
++                << ": expected exactly three TAB-separated fields\n";
++      return false;
++    }
++    const string key = line.substr(0, first_tab);
++    const string text = line.substr(first_tab + 1, second_tab - first_tab - 1);
++    const string weight_text = line.substr(second_tab + 1);
++    predict::RawEntry entry;
++    if (!IsValidRawField(key) || !IsValidRawField(text) ||
++        !ParseWeight(weight_text, &entry.weight)) {
++      std::cerr << "invalid input at line " << line_number
++                << ": raw key/text and positive finite weight are required\n";
++      return false;
++    }
++    if (!seen.emplace(key, text).second) {
++      std::cerr << "duplicate key/candidate at line " << line_number << "\n";
++      return false;
++    }
++    entry.text = text;
++    (*data)[key].push_back(std::move(entry));
++  }
++  if (data->empty()) {
++    std::cerr << "input has no records\n";
++    return false;
++  }
++  return true;
++}
++
++}  // namespace
++
+ int main(int argc, char* argv[]) {
+-  rime::predict::RawData data;
+-  while (std::cin) {
+-    string key;
+-    std::cin >> key;
+-    if (key.empty())
+-      break;
+-    rime::predict::RawEntry entry;
+-    std::cin >> entry.text >> entry.weight;
+-    data[key].push_back(std::move(entry));
++  if (argc > 2) {
++    std::cerr << "usage: build_predict [OUTPUT]\n";
++    return 2;
+   }
++  rime::predict::RawData data;
++  // Linnet contract: a deterministic raw three-column TAB format preserves
++  // multi-word n-gram keys; fields reject TAB/CR/LF/NUL and duplicate records.
++  // Remove when upstream's builder has an equivalent fail-closed parser.
++  if (!ParseInput(&data))
++    return 2;
+ 
+   path file_path = argc > 1 ? path(argv[1]) : path{"predict.db"};
+   PredictDb db(file_path);

@@ -1,0 +1,15 @@
+# Project-authored, test-only Smart English bigram fixture.
+# SPDX-License-Identifier: GPL-3.0-or-later
+context	next	weight
+hello	world	1000
+hello	cloud	600
+commit	workflow	900
+commit	context	700
+privacy	session	850
+terminal	session	800
+night	world	750
+right	context	700
+he	's	1200
+he 's	not	1150
+i do not	know	1100
+not	ready	500

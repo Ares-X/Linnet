@@ -1,0 +1,39 @@
+build/
+build.log
+Frameworks/*
+bin/*
+lib/*
+data/opencc/
+data/plum/
+download/
+package/Linnet*.pkg
+package/release/
+# Local static/UAT candidates are historical build evidence, never source or
+# inputs to a later accepted revision. Keep them readable without making the
+# clean-revision signing boundary depend on deleting prior evidence.
+package/candidate*/
+package/sign/*.pem
+*linnet-pack-ed25519.key
+package/test-*
+package/generate_keys
+package/sign_update
+*~
+.*.swp
+.DS_Store
+# Local Python environments and bytecode embed machine-specific paths and are
+# never source or release inputs.
+.venv/
+__pycache__/
+*.py[cod]
+# Chinese data pipeline: generated dictionaries, provenance and reports are
+# committed — scripts/stage-linnet-data consumes data/chinese/generated in
+# fresh checkouts, and the upstream-update PR carries them as evidence.
+# Only the update work/cache area stays local.
+data/chinese/cache/
+# The locked Wanxiang LTS grammar model (420 MB) is downloaded on demand by
+# action-install.sh from the RIME-LMDG release URL in upstreams.lock.json;
+# it must never be committed.
+data/chinese/grammar/
+# Local agent indexes and one-off generated backups are never release inputs.
+.serena/
+data/chinese/reports/*.bak

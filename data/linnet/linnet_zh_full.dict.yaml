@@ -1,0 +1,31 @@
+# Linnet Complete Chinese dictionary root
+# encoding: utf-8
+#
+# Linnet Complete extends the same reviewed + locked Wanxiang Core graph with
+# all nine declared professional tables. Rime remains the one merge/ranking
+# owner; no generated duplicate projection is shipped.
+
+---
+name: linnet_zh
+version: "1.0.0"
+sort: by_weight
+use_preset_vocabulary: false
+import_tables:
+  - linnet_reviewed
+  - dicts/zi
+  - dicts/jichu
+  - dicts/lianxiang
+  - dicts/cuoyin
+  - dicts/duoyin
+  - dicts/shici
+  - dicts/diming
+  - dicts/yixue
+  - dicts/huaxue
+  - dicts/yaopin
+  - dicts/mingren
+  - dicts/yiren
+  - dicts/wuzhong
+  - dicts/renming
+  - dicts/taifeng
+  - dicts/fangyan
+...

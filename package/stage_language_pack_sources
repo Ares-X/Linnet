@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+output_root="${1:-}"
+
+fail() {
+  echo "stage_language_pack_sources: $1" >&2
+  exit 1
+}
+
+verify_dictionary_root() {
+  local root="$1"
+  shift
+  local -a source_roots=()
+  local expected actual table source found
+  while [[ "$1" != "--" ]]; do
+    source_roots+=("$1")
+    shift
+  done
+  shift
+  expected="$(printf '%s\n' "$@")"
+  actual="$(awk '
+    /^import_tables:/ { reading = 1; next }
+    reading && /^  - / { print $2; next }
+    reading { exit }
+  ' "${root}")"
+  [[ "${actual}" == "${expected}" ]] ||
+    fail "dictionary root imports do not match its edition contract: ${root##*/}"
+  for table in "$@"; do
+    found=0
+    for source in "${source_roots[@]}"; do
+      if [[ -f "${source}/${table}.dict.yaml" && ! -L "${source}/${table}.dict.yaml" ]]; then
+        found=1
+        break
+      fi
+    done
+    [[ "${found}" -eq 1 ]] ||
+      fail "dictionary root import is absent from its assembled pack: ${table}"
+  done
+}
+
+[[ "$#" -eq 1 ]] || fail "usage: OUTPUT_ROOT"
+[[ "${output_root}" == /* && -d "${output_root}" && ! -L "${output_root}" ]] ||
+  fail "OUTPUT_ROOT must be an absolute, non-symlink directory"
+[[ -z "$(find "${output_root}" -mindepth 1 -print -quit)" ]] ||
+  fail "OUTPUT_ROOT must be empty"
+
+plum_root="${project_root}/data/plum"
+opencc_root="${project_root}/data/opencc"
+squirrel_config="${project_root}/data/squirrel.yaml"
+[[ -d "${plum_root}" && ! -L "${plum_root}" && -d "${opencc_root}" && \
+  ! -L "${opencc_root}" && -f "${squirrel_config}" && ! -L "${squirrel_config}" ]] ||
+  fail "staged language data is incomplete or unsafe"
+[[ ! -e "${plum_root}/lua" && ! -L "${plum_root}/lua" ]] ||
+  fail "Lua is Core-owned and must not enter staged language data"
+
+chinese="${output_root}/chinese"
+english="${output_root}/english"
+lts="${output_root}/lts"
+extended="${output_root}/extended"
+mkdir -p "${chinese}/build" "${chinese}/dicts" "${english}/build" \
+  "${lts}" "${extended}/dicts"
+
+for name in linnet_en.dict.yaml linnet.smart.db \
+    linnet.english-data-manifest.json linnet_en.schema.yaml; do
+  [[ -f "${plum_root}/${name}" && ! -L "${plum_root}/${name}" ]] ||
+    fail "missing English pack input: ${name}"
+  cp -X "${plum_root}/${name}" "${english}/"
+done
+while IFS= read -r -d '' artifact; do
+  cp -X "${artifact}" "${english}/build/"
+done < <(find "${plum_root}/build" -mindepth 1 -maxdepth 1 -type f \
+  -name 'linnet_en*.bin' -print0 | LC_ALL=C sort -z)
+[[ -n "$(find "${english}/build" -type f -print -quit)" ]] ||
+  fail "English precompiled artifacts are missing"
+
+while IFS= read -r -d '' entry; do
+  name="${entry##*/}"
+  case "${name}" in
+    build|wanxiang-lts-zh-hans.gram|zh-hans-t-essay-bgw.gram|linnet_grammar_active.yaml|\
+      linnet_en.dict.yaml|linnet.smart.db|linnet.english-data-manifest.json|linnet_en.schema.yaml|\
+      linnet_zh.dict.yaml|dicts)
+      continue
+      ;;
+  esac
+  COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${entry}" "${chinese}/${name}"
+done < <(find "${plum_root}" -mindepth 1 -maxdepth 1 -print0 | LC_ALL=C sort -z)
+standard_root="${project_root}/data/linnet/linnet_zh.dict.yaml"
+[[ -f "${standard_root}" && ! -L "${standard_root}" ]] ||
+  fail "missing Standard Chinese dictionary root"
+cp -X "${standard_root}" "${chinese}/linnet_zh.dict.yaml"
+for name in zi jichu lianxiang cuoyin duoyin shici diming; do
+  source="${plum_root}/dicts/${name}.dict.yaml"
+  [[ -f "${source}" && ! -L "${source}" ]] ||
+    fail "missing direct Core dictionary source: ${name}"
+  cp -X "${source}" "${chinese}/dicts/"
+done
+while IFS= read -r -d '' artifact; do
+  cp -X "${artifact}" "${chinese}/build/"
+done < <(find "${plum_root}/build" -mindepth 1 -maxdepth 1 -type f \
+  ! -name 'linnet_en*.bin' -print0 | LC_ALL=C sort -z)
+cp -X "${squirrel_config}" "${chinese}/squirrel.yaml"
+COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${opencc_root}" "${chinese}/opencc"
+for name in default.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml squirrel.yaml opencc; do
+  [[ -e "${chinese}/${name}" && ! -L "${chinese}/${name}" ]] ||
+    fail "missing Chinese pack input: ${name}"
+done
+[[ -n "$(find "${chinese}/build" -type f -print -quit)" ]] ||
+  fail "Chinese precompiled artifacts are missing"
+
+lts_model="${plum_root}/wanxiang-lts-zh-hans.gram"
+"${project_root}/scripts/verify-linnet-grammar-model" "${lts_model}" >/dev/null
+cp -X "${lts_model}" "${lts}/"
+
+cp -X "${project_root}/data/linnet/linnet_zh_full.dict.yaml" "${extended}/"
+for name in yixue huaxue yaopin mingren yiren wuzhong renming taifeng fangyan; do
+  source="${plum_root}/dicts/${name}.dict.yaml"
+  [[ -f "${source}" && ! -L "${source}" ]] ||
+    fail "missing direct Complete dictionary source: ${name}"
+  cp -X "${source}" "${extended}/dicts/"
+done
+
+# Standard and Complete select different explicit roots. Do not infer either
+# edition from data/plum: that source-build view is intentionally Complete.
+verify_dictionary_root "${chinese}/linnet_zh.dict.yaml" "${chinese}" -- \
+  linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
+  dicts/duoyin dicts/shici dicts/diming
+verify_dictionary_root "${extended}/linnet_zh_full.dict.yaml" \
+  "${chinese}" "${extended}" -- \
+  linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
+  dicts/duoyin dicts/shici dicts/diming dicts/yixue dicts/huaxue \
+  dicts/yaopin dicts/mingren dicts/yiren dicts/wuzhong dicts/renming \
+  dicts/taifeng dicts/fangyan
+
+if find "${output_root}" \( -type f -o -type l \) \
+    \( -name '*.dSYM' -o -name '*.o' -o -name '*.a' -o \
+    -name '*.py' -o -name '*.pyc' -o -name '*.sqlite' -o -name '*.csv' -o -name '*.jsonl' -o \
+    -name '*.lua' \) \
+    -print -quit | grep -q .; then
+  fail "a build-only or raw-corpus artifact entered a language pack"
+fi
+
+printf '%s\n' "${chinese}" "${english}" "${lts}" "${extended}"

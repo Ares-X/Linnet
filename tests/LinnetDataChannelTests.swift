@@ -1,0 +1,208 @@
+import Foundation
+
+@main
+struct LinnetDataChannelTests {
+  static func main() {
+    do {
+      try run()
+    } catch {
+      LinnetTestFailure.fail("data channel: \(error)")
+    }
+  }
+
+  private static func run() throws {
+    require(
+      LinnetPackContract.maximumContainerBytes == 1_700_000_000,
+      "container maximum drifted from the canonical pack contract")
+    require(
+      LinnetDataChannel.maximumCatalogBytes == 64 * 1024,
+      "catalog cap drifted from its transport contract")
+    require(
+      LinnetDataChannel.minimumCatalogSequence == 4,
+      "Core catalog replay floor drifted from the first public data release")
+    require(
+      LinnetDataChannel.service == .unpublished,
+      "unpublished Beta exposed the online data channel")
+
+    let catalog = makeCatalog()
+    let data = try catalogData(catalog)
+    let verified = try LinnetDataChannel.verify(data, coreVersion: "1.0.0")
+    require(verified.catalog.sequence == 5, "valid canonical catalog")
+
+    do {
+      _ = try LinnetDataChannel.verify(
+        try catalogData(makeCatalog(sequence: 3)), coreVersion: "1.0.0")
+      LinnetTestFailure.fail("catalog below the Core replay floor was accepted")
+    } catch {}
+    var oversized = data
+    oversized.append(Data(
+      repeating: 0x20,
+      count: LinnetDataChannel.maximumCatalogBytes - data.count + 1))
+    do {
+      _ = try LinnetDataChannel.verify(oversized, coreVersion: "1.0.0")
+      LinnetTestFailure.fail("oversized catalog was accepted")
+    } catch {}
+    do {
+      _ = try LinnetDataChannel.verify(
+        try catalogData(makeCatalog(
+          artifactBytes: LinnetPackContract.maximumContainerBytes + 1)),
+        coreVersion: "1.0.0")
+      LinnetTestFailure.fail("catalog accepted an oversized pack container")
+    } catch {}
+
+    let built = try LinnetDataCatalogBuilder.build(
+      sequence: 9,
+      coreVersion: "1.0.0",
+      artifacts: LinnetPackContract.Kind.allCases.map(publishedArtifact))
+    let builtCatalog = try LinnetDataChannel.verify(
+      built, coreVersion: "1.0.0").catalog
+    let repeated = try LinnetDataCatalogBuilder.build(
+      sequence: 9,
+      coreVersion: "1.0.0",
+      artifacts: LinnetPackContract.Kind.allCases.map(publishedArtifact))
+    require(built == repeated, "catalog builder is not byte-reproducible")
+    require(builtCatalog.sequence == 9, "catalog sequence")
+    require(
+      builtCatalog.activationSet(for: .standard)?.packs.map(\.kind)
+        == [.chinese, .english, .lts],
+      "standard activation set")
+    require(
+      builtCatalog.activationSet(for: .full)?.packs.map(\.kind)
+        == [.chinese, .english, .lts, .extended],
+      "full activation set")
+    for set in builtCatalog.activationSets {
+      for artifact in set.packs {
+        require(
+          artifact.url.lastPathComponent == artifact.kind.releaseAssetName,
+          "canonical release asset name")
+      }
+    }
+    do {
+      _ = try LinnetDataCatalogBuilder.build(
+        sequence: 9,
+        coreVersion: "1.0.0",
+        artifacts: LinnetPackContract.Kind.allCases.dropLast().map(publishedArtifact))
+      LinnetTestFailure.fail("catalog builder accepted a missing kind")
+    } catch {}
+
+    do {
+      _ = try LinnetDataChannel.verify(
+        try catalogData(makeCatalog(useCanonicalAssetNames: false)),
+        coreVersion: "1.0.0")
+      LinnetTestFailure.fail("catalog accepted a non-canonical asset name")
+    } catch {}
+    do {
+      _ = try LinnetDataChannel.verify(
+        try catalogData(makeCatalog(
+          artifactBaseURL:
+            "https://mirror.example.com/https://github.com/Ares-X/Linnet/releases/download/data-5")),
+        coreVersion: "1.0.0")
+      LinnetTestFailure.fail("catalog accepted a transport mirror as artifact identity")
+    } catch {}
+    do {
+      _ = try LinnetDataChannel.verify(data, coreVersion: "0.9.0")
+      LinnetTestFailure.fail("old Core was accepted")
+    } catch {}
+
+    let file = FileManager.default.temporaryDirectory.appending(
+      path: "LinnetDataChannelTests-\(UUID().uuidString).linnetpack")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data("four".utf8).write(to: file)
+    let artifact = catalog.activationSets[0].packs[0]
+    try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+    try Data("evil".utf8).write(to: file)
+    do {
+      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      LinnetTestFailure.fail("same-size artifact tampering was accepted")
+    } catch {}
+    try FileManager.default.removeItem(at: file)
+    try Data("short".utf8).write(to: file)
+    do {
+      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      LinnetTestFailure.fail("wrong artifact size was accepted")
+    } catch {}
+    try FileManager.default.removeItem(at: file)
+    let target = file.deletingLastPathComponent().appending(
+      path: "LinnetDataChannelTarget-\(UUID().uuidString).linnetpack")
+    defer { try? FileManager.default.removeItem(at: target) }
+    try Data("four".utf8).write(to: target)
+    try FileManager.default.createSymbolicLink(
+      atPath: file.path, withDestinationPath: target.path)
+    do {
+      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      LinnetTestFailure.fail("artifact verifier followed a destination symlink")
+    } catch {}
+    print("LinnetDataChannelTests: PASS")
+  }
+
+  private static func catalogData(_ catalog: LinnetDataChannel.Catalog) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    return try encoder.encode(catalog) + Data("\n".utf8)
+  }
+
+  private static func makeCatalog(
+    sequence: UInt64 = 5,
+    useCanonicalAssetNames: Bool = true,
+    artifactBytes: UInt64 = 4,
+    artifactBaseURL: String =
+      "https://github.com/Ares-X/Linnet/releases/download/data-5"
+  ) -> LinnetDataChannel.Catalog {
+    func artifact(_ kind: LinnetPackContract.Kind, abi: UInt32) -> LinnetDataChannel.Artifact {
+      let name = useCanonicalAssetNames ? kind.releaseAssetName : "\(kind.rawValue).linnetpack"
+      return .init(
+        kind: kind, version: "2026.08.10", sequence: 5, dataABI: abi,
+        minCore: "1.0.0", contentSHA256: String(repeating: "b", count: 64),
+        bytes: artifactBytes,
+        containerSHA256: "04efaf080f5a3e74e1c29d1ca6a48569382cbbcd324e8d59d2b83ef21c039f00",
+        url: URL(
+          string: artifactBaseURL.replacingOccurrences(
+            of: "data-5", with: "data-\(sequence)") + "/\(name)")!)
+    }
+    return .init(
+      format: LinnetDataChannel.format, sequence: sequence,
+      activationSets: [
+        .init(edition: .standard, packs: [
+          artifact(.chinese, abi: 1), artifact(.english, abi: 1), artifact(.lts, abi: 1),
+        ]),
+        .init(edition: .full, packs: [
+          artifact(.chinese, abi: 2), artifact(.english, abi: 1), artifact(.lts, abi: 2),
+          artifact(.extended, abi: 2),
+        ]),
+      ])
+  }
+
+  private static func publishedArtifact(
+    _ kind: LinnetPackContract.Kind
+  ) -> LinnetDataCatalogBuilder.PublishedArtifact {
+    let abi: UInt32 = kind == .english ? 1 : 2
+    let manifest = LinnetPackContract.Manifest(
+      format: LinnetPackContract.manifestFormat,
+      product: LinnetPackContract.productIdentifier,
+      packID: kind.packID,
+      kind: kind,
+      version: "2026.08.10",
+      sequence: 7,
+      dataABI: abi,
+      minCore: "1.0.0",
+      contentSHA256: String(repeating: "c", count: 64),
+      requires: kind == .lts || kind == .extended
+        ? [.init(kind: .chinese, dataABI: 2)] : [],
+      files: [.init(
+        path: [
+          LinnetPackContract.Kind.chinese: "default.yaml",
+          .english: "linnet.smart.db",
+          .lts: "wanxiang-lts-zh-hans.gram",
+          .extended: "linnet_zh_full.dict.yaml",
+        ][kind]!,
+        bytes: 1,
+        sha256: String(repeating: "e", count: 64))])
+    return .init(
+      manifest: manifest, bytes: 4,
+      containerSHA256: "04efaf080f5a3e74e1c29d1ca6a48569382cbbcd324e8d59d2b83ef21c039f00")
+  }
+
+  private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {
+    guard condition() else { LinnetTestFailure.fail(message) }
+  }
+}

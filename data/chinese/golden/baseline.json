@@ -1,0 +1,1535 @@
+{
+  "format": 1,
+  "top": 5,
+  "schema": "linnet_zh_pinyin",
+  "corpus_sha256": "0255d95d6115759badfbccf4b7b9b79e244036789c0a36b154a824d76c3ef6ab",
+  "corpus_entries": 215,
+  "lock": {
+    "format": 1,
+    "rime_wanxiang": {
+      "commit": "296f90d17e6b587b6fabcd661686e66372f2afaa",
+      "tree": "e8ff1fda545cc0d8ea99271e8cfcc9986ae4fb21",
+      "tag": "v17.3.0"
+    },
+    "rime_ice": {
+      "commit": "6810e8916d160498620a16fef2135956fecbd485",
+      "tree": "6eafc5bcb78261eb9b3737b45c90e1b1ff582e57",
+      "tag": "2026.06.30"
+    },
+    "rime_lmdg_grammar": {
+      "release": "LTS",
+      "asset": "wanxiang-lts-zh-hans.gram",
+      "bytes": 420246572,
+      "sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
+    }
+  },
+  "cold_ms": 126,
+  "wall_seconds": 26.7,
+  "results": {
+    "nihao": [
+      "你好",
+      "👋",
+      "拟好",
+      "泥蒿",
+      "nihao"
+    ],
+    "zaoshanghao": [
+      "早上好",
+      "zaoshanghao",
+      "早上",
+      "灶上",
+      "遭杀"
+    ],
+    "xiexie": [
+      "谢谢",
+      "🙏",
+      "写写",
+      "歇歇",
+      "写些"
+    ],
+    "duibuqi": [
+      "对不起",
+      "🙇‍♂️",
+      "🙇‍♀️",
+      "对不齐",
+      "duibuqi"
+    ],
+    "meiguanxi": [
+      "没关系",
+      "meiguanxi",
+      "没关",
+      "美观",
+      "煤管"
+    ],
+    "shijian": [
+      "时间",
+      "⌚",
+      "事件",
+      "实践",
+      "是件"
+    ],
+    "zaoshang": [
+      "早上",
+      "灶上",
+      "zaoshang",
+      "遭杀",
+      "早"
+    ],
+    "wanshang": [
+      "晚上",
+      "🌃",
+      "腕上",
+      "挽上",
+      "腕伤"
+    ],
+    "mingtian": [
+      "明天",
+      "mingtian",
+      "命题",
+      "明体",
+      "名"
+    ],
+    "zuotian": [
+      "昨天",
+      "zuotian",
+      "做题",
+      "做",
+      "作"
+    ],
+    "jintian": [
+      "今天",
+      "津田",
+      "金田",
+      "金天",
+      "锦田"
+    ],
+    "zhoumo": [
+      "周末",
+      "周茉",
+      "zhoumo",
+      "周",
+      "州"
+    ],
+    "chifan": [
+      "吃饭",
+      "chifan",
+      "吃",
+      "持",
+      "池"
+    ],
+    "shuijiao": [
+      "睡觉",
+      "😴",
+      "💤",
+      "🛌",
+      "水饺"
+    ],
+    "qichuang": [
+      "起床",
+      "气窗",
+      "凄怆",
+      "气床",
+      "qichuang"
+    ],
+    "shangban": [
+      "上班",
+      "💼",
+      "商办",
+      "上半",
+      "上板"
+    ],
+    "xiaban": [
+      "下班",
+      "下半",
+      "下板",
+      "下绊",
+      "xiaban"
+    ],
+    "xiuxi": [
+      "休息",
+      "♨️",
+      "修习",
+      "溴系",
+      "xiuxi"
+    ],
+    "pengyou": [
+      "朋友",
+      "彭友",
+      "pengyou",
+      "碰",
+      "朋"
+    ],
+    "dadianhua": [
+      "打电话",
+      "🤙",
+      "dadianhua",
+      "大点",
+      "打点"
+    ],
+    "duoshaoqian": [
+      "多少钱",
+      "duoshaoqian",
+      "多少期",
+      "多少",
+      "多烧"
+    ],
+    "zenmeyang": [
+      "怎么样",
+      "怎么养",
+      "zenmeyang",
+      "怎么呀",
+      "怎么压"
+    ],
+    "shenme": [
+      "什么",
+      "甚么",
+      "shenme",
+      "神",
+      "伸"
+    ],
+    "zenmeban": [
+      "怎么办",
+      "怎么搬",
+      "zenmeban",
+      "怎么",
+      "怎"
+    ],
+    "buxing": [
+      "不行",
+      "🙅‍♂️",
+      "🙅‍♀️",
+      "步行",
+      "不幸"
+    ],
+    "shenghuo": [
+      "生活",
+      "生火",
+      "圣火",
+      "生货",
+      "shenghuo"
+    ],
+    "huiyi": [
+      "会议",
+      "回忆",
+      "会以",
+      "会意",
+      "悔意"
+    ],
+    "baogao": [
+      "报告",
+      "baogao",
+      "包",
+      "报",
+      "薄"
+    ],
+    "fangan": [
+      "方案",
+      "反感",
+      "fangan",
+      "放",
+      "方"
+    ],
+    "queren": [
+      "确认",
+      "缺人",
+      "queren",
+      "曲儿",
+      "却"
+    ],
+    "shenpi": [
+      "审批",
+      "身披",
+      "神疲",
+      "shenpi",
+      "神"
+    ],
+    "tongzhi": [
+      "通知",
+      "同志",
+      "统治",
+      "同质",
+      "同治"
+    ],
+    "xiangmu": [
+      "项目",
+      "橡木",
+      "向慕",
+      "向暮",
+      "香木"
+    ],
+    "tongshi": [
+      "同事",
+      "同时",
+      "同是",
+      "通识",
+      "通史"
+    ],
+    "lingdao": [
+      "领导",
+      "领到",
+      "灵道",
+      "领道",
+      "lingdao"
+    ],
+    "bumen": [
+      "部门",
+      "不闷",
+      "bumen",
+      "不",
+      "🙅‍♂️"
+    ],
+    "gongsi": [
+      "公司",
+      "公私",
+      "攻丝",
+      "gongsi",
+      "工"
+    ],
+    "gongzuo": [
+      "工作",
+      "💼",
+      "供作",
+      "共座",
+      "共作"
+    ],
+    "renwu": [
+      "任务",
+      "人物",
+      "人无",
+      "人武",
+      "壬午"
+    ],
+    "mubiao": [
+      "目标",
+      "墓表",
+      "mubiao",
+      "木笔",
+      "目"
+    ],
+    "gongzi": [
+      "工资",
+      "💰",
+      "公子",
+      "工字",
+      "弓子"
+    ],
+    "heyue": [
+      "合约",
+      "和约",
+      "和乐",
+      "何月",
+      "和悦"
+    ],
+    "hetong": [
+      "合同",
+      "河童",
+      "hetong",
+      "和",
+      "合"
+    ],
+    "bianji": [
+      "编辑",
+      "边际",
+      "遍及",
+      "变基",
+      "编集"
+    ],
+    "wenjian": [
+      "文件",
+      "📄",
+      "稳健",
+      "闻见",
+      "文简"
+    ],
+    "youjian": [
+      "邮件",
+      "📧",
+      "右键",
+      "油煎",
+      "有件"
+    ],
+    "liucheng": [
+      "流程",
+      "六成",
+      "柳橙",
+      "柳城",
+      "留成"
+    ],
+    "guifan": [
+      "规范",
+      "归返",
+      "轨范",
+      "闺范",
+      "guifan"
+    ],
+    "peixun": [
+      "培训",
+      "peixun",
+      "配",
+      "培",
+      "陪"
+    ],
+    "zhaopin": [
+      "招聘",
+      "zhaopin",
+      "找",
+      "照",
+      "赵"
+    ],
+    "yusuan": [
+      "预算",
+      "yusuan",
+      "语速",
+      "语素",
+      "欲速"
+    ],
+    "chengben": [
+      "成本",
+      "chengben",
+      "成",
+      "程",
+      "城"
+    ],
+    "xiaolv": [
+      "效率",
+      "小绿",
+      "小驴",
+      "🫏",
+      "小吕"
+    ],
+    "chuangxin": [
+      "创新",
+      "chuangxin",
+      "创",
+      "床",
+      "🛏"
+    ],
+    "suanfa": [
+      "算法",
+      "suanfa",
+      "算",
+      "酸",
+      "蒜"
+    ],
+    "daima": [
+      "代码",
+      "代马",
+      "daima",
+      "带",
+      "代"
+    ],
+    "fuwuqi": [
+      "服务器",
+      "服务期",
+      "副武器",
+      "fuwuqi",
+      "服务"
+    ],
+    "shujuku": [
+      "数据库",
+      "shujuku",
+      "数据",
+      "书局",
+      "书据"
+    ],
+    "bianyi": [
+      "编译",
+      "变异",
+      "贬义",
+      "便宜",
+      "便衣"
+    ],
+    "chengxu": [
+      "程序",
+      "乘虚",
+      "称许",
+      "承续",
+      "chengxu"
+    ],
+    "chengxuyuan": [
+      "程序员",
+      "👨‍💻",
+      "👩‍💻",
+      "程序猿",
+      "程序媛"
+    ],
+    "ruanjian": [
+      "软件",
+      "软键",
+      "软坚",
+      "软剑",
+      "ruanjian"
+    ],
+    "yingjian": [
+      "硬件",
+      "营建",
+      "英舰",
+      "迎检",
+      "硬茧"
+    ],
+    "wangluo": [
+      "网络",
+      "🛜",
+      "网罗",
+      "wangluo",
+      "网路"
+    ],
+    "jiekou": [
+      "借口",
+      "接口",
+      "街口",
+      "戒口",
+      "解扣"
+    ],
+    "xitong": [
+      "系统",
+      "西通",
+      "烯酮",
+      "膝痛",
+      "希同"
+    ],
+    "jiagou": [
+      "架构",
+      "家狗",
+      "加购",
+      "甲沟",
+      "加够"
+    ],
+    "kuangjia": [
+      "框架",
+      "矿价",
+      "狂加",
+      "匡家",
+      "kuangjia"
+    ],
+    "qukuailian": [
+      "区块链",
+      "qukuailian",
+      "区块",
+      "曲库",
+      "去哭"
+    ],
+    "suanli": [
+      "算力",
+      "蒜粒",
+      "算例",
+      "suanli",
+      "算"
+    ],
+    "sousuo": [
+      "搜索",
+      "sousuo",
+      "搜",
+      "艘",
+      "嗽"
+    ],
+    "zifuchuan": [
+      "字符串",
+      "zifuchuan",
+      "字符",
+      "🔣",
+      "自负"
+    ],
+    "diedai": [
+      "迭代",
+      "diedai",
+      "跌",
+      "叠",
+      "碟"
+    ],
+    "jiemiansheji": [
+      "界面设计",
+      "jiemiansheji",
+      "界面",
+      "洁面",
+      "介面"
+    ],
+    "shequ": [
+      "社区",
+      "摄取",
+      "舍去",
+      "摄去",
+      "设区"
+    ],
+    "kaifa": [
+      "开发",
+      "开法",
+      "开罚",
+      "楷法",
+      "kaifa"
+    ],
+    "ceshi": [
+      "测试",
+      "侧视",
+      "侧室",
+      "策士",
+      "ceshi"
+    ],
+    "banben": [
+      "版本",
+      "坂本",
+      "半本",
+      "扳本",
+      "banben"
+    ],
+    "shengji": [
+      "升级",
+      "🆙",
+      "省级",
+      "生机",
+      "生计"
+    ],
+    "fankui": [
+      "反馈",
+      "fankui",
+      "反",
+      "返",
+      "饭"
+    ],
+    "gupiao": [
+      "股票",
+      "gupiao",
+      "孤僻",
+      "鼓皮",
+      "痼癖"
+    ],
+    "jijin": [
+      "基金",
+      "激进",
+      "集锦",
+      "几近",
+      "挤进"
+    ],
+    "shouyi": [
+      "收益",
+      "受益",
+      "兽医",
+      "手艺",
+      "授意"
+    ],
+    "fengxian": [
+      "风险",
+      "奉献",
+      "锋线",
+      "缝线",
+      "奉贤"
+    ],
+    "touzi": [
+      "投资",
+      "骰子",
+      "🎲",
+      "头子",
+      "投子"
+    ],
+    "zichan": [
+      "资产",
+      "自产",
+      "子产",
+      "髭蟾",
+      "zichan"
+    ],
+    "zhanghu": [
+      "账户",
+      "樟湖",
+      "张祜",
+      "zhanghu",
+      "张"
+    ],
+    "cunkuan": [
+      "存款",
+      "cunkuan",
+      "存",
+      "村",
+      "寸"
+    ],
+    "daikuan": [
+      "贷款",
+      "带宽",
+      "daikuan",
+      "带",
+      "代"
+    ],
+    "lilv": [
+      "利率",
+      "李吕",
+      "沥滤",
+      "lilv",
+      "里"
+    ],
+    "jine": [
+      "金额",
+      "紧扼",
+      "金蛾",
+      "jine",
+      "进"
+    ],
+    "zhifu": [
+      "支付",
+      "致富",
+      "制服",
+      "之父",
+      "知府"
+    ],
+    "shichang": [
+      "市场",
+      "时常",
+      "时长",
+      "失常",
+      "十场"
+    ],
+    "jingji": [
+      "经济",
+      "竞技",
+      "经纪",
+      "荆棘",
+      "京急"
+    ],
+    "maoyi": [
+      "毛衣",
+      "贸易",
+      "毛姨",
+      "毛扆",
+      "毛蚁"
+    ],
+    "caizheng": [
+      "财政",
+      "caizheng",
+      "踩着",
+      "才",
+      "菜"
+    ],
+    "shuishou": [
+      "税收",
+      "水手",
+      "睡熟",
+      "水兽",
+      "shuishou"
+    ],
+    "baoxian": [
+      "保险",
+      "保鲜",
+      "包馅",
+      "baoxian",
+      "报喜"
+    ],
+    "zhengquan": [
+      "证券",
+      "政权",
+      "争权",
+      "整圈",
+      "正拳"
+    ],
+    "waibi": [
+      "外币",
+      "外壁",
+      "歪鼻",
+      "外鼻",
+      "外嬖"
+    ],
+    "meiyuan": [
+      "美元",
+      "$",
+      "💵",
+      "💲",
+      "美院"
+    ],
+    "renminbi": [
+      "人民币",
+      "￥",
+      "renminbi",
+      "人民",
+      "任敏"
+    ],
+    "shebao": [
+      "社保",
+      "涉爆",
+      "射爆",
+      "shebao",
+      "射靶"
+    ],
+    "jinrong": [
+      "金融",
+      "仅容",
+      "金茸",
+      "浸溶",
+      "金荣"
+    ],
+    "fengxiankongzhi": [
+      "风险控制",
+      "风险控制体系",
+      "风险控制系统",
+      "风险控制制度",
+      "风险控制岗"
+    ],
+    "caiwu": [
+      "财务",
+      "财物",
+      "蔡武",
+      "彩鹀",
+      "caiwu"
+    ],
+    "rengongzhineng": [
+      "人工智能",
+      "人工智能操作系统",
+      "人工智能大模型",
+      "人工智能会代替",
+      "人工智能会替代"
+    ],
+    "jiqixuexi": [
+      "机器学习",
+      "机器学习算法",
+      "机器学习理论",
+      "机器学习模型",
+      "机器学习系统"
+    ],
+    "tanzhonghe": [
+      "碳中和",
+      "tanzhonghe",
+      "痰中",
+      "谈中",
+      "潭中"
+    ],
+    "neijuan": [
+      "内卷",
+      "内眷",
+      "neijuan",
+      "内聚",
+      "内"
+    ],
+    "tangping": [
+      "躺平",
+      "烫平",
+      "tangping",
+      "烫皮",
+      "汤"
+    ],
+    "juanwang": [
+      "卷王",
+      "juanwang",
+      "卷",
+      "捐",
+      "倦"
+    ],
+    "duanshipin": [
+      "短视频",
+      "duanshipin",
+      "短时",
+      "短视",
+      "断食"
+    ],
+    "zhibo": [
+      "直播",
+      "制播",
+      "直博",
+      "智博",
+      "直拨"
+    ],
+    "dianjing": [
+      "电竞",
+      "电井",
+      "点睛",
+      "电镜",
+      "电警"
+    ],
+    "shashoujian": [
+      "杀手锏",
+      "shashoujian",
+      "啥手机",
+      "杀手级",
+      "杀手"
+    ],
+    "shengyin": [
+      "声音",
+      "圣印",
+      "升音",
+      "shengyin",
+      "生"
+    ],
+    "tuokouxiu": [
+      "脱口秀",
+      "tuokouxiu",
+      "脱口",
+      "脱扣",
+      "托"
+    ],
+    "zhanghao": [
+      "账号",
+      "长好",
+      "张浩",
+      "张昊",
+      "章昊"
+    ],
+    "mengxiang": [
+      "梦想",
+      "孟翔",
+      "梦乡",
+      "梦响",
+      "mengxiang"
+    ],
+    "meihao": [
+      "美好",
+      "没好",
+      "煤耗",
+      "美豪",
+      "没号"
+    ],
+    "jiazhi": [
+      "价值",
+      "加之",
+      "假肢",
+      "贾至",
+      "加值"
+    ],
+    "shejiao": [
+      "社交",
+      "射角",
+      "社教",
+      "shejiao",
+      "设计啊"
+    ],
+    "xinmeiti": [
+      "新媒体",
+      "xinmeiti",
+      "新美",
+      "新梅",
+      "辛楣"
+    ],
+    "dianshang": [
+      "电商",
+      "点上",
+      "店上",
+      "垫上",
+      "殿上"
+    ],
+    "shouji": [
+      "手机",
+      "📱",
+      "收集",
+      "手记",
+      "熟记"
+    ],
+    "weixin": [
+      "微信",
+      "威信",
+      "违心",
+      "维新",
+      "唯心"
+    ],
+    "zhifubao": [
+      "支付宝",
+      "致富报",
+      "zhifubao",
+      "支付吧",
+      "致富吧"
+    ],
+    "taobao": [
+      "淘宝",
+      "套保",
+      "套包",
+      "掏包",
+      "讨保"
+    ],
+    "jingdong": [
+      "京东",
+      "惊动",
+      "景东",
+      "景栋",
+      "晶洞"
+    ],
+    "dianying": [
+      "电影",
+      "🎞",
+      "点映",
+      "电盈",
+      "点蝇"
+    ],
+    "youxi": [
+      "游戏",
+      "🎮",
+      "有戏",
+      "游嬉",
+      "有喜"
+    ],
+    "beijing": [
+      "北京",
+      "beijing",
+      "背景",
+      "北境",
+      "倍径"
+    ],
+    "shanghai": [
+      "上海",
+      "shanghai",
+      "伤害",
+      "商海",
+      "上"
+    ],
+    "zhongguo": [
+      "中国",
+      "🇨🇳",
+      "zhongguo",
+      "中过",
+      "中果"
+    ],
+    "guangzhou": [
+      "广州",
+      "guangzhou",
+      "光州",
+      "光轴",
+      "光"
+    ],
+    "shenzhen": [
+      "深圳",
+      "shenzhen",
+      "神针",
+      "神",
+      "伸"
+    ],
+    "chengdu": [
+      "成都",
+      "chengdu",
+      "程度",
+      "诚笃",
+      "成"
+    ],
+    "hangzhou": [
+      "杭州",
+      "hangzhou",
+      "行",
+      "航",
+      "杭"
+    ],
+    "xian": [
+      "先",
+      "现",
+      "线",
+      "显",
+      "西安"
+    ],
+    "taiwan": [
+      "太晚",
+      "taiwan",
+      "台湾",
+      "抬腕",
+      "太"
+    ],
+    "riben": [
+      "日本",
+      "🇯🇵",
+      "riben",
+      "日",
+      "☀️"
+    ],
+    "hanguo": [
+      "韩国",
+      "🇰🇷",
+      "喊过",
+      "汗国",
+      "汉国"
+    ],
+    "meiguo": [
+      "美国",
+      "🇺🇸",
+      "没过",
+      "莓果",
+      "每过"
+    ],
+    "yingguo": [
+      "英国",
+      "🇬🇧",
+      "赢过",
+      "硬果",
+      "颖果"
+    ],
+    "faguo": [
+      "发过",
+      "法国",
+      "🇫🇷",
+      "罚过",
+      "faguo"
+    ],
+    "deguo": [
+      "德国",
+      "🇩🇪",
+      "的锅",
+      "得过",
+      "得果"
+    ],
+    "tiananmen": [
+      "天安门",
+      "tiananmen",
+      "天安",
+      "天暗",
+      "天"
+    ],
+    "changcheng": [
+      "长城",
+      "常称",
+      "长程",
+      "唱成",
+      "常铖"
+    ],
+    "gugong": [
+      "故宫",
+      "雇工",
+      "股肱",
+      "gugong",
+      "股"
+    ],
+    "changjiang": [
+      "长江",
+      "唱将",
+      "常讲",
+      "昌江",
+      "常将"
+    ],
+    "huanghe": [
+      "黄河",
+      "黄鹤",
+      "黄褐",
+      "潢河",
+      "湟河"
+    ],
+    "xizang": [
+      "西藏",
+      "xizang",
+      "系",
+      "习",
+      "喜"
+    ],
+    "xinjiang": [
+      "新疆",
+      "xinjiang",
+      "新江",
+      "信江",
+      "新绛"
+    ],
+    "neimenggu": [
+      "内蒙古",
+      "neimenggu",
+      "内蒙",
+      "内",
+      "內"
+    ],
+    "dongbei": [
+      "东北",
+      "dongbei",
+      "动",
+      "东",
+      "懂"
+    ],
+    "yinhang": [
+      "银行",
+      "🏦",
+      "引航",
+      "引吭",
+      "尹航"
+    ],
+    "hangzhang": [
+      "行长",
+      "hangzhang",
+      "行",
+      "航",
+      "杭"
+    ],
+    "yinyue": [
+      "音乐",
+      "🎵",
+      "🎶",
+      "隐约",
+      "银月"
+    ],
+    "kuaile": [
+      "快乐",
+      "快了",
+      "kuaile",
+      "快",
+      "块"
+    ],
+    "ganbu": [
+      "干部",
+      "干不",
+      "敢不",
+      "干布",
+      "肝部"
+    ],
+    "ganjing": [
+      "干净",
+      "干警",
+      "肝经",
+      "甘敬",
+      "ganjing"
+    ],
+    "chongqing": [
+      "重庆",
+      "chongqing",
+      "虫情",
+      "重启",
+      "充气"
+    ],
+    "zhongliang": [
+      "重量",
+      "中粮",
+      "忠良",
+      "种粮",
+      "中量"
+    ],
+    "zhongyao": [
+      "重要",
+      "中药",
+      "🌿",
+      "中腰",
+      "种药"
+    ],
+    "chongfu": [
+      "重复",
+      "冲服",
+      "崇福",
+      "chongfu",
+      "充"
+    ],
+    "xingqi": [
+      "星期",
+      "兴起",
+      "刑期",
+      "行期",
+      "腥气"
+    ],
+    "chengzhang": [
+      "成长",
+      "成章",
+      "chengzhang",
+      "成渣",
+      "成"
+    ],
+    "laoshi": [
+      "老是",
+      "老师",
+      "👨‍🏫",
+      "👩‍🏫",
+      "老实"
+    ],
+    "jihui": [
+      "机会",
+      "忌讳",
+      "集会",
+      "几回",
+      "寄回"
+    ],
+    "lequ": [
+      "乐趣",
+      "lequ",
+      "了",
+      "乐",
+      "勒"
+    ],
+    "jiaoxue": [
+      "教学",
+      "胶靴",
+      "jiaoxue",
+      "叫",
+      "交"
+    ],
+    "xuexiao": [
+      "学校",
+      "🏫",
+      "雪消",
+      "雪鸮",
+      "穴鸮"
+    ],
+    "luodi": [
+      "落地",
+      "罗迪",
+      "洛迪",
+      "落第",
+      "luodi"
+    ],
+    "dibu": [
+      "地步",
+      "底部",
+      "递补",
+      "底布",
+      "抵埠"
+    ],
+    "pugai": [
+      "铺盖",
+      "普钙",
+      "pugai",
+      "普",
+      "谱"
+    ],
+    "shuaijiao": [
+      "摔跤",
+      "🤼‍♂️",
+      "🤼‍♀️",
+      "摔角",
+      "摔交"
+    ],
+    "zhangkai": [
+      "张开",
+      "长开",
+      "张凯",
+      "张闿",
+      "zhangkai"
+    ],
+    "tiaoyue": [
+      "跳跃",
+      "条约",
+      "跳越",
+      "跳月",
+      "tiaoyue"
+    ],
+    "daju": [
+      "大局",
+      "大举",
+      "大巨",
+      "大剧",
+      "大狙"
+    ],
+    "daojia": [
+      "到家",
+      "道家",
+      "刀架",
+      "daojia",
+      "道济"
+    ],
+    "faqian": [
+      "发钱",
+      "发遣",
+      "罚钱",
+      "faqian",
+      "发起"
+    ],
+    "huanjing": [
+      "环境",
+      "幻境",
+      "环京",
+      "幻镜",
+      "换景"
+    ],
+    "zhandou": [
+      "战斗",
+      "⚔️",
+      "战痘",
+      "zhandou",
+      "展"
+    ],
+    "jintiantianqizhenhao": [
+      "今天天气真好",
+      "jintiantianqizhenhao",
+      "今天天气",
+      "今天",
+      "津田"
+    ],
+    "womenyidingyaoqukankan": [
+      "我们一定要去看看",
+      "womenyidingyaoqukankan",
+      "我们一定",
+      "我们一",
+      "我们以"
+    ],
+    "tadefangzihenpiaoliang": [
+      "他的房子很漂亮",
+      "tadefangzihenpiaoliang",
+      "他的发",
+      "他的",
+      "她的"
+    ],
+    "womenxiazhouqunakan": [
+      "我们下周去哪堪",
+      "womenxiazhouqunakan",
+      "我们下",
+      "我们吓",
+      "我们夏"
+    ],
+    "zhongguorenmindejiaoyu": [
+      "中国人民的教育",
+      "zhongguorenmindejiaoyu",
+      "中国人民",
+      "中国人",
+      "中国"
+    ],
+    "womendouhenxihuankan": [
+      "我们都很喜欢看",
+      "womendouhenxihuankan",
+      "我们都",
+      "我们兜",
+      "我们逗"
+    ],
+    "zuotianwanshangwokandianshi": [
+      "昨天晚上我看电视",
+      "zuotianwanshangwokandianshi",
+      "昨天晚上",
+      "昨天晚",
+      "昨天"
+    ],
+    "mingtianwomenyaokaigehui": [
+      "明天我们要开个会",
+      "mingtianwomenyaokaigehui",
+      "明天我们",
+      "明天我",
+      "明天"
+    ],
+    "xianzaiwomenkaishigongzuo": [
+      "现在我们开始工作",
+      "xianzaiwomenkaishigongzuo",
+      "现在我们",
+      "现在我",
+      "现在"
+    ],
+    "zhonghuarenmingongheguo": [
+      "中华人民共和国",
+      "🇨🇳",
+      "zhonghuarenmingongheguo",
+      "中华人民",
+      "种花人"
+    ],
+    "shehuizhuyi": [
+      "社会主义",
+      "社会主义和谐社会",
+      "社会主义荣辱观",
+      "社会主义事业",
+      "社会主义初级阶段"
+    ],
+    "shijiezhenqimiao": [
+      "世界真奇妙",
+      "shijiezhenqimiao",
+      "世界真",
+      "石碣镇",
+      "誓节镇"
+    ],
+    "yujiannizhenkaixin": [
+      "遇见你真开心",
+      "yujiannizhenkaixin",
+      "遇见你",
+      "遇见",
+      "预见"
+    ],
+    "yongyuanxiangxinweilai": [
+      "永远相信未来",
+      "yongyuanxiangxinweilai",
+      "永远相信",
+      "永远",
+      "永元"
+    ],
+    "renminwansui": [
+      "人民万岁",
+      "renminwansui",
+      "人民",
+      "任敏",
+      "人"
+    ],
+    "nengbugengkuai": [
+      "能不更快",
+      "nengbugengkuai",
+      "能不",
+      "能补",
+      "能"
+    ],
+    "jintianwanshangyiqichifan": [
+      "今天晚上一起吃饭",
+      "jintianwanshangyiqichifan",
+      "今天晚上",
+      "今天玩",
+      "今天"
+    ],
+    "wojuedezhegebucuo": [
+      "我觉得这个不错",
+      "wojuedezhegebucuo",
+      "我觉得",
+      "我觉",
+      "我绝"
+    ],
+    "mingtianzaoshangyaochumen": [
+      "明天早上要出门",
+      "mingtianzaoshangyaochumen",
+      "明天早上",
+      "明天",
+      "命题"
+    ],
+    "nideyijianhenzhongyao": [
+      "你的意见很重要",
+      "nideyijianhenzhongyao",
+      "你的意见",
+      "你的已",
+      "你得意"
+    ],
+    "womenyijingdaolejichang": [
+      "我们已经到了机场",
+      "womenyijingdaolejichang",
+      "我们已经",
+      "我们一",
+      "我们以"
+    ],
+    "xianzaijiukeyikaishile": [
+      "现在就可以开始了",
+      "xianzaijiukeyikaishile",
+      "现在就可以",
+      "现在就",
+      "现在"
+    ],
+    "zhegewentibijiaofuza": [
+      "这个问题比较复杂",
+      "zhegewentibijiaofuza",
+      "这个问题",
+      "这个",
+      "这歌"
+    ],
+    "qingnishaodengyixia": [
+      "请你稍等一下",
+      "qingnishaodengyixia",
+      "请你",
+      "青泥",
+      "请"
+    ],
+    "wobuzhidaonizaishuoshenme": [
+      "我不知道你在说什么",
+      "wobuzhidaonizaishuoshenme",
+      "我不知道你在",
+      "我不知道你",
+      "我不知道"
+    ],
+    "dajiadoujuedehenmanyi": [
+      "大家都觉得很满意",
+      "dajiadoujuedehenmanyi",
+      "大家都",
+      "大家",
+      "打架"
+    ],
+    "zuijingongzuobijiaomang": [
+      "最近工作比较忙",
+      "zuijingongzuobijiaomang",
+      "最近工作",
+      "最精",
+      "最近"
+    ],
+    "zhunbeihaolejiugaosuwo": [
+      "准备好了就告诉我",
+      "zhunbeihaolejiugaosuwo",
+      "准备好了",
+      "准备好",
+      "准备"
+    ],
+    "womenmingtianjian": [
+      "我们明天见",
+      "womenmingtianjian",
+      "我们明",
+      "我们名",
+      "我们迷"
+    ],
+    "zhelidekongqizhenxinxian": [
+      "这里的空气真新鲜",
+      "zhelidekongqizhenxinxian",
+      "这里的",
+      "这里",
+      "🈁"
+    ],
+    "xiexienidebangzhu": [
+      "谢谢你的帮助",
+      "xiexienidebangzhu",
+      "谢谢你",
+      "谢谢",
+      "🙏"
+    ]
+  }
+}

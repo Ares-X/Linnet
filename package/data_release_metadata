@@ -1,0 +1,188 @@
+#!/usr/bin/env ruby
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+require "json"
+
+FORMAT = "io.github.ares-x.linnet.data-releases.v1"
+KINDS = %w[chinese english lts extended].freeze
+FIELDS = %w[version sequence data_abi min_core content_sha256].freeze
+SAFE_VERSION = /\A[0-9A-Za-z][0-9A-Za-z._-]*\z/
+SEMVER = /\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?\z/
+SHA256 = /\A[0-9a-f]{64}\z/
+RELEASE_METADATA_PATH = "config/linnet-data-releases.json"
+RELEASE_SOURCE_PREFIXES = %w[data/chinese/ data/linnet/ data/opencc/].freeze
+
+def fail_metadata(message)
+  warn "data_release_metadata: #{message}"
+  exit 1
+end
+
+def load_metadata(path)
+  fail_metadata("metadata must be a regular file") unless
+    File.file?(path) && !File.symlink?(path)
+  document = JSON.parse(File.read(path))
+  fail_metadata("unexpected top-level shape") unless
+    document.is_a?(Hash) && document.keys.sort == %w[catalog_sequence format packs]
+  fail_metadata("format mismatch") unless document.fetch("format") == FORMAT
+  fail_metadata("catalog sequence is invalid") unless
+    document.fetch("catalog_sequence").is_a?(Integer) &&
+      document.fetch("catalog_sequence").positive?
+  packs = document.fetch("packs")
+  fail_metadata("pack set mismatch") unless
+    packs.is_a?(Hash) && packs.keys.sort == KINDS.sort
+  packs.each do |kind, release|
+    fail_metadata("#{kind} release shape mismatch") unless
+      release.is_a?(Hash) && release.keys.sort == FIELDS.sort
+    fail_metadata("#{kind} version is invalid") unless
+      release.fetch("version").is_a?(String) && release.fetch("version").match?(SAFE_VERSION)
+    %w[sequence data_abi].each do |field|
+      fail_metadata("#{kind} #{field} is invalid") unless
+        release.fetch(field).is_a?(Integer) && release.fetch(field).positive?
+    end
+    fail_metadata("#{kind} min_core is invalid") unless
+      release.fetch("min_core").is_a?(String) && release.fetch("min_core").match?(SEMVER)
+    fail_metadata("#{kind} content_sha256 is invalid") unless
+      release.fetch("content_sha256").is_a?(String) &&
+      release.fetch("content_sha256").match?(SHA256)
+  end
+  %w[lts extended].each do |kind|
+    fail_metadata("#{kind} data ABI must match Chinese") unless
+      packs.fetch(kind).fetch("data_abi") == packs.fetch("chinese").fetch("data_abi")
+  end
+  document
+rescue JSON::ParserError, KeyError, Errno::ENOENT, Errno::EACCES => error
+  fail_metadata("cannot load metadata (#{error.class})")
+end
+
+def check_active_core(active_path, core_version)
+  fail_metadata("Core version is invalid") unless core_version.match?(SEMVER)
+  fail_metadata("active state must be a regular file") unless
+    File.file?(active_path) && !File.symlink?(active_path)
+  document = JSON.parse(File.read(active_path))
+  fail_metadata("active state format mismatch") unless
+    document.is_a?(Hash) &&
+    document.fetch("format") == "io.github.ares-x.linnet.active-set.v1"
+  packs = document.fetch("packs")
+  fail_metadata("active pack set is invalid") unless packs.is_a?(Array)
+  kinds = packs.map { |pack| pack.fetch("kind") }
+  fail_metadata("active pack set mismatch") unless kinds.sort == KINDS.sort
+  packs.each do |pack|
+    required = pack.fetch("min_core")
+    fail_metadata("active pack min_core is invalid") unless
+      required.is_a?(String) && required.match?(SEMVER)
+    if compare_semantic_versions(core_version, required).negative?
+      fail_metadata("#{pack.fetch("kind")} requires a newer Core")
+    end
+  end
+rescue JSON::ParserError, KeyError, Errno::ENOENT, Errno::EACCES, TypeError => error
+  fail_metadata("cannot validate active state (#{error.class})")
+end
+
+def check_source_change(paths)
+  normalized = paths.map(&:strip).reject(&:empty?).uniq
+  fail_metadata("changed path list contains an unsafe path") if normalized.any? do |path|
+    path.start_with?("/") || path.split("/").include?("..")
+  end
+  source_changed = normalized.any? do |path|
+    RELEASE_SOURCE_PREFIXES.any? { |prefix| path.start_with?(prefix) }
+  end
+  metadata_changed = normalized.include?(RELEASE_METADATA_PATH)
+  if source_changed && !metadata_changed
+    fail_metadata("language-data sources changed without #{RELEASE_METADATA_PATH}")
+  end
+end
+
+def semantic_version(value)
+  match = SEMVER.match(value) or fail_metadata("invalid semantic version")
+  [[match[1].to_i, match[2].to_i, match[3].to_i], match[4]&.split(".") || []]
+end
+
+def compare_semantic_versions(left, right)
+  left_core, left_pre = semantic_version(left)
+  right_core, right_pre = semantic_version(right)
+  core_comparison = left_core <=> right_core
+  return core_comparison unless core_comparison.zero?
+  return 0 if left_pre.empty? && right_pre.empty?
+  return 1 if left_pre.empty?
+  return -1 if right_pre.empty?
+  left_pre.zip(right_pre).each do |left_part, right_part|
+    return 1 if right_part.nil?
+    next if left_part == right_part
+    left_number = left_part.match?(/\A[0-9]+\z/) ? left_part.to_i : nil
+    right_number = right_part.match?(/\A[0-9]+\z/) ? right_part.to_i : nil
+    return left_number <=> right_number if left_number && right_number
+    return -1 if left_number
+    return 1 if right_number
+    return left_part <=> right_part
+  end
+  left_pre.length <=> right_pre.length
+end
+
+command = ARGV.shift
+case command
+when "validate"
+  fail_metadata("usage: validate FILE") unless ARGV.length == 1
+  load_metadata(ARGV.fetch(0))
+  puts "Linnet data release metadata: PASS"
+when "get"
+  fail_metadata("usage: get FILE KIND FIELD") unless ARGV.length == 3
+  path, kind, field = ARGV
+  fail_metadata("unknown pack kind") unless KINDS.include?(kind)
+  fail_metadata("unknown metadata field") unless FIELDS.include?(field)
+  puts load_metadata(path).fetch("packs").fetch(kind).fetch(field)
+when "get-catalog-sequence"
+  fail_metadata("usage: get-catalog-sequence FILE") unless ARGV.length == 1
+  puts load_metadata(ARGV.fetch(0)).fetch("catalog_sequence")
+when "profile-receipt-version"
+  fail_metadata("usage: profile-receipt-version FILE") unless ARGV.length == 1
+  packs = load_metadata(ARGV.fetch(0)).fetch("packs")
+  puts KINDS.map { |kind| packs.fetch(kind).fetch("sequence") }.join(".")
+when "check-core"
+  fail_metadata("usage: check-core FILE CORE_VERSION") unless ARGV.length == 2
+  path, core_version = ARGV
+  fail_metadata("Core version is invalid") unless core_version.match?(SEMVER)
+  load_metadata(path).fetch("packs").each do |kind, release|
+    if compare_semantic_versions(core_version, release.fetch("min_core")).negative?
+      fail_metadata("#{kind} requires a newer Core")
+    end
+  end
+  puts "Linnet data release Core compatibility: PASS"
+when "check-active-core"
+  fail_metadata("usage: check-active-core ACTIVE_STATE CORE_VERSION") unless ARGV.length == 2
+  check_active_core(ARGV.fetch(0), ARGV.fetch(1))
+  puts "Linnet active data Core compatibility: PASS"
+when "check-monotonic"
+  fail_metadata("usage: check-monotonic PREVIOUS CURRENT") unless ARGV.length == 2
+  previous_document = load_metadata(ARGV.fetch(0))
+  current_document = load_metadata(ARGV.fetch(1))
+  previous = previous_document.fetch("packs")
+  current = current_document.fetch("packs")
+  previous_catalog_sequence = previous_document.fetch("catalog_sequence")
+  current_catalog_sequence = current_document.fetch("catalog_sequence")
+  fail_metadata("catalog sequence regressed") if
+    current_catalog_sequence < previous_catalog_sequence
+  if current != previous && current_catalog_sequence == previous_catalog_sequence
+    fail_metadata("pack metadata changed without a catalog sequence increment")
+  end
+  KINDS.each do |kind|
+    before = previous.fetch(kind)
+    after = current.fetch(kind)
+    fail_metadata("#{kind} sequence regressed") if after.fetch("sequence") < before.fetch("sequence")
+    if after.fetch("sequence") == before.fetch("sequence") && after != before
+      fail_metadata("#{kind} metadata changed without a sequence increment")
+    end
+    comparison = compare_semantic_versions(
+      after.fetch("min_core"), before.fetch("min_core"))
+    if comparison.negative?
+      fail_metadata("#{kind} min_core regressed")
+    end
+  end
+  puts "Linnet data release metadata monotonicity: PASS"
+when "check-source-change"
+  fail_metadata("usage: check-source-change < CHANGED_PATHS") unless ARGV.empty?
+  check_source_change($stdin.each_line.to_a)
+  puts "Linnet data release source-change coupling: PASS"
+else
+  fail_metadata("usage: validate FILE | get FILE KIND FIELD | get-catalog-sequence FILE | profile-receipt-version FILE | check-core FILE CORE_VERSION | check-active-core ACTIVE_STATE CORE_VERSION | check-monotonic PREVIOUS CURRENT | check-source-change < CHANGED_PATHS")
+end

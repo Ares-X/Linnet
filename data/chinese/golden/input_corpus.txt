@@ -1,0 +1,252 @@
+# Linnet golden input corpus
+# One pinyin key sequence per line. Lines starting with '#' are category
+# headers or comments. The corpus is committed and versioned;
+# tests/verify_profile_golden.rb owns product semantics for every input across
+# all eight keyboard profiles and the committed profile fixture is the product
+# acceptance oracle.
+#
+# Corpus size: 215 test inputs (200 original + 15 full sentences), covering
+# daily conversation, tech, finance, modern internet terms, places, polyphone
+# readings and long multi-syllable sentences.  Coverage categories must not
+# be dropped.
+#
+# Corpus update policy: entries may be added to extend coverage, but existing
+# lines must never be edited or removed without a review note.  (The corpus was trimmed from
+# 212 to 200 on creation, before the first baseline was recorded; 15 sentence
+# entries were added later to guard the grammar-model sentence fix.)
+# The committed profile fixture owns the reviewed code for every one of the
+# eight profiles; do not create a second per-profile corpus.
+
+# daily: common daily chat
+nihao
+zaoshanghao
+xiexie
+duibuqi
+meiguanxi
+shijian
+zaoshang
+wanshang
+mingtian
+zuotian
+jintian
+zhoumo
+chifan
+shuijiao
+qichuang
+shangban
+xiaban
+xiuxi
+pengyou
+dadianhua
+duoshaoqian
+zenmeyang
+shenme
+zenmeban
+buxing
+shenghuo
+
+# work: office and workplace terms
+huiyi
+baogao
+fangan
+queren
+shenpi
+tongzhi
+xiangmu
+tongshi
+lingdao
+bumen
+gongsi
+gongzuo
+renwu
+mubiao
+gongzi
+heyue
+hetong
+bianji
+wenjian
+youjian
+liucheng
+guifan
+peixun
+zhaopin
+yusuan
+chengben
+xiaolv
+chuangxin
+
+# tech: programming and technology
+suanfa
+daima
+fuwuqi
+shujuku
+bianyi
+chengxu
+chengxuyuan
+ruanjian
+yingjian
+wangluo
+jiekou
+xitong
+jiagou
+kuangjia
+qukuailian
+suanli
+sousuo
+zifuchuan
+diedai
+jiemiansheji
+shequ
+kaifa
+ceshi
+banben
+shengji
+fankui
+
+# finance: markets, money, investing
+gupiao
+jijin
+shouyi
+fengxian
+touzi
+zichan
+zhanghu
+cunkuan
+daikuan
+lilv
+jine
+zhifu
+shichang
+jingji
+maoyi
+caizheng
+shuishou
+baoxian
+zhengquan
+waibi
+meiyuan
+renminbi
+shebao
+jinrong
+fengxiankongzhi
+caiwu
+
+# modern: recent terms and internet slang
+rengongzhineng
+jiqixuexi
+tanzhonghe
+neijuan
+tangping
+juanwang
+duanshipin
+zhibo
+dianjing
+shashoujian
+shengyin
+tuokouxiu
+zhanghao
+mengxiang
+meihao
+jiazhi
+shejiao
+xinmeiti
+dianshang
+shouji
+weixin
+zhifubao
+taobao
+jingdong
+dianying
+youxi
+
+# places: cities and countries
+beijing
+shanghai
+zhongguo
+guangzhou
+shenzhen
+chengdu
+hangzhou
+xian
+taiwan
+riben
+hanguo
+meiguo
+yingguo
+faguo
+deguo
+tiananmen
+changcheng
+gugong
+changjiang
+huanghe
+xizang
+xinjiang
+neimenggu
+dongbei
+
+# polyphone: same characters, different readings
+yinhang
+hangzhang
+yinyue
+kuaile
+ganbu
+ganjing
+chongqing
+zhongliang
+zhongyao
+chongfu
+xingqi
+chengzhang
+laoshi
+jihui
+lequ
+jiaoxue
+xuexiao
+luodi
+dibu
+pugai
+shuaijiao
+zhangkai
+tiaoyue
+daju
+daojia
+faqian
+huanjing
+zhandou
+
+# long: multi-syllable sentences and phrases
+jintiantianqizhenhao
+womenyidingyaoqukankan
+tadefangzihenpiaoliang
+womenxiazhouqunakan
+zhongguorenmindejiaoyu
+womendouhenxihuankan
+zuotianwanshangwokandianshi
+mingtianwomenyaokaigehui
+xianzaiwomenkaishigongzuo
+zhonghuarenmingongheguo
+shehuizhuyi
+shijiezhenqimiao
+yujiannizhenkaixin
+yongyuanxiangxinweilai
+renminwansui
+nengbugengkuai
+
+# sentences: everyday full sentences — guards grammar-model sentence
+# construction (the double-pinyin sentence-collapse fix) across all profiles
+jintianwanshangyiqichifan
+wojuedezhegebucuo
+mingtianzaoshangyaochumen
+nideyijianhenzhongyao
+womenyijingdaolejichang
+xianzaijiukeyikaishile
+zhegewentibijiaofuza
+qingnishaodengyixia
+wobuzhidaonizaishuoshenme
+dajiadoujuedehenmanyi
+zuijingongzuobijiaomang
+zhunbeihaolejiugaosuwo
+womenmingtianjian
+zhelidekongqizhenxinxian
+xiexienidebangzhu

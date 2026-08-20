@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>Linnet Core</title>
+  <welcome file="WELCOME.md" mime-type="text/plain"/>
+  <license file="LICENSE.txt" mime-type="text/plain"/>
+  <readme file="NOTICE.md" mime-type="text/plain"/>
+  <conclusion file="Conclusion-summary.txt" mime-type="text/plain"/>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
+  <domains enable_localSystem="false" enable_currentUserHome="true" enable_anywhere="false"/>
+  <os-version min="13.0"/>
+  <choices-outline>
+    <line choice="core"/>
+  </choices-outline>
+  <choice id="core" visible="false">
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"/>
+  </choice>
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"
+    version="@CORE_VERSION@" auth="none">Linnet-Core.component.pkg</pkg-ref>
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg">
+    <must-close>
+      <app id="io.github.ares-x.inputmethod.Linnet"/>
+      <app id="io.github.ares-x.inputmethod.Linnet.settings"/>
+    </must-close>
+  </pkg-ref>
+</installer-gui-script>

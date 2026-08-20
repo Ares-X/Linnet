@@ -1,0 +1,44 @@
+name: Linnet pull request CI
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout last commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          # Keep all five source submodules on the lock-owning build path.
+          submodules: false
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Lint
+        run: swiftlint
+
+      - name: Check language-data release identity changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "${BASE_SHA}"...HEAD |
+            package/data_release_metadata check-source-change
+          previous="$(mktemp)"
+          trap 'rm -f "${previous}"' EXIT
+          if git show "${BASE_SHA}:config/linnet-data-releases.json" >"${previous}" 2>/dev/null; then
+            package/data_release_metadata check-monotonic \
+              "${previous}" config/linnet-data-releases.json
+          fi
+
+      - name: Build and verify Linnet
+        run: ./action-build.sh release && tests/verify_development.sh
+
+      - name: Install periphery
+        run: brew install peripheryapp/periphery/periphery
+
+      - name: Check Unused Code
+        run: periphery scan --relative-results --skip-build --index-store-path build/Index.noindex/DataStore

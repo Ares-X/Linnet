@@ -1,0 +1,326 @@
+{
+  "format": 1,
+  "policy": {
+    "channel": "stable",
+    "nested_submodules": "pinned-current-tree-only",
+    "automatic_stable_merge": false,
+    "squirrel_provenance": "locked-tag-and-sbom-variant",
+    "direct_product_upstreams": [
+      "squirrel_rime",
+      "rime_ice",
+      "hallelujah",
+      "rime_wanxiang",
+      "rime_lmdg_grammar"
+    ]
+  },
+  "build_inputs": {
+    "boost_headers": {
+      "version": "1.89.0",
+      "url": "https://archives.boost.io/release/1.89.0/source/boost_1_89_0.tar.gz",
+      "sha256": "9de758db755e8330a01d995b0a24d09798048400ac25c03fc5ea9be364b13c93",
+      "archive_root": "boost_1_89_0",
+      "license": "BSL-1.0",
+      "license_path": "LICENSE_1_0.txt",
+      "license_sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    "cmake": {
+      "version": "3.31.12",
+      "url": "https://github.com/Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-macos-universal.tar.gz",
+      "sha256": "799af7fd545db9bf1b9cfe72f8095880e727a2d4e0df0e3dffc3bc7b95c2d3b0",
+      "archive_root": "cmake-3.31.12-macos-universal/CMake.app/Contents",
+      "executable": "bin/cmake",
+      "license": "BSD-3-Clause"
+    }
+  },
+  "downstream_patches": {
+    "librime_core_interactions": {
+      "target": "sources.librime",
+      "path": "patches/librime-linnet-core-interactions.patch",
+      "sha256": "d0ec1ebacbaf197a8eee5872a6781cd7dc0302752ba8a3aaf5735c6a5ead93ca"
+    },
+    "librime_lua_state_lifetime": {
+      "target": "sources.librime.bundled_plugins.lua",
+      "path": "patches/librime-lua-linnet-state-lifetime.patch",
+      "sha256": "54b6a6d344de9c3cd1957b813c37f06b98e4368748665e289a20e47e6eba4243"
+    },
+    "librime_predict_session_state": {
+      "target": "sources.librime.bundled_plugins.predict",
+      "path": "patches/librime-predict-linnet-session-state.patch",
+      "sha256": "fbfbce1bc0f4bc194471b47ed508a0c74940d9eec91b2f53045c3a4a866909d4"
+    }
+  },
+  "sources": {
+    "hallelujah": {
+      "repository": "https://github.com/dongyuwei/hallelujahIM.git",
+      "submodule_path": "upstreams/hallelujah",
+      "submodule_name": "hallelujah",
+      "tag": "v1.7.2",
+      "tag_ref": "refs/tags/v1.7.2",
+      "commit": "01f733844d9f1d9548a86fc2741a0dcba1e2e17c",
+      "tree": "5ac497cc175ce83bf6848f1052e1655b390172e4",
+      "stable_tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "preview_ref": "refs/heads/master",
+      "declared_license": "GPL-3.0-only",
+      "license_path": "LICENSE",
+      "license_sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "copying_path": "COPYING.md",
+      "copying_sha256": "6753a9fcf1a918f929b24da6a0a1d7135f160f313f2f9909146e4da4a3e3e0b6",
+      "m2_inputs": {
+        "english_database": {
+          "path": "dictionary/words_with_frequency_and_translation_and_ipa.sqlite3",
+          "sha256": "9bc3f052fabc92cdc1f5d5b6e0d3a09341db4bde65f5c504c7aa335f3da04465"
+        },
+        "pinyin_to_english": {
+          "path": "dictionary/cedict.json",
+          "sha256": "b3c976491d79fd1d0a13fe50c14b6ea4b32b61452fd13ec337cd3bb686c40f55"
+        },
+        "phonex_index": {
+          "path": "dictionary/phonex_encoded_words.json",
+          "sha256": "c59253d4e7a62d6e3b483b5ad2c3b5a4787eb5d899873ff72aa00b81e4562a8c"
+        },
+        "phonex_algorithm": {
+          "path": "src/phonex.js",
+          "sha256": "e3d23cf96e1615a0536e325e705b4e903741046a3ac23f1d953799cea5136244"
+        }
+      }
+    },
+    "squirrel": {
+      "repository": "https://github.com/rime/squirrel.git",
+      "tag": "1.1.2",
+      "tag_ref": "refs/tags/1.1.2",
+      "commit": "876adebaf2f612951dcdca8a591de65401222b9a",
+      "stable_tag_pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "preview_ref": "refs/heads/master",
+      "declared_license": "GPL-3.0-only",
+      "license_path": "LICENSE.txt",
+      "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    "librime": {
+      "repository": "https://github.com/rime/librime.git",
+      "submodule_path": "librime",
+      "tag": "1.17.0",
+      "tag_ref": "refs/tags/1.17.0",
+      "tag_object": "a52a3400f8b7679e839bc5fb8e6309a0fc4424da",
+      "commit": "33e78140250125871856cdc5b42ddc6a5fcd3cd4",
+      "stable_tag_pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "declared_license": "BSD-3-Clause",
+      "license_path": "LICENSE",
+      "license_sha256": "f67d27a6d2d586fcfed4b4c886a83747095396a39b6641e18e855086be2ec400",
+      "static_dependencies": {
+        "glog": {
+          "declared_license": "BSD-3-Clause",
+          "license_path": "COPYING",
+          "license_sha256": "136d48dea7a681413691f3db3098f6cf5ffaa3119d96d97bb83b8cff3ce38c4a"
+        },
+        "leveldb": {
+          "declared_license": "BSD-3-Clause",
+          "license_path": "LICENSE",
+          "license_sha256": "ccc19f1da0798ed666609b65a5b44dd8b3abe6fc08b9c0592eb76e82e174db19"
+        },
+        "marisa-trie": {
+          "declared_license": "BSD-2-Clause OR LGPL-2.1-or-later",
+          "license_concluded": "BSD-2-Clause",
+          "license_path": "COPYING.md",
+          "license_sha256": "edf58dab34c3dc239ba4ba2d5d3d844d8c5b442aa4dd1149fac81b2d8c6cb8d1"
+        },
+        "opencc": {
+          "declared_license": "Apache-2.0",
+          "license_path": "LICENSE",
+          "license_sha256": "b534e465949558eec2597b04f5092b5e161236a68dfbfd04d547592ac3964308",
+          "embedded_components": {
+            "rapidjson": {
+              "version": "1.1.0",
+              "source_path": "deps/rapidjson-1.1.0/rapidjson/rapidjson.h",
+              "source_sha256": "fd0ff970fb7b9def30ca15739916d4a65e5195c6c2bc85dba1d6f297bb37f301",
+              "declared_license": "MIT",
+              "license_source_url": "https://raw.githubusercontent.com/Tencent/rapidjson/f54b0e47a08782a6131cc3d60f94d038fa6e0a51/license.txt",
+              "license_path": "LICENSES/RapidJSON-1.1.0.txt",
+              "license_sha256": "a140e5d46fe734a1c78f1a3c3ef207871dd75648be71fdda8e309b23ab8b1f32"
+            }
+          }
+        },
+        "yaml-cpp": {
+          "declared_license": "MIT",
+          "license_path": "LICENSE",
+          "license_sha256": "aa6fcc27be034e41e21dd832f9175bfe694a48491d9e14ff0fa278e19ad14f1b"
+        }
+      },
+      "embedded_components": {
+        "darts_clone": {
+          "version": "0.32",
+          "declared_license": "BSD-3-Clause",
+          "license_path": "include/COPYING.darts-clone",
+          "license_sha256": "11bf6ca180d01e60656cd3cbe65cff95b738afe4ca5a8a66b9dd1ec594a41d2f"
+        }
+      },
+      "bundled_plugins": {
+        "lua": {
+          "repository": "https://github.com/hchunhui/librime-lua.git",
+          "ref": "refs/heads/master",
+          "commit": "68f9c364a2d25a04c7d4794981d7c796b05ab627",
+          "source_dir": "lua",
+          "declared_license": "BSD-3-Clause",
+          "license_path": "LICENSE",
+          "license_sha256": "c6bd4f58b13ae9d45c5e53adddeea5049114a25862797c6c6f64920431eea249",
+          "embedded_mit_notice": {
+            "path": "LICENSES/librime-lua-embedded-MIT.txt",
+            "sha256": "7741dacddeaa2e2a175852c7829061a5db2361721cb47c4c29cc67b366720cae",
+            "sources": {
+              "lauxlib_compat": {
+                "path": "src/lib/lauxlib-compat.c",
+                "sha256": "48f94f12ac04177a8617a88a900cff3a38a191505d53d9227d1e999c6e5210b4"
+              },
+              "lutf8lib_compat": {
+                "path": "src/lib/lutf8lib-compat.c",
+                "sha256": "a5aa849e21b789d7e9b253837cbbbba1c049d5df69e9312c056def6c76dad6e7"
+              },
+              "script_translator": {
+                "path": "src/script_translator.cc",
+                "sha256": "1e1f97b19240a16aea8f1883cbe9fbe5cd72cdbaf5491fba90c5335d5e2c145c"
+              },
+              "table_translator": {
+                "path": "src/table_translator.cc",
+                "sha256": "f7bd7eed3674f810860e6b8247b76d774b9f2b4e81eb3a6dd8c8ac4451f23f0c"
+              },
+              "translator": {
+                "path": "src/translator.h",
+                "sha256": "f16c5db0158065a51168f1aa46779903a24ddc60e774383dcea35abc185c91ec"
+              },
+              "types_ext": {
+                "path": "src/types_ext.cc",
+                "sha256": "3ad68b2013047f6e05250e05fc6d320bb88ddeab463d1f00f1300839c08db8dc"
+              }
+            }
+          },
+          "thirdparty": {
+            "repository": "https://github.com/hchunhui/librime-lua.git",
+            "ref": "refs/heads/thirdparty",
+            "commit": "fa40fadd8af1e5b1fbd55703ccbd54476956d74c",
+            "source_dir": "thirdparty",
+            "version": "5.4.8",
+            "declared_license": "MIT",
+            "source_path": "lua5.4/lua.h",
+            "source_sha256": "3b77329f9deed929a5cbe7a7d5fc81ebbb63fd869a49e0a9302fe9240caf1930"
+          }
+        },
+        "octagram": {
+          "repository": "https://github.com/lotem/librime-octagram.git",
+          "ref": "refs/heads/master",
+          "commit": "dfcc15115788c828d9dd7b4bff68067d3ce2ffb8",
+          "source_dir": "octagram",
+          "declared_license": "GPL-3.0-only",
+          "license_path": "LICENSE",
+          "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        "predict": {
+          "repository": "https://github.com/rime/librime-predict.git",
+          "ref": "refs/heads/master",
+          "commit": "920bd41ebf6f9bf6855d14fbe80212e54e749791",
+          "source_dir": "predict",
+          "declared_license": "BSD-3-Clause",
+          "license_path": "LICENSE",
+          "license_sha256": "9b1bbdf15a381884b47dfd9422e68f6382170b2841c476afc076f2d448c7a59f"
+        }
+      }
+    },
+    "plum": {
+      "repository": "https://github.com/rime/plum.git",
+      "submodule_path": "plum",
+      "ref": "refs/heads/master",
+      "commit": "4c28f11f451facef809b380502874a48ba964ddb"
+    },
+    "rime_octagram_data": {
+      "repository": "https://github.com/lotem/rime-octagram-data.git",
+      "submodule_path": "upstreams/rime-octagram-data",
+      "submodule_name": "rime-octagram-data",
+      "ref": "refs/heads/hans",
+      "commit": "f8ce3b534733e489a8470a7c2adf5a154e8ea069",
+      "tree": "dca20ef453c0089dd612a45b77fb6537eaa97549",
+      "declared_license": "LGPL-3.0",
+      "license_path": "LICENSE",
+      "license_sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+    },
+    "rime_ice": {
+      "repository": "https://github.com/iDvel/rime-ice.git",
+      "submodule_path": "upstreams/rime-ice",
+      "submodule_name": "rime-ice",
+      "tag": "2026.06.30",
+      "tag_ref": "refs/tags/2026.06.30",
+      "commit": "6810e8916d160498620a16fef2135956fecbd485",
+      "tree": "6eafc5bcb78261eb9b3737b45c90e1b1ff582e57",
+      "declared_license": "GPL-3.0-only",
+      "license_path": "LICENSE",
+      "license_sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "stable_tag_pattern": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}$",
+      "data_inputs": {
+        "english_dictionaries": [
+          "en_dicts/en.dict.yaml",
+          "en_dicts/en_ext.dict.yaml"
+        ]
+      }
+    },
+    "rime_wanxiang": {
+      "repository": "https://github.com/amzxyz/rime-wanxiang.git",
+      "submodule_path": "upstreams/rime-wanxiang",
+      "submodule_name": "rime-wanxiang",
+      "tag": "v17.3.0",
+      "tag_ref": "refs/tags/v17.3.0",
+      "commit": "296f90d17e6b587b6fabcd661686e66372f2afaa",
+      "tree": "e8ff1fda545cc0d8ea99271e8cfcc9986ae4fb21",
+      "declared_license": "CC-BY-4.0",
+      "license_path": "LICENSE",
+      "license_sha256": "9e5f1b3c610b9c2da5c313bf81d577a7d1acec686bdb0384edefa6df0f90cd94",
+      "stable_tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "preview_ref": "refs/heads/master",
+      "data_inputs": {
+        "core_dictionaries": [
+          "dicts/zi.dict.yaml",
+          "dicts/jichu.dict.yaml",
+          "dicts/lianxiang.dict.yaml",
+          "dicts/cuoyin.dict.yaml",
+          "dicts/duoyin.dict.yaml",
+          "dicts/shici.dict.yaml",
+          "dicts/diming.dict.yaml"
+        ],
+        "professional_dictionaries": [
+          "dicts/yixue.dict.yaml",
+          "dicts/yaopin.dict.yaml",
+          "dicts/huaxue.dict.yaml",
+          "dicts/renming.dict.yaml",
+          "dicts/mingren.dict.yaml",
+          "dicts/yiren.dict.yaml",
+          "dicts/wuzhong.dict.yaml",
+          "dicts/taifeng.dict.yaml",
+          "dicts/fangyan.dict.yaml"
+        ],
+        "algebra": {
+          "path": "wanxiang_algebra.yaml",
+          "section": "base",
+          "profiles": {
+            "full_pinyin": "全拼",
+            "ziranma": "自然码",
+            "flypy": "小鹤双拼",
+            "sogou": "搜狗双拼",
+            "mspy": "微软双拼",
+            "abc": "智能ABC",
+            "ziguang": "紫光双拼",
+            "jiajia": "拼音加加"
+          }
+        }
+      }
+    },
+    "rime_lmdg_grammar": {
+      "repository": "https://github.com/amzxyz/RIME-LMDG.git",
+      "release": "LTS",
+      "asset": "wanxiang-lts-zh-hans.gram",
+      "asset_id": 522394578,
+      "asset_api_url": "https://api.github.com/repos/amzxyz/RIME-LMDG/releases/assets/522394578",
+      "asset_download_url": "https://github.com/amzxyz/RIME-LMDG/releases/download/LTS/wanxiang-lts-zh-hans.gram",
+      "declared_license": "CC-BY-4.0",
+      "license_path": "LICENSES/RIME-LMDG-CC-BY-4.0.txt",
+      "license_sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+      "bytes": 420246572,
+      "sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
+    }
+  }
+}

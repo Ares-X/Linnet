@@ -1,0 +1,193 @@
+--- a/dicts/jichu.dict.yaml
++++ b/dicts/jichu.dict.yaml
+@@ -313823,25 +313823,19 @@
+ 更奢华	gèng shē huá	428
+ 更深吧	gēng shēn ba	284
+ 更甚吧	gèng shèn ba	175
+-更深层	gēng shēn céng	1178
+ 更深沉	gēng shēn chén	594
+-更深处	gēng shēn chù	657
+ 更深地	gēng shēn de	639
+ 更深度	gēng shēn dù	424
+-更深厚	gēng shēn hòu	621
+ 庚申猴	gēng shēn hóu	285
+-更深刻	gēng shēn kè	2898
+ 更深了	gēng shēn le	389
+ 更神秘	gèng shén mì	549
+ 庚申年	gēng shēn nián	22
+ 更深切	gēng shēn qiè	634
+ 庚申日	gēng shēn rì	13
+-更深入	gēng shēn rù	3316
+ 更审慎	gèng shěn shèn	400
+ 更神圣	gèng shén shèng	392
+ 更深邃	gēng shēn suì	558
+ 更甚于	gèng shèn yú	292
+-更深远	gēng shēn yuǎn	752
+ 庚申月	gēng shēn yuè	306
+ 更甚者	gèng shèn zhě	458
+ 更甚至	gèng shèn zhì	720
+@@ -314168,7 +314162,6 @@
+ 哽咽着	gěng yè zhe	364
+ 更衣吧	gēng yī ba	374
+ 更一般	gèng yì bān	914
+-更易懂	gēng yì dǒng	634
+ 更衣柜	gēng yī guì	31
+ 更衣间	gēng yī jiān	69
+ 更衣镜	gēng yī jìng	234
+@@ -314282,7 +314275,6 @@
+ 更珍惜	gèng zhēn xī	756
+ 更真挚	gèng zhēn zhì	378
+ 更正吧	gēng zhèng ba	220
+-更正常	gēng zhèng cháng	594
+ 更正后	gēng zhèng hòu	31
+ 耕整机	gēng zhěng jī	297
+ 更正教	gēng zhèng jiào	495
+@@ -916291,17 +916283,12 @@
+ 更上一层	gèng shàng yī céng	358
+ 更上一级	gèng shàng yì jí	374
+ 更少的钱	gèng shǎo de qián	675
+-更深层次	gēng shēn céng cì	2876
+ 更深的红	gēng shēn de hóng	153
+ 更深露重	gēng shēn lù zhòng	13
+ 更深人静	gēng shēn rén jìng	3
+-更深入地	gēng shēn rù dì	1228
+-更深入点	gēng shēn rù diǎn	25
+ 更深夜半	gèng shēn yè bàn	50
+ 更深夜静	gēng shēn yè jìng	225
+ 更深夜阑	gèng shēn yè lán	3
+-更深一步	gēng shēn yí bù	680
+-更深一层	gēng shēn yì céng	575
+ 更甚一筹	gèng shèn yì chóu	518
+ 耕莘医院	gēng shēn yī yuàn	405
+ 庚申之变	gēng shēn zhī biàn	194
+@@ -916356,32 +916343,21 @@
+ 更听不到	gèng tīng bú dào	243
+ 更退一步	gèng tuì yí bù	234
+ 更忘不了	gèng wàng bù liǎo	25
+-更为安全	gēng wéi ān quán	788
+ 更为保守	gēng wéi bǎo shǒu	518
+-更为便捷	gēng wéi biàn jié	806
+ 更为不利	gēng wéi bú lì	490
+ 更为彻底	gēng wéi chè dǐ	518
+-更为成熟	gēng wéi chéng shú	711
+ 更为充裕	gēng wéi chōng yù	387
+ 更为抽象	gēng wéi chōu xiàng	428
+-更为出色	gēng wéi chū sè	806
+ 更为独到	gēng wéi dú dào	225
+-更为方便	gēng wéi fāng biàn	783
+-更为丰富	gēng wéi fēng fù	927
+-更为复杂	gēng wéi fù zá	1017
+ 更为概括	gēng wéi gài kuò	207
+ 更为高级	gēng wéi gāo jí	500
+-更为高效	gēng wéi gāo xiào	702
+ 更为公平	gēng wéi gōng píng	544
+ 更为古老	gēng wéi gǔ lǎo	436
+ 更为关注	gēng wéi guān zhù	630
+ 更为广阔	gēng wéi guǎng kuò	292
+-更为合理	gēng wéi hé lǐ	783
+-更为合适	gēng wéi hé shì	824
+ 更为环保	gēng wéi huán bǎo	567
+ 更为积极	gēng wéi jī jí	680
+ 更为激进	gēng wéi jī jìn	634
+-更为简单	gēng wéi jiǎn dān	747
+ 更为艰巨	gēng wéi jiān jù	387
+ 更为健康	gēng wéi jiàn kāng	616
+ 更为艰难	gēng wéi jiān nán	572
+@@ -916393,7 +916369,6 @@
+ 更为精彩	gēng wéi jīng cǎi	549
+ 更为经济	gēng wéi jīng jì	590
+ 更为精致	gēng wéi jīng zhì	630
+-更为精准	gēng wéi jīng zhǔn	819
+ 更为均匀	gēng wéi jūn yún	396
+ 更为可靠	gēng wéi kě kào	630
+ 更为科学	gēng wéi kē xué	693
+@@ -916403,29 +916378,21 @@
+ 更为立体	gēng wéi lì tǐ	558
+ 更为理想	gēng wéi lǐ xiǎng	85
+ 更为理性	gēng wéi lǐ xìng	603
+-更为灵活	gēng wéi líng huó	788
+ 更为猛烈	gēng wéi měng liè	16
+-更为明显	gēng wéi míng xiǎn	1040
+ 更为年轻	gēng wéi nián qīng	626
+ 更为浓厚	gēng wéi nóng hòu	432
+ 更为平衡	gēng wéi píng héng	428
+ 更为迫切	gēng wéi pò qiè	57
+-更为普遍	gēng wéi pǔ biàn	716
+ 更为普及	gēng wéi pǔ jí	522
+ 更为奇妙	gēng wéi qí miào	338
+-更为强大	gēng wéi qiáng dà	810
+ 更为强烈	gēng wéi qiáng liè	257
+ 更为抢眼	gēng wéi qiǎng yǎn	414
+ 更为强硬	gēng wéi qiáng yìng	472
+-更为全面	gēng wéi quán miàn	788
+ 更为容易	gēng wéi róng yì	630
+ 更为锐利	gēng wéi ruì lì	328
+-更为深刻	gēng wéi shēn kè	729
+ 更为神圣	gēng wéi shén shèng	220
+-更为适合	gēng wéi shì hé	720
+ 更为时尚	gēng wéi shí shàng	608
+ 更为适宜	gēng wéi shì yí	554
+-更为舒适	gēng wéi shū shì	752
+ 更为谁羞	gēng wéi shuí xiū	76
+ 更为通透	gēng wéi tōng tòu	306
+ 更为突出	gēng wéi tū chū	490
+@@ -916439,21 +916406,16 @@
+ 更为详细	gēng wéi xiáng xì	371
+ 更为醒目	gēng wéi xǐng mù	392
+ 更为凶猛	gēng wéi xiōng měng	356
+-更为严格	gēng wéi yán gé	878
+ 更为严峻	gēng wéi yán jùn	85
+ 更为严厉	gēng wéi yán lì	558
+ 更为严肃	gēng wéi yán sù	396
+-更为严重	gēng wéi yán zhòng	829
+ 更为友好	gēng wéi yǒu hǎo	459
+ 更为有利	gēng wéi yǒu lì	688
+-更为有效	gēng wéi yǒu xiào	819
+ 更为真实	gēng wéi zhēn shí	684
+ 更为直观	gēng wéi zhí guān	648
+ 更为直接	gēng wéi zhí jiē	361
+ 更为致命	gēng wéi zhì mìng	459
+-更为重要	gēng wéi zhòng yào	3982
+ 更为专业	gēng wéi zhuān yè	698
+-更为准确	gēng wéi zhǔn què	909
+ 更温暖的	gèng wēn nuǎn de	518
+ 更无人问	gèng wú rén wèn	212
+ 更细更实	gèng xì gèng shí	189
+--- a/dicts/lianxiang.dict.yaml
++++ b/dicts/lianxiang.dict.yaml
+@@ -105429,7 +105429,6 @@
+ 更全面的了解	gèng quán miàn de liǎo jiě	10
+ 梗塞后心绞痛	gěng sè hòu xīn jiǎo tòng	10
+ 更上微火消解	gèng shàng wēi huǒ xiāo jiě	10
+-更深层的原因	gēng shēn céng de yuán yīn	10
+ 更深的地下城	gēng shēn de dì xià chéng	10
+ 更是变本加厉	gèng shì biàn běn jiā lì	10
+ 更是不计其数	gèng shì bú jì qí shù	10
+@@ -155319,7 +155318,6 @@
+ 更年期月经过多	gēng nián qī yuè jīng guò duō	10
+ 更容易让人接受	gèng róng yì ràng rén jiē shòu	10
+ 更上火微一二沸	gèng shàng huǒ wēi yī èr fèi	10
+-更深层次的原因	gēng shēn céng cì de yuán yīn	10
+ 耕莘文教基金会	gēng shēn wén jiào jī jīn huì	10
+ 庚申辛酉石榴木	gēng shēn xīn yǒu shí liú mù	10
+ 更是乱的一团糟	gèng shì luàn de yì tuán zāo	10
+--- a/dicts/zi.dict.yaml
++++ b/dicts/zi.dict.yaml
+@@ -43,7 +43,6 @@
+ 砹	ài	335
+ 嫒	ài	324
+ 叆	ài	322
+-乂	aì	310
+ 瑷	ài	304
+ 毐	ǎi	258
+ 锿	āi	220
+--- a/dicts/cuoyin.dict.yaml
++++ b/dicts/cuoyin.dict.yaml
+@@ -130,7 +130,6 @@
+ 安徽省六安市	ān huī shěng liù ān shì	1	ān huī shěng lù ān shì
+ 南京市六合区	nán jīng shì liù hé qū	1	nán jīng shì lù hé qū
+ 螺蛳粉	luó shī fěn	150	luó sī fěn
+-温庭筠	wēn tíng jūn	210	温庭筠(yún)
+ 关卡	guān kǎ	14734	guān qiǎ
+ 牛皮癣	niú pí xiǎn	289	(癣)xuǎn
+ 三昧真火	sān wèi zhēn huǒ	440	三昧(mèi)真火

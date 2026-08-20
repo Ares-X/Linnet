@@ -1,0 +1,507 @@
+Linnet English translation quality fix report
+========================================================================
+input decisions:            68270
+manual fixes applied:       494
+  - replacing an existing decision: 494
+  - new decisions (no enriched row): 446
+POS restores (auto, freq>1000): 1
+final decisions:            68716
+
+Manual fixes (word | before | after):
+  a          freq=9081174698   art. 一(个)；每一(个)；任一(个)；n. 英语字母表的第一个字母；学业成绩得优者；表示“最好 -> art. 一（个）；每一（个）；任一（个）；n. 字母A；成绩优等者
+  abe        freq=2420884      (none) -> 亚伯（男子名，等于Abraham）
+  abigail    freq=1604495      (none) -> n. 侍女；Abigail:.；n. 阿比盖尔(女子名)
+  adaptor    freq=6027066      (none) -> [通信] 适配器；（美）改编者；转接器（等于adapter）
+  adecco     freq=745855       (none) -> Adecco公司(财富500强公司之一, 总部所在地瑞士, 主要经营)
+  adirondack freq=1370037      (none) -> 阿尔岗金族印第安人； 艾迪龙达克（美国IBM公司大型计算机System3081D在开发时期所用代号）
+  adler      freq=1926676      (none) -> 阿德勒(①姓氏 ②Alfred, 1870-1937, 奥地利精神病学家、心理学家)
+  admins     freq=2233477      (none) -> abbr. 管理员（administrators）
+  adviser    freq=4911485      (none) -> 顾问；劝告者；指导教师（等于advisor）
+  aeronautical freq=970791       (none) -> 航空的；航空学的；飞机驾驶员的（等于aeronautic）
+  almighty   freq=1780004      (none) -> adj. 万能的；极大的；adv. 极度地；Almighty:上帝.
+  alzheimer  freq=4606962      (none) -> n. 老年痴呆症（亦称:Alzheimer's disease，阿兹海默症）
+  amenities  freq=10198635     (none) -> n. 适意；舒适；便利设施；（复）amenities：礼仪；礼节.
+  anchorage  freq=4651277      (none) -> n. 下锚；停泊所；停泊税；寄托；Anchorage.；n. 安克雷奇(美国港口城市)
+  andale     freq=7136201      (none) -> [美国] 安代尔； [地名] [厄立特里亚] 安达莱
+  andy       freq=16447205     (none) -> n. 安迪（男子名，Andrew的昵称）；安迪（女子名，Andrea的昵称）
+  antony     freq=1615554      (none) -> Antony.；n. 安东尼（男子名）；n. 安东尼市（法国中北部城市）
+  archer     freq=2762538      (none) -> n. 射箭运动员；弓箭手；Archer.；n. 射手座；阿切尔(姓氏)
+  argentine  freq=1628903      (none) -> adj. 银的；n. 银；Argentine.；n. 阿根廷人；adj. 阿根廷（人）的
+  arranging  freq=2043604      (none) -> n. 安排；动词arrange现在分词形式.
+  arsenal    freq=4017059      (none) -> n. 兵工厂；军械库；储藏；Arsenal.；n. 阿森纳(英格兰一足球队名)
+  asked      freq=75532722     adj. 请求的；动词ask的过去式和过去分词. -> v. 问；请求（ask的过去式和过去分词）；adj. 请求的
+  assassin   freq=1449166      (none) -> n. 暗杀者；刺客；Assassin.；n. 暗杀基督教十字军成员的穆斯林狂热派
+  attainment freq=3138108      (none) -> n. 达到；获得；（常复数）attainments:成就； 才能； 学识.
+  authors    freq=52891750     (none) -> n. 作家；作者；vt. 编写；创作；Author.；n. 上帝
+  avatar     freq=21069571     (none) -> n. （网络空间中使用的）头像；化身；（印度教）天神下凡；Avatar.；n. 阿凡达
+  badgers    freq=1004989      (none) -> n. 獾；獾皮(毛)；Badger:獾州人(对威斯康星州人的昵称).；v. 纠缠；一再烦扰；吵着要
+  bebe       freq=811435       (none) -> [医]婴儿（计算机病毒名）； [人名] 比比
+  became     freq=37332761     v. 变成；成为；变得（动词become的过去式） -> v. 变成；成为；变得（become的过去式）
+  becky      freq=2606971      (none) -> n. 贝基（女子名；Rebecca的昵称）
+  before     freq=277546019    conj. 在 ... 以前；pref. 在 ... 以前；在..前面；adv. 以前；以往；之前 -> prep. 在…之前；conj. 在…以前；adv. 以前；以往
+  begun      freq=8636352      (none) -> v. 开始（begin的过去分词）
+  belgique   freq=908226       (none) -> 比利时（西欧国家，首都布鲁塞尔Brussels）
+  bella      freq=3753635      (none) -> 贝拉（女子名，等于Arabella，Isabella）
+  bennett    freq=7021418      (none) -> n. 班尼特（姓氏；男子名；Benedict 的异体)
+  beverly    freq=7429063      (none) -> Beverly.；n. 贝弗利（美国马萨诸塞州东北部城市）
+  bigfoot    freq=743525       (none) -> n. 大脚怪(据称生活在北美洲西北部太平洋沿岸森林中的野人；亦称Sasquatch)
+  biz        freq=17067959     (none) -> 商业（等于business）
+  bobby      freq=8964342      (none) -> n. (英)警察；Bobby.；n. 鲍比(男子名；Robert的昵称)
+  bonneville freq=915224       (none) -> 博纳维尔牌汽车； 犹他州的邦纳维尔； [医]宝石柱白鲑； [人名] 博纳维尔； [地名] [法国] 博讷维尔
+  bookstore  freq=11285387     (none) -> 书店（等于bookshop）
+  boxer      freq=3592432      (none) -> n. 拳击手；拳师狗；boxers: 拳击短裤.
+  breckenridge freq=1573851      (none) -> [英格兰人姓氏] 布雷肯里奇 Brackenridge的变体； [地名] [美国] 布雷肯里奇
+  bridges    freq=8083681      (none) -> n. 桥；名词bridge的复数形式.；Bridges.；n. 布里奇斯(姓氏)
+  bros       freq=2240209      (none) -> (brothers之略)兄弟
+  brought    freq=39794764     v. 带来，拿来（动词bring的过去式和过去分词） -> v. 带来，拿来（bring的过去式和过去分词）
+  bum        freq=1523602      (none) -> n. 流浪汉；游荡者；懒鬼；n. <俚>屁股；n. 狂欢；adj. 无价值的；残废的；不合理的；vt. 使失望；vt. 乞求；vi. 乞讨；游荡
+  burgers    freq=1682693      (none) -> n. 汉堡；名词burger的复数形式.；Burgers.；n. 伯格斯(姓氏)
+  burgess    freq=2120777      (none) -> n. (英)市民；镇民；（代表市镇或大学的）国会议员；（殖民地弗吉尼亚州或马里兰州的立法机关）下议院议员；Burgess：.；n. 伯吉斯（人名）
+  c          freq=596623239    n. 字母 -> n. 字母C
+  calypso    freq=1268267      (none) -> n. 卡利普索民歌；匙唇兰；Calypso.；n. [希神]卡吕普索(海之女神)
+  cam        freq=23995601     (none) -> abbr. 计算机辅助制造=computer-aided manufacturing；n. 凸轮
+  came       freq=73286694     (none) -> v. 来；来到（come的过去式）
+  cancer     freq=65078084     (none) -> n. 癌；肿瘤；毒瘤；Cancer.；n. 巨蟹座
+  canning    freq=1237146      (none) -> n. 罐头制造业；装罐头；动词can的现在分词形式.；Canning.；n. 坎宁（姓氏）
+  canton     freq=4164322      (none) -> n. 一些国家的行政区；(瑞士的）州；（法国的）县；（徽章或旗子）右上角的小方块部分；Canton.；n. 广州（英语中的旧称）
+  carlyle    freq=972446       (none) -> n. 卡莱尔(①姓氏；男子名 ②Thomas；1795-1881；苏格兰作家；历史学家；哲学家)
+  carrie     freq=4245824      (none) -> 卡丽（女名，Caroline的昵称）
+  carta      freq=860402       (none) -> [计] - Analysis,计算机辅助记录器捕获分析
+  cartwright freq=815878       (none) -> n. 车匠；修车工；Cartwright.；n. 卡特赖特(名字)；卡特赖特·埃德蒙(英国动力织机发明者；1743-1823)
+  caterpillar freq=1947305      (none) -> n. 毛虫；Caterpillar.；n. 卡特彼勒(财富500强公司之一；总部所在地美国；主要经营工业农业设备)
+  caucasus   freq=1025795      (none) -> n. 高加索山脉；高加索（苏联欧洲部分东南部的地区）；=Caucasia.
+  cecil      freq=2262884      (none) -> n. 塞西尔(①姓氏；男子名②Edgar Algernon Robert；1864-1958；英国政治家；曾获1937年诺贝尔和平奖)
+  celebrex   freq=3178829      (none) -> 西乐葆(celecoxib制剂)<抗关节炎药>
+  celestial  freq=2355105      (none) -> adj. 天上的；非凡的；n. 天神；Celestial.；adj. 中国的；中国人的；n. 中国人
+  chandler   freq=4594301      (none) -> n. 杂货零售商人；蜡烛商；Chandler.；n. 钱德勒（男子名；美国亚利桑那州中南部一城市）
+  chapman    freq=4787251      (none) -> n. <英>叫卖小贩；<古>商人；Chapman；n. 查普曼(男子名)
+  charley    freq=1218174      (none) -> n.  <英> 蠢人（=charlie)；Charley；n.  查理（男子名）
+  che        freq=4863235      (none) -> 胆碱酯酶（等于cholinesterase）；化学（等于Chemical）；充电指示灯
+  christy    freq=2094560      (none) -> 人名；(英)克里斯蒂，克丽丝蒂(女名) (教名Christian、Christabel的昵称)
+  chromosome freq=4898576      (none) -> [遗][细胞][染料] 染色体（形容词chromosomal，副词chromosomally）
+  cindy      freq=5809307      (none) -> 辛迪（女子名，Cynthia的昵称）
+  cleo       freq=1038418      (none) -> n. 克利奥(女子名；Cleopatra的昵称)
+  clinique   freq=1518938      (none) -> 诊所，门诊部（等于clinic）
+  clovis     freq=837893       (none) -> [法]克洛维斯； [人名] 克洛维斯； [地名] [美国] 克洛维斯
+  cocos      freq=2354000      (none) -> [医]椰子； [地名] [巴西] 科库斯
+  coliseum   freq=1392116      (none) -> 竞技场；大剧场；大体育馆（等于colosseum）
+  cologne    freq=5078538      (none) -> n. 科隆香水；古龙水；Cologne:科隆(德国城市名）.
+  coloured   freq=3867584      (none) -> adj. 彩色的；有色的；动词词colour的过去式和过去分词.；=color（美）.
+  comes      freq=64256803     伴引血管；伴星 -> v. 来；到来（come的第三人称单数）
+  comfy      freq=1245404      (none) -> 舒服的；轻松的（等于comfortable）
+  condo      freq=6444848      (none) -> 分户出售公寓大厦（等于condominium）
+  confederate freq=1966184      (none) -> n. 同盟者；同盟国；同伙；Confederate：美国南部联盟.；adj. 同盟的；联合的；v. （使)结盟；（使)联合
+  connexion  freq=755291       (none) -> 连接，联系（等于connection）
+  connie     freq=2838668      (none) -> n. 康妮(女子名；Constance的昵称)；n. 康尼(男子名；Conrad 和 Cornelius的昵称)
+  conrad     freq=3512615      (none) -> 康拉德（男子名，等于Konrad）
+  coordinated freq=5174649      (none) -> adj. 协调性好的；协调的，配合的；v. coordinate的动词过去式、过去分词
+  cordoba    freq=1201447      (none) -> n. 科多瓦(尼加拉瓜的货币单位)；Cordoba.；n. 科尔多瓦（西班牙城市)(=Cordova)；n. 科尔多瓦(阿根廷城市)
+  cottonwood freq=1072505      (none) -> n. [植]三角叶杨；棉白杨；Cottonwood.；n. 科顿伍德河(美明尼苏达州河流名)
+  councillor freq=3537961      (none) -> n. 政务会委员；议员；=councilor（美）.
+  counsellor freq=908417       (none) -> 顾问；参赞；辅导员（等于counselor）；律师；法律顾问
+  counselor  freq=4699959      (none) -> 顾问；法律顾问；参事（等于counsellor）
+  cousins    freq=2197809      (none) -> n. 卡曾斯(姓)；cousins.；n. 堂兄弟；堂姐妹；表兄弟；表姐妹；名词cousin的复数形式.
+  coz        freq=1113081      (none) -> abbr. 堂(或表)兄弟(姐妹) (=cousin)；abbr. 由于；因为 =cuz
+  cpm        freq=1725820      (none) -> n. 每分钟卡片张数(临界途径法)；abbr. 腐蚀防护手册（Corrosion Prevention Manual，CPM）
+  cray       freq=861878       (none) -> 小龙虾（等于crayfish）
+  credit     freq=175916536    (none) -> n. 信用；荣誉；学分；赞扬；贷款；赊欠；贷方；存款；(复)credits: 演职员名单.；v. 归功于；相信；记入贷方
+  croix      freq=1871912      (none) -> 克鲁瓦； [地名] [法国] 克鲁瓦
+  crowley    freq=1588300      (none) -> [爱尔兰姓氏] 克罗利住所名称，来源于古英语，含义是“鸦+树林，开垦地”(crow+wood,clearing)
+  darlene    freq=1030408      (none) -> 达琳（亦作 Darleen）
+  dealing    freq=17303748     (none) -> n. 经营方法；行为态度；(复数）dealings:商务往来； 交往.；动词deal的现在分词.
+  degrees    freq=28091266     (none) -> n. 度；学位；名词degree复数形式.
+  deli       freq=3655555      (none) -> 熟食店；[食品] 熟食品（等于delicatessen）
+  demolition freq=2830701      (none) -> 拆除（等于demolishment）；破坏；毁坏
+  dhl        freq=1107599      (none) -> 敦豪速递公司（Dalsey， Lynn是一家国际快递公司）
+  dickens    freq=1930015      (none) -> n. <口> 魔鬼；究竟；Dickens；n. 狄更斯（英国作家）
+  diflucan   freq=849279       (none) -> [医]大扶康（含 fluconazole）
+  dissenting freq=1034592      (none) -> adj. 不同意的；动词dissent的现在分词形式.
+  dmoz       freq=1642050      (none) -> 开放目录项目（来自于Directory.Mozilla.org的简写，一个由世界各地志愿者共同维护与建设的全球目录社区）
+  dod        freq=7322498      (none) -> abbr. 美国国防部(=department of defense)
+  doing      freq=80821946     (none) -> n. 做；(复)doings: 所作之事，行为，活动；动词do的现在分词.
+  domination freq=4362286      (none) -> n. 支配；控制；管辖；（复数）dominations:[宗]主天使.
+  doodle     freq=821153       (none) -> v. 乱写；乱画；信手涂鸦；n. 乱写；乱画；Doodle；n. 谷歌涂鸦（搜索引擎谷歌Google于节日和其他纪念日在主页上展示的定制版谷歌图标）
+  dramatic   freq=8612079      (none) -> adj. 戏剧性的；引人注目的；给人深刻印象的；激动人心的；dramatics: n.；戏剧作品；戏剧艺术；戏剧性的行为
+  draper     freq=2394747      (none) -> n. 布商；带式输送器；布面清选机；Draper.；n. 德雷珀(姓氏、男子名或地名)
+  drayton    freq=749219       (none) -> 德雷顿(①姓氏 ②Michael, 1563-1631, 英国诗人)
+  dropping   freq=4761980      (none) -> n. 点滴；滴下；落下物；(复)droppings: 动物的粪.；动词drop的现在分词形式.
+  dulles     freq=853060       (none) -> 杜勒斯(①姓氏 ②John Foster,  1888-1959, 曾于1953-1959任美国国务卿)
+  dynamical  freq=1477917      (none) -> adj. 动力的；电动的；有生气的；不断变化的；=dynamic.
+  eastman    freq=1974520      (none) -> 伊斯门(①姓氏 ②George, 1854-1932, 美国摄影技术领域的发明家)
+  ed         freq=51788932     (none) -> Edmund，Edward，Edwin等的昵称
+  edema      freq=873634       (none) -> n.  [医]浮肿； 水肿； [植]瘤腺体；<美>(=oedema )
+  edmond     freq=1453269      (none) -> n. 埃德蒙(男子名；亦作Edmund)；n. 埃特蒙德(美国城市)
+  effexor    freq=1465969      (none) -> [医]郁复伸，（文拉法辛制剂）（含venlafaxine）
+  elias      freq=1552410      (none) -> 伊莱亚斯（希伯来先知, 等于Elijah）
+  eliot      freq=2049290      (none) -> n. 埃利奥特；艾略特(姓氏；Elias的异体；亦作Elliott；Elliot)
+  elisabeth  freq=1888877      (none) -> 伊丽莎白（女子名，等于Elizabeth）
+  emanuel    freq=1185579      (none) -> n. 伊曼纽尔(男子名)；以马内利（希伯来语，意为“上帝与我们同在“）；=Emmanuel.；=Immanuel.
+  emmanuel   freq=1630708      (none) -> 以马内利（耶稣基督的别称）；伊曼纽尔（男子名，等于Immanuel）
+  emoticons  freq=1711990      (none) -> n. 表情符号；名词emoticon的复数形式.
+  endeavor   freq=2277610      (none) -> n. 尽力；努力；v. 尽力；努力；力图
+  episcopal  freq=2336299      (none) -> adj. 主教的；主教管辖的；Episcopal.；adj. 新教圣公会的
+  erwin      freq=1356404      (none) -> 欧文(Irving的异体)
+  eudora     freq=1269763      (none) -> n. [计] 一种电子邮件软件；由Qualcomm公司出品；n. 尤朵拉（女子名）
+  eureka     freq=3445857      (none) -> int. 找到了! 有了！；Eureka.；n. 尤里卡（加利福尼亚西北部一城市）
+  evergreen  freq=3333511      (none) -> adj. 常绿的；n. 常绿树；常绿植物；(复)evergreens: 常绿树枝条.
+  everlasting freq=1630054      (none) -> adj. 永恒的；持久的；无止境的；n. 永恒；永久盛开的花；[大写]Everlasting: 上帝.
+  excl       freq=1881600      (none) -> 除外的（等于exclusive）；除外（等于excluded）；不包括（等于excluding）
+  eyeglasses freq=1598397      (none) -> 眼镜（等于glasses）
+  facing     freq=13385115     (none) -> n. [建]饰面，覆盖面，面层；衬里；(复)facings:衣领；袖口.；动词face的现在分词.
+  feeling    freq=26546473     (none) -> n. 感觉；知觉；气氛；鉴赏力；反感；adj. 有感情的；富于同情心的；含情脉脉的；（复）feelings：感情.
+  felt       freq=33321821     n. 毛毡；毡制品；vt. 制毡；使粘结；vi. 毡合；动词feel的过去式和过去分词. -> v. 感觉；觉得（feel的过去式和过去分词）；n. 毛毡；毡制品
+  fishes     freq=2151535      (none) -> n. 鱼；名词fish的复数形式.；Fishes.；n. 双鱼宫
+  flushing   freq=1731756      (none) -> n. 冲洗；脸红；动词flush的现在分词形式.；Flushing: 弗拉兴(纽约城的一个区).
+  followed   freq=31437587     n. 跟随的；遵照的；动词follow的过去式和过去分词形式. -> v. 跟随；遵循（follow的过去式和过去分词）；n. 跟随的；遵照的
+  francisco  freq=45480506     (none) -> 弗朗西斯科（男子名，等于Francis）
+  frankenstein freq=1347765      (none) -> n. 弗兰肯斯坦(英国女作家Mary W. Shelly所著同名小说中的主角)；人形怪物；作法自毙的人，被自己的创造物所毁者
+  franz      freq=4321556      (none) -> Ferdinand弗朗茨·斐迪南( Ferdinand的德文名)
+  freaky     freq=1352418      (none) -> adj. (=freakish)畸形的；古怪的；捉摸不定的
+  french     freq=81396759     (none) -> n. 法国人；法语；adj. 法国人的；法国的；法语的；french.；vt. (从骨头)剔肉；切成细条
+  fried      freq=4364192      (none) -> adj. 炸过的；弗里德(Alfred Hermann,1864-1921，奥地利著述家、记者，曾获1911年诺贝尔和平奖）
+  functioning freq=5619525      (none) -> n. 机能；动词function的现在分词形式.
+  fv         freq=1248479      (none) -> abbr. [军] Fighting Vehicle；战斗车辆
+  ga         freq=38185755     (none) -> n. 镓(元素gallium的符号)；abbr. 总代理人
+  gallup     freq=1092401      (none) -> n. 盖洛普（美国新墨西哥州城市名）；n. 盖洛普(姓氏；George Horace；美国统计学家；盖洛普民意测验的创始人)
+  garner     freq=2725663      (none) -> v. 贮藏；收集；得到；n. 谷仓；Garner.；n. 加纳(姓氏)
+  garter     freq=1004872      (none) -> n. 吊袜带；Garter：嘉德勋章；嘉德勋位的成员.；v. 用吊带系紧
+  gentile    freq=741856       (none) -> n. 异教徒；adj. 异教徒的；Gentile: n.；非犹太教徒；非摩门教徒；adj. 非犹太人的；非摩门教徒的
+  gerard     freq=2734359      (none) -> 杰勒德（男子名，Gerald的异体）
+  gets       freq=48807490     (none) -> v. 得到；获得；变得；到达（get的第三人称单数）
+  gina       freq=3284599      (none) -> n. 吉娜(Regina；Angelina等的昵称)；abbr. 全球哮喘防治创议（Global Initiative for Asthma）
+  given      freq=125542966    adj. 特定的；假设的；有 ... 倾向的；prep. 考虑到；如果；n. 不争的事实；动词giv -> v. 给；赠予（give的过去分词）；adj. 特定的；假设的；prep. 考虑到
+  gives      freq=45649146     v. 给；赠予；送；捐助；提供；供给；举行；弯曲；n. 弹性 -> v. 给；赠予；提供（give的第三人称单数）
+  goalie     freq=1329458      (none) -> 守门员（等于goalkeeper）
+  goddard    freq=1516197      (none) -> 戈达德(①姓氏 ②Robert Hutchings；  1882-1945； 美国物理学家； 火箭工程学的先驱者)
+  goes       freq=47278206     v. 动词go的第三人称单数现在时，去，前往 -> v. 去；前往（go的第三人称单数）
+  going      freq=155284081    (none) -> n. 去；离去；地面(或道路)的状况；进展；(复)goings: 行为.；adj. 运转中的；营业中的；现有的；流行的
+  goldsmith  freq=1197840      (none) -> n. 金匠；Goldsmith.；n. 戈德史密斯（姓氏）
+  gonzaga    freq=806455       (none) -> [巴西、意大利] 贡扎加； [地名] [菲律宾] 贡萨加
+  goodyear   freq=1318472      (none) -> 固特异轮胎（世界500强的橡胶产业, 总部设于美国）；古德伊尔（①姓氏②Charles, 1800-1860, 发明硬橡皮制造法的美国人）
+  got        freq=145057782    v. 得到，明白（动词get的过去式和过去分词） -> v. 得到，明白（get的过去式和过去分词）
+  gotten     freq=7480306      (none) -> v. 得到；获得（get的过去分词）
+  grange     freq=2247323      (none) -> n. 农场；庄园；Grange.；n. 格兰其（美国农业保护者协会）
+  graves     freq=3552013      (none) -> n. 坟墓；名词grave的复数形式.；Graves.；n. 格拉夫区（法国西南部一个地区）；n. （法国）格拉夫葡萄酒；格雷夫斯病
+  greenfield freq=2209164      (none) -> n. 市郊绿区；Greenfield.；n. 格林菲尔德（美国马萨诸塞州西北部城镇；威斯康辛州东南部城市）
+  greg       freq=15681408     (none) -> 格雷格（男子名，等于Gregory）
+  gretchen   freq=1149394      (none) -> 格雷琴(Margaret的昵称)
+  griffith   freq=2805409      (none) -> n. 格里菲思(男子名；Griffin的异体)
+  grocery    freq=9699375      (none) -> n. 杂货店；adj. 杂货的；（复）groceries：食品杂货.
+  groves     freq=1377169      (none) -> n. 小树林；果树园；名词grove的复数形式.；Groves.；n. 格罗夫斯(美国得克萨斯州东南一城市)；n. 格罗夫斯(人名)
+  guillaume  freq=883930       (none) -> 纪尧姆(①姓氏 ②Charles Edouard,  1861-1938, 生于瑞士的法国物理学家, 曾获1920年诺贝尔物理学奖)
+  gustav     freq=1035533      (none) -> [男子名] 古斯塔夫 Gustavus的变体
+  gwen       freq=3599486      (none) -> n. 格温(女子名；Gwendolyn的昵称)
+  hackney    freq=1054260      (none) -> n. 乘用马；出租马车；<古>受雇的人；adj. 陈腐的；受雇的；v. 使变平凡；<古>使变得世故、老练；Hackney；n. 海克尼挽马；哈克尼(英格兰地名)
+  hanukkah   freq=929056       (none) -> 光明节（犹太教节日，等于Chanukah）
+  having     freq=109360096    (none) -> n. 所有；持有；(复)havings: 所有财产.；动词have的现在分词形式.
+  hawking    freq=1194571      (none) -> n. 利用鹰行猎；贩卖；动词hawk的现在分词形式.；Hawking: 霍金（人名）.
+  heard      freq=45436523     (none) -> v. 听见；听到（hear的过去式和过去分词）
+  held       freq=76100888     v. 拿着；控制；容纳；握住；持有；保持；掌握；认为；举行；动词hold的过去式和过去分词形式 -> v. 握住；持有；保持；举行（hold的过去式和过去分词）
+  helps      freq=29607993     v. 帮助；有助于；促进（动词help的第三人称单数形式） -> v. 帮助；有助于（help的第三人称单数）
+  hemoglobin freq=942297       (none) -> [生化] 血红蛋白（等于haemoglobin）；血红素
+  hemorrhage freq=978574       (none) -> n. 出血；溢血；失控的行为
+  henderson  freq=7453879      (none) -> 亨德森(①姓氏 ②Arthur, 1863-1935, 英国工党领袖及政治家, 曾获1934年诺贝尔和平奖)
+  henley     freq=1466836      (none) -> 亨里(①姓氏 ②William Ernest,  1849-1903, 英国诗人, 批评家及剧作家)
+  hershey    freq=1676137      (none) -> n. 赫尔希(姓氏）；n. 赫尔希小镇(位于美国宾夕法尼亚州)
+  hms        freq=1711533      (none) -> abbr. 英国政府公务 (Her/ His Majesty's Service)
+  homewood   freq=1070118      (none) -> 霍姆伍德； [地名] [加拿大、美国、新西兰] 霍姆伍德
+  hooker     freq=1768891      (none) -> n. (橄榄球)扭夺时的中心选手；妓女；小渔船；Hooker.；n. 胡克（姓氏）
+  hoover     freq=4189070      (none) -> v. 用真空吸尘器把...清除掉；获得大量的(某物)；Hoover；n. 胡佛吸尘器(商标名)
+  hopkins    freq=6674368      (none) -> 霍普金斯(①姓氏 ②Sir Frederick Gowland,  1861-1947, 英国生物化学家, 曾获1929年诺贝尔生理学-医学奖)
+  hubbard    freq=2649059      (none) -> [医]Hubbard槽； [人名] 哈伯德； [地名] [加拿大、美国] 哈伯德
+  hundred    freq=18339491     (none) -> num. 百；n. 一百元；（复）hundreds: 成百上千；许多.
+  hyperlinks freq=1424368      (none) -> n. 超级链接；名hyperlink词的复数形式.
+  imitrex    freq=1480884      (none) -> 琥珀酸舒马普曲坦注射剂(含sumatriptan succinate)
+  inches     freq=28018680     (none) -> n. 英寸；少量；v. 慢慢移动；（复）inches: 身高.
+  incl       freq=5842780      (none) -> abbr. 包含；包括(=include；included；including；inclusive)
+  influencing freq=2094933      (none) -> adj. 影响的；influence的现在进行分词形式.
+  interconnected freq=1052701      (none) -> adj. 相互连接的；v. interconnect的动词过去式、过去分词
+  international freq=295639201    adj. 国际的；世界性的；n. 国际比赛 -> adj. 国际的；世界性的；n. 国际比赛；国际组织；国际体育比赛
+  irc        freq=8332867      (none) -> 国际红十字会；Internet交互式闲聊程序
+  isolde     freq=786673       (none) -> n. 伊索尔德（女子名；嫁给康沃尔的国王Mark却被骑士Tristan所爱的爱尔兰公主）
+  janssen    freq=770951       (none) -> [医]杨森（药厂名）； [人名] 詹森
+  jeannie    freq=759553       (none) -> [女子名] 珍妮 Jane,Jean,Joan,Joanna等的昵称
+  jefferson  freq=11851441     (none) -> 杰斐逊(①姓氏 ②Thomas, 1743-1826, 美国政治家, 第三任总统, 独立宣言的起草人),杰斐逊追随者
+  jersey     freq=48658750     (none) -> n. 毛线衫；毛织运动衫；Jersey: 泽西岛； 泽西乳牛.
+  jerseys    freq=4222586      (none) -> n. 毛线衫；毛织运动衫；Jersey: 泽西岛； 泽西乳牛.
+  jesuit     freq=938697       (none) -> n. 阴险的人；阴谋家；Jesuit: 耶稣会信徒.
+  joann      freq=807437       (none) -> [女子名] 乔安 Joan的变体； [人名] 琼
+  jody       freq=1433607      (none) -> n. 乔迪(女子名；Judith的昵称；亦作Jodi；Jodie)
+  johanna    freq=1084085      (none) -> 约翰娜(Joanna的异体)
+  jules      freq=2268604      (none) -> 朱尔斯(Julius的异体)
+  justine    freq=866589       (none) -> 贾丝廷(Justina的异体)
+  karl       freq=7553289      (none) -> 卡尔（男子名，等于Charles）
+  kate       freq=13076275     (none) -> 凯特（女子名，等于Catherine）
+  kathy      freq=6661457      (none) -> 凯西（女子名，等于Katherine）
+  kendall    freq=2588076      (none) -> 肯德尔(①姓氏, 男子名 ②Edward Calvin,  1886-1972, 美国生物化学家, 曾获1950年诺贝尔生理学-医学奖)
+  kept       freq=27838368     adj. 保存的；被人供养的；动词keep的过去式和过去分词. -> v. 保持；保存（keep的过去式和过去分词）；adj. 保存的；被人供养的
+  kfc        freq=744841       (none) -> abbr. (商标)肯德基 (=Kentucky Fried Chicken)
+  kgs        freq=843641       (none) -> 千克（重量单位，kilograms）；生酮类固醇；吉尔吉斯斯坦索姆（吉尔吉斯斯坦货币名）；毛重净重
+  kh         freq=2364036      (none) -> ( , inlet, ravine, water-course) （阿拉伯语）小溪； 海湾； 高棉人； 高棉语
+  kilometer  freq=867428       (none) -> n. =kilometre 公里；千米(略作km)
+  kingfisher freq=793272       (none) -> n. 翠鸟；Kingfisher.；n. 翠丰公司(英国的一家主要经营零售的公司)
+  kinsey     freq=768538       (none) -> n.  [姓氏] 金赛；Alfred Charles Kinsey； 金赛教授(著有<<金赛报告>>； 调查美国人之性行为)
+  knew       freq=31598395     v. 了解；知道；认识（动词know的过去式） -> v. 了解；知道；认识（know的过去式）
+  koch       freq=2349132      (none) -> 科赫(Robert, 1843-1910, 德国细菌学家, 医学家, 结核菌、霍乱菌发现者, 曾获1905年诺贝尔生理学-医学奖)
+  krause     freq=988956       (none) -> [医]唇压肌； [人名] 克劳斯
+  kris       freq=2970945      (none) -> 波壮刃短剑（等于creese，马来西亚和印尼的）
+  kuhn       freq=1067449      (none) -> 库恩(①姓氏 ②Richard,  1900-1967, 生于奥地利的德国化学家, 曾获1938年诺贝尔化学奖)
+  kw         freq=5302888      (none) -> abbr. 千瓦(=kilowatt)
+  labour     freq=21288089     (none) -> n. 劳动；劳工；分娩；v. 努力；干苦力活；困难吃力地行进；反复说明；Labour；n. (英国)工党
+  lakeside   freq=2036381      (none) -> n. 湖边；Lakeside.；n. 莱克赛德(美国地名)
+  lambert    freq=2738171      (none) -> n. 朗伯(一种亮度单位)；Lambert.；n. 兰伯特(姓氏或男子名)
+  landry     freq=909412       (none) -> 兰德里； [地名] [法国] 朗德里
+  larsen     freq=1733946      (none) -> [医]综合征：本征特点为腭裂，面部扁平，多处关节先天性脱位，及足畸形； [人名] 拉森； [地名] [荷兰、美国] 拉森
+  laurent    freq=3680554      (none) -> 劳伦，洛朗(Hermann,1841-1908，法国数学家)
+  left       freq=171752631    adj. 左边的；adv. 向左；n. 左边；左派分子；【体】左手拳；动词leave的过去式和过去分 -> v. 离开（leave的过去式和过去分词）；adj. 左边的；n. 左边；左派
+  lena       freq=1727154      (none) -> 莉娜（女子名，等于Helena）；勒拿河（西伯利亚中部河流）
+  lets       freq=15876825     v. 让；允许；(用于祈使句表建议、请求、命令)让；假设；出租；n. 出租；阻碍；(网球等)触网重发 -> v. 让；允许（let的第三人称单数）
+  lib        freq=24291030     (none) -> n. <非正式> 解放运动；abbr. 自由的(=liberal)；图书管(=library)；图书管理员(=librarian)
+  libby      freq=2019919      (none) -> 莉比（等于Elizabeth，女子名）
+  licensed   freq=26151610     (none) -> adj. 得到许可的；动词license的过去式和过去分词形式.
+  linden     freq=1843791      (none) -> n. [植]椴属；菩提树；Linden.；n. 林登（美国新泽西州东北部城市）
+  lipitor    freq=4243818      (none) -> 立普妥(atorvastatin calcium包衣片)<降血脂药>
+  listserv   freq=2572223      (none) -> BITnet上用来管理讨论邮件清单的程序
+  lived      freq=18050710     suf.  表示“寿命 ... 长的； 生活 ... 的”；动词live的过去式和过去分词 -> v. 居住；生活（live的过去式和过去分词）；suf. 表示“寿命…长的”
+  loeb       freq=786285       (none) -> 罗卜（Jacques；1859-1924生于德国的美国生理学家及生物学家）
+  lou        freq=5451701      (none) -> 卢（女子名，等于Louise或Lu）
+  lowell     freq=3240910      (none) -> 洛厄尔（男子名，等于Lovell）
+  ltd        freq=65747979     (none) -> 有限责任公司；激光目标指示器（等于 Designator）
+  macleod    freq=1055084      (none) -> 麦克劳德(①姓氏 ②John James Rickard,  1876-1935, 英国生理学家, 曾获1923年诺贝尔生理学-医学奖)
+  made       freq=287353021    adj. 制造的；捏造的；拼成的；肯定会成功的；动词make的过去式和过去分词形式. -> v. 做；制造（make的过去式和过去分词）；adj. 制造的；捏造的
+  madeleine  freq=1358505      (none) -> 玛德琳蛋糕；马德琳（女子名，等于Madelin）
+  mag        freq=8461577      (none) -> abbr. 杂志（=magazine）
+  making     freq=124198695    (none) -> n. 制成；成功之道；(复)makings: 要素.；动词make的现在分词形式.
+  malvinas   freq=1287464      (none) -> Malvinas Islands (Falklands) 玛尔维娜岛屿
+  mandela    freq=899703       (none) -> 纳尔逊曼德拉 Nelson, [1918, 南非黑人反种族隔离活动家]
+  manpower   freq=2371829      (none) -> n. 人力；Manpower.；n. 公司(财富500强公司之一；总部所在地美国；主要经营临时帮助)
+  mares      freq=789891       (none) -> [医]母马； [人名] 马雷斯
+  marge      freq=876008       (none) -> n. <英>人造黄油（=margarine）；<古>边；缘
+  margo      freq=743004       (none) -> [医]缘,Margo：马戈（人名）
+  marquis    freq=1788011      (none) -> （法）侯爵；世袭贵族（等于marquess）
+  marseille  freq=1542837      (none) -> n. 马塞双层布；Marseille.；n. 马赛(法国港口城市）
+  marsha     freq=1008975      (none) -> 玛莎(Marcia的异体)
+  marshall   freq=17684438     (none) -> 元帅；典礼官；执法官；法官的随行官员（等于 marshal）
+  maths      freq=3231878      (none) -> 数学（等于mathematics）
+  matthews   freq=4890853      (none) -> 马修斯(①姓氏 ②James Brander,  1852-1929, 美国戏剧评论家, 散文家及教育家)
+  mca        freq=2134338      (none) -> [计] MicroChannel Architecture微通道结构
+  mcgraw     freq=4354997      (none) -> [苏格兰人、爱尔兰人姓氏] 麦格劳 McCrae的变体； [地名] [美国] 麦格劳
+  mchenry    freq=820692       (none) -> [苏格兰人、爱尔兰人姓氏] 麦克亨利盖尔语姓氏的英语形式，来源于教名Henry的盖尔语形式； [地名] [美国] 麦克亨利
+  mcmillan   freq=1191476      (none) -> 麦克米伦 (①姓氏 ②Edwin Mattison,  1907-, 美国化学家, 曾获1951年诺贝尔化学奖)
+  medina     freq=2085061      (none) -> n. 麦地那（位于北非的一阿拉伯城市的旧城部分）；Medina.；n. 麦地那（沙特阿拉伯西部一城）；n. 麦地那 (美国俄亥俄东北部一城市)
+  merlin     freq=2354378      (none) -> n. 灰背隼；Merlin.；n. 梅林(男子名)
+  met        freq=42223443     abbr. 气象的（=meteorological）；abbr. 大城市的（=metropolita -> v. 遇见；满足（meet的过去式和过去分词）；abbr. 气象的；大城市的
+  methodist  freq=4565081      (none) -> n. 照章办事者；Methodist：卫理公会派教徒.；adj. 卫理公会教派的
+  might      freq=123196001    aux. 可能；也许；may的过去式；n. 威力；力量 -> aux. 可能；也许；n. 力量；威力；势力
+  mikes      freq=2933878      (none) -> n. 扩音器；麦克风；v. 用扩音器传送；n. [大写]迈克（男子名,Michael的昵称）
+  mona       freq=1860383      (none) -> n. 莫娜(女子名)；n. [动]白腹长尾猴(西非常见的一种长尾猴)；Mona Passage.；n. 莫纳海峡(在拉丁美洲的海地岛和波多黎各岛之间)
+  montague   freq=1033786      (none) -> [男子名] [英格兰人姓氏] 蒙塔古 Montagu的变体； [地名] [加拿大、美国] 蒙塔古
+  moved      freq=35713495     adj. 感动的；动词move的过去式和过去分词. -> v. 移动；感动（move的过去式和过去分词）；adj. 感动的
+  mr         freq=55692230     (none) -> n. 先生(Mister的缩写)
+  mwf        freq=1131918      (none) -> abbr. =Medical Women's Federation 女医务人员联合会；Mine Warfare Forces；水雷作战部队
+  natasha    freq=1863553      (none) -> 娜塔莎（亦作Natascha）
+  naturist   freq=860242       (none) -> 裸体主义者（指认为裸体有益身心的人）；天体运动者（等于nudist）
+  nautilus   freq=1470549      (none) -> n. 鹦鹉螺；舡鱼；Nautilus.；n. 鹦鹉螺号(美国第一艘核潜艇)
+  ned        freq=3152758      (none) -> n. 内德(男子名；Edmund；Edward的昵称）；abbr. 《新英语词典》(=New English Dictionary)
+  needed     freq=76528079     adj. 需要的；动词need的过去式和过去分词形式. -> v. 需要（need的过去式和过去分词）；adj. 需要的
+  neighboring freq=2909095      (none) -> adj. 附近的；邻近的；邻接的；动词neighbor的现在分词形式.
+  nema       freq=842041       (none) -> n. 美国全国电器制造商协会
+  nerve      freq=6567418      (none) -> n. 神经；勇气；敏感处；叶脉；厚脸皮；v. 鼓起勇气；（复）nerves: 神经紧张.
+  netherlands freq=30672254     (none) -> n. 荷兰（国家名，全称the Kingdom of the Netherlands）
+  netscape   freq=11443351     (none) -> n. 美国网景公司(以开发Internet浏览器闻名)
+  neville    freq=1864220      (none) -> 内维尔；[男子名] [英格兰人、爱尔兰人姓氏] 内维尔住所名称，来源于古法语，含义是“新+居留地”(new+settlement)
+  nicole     freq=7827726      (none) -> n. 尼科尔，妮可（女子名，=Nichole）
+  ningbo     freq=797466       (none) -> 宁波（中国地名，旧译Ningpo）
+  nix        freq=1414384      (none) -> n. 无；皆无；水中精灵；v. 禁止；拒绝；adv. 不是这样；不
+  nom        freq=1931008      (none) -> abbr. 主格（=Nominative）
+  nora       freq=2144854      (none) -> n. 诺拉（女子名；Eleanor；Honora；Leonora的昵称）
+  novell     freq=4539111      (none) -> 美国Novell公司，以开发网络产品著称
+  nz         freq=15445373     (none) -> abbr. 新西兰(=New Zealand)
+  oakley     freq=3561959      (none) -> n. <俚>=Annie Oakley，赠券，免费入场券；奥克利眼镜
+  obtained   freq=33486258     (none) -> adj. 获得的；动词obtain过去式和过去分词.
+  ollie      freq=855837       (none) -> 奥利（男子名，等于Oliver）；奥莉（女子名，等于Olive）；翱骊（滑板的一种动作）
+  or         freq=2590739907   conj. 或者；还是；否则；prep. <古>在...之前 -> conj. 或者；还是；否则
+  orthopedic freq=1764724      (none) -> 整形外科的（等于orthopaedic）
+  orwell     freq=1177438      (none) -> 奥韦尔(①姓氏 ②George, 本名 Eric Blair,  1903-1950, 英国小说家及散文家)
+  ottoman    freq=1703262      (none) -> n. 软凳；垫脚软凳；Ottoman.；n. 土耳其人；adj. 土耳其帝国的；土耳其人的；土耳其民族的（=Turkish）
+  overland   freq=2913342      (none) -> adj. 陆路的；adv. 经由陆路地；Overland.；n. 欧弗兰（美国密苏里州东部一城市）
+  paid       freq=60294928     adj. 已付钱的；有薪俸的；动词pay的过去式和过去分词. -> v. 支付；付给（pay的过去式和过去分词）；adj. 已付钱的；有薪俸的
+  paisley    freq=1557028      (none) -> n. (苏格兰)佩斯利涡旋纹花呢；adj. 佩斯利织物的；Paisley.；n. 佩斯里(苏格兰西南部一城市)
+  palmyra    freq=801644       (none) -> n. [植]扇叶树头榈；Palmyra.；n. 帕尔米拉(叙利亚城市名)
+  panty      freq=3546636      (none) -> 女裤；童裤（等于panties）
+  paramount  freq=3954831      (none) -> adj. 极为重要的；至高无上的；n. 最高统治者；Paramount.；n. 派拉蒙(美电影公司)
+  patterns   freq=25809816     (none) -> n. 式样；图案；样式；模式；名词的pattern复数形式.
+  patty      freq=2339693      (none) -> n. <美>肉饼；Patty；n. 帕蒂(女子名；Mathilda；Matilda；Martha 的昵称)
+  pb         freq=8424893      (none) -> n. 出版委员会；出版物公报；祈祷书；元素铅 plumbum的缩写.
+  pda        freq=26454587     (none) -> abbr. 个人数字助理 (=Personal Digital Assistant)
+  pearce     freq=1668218      (none) -> [英格兰人姓氏] 皮尔斯来源于中世纪英语教名，Peter的土语形式； [地名] [加拿大、美国] 皮尔斯
+  pentagon   freq=4424810      (none) -> n. 五边形；Pentagon:五角大楼（美国国防部）.
+  perrin     freq=976712       (none) -> 佩兰(Jean Baptiste,  1870-1942, 法国物理学家, 曾获1926年诺贝尔物理学奖)
+  peyton     freq=904978       (none) -> 佩顿（亦作 Payton）
+  philly     freq=2102437      (none) -> 费城（Philadelphia的俗称，美国一座城市）
+  phosphorus freq=2201635      (none) -> 磷
+  pics       freq=79323162     (none) -> n. 照片；电影；picture的简写.
+  pix        freq=5645638      (none) -> n. <俚>照片（pictures的简写）；圣餐盒（pyx的变体）；名词pic的复数形式
+  planck     freq=1412481      (none) -> 普朗克 (Max Karl Ernst Ludwig,  1858-1947, 德国物理学家, 量子论确立者, 曾获1918年诺贝尔物理学奖)
+  pointer    freq=11475647     (none) -> n. 指针；教鞭；（能指出猎物位置的）猎犬；暗示；主意；Pointer: 指极星.
+  pol        freq=4104771      (none) -> abbr. 石油；燃料与润滑剂（=petroleum；oil and lubricant）；abbr. 北极星导弹（=Polaris）
+  polaroid   freq=1788581      (none) -> n. 人造偏光板；Polaroid.；n. 偏光薄膜；有偏光薄膜的太阳眼镜；宝丽来(一种快速成像照相机)；用宝丽来拍出来的照片
+  polish     freq=13927858     (none) -> n. 光泽；上光剂；优雅；精良；v. 擦亮；磨光；推敲；完善；Polish.；adj. 波兰的；波兰人的；波兰语的；n. 波兰语
+  pollock    freq=1314501      (none) -> n. [动]青鳕；Pollock.；n. 波洛克（男子名）
+  poly       freq=7326088      (none) -> abbr. 聚乙烯(=polyethylene)；pref. 多的；聚合的
+  porn       freq=119294962    (none) -> n. <口>色情文学，色情描写，色情刊物；adj. <口>色情的，色情文学的；=pornography/pornographic
+  potty      freq=1390617      (none) -> n. (小孩的)便壶；adj. 疯癫的；着迷的；微小的；愚蠢的
+  prayers    freq=5587372      (none) -> n. 祈祷；祝福；名词prayer复数形式.
+  prof       freq=4282231      (none) -> 教授（等于professor）
+  protestant freq=2350938      (none) -> n. 抗议者；adj. 抗议的；Protestant.；n. 新教徒；adj. 新教徒的
+  providence freq=7284693      (none) -> n. 天意；天命；n. 远见；卓识；先见之明；Providence: 上帝.
+  prudential freq=2319748      (none) -> adj. 谨慎的；细心的；深谋远虑的；明辨的；咨询的；Prudential.；n. 保诚保险(总部所在地英国)
+  psyche     freq=1166306      (none) -> n. 【C】精神；心灵；灵魂；Psyche：[希神]塞姬（爱神丘比特所爱的美女）.
+  puts       freq=10705170     (none) -> v. 放置；安置；写上（put的第三人称单数）；n. （推铅球等）推；掷
+  racine     freq=1267167      (none) -> 拉辛(①姓氏 ②Jean Baptiste,  1639-1699, 法国剧作家)
+  rainier    freq=905792       (none) -> adj. 多雨的；形容词rainy的比较级形式.；Rainier.；n. 雷尼尔山（美国华盛顿州中西部火山）
+  ramsay     freq=813241       (none) -> 拉姆齐(①姓氏 ②Sir William,  1852-1916, 英国化学家, 氦的发现者, 曾获1904年诺贝尔化学奖)
+  ran        freq=16291429     (none) -> v. 跑；奔跑（run的过去式）
+  randall    freq=3802515      (none) -> 兰德尔（亦作Randal）
+  randy      freq=8110369      (none) -> adj. 好色的；adj. (苏格兰)粗野的；n. (苏格兰)放荡的女人；Randy.；n. 兰迪(男子名；Randolph的昵称)
+  rationality freq=867752       (none) -> n. 理性；合理性；（复数）rationalities:合理的意见（信仰、行为等）.
+  rawlings   freq=896378       (none) -> [英格兰人姓氏] 罗林斯取自父名，来源于Rawling,含义是“罗林之子”
+  rec        freq=8441122      (none) -> 娱乐；休闲（等于recreation，仅用于复合词中，如 room）
+  receivable freq=2400318      (none) -> adj. 可收到的；应收的；n. (复)receivables: 应收帐款
+  redondo    freq=870479       (none) -> [秘鲁、多米尼加共和国、美国] 雷东多； [地名] [葡萄牙] 雷东杜
+  reformation freq=1412334      (none) -> n. 改造；变革；Reformation.；n. (十六世纪欧洲的)宗教改革运动
+  remington  freq=1946473      (none) -> 雷明顿（姓氏； Frederic, 1861-1909，美国艺术家）
+  remodeling freq=4243031      (none) -> n. 重新塑造；改型；重作；动词remodel的现在分词形式.
+  republican freq=14056260     (none) -> n. 拥护共和政体的人；adj. 共和政体的；Republican: 共和党人.；Republican: 共和党的.
+  respect    freq=48329678     (none) -> vt. 尊敬；尊重；遵守；关于；涉及；n. 尊敬；敬重；关系；方面；n. （复）respects: 敬意；问候
+  respects   freq=3850738      (none) -> vt. 尊敬；尊重；遵守；关于；涉及；n. 尊敬；敬重；关系；方面；n. （复）respects: 敬意；问候
+  resurrection freq=3299623      (none) -> n. 复活；复兴；恢复；Resurrection：耶稣复活； （最后审判日前）全部死者的复活.
+  retinal    freq=1253019      (none) -> adj. 视网膜的
+  reverence  freq=893456       (none) -> n. 敬畏；尊敬；尊严；v. 尊敬；敬畏；崇敬；Reverence: 对某些基督教神职人员的尊称.
+  reversed   freq=3556556      (none) -> adj. 颠倒的；相反的；撤销的；动词reverse过去式和过去分词.
+  rhythmic   freq=1177228      (none) -> [生物] 有节奏的（等于rhythmical）；间歇的；合拍的
+  richardson freq=6506250      (none) -> 理查森(①姓氏②Sir Owen Willians,  1879-1959, 英国物理学家, 曾获1928年诺贝尔物理学奖)
+  ricky      freq=5071881      (none) -> 里基（男子名，等于Rick，Rickie）
+  ridley     freq=1047880      (none) -> 鳞龟属动物（产于墨西哥湾，等于Lepidochelys）
+  rmb        freq=767041       (none) -> 人民币（等于Renminbi）
+  robbins    freq=3193148      (none) -> 罗宾斯(①姓氏 ②Frederick Chapman,  1916-, 美国医学家, 曾获1954年诺贝尔生理学-医学奖)
+  rochdale   freq=1024637      (none) -> principles[复]罗奇代尔合作社原则
+  rosemary   freq=3030760      (none) -> n. 迷迭香；Rosemary.；n. 罗斯玛丽(女子名)
+  rudy       freq=2014882      (none) -> 鲁迪（男子名，Rudolf的昵称）
+  runs       freq=25881512     n. 腹泻；名词run的复数形式；动词run的第三人称单数. -> v. 跑；行驶；运行（run的第三人称单数）；n. 腹泻
+  sanger     freq=861440       (none) -> 桑格（姓氏； Frederick, 1918-，美国生物化学家，曾获 1958年诺贝尔化学奖）
+  santos     freq=2209111      (none) -> n. 圣者像；名词santo的复数形式.；Santos.；n. 桑托斯(巴西港口)
+  saskatoon  freq=1937497      (none) -> n. 唐棣属植物；Saskatoon.；n. 萨斯卡通(加拿大中南部一城市)
+  sat        freq=70639358     v. 坐（动词sit的过去式和过去分词）；abbr. 学术能力测试（=Scholastic Apti -> v. 坐（sit的过去式和过去分词）；abbr. 学业能力倾向测验
+  savannah   freq=6569355      (none) -> n. (特指非洲)大草原；Savannah.；n. 萨凡纳（美国乔治亚州东南部一城市）
+  saving     freq=21120835     (none) -> n.  节约； 挽救；（复数)savings:储蓄金； 存款；prep.  除 ... 之外；conj.  除了； 除去；save 的现在分词
+  schiller   freq=841687       (none) -> 席勒(①姓氏 ②Johann Christoph Friedrich von,  1759Schiller1805, 德国诗人及剧作家)
+  schneider  freq=4018252      (none) -> n. (德语)西装店；裁缝店；Schneider.；n. 施奈特（姓氏）
+  scholastic freq=2190315      (none) -> adj. 学术的；学习的；学院的；教育的；拘泥于形式的，教条的；n. 经院哲学家；墨守成规者；学究
+  scotia     freq=7846014      (none) -> n. 凹形边饰；Scotia.；n. 苏格夏(苏格兰的拉丁名称)
+  scotts     freq=850659       (none) -> 斯科茨； [地名] [美国] 斯科茨
+  scotty     freq=1140138      (none) -> 苏格兰狗（等于Scottie）
+  sd         freq=28394298     (none) -> 标准偏差；美国南达科他州（邮政编码， Dakota）；侧视图
+  sdf        freq=781787       (none) -> abbr. [军] Self-Defense Forces；自卫队
+  sedona     freq=1963002      (none) -> 塞多那市，亚利桑那州。位于凤凰城以北145千米处。； [地名] [美国] 塞多纳
+  sees       freq=10274243     v. 看见；明白；了解；经历；设想；n. 主教教区；主角权限 -> v. 看见；明白；了解（see的第三人称单数）
+  serene     freq=1185408      (none) -> adj. 安详的；宁静的；平静的；Serene.；adj. 尊贵的
+  sessions   freq=21505885     (none) -> n. 会议；研讨；学期；法庭；名词session的复数形式.；Sessions.；n. 塞森斯（美国作曲家）
+  shabbat    freq=820362       (none) -> （犹太教）安息日（等于Shabbos，Shabbas）
+  she        freq=339171382    pron. 她（主格） -> pron. 她
+  shown      freq=68755779     v. 证明；显现；展示；解说；指示；表示；表现；流露（show的过去分词） -> v. 证明；显现；展示；解说；指示；表示（show的过去分词）
+  sildenafil freq=1269245      (none) -> 西地那非； [医]昔多芬，一氧化氮样药物，商品名Viagra（伟哥）
+  singer     freq=12021075     (none) -> n. 歌手；鸣禽；n. 烧毛工；烧毛机；Singer: 辛格(姓氏).
+  slackware  freq=1332904      (none) -> 由Patrick Volkerding于1993年创建并维护至今的一个Linux发行版本。
+  smartphone freq=4175885      (none) -> n. Microsoft开发的新一代手机操作系统平台；智能手机
+  soho       freq=3012062      (none) -> abbr. 在家上班族（=small office；home office）
+  spain      freq=51553238     (none) -> n. 西班牙（西南欧一国家，全称为the Kingdom of Spain，首都为Madrid）
+  sperm      freq=5944531      (none) -> n. 精液；精子；与抹香鲸有关的物质(如鲸脑油)；pref. 表示“精液；精子；种子”（=spermo-；sperma-；spermi-）
+  spirit     freq=36971683     (none) -> n. 精神；心灵；幽灵；精灵；(复)spirits：精力；情绪；烈酒.；v. 使精神振作；偷偷带走
+  spoke      freq=11577917     n. 轮辐；v. 为…装轮辐；动词speak的过去式. -> v. 说；说话（speak的过去式）；n. 轮辐
+  spoken     freq=10290440     adj. 口语的；动词speak的过去分词. -> v. 说（speak的过去分词）；adj. 口语的
+  st         freq=101338951    (none) -> abbr. 标准时间（=standard time）；街道（=street）
+  stands     freq=19090611     v. 站立；忍受；位于；停滞；n. 站立；货摊；停顿；看台 -> v. 站立；忍受；位于；n. 看台；货摊；停顿
+  starved    freq=781539       (none) -> adj. 饥饿的；动词starve的过去式和过去分词.
+  stephenson freq=1542254      (none) -> 斯蒂芬森(①姓氏 ②George, 1781-1848, 英国发明家, 蒸气机的发明人)
+  stood      freq=11116275     (none) -> v. 站立；忍受（stand的过去式和过去分词）
+  stopped    freq=14956865     adj. 停止的；停下来的；动词stop的过去式和过去分词形式. -> v. 停止；阻止（stop的过去式和过去分词）；adj. 停止的；停下来的
+  stops      freq=9118589      v. 停止；阻止；停留；n. 停止；逗留；车站 -> v. 停止；阻止；n. 站点；停靠站
+  studied    freq=12881982     adj. 故意的；有学问的；动词study的过去式和过去分词. -> v. 学习；研究（study的过去式和过去分词）；adj. 故意的；有意的
+  studies    freq=108024858    (none) -> v. 学习；研究（study的第三人称单数）；n. 研究；书房（study的复数）
+  sua        freq=1059911      (none) -> (single user account单用户帐号)
+  submitter  freq=1521555      (none) -> 发送者；传送者；提交人（原形是submit）
+  suisse     freq=1348414      (none) -> （法）瑞士（等于Switzerland）
+  surrey     freq=6743263      (none) -> n. (四轮双座通常有篷的)萨里式游览马车；Surrey: n.萨里（英国南部郡名）
+  swatch     freq=1020069      (none) -> n. （布料等的）样品；Swatch.；n. 斯沃琪(一瑞士手表品牌)
+  sweeping   freq=2463965      (none) -> n. 扫除；（复数）sweepings: 垃圾.；adj. 一扫而去的；凶猛的；广泛的；动词sweep的现在分词.
+  swords     freq=2979433      (none) -> n. 剑；刀；名词sword的复数形式.；Swords.；n. 索兹(姓氏)
+  takahashi  freq=926210       (none) -> 高桥[日本]； [地名] [日本] 高梁
+  taken      freq=87019836     (none) -> v. 拿；取；带（take的过去分词）
+  tamiflu    freq=1976189      (none) -> 是一种抗病毒药(含oseltamivir phosphate)
+  tbd        freq=2074334      (none) -> abbr. 待完成；待做(=to be determined)
+  than       freq=502609275    (none) -> conj. 比；除…外（用于other等之后）；与其…（用于 rather等之后）；一…就（用于 no sooner等之后）；prep. 比
+  themselves freq=47176048     (none) -> pron. 他/她/它们自己；他/她/它们亲自；指性别不详的人时用以代替himself或herself；himself/herself/itself的复数.
+  thx        freq=2008850      (none) -> 汤·霍尔曼实验（ expriment的缩写）；谢谢（thanks的缩写）
+  timothy    freq=8103385      (none) -> n. 梯牧草；猫尾草(牧草之一种)；Timothy.；n. [圣经]提摩太
+  tortoise   freq=1133746      (none) -> 龟，[脊椎] 乌龟（等于testudo）；迟缓的人
+  trapping   freq=1415594      (none) -> n. 诱捕；（复数）trappings: 装饰物； 象征的符号.；动词trap的现在分词.
+  tried      freq=34201786     adj. 可靠的；备受苦难的；动词try的过去式和过去分词. -> v. 尝试；试图（try的过去式和过去分词）；adj. 可靠的；经受考验的
+  turbo      freq=10058686     (none) -> n. 涡轮(发动机)；增压涡轮；n. [计] BORLAND公司开发的系列语言软件
+  turned     freq=34215128     adj. 翻转的；动词turn的过去式和过去分词形式. -> v. 转动；翻转（turn的过去式和过去分词）；adj. 翻转的
+  turner     freq=10302792     (none) -> n. 铁匠；车床工人；锅铲；n. 体育协会会员；体育家；Turner: 特纳(姓氏).
+  tux        freq=966952       (none) -> 男士无尾半正式晚礼服（等于tuxedo）
+  ulster     freq=1885001      (none) -> n. 乌尔斯特大衣；Ulster.；n. 乌尔斯特(原为爱尔兰一地区；今为北爱尔兰及爱尔兰共和国所分割)
+  urbana     freq=2772517      (none) -> [委内瑞拉] 乌尔瓦纳； [地名] [美国] 厄巴纳
+  url        freq=100907064    (none) -> abbr. 统一资源定位器（=Uniform Resource Locator，在Internet的www服务程序上用于指定信息位置的表示方法）
+  used       freq=421438139    adj. 使用过的；二手的；习惯的；动词use的过去式和过去分词. -> v. 使用；用（use的过去式和过去分词）；adj. 使用过的；二手的；习惯的
+  uses       freq=55842334     abbr. 美国就业局(=United States Employment Service) -> v. 使用；利用（use的第三人称单数）
+  utf        freq=3151108      超声波传输时间流量计 -> Unicode转换格式
+  venerable  freq=882393       (none) -> adj. 值得尊敬的；庄严的；the Venerable.；adj. (英国国教的)副主教的称；(天主教)被列入可敬的称号
+  venezia    freq=1129344      (none) -> （意）威尼斯（等于Venice）
+  victor     freq=9448878      (none) -> n. 胜利者；Victor.；n. 维克托(男子名)
+  vince      freq=3616647      (none) -> 文斯（男子名，Vincent的昵称）
+  vioxx      freq=2717063      (none) -> 万络(含rofecoxib)<抗关节炎药>
+  vu         freq=2872180      (none) -> [缩]Vanuatu瓦努阿图
+  walton     freq=3910292      (none) -> 沃尔顿(①姓氏, 男子名 ②Ernest Thomas Sinton,  1903-, 英国物理学家, 曾获1951年诺贝尔物理学奖)
+  wand       freq=1887049      (none) -> 魔杖；棒；权杖；嫩枝；识别笔（等于 reader）
+  wanted     freq=63301836     adj. 受到通缉的；动词want的过去式及过去分词. -> v. 想要；需要（want的过去式和过去分词）；adj. 被通缉的
+  warner     freq=12165874     (none) -> n. 报警器；警告者；Warner.；n. 华纳；沃纳（姓氏；男子名）
+  wearable   freq=795330       (none) -> adj. 可以穿戴、佩带的；n. （复）wearables: 衣服
+  weaver     freq=3464764      (none) -> n. 织布工；编织者；Weaver.；n. 韦弗(男子名或姓氏)
+  weller     freq=1086983      (none) -> 韦勒 (①姓氏 ②Thomas Huckle,  1915-, 美国微生物学家, 曾获1954年诺贝尔生理学-医学奖)
+  went       freq=68130142     (none) -> v. 去；离开（go的过去式）
+  wes        freq=2548030      (none) -> n. 韦斯(男子名；Wesley的昵称)
+  westinghouse freq=1112917      (none) -> 威斯丁豪斯(①姓氏 ②George, 1846-1914, 美国发明家)
+  wheeling   freq=1367716      (none) -> n. 旋转；车辆搬运；道路行车鉴定；动词wheel的现在分词形式.；Wheeling.；n. 惠灵（美国伊利诺斯州东北部村庄；西弗吉尼亚州西北部城市）
+  when       freq=650621178    adv. 什么时候；当 ... 时；conj. 然后；可是；当 ... 时；pron. 什么时候；n -> adv. 什么时候；何时；conj. 当…时；如果
+  whistler   freq=3281414      (none) -> n. 吹口哨的人；花白旱獭；啸&%2340543；啸声干扰；Whistler.；n. 惠斯勒(姓氏)
+  whitley    freq=935021       (none) -> [英格兰人姓氏] 惠特利 Whiteley的变体； [地名] [英国] 惠特利
+  wiener     freq=910477       (none) -> n. 小熏肠；维也纳香肠(=frankfurter)；小鸡鸡(儿语)；=wienie；weenie.
+  wilbur     freq=1029357      (none) -> 威尔伯（男子名，等于Wilber）
+  wilkins    freq=1641416      (none) -> 威尔金斯(①姓氏 ②Maurice Hugh Frederick,  1916-, 生于新西兰的英国生物物理学家, 曾获1962年诺贝尔生理学-医学奖)
+  willie     freq=4301619      (none) -> 威利（男子名， William的昵称）
+  winamp     freq=2553604      (none) -> Windows上最流行的mp3播放软件
+  winona     freq=1182765      (none) -> 威诺娜（亦作 Wenona, Wenonah）
+  wmf        freq=974604       (none) -> Windows图元文件格式
+  woodstock  freq=2547116      (none) -> n. 伍德斯托克音乐节(每年8月在纽约州东南部Woodstock举行的摇滚音乐节)；n. 伍德斯托克(城市名)
+  woodwind   freq=861164       (none) -> n. 木管乐器；（复）woodwinds: 木管乐队.
+  worked     freq=38128226     adj. 处理过的；动词work的过去式和过去分词. -> v. 工作；运转（work的过去式和过去分词）；adj. 处理过的
+  working    freq=147675944    (none) -> adj. 做工作的；劳动的；工作上的；初步的；暂定的；基本够用的；起作用的；n. 矿；作业区；（复）workings：运作；工作方法.
+  works      freq=98581698     (none) -> v. 工作；运转；起作用（work的第三人称单数）；n. 工厂；著作；作品（work的复数）
+  written    freq=98056850     adj. 书面的；写成文字的；动词write的现在分词形式. -> v. 写（write的过去分词）；adj. 书面的
+  xenical    freq=3677341      (none) -> [医]赛尼可（含orlistat）
+  xxxx       freq=3652233      (none) -> n. 一种澳大利亚产的贮陈啤酒; 某一四字词的幽默讳饰用法
+  yasmin     freq=797806       (none) -> [医]雅司明(drospirenone和 estradil口服剂)； [人名] 亚斯明，亚丝明（女名）
+  yc         freq=1156265      (none) -> (=y-chromosome) y染色体,(=young controls) 青年对照组
+  yeti       freq=787113       (none) -> n. (传说中喜马拉雅山的)雪人(=Abominable Snowman)
+  yogurt     freq=1832002      (none) -> n. 酸奶；酵母乳；=yoghurt.
+  zach       freq=1914201      (none) -> n. 扎克(男子名；Zachary；Zachariah的昵称；亦作Zack；Zak)；abbr. 新约中施洗约翰的父亲撒迦利亚(=Zacharias)
+  zachary    freq=1129405      (none) -> 圣扎迦利（等于Zacharias, Saint）；扎卡里（男子名）
+  zen        freq=7146814      (none) -> 禅；禅宗；禅宗信徒（等于 Buddhism）
+  zi         freq=940621       (none) -> abbr. 后方地带（=zone of interior）
+  zithromax  freq=906288       (none) -> 希舒美(含azithromycin dihydrate)<抗生素类药>
+  zz         freq=2548654      (none) -> Z字形, 锯齿形（等于zigzag）
+
+POS restores (word | enriched-before | hallelujah-restored | freq):
+  sm             理学学士；士兵勋章；舞台策划；小的                        -> 理学学士；士兵勋章；舞台策划；小的                        freq=13383491

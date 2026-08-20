@@ -1,0 +1,6 @@
+# Linnet user-managed settings defaults
+# encoding: utf-8
+
+disabled_words: []
+sentence_capitalization: false
+tab_behavior: smart_complete

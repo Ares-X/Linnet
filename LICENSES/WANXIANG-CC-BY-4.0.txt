@@ -1,0 +1,14 @@
+Creative Commons Attribution 4.0 International Public License
+
+The Linnet Chinese packs contain the locked Wanxiang Pinyin dictionary tables,
+with the reviewed wrong-code rows removed by
+patches/rime-wanxiang-linnet-reviewed.patch. The source project
+(https://github.com/amzxyz/rime-wanxiang) is licensed under CC BY 4.0:
+
+  https://creativecommons.org/licenses/by/4.0/legalcode
+
+Upstream commit: 296f90d17e6b587b6fabcd661686e66372f2afaa (v17.3.0)
+
+Attribution: "万象拼音 (Wanxiang Pinyin) by amzxyz, CC BY 4.0"
+
+Full license text: https://creativecommons.org/licenses/by/4.0/legalcode.txt

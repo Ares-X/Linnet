@@ -1,0 +1,77 @@
+# Test-only active-Prism boundary dictionary; never shipped.
+# SPDX-License-Identifier: GPL-3.0-or-later
+---
+name: linnet_pinyin_limit
+version: "fixture-v1"
+sort: by_weight
+use_preset_vocabulary: false
+columns:
+  - text
+  - code
+  - weight
+...
+探针01	a	1000
+探针02	ai	999
+探针03	an	998
+探针04	ang	997
+探针05	ao	996
+探针06	ba	995
+探针07	bai	994
+探针08	ban	993
+探针09	bang	992
+探针10	bao	991
+探针11	bei	990
+探针12	ben	989
+探针13	beng	988
+探针14	bi	987
+探针15	bian	986
+探针16	biao	985
+探针17	bie	984
+探针18	bin	983
+探针19	bing	982
+探针20	bo	981
+探针21	bu	980
+探针22	ca	979
+探针23	cai	978
+探针24	can	977
+探针25	cang	976
+探针26	cao	975
+探针27	ce	974
+探针28	cen	973
+探针29	ceng	972
+探针30	cha	971
+探针31	chai	970
+探针32	chan	969
+探针33	chang	968
+探针34	chao	967
+探针35	che	966
+探针36	chen	965
+探针37	cheng	964
+探针38	chi	963
+探针39	chong	962
+探针40	chou	961
+探针41	chu	960
+探针42	chua	959
+探针43	chuai	958
+探针44	chuan	957
+探针45	chuang	956
+探针46	chui	955
+探针47	chun	954
+探针48	chuo	953
+探针49	ci	952
+探针50	cong	951
+探针51	cou	950
+探针52	cu	949
+探针53	cuan	948
+探针54	cui	947
+探针55	cun	946
+探针56	cuo	945
+探针57	da	944
+探针58	dai	943
+探针59	dan	942
+探针60	dang	941
+探针61	dao	940
+探针62	de	939
+探针63	dei	938
+探针64	yun	937
+探针65	deng	936

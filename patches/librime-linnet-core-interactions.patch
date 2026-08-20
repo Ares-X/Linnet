@@ -1,0 +1,132 @@
+diff --git a/src/rime/gear/ascii_composer.cc b/src/rime/gear/ascii_composer.cc
+index e49dc38..a5f55f7 100644
+--- a/src/rime/gear/ascii_composer.cc
++++ b/src/rime/gear/ascii_composer.cc
+@@ -51,18 +51,20 @@ static void load_bindings(const an<ConfigMap>& src,
+ 
+ AsciiComposer::AsciiComposer(const Ticket& ticket) : Processor(ticket) {
+   LoadConfig(ticket.schema);
++  abort_connection_ = engine_->context()->abort_notifier().connect(
++      [this](Context*) { ResetModifierState(); });
+ }
+ 
+ AsciiComposer::~AsciiComposer() {
+   connection_.disconnect();
++  abort_connection_.disconnect();
+ }
+ 
+ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+   if (key_event.shift() + key_event.ctrl() + key_event.alt() +
+           key_event.super() >
+       1) {
+-    shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
+-        super_key_pressed_ = false;
++    ResetModifierState();
+     return kNoop;
+   }
+   if (caps_lock_switch_style_ != kAsciiModeSwitchNoop) {
+@@ -95,8 +97,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+             now < toggle_expired_) {
+           ToggleAsciiModeWithKey(ch);
+         }
+-        shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
+-            super_key_pressed_ = false;
++        ResetModifierState();
+         return kNoop;
+       }
+     } else if (!(shift_key_pressed_ || ctrl_key_pressed_ || alt_key_pressed_ ||
+@@ -118,8 +119,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+     return kNoop;
+   }
+   // other keys
+-  shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
+-      super_key_pressed_ = false;
++  ResetModifierState();
+   // possible key binding: Control+x, Shift+space
+   if (key_event.ctrl() || key_event.alt() || key_event.super() ||
+       (key_event.shift() && ch == XK_space)) {
+@@ -144,8 +144,7 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
+   int ch = key_event.keycode();
+   if (ch == XK_Caps_Lock) {
+     if (!key_event.release()) {
+-      shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
+-          super_key_pressed_ = false;
++      ResetModifierState();
+       // temporarily disable good-old (uppercase) Caps Lock as mode switch key
+       // in case the user switched to ascii mode with other keys, eg. with Shift
+       if (good_old_caps_lock_ && !toggle_with_caps_) {
+@@ -255,7 +254,11 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+             [this](Context* ctx) { OnContextUpdate(ctx); });
+       }
+     } else if (style == kAsciiModeSwitchCommitText) {
+-      ctx->ConfirmCurrentSelection();
++      if (ctx->input().empty()) {
++        ctx->AbortComposition();
++      } else {
++        ctx->ConfirmCurrentSelection();
++      }
+     } else if (style == kAsciiModeSwitchCommitCode) {
+       ctx->ClearNonConfirmedComposition();
+       ctx->Commit();
+@@ -268,6 +271,11 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+   ctx->set_option("ascii_mode", ascii_mode);
+ }
+ 
++void AsciiComposer::ResetModifierState() {
++  shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
++      super_key_pressed_ = false;
++}
++
+ void AsciiComposer::OnContextUpdate(Context* ctx) {
+   if (!ctx->IsComposing()) {
+     connection_.disconnect();
+diff --git a/src/rime/gear/ascii_composer.h b/src/rime/gear/ascii_composer.h
+index 756771f..a765490 100644
+--- a/src/rime/gear/ascii_composer.h
++++ b/src/rime/gear/ascii_composer.h
+@@ -42,6 +42,7 @@ class AsciiComposer : public Processor {
+   bool ToggleAsciiModeWithKey(int key_code);
+   void SwitchAsciiMode(bool ascii_mode, AsciiModeSwitchStyle style);
+   void OnContextUpdate(Context* ctx);
++  void ResetModifierState();
+ 
+   // config options
+   AsciiModeSwitchKeyBindings bindings_;
+@@ -56,6 +57,7 @@ class AsciiComposer : public Processor {
+   using TimePoint = std::chrono::steady_clock::time_point;
+   TimePoint toggle_expired_;
+   connection connection_;
++  connection abort_connection_;
+ };
+ 
+ }  // namespace rime
+diff --git a/src/rime/gear/punctuator.cc b/src/rime/gear/punctuator.cc
+index 0c20b92..71d992a 100644
+--- a/src/rime/gear/punctuator.cc
++++ b/src/rime/gear/punctuator.cc
+@@ -7,6 +7,7 @@
+ //
+ #include <utf8.h>
+ #include <rime/commit_history.h>
++#include <rime/candidate.h>
+ #include <rime/common.h>
+ #include <rime/composition.h>
+ #include <rime/context.h>
+@@ -67,7 +68,16 @@ static bool punctuation_is_translated(Context* ctx, const string& tag) {
+     return false;
+   }
+   auto cand = comp.back().GetSelectedCandidate();
+-  return cand && cand->type() == "punct";
++  if (!cand)
++    return false;
++  // Filters may wrap both ordinary punctuation and punct_number candidates.
++  // Translation identity belongs to the genuine punctuator candidate, not
++  // the outer presentation candidate or the segment tag.
++  for (const auto& genuine : Candidate::GetGenuineCandidates(cand)) {
++    if (genuine && genuine->type() == "punct")
++      return true;
++  }
++  return false;
+ }
+ 
+ inline static bool ends_with_digit(const string& text) {

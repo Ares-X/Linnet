@@ -1,0 +1,625 @@
+#!/usr/bin/env ruby
+
+require "json"
+require "digest"
+require "net/http"
+require "open3"
+require "uri"
+
+ROOT = File.expand_path("..", __dir__)
+LOCK_PATH = File.join(ROOT, "upstreams.lock.json")
+SHA1 = /\A[0-9a-f]{40}\z/
+SHA256 = /\A[0-9a-f]{64}\z/
+SAFE_COMPONENT = /\A[A-Za-z0-9._-]+\z/
+
+def fail_lock(message)
+  warn "upstream-sync: #{message}"
+  exit 1
+end
+
+def capture!(*command, chdir: ROOT)
+  output, status = Open3.capture2e(*command, chdir: chdir)
+  fail_lock("#{command.join(' ')} failed:\n#{output}") unless status.success?
+  output
+end
+
+def require_hash(parent, key)
+  value = parent[key]
+  fail_lock("missing object #{key}") unless value.is_a?(Hash)
+  value
+end
+
+def require_string(parent, key, pattern = nil)
+  value = parent[key]
+  fail_lock("missing string #{key}") unless value.is_a?(String) && !value.empty?
+  fail_lock("invalid #{key}: #{value}") if pattern && !pattern.match?(value)
+  value
+end
+
+def validate_repository(source, name)
+  repository = require_string(source, "repository")
+  uri = URI.parse(repository)
+  unless uri.scheme == "https" && uri.host == "github.com" && uri.path.end_with?(".git")
+    fail_lock("#{name}.repository must be an HTTPS GitHub Git URL")
+  end
+rescue URI::InvalidURIError
+  fail_lock("#{name}.repository is not a valid URL")
+end
+
+def load_lock
+  lock = JSON.parse(File.read(LOCK_PATH))
+  fail_lock("unsupported lock format") unless lock["format"] == 1
+
+  policy = require_hash(lock, "policy")
+  fail_lock("Stable must be the authoritative channel") unless policy["channel"] == "stable"
+  unless policy["nested_submodules"] == "pinned-current-tree-only"
+    fail_lock("nested sources must be locked to the pinned current tree")
+  end
+  if policy["automatic_stable_merge"] != false
+    fail_lock("Stable updates must require review")
+  end
+  unless policy["squirrel_provenance"] == "locked-tag-and-sbom-variant"
+    fail_lock("Squirrel provenance must be owned by the lock and release SBOM")
+  end
+  unless policy["direct_product_upstreams"] ==
+         %w[squirrel_rime rime_ice hallelujah rime_wanxiang rime_lmdg_grammar]
+    fail_lock("direct product upstream set must contain exactly five owners")
+  end
+
+  build_inputs = require_hash(lock, "build_inputs")
+  fail_lock("unexpected build input set") unless build_inputs.keys.sort == %w[boost_headers cmake]
+  boost = require_hash(build_inputs, "boost_headers")
+  require_string(boost, "version")
+  boost_url = require_string(boost, "url")
+  fail_lock("Boost headers must come from the official archive") unless
+    boost_url.start_with?("https://archives.boost.io/release/")
+  require_string(boost, "sha256", SHA256)
+  require_string(boost, "archive_root")
+  fail_lock("unexpected Boost license") unless require_string(boost, "license") == "BSL-1.0"
+  fail_lock("unexpected Boost license path") unless
+    require_string(boost, "license_path") == "LICENSE_1_0.txt"
+  require_string(boost, "license_sha256", SHA256)
+
+  cmake = require_hash(build_inputs, "cmake")
+  cmake_version = require_string(cmake, "version")
+  cmake_url = require_string(cmake, "url")
+  expected_cmake_url = "https://github.com/Kitware/CMake/releases/download/" \
+    "v#{cmake_version}/cmake-#{cmake_version}-macos-universal.tar.gz"
+  fail_lock("CMake must come from its official versioned release") unless
+    cmake_url == expected_cmake_url
+  require_string(cmake, "sha256", SHA256)
+  expected_cmake_root = "cmake-#{cmake_version}-macos-universal/CMake.app/Contents"
+  fail_lock("unexpected CMake archive root") unless
+    require_string(cmake, "archive_root") == expected_cmake_root
+  fail_lock("unexpected CMake executable") unless
+    require_string(cmake, "executable") == "bin/cmake"
+  fail_lock("unexpected CMake license") unless
+    require_string(cmake, "license") == "BSD-3-Clause"
+
+  patches = require_hash(lock, "downstream_patches")
+  expected_patches = {
+    "librime_core_interactions" => {
+      "target" => "sources.librime",
+      "path" => "patches/librime-linnet-core-interactions.patch",
+    },
+    "librime_lua_state_lifetime" => {
+      "target" => "sources.librime.bundled_plugins.lua",
+      "path" => "patches/librime-lua-linnet-state-lifetime.patch",
+    },
+    "librime_predict_session_state" => {
+      "target" => "sources.librime.bundled_plugins.predict",
+      "path" => "patches/librime-predict-linnet-session-state.patch",
+    },
+  }
+  fail_lock("unexpected downstream patch set") unless
+    patches.keys.sort == expected_patches.keys.sort
+  expected_patches.each do |name, expected|
+    item = require_hash(patches, name)
+    fail_lock("unexpected downstream patch shape for #{name}") unless
+      item.keys.sort == %w[path sha256 target]
+    expected.each do |key, value|
+      fail_lock("unexpected #{name}.#{key}") unless
+        require_string(item, key) == value
+    end
+    require_string(item, "sha256", SHA256)
+  end
+
+  sources = require_hash(lock, "sources")
+  expected_sources = %w[
+    hallelujah librime plum rime_ice rime_lmdg_grammar rime_octagram_data
+    rime_wanxiang squirrel
+  ]
+  fail_lock("unexpected source set") unless sources.keys.sort == expected_sources
+
+  sources.each { |name, source| validate_repository(source, name) }
+
+  hallelujah = require_hash(sources, "hallelujah")
+  require_string(hallelujah, "submodule_path")
+  require_string(hallelujah, "submodule_name")
+  require_string(hallelujah, "tag")
+  require_string(hallelujah, "tag_ref")
+  require_string(hallelujah, "commit", SHA1)
+  require_string(hallelujah, "tree", SHA1)
+  require_string(hallelujah, "stable_tag_pattern")
+  require_string(hallelujah, "preview_ref")
+  unless require_string(hallelujah, "declared_license") == "GPL-3.0-only"
+    fail_lock("unexpected Hallelujah declared license")
+  end
+  expected_hallelujah_paths = {
+    "license_path" => "LICENSE",
+    "copying_path" => "COPYING.md",
+  }
+  expected_hallelujah_paths.each do |key, expected|
+    fail_lock("unexpected Hallelujah #{key}") unless
+      require_string(hallelujah, key) == expected
+  end
+  require_string(hallelujah, "license_sha256", SHA256)
+  require_string(hallelujah, "copying_sha256", SHA256)
+  m2_inputs = require_hash(hallelujah, "m2_inputs")
+  expected_m2_inputs = {
+    "english_database" => "dictionary/words_with_frequency_and_translation_and_ipa.sqlite3",
+    "pinyin_to_english" => "dictionary/cedict.json",
+    "phonex_index" => "dictionary/phonex_encoded_words.json",
+    "phonex_algorithm" => "src/phonex.js",
+  }
+  unless m2_inputs.keys.sort == expected_m2_inputs.keys.sort
+    fail_lock("unexpected Hallelujah M2 input set")
+  end
+  expected_m2_inputs.each do |name, expected_path|
+    input = require_hash(m2_inputs, name)
+    fail_lock("unexpected Hallelujah M2 input shape for #{name}") unless
+      input.keys.sort == %w[path sha256]
+    fail_lock("unexpected Hallelujah M2 path for #{name}") unless
+      require_string(input, "path") == expected_path
+    require_string(input, "sha256", SHA256)
+  end
+
+  squirrel = require_hash(sources, "squirrel")
+  require_string(squirrel, "tag")
+  require_string(squirrel, "tag_ref")
+  require_string(squirrel, "commit", SHA1)
+  require_string(squirrel, "stable_tag_pattern")
+  require_string(squirrel, "preview_ref")
+  fail_lock("unexpected Squirrel license") unless
+    require_string(squirrel, "declared_license") == "GPL-3.0-only"
+  fail_lock("unexpected Squirrel license path") unless
+    require_string(squirrel, "license_path") == "LICENSE.txt"
+  require_string(squirrel, "license_sha256", SHA256)
+
+  librime = require_hash(sources, "librime")
+  require_string(librime, "submodule_path")
+  require_string(librime, "tag")
+  require_string(librime, "tag_ref")
+  require_string(librime, "tag_object", SHA1)
+  require_string(librime, "commit", SHA1)
+  require_string(librime, "stable_tag_pattern")
+  fail_lock("unexpected librime license") unless
+    require_string(librime, "declared_license") == "BSD-3-Clause"
+  fail_lock("unexpected librime license path") unless
+    require_string(librime, "license_path") == "LICENSE"
+  require_string(librime, "license_sha256", SHA256)
+  static_dependencies = require_hash(librime, "static_dependencies")
+  expected_static_dependencies = {
+    "glog" => ["BSD-3-Clause", "COPYING"],
+    "leveldb" => ["BSD-3-Clause", "LICENSE"],
+    "marisa-trie" => ["BSD-2-Clause OR LGPL-2.1-or-later", "COPYING.md"],
+    "opencc" => ["Apache-2.0", "LICENSE"],
+    "yaml-cpp" => ["MIT", "LICENSE"],
+  }
+  fail_lock("unexpected librime static dependency set") unless
+    static_dependencies.keys.sort == expected_static_dependencies.keys.sort
+  expected_static_dependencies.each do |name, (license, path)|
+    dependency = require_hash(static_dependencies, name)
+    fail_lock("unexpected #{name} license") unless
+      require_string(dependency, "declared_license") == license
+    fail_lock("unexpected #{name} license path") unless
+      require_string(dependency, "license_path") == path
+    require_string(dependency, "license_sha256", SHA256)
+  end
+  fail_lock("marisa distribution must select its BSD branch") unless
+    require_string(static_dependencies.fetch("marisa-trie"), "license_concluded") ==
+      "BSD-2-Clause"
+
+  embedded_components = require_hash(librime, "embedded_components")
+  fail_lock("unexpected librime embedded component set") unless
+    embedded_components.keys == ["darts_clone"]
+  darts = require_hash(embedded_components, "darts_clone")
+  fail_lock("unexpected Darts version") unless require_string(darts, "version") == "0.32"
+  fail_lock("unexpected Darts license") unless
+    require_string(darts, "declared_license") == "BSD-3-Clause"
+  fail_lock("unexpected Darts license path") unless
+    require_string(darts, "license_path") == "include/COPYING.darts-clone"
+  require_string(darts, "license_sha256", SHA256)
+  opencc = require_hash(static_dependencies, "opencc")
+  opencc_components = require_hash(opencc, "embedded_components")
+  fail_lock("unexpected OpenCC embedded component set") unless
+    opencc_components.keys == ["rapidjson"]
+  rapidjson = require_hash(opencc_components, "rapidjson")
+  fail_lock("unexpected RapidJSON version") unless
+    require_string(rapidjson, "version") == "1.1.0"
+  fail_lock("unexpected RapidJSON source path") unless
+    require_string(rapidjson, "source_path") ==
+      "deps/rapidjson-1.1.0/rapidjson/rapidjson.h"
+  require_string(rapidjson, "source_sha256", SHA256)
+  fail_lock("unexpected RapidJSON license") unless
+    require_string(rapidjson, "declared_license") == "MIT"
+  fail_lock("unexpected RapidJSON license source") unless
+    require_string(rapidjson, "license_source_url") ==
+      "https://raw.githubusercontent.com/Tencent/rapidjson/" \
+      "f54b0e47a08782a6131cc3d60f94d038fa6e0a51/license.txt"
+  fail_lock("unexpected RapidJSON license path") unless
+    require_string(rapidjson, "license_path") == "LICENSES/RapidJSON-1.1.0.txt"
+  require_string(rapidjson, "license_sha256", SHA256)
+  plugins = require_hash(librime, "bundled_plugins")
+  expected_plugin_dirs = {
+    "lua" => "lua",
+    "octagram" => "octagram",
+    "predict" => "predict",
+  }
+  fail_lock("unexpected bundled plugin set") unless
+    plugins.keys.sort == expected_plugin_dirs.keys.sort
+  plugins.each do |name, plugin|
+    fail_lock("invalid plugin object for #{name}") unless plugin.is_a?(Hash)
+    validate_repository(plugin, "librime.bundled_plugins.#{name}")
+    plugin_ref = require_string(plugin, "ref")
+    fail_lock("plugin ref must be a review branch for #{name}") unless
+      plugin_ref.start_with?("refs/heads/")
+    require_string(plugin, "commit", SHA1)
+    fail_lock("unexpected source directory for #{name}") unless
+      require_string(plugin, "source_dir") == expected_plugin_dirs.fetch(name)
+  end
+  expected_plugin_licenses = {
+    "lua" => ["BSD-3-Clause", "LICENSE"],
+    "octagram" => ["GPL-3.0-only", "LICENSE"],
+    "predict" => ["BSD-3-Clause", "LICENSE"],
+  }
+  expected_plugin_licenses.each do |name, (license, path)|
+    plugin = plugins.fetch(name)
+    fail_lock("unexpected #{name} plugin license") unless
+      require_string(plugin, "declared_license") == license
+    fail_lock("unexpected #{name} plugin license path") unless
+      require_string(plugin, "license_path") == path
+    require_string(plugin, "license_sha256", SHA256)
+  end
+
+  lua_notice = require_hash(plugins.fetch("lua"), "embedded_mit_notice")
+  fail_lock("unexpected librime-lua MIT notice path") unless
+    require_string(lua_notice, "path") == "LICENSES/librime-lua-embedded-MIT.txt"
+  require_string(lua_notice, "sha256", SHA256)
+  lua_notice_sources = require_hash(lua_notice, "sources")
+  expected_lua_notice_sources = {
+    "lauxlib_compat" => "src/lib/lauxlib-compat.c",
+    "lutf8lib_compat" => "src/lib/lutf8lib-compat.c",
+    "script_translator" => "src/script_translator.cc",
+    "table_translator" => "src/table_translator.cc",
+    "translator" => "src/translator.h",
+    "types_ext" => "src/types_ext.cc",
+  }
+  fail_lock("unexpected librime-lua MIT source set") unless
+    lua_notice_sources.keys.sort == expected_lua_notice_sources.keys.sort
+  expected_lua_notice_sources.each do |name, path|
+    source = require_hash(lua_notice_sources, name)
+    fail_lock("unexpected librime-lua MIT source path") unless
+      require_string(source, "path") == path
+    require_string(source, "sha256", SHA256)
+  end
+
+  lua_thirdparty = require_hash(plugins.fetch("lua"), "thirdparty")
+  validate_repository(lua_thirdparty, "librime.bundled_plugins.lua.thirdparty")
+  fail_lock("Lua third-party source must share the locked repository") unless
+    lua_thirdparty.fetch("repository") == plugins.fetch("lua").fetch("repository")
+  require_string(lua_thirdparty, "ref")
+  require_string(lua_thirdparty, "commit", SHA1)
+  fail_lock("unexpected Lua third-party source directory") unless
+    require_string(lua_thirdparty, "source_dir") == "thirdparty"
+  fail_lock("unexpected embedded Lua version") unless
+    require_string(lua_thirdparty, "version") == "5.4.8"
+  fail_lock("unexpected embedded Lua license") unless
+    require_string(lua_thirdparty, "declared_license") == "MIT"
+  fail_lock("unexpected embedded Lua source path") unless
+    require_string(lua_thirdparty, "source_path") == "lua5.4/lua.h"
+  require_string(lua_thirdparty, "source_sha256", SHA256)
+
+  plum = require_hash(sources, "plum")
+  require_string(plum, "submodule_path")
+  require_string(plum, "ref")
+  require_string(plum, "commit", SHA1)
+
+  octagram_data = require_hash(sources, "rime_octagram_data")
+  require_string(octagram_data, "submodule_path")
+  require_string(octagram_data, "submodule_name")
+  require_string(octagram_data, "ref")
+  require_string(octagram_data, "commit", SHA1)
+  require_string(octagram_data, "tree", SHA1)
+  unless require_string(octagram_data, "declared_license") == "LGPL-3.0"
+    fail_lock("unexpected Rime octagram data license")
+  end
+  unless require_string(octagram_data, "license_path") == "LICENSE"
+    fail_lock("unexpected Rime octagram data license path")
+  end
+  require_string(octagram_data, "license_sha256", SHA256)
+  fail_lock("Rime octagram data must not own the product LTS model") if
+    octagram_data.key?("model")
+
+  rime_ice = require_hash(sources, "rime_ice")
+  require_string(rime_ice, "submodule_path")
+  require_string(rime_ice, "submodule_name")
+  require_string(rime_ice, "tag")
+  require_string(rime_ice, "tag_ref")
+  require_string(rime_ice, "commit", SHA1)
+  require_string(rime_ice, "tree", SHA1)
+  require_string(rime_ice, "stable_tag_pattern")
+  unless require_string(rime_ice, "declared_license") == "GPL-3.0-only"
+    fail_lock("unexpected rime-ice declared license")
+  end
+  unless require_string(rime_ice, "license_path") == "LICENSE"
+    fail_lock("unexpected rime-ice license path")
+  end
+  require_string(rime_ice, "license_sha256", SHA256)
+  ice_inputs = require_hash(rime_ice, "data_inputs")
+  expected_ice_inputs = {
+    "english_dictionaries" => %w[
+      en_dicts/en.dict.yaml en_dicts/en_ext.dict.yaml
+    ],
+  }
+  fail_lock("unexpected rime-ice data input set") unless
+    ice_inputs == expected_ice_inputs
+
+  rime_wanxiang = require_hash(sources, "rime_wanxiang")
+  require_string(rime_wanxiang, "submodule_path")
+  require_string(rime_wanxiang, "submodule_name")
+  require_string(rime_wanxiang, "tag")
+  require_string(rime_wanxiang, "tag_ref")
+  require_string(rime_wanxiang, "commit", SHA1)
+  require_string(rime_wanxiang, "tree", SHA1)
+  require_string(rime_wanxiang, "stable_tag_pattern")
+  require_string(rime_wanxiang, "preview_ref")
+  unless require_string(rime_wanxiang, "declared_license") == "CC-BY-4.0"
+    fail_lock("unexpected Rime Wanxiang declared license")
+  end
+  unless require_string(rime_wanxiang, "license_path") == "LICENSE"
+    fail_lock("unexpected Rime Wanxiang license path")
+  end
+  require_string(rime_wanxiang, "license_sha256", SHA256)
+  data_inputs = require_hash(rime_wanxiang, "data_inputs")
+  expected_wanxiang_inputs = {
+    "core_dictionaries" => %w[
+      dicts/zi.dict.yaml dicts/jichu.dict.yaml dicts/lianxiang.dict.yaml
+      dicts/cuoyin.dict.yaml dicts/duoyin.dict.yaml dicts/shici.dict.yaml
+      dicts/diming.dict.yaml
+    ],
+    "professional_dictionaries" => %w[
+      dicts/yixue.dict.yaml dicts/yaopin.dict.yaml dicts/huaxue.dict.yaml
+      dicts/renming.dict.yaml dicts/mingren.dict.yaml dicts/yiren.dict.yaml
+      dicts/wuzhong.dict.yaml dicts/taifeng.dict.yaml dicts/fangyan.dict.yaml
+    ],
+    "algebra" => {
+      "path" => "wanxiang_algebra.yaml",
+      "section" => "base",
+      "profiles" => {
+        "full_pinyin" => "全拼",
+        "ziranma" => "自然码",
+        "flypy" => "小鹤双拼",
+        "sogou" => "搜狗双拼",
+        "mspy" => "微软双拼",
+        "abc" => "智能ABC",
+        "ziguang" => "紫光双拼",
+        "jiajia" => "拼音加加",
+      },
+    },
+  }
+  fail_lock("unexpected Rime Wanxiang data input set") unless
+    data_inputs == expected_wanxiang_inputs
+
+  rime_lmdg_grammar = require_hash(sources, "rime_lmdg_grammar")
+  require_string(rime_lmdg_grammar, "release")
+  require_string(rime_lmdg_grammar, "asset")
+  asset_id = rime_lmdg_grammar["asset_id"]
+  fail_lock("grammar asset id must be a positive integer") unless
+    asset_id.is_a?(Integer) && asset_id.positive?
+  asset_api_url = require_string(rime_lmdg_grammar, "asset_api_url")
+  repository_path = URI.parse(require_string(rime_lmdg_grammar, "repository")).path
+  repository_slug = repository_path.delete_prefix("/").delete_suffix(".git")
+  expected_asset_api_url =
+    "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
+  fail_lock("grammar asset API URL must match its repository and immutable id") unless
+    asset_api_url == expected_asset_api_url
+  release = require_string(rime_lmdg_grammar, "release", SAFE_COMPONENT)
+  asset = require_string(rime_lmdg_grammar, "asset", SAFE_COMPONENT)
+  asset_download_url = require_string(rime_lmdg_grammar, "asset_download_url")
+  expected_asset_download_url =
+    "https://github.com/#{repository_slug}/releases/download/#{release}/#{asset}"
+  fail_lock("grammar download URL must match its repository, release, and asset") unless
+    asset_download_url == expected_asset_download_url
+  unless require_string(rime_lmdg_grammar, "declared_license") == "CC-BY-4.0"
+    fail_lock("unexpected Rime LMDG declared license")
+  end
+  require_string(rime_lmdg_grammar, "license_path")
+  require_string(rime_lmdg_grammar, "license_sha256", SHA256)
+  unless rime_lmdg_grammar["bytes"].is_a?(Integer) && rime_lmdg_grammar["bytes"].positive?
+    fail_lock("invalid Rime LMDG grammar model size")
+  end
+  require_string(rime_lmdg_grammar, "sha256", SHA256)
+  lock
+rescue Errno::ENOENT
+  fail_lock("missing upstreams.lock.json")
+rescue JSON::ParserError => error
+  fail_lock("invalid JSON: #{error.message}")
+end
+
+def verify_local(lock)
+  sources = lock.fetch("sources")
+  lock.fetch("downstream_patches").each do |name, item|
+    path = File.join(ROOT, item.fetch("path"))
+    fail_lock("missing or unsafe downstream patch #{name}") unless
+      File.file?(path) && !File.symlink?(path)
+    actual = Digest::SHA256.file(path).hexdigest
+    fail_lock("downstream patch digest differs for #{name}") unless
+      actual == item.fetch("sha256")
+  end
+  %w[librime plum rime_ice hallelujah rime_octagram_data rime_wanxiang].each do |name|
+    source = sources.fetch(name)
+    path = source.fetch("submodule_path")
+    submodule_name = source.fetch("submodule_name", path)
+    gitlink = capture!("git", "ls-files", "--stage", "--", path, chdir: ROOT).split[1]
+    fail_lock("missing #{name} gitlink") unless gitlink
+    fail_lock("#{name} gitlink differs from upstreams.lock.json") unless gitlink == source.fetch("commit")
+    configured_url = capture!(
+      "git", "config", "-f", ".gitmodules", "--get", "submodule.#{submodule_name}.url", chdir: ROOT
+    ).strip
+    fail_lock("#{name} .gitmodules URL differs from the lock") unless configured_url == source.fetch("repository")
+    mutable_branch = system(
+      "git", "config", "-f", ".gitmodules", "--get", "submodule.#{submodule_name}.branch",
+      chdir: ROOT, out: File::NULL, err: File::NULL
+    )
+    fail_lock("#{name} .gitmodules must not carry a mutable branch") if mutable_branch
+  end
+
+  puts "upstream-sync: local lock and projections are valid"
+end
+
+def remote_refs(repository, *patterns)
+  command = ["git", "ls-remote", "--tags", repository]
+  command.concat(patterns) unless patterns.empty?
+  refs = {}
+  capture!(*command).each_line do |line|
+    commit, ref = line.split
+    refs[ref] = commit if commit && ref
+  end
+  refs
+end
+
+def resolved_tag_commit(refs, tag_ref)
+  refs["#{tag_ref}^{}"] || refs[tag_ref]
+end
+
+def version_key(tag)
+  tag.scan(/\d+/).map(&:to_i)
+end
+
+def stable_status(source)
+  refs = remote_refs(source.fetch("repository"))
+  pattern = Regexp.new(source.fetch("stable_tag_pattern"))
+  tags = refs.keys.each_with_object([]) do |ref, values|
+    next if ref.end_with?("^{}")
+    tag = ref.delete_prefix("refs/tags/")
+    values << [tag, resolved_tag_commit(refs, ref)] if pattern.match?(tag)
+  end
+  fail_lock("no stable tags found for #{source.fetch('repository')}") if tags.empty?
+  latest_tag, latest_commit = tags.max_by { |tag, _commit| version_key(tag) }
+  pinned_remote = resolved_tag_commit(refs, source.fetch("tag_ref"))
+  fail_lock("pinned tag disappeared: #{source.fetch('tag_ref')}") unless pinned_remote
+  fail_lock("pinned tag moved: #{source.fetch('tag_ref')}") unless pinned_remote == source.fetch("commit")
+  status = latest_tag == source.fetch("tag") ? "current" : "review #{latest_tag}"
+  [source.fetch("tag"), latest_tag, latest_commit, status]
+end
+
+def mutable_ref_status(source, ref_key)
+  ref = source.fetch(ref_key)
+  output = capture!("git", "ls-remote", source.fetch("repository"), ref)
+  commit, returned_ref = output.split
+  fail_lock("missing remote ref #{ref}") unless returned_ref == ref && SHA1.match?(commit.to_s)
+  status = commit == source.fetch("commit") ? "current" : "review #{commit[0, 12]}"
+  [source.fetch("commit")[0, 12], commit[0, 12], commit, status]
+end
+
+def release_asset_status(source)
+  repository_path = URI.parse(source.fetch("repository")).path
+  repository_slug = repository_path.delete_prefix("/").delete_suffix(".git")
+  release = URI.encode_www_form_component(source.fetch("release"))
+  uri = URI("https://api.github.com/repos/#{repository_slug}/releases/tags/#{release}")
+  request = Net::HTTP::Get.new(uri)
+  request["Accept"] = "application/vnd.github+json"
+  request["X-GitHub-Api-Version"] = "2022-11-28"
+  request["User-Agent"] = "linnet-upstream-sync"
+  token = ENV["GH_TOKEN"]
+  request["Authorization"] = "Bearer #{token}" if token && !token.empty?
+  response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+    http.request(request)
+  end
+  fail_lock("GitHub release lookup failed for #{repository_slug}: HTTP #{response.code}") unless
+    response.is_a?(Net::HTTPSuccess)
+  release_json = JSON.parse(response.body)
+  assets = release_json.fetch("assets")
+  matches = assets.select { |asset| asset["name"] == source.fetch("asset") }
+  fail_lock("expected one #{source.fetch('asset')} asset in #{source.fetch('release')}") unless
+    matches.length == 1
+  asset = matches.fetch(0)
+  asset_id = asset.fetch("id")
+  bytes = asset.fetch("size")
+  digest = asset.fetch("digest").to_s
+  sha256 = digest.delete_prefix("sha256:")
+  fail_lock("invalid remote grammar asset identity") unless
+    asset["state"] == "uploaded" && asset_id.is_a?(Integer) && asset_id.positive? &&
+      bytes.is_a?(Integer) && bytes.positive? && SHA256.match?(sha256)
+  expected_url = "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
+  fail_lock("remote grammar asset API URL is inconsistent") unless
+    asset.fetch("url") == expected_url
+  fail_lock("remote grammar download URL is inconsistent") unless
+    asset.fetch("browser_download_url") == source.fetch("asset_download_url")
+  current = asset_id == source.fetch("asset_id") &&
+    bytes == source.fetch("bytes") && sha256 == source.fetch("sha256")
+  status = current ? "current" : "review #{sha256[0, 12]} (asset #{asset_id})"
+  [source.fetch("sha256")[0, 12], sha256[0, 12], status]
+rescue JSON::ParserError, KeyError => error
+  fail_lock("invalid GitHub release metadata for #{repository_slug}: #{error.message}")
+end
+
+def report(lock)
+  sources = lock.fetch("sources")
+  rows = []
+  %w[squirrel librime rime_ice hallelujah rime_wanxiang].each do |name|
+    pinned, latest, _commit, status = stable_status(sources.fetch(name))
+    rows << [name, "stable tag", pinned, latest, status]
+  end
+  pinned, latest, _commit, status = mutable_ref_status(sources.fetch("plum"), "ref")
+  rows << ["plum", "review branch", pinned, latest, status]
+  pinned, latest, _commit, status = mutable_ref_status(
+    sources.fetch("rime_octagram_data"), "ref"
+  )
+  rows << ["rime-octagram-data", "Rime data branch", pinned, latest, status]
+  grammar = sources.fetch("rime_lmdg_grammar")
+  pinned, latest, status = release_asset_status(grammar)
+  rows << ["RIME-LMDG grammar", "release asset",
+           pinned, latest, status]
+
+  plugins = sources.fetch("librime").fetch("bundled_plugins")
+  plugins.each do |name, plugin|
+    pinned, latest, _commit, status = mutable_ref_status(plugin, "ref")
+    rows << ["librime-#{name}", "review branch", pinned, latest, status]
+  end
+  lua_thirdparty = plugins.fetch("lua").fetch("thirdparty")
+  pinned, latest, _commit, status = mutable_ref_status(lua_thirdparty, "ref")
+  rows << ["librime-lua thirdparty", "review branch", pinned, latest, status]
+
+  %w[squirrel hallelujah].each do |name|
+    source = sources.fetch(name)
+    preview_output = capture!("git", "ls-remote", source.fetch("repository"), source.fetch("preview_ref"))
+    preview_commit, preview_ref = preview_output.split
+    fail_lock("missing #{name} preview ref") unless preview_ref == source.fetch("preview_ref")
+    preview_status = preview_commit == source.fetch("commit") ? "same as stable" : "review only"
+    rows << [name, "preview branch", source.fetch("commit")[0, 12], preview_commit[0, 12], preview_status]
+  end
+
+  puts "# Linnet upstream report"
+  puts
+  puts "Stable updates are candidates only; this command never fetches submodules, edits the lock, or merges code."
+  puts "Direct product upstreams: Squirrel/Rime, rime-ice, Hallelujah, " \
+       "Wanxiang, Rime LMDG grammar."
+  puts
+  puts "| Source | Track | Locked | Remote candidate | Status |"
+  puts "| --- | --- | --- | --- | --- |"
+  rows.each { |row| puts "| #{row.join(' | ')} |" }
+end
+
+lock = load_lock
+case ARGV.fetch(0, "verify")
+when "verify"
+  verify_local(lock)
+when "report"
+  verify_local(lock)
+  puts
+  report(lock)
+else
+  fail_lock("usage: scripts/upstream-sync [verify|report]")
+end

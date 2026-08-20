@@ -1,0 +1,766 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "${repo_root}"
+
+privacy="${repo_root}/scripts/build-privacy"
+upstream_sync="${repo_root}/scripts/upstream-sync"
+lua_embedding_generator="${repo_root}/scripts/generate-linnet-lua-embedding"
+lock_file="${repo_root}/upstreams.lock.json"
+[[ -x "${privacy}" && -x "${upstream_sync}" && \
+  -x "${lua_embedding_generator}" && -f "${lock_file}" ]] || {
+  echo "build-rime-runtime: missing build contract" >&2
+  exit 1
+}
+
+# This is the only diagnostic boundary. Successful third-party output is
+# redacted and discarded by run(); unexpected shell diagnostics are redacted
+# here. Our own stdout is limited to the short, path-free status lines below.
+exec 2> >( exec "${privacy}" redact >&2 )
+
+fail() {
+  echo "build-rime-runtime: $1" >&2
+  exit 1
+}
+
+lock_value() {
+  local key_path="$1"
+  ruby -rjson -e '
+    lock = JSON.parse(File.binread(ARGV.fetch(0)).force_encoding(Encoding::UTF_8))
+    value = ARGV.fetch(1).split(".").reduce(lock) do |node, key|
+      abort "missing lock value" unless node.is_a?(Hash) && node.key?(key)
+      node.fetch(key)
+    end
+    abort "lock value is not a string" unless value.is_a?(String) && !value.empty?
+    puts value
+  ' "${lock_file}" "${key_path}"
+}
+
+require_sha1() {
+  [[ "$1" =~ ^[0-9a-f]{40}$ ]] || fail "invalid locked Git commit"
+}
+
+require_sha256() {
+  [[ "$1" =~ ^[0-9a-f]{64}$ ]] || fail "invalid locked archive digest"
+}
+
+require_relative_component() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || fail "unsafe locked source directory"
+}
+
+run() {
+  local output
+  if ! output="$("$@" 2>&1 | "${privacy}" redact | tail -n 40)"; then
+    [[ -z "${output}" ]] || printf '%s\n' "${output}" >&2
+    fail "third-party command failed"
+  fi
+}
+
+capture() {
+  local output
+  output="$("$@")" || fail "required command failed"
+  printf '%s' "${output}"
+}
+
+run "${upstream_sync}" verify
+
+offline=0
+[[ -n "${no_download:-}" ]] && offline=1
+export LC_ALL=C TZ=UTC ZERO_AR_DATE=1
+
+cache_root="${repo_root}/build/upstreams"
+archive_root="${cache_root}/archives"
+git_root="${cache_root}/git"
+tools_root="${repo_root}/build/tools"
+mkdir -p "${archive_root}" "${git_root}" "${tools_root}"
+
+# Fast path: the compiled runtime only changes when its own locked inputs do.
+# Language-data locks are deliberately excluded: only build tools, librime and
+# its bundled plugins, the retained runtime patches, and this build script own the
+# generated runtime bytes. Hash file contents without absolute path names so a
+# workspace move cannot invalidate an otherwise identical runtime cache.
+runtime_fingerprint_stamp="${repo_root}/build/rime-runtime.fingerprint"
+content_sha256() {
+  shasum -a 256 < "$1" | awk '{print $1}'
+}
+
+runtime_lock_projection() {
+  ruby -rjson -rdigest -e '
+    lock = JSON.parse(File.binread(ARGV.fetch(0)).force_encoding(Encoding::UTF_8))
+    canonical = lambda do |value|
+      case value
+      when Hash
+        value.keys.sort.to_h { |key| [key, canonical.call(value.fetch(key))] }
+      when Array
+        value.map { |item| canonical.call(item) }
+      else
+        value
+      end
+    end
+    paths = %w[
+      build_inputs.cmake
+      build_inputs.boost_headers
+      sources.librime
+      downstream_patches
+    ]
+    projection = paths.to_h do |path|
+      value = path.split(".").reduce(lock) { |node, key| node.fetch(key) }
+      [path, value]
+    end
+    puts Digest::SHA256.hexdigest(JSON.generate(canonical.call(projection)))
+  ' "${lock_file}"
+}
+
+runtime_patch_paths() {
+  ruby -rjson -e '
+    patches = JSON.parse(
+      File.binread(ARGV.fetch(0)).force_encoding(Encoding::UTF_8)
+    ).fetch("downstream_patches")
+    puts patches.values.map { |item| item.fetch("path") }.sort
+  ' "${lock_file}"
+}
+
+lua_embedding_inputs="$("${lua_embedding_generator}" --print-inputs)" ||
+  fail "Lua embedding input inventory is unavailable"
+lua_embedding_input_count="$(printf '%s\n' "${lua_embedding_inputs}" |
+  awk 'NF { count += 1 } END { print count + 0 }')"
+lua_embedding_unique_count="$(printf '%s\n' "${lua_embedding_inputs}" |
+  awk 'NF' | LC_ALL=C sort -u | wc -l | tr -d ' ')"
+[[ "${lua_embedding_input_count}" -eq 11 &&
+   "${lua_embedding_unique_count}" -eq 11 ]] ||
+  fail "Lua embedding input inventory must contain exactly 11 unique files"
+while IFS= read -r relative_path; do
+  [[ "${relative_path}" =~ ^[A-Za-z0-9._/-]+$ &&
+     "${relative_path}" != /* && "${relative_path}" != *..* ]] ||
+    fail "unsafe Lua embedding input path"
+  [[ -f "${repo_root}/${relative_path}" &&
+     ! -L "${repo_root}/${relative_path}" ]] ||
+    fail "Lua embedding input is missing or unsafe"
+done <<< "${lua_embedding_inputs}"
+
+compute_runtime_fingerprint() {
+  {
+    printf '%s\n' 'linnet-runtime-fingerprint-v3-embedded-lua'
+    runtime_lock_projection
+    while IFS= read -r relative_path; do
+      printf '%s\t%s\n' "${relative_path}" \
+        "$(content_sha256 "${repo_root}/${relative_path}")"
+    done < <(runtime_patch_paths)
+    printf '%s\t%s\n' scripts/build-rime-runtime \
+      "$(content_sha256 "${repo_root}/scripts/build-rime-runtime")"
+    printf '%s\t%s\n' scripts/generate-linnet-lua-embedding \
+      "$(content_sha256 "${lua_embedding_generator}")"
+    while IFS= read -r relative_path; do
+      printf '%s\t%s\n' "${relative_path}" \
+        "$(content_sha256 "${repo_root}/${relative_path}")"
+    done <<< "${lua_embedding_inputs}"
+  } | shasum -a 256 | awk '{print $1}'
+}
+runtime_fingerprint="$(compute_runtime_fingerprint)"
+if [[ -f "${runtime_fingerprint_stamp}" &&
+      "$(cat "${runtime_fingerprint_stamp}")" == "${runtime_fingerprint}" ]]; then
+  runtime_complete=1
+  for runtime_output in \
+      "${repo_root}/librime/dist/lib/rime-plugins/librime-predict.dylib" \
+      "${repo_root}/librime/dist/bin/rime_deployer" \
+      "${repo_root}/librime/dist/share/linnet-licenses" \
+      "${repo_root}/librime/share/opencc" \
+      "${repo_root}/build/dependencies/boost/boost"; do
+    [[ -e "${runtime_output}" ]] || { runtime_complete=0; break; }
+  done
+  ls "${repo_root}"/librime/dist/lib/librime.*.dylib >/dev/null 2>&1 ||
+    runtime_complete=0
+  [[ "$(find "${repo_root}/librime/dist/share/linnet-licenses" \
+      -mindepth 1 -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')" == 12 ]] ||
+    runtime_complete=0
+  if [[ "${runtime_complete}" -eq 1 ]]; then
+    echo "build-rime-runtime: SKIP (locked inputs unchanged; runtime artifacts present)"
+    exit 0
+  fi
+fi
+
+is_safe_runtime_work_root() {
+  local candidate="$1"
+  [[ "${candidate}" == /private/tmp/linnet-rime-runtime.?????? &&
+    -d "${candidate}" && ! -L "${candidate}" ]]
+}
+
+work_root="$(mktemp -d /private/tmp/linnet-rime-runtime.XXXXXX)"
+is_safe_runtime_work_root "${work_root}" || fail "unsafe runtime work root"
+publishing=0
+new_dist=0
+new_opencc=0
+new_boost=0
+had_dist=0
+had_opencc=0
+had_boost=0
+dist_target="${repo_root}/librime/dist"
+opencc_target="${repo_root}/librime/share/opencc"
+boost_target="${repo_root}/build/dependencies/boost"
+dist_backup="${work_root}/previous-dist"
+opencc_backup="${work_root}/previous-opencc"
+boost_backup="${work_root}/previous-boost"
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if ! is_safe_runtime_work_root "${work_root}"; then
+    echo "build-rime-runtime: refusing unsafe runtime cleanup" >&2
+    exit 1
+  fi
+  if [[ "${status}" -ne 0 && "${publishing}" -eq 1 ]]; then
+    [[ "${new_boost}" -eq 0 ]] || rm -rf -- "${boost_target}"
+    [[ "${had_boost}" -eq 0 ]] || mv "${boost_backup}" "${boost_target}"
+    [[ "${new_opencc}" -eq 0 ]] || rm -rf -- "${opencc_target}"
+    [[ "${had_opencc}" -eq 0 ]] || mv "${opencc_backup}" "${opencc_target}"
+    [[ "${new_dist}" -eq 0 ]] || rm -rf -- "${dist_target}"
+    [[ "${had_dist}" -eq 0 ]] || mv "${dist_backup}" "${dist_target}"
+  fi
+  rm -rf -- "${work_root}"
+  exit "${status}"
+}
+trap cleanup EXIT
+
+verify_archive() {
+  local archive="$1"
+  local expected="$2"
+  local actual
+  [[ -f "${archive}" ]] || return 1
+  actual="$(capture shasum -a 256 "${archive}" | awk '{print $1}')"
+  [[ "${actual}" == "${expected}" ]]
+}
+
+materialize_archive() {
+  local label="$1"
+  local url="$2"
+  local expected="$3"
+  local archive="${archive_root}/${label}-${expected}.tar.gz"
+  local partial="${archive}.partial"
+  require_sha256 "${expected}"
+  [[ "${url}" == https://* ]] || fail "archive URL must use HTTPS"
+
+  if ! verify_archive "${archive}" "${expected}"; then
+    [[ "${offline}" -eq 0 ]] || fail "offline archive input is missing or invalid"
+    run curl --fail --location --output "${partial}" "${url}"
+    verify_archive "${partial}" "${expected}" || fail "downloaded archive digest mismatch"
+    mv "${partial}" "${archive}"
+  fi
+  printf '%s' "${archive}"
+}
+
+verify_clean_checkout() {
+  local directory="$1"
+  local expected="$2"
+  local actual dirty
+  actual="$(capture git -C "${directory}" rev-parse HEAD)"
+  [[ "${actual}" == "${expected}" ]] || fail "source checkout differs from lock"
+  dirty="$(capture git -C "${directory}" status --porcelain --untracked-files=all)"
+  [[ -z "${dirty}" ]] || fail "source checkout is dirty"
+}
+
+materialize_git() {
+  local label="$1"
+  local repository="$2"
+  local commit="$3"
+  local directory="${git_root}/${label}"
+  local configured_url=""
+  require_sha1 "${commit}"
+  [[ "${repository}" == https://github.com/*.git ]] || fail "source URL must be an HTTPS GitHub Git URL"
+
+  if [[ ! -d "${directory}/.git" ]]; then
+    [[ "${offline}" -eq 0 ]] || fail "offline source cache is missing"
+    mkdir -p "${directory}"
+    run git -C "${directory}" init --quiet
+    run git -C "${directory}" remote add origin "${repository}"
+  fi
+  configured_url="$(capture git -C "${directory}" remote get-url origin)"
+  [[ "${configured_url}" == "${repository}" ]] || fail "cached source URL differs from lock"
+
+  if [[ "${offline}" -eq 0 ]]; then
+    run git -C "${directory}" fetch --no-tags --depth=1 origin "${commit}"
+  fi
+  git -C "${directory}" cat-file -e "${commit}^{commit}" || fail "locked source commit is unavailable"
+  local dirty
+  dirty="$(capture git -C "${directory}" status --porcelain --untracked-files=all)"
+  [[ -z "${dirty}" ]] || fail "cached source checkout is dirty"
+  run git -C "${directory}" checkout --quiet --detach --force "${commit}"
+  verify_clean_checkout "${directory}" "${commit}"
+  printf '%s' "${directory}"
+}
+
+archive_checkout() {
+  local checkout="$1"
+  local commit="$2"
+  local destination="$3"
+  mkdir -p "${destination}"
+  git -C "${checkout}" archive "${commit}" | tar -x -C "${destination}"
+}
+
+apply_downstream_patch() {
+  local target="$1"
+  local relative_path="$2"
+  local expected="$3"
+  local patch_path="${repo_root}/${relative_path}"
+  local actual
+  require_sha256 "${expected}"
+  [[ -d "${target}" ]] || fail "downstream patch target is missing"
+  [[ -f "${patch_path}" && ! -L "${patch_path}" ]] ||
+    fail "downstream patch input is missing or unsafe"
+  if rg -n '(^\*\*\* |^--- /|^\+\+\+ /|/(U[s]ers|h[o]me)/)' \
+      "${patch_path}" >/dev/null; then
+    fail "downstream patch contains an invalid directive or private absolute path"
+  fi
+  actual="$(capture shasum -a 256 "${patch_path}" | awk '{print $1}')"
+  [[ "${actual}" == "${expected}" ]] || fail "downstream patch digest mismatch"
+  run env GIT_CEILING_DIRECTORIES="${repo_root}" \
+    git -C "${target}" apply --no-index --check "${patch_path}"
+  run env GIT_CEILING_DIRECTORIES="${repo_root}" \
+    git -C "${target}" apply --no-index "${patch_path}"
+  run env GIT_CEILING_DIRECTORIES="${repo_root}" \
+    git -C "${target}" apply --no-index --reverse --check "${patch_path}"
+}
+
+verify_locked_file() {
+  local source="$1"
+  local expected="$2"
+  local label="$3"
+  local actual
+  require_sha256 "${expected}"
+  [[ -f "${source}" && ! -L "${source}" ]] ||
+    fail "${label} is missing or unsafe"
+  actual="$(capture shasum -a 256 "${source}" | awk '{print $1}')"
+  [[ "${actual}" == "${expected}" ]] || fail "${label} differs from the lock"
+}
+
+project_runtime_license() {
+  local source="$1"
+  local expected="$2"
+  local output="$3"
+  local label="$4"
+  verify_locked_file "${source}" "${expected}" "${label}"
+  [[ "${output}" == "${runtime_license_stage}/"* &&
+     "${output#"${runtime_license_stage}/"}" =~ ^[A-Za-z0-9._-]+$ ]] ||
+    fail "unsafe runtime license output"
+  cp "${source}" "${output}"
+}
+
+cmake_version="$(lock_value build_inputs.cmake.version)"
+cmake_url="$(lock_value build_inputs.cmake.url)"
+cmake_sha="$(lock_value build_inputs.cmake.sha256)"
+cmake_archive_root="$(lock_value build_inputs.cmake.archive_root)"
+cmake_relative_exec="$(lock_value build_inputs.cmake.executable)"
+boost_url="$(lock_value build_inputs.boost_headers.url)"
+boost_sha="$(lock_value build_inputs.boost_headers.sha256)"
+boost_archive_root="$(lock_value build_inputs.boost_headers.archive_root)"
+librime_commit="$(lock_value sources.librime.commit)"
+librime_version="$(lock_value sources.librime.tag)"
+core_patch_target="$(lock_value downstream_patches.librime_core_interactions.target)"
+core_patch_path="$(lock_value downstream_patches.librime_core_interactions.path)"
+core_patch_sha="$(lock_value downstream_patches.librime_core_interactions.sha256)"
+lua_patch_target="$(lock_value downstream_patches.librime_lua_state_lifetime.target)"
+lua_patch_path="$(lock_value downstream_patches.librime_lua_state_lifetime.path)"
+lua_patch_sha="$(lock_value downstream_patches.librime_lua_state_lifetime.sha256)"
+predict_patch_target="$(lock_value downstream_patches.librime_predict_session_state.target)"
+predict_patch_path="$(lock_value downstream_patches.librime_predict_session_state.path)"
+predict_patch_sha="$(lock_value downstream_patches.librime_predict_session_state.sha256)"
+require_sha1 "${librime_commit}"
+[[ "${librime_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail "invalid locked librime version"
+
+[[ "${core_patch_target}" == "sources.librime" ]] ||
+  fail "unexpected core interaction downstream patch target"
+[[ "${core_patch_path}" == \
+   "patches/librime-linnet-core-interactions.patch" ]] ||
+  fail "unexpected core interaction downstream patch path"
+[[ "${lua_patch_target}" == "sources.librime.bundled_plugins.lua" ]] ||
+  fail "unexpected lua downstream patch target"
+[[ "${lua_patch_path}" == "patches/librime-lua-linnet-state-lifetime.patch" ]] ||
+  fail "unexpected lua downstream patch path"
+[[ "${predict_patch_target}" == "sources.librime.bundled_plugins.predict" ]] ||
+  fail "unexpected predict downstream patch target"
+[[ "${predict_patch_path}" == "patches/librime-predict-linnet-session-state.patch" ]] ||
+  fail "unexpected predict downstream patch path"
+
+[[ "${cmake_archive_root}" != /* && "${cmake_archive_root}" != *..* ]] || fail "unsafe CMake archive root"
+[[ "${cmake_relative_exec}" != /* && "${cmake_relative_exec}" != *..* ]] || fail "unsafe CMake executable"
+[[ "${boost_archive_root}" != /* && "${boost_archive_root}" != *..* ]] || fail "unsafe Boost archive root"
+
+cmake_archive="$(materialize_archive cmake "${cmake_url}" "${cmake_sha}")"
+boost_archive="$(materialize_archive boost "${boost_url}" "${boost_sha}")"
+
+cmake_extract="${work_root}/cmake"
+mkdir -p "${cmake_extract}"
+run tar -xzf "${cmake_archive}" -C "${cmake_extract}"
+cmake_top="${cmake_archive_root%%/*}"
+[[ -x "${cmake_extract}/${cmake_archive_root}/${cmake_relative_exec}" ]] || fail "CMake archive layout differs from lock"
+cmake_target="${tools_root}/${cmake_top}"
+[[ ! -e "${cmake_target}" || ! -L "${cmake_target}" ]] || fail "CMake tool target must not be a symlink"
+if [[ -e "${cmake_target}" ]]; then
+  mv "${cmake_target}" "${work_root}/previous-cmake"
+fi
+mv "${cmake_extract}/${cmake_top}" "${cmake_target}"
+cmake="${cmake_target}/${cmake_archive_root#*/}/${cmake_relative_exec}"
+cmake_report="$(capture "${cmake}" --version | head -n 1)"
+[[ "${cmake_report}" == "cmake version ${cmake_version}" ]] || fail "CMake version differs from lock"
+
+librime_checkout="${repo_root}/librime"
+[[ -d "${librime_checkout}/.git" || -f "${librime_checkout}/.git" ]] || fail "librime checkout is missing"
+verify_clean_checkout "${librime_checkout}" "${librime_commit}"
+
+source_root="${work_root}/source"
+archive_checkout "${librime_checkout}" "${librime_commit}" "${source_root}"
+apply_downstream_patch \
+  "${source_root}" "${core_patch_path}" "${core_patch_sha}"
+
+deps=(glog leveldb marisa-trie opencc yaml-cpp)
+for dependency in "${deps[@]}"; do
+  dependency_url="$(capture git -C "${librime_checkout}" config -f .gitmodules --get "submodule.${dependency}.url")"
+  dependency_commit="$(capture git -C "${librime_checkout}" ls-tree "${librime_commit}" -- "deps/${dependency}" | awk '{print $3}')"
+  require_sha1 "${dependency_commit}"
+  dependency_cache="$(materialize_git "librime-deps/${dependency}" "${dependency_url}" "${dependency_commit}")"
+  archive_checkout "${dependency_cache}" "${dependency_commit}" "${source_root}/deps/${dependency}"
+done
+
+plugins=(lua octagram predict)
+for plugin in "${plugins[@]}"; do
+  plugin_url="$(lock_value "sources.librime.bundled_plugins.${plugin}.repository")"
+  plugin_commit="$(lock_value "sources.librime.bundled_plugins.${plugin}.commit")"
+  plugin_dir="$(lock_value "sources.librime.bundled_plugins.${plugin}.source_dir")"
+  require_relative_component "${plugin_dir}"
+  [[ "${plugin_dir}" == "${plugin}" ]] || fail "plugin source directory differs from canonical layout"
+  plugin_cache="$(materialize_git "plugins/${plugin}" "${plugin_url}" "${plugin_commit}")"
+  archive_checkout "${plugin_cache}" "${plugin_commit}" "${source_root}/plugins/${plugin_dir}"
+done
+apply_downstream_patch "${source_root}/plugins/lua" "${lua_patch_path}" "${lua_patch_sha}"
+lua_modules="${source_root}/plugins/lua/src/modules.cc"
+lua_state="${source_root}/plugins/lua/src/lib/lua.cc"
+if rg -n 'dladdr|dli_fname|lstat|LUA_DIRSEP|get_(user|shared)_data_dir|rime\.lua|luaL_dofile|file_exists' \
+    "${lua_modules}" "${lua_state}"; then
+  fail "patched Lua loader retains a filesystem execution path"
+fi
+rg -Fq '#include "linnet_embedded_lua.h"' "${lua_modules}" ||
+  fail "patched Lua loader does not consume the generated embedding"
+rg -Fq 'LUA_PRELOAD_TABLE' "${lua_modules}" ||
+  fail "patched Lua loader does not own package.preload"
+rg -Fq '"LUA_NOENV"' "${lua_state}" ||
+  fail "patched Lua state does not disable environment loaders"
+run "${lua_embedding_generator}" \
+  "${source_root}/plugins/lua/src/linnet_embedded_lua.h"
+apply_downstream_patch \
+  "${source_root}/plugins/predict" "${predict_patch_path}" "${predict_patch_sha}"
+
+lua_thirdparty_url="$(lock_value sources.librime.bundled_plugins.lua.thirdparty.repository)"
+lua_thirdparty_commit="$(lock_value sources.librime.bundled_plugins.lua.thirdparty.commit)"
+lua_thirdparty_dir="$(lock_value sources.librime.bundled_plugins.lua.thirdparty.source_dir)"
+require_relative_component "${lua_thirdparty_dir}"
+[[ "${lua_thirdparty_dir}" == "thirdparty" ]] || fail "Lua third-party source directory differs from canonical layout"
+lua_thirdparty_cache="$(materialize_git plugins/lua-thirdparty "${lua_thirdparty_url}" "${lua_thirdparty_commit}")"
+archive_checkout "${lua_thirdparty_cache}" "${lua_thirdparty_commit}" "${source_root}/plugins/lua/${lua_thirdparty_dir}"
+
+boost_root="${work_root}/boost"
+mkdir -p "${boost_root}"
+run tar -xzf "${boost_archive}" -C "${boost_root}" \
+  "${boost_archive_root}/boost" "${boost_archive_root}/LICENSE_1_0.txt"
+[[ -f "${boost_root}/${boost_archive_root}/boost/signals2/signal.hpp" ]] || fail "Boost archive layout differs from lock"
+
+# Release legal metadata consumes this exact build output rather than mutable
+# source caches.  Each file is first verified against the sole lock owner.
+runtime_license_stage="${work_root}/runtime-licenses"
+mkdir -p "${runtime_license_stage}"
+project_runtime_license \
+  "${source_root}/$(lock_value sources.librime.license_path)" \
+  "$(lock_value sources.librime.license_sha256)" \
+  "${runtime_license_stage}/librime-BSD-3-Clause.txt" "librime license"
+project_runtime_license \
+  "${source_root}/plugins/lua/$(lock_value sources.librime.bundled_plugins.lua.license_path)" \
+  "$(lock_value sources.librime.bundled_plugins.lua.license_sha256)" \
+  "${runtime_license_stage}/librime-lua-BSD-3-Clause.txt" "librime-lua license"
+verify_locked_file \
+  "${source_root}/plugins/octagram/$(lock_value sources.librime.bundled_plugins.octagram.license_path)" \
+  "$(lock_value sources.librime.bundled_plugins.octagram.license_sha256)" \
+  "librime-octagram license"
+project_runtime_license \
+  "${source_root}/plugins/predict/$(lock_value sources.librime.bundled_plugins.predict.license_path)" \
+  "$(lock_value sources.librime.bundled_plugins.predict.license_sha256)" \
+  "${runtime_license_stage}/librime-predict-BSD-3-Clause.txt" \
+  "librime-predict license"
+while IFS=$'\t' read -r notice_path notice_sha; do
+  verify_locked_file "${source_root}/plugins/lua/${notice_path}" "${notice_sha}" \
+    "librime-lua embedded MIT source"
+done < <(ruby -rjson -e '
+  lua = JSON.parse(File.binread(ARGV.fetch(0)).force_encoding(Encoding::UTF_8)).dig(
+    "sources", "librime", "bundled_plugins", "lua"
+  )
+  sources = lua.fetch("embedded_mit_notice").fetch("sources")
+  sources.keys.sort.each do |name|
+    item = sources.fetch(name)
+    puts [item.fetch("path"), item.fetch("sha256")].join("\t")
+  end
+  thirdparty = lua.fetch("thirdparty")
+  puts [File.join("thirdparty", thirdparty.fetch("source_path")),
+        thirdparty.fetch("source_sha256")].join("\t")
+' "${lock_file}")
+project_runtime_license \
+  "${repo_root}/$(lock_value sources.librime.bundled_plugins.lua.embedded_mit_notice.path)" \
+  "$(lock_value sources.librime.bundled_plugins.lua.embedded_mit_notice.sha256)" \
+  "${runtime_license_stage}/librime-lua-embedded-MIT.txt" \
+  "librime-lua embedded MIT notice"
+project_runtime_license \
+  "${source_root}/deps/glog/$(lock_value sources.librime.static_dependencies.glog.license_path)" \
+  "$(lock_value sources.librime.static_dependencies.glog.license_sha256)" \
+  "${runtime_license_stage}/glog-BSD-3-Clause.txt" "glog license"
+project_runtime_license \
+  "${source_root}/deps/leveldb/$(lock_value sources.librime.static_dependencies.leveldb.license_path)" \
+  "$(lock_value sources.librime.static_dependencies.leveldb.license_sha256)" \
+  "${runtime_license_stage}/LevelDB-BSD-3-Clause.txt" "LevelDB license"
+project_runtime_license \
+  "${source_root}/deps/marisa-trie/$(lock_value sources.librime.static_dependencies.marisa-trie.license_path)" \
+  "$(lock_value sources.librime.static_dependencies.marisa-trie.license_sha256)" \
+  "${runtime_license_stage}/marisa-BSD-2-Clause-or-LGPL-2.1.txt" \
+  "marisa license"
+project_runtime_license \
+  "${source_root}/deps/opencc/$(lock_value sources.librime.static_dependencies.opencc.license_path)" \
+  "$(lock_value sources.librime.static_dependencies.opencc.license_sha256)" \
+  "${runtime_license_stage}/OpenCC-Apache-2.0.txt" "OpenCC license"
+project_runtime_license \
+  "${source_root}/deps/yaml-cpp/$(lock_value sources.librime.static_dependencies.yaml-cpp.license_path)" \
+  "$(lock_value sources.librime.static_dependencies.yaml-cpp.license_sha256)" \
+  "${runtime_license_stage}/yaml-cpp-MIT.txt" "yaml-cpp license"
+project_runtime_license \
+  "${boost_root}/${boost_archive_root}/$(lock_value build_inputs.boost_headers.license_path)" \
+  "$(lock_value build_inputs.boost_headers.license_sha256)" \
+  "${runtime_license_stage}/Boost-BSL-1.0.txt" "Boost license"
+project_runtime_license \
+  "${source_root}/$(lock_value sources.librime.embedded_components.darts_clone.license_path)" \
+  "$(lock_value sources.librime.embedded_components.darts_clone.license_sha256)" \
+  "${runtime_license_stage}/Darts-clone-BSD-3-Clause.txt" "Darts-clone license"
+verify_locked_file \
+  "${source_root}/deps/opencc/$(lock_value sources.librime.static_dependencies.opencc.embedded_components.rapidjson.source_path)" \
+  "$(lock_value sources.librime.static_dependencies.opencc.embedded_components.rapidjson.source_sha256)" \
+  "OpenCC vendored RapidJSON source"
+project_runtime_license \
+  "${repo_root}/$(lock_value sources.librime.static_dependencies.opencc.embedded_components.rapidjson.license_path)" \
+  "$(lock_value sources.librime.static_dependencies.opencc.embedded_components.rapidjson.license_sha256)" \
+  "${runtime_license_stage}/RapidJSON-1.1.0.txt" "RapidJSON license"
+[[ "$(find "${runtime_license_stage}" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" == 12 ]] ||
+  fail "runtime license projection has an unexpected inventory"
+
+sdk="$(capture xcrun --sdk macosx --show-sdk-path)"
+[[ "${sdk}" == /* && -d "${sdk}" ]] || fail "macOS SDK is unavailable"
+source_epoch="$(capture git -C "${librime_checkout}" show -s --format=%ct "${librime_commit}")"
+[[ "${source_epoch}" =~ ^[0-9]+$ ]] || fail "invalid source epoch"
+export SOURCE_DATE_EPOCH="${source_epoch}" MACOSX_DEPLOYMENT_TARGET=13.0
+jobs="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+[[ "${jobs}" =~ ^[1-9][0-9]*$ ]] || jobs=8
+export CMAKE_BUILD_PARALLEL_LEVEL="${jobs}"
+
+# macOS exposes the same temporary filesystem through /tmp and /private/tmp.
+# CMake may spell compiler inputs with the other alias after the shell has
+# established canonical roots, so map both exact spellings before accepting a
+# generated runtime. The generic maps remain defense in depth for unrelated
+# temporary inputs; exact roots prevent their private suffixes from surviving.
+repo_root_alias="${repo_root}"
+work_root_alias="${work_root}"
+case "${repo_root}" in
+  /private/tmp/*) repo_root_alias="/tmp/${repo_root#/private/tmp/}" ;;
+  /tmp/*) repo_root_alias="/private/tmp/${repo_root#/tmp/}" ;;
+esac
+case "${work_root}" in
+  /private/tmp/*) work_root_alias="/tmp/${work_root#/private/tmp/}" ;;
+  /tmp/*) work_root_alias="/private/tmp/${work_root#/tmp/}" ;;
+esac
+map_flags="-ffile-prefix-map=/tmp=Linnet/Temp -fmacro-prefix-map=/tmp=Linnet/Temp -fdebug-prefix-map=/tmp=Linnet/Temp"
+map_flags+=" -ffile-prefix-map=/private/tmp=Linnet/Temp -fmacro-prefix-map=/private/tmp=Linnet/Temp -fdebug-prefix-map=/private/tmp=Linnet/Temp"
+map_flags+=" -ffile-prefix-map=${sdk}=Linnet/SDK -fmacro-prefix-map=${sdk}=Linnet/SDK -fdebug-prefix-map=${sdk}=Linnet/SDK"
+map_flags+=" -ffile-prefix-map=${repo_root}=Linnet/Workspace -fmacro-prefix-map=${repo_root}=Linnet/Workspace -fdebug-prefix-map=${repo_root}=Linnet/Workspace"
+map_flags+=" -ffile-prefix-map=${repo_root_alias}=Linnet/Workspace -fmacro-prefix-map=${repo_root_alias}=Linnet/Workspace -fdebug-prefix-map=${repo_root_alias}=Linnet/Workspace"
+map_flags+=" -ffile-prefix-map=${work_root}=Linnet/Source -fmacro-prefix-map=${work_root}=Linnet/Source -fdebug-prefix-map=${work_root}=Linnet/Source"
+map_flags+=" -ffile-prefix-map=${work_root_alias}=Linnet/Source -fmacro-prefix-map=${work_root_alias}=Linnet/Source -fdebug-prefix-map=${work_root_alias}=Linnet/Source"
+map_flags+=" -fdebug-compilation-dir=."
+
+deps_stage="${work_root}/deps-stage"
+common_cmake=(
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_INSTALL_PREFIX=/Linnet
+  -DCMAKE_OSX_ARCHITECTURES=arm64
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+  "-DCMAKE_OSX_SYSROOT=${sdk}"
+  "-DCMAKE_C_FLAGS=${map_flags}"
+  "-DCMAKE_CXX_FLAGS=${map_flags}"
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+)
+
+build_dependency() {
+  local dependency="$1"
+  shift
+  local build_dir="${work_root}/build-deps/${dependency}"
+  run "${cmake}" -S "${source_root}/deps/${dependency}" -B "${build_dir}" \
+    "${common_cmake[@]}" "$@"
+  run env DESTDIR="${deps_stage}" "${cmake}" --build "${build_dir}" --target install
+}
+
+echo "build-rime-runtime: building pinned arm64 dependencies"
+build_dependency glog -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DWITH_GFLAGS=OFF
+build_dependency leveldb -DLEVELDB_BUILD_BENCHMARKS=OFF -DLEVELDB_BUILD_TESTS=OFF
+build_dependency marisa-trie -DBUILD_TESTING=OFF -DENABLE_TOOLS=OFF
+build_dependency opencc \
+  -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DENABLE_GTEST=OFF \
+  -DENABLE_BENCHMARK=OFF -DBUILD_PYTHON=OFF -DUSE_SYSTEM_MARISA=ON \
+  -DENABLE_DARTS=OFF \
+  "-DLIBMARISA:FILEPATH=${deps_stage}/Linnet/lib/libmarisa.a" \
+  "-DCMAKE_CXX_FLAGS=${map_flags} -I${deps_stage}/Linnet/include -L${deps_stage}/Linnet/lib"
+opencc_cache="${work_root}/build-deps/opencc/CMakeCache.txt"
+rg -Fxq "LIBMARISA:FILEPATH=${deps_stage}/Linnet/lib/libmarisa.a" \
+  "${opencc_cache}" || fail "OpenCC did not bind the locked standalone marisa"
+rg -Fxq 'USE_SYSTEM_MARISA:BOOL=ON' "${opencc_cache}" ||
+  fail "OpenCC enabled its second vendored marisa implementation"
+rg -Fxq 'ENABLE_DARTS:BOOL=OFF' "${opencc_cache}" ||
+  fail "OpenCC enabled its second embedded Darts implementation"
+build_dependency yaml-cpp -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF
+
+runtime_stage="${work_root}/runtime-stage"
+runtime_build="${work_root}/build-runtime"
+export RIME_PLUGINS='hchunhui/librime-lua lotem/librime-octagram rime/librime-predict'
+echo "build-rime-runtime: building librime and pinned plugins"
+run "${cmake}" -S "${source_root}" -B "${runtime_build}" \
+  "${common_cmake[@]}" \
+  "-DCMAKE_PREFIX_PATH=${deps_stage}/Linnet" \
+  "-DBoost_ROOT=${boost_root}/${boost_archive_root}" \
+  -DBoost_NO_SYSTEM_PATHS=TRUE \
+  -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC=OFF \
+  -DBUILD_MERGED_PLUGINS=OFF -DENABLE_EXTERNAL_PLUGINS=ON \
+  -DBUILD_TEST=OFF -DBUILD_TOOLS=OFF -DLINNET_BUILD_PREDICT_TOOL=ON \
+  -DBUILD_DATA=OFF -DBUILD_SAMPLE=OFF \
+  -DENABLE_TIMESTAMP=OFF
+run "${cmake}" --build "${runtime_build}"
+run env DESTDIR="${runtime_stage}" "${cmake}" --install "${runtime_build}"
+
+runtime_prefix="${runtime_stage}/Linnet"
+mkdir -p "${runtime_prefix}/share/linnet-licenses"
+cp -R -X "${runtime_license_stage}/." \
+  "${runtime_prefix}/share/linnet-licenses/"
+build_predict_source="${runtime_build}/linnet-tools/build_predict"
+[[ -x "${build_predict_source}" ]] || fail "patched build_predict output is missing"
+mkdir -p "${runtime_prefix}/bin"
+cp "${build_predict_source}" "${runtime_prefix}/bin/build_predict"
+
+mkdir -p "${runtime_prefix}/include/rime"
+while IFS= read -r -d '' header; do
+  relative="${header#"${source_root}/src/"}"
+  mkdir -p "${runtime_prefix}/include/$(dirname "${relative}")"
+  cp "${header}" "${runtime_prefix}/include/${relative}"
+done < <(find "${source_root}/src/rime" -type f \( -name '*.h' -o -name '*.hpp' \) -print0)
+cp "${runtime_build}/src/rime/build_config.h" "${runtime_prefix}/include/rime/build_config.h"
+cp -R "${source_root}/include/." "${runtime_prefix}/include/"
+cp "${deps_stage}/Linnet/include/marisa.h" "${runtime_prefix}/include/marisa.h"
+cp -R "${deps_stage}/Linnet/include/marisa" "${runtime_prefix}/include/marisa"
+cp -R "${deps_stage}/Linnet/include/glog" "${runtime_prefix}/include/glog"
+mkdir -p "${runtime_prefix}/include/rime/predict"
+cp \
+  "${source_root}/plugins/predict/src/predict_db.h" \
+  "${source_root}/plugins/predict/src/predict_engine.h" \
+  "${runtime_prefix}/include/rime/predict/"
+/usr/bin/grep -Fq 'RIME_DLL bool Resolve(Context* ctx) const;' \
+  "${runtime_prefix}/include/rime/predict/predict_engine.h" ||
+  fail "patched predict SDK contract is missing"
+
+expected_macho=(
+  bin/build_predict bin/rime_deployer bin/rime_dict_manager bin/rime_patch bin/rime_table_decompiler
+  lib/librime.${librime_version}.dylib
+  lib/rime-plugins/librime-lua.dylib
+  lib/rime-plugins/librime-octagram.dylib
+  lib/rime-plugins/librime-predict.dylib
+)
+for relative in "${expected_macho[@]}"; do
+  binary="${runtime_prefix}/${relative}"
+  [[ -f "${binary}" ]] || fail "expected runtime artifact is missing"
+  description="$(capture file "${binary}")"
+  [[ "${description}" == *"Mach-O 64-bit"*" arm64"* && "${description}" != *universal* && "${description}" != *x86_64* ]] ||
+    fail "runtime artifact is not thin arm64"
+  while IFS= read -r dependency; do
+    case "${dependency}" in
+      @rpath/*|/usr/lib/*|/System/Library/Frameworks/*) ;;
+      *) fail "runtime artifact has an unreviewed load path" ;;
+    esac
+  done < <(otool -L "${binary}" | tail -n +2 | awk '{print $1}')
+done
+
+build_predict_rpaths="$(otool -l "${runtime_prefix}/bin/build_predict" | awk '
+  $1 == "cmd" && $2 == "LC_RPATH" { in_rpath = 1; next }
+  in_rpath && $1 == "path" { print $2; in_rpath = 0 }
+')"
+[[ "${build_predict_rpaths}" == '@executable_path/../lib' ]] ||
+  fail "build_predict runtime search path differs from contract"
+predict_symbols="$(nm -gU "${runtime_prefix}/lib/rime-plugins/librime-predict.dylib" | c++filt)"
+for symbol in \
+  'rime::PredictEngine::Resolve(' \
+  'rime::PredictEngine::LookupCopy(' \
+  'rime::PredictEngineComponent::Shared('; do
+  [[ "${predict_symbols}" == *"${symbol}"* ]] ||
+    fail "patched predict runtime contract is missing"
+done
+smoke_input="${work_root}/build-predict-smoke.tsv"
+smoke_database="${work_root}/build-predict-smoke.db"
+printf 'hello\thello\t1\np/test\tfirst\t64\np/test\tsecond\t63\n' > "${smoke_input}"
+run "${runtime_prefix}/bin/build_predict" "${smoke_database}" < "${smoke_input}"
+[[ -s "${smoke_database}" ]] || fail "build_predict smoke failed"
+ruby -e '
+  header = File.binread(ARGV.fetch(0), 32).delete("\0")
+  abort "unexpected predict database format" unless header == "Rime::Predict/2.0"
+' "${smoke_database}" || fail "build_predict format contract failed"
+invalid_pinyin_input="${work_root}/build-predict-invalid-pinyin.tsv"
+invalid_pinyin_database="${work_root}/build-predict-invalid-pinyin.db"
+printf 'p/test\tinvalid\t63\n' > "${invalid_pinyin_input}"
+if "${runtime_prefix}/bin/build_predict" "${invalid_pinyin_database}" \
+    < "${invalid_pinyin_input}" >/dev/null 2>&1; then
+  fail "build_predict accepted an invalid compact pinyin rank"
+fi
+
+[[ -f "${runtime_prefix}/include/rime_api.h" &&
+   -f "${runtime_prefix}/include/rime/engine.h" &&
+   -f "${runtime_prefix}/include/glog/logging.h" &&
+   -f "${runtime_prefix}/include/marisa.h" &&
+   -f "${runtime_prefix}/include/marisa/stdio.h" &&
+   -f "${runtime_prefix}/include/rime/predict/predict_engine.h" &&
+   -f "${runtime_prefix}/include/rime/predict/predict_db.h" ]] ||
+  fail "runtime SDK headers are incomplete"
+[[ -d "${deps_stage}/Linnet/share/opencc" ]] || fail "OpenCC runtime data is missing"
+
+publish_root="${work_root}/publish"
+mkdir -p "${publish_root}/dist" "${publish_root}/opencc" "${publish_root}/boost"
+# Materialize the publication boundary without copying any build-machine
+# extended attributes. The final App scan validates the shipped result.
+run cp -R -X "${runtime_prefix}/." "${publish_root}/dist"
+run cp -R -X "${deps_stage}/Linnet/share/opencc/." "${publish_root}/opencc"
+run cp -R -X "${boost_root}/${boost_archive_root}/." "${publish_root}/boost"
+[[ -d "${publish_root}/boost/boost" && -f "${publish_root}/boost/LICENSE_1_0.txt" ]] ||
+  fail "Boost SDK tree is incomplete"
+[[ "$(find "${publish_root}/boost" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 2 ]] ||
+  fail "Boost SDK tree has an unexpected top-level entry"
+[[ -z "$(find "${publish_root}/boost" -type l -print -quit)" ]] ||
+  fail "Boost SDK tree contains a symlink"
+# Boost is a hash-locked upstream source input, not a shipped product artifact.
+# Its source text may legitimately contain generic path examples. Compiled
+# bytes remain covered by the final App artifact scan.
+
+[[ ! -L "${dist_target}" && ! -L "${opencc_target}" && ! -L "${boost_target}" ]] ||
+  fail "generated runtime target must not be a symlink"
+mkdir -p "$(dirname "${dist_target}")" "$(dirname "${opencc_target}")" "$(dirname "${boost_target}")"
+publishing=1
+if [[ -e "${dist_target}" ]]; then mv "${dist_target}" "${dist_backup}"; had_dist=1; fi
+mv "${publish_root}/dist" "${dist_target}"
+new_dist=1
+if [[ -e "${opencc_target}" ]]; then mv "${opencc_target}" "${opencc_backup}"; had_opencc=1; fi
+mv "${publish_root}/opencc" "${opencc_target}"
+new_opencc=1
+if [[ -e "${boost_target}" ]]; then mv "${boost_target}" "${boost_backup}"; had_boost=1; fi
+mv "${publish_root}/boost" "${boost_target}"
+new_boost=1
+publishing=0
+
+mkdir -p "$(dirname "${runtime_fingerprint_stamp}")"
+printf '%s\n' "${runtime_fingerprint}" > "${runtime_fingerprint_stamp}"
+
+echo "build-rime-runtime: PASS (locked core/lua/predict patches; arm64 runtime)"

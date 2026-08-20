@@ -1,0 +1,100 @@
+name: Linnet community release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linnet-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-source:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+      - name: Install declared build tools
+        run: brew install ripgrep
+      - name: Validate key-free source and data inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse --verify HEAD^{commit})" = "${GITHUB_SHA}"
+          package/data_release_metadata validate config/linnet-data-releases.json
+          product_version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' config/LinnetProduct.xcconfig | LC_ALL=C sort -u)"
+          package/data_release_metadata check-core config/linnet-data-releases.json "${product_version}"
+          ruby scripts/upstream-sync report
+          ./action-install.sh
+
+  publish-community:
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    runs-on: macos-latest
+    steps:
+      - name: Checkout the tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Install declared build tools
+        run: brew install ripgrep
+
+      - name: Validate tag and release data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse --verify HEAD^{commit})" = "${GITHUB_SHA}"
+          product_version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' config/LinnetProduct.xcconfig | LC_ALL=C sort -u)"
+          test "${GITHUB_REF_NAME}" = "v${product_version}"
+          package/data_release_metadata validate config/linnet-data-releases.json
+          package/data_release_metadata check-core config/linnet-data-releases.json "${product_version}"
+          ruby scripts/upstream-sync report
+
+      - name: Build unsigned community artifacts
+        env:
+          LINNET_CANDIDATE_REVISION: ${{ github.sha }}
+          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-release
+        run: |
+          mkdir -p "${ARCHIVE_OUTPUT_DIR}"
+          ./action-build.sh archive
+
+      - name: Verify the exact public artifact set
+        env:
+          LINNET_CANDIDATE_REVISION: ${{ github.sha }}
+          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-release
+        run: |
+          pack_tool="${RUNNER_TEMP}/linnet-pack"
+          xcrun swiftc -warnings-as-errors \
+            sources/LinnetPackContract.swift \
+            sources/LinnetDataChannel.swift \
+            sources/LinnetDataRegistry.swift \
+            tools/LinnetDataCatalogBuilder.swift \
+            tools/LinnetPackTool.swift -o "${pack_tool}"
+          LINNET_RELEASE_TOOL="${pack_tool}" package/verify_publication_artifacts \
+            "${ARCHIVE_OUTPUT_DIR}" "${GITHUB_REF_NAME#v}" \
+            "${LINNET_CANDIDATE_REVISION}"
+
+      - name: Publish the tagged community release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-release
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "${ARCHIVE_OUTPUT_DIR}"/* \
+            --verify-tag --title "Linnet ${GITHUB_REF_NAME#v}" \
+            --notes-from-tag

@@ -1,0 +1,9 @@
+// One Xcode build contract owns architecture and compiler path mapping for
+// both Debug and Release. Build logs are a separate output boundary.
+ARCHS = arm64
+ONLY_ACTIVE_ARCH = NO
+GCC_GENERATE_DEBUGGING_SYMBOLS = NO
+
+OTHER_CFLAGS = $(inherited) "-ffile-prefix-map=$(SRCROOT)=." "-fmacro-prefix-map=$(SRCROOT)=." "-fdebug-prefix-map=$(SRCROOT)=." "-fdebug-compilation-dir=." "-ffile-prefix-map=$(OBJROOT)=.build/Intermediates" "-fmacro-prefix-map=$(OBJROOT)=.build/Intermediates" "-fdebug-prefix-map=$(OBJROOT)=.build/Intermediates" "-ffile-prefix-map=$(SYMROOT)=.build/Products" "-fdebug-prefix-map=$(SYMROOT)=.build/Products" "-ffile-prefix-map=$(MODULE_CACHE_DIR)=.build/ModuleCache" "-fdebug-prefix-map=$(MODULE_CACHE_DIR)=.build/ModuleCache" "-ffile-prefix-map=$(SDKROOT)=/SDK" "-fmacro-prefix-map=$(SDKROOT)=/SDK" "-fdebug-prefix-map=$(SDKROOT)=/SDK" "-ffile-prefix-map=$(TOOLCHAIN_DIR)=/Toolchain" "-fmacro-prefix-map=$(TOOLCHAIN_DIR)=/Toolchain" "-fdebug-prefix-map=$(TOOLCHAIN_DIR)=/Toolchain"
+
+OTHER_SWIFT_FLAGS = $(inherited) -file-compilation-dir . -file-prefix-map "$(SRCROOT)=." -debug-prefix-map "$(SRCROOT)=." -file-prefix-map "$(OBJROOT)=.build/Intermediates" -debug-prefix-map "$(OBJROOT)=.build/Intermediates" -file-prefix-map "$(SYMROOT)=.build/Products" -debug-prefix-map "$(SYMROOT)=.build/Products" -file-prefix-map "$(MODULE_CACHE_DIR)=.build/ModuleCache" -debug-prefix-map "$(MODULE_CACHE_DIR)=.build/ModuleCache" -file-prefix-map "$(SDKROOT)=/SDK" -debug-prefix-map "$(SDKROOT)=/SDK" -file-prefix-map "$(TOOLCHAIN_DIR)=/Toolchain" -debug-prefix-map "$(TOOLCHAIN_DIR)=/Toolchain"

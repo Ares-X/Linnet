@@ -1,0 +1,8 @@
+# Rime table
+# coding: utf-8
+#@/db_name	linnet_custom_words.txt
+#@/db_type	tabledb
+#
+Linnet Custom	customword
+BlockedCustom	blockedcustom
+don't	don't

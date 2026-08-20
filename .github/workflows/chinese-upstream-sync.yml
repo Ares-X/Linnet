@@ -1,0 +1,44 @@
+name: Chinese Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check stable upstreams
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Inspect public stable tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/linnet-chinese-upstream-drift.txt"
+          ruby scripts/upstream-sync report | tee "${report}"
+          if ! grep -Eq '\| review( |\|)' "${report}"; then
+            exit 0
+          fi
+          title='Chinese upstream update available'
+          existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open \
+            --search "${title} in:title" --json number --jq '.[0].number // empty')"
+          if [[ -n "${existing}" ]]; then
+            echo "Open review issue already exists: #${existing}"
+          else
+            gh issue create --repo "${GITHUB_REPOSITORY}" \
+              --title "${title}" --body-file "${report}"
+          fi

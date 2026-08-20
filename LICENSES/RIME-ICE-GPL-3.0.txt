@@ -1,0 +1,12 @@
+GNU General Public License v3.0
+
+The Linnet English dictionary complement, radical dictionary, symbols and
+OpenCC assets incorporate material from the rime-ice project
+(https://github.com/iDvel/rime-ice), licensed under GPL-3.0-only. Linnet no
+longer generates or ships a second rime-ice Chinese dictionary projection.
+
+  https://www.gnu.org/licenses/gpl-3.0.html
+
+Upstream commit: 6810e8916d160498620a16fef2135956fecbd485 (tag: 2026.06.30)
+
+Full license text: https://www.gnu.org/licenses/gpl-3.0.txt

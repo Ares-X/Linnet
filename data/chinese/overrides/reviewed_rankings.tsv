@@ -1,0 +1,13 @@
+text	code	weight	defect	regression
+成都	chéng dū	120000	geographic corpus ranked 程度 first	full=chengdu; ziranma=igdu
+同事	tóng shì	500000	office corpus ranked 同时 first	full=tongshi; ziranma=tsui
+你的意见很重要	nǐ de yì jiàn hěn zhòng yào	500000	correct long sentence was not composed first	full=nideyijianhenzhongyao
+这里的空气真新鲜	zhè lǐ de kōng qì zhēn xīn xiān	500000	correct long sentence was not composed first	full=zhelidekongqizhenxinxian
+白山	bái shān	1100	person-name candidate displaced the common reviewed place term	full=baishan; place-before-person-name
+橙汁	chéng zhī	1300	correct spelling was displaced by the 称职 cuoyin hint	full=chengzhi; correct-spelling-before-cuoyin
+诚挚	chéng zhì	1250	correct spelling was displaced by the 称职 cuoyin hint	full=chengzhi; correct-spelling-before-cuoyin
+华融	huá róng	1200	generic place and name candidates displaced the common reviewed term	full=huarong; general-before-place-name
+讲演	jiǎng yǎn	1300	place names displaced the common general word	full=jiangyan; general-before-place-name
+凛冬	lǐn dōng	1100	generic place and name candidate displaced the common general word	full=lindong; general-before-place-name
+鳞状	lín zhuàng	1100	generic place and name candidate displaced the common general word	full=linzhuang; general-before-place-name
+李双代数	lǐ shuāng dài shù	520	upstream frequency 40986122 was a four-character academic-term outlier	full=lishuangdaishu; bounded-academic-weight

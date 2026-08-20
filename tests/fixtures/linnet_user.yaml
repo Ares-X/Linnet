@@ -1,0 +1,6 @@
+# Test-only personal-data fixture.
+disabled_words:
+  - "forbiddenword"
+  - "blockedcustom"
+sentence_capitalization: false
+tab_behavior: smart_complete

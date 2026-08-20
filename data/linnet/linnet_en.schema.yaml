@@ -1,0 +1,126 @@
+# Linnet Smart English mode
+# encoding: utf-8
+
+schema:
+  schema_id: linnet_en
+  name: 双韵 Smart English
+  version: "0.2.0"
+  author:
+    - Linnet contributors
+  description: |
+    Standalone English mode with prefix completion, correction, automatic
+    pinyin lookup, session prediction, and Rime user learning.
+
+# prediction and full_shape are reset-only invariants. Without states they do
+# not add another visible language or shape control to the product switcher.
+switches:
+  - name: ascii_mode
+    states: [ En, A ]
+    abbrev: [ En, A ]
+  - name: prediction
+    reset: 1
+  - name: full_shape
+    reset: 0
+
+engine:
+  # Recognizer gets first refusal for explicit Unicode/raw/calculator forms.
+  # Linnet then owns remaining key intent before Predictor/Selector; Predictor
+  # only projects suggestions after a real commit.
+  processors:
+    - ascii_composer
+    - linnet_mode_switch_processor
+    - recognizer
+    - linnet_interaction_processor
+    - predictor
+    - key_binder
+    - speller
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - matcher
+    - affix_segmentor@linnet_pinyin
+    - ascii_segmentor
+    - abc_segmentor
+    - punct_segmentor
+    - fallback_segmentor
+  translators:
+    - table_translator@linnet_custom_words
+    - table_translator
+    - table_translator@linnet_text_expander
+    - linnet_english_translator
+    - predict_translator
+    - echo_translator
+  filters:
+    - linnet_disabled_filter@linnet_disabled_filter
+    - linnet_english_filter
+    - uniquifier
+
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA'
+  algebra:
+    - derive/^.+$/\U$0/
+    - derive/^./\U$0/
+    # Standard Rime spellings cover the short transposition that Phonex
+    # intentionally excludes and preserve one-letter uppercase completion.
+    - derive/^([a-z])([a-z])([a-z])$/$1$3$2/
+    - derive/^([A-Z]+).$/$1/
+
+translator:
+  dictionary: linnet_en
+  user_dict: linnet_en
+  enable_completion: true
+  enable_sentence: false
+  enable_user_dict: true
+
+predictor:
+  max_candidates: 10
+
+# The ordinary-word tag sorts after zz_code_token, keeping code routing
+# authoritative. The native translator appends pinyin-to-English results after
+# ordinary English candidates, matching Hallelujah's established interaction.
+recognizer:
+  patterns:
+    text_expander:
+      __include: default.yaml:/linnet/recognizer_patterns/text_expander
+    zz_code_token:
+      __include: default.yaml:/linnet/recognizer_patterns/zz_code_token
+    linnet_pinyin:
+      __include: default.yaml:/linnet/recognizer_patterns/pinyin_reverse_lookup
+    zz_english: "^[a-zA-Z]+$"
+
+# One Settings-owned Chinese profile selects this Prism. The dictionary and
+# canonical pinyin formatter stay singular; no profile-specific English index
+# or full-pinyin fallback exists.
+linnet_pinyin:
+  __include: default.yaml:/linnet/pinyin_reverse_lookup
+  dictionary: linnet_zh
+  prism: linnet_zh_pinyin
+  delimiter: " '"
+
+# A Smart English session opened directly has no paired Chinese context. The
+# same Settings-owned profile that selects the Prism also owns this return.
+linnet_mode_switch:
+  chinese_schema: linnet_zh_pinyin
+
+linnet_custom_words:
+  __include: default.yaml:/linnet/custom_words
+
+linnet_text_expander:
+  __include: default.yaml:/linnet/text_expander
+
+linnet_disabled_filter:
+  __include: default.yaml:/linnet/disabled_filter
+
+linnet_english_interaction:
+  __include: default.yaml:/linnet/english_interaction
+
+# Plain Space and Return are selected-candidate behavior owned by the native
+# interaction processor. Host-modified keys are rejected before the editor;
+# only unmodified editing keys remain in this downstream owner.
+editor:
+  bindings:
+    Return: commit_raw_input
+    BackSpace: revert
+    Delete: delete
+    Escape: cancel

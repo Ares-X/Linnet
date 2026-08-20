@@ -1,0 +1,19 @@
+[submodule "librime"]
+	path = librime
+	url = https://github.com/rime/librime.git
+	ignore = dirty
+[submodule "plum"]
+	path = plum
+	url = https://github.com/rime/plum.git
+[submodule "rime-ice"]
+	path = upstreams/rime-ice
+	url = https://github.com/iDvel/rime-ice.git
+[submodule "hallelujah"]
+	path = upstreams/hallelujah
+	url = https://github.com/dongyuwei/hallelujahIM.git
+[submodule "rime-octagram-data"]
+	path = upstreams/rime-octagram-data
+	url = https://github.com/lotem/rime-octagram-data.git
+[submodule "rime-wanxiang"]
+	path = upstreams/rime-wanxiang
+	url = https://github.com/amzxyz/rime-wanxiang.git

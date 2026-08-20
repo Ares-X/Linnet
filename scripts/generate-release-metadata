@@ -1,0 +1,680 @@
+#!/usr/bin/env ruby
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+require "digest"
+require "fileutils"
+require "json"
+require "open3"
+require "time"
+
+def fail_release(message)
+  warn "generate-release-metadata: #{message}"
+  exit 1
+end
+
+def git_output(repository, *arguments)
+  output, error, status = Open3.capture3("git", "-C", repository, *arguments)
+  fail_release("cannot read pinned librime metadata: #{error.strip}") unless status.success?
+  output.strip
+end
+
+def vcs_reference(repository, commit)
+  {
+    "referenceCategory" => "OTHER",
+    "referenceType" => "vcs",
+    "referenceLocator" => "git+#{repository}@#{commit}"
+  }
+end
+
+def spdx_package(name:, id:, version:, download:, declared:, concluded: declared,
+                 purpose: nil, refs: nil, comment: nil)
+  package = {
+    "name" => name,
+    "SPDXID" => id,
+    "versionInfo" => version,
+    "downloadLocation" => download,
+    "filesAnalyzed" => false,
+    "licenseConcluded" => concluded,
+    "licenseDeclared" => declared,
+    "copyrightText" => "NOASSERTION"
+  }
+  package["primaryPackagePurpose"] = purpose if purpose
+  package["externalRefs"] = refs if refs
+  package["comment"] = comment if comment
+  package
+end
+
+def relationship(owner, type, component)
+  {
+    "spdxElementId" => owner,
+    "relationshipType" => type,
+    "relatedSpdxElement" => component
+  }
+end
+
+def verify_locked_file(path, digest, label)
+  fail_release("#{label} differs from the release lock") unless
+    File.file?(path) && !File.symlink?(path) &&
+      Digest::SHA256.file(path).hexdigest == digest
+end
+
+lock_path, output_path, version, build, source_epoch, code_identity_json = ARGV
+fail_release(
+  "usage: LOCK OUTPUT VERSION BUILD SOURCE_DATE_EPOCH CODE_IDENTITY_JSON"
+) unless ARGV.length == 6
+fail_release("invalid product version") unless version.match?(/\A[0-9]+\.[0-9]+\.[0-9]+(?:[-.][0-9A-Za-z]+)*\z/)
+fail_release("invalid product build") unless build.match?(/\A[0-9]+\z/)
+fail_release("invalid source epoch") unless source_epoch.match?(/\A[0-9]+\z/)
+begin
+  code_identity = JSON.parse(code_identity_json)
+rescue JSON::ParserError
+  fail_release("code identity projection is not valid JSON")
+end
+uat_identity =
+  code_identity.keys.sort == %w[candidate_revision format leaf_certificate_sha256 profile] &&
+  code_identity["format"] == 2 && code_identity["profile"] == "uat" &&
+  code_identity["leaf_certificate_sha256"].is_a?(String) &&
+  code_identity["leaf_certificate_sha256"].match?(/\A[0-9a-f]{64}\z/)
+community_identity =
+  code_identity.keys.sort == %w[candidate_revision format profile] &&
+  code_identity["format"] == 3 && code_identity["profile"] == "community-adhoc"
+fail_release("code identity projection shape is invalid") unless
+  (uat_identity || community_identity) &&
+  code_identity["candidate_revision"].is_a?(String) &&
+  code_identity["candidate_revision"].match?(/\A[0-9a-f]{40}\z/)
+code_signing_profile = code_identity.fetch("profile")
+candidate_revision = code_identity.fetch("candidate_revision")
+
+lock = JSON.parse(File.read(lock_path))
+source_root = File.dirname(File.expand_path(lock_path))
+sources = lock.fetch("sources")
+squirrel = sources.fetch("squirrel")
+librime = sources.fetch("librime")
+rime_ice = sources.fetch("rime_ice")
+hallelujah = sources.fetch("hallelujah")
+rime_wanxiang = sources.fetch("rime_wanxiang")
+rime_lmdg_grammar = sources.fetch("rime_lmdg_grammar")
+wanxiang_algebra = rime_wanxiang.fetch("data_inputs").fetch("algebra")
+plugins = librime.fetch("bundled_plugins")
+lua_plugin = plugins.fetch("lua")
+octagram_plugin = plugins.fetch("octagram")
+predict_plugin = plugins.fetch("predict")
+lua_runtime = lua_plugin.fetch("thirdparty")
+static_dependencies = librime.fetch("static_dependencies")
+embedded_components = librime.fetch("embedded_components")
+rapidjson = static_dependencies.dig("opencc", "embedded_components", "rapidjson")
+boost = lock.dig("build_inputs", "boost_headers")
+expected_groups = %w[squirrel_rime rime_ice hallelujah rime_wanxiang rime_lmdg_grammar]
+fail_release("direct product upstream list changed") unless
+  lock.dig("policy", "direct_product_upstreams") == expected_groups
+
+librime_root = File.join(source_root, librime.fetch("submodule_path"))
+librime_commit = librime.fetch("commit")
+fail_release("pinned librime checkout is unavailable") unless
+  File.directory?(librime_root) && !File.symlink?(librime_root)
+
+static_git_names = {
+  "glog" => "glog",
+  "leveldb" => "leveldb",
+  "marisa-trie" => "marisa-trie",
+  "opencc" => "opencc",
+  "yaml-cpp" => "yaml-cpp"
+}
+static_sources = static_git_names.to_h do |lock_name, git_name|
+  tree_entry = git_output(
+    librime_root, "ls-tree", librime_commit, "--", "deps/#{git_name}"
+  )
+  match = tree_entry.match(/\A160000 commit ([0-9a-f]{40})\tdeps\/#{Regexp.escape(git_name)}\z/)
+  fail_release("pinned librime gitlink is invalid: #{git_name}") unless match
+  repository = git_output(
+    librime_root, "config", "--blob", "#{librime_commit}:.gitmodules",
+    "--get", "submodule.#{git_name}.url"
+  )
+  fail_release("pinned librime repository is invalid: #{git_name}") unless
+    repository.match?(%r{\Ahttps://github\.com/[^[:space:]]+\.git\z})
+  [lock_name, { "repository" => repository, "commit" => match[1] }]
+end
+
+runtime_license_specs = {
+  "Boost-BSL-1.0.txt" => boost.fetch("license_sha256"),
+  "Darts-clone-BSD-3-Clause.txt" =>
+    embedded_components.dig("darts_clone", "license_sha256"),
+  "LevelDB-BSD-3-Clause.txt" =>
+    static_dependencies.dig("leveldb", "license_sha256"),
+  "OpenCC-Apache-2.0.txt" =>
+    static_dependencies.dig("opencc", "license_sha256"),
+  "RapidJSON-1.1.0.txt" =>
+    rapidjson.fetch("license_sha256"),
+  "glog-BSD-3-Clause.txt" =>
+    static_dependencies.dig("glog", "license_sha256"),
+  "librime-BSD-3-Clause.txt" => librime.fetch("license_sha256"),
+  "librime-lua-BSD-3-Clause.txt" => lua_plugin.fetch("license_sha256"),
+  "librime-lua-embedded-MIT.txt" =>
+    lua_plugin.dig("embedded_mit_notice", "sha256"),
+  "librime-predict-BSD-3-Clause.txt" => predict_plugin.fetch("license_sha256"),
+  "marisa-BSD-2-Clause-or-LGPL-2.1.txt" =>
+    static_dependencies.dig("marisa-trie", "license_sha256"),
+  "yaml-cpp-MIT.txt" => static_dependencies.dig("yaml-cpp", "license_sha256")
+}
+runtime_license_root = File.join(librime_root, "dist", "share", "linnet-licenses")
+fail_release("runtime license projection is unavailable") unless
+  File.directory?(runtime_license_root) && !File.symlink?(runtime_license_root)
+fail_release("runtime license projection has an unexpected inventory") unless
+  Dir.children(runtime_license_root).sort == runtime_license_specs.keys.sort
+runtime_license_specs.each do |filename, digest|
+  verify_locked_file(
+    File.join(runtime_license_root, filename), digest, "runtime license #{filename}"
+  )
+end
+
+root_gpl = File.join(source_root, squirrel.fetch("license_path"))
+verify_locked_file(root_gpl, squirrel.fetch("license_sha256"), "App GPL text")
+fail_release("Squirrel and librime-octagram GPL texts diverged") unless
+  squirrel.fetch("license_sha256") == octagram_plugin.fetch("license_sha256")
+[rime_ice, hallelujah].each do |source|
+  license = File.join(
+    source_root, source.fetch("submodule_path"), source.fetch("license_path")
+  )
+  verify_locked_file(
+    license, source.fetch("license_sha256"), "#{source.fetch("repository")} license"
+  )
+end
+
+FileUtils.mkdir_p(output_path)
+fail_release("output directory is not empty") unless Dir.children(output_path).empty?
+
+short = ->(value) { value.fetch("commit")[0, 12] }
+notice = <<~NOTICE
+  # Linnet release notices
+
+  This file and `SBOM.spdx.json` are generated from the release lock, the exact
+  librime gitlinks and the runtime license projection used by this build. The
+  App-level `LICENSE.txt` supplies the GNU GPL version 3 terms for Linnet,
+  Squirrel, the shipped librime-octagram plugin and the selected rime-ice and
+  Hallelujah inputs. It is byte-identical to the Squirrel and octagram license
+  texts; the other locked GPL source texts are verified during generation.
+  Other shipped license texts are under `LICENSES/`.
+
+  ## Shipped frontend and Rime runtime
+
+  - Squirrel #{squirrel.fetch("tag")} (#{short.call(squirrel)}),
+    #{squirrel.fetch("declared_license")}: #{squirrel.fetch("repository")}
+  - librime #{librime.fetch("tag")} (#{short.call(librime)}),
+    #{librime.fetch("declared_license")}: #{librime.fetch("repository")}
+  - librime-lua (#{short.call(lua_plugin)}),
+    #{lua_plugin.fetch("declared_license")}: #{lua_plugin.fetch("repository")}
+  - librime-octagram (#{short.call(octagram_plugin)}),
+    #{octagram_plugin.fetch("declared_license")}:
+    #{octagram_plugin.fetch("repository")}
+  - librime-predict (#{short.call(predict_plugin)}),
+    #{predict_plugin.fetch("declared_license")}:
+    #{predict_plugin.fetch("repository")}
+  - Lua #{lua_runtime.fetch("version")} (#{short.call(lua_runtime)}),
+    #{lua_runtime.fetch("declared_license")}:
+    #{lua_runtime.fetch("repository")} (thirdparty branch)
+
+  Squirrel supplies the macOS InputMethodKit frontend. librime and the three
+  named plugins supply the input engine, Lua automation, grammar scoring and
+  prediction. librime-octagram is shipped executable code; no octagram model
+  data is included. The combined MIT notice for embedded Lua and compatibility
+  code is `LICENSES/librime-lua-embedded-MIT.txt`.
+
+  ## Statically linked and embedded runtime components
+
+  - glog (#{static_sources.fetch("glog").fetch("commit")[0, 12]}),
+    #{static_dependencies.dig("glog", "declared_license")}:
+    #{static_sources.fetch("glog").fetch("repository")}
+  - LevelDB (#{static_sources.fetch("leveldb").fetch("commit")[0, 12]}),
+    #{static_dependencies.dig("leveldb", "declared_license")}:
+    #{static_sources.fetch("leveldb").fetch("repository")}
+  - marisa-trie (#{static_sources.fetch("marisa-trie").fetch("commit")[0, 12]}),
+    declared #{static_dependencies.dig("marisa-trie", "declared_license")};
+    this build concludes #{static_dependencies.dig("marisa-trie", "license_concluded")}:
+    #{static_sources.fetch("marisa-trie").fetch("repository")}
+  - OpenCC (#{static_sources.fetch("opencc").fetch("commit")[0, 12]}),
+    #{static_dependencies.dig("opencc", "declared_license")}:
+    #{static_sources.fetch("opencc").fetch("repository")}
+  - yaml-cpp (#{static_sources.fetch("yaml-cpp").fetch("commit")[0, 12]}),
+    #{static_dependencies.dig("yaml-cpp", "declared_license")}:
+    #{static_sources.fetch("yaml-cpp").fetch("repository")}
+  - Boost #{boost.fetch("version")}, #{boost.fetch("license")}:
+    #{boost.fetch("url")}
+  - Darts-clone #{embedded_components.dig("darts_clone", "version")},
+    #{embedded_components.dig("darts_clone", "declared_license")}, embedded
+    by librime
+  - RapidJSON #{rapidjson.fetch("version")},
+    #{rapidjson.fetch("declared_license")}, vendored and
+    owned at runtime by the exact OpenCC gitlink above
+
+  RapidJSON's official URL in the lock identifies only the source of its
+  license text. OpenCC contains the shipped RapidJSON copy. Darts-clone occurs
+  once in this inventory and is contained by librime.
+
+  ## Direct data upstreams
+
+  ### rime-ice
+
+  - rime-ice #{rime_ice.fetch("tag")} (#{short.call(rime_ice)})
+    #{rime_ice.fetch("repository")}
+
+  rime-ice supplies build-time English dictionary supplements, radical lookup,
+  symbol tables, emoji/OpenCC resources and the explicitly embedded Lua modules.
+  Its Chinese candidate dictionaries and runtime schemas are not product inputs.
+
+  ### Hallelujah
+
+  - Hallelujah #{hallelujah.fetch("tag")} (#{short.call(hallelujah)})
+    #{hallelujah.fetch("repository")}
+  - Upstream declared license: #{hallelujah.fetch("declared_license")}
+
+  Hallelujah supplies pinned English dictionary, pronunciation, definition,
+  prediction and behavior inputs transformed into Rime-native immutable data.
+  Linnet adds a project-maintained, build-time Chinese gloss decision for
+  every currently missing definition; reviewed proper terms remain unchanged.
+  Its frontend and runtime are not bundled, and no translation service or model
+  is present at runtime.
+
+  ### Rime Wanxiang
+
+  - Rime Wanxiang #{rime_wanxiang.fetch("tag")} (#{short.call(rime_wanxiang)})
+    #{rime_wanxiang.fetch("repository")}
+  - Upstream declared license: #{rime_wanxiang.fetch("declared_license")}
+
+  Wanxiang supplies the canonical Chinese dictionary core and the eight source
+  layouts selected from `#{wanxiang_algebra.fetch("path")}:/#{wanxiang_algebra.fetch("section")}`.
+  Linnet applies its reviewed pronunciation corrections to selected dictionary
+  rows. For the algebra, Linnet flattens those layouts into self-contained
+  profiles, removes upstream selector markers and broad single-character
+  double-pinyin derivations/abbreviations, narrows full-pinyin typo transforms,
+  and adds reviewed v/u compatibility and a shared accuracy-oriented typo
+  suffix. The license text is included under `LICENSES/`.
+
+  ### Rime LMDG grammar
+
+  - Rime LMDG #{rime_lmdg_grammar.fetch("release")} release asset
+    #{rime_lmdg_grammar.fetch("asset")}
+    #{rime_lmdg_grammar.fetch("repository")}
+  - Upstream declared license: #{rime_lmdg_grammar.fetch("declared_license")}
+
+  Rime LMDG supplies the offline Wanxiang LTS grammar model shipped in both
+  public Linnet editions. The historical model-size labels "200M/400M" do not
+  identify downloadable bytes; the currently locked simplified-Chinese LTS asset is
+  approximately 420 MB. Linnet does not infer the bytes or digest of a retired
+  upstream asset from those labels. The license text is included under
+  `LICENSES/`.
+NOTICE
+
+identity_statement = if community_identity
+  <<~TEXT
+    This public community build uses hardened-runtime ad-hoc signatures for the
+    Host, embedded Settings app and executable code. It is not signed with an
+    Apple Developer ID and is not notarized. Users must verify the release
+    SHA-256 files and approve the package through the standard macOS Finder or
+    Privacy & Security interface.
+  TEXT
+else
+  <<~TEXT
+    This installation-UAT build uses one explicit external CMS identity to sign
+    the Host, embedded Settings app and executable code. The identity is supplied
+    outside the source checkout and is recorded in the release manifest; it does
+    not by itself imply Apple Developer ID validation. This build is not notarized
+    or eligible for publication.
+  TEXT
+end
+
+privacy = <<~PRIVACY
+  # Linnet privacy statement
+
+  Linnet processes keystrokes and candidate selection locally on the Mac.
+  The input-method process contains no network client. The embedded Settings
+  application has one user-initiated network boundary for Chinese, English, LTS
+  and Extended packs from Linnet GitHub Releases. It fetches the canonical GitHub HTTPS Catalog
+  directly, binds each exact container byte count and SHA-256, then verifies
+  Core compatibility, the exhaustive manifest and every file hash before
+  atomically publishing an immutable local pack.
+  Linnet contains no telemetry or automatic updater.
+
+  Linnet stores immutable language packs and mutable user state separately
+  under `~/Library/Application Support/Linnet`. The optional import action
+  reads only explicitly selected compatible local Rime learning data and
+  Hallelujah substitutions, builds an isolated candidate, and activates it
+  only after validation. It does not upload those records.
+
+  #{identity_statement.strip}
+  Linnet never disables Gatekeeper, clears quarantine, or changes system
+  security policy.
+PRIVACY
+
+created_at = Time.at(Integer(source_epoch)).utc.iso8601
+lock_sha256 = Digest::SHA256.file(lock_path).hexdigest
+release_name = "Linnet-#{version}-#{build}-#{candidate_revision}-arm64-community-beta"
+
+packages = [
+  spdx_package(
+    name: "Linnet", id: "SPDXRef-Package-Linnet", version: version,
+    download: "NOASSERTION", declared: "GPL-3.0-or-later",
+    purpose: "APPLICATION",
+    comment: "Exact candidate revision #{candidate_revision}; includes the " \
+      "Host, embedded Settings app and first-party Smart English plugin."
+  ),
+  spdx_package(
+    name: "Squirrel", id: "SPDXRef-Package-Squirrel",
+    version: squirrel.fetch("tag"), download: squirrel.fetch("repository"),
+    declared: squirrel.fetch("declared_license"), purpose: "APPLICATION",
+    refs: [vcs_reference(squirrel.fetch("repository"), squirrel.fetch("commit"))]
+  ),
+  spdx_package(
+    name: "librime", id: "SPDXRef-Package-librime",
+    version: librime.fetch("tag"), download: librime.fetch("repository"),
+    declared: librime.fetch("declared_license"), purpose: "LIBRARY",
+    refs: [vcs_reference(librime.fetch("repository"), librime_commit)]
+  ),
+  spdx_package(
+    name: "librime-lua", id: "SPDXRef-Package-librime-lua",
+    version: lua_plugin.fetch("commit"), download: lua_plugin.fetch("repository"),
+    declared: lua_plugin.fetch("declared_license"),
+    concluded: "(BSD-3-Clause AND MIT)", purpose: "LIBRARY",
+    refs: [vcs_reference(lua_plugin.fetch("repository"), lua_plugin.fetch("commit"))],
+    comment: "The plugin includes the MIT components named in " \
+      "LICENSES/librime-lua-embedded-MIT.txt."
+  ),
+  spdx_package(
+    name: "librime-octagram", id: "SPDXRef-Package-librime-octagram",
+    version: octagram_plugin.fetch("commit"),
+    download: octagram_plugin.fetch("repository"),
+    declared: octagram_plugin.fetch("declared_license"), purpose: "LIBRARY",
+    refs: [vcs_reference(
+      octagram_plugin.fetch("repository"), octagram_plugin.fetch("commit")
+    )],
+    comment: "Shipped plugin code; no octagram model data is bundled."
+  ),
+  spdx_package(
+    name: "librime-predict", id: "SPDXRef-Package-librime-predict",
+    version: predict_plugin.fetch("commit"),
+    download: predict_plugin.fetch("repository"),
+    declared: predict_plugin.fetch("declared_license"), purpose: "LIBRARY",
+    refs: [vcs_reference(
+      predict_plugin.fetch("repository"), predict_plugin.fetch("commit")
+    )]
+  ),
+  spdx_package(
+    name: "Lua", id: "SPDXRef-Package-Lua",
+    version: lua_runtime.fetch("version"), download: lua_runtime.fetch("repository"),
+    declared: lua_runtime.fetch("declared_license"), purpose: "LIBRARY",
+    refs: [vcs_reference(lua_runtime.fetch("repository"), lua_runtime.fetch("commit"))],
+    comment: "The exact Lua thirdparty branch is embedded by librime-lua."
+  ),
+  spdx_package(
+    name: "glog", id: "SPDXRef-Package-glog",
+    version: static_sources.dig("glog", "commit"),
+    download: static_sources.dig("glog", "repository"),
+    declared: static_dependencies.dig("glog", "declared_license"),
+    purpose: "LIBRARY", refs: [vcs_reference(
+      static_sources.dig("glog", "repository"),
+      static_sources.dig("glog", "commit")
+    )]
+  ),
+  spdx_package(
+    name: "LevelDB", id: "SPDXRef-Package-LevelDB",
+    version: static_sources.dig("leveldb", "commit"),
+    download: static_sources.dig("leveldb", "repository"),
+    declared: static_dependencies.dig("leveldb", "declared_license"),
+    purpose: "LIBRARY", refs: [vcs_reference(
+      static_sources.dig("leveldb", "repository"),
+      static_sources.dig("leveldb", "commit")
+    )]
+  ),
+  spdx_package(
+    name: "marisa-trie", id: "SPDXRef-Package-marisa",
+    version: static_sources.dig("marisa-trie", "commit"),
+    download: static_sources.dig("marisa-trie", "repository"),
+    declared: static_dependencies.dig("marisa-trie", "declared_license"),
+    concluded: static_dependencies.dig("marisa-trie", "license_concluded"),
+    purpose: "LIBRARY", refs: [vcs_reference(
+      static_sources.dig("marisa-trie", "repository"),
+      static_sources.dig("marisa-trie", "commit")
+    )]
+  ),
+  spdx_package(
+    name: "OpenCC", id: "SPDXRef-Package-OpenCC",
+    version: static_sources.dig("opencc", "commit"),
+    download: static_sources.dig("opencc", "repository"),
+    declared: static_dependencies.dig("opencc", "declared_license"),
+    purpose: "LIBRARY", refs: [vcs_reference(
+      static_sources.dig("opencc", "repository"),
+      static_sources.dig("opencc", "commit")
+    )]
+  ),
+  spdx_package(
+    name: "yaml-cpp", id: "SPDXRef-Package-yaml-cpp",
+    version: static_sources.dig("yaml-cpp", "commit"),
+    download: static_sources.dig("yaml-cpp", "repository"),
+    declared: static_dependencies.dig("yaml-cpp", "declared_license"),
+    purpose: "LIBRARY", refs: [vcs_reference(
+      static_sources.dig("yaml-cpp", "repository"),
+      static_sources.dig("yaml-cpp", "commit")
+    )]
+  ),
+  spdx_package(
+    name: "Boost", id: "SPDXRef-Package-Boost",
+    version: boost.fetch("version"), download: boost.fetch("url"),
+    declared: boost.fetch("license"), purpose: "LIBRARY"
+  ),
+  spdx_package(
+    name: "Darts-clone", id: "SPDXRef-Package-Darts-clone",
+    version: embedded_components.dig("darts_clone", "version"),
+    download: "NOASSERTION",
+    declared: embedded_components.dig("darts_clone", "declared_license"),
+    purpose: "LIBRARY", comment: "Embedded once in the shipped librime package."
+  ),
+  spdx_package(
+    name: "RapidJSON", id: "SPDXRef-Package-RapidJSON",
+    version: rapidjson.fetch("version"),
+    download: "NOASSERTION",
+    declared: rapidjson.fetch("declared_license"),
+    purpose: "LIBRARY", refs: [vcs_reference(
+      static_sources.dig("opencc", "repository"),
+      static_sources.dig("opencc", "commit")
+    )],
+    comment: "Vendored by the exact OpenCC gitlink. The official RapidJSON " \
+      "URL in the lock is only the license-text source."
+  ),
+  spdx_package(
+    name: "rime-ice", id: "SPDXRef-Package-rime-ice",
+    version: rime_ice.fetch("tag"), download: rime_ice.fetch("repository"),
+    declared: rime_ice.fetch("declared_license"),
+    refs: [vcs_reference(rime_ice.fetch("repository"), rime_ice.fetch("commit"))],
+    comment: "Only the selected build-time data and Lua modules named in NOTICE.md are used."
+  ),
+  spdx_package(
+    name: "Hallelujah", id: "SPDXRef-Package-Hallelujah",
+    version: hallelujah.fetch("tag"), download: hallelujah.fetch("repository"),
+    declared: hallelujah.fetch("declared_license"),
+    refs: [vcs_reference(hallelujah.fetch("repository"), hallelujah.fetch("commit"))],
+    comment: "Selected build-time data; see NOTICE.md."
+  ),
+  spdx_package(
+    name: "rime-wanxiang", id: "SPDXRef-Package-rime-wanxiang",
+    version: rime_wanxiang.fetch("tag"),
+    download: rime_wanxiang.fetch("repository"),
+    declared: rime_wanxiang.fetch("declared_license"),
+    refs: [vcs_reference(
+      rime_wanxiang.fetch("repository"), rime_wanxiang.fetch("commit")
+    )],
+    comment: "Selected dictionary and algebra inputs are transformed as " \
+      "documented in NOTICE.md; see LICENSES/Rime-wanxiang-CC-BY-4.0.txt."
+  ),
+  spdx_package(
+    name: "RIME-LMDG", id: "SPDXRef-Package-RIME-LMDG",
+    version: rime_lmdg_grammar.fetch("release"),
+    download: rime_lmdg_grammar.fetch("repository"),
+    declared: rime_lmdg_grammar.fetch("declared_license"),
+    refs: [{
+      "referenceCategory" => "OTHER",
+      "referenceType" => "download",
+      "referenceLocator" => rime_lmdg_grammar.fetch("asset_api_url")
+    }],
+    comment: "The bundled grammar model is #{rime_lmdg_grammar.fetch("asset")}."
+  )
+]
+
+relationships = [
+  relationship("SPDXRef-Package-Linnet", "VARIANT_OF", "SPDXRef-Package-Squirrel"),
+  relationship("SPDXRef-Package-Linnet", "DYNAMIC_LINK", "SPDXRef-Package-librime"),
+  relationship("SPDXRef-Package-Linnet", "DYNAMIC_LINK", "SPDXRef-Package-librime-lua"),
+  relationship(
+    "SPDXRef-Package-Linnet", "DYNAMIC_LINK", "SPDXRef-Package-librime-octagram"
+  ),
+  relationship(
+    "SPDXRef-Package-Linnet", "DYNAMIC_LINK", "SPDXRef-Package-librime-predict"
+  ),
+  relationship("SPDXRef-Package-Linnet", "DEPENDS_ON", "SPDXRef-Package-rime-ice"),
+  relationship("SPDXRef-Package-Linnet", "DEPENDS_ON", "SPDXRef-Package-Hallelujah"),
+  relationship(
+    "SPDXRef-Package-Linnet", "DEPENDS_ON", "SPDXRef-Package-rime-wanxiang"
+  ),
+  relationship("SPDXRef-Package-Linnet", "DEPENDS_ON", "SPDXRef-Package-RIME-LMDG"),
+  relationship(
+    "SPDXRef-Package-librime-lua", "DYNAMIC_LINK", "SPDXRef-Package-librime"
+  ),
+  relationship("SPDXRef-Package-librime-lua", "CONTAINS", "SPDXRef-Package-Lua"),
+  relationship(
+    "SPDXRef-Package-librime-lua", "STATIC_LINK", "SPDXRef-Package-Boost"
+  ),
+  relationship(
+    "SPDXRef-Package-librime-octagram", "DYNAMIC_LINK", "SPDXRef-Package-librime"
+  ),
+  relationship(
+    "SPDXRef-Package-librime-predict", "DYNAMIC_LINK", "SPDXRef-Package-librime"
+  ),
+  relationship(
+    "SPDXRef-Package-librime-predict", "STATIC_LINK", "SPDXRef-Package-Boost"
+  ),
+  relationship(
+    "SPDXRef-Package-librime-octagram", "STATIC_LINK", "SPDXRef-Package-Boost"
+  ),
+  relationship("SPDXRef-Package-Linnet", "STATIC_LINK", "SPDXRef-Package-Boost"),
+  relationship("SPDXRef-Package-librime", "STATIC_LINK", "SPDXRef-Package-glog"),
+  relationship("SPDXRef-Package-librime", "STATIC_LINK", "SPDXRef-Package-LevelDB"),
+  relationship("SPDXRef-Package-librime", "STATIC_LINK", "SPDXRef-Package-marisa"),
+  relationship("SPDXRef-Package-librime", "STATIC_LINK", "SPDXRef-Package-OpenCC"),
+  relationship("SPDXRef-Package-librime", "STATIC_LINK", "SPDXRef-Package-yaml-cpp"),
+  relationship("SPDXRef-Package-librime", "STATIC_LINK", "SPDXRef-Package-Boost"),
+  relationship("SPDXRef-Package-librime", "CONTAINS", "SPDXRef-Package-Darts-clone"),
+  relationship(
+    "SPDXRef-Package-librime-octagram", "STATIC_LINK", "SPDXRef-Package-Darts-clone"
+  ),
+  relationship(
+    "SPDXRef-Package-librime-predict", "STATIC_LINK", "SPDXRef-Package-Darts-clone"
+  ),
+  relationship("SPDXRef-Package-OpenCC", "CONTAINS", "SPDXRef-Package-RapidJSON")
+]
+
+sbom = {
+  "spdxVersion" => "SPDX-2.3",
+  "dataLicense" => "CC0-1.0",
+  "SPDXID" => "SPDXRef-DOCUMENT",
+  "name" => release_name,
+  "documentNamespace" =>
+    "https://spdx.org/spdxdocs/io.github.ares-x.inputmethod.Linnet/" \
+    "#{version}/#{build}/#{candidate_revision}/#{lock_sha256}",
+  "creationInfo" => {
+    "created" => created_at,
+    "creators" => ["Tool: Linnet release metadata generator"]
+  },
+  "documentDescribes" => ["SPDXRef-Package-Linnet"],
+  "packages" => packages,
+  "relationships" => relationships
+}
+sbom_json = JSON.pretty_generate(sbom) + "\n"
+sbom_sha256 = Digest::SHA256.hexdigest(sbom_json)
+
+distribution = if community_identity
+  {
+    "application_code_signature" => {
+      "profile" => "community-adhoc",
+      "kind" => "adhoc",
+      "hardened_runtime" => true,
+      "host_settings_same_kind" => true
+    },
+    "artifact_scope" => "public-community",
+    "notarized" => false,
+    "publication_eligible" => true,
+    "trust_model" => "manual-user-approval"
+  }
+else
+  {
+    "application_code_signature" => {
+      "profile" => code_signing_profile,
+      "kind" => "external-cms",
+      "leaf_certificate_sha256" => code_identity.fetch("leaf_certificate_sha256"),
+      "hardened_runtime" => true,
+      "host_settings_same_leaf" => true
+    },
+    "artifact_scope" => "installation-uat",
+    "notarized" => false,
+    "publication_eligible" => false
+  }
+end
+
+version_manifest = {
+  "format" => 2,
+  "product" => "Linnet",
+  "version" => version,
+  "build" => build,
+  "channel" => "community-beta",
+  "architecture" => "arm64",
+  "minimum_macos" => "13.0",
+  "source" => {
+    "candidate_revision" => code_identity.fetch("candidate_revision")
+  },
+  "distribution" => distribution,
+  "upstream_lock_sha256" => lock_sha256,
+  "sbom_sha256" => sbom_sha256,
+  "direct_product_upstreams" => [
+    {
+      "group" => "squirrel_rime",
+      "squirrel" => squirrel.slice("tag", "commit", "repository"),
+      "librime" => librime.slice("tag", "commit", "repository")
+    },
+    { "group" => "rime_ice" }.merge(rime_ice.slice("tag", "commit", "repository")),
+    { "group" => "hallelujah" }.merge(hallelujah.slice("tag", "commit", "repository", "declared_license")),
+    { "group" => "rime_wanxiang" }.merge(
+      rime_wanxiang.slice("tag", "commit", "repository", "declared_license")
+    ),
+    { "group" => "rime_lmdg_grammar" }.merge(
+      rime_lmdg_grammar.slice(
+        "release", "asset", "repository", "declared_license", "bytes", "sha256"
+      )
+    )
+  ]
+}
+
+File.write(File.join(output_path, "NOTICE.md"), notice)
+licenses_path = File.join(output_path, "LICENSES")
+FileUtils.mkdir_p(licenses_path)
+runtime_license_specs.each_key do |filename|
+  FileUtils.cp(
+    File.join(runtime_license_root, filename), File.join(licenses_path, filename)
+  )
+end
+wanxiang_license = File.join(
+  source_root,
+  rime_wanxiang.fetch("submodule_path"),
+  rime_wanxiang.fetch("license_path")
+)
+fail_release("Rime Wanxiang license differs from the release lock") unless
+  File.file?(wanxiang_license) && !File.symlink?(wanxiang_license) &&
+    Digest::SHA256.file(wanxiang_license).hexdigest ==
+      rime_wanxiang.fetch("license_sha256")
+FileUtils.cp(wanxiang_license, File.join(licenses_path, "Rime-wanxiang-CC-BY-4.0.txt"))
+lmdg_license = File.join(source_root, rime_lmdg_grammar.fetch("license_path"))
+fail_release("Rime LMDG license differs from the release lock") unless
+  File.file?(lmdg_license) && !File.symlink?(lmdg_license) &&
+    Digest::SHA256.file(lmdg_license).hexdigest ==
+      rime_lmdg_grammar.fetch("license_sha256")
+FileUtils.cp(lmdg_license, File.join(licenses_path, "RIME-LMDG-CC-BY-4.0.txt"))
+File.write(File.join(output_path, "PRIVACY.md"), privacy)
+File.write(File.join(output_path, "SBOM.spdx.json"), sbom_json)
+File.write(File.join(output_path, "VERSION.json"), JSON.pretty_generate(version_manifest) + "\n")

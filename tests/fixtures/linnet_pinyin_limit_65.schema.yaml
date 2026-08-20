@@ -1,0 +1,17 @@
+# Test-only schema proving that 65 active-Prism decodes fail closed as a unit.
+
+__include: linnet_pinyin_limit_64.schema.yaml:/
+
+schema:
+  __include: linnet_pinyin_limit_64.schema.yaml:/schema
+  schema_id: linnet_pinyin_limit_65
+  name: Linnet pinyin limit 65 fixture
+
+translator:
+  __include: linnet_pinyin_limit_64.schema.yaml:/translator
+  prism: linnet_pinyin_limit_65
+
+speller:
+  __include: linnet_pinyin_limit_64.schema.yaml:/speller
+  algebra:
+    __include: linnet_pinyin_limit_algebra.yaml:/limit_65

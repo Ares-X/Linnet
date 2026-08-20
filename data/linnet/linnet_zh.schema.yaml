@@ -1,0 +1,261 @@
+# Linnet Chinese mode — self-owned schema
+# encoding: utf-8
+#
+# Linnet owns this pipeline. Wanxiang is the sole Chinese candidate-dictionary
+# source. Selected rime-ice English, radical, symbol, emoji/OpenCC and embedded
+# Lua assets support the product; rime-ice Chinese dictionaries are not inputs.
+#
+# Canonical core: Wanxiang Base/LTS (CC BY 4.0, amzxyz/rime-wanxiang)
+# Supporting assets: rime-ice (GPL-3.0-only, iDvel/rime-ice)
+# Grammar: Wanxiang LTS (amzxyz/RIME-LMDG)
+# Algebra: Linnet natural-code, derived from Wanxiang Base (CC BY 4.0)
+
+schema:
+  schema_id: linnet_zh
+  name: 双韵 中文
+  version: "1.0.0"
+  author:
+    - Linnet contributors
+  description: |
+    Linnet 中文输入，使用万象词库与 LTS 离线语法。
+    支持拆字、符号、Emoji 和简繁转换；Shift 直接切换 Smart English。
+  dependencies:
+    - linnet_en
+    - radical_pinyin
+
+# ── Switches ────────────────────────────────────────────────────────────────
+switches:
+  - name: ascii_mode
+    states: [ 双, A ]
+    abbrev: [ 双, A ]
+  - name: ascii_punct
+    states: [ ¥, $ ]
+    reset: 0
+  - name: traditionalization
+    states: [ 简, 繁 ]
+    reset: 0
+  - name: emoji
+    states: [ 💀, 😄 ]
+    reset: 1
+  - name: search_single_char
+    states: [ 正常, 单字 ]
+    abbrev: [ 词, 单 ]
+    reset: 0
+  - name: prediction
+    reset: 0
+  - name: full_shape
+    reset: 0
+
+# ── Recognizer patterns ─────────────────────────────────────────────────────
+recognizer:
+  patterns:
+    punct: "^V([0-9]|10|[A-Za-z]+)$"
+    radical_lookup: "^uU[a-z]+$"
+    unicode: "^U[a-f0-9]+"
+    calculator: "^cC.+"
+    text_expander: "^x;[-0-9A-Za-z_]*$"
+    zz_code_token:
+      __include: default.yaml:/linnet/recognizer_patterns/zz_code_token
+    linnet_pinyin:
+      __include: default.yaml:/linnet/recognizer_patterns/pinyin_reverse_lookup
+
+# ── Key binder ──────────────────────────────────────────────────────────────
+key_binder:
+  search: "`"
+
+# ── Punctuator ──────────────────────────────────────────────────────────────
+punctuator:
+  __include: default.yaml:/punctuator
+  symbols:
+    __include: symbols_caps_v:/symbols
+
+# ── Date/time commands ──────────────────────────────────────────────────────
+# Double-pinyin profiles use whole words so ordinary two-key syllables never
+# collide with the full-pinyin abbreviations. The full-pinyin wrapper restores
+# rime-ice's shorter reviewed commands.
+date_translator:
+  date: date
+  time: time
+  week: week
+  datetime: datetime
+  timestamp: timestamp
+  datezh: datezh
+  dateen: dateen
+
+# ── Traditionalize ──────────────────────────────────────────────────────────
+traditionalize:
+  option_name: traditionalization
+  opencc_config: s2t.json
+  tags: [ abc ]
+
+# ── Emoji ────────────────────────────────────────────────────────────────────
+emoji:
+  option_name: emoji
+  opencc_config: emoji.json
+  inherit_comment: false
+
+# ── Radical reverse lookup ──────────────────────────────────────────────────
+radical_lookup:
+  tag: radical_lookup
+  dictionary: radical_pinyin
+  enable_user_dict: false
+  prefix: "uU"
+  tips: "  〔拆字〕"
+  comment_format:
+    - erase/^.*$//
+
+radical_reverse_lookup:
+  tags: [ radical_lookup ]
+  dictionary: linnet_zh
+
+# ── Active-profile pinyin-to-English lookup ────────────────────────────────
+linnet_pinyin:
+  __include: default.yaml:/linnet/pinyin_reverse_lookup
+
+# The native interaction processor is shared by Chinese and Smart English.
+# Keep its default policy in the same canonical document-owned config that the
+# Settings renderer overrides in each schema custom file.
+linnet_english_interaction:
+  __include: default.yaml:/linnet/english_interaction
+
+# ── Engine pipeline ─────────────────────────────────────────────────────────
+engine:
+  processors:
+    - ascii_composer
+    - linnet_mode_switch_processor
+    - recognizer
+    - linnet_interaction_processor
+    - predictor
+    - key_binder
+    - speller
+    - punctuator
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - matcher
+    - affix_segmentor@linnet_pinyin
+    - affix_segmentor@radical_lookup
+    - ascii_segmentor
+    - abc_segmentor
+    - punct_segmentor
+    - fallback_segmentor
+  translators:
+    - punct_translator
+    - script_translator
+    - lua_translator@*date_translator
+    - lua_translator@*uuid
+    - table_translator@linnet_custom_words
+    - table_translator@linnet_english_words
+    # The native translator owns only the explicit ;pinyin -> English flow in
+    # Chinese schemas. Ordinary mixed English remains the standard table above.
+    - linnet_english_translator
+    - table_translator@linnet_text_expander
+    - table_translator@radical_lookup
+    - lua_translator@*unicode
+    - lua_translator@*calc_translator
+    - lua_translator@*force_gc
+    - predict_translator
+    - echo_translator
+  filters:
+    - linnet_disabled_filter@linnet_disabled_filter
+    - linnet_english_filter
+    - lua_filter@*auto_phrase
+    # auto_phrase 必须位于 corrector 之前：它依赖 translator 的 ［全拼］
+    # 注释缓存编码，而 corrector 会清空非纠错候选的注释。
+    - lua_filter@*corrector
+    - reverse_lookup_filter@radical_reverse_lookup
+    - lua_filter@*pin_cand_filter
+    - simplifier@emoji
+    - simplifier@traditionalize
+    - lua_filter@*search@radical_pinyin
+    - uniquifier
+
+# ── Speller: Linnet natural-code algebra ───────────────────────────────────
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA`
+  initials: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA
+  delimiter: " '"
+  algebra:
+    __include: linnet_algebra.yaml:/ziranma
+
+# ── Main translator ─────────────────────────────────────────────────────────
+translator:
+  dictionary: linnet_zh
+  user_dict: linnet_zh
+  enable_user_dict: true
+  prism: linnet_zh
+  contextual_suggestions: false
+  # Match rime-ice's mature mixed-input ordering: Chinese 1.2, English 1.1.
+  initial_quality: 1.2
+  max_homophones: 8
+  max_homographs: 7
+  # 原生按段学词 + 相邻段拼接（与万象 LTS 相同的学习策略）：
+  # core_word_length > 0 时按段学习并拼接相邻段；
+  # max_word_length > 0 时超过 7 音节的长句不整体入库，只做元素权重微调。
+  core_word_length: 4
+  max_word_length: 7
+  # Corrector dependencies: spelling_hints generates pinyin comments,
+  # always_show_comments keeps them visible, comment_format wraps them in ［］
+  # so corrector.lua can detect and display 错音错字提示.
+  spelling_hints: 8
+  always_show_comments: true
+  comment_format:
+    - xform/^/［/
+    - xform/$/］/
+  preedit_format:
+    - xform/([jqxy])v/$1u/
+    - xform/([nl])v/$1v/
+    - xform/([nl])ue/$1ve/
+
+# ── Grammar: selected by the immutable Runtime/Active profile ───────────────
+grammar:
+  __include: linnet_grammar_active.yaml:/grammar
+  collocation_max_length: 6
+  collocation_min_length: 2
+  collocation_penalty: -14
+  non_collocation_penalty: -6
+  weak_collocation_penalty: -100
+  rear_penalty: -18
+
+# ── Auto phrase (无感造词) ─────────────────────────────────────────────────
+# 当用户逐字选字组成词库中没有的多字词并上屏时，把整词写入用户词典
+# （linnet_zh.userdb，与主翻译器同一本），下次输入相同编码直接可用。
+# 仅"逐字选字"场景造词：纯汉字、编码段数 == 字数、词库已有的词不重复造。
+# 学习到的词可用 Delete 键删除（候选标记为用户词时）。
+# 实现见 data/linnet/lua/auto_phrase.lua（源自 rime-wanxiang）。
+auto_phrase:
+  enable: true
+  max_word_length: 7
+
+# ── Predictor ───────────────────────────────────────────────────────────────
+predictor:
+  max_candidates: 10
+
+# ── Shared product features ─────────────────────────────────────────────────
+linnet_custom_words:
+  __include: default.yaml:/linnet/custom_words
+
+linnet_english_words:
+  dictionary: linnet_en
+  enable_completion: false
+  enable_sentence: false
+  enable_user_dict: false
+  initial_quality: 1.1
+  comment_format:
+    - xform/.*//
+
+linnet_text_expander:
+  __include: default.yaml:/linnet/text_expander
+
+linnet_disabled_filter:
+  __include: default.yaml:/linnet/disabled_filter
+
+# ── Editor bindings ─────────────────────────────────────────────────────────
+editor:
+  bindings:
+    space: confirm
+    Return: commit_raw_input
+    BackSpace: revert
+    Delete: delete
+    Escape: cancel

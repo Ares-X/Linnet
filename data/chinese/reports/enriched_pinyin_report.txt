@@ -1,0 +1,9 @@
+enriched pinyin -> English vocabulary build report
+curated words: 1804
+selected words: 3500
+pinyin keys: 7359
+canonical keys: 3538
+fuzzy variant keys: 3372
+abbreviation keys: 3344
+curated words without Wanxiang pinyin: 0
+  -

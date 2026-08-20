@@ -1,0 +1,68 @@
+# Linnet reviewed Chinese corrections and ranking decisions
+# encoding: utf-8
+
+---
+name: linnet_reviewed
+version: "1.0.0"
+sort: by_weight
+use_preset_vocabulary: false
+columns:
+  - text
+  - code
+  - weight
+...
+更为严格	gèng wéi yán gé	878
+更为严重	gèng wéi yán zhòng	829
+更为丰富	gèng wéi fēng fù	927
+更为便捷	gèng wéi biàn jié	806
+更为全面	gèng wéi quán miàn	788
+更为准确	gèng wéi zhǔn què	909
+更为出色	gèng wéi chū sè	806
+更为合理	gèng wéi hé lǐ	783
+更为合适	gèng wéi hé shì	824
+更为复杂	gèng wéi fù zá	1017
+更为安全	gèng wéi ān quán	788
+更为强大	gèng wéi qiáng dà	810
+更为成熟	gèng wéi chéng shú	711
+更为方便	gèng wéi fāng biàn	783
+更为明显	gèng wéi míng xiǎn	1040
+更为普遍	gèng wéi pǔ biàn	716
+更为有效	gèng wéi yǒu xiào	819
+更为深刻	gèng wéi shēn kè	729
+更为灵活	gèng wéi líng huó	788
+更为简单	gèng wéi jiǎn dān	747
+更为精准	gèng wéi jīng zhǔn	819
+更为舒适	gèng wéi shū shì	752
+更为适合	gèng wéi shì hé	720
+更为重要	gèng wéi zhòng yào	3982
+更为高效	gèng wéi gāo xiào	702
+更深层	gèng shēn céng	1178
+更深处	gèng shēn chù	657
+更深厚	gèng shēn hòu	621
+更深刻	gèng shēn kè	2898
+更深入	gèng shēn rù	3316
+更深远	gèng shēn yuǎn	752
+更易懂	gèng yì dǒng	634
+更正常	gèng zhèng cháng	594
+更深层次	gèng shēn céng cì	2876
+更深入地	gèng shēn rù dì	1228
+更深一步	gèng shēn yí bù	680
+更深一层	gèng shēn yì céng	575
+更深层的原因	gèng shēn céng de yuán yīn	19
+更深层次的原因	gèng shēn céng cì de yuán yīn	19
+更深入点	gèng shēn rù diǎn	18
+乂	ài	310
+温庭筠	wēn tíng yún	210
+丙泊酚注射液	bǐng bó fēn zhù shè yè	133
+成都	chéng dū	120000
+同事	tóng shì	500000
+你的意见很重要	nǐ de yì jiàn hěn zhòng yào	500000
+这里的空气真新鲜	zhè lǐ de kōng qì zhēn xīn xiān	500000
+白山	bái shān	1100
+橙汁	chéng zhī	1300
+诚挚	chéng zhì	1250
+华融	huá róng	1200
+讲演	jiǎng yǎn	1300
+凛冬	lǐn dōng	1100
+鳞状	lín zhuàng	1100
+李双代数	lǐ shuāng dài shù	520

@@ -1,0 +1,21 @@
+# Unknown embedded modules must fail closed with no filesystem fallback.
+schema:
+  schema_id: lua_unknown_test
+  name: lua_unknown_test
+
+engine:
+  processors:
+    - ascii_composer
+    - speller
+  segmentors:
+    - ascii_segmentor
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - lua_translator@*unknown_module
+  filters:
+    - uniquifier
+
+speller:
+  alphabet: abcdefghijklmnopqrstuvwxyz
+  delimiter: " '"

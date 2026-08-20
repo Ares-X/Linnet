@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+complete_pkg="${1:-}"
+
+fail() {
+  echo "report_size: $1" >&2
+  exit 1
+}
+
+[[ "$#" -eq 1 ]] || fail "usage: LINNET_PKG"
+for package_path in "${complete_pkg}"; do
+  [[ "${package_path}" == /* && -f "${package_path}" && ! -L "${package_path}" ]] ||
+    fail "package must be an absolute regular file"
+done
+for tool in mktemp pkgutil ruby stat; do
+  command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
+done
+
+work_root="$(mktemp -d -t linnet-size-report)"
+cleanup() {
+  if [[ "${work_root##*/}" == linnet-size-report.* ]]; then
+    /bin/rm -rf -- "${work_root}"
+  fi
+}
+trap cleanup EXIT
+pkgutil --expand-full "${complete_pkg}" "${work_root}/complete"
+
+COMPLETE_PKG="${complete_pkg}" COMPLETE_ROOT="${work_root}/complete" ruby <<'RUBY'
+require "digest"
+
+def logical_bytes(root)
+  Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH).sum do |path|
+    File.file?(path) && !File.symlink?(path) ? File.size(path) : 0
+  end
+end
+
+def components(root)
+  Dir.glob(File.join(root, "*.component.pkg")).to_h do |component|
+    [File.basename(component).sub(".component.pkg", ""), logical_bytes(File.join(component, "Payload"))]
+  end
+end
+
+def human(bytes)
+  units = %w[B KiB MiB GiB]
+  value = bytes.to_f
+  unit = units.shift
+  while value >= 1024 && !units.empty?
+    value /= 1024
+    unit = units.shift
+  end
+  format(value >= 100 || unit == "B" ? "%.0f %s" : "%.1f %s", value, unit)
+end
+
+complete = components(ENV.fetch("COMPLETE_ROOT"))
+puts "# Linnet package size report"
+puts
+puts "Logical installed bytes are the sum of regular payload files; filesystem block usage may differ."
+puts
+puts "| Package | Download | Logical installed payload |"
+puts "|---|---:|---:|"
+download = File.size(ENV.fetch("COMPLETE_PKG"))
+installed = complete.values.sum
+puts "| Linnet | #{download} bytes (#{human(download)}) | " \
+  "#{installed} bytes (#{human(installed)}) |"
+puts
+puts "| Component | Installed payload |"
+puts "|---|---:|"
+complete.sort.each do |name, bytes|
+  puts "| #{name} | #{bytes} bytes (#{human(bytes)}) |"
+end
+
+forbidden = Dir.glob(File.join(ENV.fetch("COMPLETE_ROOT"), "**", "*"), File::FNM_DOTMATCH).select do |path|
+  File.file?(path) && (path.end_with?(".dSYM", ".o", ".a", ".pyc", ".csv", ".jsonl") ||
+    File.basename(path).match?(/(?:benchmark|test)/i))
+end
+puts
+puts "Build-only/debug artifacts found: **#{forbidden.length}**"
+puts
+puts "## Largest installed files"
+puts
+puts "| File | Bytes |"
+puts "|---|---:|"
+files = Dir.glob(File.join(ENV.fetch("COMPLETE_ROOT"), "*.component.pkg", "Payload", "**", "*"))
+  .select { |path| File.file?(path) && !File.symlink?(path) }
+  .sort_by { |path| -File.size(path) }
+  .first(20)
+files.each do |path|
+  relative = path.sub(%r{\A#{Regexp.escape(ENV.fetch("COMPLETE_ROOT"))}/}, "")
+    .sub(%r{/Payload/}, "/")
+  puts "| `#{relative}` | #{File.size(path)} |"
+end
+RUBY

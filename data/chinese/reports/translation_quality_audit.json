@@ -1,0 +1,377 @@
+{
+  "source_identity": {
+    "final_decisions_sha256": "6c503b126199513c39681c3d80b5f0e22470571feaf7cecf16176e3ea772e357",
+    "historical_verdict_date": "2026-08-07"
+  },
+  "summary": {
+    "final_decisions": 69002,
+    "hallelujah_words": 140402
+  },
+  "effective_release": {
+    "hallelujah_fallbacks": 77160,
+    "decisions_differing_after_canonical_normalization": 39055,
+    "decisions_equal_after_canonical_normalization": 23096,
+    "decisions_for_missing_chinese_metadata": 214,
+    "decisions_not_in_hallelujah": 4114,
+    "skip_decisions": 2523
+  },
+  "replacement_set": {
+    "by_frequency_band": {
+      "freq >= 10M": 971,
+      "1M <= freq < 10M": 6052,
+      "100K <= freq < 1M": 13726,
+      "freq < 100K": 18306
+    }
+  },
+  "top2000": {
+    "words_sampled": 2000,
+    "historically_reviewed": 73,
+    "current_resolution_distribution": {
+      "UNREVIEWED": 1927,
+      "RESOLVED": 66,
+      "IMPROVED": 7
+    },
+    "freq_range": [
+      13151942776,
+      5660658
+    ],
+    "unresolved_historical_findings": []
+  },
+  "sample500": {
+    "sample_size": 500,
+    "current_resolution_distribution": {
+      "UNREVIEWED": 500
+    }
+  },
+  "domains": {
+    "MEDICAL": {
+      "words_requested": 57,
+      "words_in_replacement_set": 23,
+      "words_not_in_set": [
+        "disease",
+        "virus",
+        "cancer",
+        "patient",
+        "diagnosis",
+        "treatment",
+        "surgery",
+        "drug",
+        "nurse",
+        "hospital",
+        "medicine",
+        "infection",
+        "therapy",
+        "diabetes",
+        "hypertension",
+        "anesthesia",
+        "antibiotic",
+        "cardiac",
+        "dental",
+        "fetus",
+        "genetic",
+        "hepatitis",
+        "immunity",
+        "metabolism",
+        "neurology",
+        "obstetrics",
+        "pediatric",
+        "physician",
+        "psychiatric",
+        "respiratory",
+        "rheumatism",
+        "dosage",
+        "fracture",
+        "anemia"
+      ],
+      "resolution": {
+        "RESOLVED": 1,
+        "UNREVIEWED": 22
+      },
+      "reviewed_acceptable_pct": 100.0
+    },
+    "LEGAL": {
+      "words_requested": 48,
+      "words_in_replacement_set": 17,
+      "words_not_in_set": [
+        "court",
+        "law",
+        "attorney",
+        "lawyer",
+        "judge",
+        "jury",
+        "trial",
+        "defendant",
+        "plaintiff",
+        "evidence",
+        "contract",
+        "appeal",
+        "acquittal",
+        "bail",
+        "damages",
+        "felony",
+        "legislation",
+        "liability",
+        "litigation",
+        "mediation",
+        "misdemeanor",
+        "parole",
+        "precedent",
+        "sanction",
+        "subpoena",
+        "summons",
+        "tort",
+        "warranty",
+        "witness",
+        "arbitration",
+        "breach"
+      ],
+      "resolution": {
+        "UNREVIEWED": 17
+      },
+      "reviewed_acceptable_pct": null
+    },
+    "TECH": {
+      "words_requested": 46,
+      "words_in_replacement_set": 18,
+      "words_not_in_set": [
+        "computer",
+        "software",
+        "database",
+        "algorithm",
+        "interface",
+        "malware",
+        "programming",
+        "kernel",
+        "cache",
+        "domain",
+        "graphics",
+        "hyperlink",
+        "microprocessor",
+        "processor",
+        "socket",
+        "storage",
+        "subroutine",
+        "terminal",
+        "transistor",
+        "username",
+        "virtual",
+        "wireless",
+        "binary",
+        "byte",
+        "chip",
+        "circuit",
+        "click",
+        "download"
+      ],
+      "resolution": {
+        "UNREVIEWED": 17,
+        "RESOLVED": 1
+      },
+      "reviewed_acceptable_pct": 100.0
+    },
+    "VERBS": {
+      "words_requested": 63,
+      "words_in_replacement_set": 9,
+      "words_not_in_set": [
+        "run",
+        "walk",
+        "eat",
+        "drink",
+        "sleep",
+        "sit",
+        "stand",
+        "go",
+        "see",
+        "speak",
+        "talk",
+        "say",
+        "ask",
+        "answer",
+        "give",
+        "take",
+        "get",
+        "put",
+        "make",
+        "do",
+        "have",
+        "hold",
+        "bring",
+        "carry",
+        "buy",
+        "sell",
+        "pay",
+        "cost",
+        "find",
+        "lose",
+        "start",
+        "stop",
+        "open",
+        "turn",
+        "break",
+        "build",
+        "grow",
+        "feel",
+        "think",
+        "know",
+        "want",
+        "like",
+        "love",
+        "hate",
+        "help",
+        "write",
+        "dance",
+        "jump",
+        "swim",
+        "fly",
+        "drive",
+        "cook",
+        "clean",
+        "wash"
+      ],
+      "resolution": {
+        "UNREVIEWED": 6,
+        "RESOLVED": 3
+      },
+      "reviewed_acceptable_pct": 100.0
+    }
+  },
+  "heuristic_flags": {
+    "abbr_tag_dropped": {
+      "count": 139,
+      "sample": [
+        "AA",
+        "ABC",
+        "ABCD",
+        "ABS",
+        "ACK",
+        "ADHD",
+        "AI",
+        "AIDS",
+        "AK",
+        "ANSI",
+        "API",
+        "ASAP",
+        "ASCII",
+        "ATM",
+        "AUX",
+        "AV",
+        "BBQ",
+        "BBS",
+        "BIOS",
+        "BMP"
+      ]
+    },
+    "length_collapse": {
+      "count": 5552,
+      "sample": [
+        "ABC",
+        "ABS",
+        "ADHD",
+        "AIDS",
+        "AJAX",
+        "API",
+        "APIs",
+        "ARM",
+        "Abba",
+        "Adios",
+        "Afghan",
+        "African",
+        "Afro",
+        "Alaskan",
+        "Albanian",
+        "American",
+        "Americana",
+        "Americans",
+        "Anglican",
+        "Anglo"
+      ]
+    },
+    "pos_tags_stripped": {
+      "count": 445,
+      "sample": [
+        "AA",
+        "ABC",
+        "ABCD",
+        "ABS",
+        "ACK",
+        "ADHD",
+        "AI",
+        "AIDS",
+        "AJAX",
+        "AK",
+        "ANSI",
+        "API",
+        "APIs",
+        "ARM",
+        "ASAP",
+        "ASCII",
+        "ATM",
+        "AUX",
+        "AV",
+        "Abba"
+      ]
+    },
+    "sense_loss_gt50pct": {
+      "count": 585,
+      "sample": [
+        "ABC",
+        "APIs",
+        "ARM",
+        "Afghan",
+        "Albanian",
+        "Americana",
+        "Americans",
+        "Anglican",
+        "Arab",
+        "Arabic",
+        "Arcadian",
+        "Argentine",
+        "August",
+        "BT",
+        "Banning",
+        "Baptist",
+        "Bell",
+        "Braille",
+        "British",
+        "CI"
+      ]
+    },
+    "verb_senses_lost": {
+      "count": 43,
+      "sample": [
+        "ARM",
+        "Banning",
+        "Bell",
+        "Braille",
+        "COO",
+        "Compound",
+        "Forecast",
+        "French",
+        "Go",
+        "Gray",
+        "ID",
+        "March",
+        "Miss",
+        "Mister",
+        "Pole",
+        "Quiver",
+        "RAM",
+        "Telnet",
+        "Welsh",
+        "boasted"
+      ]
+    }
+  },
+  "historical_verdicts": {
+    "wrong": 29,
+    "degraded": 513,
+    "resolved_by_canonical_decision": 542,
+    "unresolved_wrong": [],
+    "unresolved_degraded_count": 0
+  },
+  "manual_review": {
+    "heuristic_flagged_not_reviewed_not_fixed": [],
+    "heuristic_flagged_not_reviewed_count": 0,
+    "note": "Heuristic flags are risk indicators, not verdicts; review before applying."
+  }
+}

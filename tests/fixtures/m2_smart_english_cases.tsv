@@ -1,0 +1,13 @@
+# Project-authored, test-only Smart English acceptance cases.
+# SPDX-License-Identifier: GPL-3.0-or-later
+kind	query	expected
+correction_insertion	cloudd	cloud
+correction_deletion	clud	cloud
+correction_substitution	cloid	cloud
+correction_transposition	cluod	cloud
+contraction	he 's	not
+prediction_static	i do not	know
+prediction_learned_only	privacy cloud	workflow
+phonex_overflow	overflow	<none>
+pinyin_order	pailie	overflow|overflowa|overflowe
+pinyin_overflow	overflow	<none>

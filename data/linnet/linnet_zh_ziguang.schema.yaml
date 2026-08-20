@@ -1,0 +1,19 @@
+# Linnet Ziguang double-pinyin Chinese profile
+# encoding: utf-8
+
+__include: linnet_zh.schema.yaml:/
+
+schema:
+  __include: linnet_zh.schema.yaml:/schema
+  schema_id: linnet_zh_ziguang
+  name: 双韵 紫光双拼
+  description: Linnet 紫光双拼，万象词库为核心，共用词库、用户学习与产品行为。
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA;`
+  initials: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA
+  delimiter: " '"
+  algebra:
+    __include: linnet_algebra.yaml:/ziguang
+translator:
+  __include: linnet_zh.schema.yaml:/translator
+  prism: linnet_zh_ziguang

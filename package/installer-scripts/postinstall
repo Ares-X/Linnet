@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+# A currentUserHome installation runs as the current user and cannot write
+# outside that home.  Do not infer a console user or cross the boundary with
+# privilege escalation: the Installer-selected home is the sole lifecycle owner.
+user_home="${HOME:-}"
+library_root="${user_home}/Library"
+input_methods_root="${library_root}/Input Methods"
+app_path="${input_methods_root}/Linnet.app"
+application_support_root="${library_root}/Application Support"
+support_root="${application_support_root}/Linnet"
+executable="${app_path}/Contents/MacOS/Linnet"
+active_state="${support_root}/Runtime/Active/activation.json"
+state_link="${support_root}/State/active.json"
+selection_state="${support_root}/State/core-update-selection-v1.plist"
+script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+mode_file="${script_root}/install-mode"
+identity_helper="${script_root}/candidate-app-identity.sh"
+identity_metadata="${script_root}/candidate-app-identity.json"
+current_uid="$(/usr/bin/id -u)"
+
+secure_owned_path() {
+  local path="$1"
+  local expected_type="$2"
+  local owner mode
+  case "${expected_type}" in
+    directory) [[ -d "${path}" && ! -L "${path}" ]] || return 1 ;;
+    file) [[ -f "${path}" && ! -L "${path}" ]] || return 1 ;;
+    *) return 1 ;;
+  esac
+  read -r owner mode < <(/usr/bin/stat -f '%u %Lp' "${path}") || return 1
+  [[ "${owner}" == "${current_uid}" ]] || return 1
+  (( (8#${mode} & 0022) == 0 ))
+}
+
+[[ "${user_home}" == /* ]] || {
+  echo "Linnet postinstall: current user home is unavailable" >&2
+  exit 1
+}
+[[ -f "${mode_file}" && ! -L "${mode_file}" && \
+  -f "${identity_helper}" && ! -L "${identity_helper}" && \
+  -x "${identity_helper}" && \
+  -f "${identity_metadata}" && ! -L "${identity_metadata}" ]] || {
+  echo "Linnet postinstall: package installation mode is unavailable" >&2
+  exit 1
+}
+IFS= read -r install_mode <"${mode_file}"
+case "${install_mode}" in
+  complete|core-update) ;;
+  *)
+    echo "Linnet postinstall: package installation mode is invalid" >&2
+    exit 1
+    ;;
+esac
+
+# Installer has now mutated both payload roots. Revalidate every App and Active
+# ancestor before executing installed code; a safe preinstall result is not
+# authority for the post-payload filesystem state.
+required_directories=(
+  "${user_home}"
+  "${library_root}"
+  "${input_methods_root}"
+  "${app_path}"
+  "${app_path}/Contents"
+  "${app_path}/Contents/MacOS"
+  "${application_support_root}"
+  "${support_root}"
+  "${support_root}/Runtime"
+  "${support_root}/Runtime/Active"
+  "${support_root}/State"
+)
+for required_directory in "${required_directories[@]}"; do
+  secure_owned_path "${required_directory}" directory || {
+    echo "Linnet postinstall: unsafe installed payload path: ${required_directory}" >&2
+    exit 1
+  }
+done
+secure_owned_path "${executable}" file && [[ -x "${executable}" ]] || {
+  echo "Linnet postinstall: installed Core App is missing or unsafe" >&2
+  exit 1
+}
+secure_owned_path "${active_state}" file && \
+  [[ -L "${state_link}" && "$(readlink "${state_link}")" == \
+    "../Runtime/Active/activation.json" ]] || {
+  echo "Linnet postinstall: installed language profile is incomplete" >&2
+  exit 1
+}
+
+# Payload mutation invalidates every preinstall observation. Bind the installed
+# App to the exact version, build, source revision and trust model captured
+# from the already verified package candidate before executing its first byte.
+"${identity_helper}" installed
+
+selection_was_current=""
+selection_post_quiescence=""
+if [[ "${install_mode}" == core-update ]]; then
+  secure_owned_path "${selection_state}" file || {
+    echo "Linnet postinstall: selection transaction is missing or unsafe" >&2
+    exit 1
+  }
+  selection_format="$(/usr/bin/plutil -extract format raw -o - \
+    "${selection_state}")" || exit 1
+  selection_target="$(/usr/bin/plutil -extract target_input_source_id raw -o - \
+    "${selection_state}")" || exit 1
+  selection_was_current="$(/usr/bin/plutil -extract was_current raw -o - \
+    "${selection_state}")" || exit 1
+  selection_post_quiescence="$(/usr/bin/plutil -extract \
+    post_quiescence_input_source_id raw -o - "${selection_state}")" || exit 1
+  selection_revision="$(/usr/bin/plutil -extract candidate_revision raw -o - \
+    "${selection_state}")" || exit 1
+  selection_build="$(/usr/bin/plutil -extract candidate_build raw -o - \
+    "${selection_state}")" || exit 1
+  candidate_target="$(/usr/bin/plutil -extract bundle_identifier raw -o - \
+    "${identity_metadata}")" || exit 1
+  candidate_revision="$(/usr/bin/plutil -extract candidate_revision raw -o - \
+    "${identity_metadata}")" || exit 1
+  candidate_build="$(/usr/bin/plutil -extract build raw -o - \
+    "${identity_metadata}")" || exit 1
+  [[ "${selection_format}" == 1 &&
+    "${selection_target}" == "${candidate_target}" &&
+    "${selection_revision}" == "${candidate_revision}" &&
+    "${selection_build}" == "${candidate_build}" &&
+    ( "${selection_was_current}" == true || "${selection_was_current}" == false ) &&
+    -n "${selection_post_quiescence}" &&
+    "${selection_post_quiescence}" != *$'\n'* &&
+    "${selection_post_quiescence}" != *$'\r'* ]] || {
+    echo "Linnet postinstall: selection transaction fields do not match the candidate" >&2
+    exit 1
+  }
+fi
+
+# InputMethodKit may relaunch a selected Host after Installer's pre-payload
+# must-close check. The newly installed executable owns one final Host-only,
+# non-forcing quiescence boundary before TIS observes the replacement bundle.
+# Settings was enforced by the Core preinstall immediately before payload and
+# is never touched at this post-payload boundary.
+if [[ "${install_mode}" == complete ]]; then
+  "${executable}" --quit-host-clean
+  "${executable}" --register-input-source
+  "${executable}" --enable-input-source
+else
+  "${executable}" --refresh-core-input-source \
+    "${selection_was_current}" "${selection_post_quiescence}"
+  /bin/rm -f -- "${selection_state}"
+fi
+# Complete enables the newly registered source. Core never enables or selects
+# unconditionally: the installed Host restores only a source that was current
+# immediately before quiescence, and it preserves any concurrent user choice.
+
+exit 0

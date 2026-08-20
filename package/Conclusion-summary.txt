@@ -1,0 +1,84 @@
+双韵（Linnet）安装完成。
+
+首次 Complete 会注册并请求启用 Linnet，但不会替你选择输入源。
+Core 只刷新同一注册，并保留更新前的 enabled/disabled 与
+selected 状态。
+
+如果这是首次完整安装：
+
+1. 保存工作，注销当前 macOS 账户，再登录同一账户。只退出应用不足以刷新
+   InputMethodKit 输入源列表。
+2. 打开 系统设置 → 键盘 → 文本输入 → 编辑，添加 Linnet；如果 macOS 请求
+   允许 Linnet，请选择“允许”。
+3. 确认 Linnet 已在启用列表中，再从菜单栏输入菜单选择 Linnet。
+
+Core 更新在替换前由 Installer 要求关闭 Host/Settings，替换后只温和退出可能被
+InputMethodKit 重启的 Host，再刷新同一个输入源身份；它不请求注销，也不改变
+enabled/disabled 或 selected 状态。当前候选仍须通过真实安装升级 UAT，才能把
+免注销作为发布结论。
+
+日常使用：
+
+- 全新安装默认全拼；可在 Settings → 输入选择全拼或七种双拼之一并应用
+  更改。Linnet 不占用 F4 或 Control+grave。
+- 轻按 Shift 在当前中文方案与智能英文之间切换；Caps Lock 用于原始 ASCII。
+- 在 Settings 选择默认简体或繁体输出。
+- 从原生 Linnet 输入菜单选择 Settings。它内嵌于 Linnet，不作为独立产品
+  安装、不常驻 Dock，并在最后一个窗口关闭后退出。
+- Settings 可分别开关智能英文上下文预测、拼写纠错和选词学习。候选字号
+  范围为 12–32 pt，所有字体预设只使用 macOS 内置字体。
+
+许可信息：
+
+- Linnet 本体采用 GPL-3.0；Squirrel/Rime、rime-ice、Hallelujah、
+  rime-wanxiang 与 RIME-LMDG 的许可和修改说明随安装材料提供。
+- 许可证全文位于
+  ~/Library/Input Methods/Linnet.app/Contents/Resources/LinnetRelease/LICENSES/；
+  各上游组件及版本清单见上一页 NOTICE.md。
+
+---
+
+双韵 (Linnet) installation is complete.
+
+A first Complete installation registers and requests enablement for Linnet but
+does not select the input source for you. Core keeps enabled/disabled unchanged
+and conditionally restores Linnet only when it was selected before or during
+that update; a newer choice of another input source is preserved.
+
+For a first Complete installation:
+
+1. Save open work, log out of the current macOS account, and log in again.
+   Quitting applications alone does not refresh the InputMethodKit source list.
+2. Open System Settings > Keyboard > Text Input > Edit, add Linnet, and choose
+   Allow if macOS asks for permission.
+3. Confirm that Linnet is enabled, then select it from the menu-bar input menu.
+
+Core has Installer close Host and Settings before replacement, then one new-Host
+transition cleanly stops any InputMethodKit-relaunched Host, refreshes the same
+input-source identity, and conditionally restores a selected Linnet without
+overriding a newer choice. It does not request logout or change enabled/disabled.
+This candidate still requires installed upgrade UAT before no-logout behavior is
+an accepted release claim.
+
+Daily use:
+
+- A fresh installation defaults to full pinyin. Choose it or one of seven
+  double-pinyin profiles in Settings > Input, then apply the change. Linnet does
+  not reserve F4 or Control+grave.
+- Tap Shift to switch between the current Chinese profile and Smart English;
+  use Caps Lock for raw ASCII.
+- Choose simplified or traditional Chinese as the default in Settings.
+- Choose Settings from the native Linnet input menu. It is embedded in Linnet,
+  is not installed as a separate product, does not remain in the Dock, and
+  exits when its last window closes.
+- Settings can independently enable Smart English context prediction, spelling
+  correction, and selection learning. Candidate font size is limited to
+  12–32 pt, and every font preset uses only fonts built into macOS.
+
+Licenses:
+
+- Linnet is GPL-3.0. License and modification notices for Squirrel/Rime,
+  rime-ice, Hallelujah, rime-wanxiang, and RIME-LMDG are included.
+- Full license texts are installed in
+  ~/Library/Input Methods/Linnet.app/Contents/Resources/LinnetRelease/LICENSES/;
+  component identities and versions are listed in NOTICE.md on the previous page.

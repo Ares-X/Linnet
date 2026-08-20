@@ -1,0 +1,192 @@
+diff --git a/src/modules.cc b/src/modules.cc
+index 6ca704e..47be0f1 100644
+--- a/src/modules.cc
++++ b/src/modules.cc
+@@ -1,93 +1,90 @@
+-#include <cstdio>
+ #include <rime/common.h>
+ #include <rime/registry.h>
+-#include <rime_api.h>
+-#include <rime/service.h>
+ #include "lib/lua_templates.h"
++#include "linnet_embedded_lua.h"
+ #include "lua_gears.h"
+ 
+ void types_init(lua_State *L);
+ 
+-static bool file_exists(const char *fname) noexcept {
+-    FILE * const fp = fopen(fname, "r");
+-    if (fp) {
+-        fclose(fp);
+-        return true;
+-    }
+-    return false;
+-}
+-
+ namespace {
+-template<typename> using void_t = void;
++using linnet_embedded_lua::Module;
+ 
+-template<typename T, typename = void>
+-struct COMPAT {
+-  static std::string get_shared_data_dir() {
+-    return std::string(rime_get_api()->get_shared_data_dir());
++int load_embedded_module(lua_State *L) {
++  const auto* module = static_cast<const Module*>(
++      lua_touserdata(L, lua_upvalueindex(1)));
++  if (!module) {
++    return luaL_error(L, "invalid embedded Lua module");
+   }
+-
+-  static std::string get_user_data_dir() {
+-    return std::string(rime_get_api()->get_user_data_dir());
++  const int require_arguments = lua_gettop(L);
++  if (luaL_loadbufferx(L, reinterpret_cast<const char*>(module->bytes),
++                       module->size, module->chunk_name, "t") != LUA_OK) {
++    return lua_error(L);
+   }
+-};
++  lua_insert(L, 1);
++  lua_call(L, require_arguments, LUA_MULTRET);
++  return lua_gettop(L);
++}
+ 
+-template<typename T>
+-struct COMPAT<T, void_t<decltype(std::declval<T>().user_data_dir.string())>> {
+-  static std::string get_shared_data_dir() {
+-    // path::string() returns native encoding on Windows
+-    T &deployer = rime::Service::instance().deployer();
+-    return deployer.shared_data_dir.string();
++void install_embedded_modules(lua_State *L, int package_index) {
++  lua_createtable(L, 0, static_cast<int>(linnet_embedded_lua::kModuleCount));
++  const int preload_index = lua_gettop(L);
++  for (const auto& module : linnet_embedded_lua::kModules) {
++    lua_pushlightuserdata(L, const_cast<Module*>(&module));
++    lua_pushcclosure(L, load_embedded_module, 1);
++    lua_setfield(L, preload_index, module.name);
+   }
++  lua_pushvalue(L, preload_index);
++  lua_setfield(L, LUA_REGISTRYINDEX, LUA_PRELOAD_TABLE);
++  lua_pushvalue(L, preload_index);
++  lua_setfield(L, package_index, "preload");
++  lua_pop(L, 1);
++}
+ 
+-  static std::string get_user_data_dir() {
+-    T &deployer = rime::Service::instance().deployer();
+-    return deployer.user_data_dir.string();
++void keep_preload_searcher_only(lua_State *L, int package_index) {
++  lua_getfield(L, package_index, "searchers");
++  if (!lua_istable(L, -1)) {
++    luaL_error(L, "package.searchers is unavailable");
+   }
+-};
++  lua_rawgeti(L, -1, 1);
++  if (!lua_isfunction(L, -1)) {
++    luaL_error(L, "package.preload searcher is unavailable");
++  }
++  lua_remove(L, -2);
++  lua_createtable(L, 1, 0);
++  lua_pushvalue(L, -2);
++  lua_rawseti(L, -2, 1);
++  lua_pushvalue(L, -1);
++  lua_setfield(L, package_index, "searchers");
++  lua_setfield(L, package_index, "loaders");
++  lua_pop(L, 1);
+ }
+ 
+-static void lua_init(lua_State *L) {
++}  // namespace
+ 
+-  const auto user_dir = COMPAT<rime::Deployer>::get_user_data_dir();
+-  const auto shared_dir = COMPAT<rime::Deployer>::get_shared_data_dir();
+-
++static void lua_init(lua_State *L) {
+   types_init(L);
+   lua_getglobal(L, "package");
+-  lua_pushfstring(L, "%s%slua%s?.lua;"
+-                  "%s%slua%s?%sinit.lua;"
+-                  "%s%slua%s?.lua;"
+-                  "%s%slua%s?%sinit.lua;",
+-                  user_dir.c_str(), LUA_DIRSEP, LUA_DIRSEP,
+-                  user_dir.c_str(), LUA_DIRSEP, LUA_DIRSEP, LUA_DIRSEP,
+-                  shared_dir.c_str(), LUA_DIRSEP, LUA_DIRSEP,
+-                  shared_dir.c_str(), LUA_DIRSEP, LUA_DIRSEP, LUA_DIRSEP);
+-  lua_getfield(L, -2, "path");
+-  lua_concat(L, 2);
+-  lua_setfield(L, -2, "path");
++  if (!lua_istable(L, -1)) {
++    luaL_error(L, "package library is unavailable");
++  }
++  const int package_index = lua_gettop(L);
++  install_embedded_modules(L, package_index);
++
++  lua_pushliteral(L, "");
++  lua_setfield(L, package_index, "path");
++  lua_pushliteral(L, "");
++  lua_setfield(L, package_index, "cpath");
++  lua_pushnil(L);
++  lua_setfield(L, package_index, "loadlib");
++  lua_pushnil(L);
++  lua_setfield(L, package_index, "searchpath");
++  keep_preload_searcher_only(L, package_index);
+   lua_pop(L, 1);
+ 
+-  const auto user_file = user_dir + LUA_DIRSEP "rime.lua";
+-  const auto shared_file = shared_dir + LUA_DIRSEP "rime.lua";
+-
+-  // use the user_file first
+-  // use the shared_file if the user_file doesn't exist
+-  if (file_exists(user_file.c_str())) {
+-    if (luaL_dofile(L, user_file.c_str())) {
+-      const char *e = lua_tostring(L, -1);
+-      LOG(ERROR) << "rime.lua error: " << e;
+-      lua_pop(L, 1);
+-    }
+-  } else if (file_exists(shared_file.c_str())) {
+-    if (luaL_dofile(L, shared_file.c_str())) {
+-      const char *e = lua_tostring(L, -1);
+-      LOG(ERROR) << "rime.lua error: " << e;
+-      lua_pop(L, 1);
+-    }
+-  } else {
+-    LOG(INFO) << "rime.lua info: rime.lua should be either in the "
+-                 "rime user data directory or in the rime shared "
+-                 "data directory";
+-  }
++  lua_pushnil(L);
++  lua_setglobal(L, "loadfile");
++  lua_pushnil(L);
++  lua_setglobal(L, "dofile");
+ }
+ 
+ static void rime_lua_initialize() {
+@@ -96,7 +95,14 @@ static void rime_lua_initialize() {
+   LOG(INFO) << "registering components from module 'lua'.";
+   Registry& r = Registry::instance();
+ 
+-  an<Lua> lua(new Lua);
++  // Linnet contract: keep the Lua state alive for the process lifetime.
++  // Gear objects (translators, filters, segmentors, processors) hold raw
++  // Lua* pointers and LuaObj registry references and call into the state
++  // from their destructors. Destroying the state at Registry::Clear()
++  // (RimeFinalize) lets any gear or translation that outlives the
++  // components run its destructor against a closed lua_State. Remove when
++  // upstream owns the state with a process-lifetime owner.
++  static an<Lua> lua(new Lua);
+   lua->to_state(lua_init);
+ 
+   r.Register("lua_translator", new LuaComponent<LuaTranslator>(lua));
+diff --git a/src/lib/lua.cc b/src/lib/lua.cc
+index 4bd47ec..2e21c40 100644
+--- a/src/lib/lua.cc
++++ b/src/lib/lua.cc
+@@ -198,6 +198,8 @@ namespace LuaImpl {
+   static const char luakey = 'k';
+ 
+   static int pmain(lua_State *L) {
++    lua_pushboolean(L, 1);
++    lua_setfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
+     luaL_openlibs(L);
+     xluaopen_utf8(L);
+     lua_register(L, "yield", yield);

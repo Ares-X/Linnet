@@ -1,0 +1,20 @@
+# Test-only schema proving that exactly 64 active-Prism decodes remain usable.
+# It inherits the real Linnet pipeline and changes only its dictionary/prism.
+
+__include: linnet_zh.schema.yaml:/
+
+schema:
+  __include: linnet_zh.schema.yaml:/schema
+  schema_id: linnet_pinyin_limit_64
+  name: Linnet pinyin limit 64 fixture
+
+translator:
+  __include: linnet_zh.schema.yaml:/translator
+  dictionary: linnet_pinyin_limit
+  prism: linnet_pinyin_limit_64
+  enable_user_dict: false
+
+speller:
+  __include: linnet_zh.schema.yaml:/speller
+  algebra:
+    __include: linnet_pinyin_limit_algebra.yaml:/limit_64

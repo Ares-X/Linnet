@@ -1,0 +1,74 @@
+# Test-only normal-spelling fanout for the exact 64/65 decoder boundary.
+# xform keeps every edge a normal spelling; derive would incorrectly turn the
+# fixture into fuzzy spellings that the product decoder intentionally rejects.
+
+limit_64:
+  - xform/^a$/probe/
+  - xform/^ai$/probe/
+  - xform/^an$/probe/
+  - xform/^ang$/probe/
+  - xform/^ao$/probe/
+  - xform/^ba$/probe/
+  - xform/^bai$/probe/
+  - xform/^ban$/probe/
+  - xform/^bang$/probe/
+  - xform/^bao$/probe/
+  - xform/^bei$/probe/
+  - xform/^ben$/probe/
+  - xform/^beng$/probe/
+  - xform/^bi$/probe/
+  - xform/^bian$/probe/
+  - xform/^biao$/probe/
+  - xform/^bie$/probe/
+  - xform/^bin$/probe/
+  - xform/^bing$/probe/
+  - xform/^bo$/probe/
+  - xform/^bu$/probe/
+  - xform/^ca$/probe/
+  - xform/^cai$/probe/
+  - xform/^can$/probe/
+  - xform/^cang$/probe/
+  - xform/^cao$/probe/
+  - xform/^ce$/probe/
+  - xform/^cen$/probe/
+  - xform/^ceng$/probe/
+  - xform/^cha$/probe/
+  - xform/^chai$/probe/
+  - xform/^chan$/probe/
+  - xform/^chang$/probe/
+  - xform/^chao$/probe/
+  - xform/^che$/probe/
+  - xform/^chen$/probe/
+  - xform/^cheng$/probe/
+  - xform/^chi$/probe/
+  - xform/^chong$/probe/
+  - xform/^chou$/probe/
+  - xform/^chu$/probe/
+  - xform/^chua$/probe/
+  - xform/^chuai$/probe/
+  - xform/^chuan$/probe/
+  - xform/^chuang$/probe/
+  - xform/^chui$/probe/
+  - xform/^chun$/probe/
+  - xform/^chuo$/probe/
+  - xform/^ci$/probe/
+  - xform/^cong$/probe/
+  - xform/^cou$/probe/
+  - xform/^cu$/probe/
+  - xform/^cuan$/probe/
+  - xform/^cui$/probe/
+  - xform/^cun$/probe/
+  - xform/^cuo$/probe/
+  - xform/^da$/probe/
+  - xform/^dai$/probe/
+  - xform/^dan$/probe/
+  - xform/^dang$/probe/
+  - xform/^dao$/probe/
+  - xform/^de$/probe/
+  - xform/^dei$/probe/
+  - xform/^yun$/probe/
+
+limit_65:
+  __include: linnet_pinyin_limit_algebra.yaml:/limit_64
+  __append:
+    - xform/^deng$/probe/

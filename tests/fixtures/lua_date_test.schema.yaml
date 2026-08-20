@@ -1,0 +1,33 @@
+# Minimal Lua-using schema for tests/verify_lua_lifetime.sh.
+#
+# The only translator is lua_translator@*date_translator, so any candidate
+# produced for the input "rq" must come from the Lua plugin. A crash in this
+# scenario after RimeFinalize/re-initialize cycles is a regression of the
+# librime-lua static-state lifetime patch
+# (patches/librime-lua-linnet-state-lifetime.patch).
+#
+# No dictionary, no punctuator, no recognizer: the engine is intentionally
+# the smallest set of components that turns key events into input and runs a
+# Lua translator over it.
+
+schema:
+  schema_id: lua_date_test
+  name: lua_date_test
+  description: Lua date translator test schema for verify_lua_lifetime.sh
+
+engine:
+  processors:
+    - ascii_composer
+    - speller
+  segmentors:
+    - ascii_segmentor
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - lua_translator@*date_translator
+  filters:
+    - uniquifier
+
+speller:
+  alphabet: abcdefghijklmnopqrstuvwxyz
+  delimiter: " '"

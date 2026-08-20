@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+lock_file="${project_root}/upstreams.lock.json"
+
+fail_model() {
+  echo "verify-linnet-grammar-model: $1" >&2
+  exit 1
+}
+
+[[ "$#" -gt 0 ]] || fail_model "no model artifact supplied"
+for required_tool in ruby shasum stat; do
+  command -v "${required_tool}" >/dev/null 2>&1 ||
+    fail_model "required verification tool is unavailable"
+done
+
+IFS=$'\t' read -r expected_name expected_bytes expected_sha256 < <(
+  ruby -rjson -e '
+    model = JSON.parse(File.read(ARGV.fetch(0))).fetch("sources")
+      .fetch("rime_lmdg_grammar")
+    puts [model.fetch("asset"), model.fetch("bytes"), model.fetch("sha256")].join("\t")
+  ' "${lock_file}"
+)
+[[ -n "${expected_name}" && -n "${expected_bytes}" && -n "${expected_sha256}" ]] ||
+  fail_model "invalid model lock"
+
+for artifact in "$@"; do
+  [[ -f "${artifact}" && ! -L "${artifact}" ]] ||
+    fail_model "model artifact is missing or unsafe"
+  [[ "${artifact##*/}" == "${expected_name}" ]] ||
+    fail_model "unexpected model artifact name"
+  [[ "$(stat -f %z "${artifact}")" == "${expected_bytes}" ]] ||
+    fail_model "model artifact size differs from the lock"
+  [[ "$(shasum -a 256 "${artifact}" | awk '{print $1}')" == "${expected_sha256}" ]] ||
+    fail_model "model artifact digest differs from the lock"
+done
+
+echo "Linnet grammar model: PASS (${expected_bytes} bytes, locked digest)"

@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+profile="${1:-}"
+payload_root="${2:-}"
+chinese_pack="${3:-}"
+english_pack="${4:-}"
+lts_pack="${5:-}"
+extended_pack="${6:-}"
+release_tool="${LINNET_RELEASE_TOOL:-}"
+core_version="${LINNET_CORE_VERSION:-}"
+
+fail() {
+  echo "build_activation_profile: $1" >&2
+  exit 1
+}
+
+[[ "$#" -eq 6 ]] ||
+  fail "usage: PROFILE PAYLOAD_ROOT CHINESE_PACK ENGLISH_PACK LTS_PACK EXTENDED_PACK"
+[[ "${profile}" == complete ]] || fail "unsupported profile: ${profile}"
+[[ "${extended_pack}" != "-" ]] || fail "the complete profile requires Extended"
+[[ "${payload_root}" == /* && -d "${payload_root}" && ! -L "${payload_root}" ]] ||
+  fail "PAYLOAD_ROOT must be an absolute, non-symlink directory"
+[[ "${release_tool}" == /* && -x "${release_tool}" && ! -L "${release_tool}" ]] ||
+  fail "LINNET_RELEASE_TOOL must name the Swift release CLI"
+[[ "${core_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]] ||
+  fail "LINNET_CORE_VERSION is invalid"
+
+[[ "${lts_pack}" != "-" ]] || fail "the complete profile requires LTS"
+pack_roots=("${chinese_pack}" "${english_pack}" "${lts_pack}" "${extended_pack}")
+pack_kinds=(chinese english lts extended)
+for index in "${!pack_roots[@]}"; do
+  pack_root="${pack_roots[${index}]}"
+  [[ "${pack_root}" == /* && -d "${pack_root}" && ! -L "${pack_root}" ]] ||
+    fail "pack root is missing or unsafe"
+  [[ -s "${pack_root}/manifest.json" ]] || fail "pack manifest is missing"
+  "${release_tool}" inspect-installed --root "${pack_root}" \
+    --core-version "${core_version}" >/dev/null ||
+    fail "installed pack manifest or inventory is invalid"
+  [[ "${pack_root##*/}" == [1-9]*-* ]] || fail "pack identity path mismatch"
+done
+
+active_root="${payload_root}/Runtime/Active"
+state_root="${payload_root}/State"
+profile_root="${payload_root}/Profiles/Active"
+mkdir -p "${active_root}/build" "${state_root}" "${profile_root}"
+
+active_entries=$'\n'
+claim_active_entry() {
+  local candidate="$1"
+  case "${active_entries}" in
+    *$'\n'"${candidate}"$'\n'*) fail "duplicate active entry: ${candidate}" ;;
+  esac
+  active_entries+="${candidate}"$'\n'
+}
+for index in "${!pack_roots[@]}"; do
+  pack_root="${pack_roots[${index}]}"
+  kind="${pack_kinds[${index}]}"
+  identity="${pack_root##*/}"
+  while IFS= read -r -d '' entry; do
+    relative="${entry#"${pack_root}/"}"
+    [[ "${relative}" == "manifest.json" ]] && continue
+    [[ "${relative}" == "linnet_zh.dict.yaml" || \
+      "${relative}" == "linnet_zh_full.dict.yaml" ]] && continue
+
+    parent="${relative%/*}"
+    target_prefix="../.."
+    if [[ "${parent}" != "${relative}" ]]; then
+      active_parent="${active_root}"
+      remaining_parent="${parent}"
+      while [[ -n "${remaining_parent}" ]]; do
+        component="${remaining_parent%%/*}"
+        [[ -n "${component}" && "${component}" != . && "${component}" != .. ]] ||
+          fail "unsafe manifest directory: ${parent}"
+        active_parent="${active_parent}/${component}"
+        if [[ -L "${active_parent}" || (-e "${active_parent}" && ! -d "${active_parent}") ]]; then
+          fail "active file/directory collision: ${parent}"
+        fi
+        mkdir -p "${active_parent}"
+        target_prefix="${target_prefix}/.."
+        if [[ "${remaining_parent}" == */* ]]; then
+          remaining_parent="${remaining_parent#*/}"
+        else
+          remaining_parent=""
+        fi
+      done
+    fi
+
+    claim_active_entry "${relative}"
+    active_entry="${active_root}/${relative}"
+    [[ ! -e "${active_entry}" && ! -L "${active_entry}" ]] ||
+      fail "active file/directory collision: ${relative}"
+    ln -s "${target_prefix}/Data/Packs/${kind}/${identity}/${relative}" \
+      "${active_entry}"
+  done < <(find "${pack_root}" -mindepth 1 -type f -print0 | LC_ALL=C sort -z)
+done
+rmdir "${active_root}/build" 2>/dev/null || true
+
+claim_active_entry "activation.json"
+grammar_language="wanxiang-lts-zh-hans"
+printf '%s\n' \
+  'grammar:' \
+  "  language: ${grammar_language}" \
+  >"${profile_root}/linnet_grammar_active.yaml"
+printf '%s\n' \
+  '{"format":"io.github.ares-x.linnet.language-profile.v1","profile_id":"Active"}' \
+  >"${profile_root}/.linnet-language-profile.json"
+claim_active_entry "linnet_grammar_active.yaml"
+/bin/cp -X "${profile_root}/linnet_grammar_active.yaml" \
+  "${active_root}/linnet_grammar_active.yaml"
+selector_target="../../Data/Packs/extended/${extended_pack##*/}/linnet_zh_full.dict.yaml"
+claim_active_entry "linnet_zh.dict.yaml"
+ln -s "${selector_target}" "${active_root}/linnet_zh.dict.yaml"
+"${release_tool}" build-activation-profile \
+  --output "${active_root}/activation.json" \
+  --core-version "${core_version}" \
+  --chinese-pack "${chinese_pack}" \
+  --english-pack "${english_pack}" \
+  --lts-pack "${lts_pack}" \
+  --extended-pack "${extended_pack}"
+
+[[ -s "${active_root}/activation.json" ]] || fail "active state was not created"
+ln -s "../Runtime/Active/activation.json" "${state_root}/active.json"

@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+fail_asset() {
+  echo "fetch-locked-release-asset: $1" >&2
+  exit 1
+}
+
+[[ "$#" -eq 3 ]] || fail_asset "usage: LOCK SOURCE OUTPUT"
+lock_file="$1"
+source_name="$2"
+output="$3"
+[[ -f "${lock_file}" && ! -L "${lock_file}" ]] || fail_asset "lock is missing or unsafe"
+[[ "${source_name}" =~ ^[a-z0-9_]+$ ]] || fail_asset "source name is invalid"
+[[ "${output}" == /* && ! -e "${output}" && ! -L "${output}" ]] ||
+  fail_asset "output must be one new absolute path"
+output_parent="$(cd "$(dirname "${output}")" && pwd -P)"
+[[ "${output}" == "${output_parent}/$(basename "${output}")" ]] ||
+  fail_asset "output is not canonical"
+
+lock_value() {
+  plutil -extract "sources.${source_name}.$1" raw -o - "${lock_file}" 2>/dev/null ||
+    fail_asset "missing lock value: $1"
+}
+
+repository="$(lock_value repository)"
+release="$(lock_value release)"
+asset="$(lock_value asset)"
+asset_download_url="$(lock_value asset_download_url)"
+expected_bytes="$(lock_value bytes)"
+expected_sha256="$(lock_value sha256)"
+[[ "${repository}" =~ ^https://github\.com/([^/]+/[^/]+)\.git$ ]] ||
+  fail_asset "repository is not one GitHub HTTPS Git URL"
+repository_slug="${BASH_REMATCH[1]}"
+[[ "${release}" =~ ^[A-Za-z0-9._-]+$ ]] || fail_asset "release is invalid"
+[[ "${asset}" =~ ^[A-Za-z0-9._-]+$ ]] || fail_asset "asset name is invalid"
+[[ "${expected_bytes}" =~ ^[1-9][0-9]*$ ]] || fail_asset "asset byte count is invalid"
+[[ "${expected_sha256}" =~ ^[0-9a-f]{64}$ ]] || fail_asset "asset digest is invalid"
+expected_download_url="https://github.com/${repository_slug}/releases/download/${release}/${asset}"
+[[ "${asset_download_url}" == "${expected_download_url}" ]] ||
+  fail_asset "asset download URL differs from repository, release, and name"
+
+download="$(mktemp "${output_parent}/.$(basename "${output}").download.XXXXXX")"
+headers="$(mktemp "${output_parent}/.$(basename "${output}").headers.XXXXXX")"
+cleanup_asset() {
+  local status=$?
+  trap - EXIT INT TERM HUP
+  case "${download}" in
+    "${output_parent}/.$(basename "${output}").download."??????) rm -f -- "${download}" ;;
+    *) status=1 ;;
+  esac
+  case "${headers}" in
+    "${output_parent}/.$(basename "${output}").headers."??????) rm -f -- "${headers}" ;;
+    *) status=1 ;;
+  esac
+  exit "${status}"
+}
+trap cleanup_asset EXIT INT TERM HUP
+
+status="$(curl --silent --show-error --proto '=https' --connect-timeout 30 --max-time 600 \
+  -H 'User-Agent: Linnet-locked-release-asset' \
+  --dump-header "${headers}" --output "${download}" --write-out '%{http_code}' \
+  "${asset_download_url}")" || fail_asset "GitHub asset request failed"
+locations="$(awk '
+  tolower(substr($0, 1, 9)) == "location:" {
+    sub(/^[^:]*:[[:space:]]*/, "")
+    sub(/\r$/, "")
+    print
+  }
+' "${headers}")"
+if [[ -z "${locations}" ]]; then
+  location_count=0
+else
+  location_count="$(printf '%s\n' "${locations}" | wc -l | tr -d '[:space:]')"
+fi
+case "${status}" in
+  200)
+    [[ "${location_count}" == 0 ]] ||
+      fail_asset "direct asset response unexpectedly redirected"
+    ;;
+  301|302|303|307|308)
+    [[ "${location_count}" == 1 ]] || fail_asset "asset response has an invalid redirect count"
+    location="${locations}"
+    case "${location}" in
+      https://release-assets.githubusercontent.com/*) ;;
+      *) fail_asset "asset redirected outside GitHub storage" ;;
+    esac
+
+    # The second request is deliberately fresh: no Cookie or proxy credential
+    # state from the GitHub release request is copied across the host boundary.
+    curl --fail --silent --show-error --proto '=https' --connect-timeout 30 --max-time 600 \
+      -H 'User-Agent: Linnet-locked-release-asset' --output "${download}" "${location}"
+    ;;
+  *)
+    fail_asset "GitHub asset request returned HTTP ${status}"
+    ;;
+esac
+[[ "$(stat -f %z "${download}")" == "${expected_bytes}" ]] ||
+  fail_asset "asset byte count differs from the lock"
+actual_sha256="$(shasum -a 256 "${download}" | awk '{print $1}')"
+[[ "${actual_sha256}" == "${expected_sha256}" ]] ||
+  fail_asset "asset digest differs from the lock"
+mv "${download}" "${output}"
+echo "Locked release asset: PASS (${expected_bytes} bytes, ${actual_sha256})"

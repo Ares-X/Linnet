@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+kind="${1:-}"
+version="${2:-}"
+sequence="${3:-}"
+data_abi="${4:-}"
+source_root="${5:-}"
+output_root="${6:-}"
+minimum_core_version="${7:-}"
+content_sha256="${8:-}"
+release_tool="${LINNET_RELEASE_TOOL:-}"
+
+fail() {
+  echo "build_data_pack: $1" >&2
+  exit 1
+}
+
+[[ "$#" -eq 8 ]] ||
+  fail "usage: KIND VERSION SEQUENCE DATA_ABI SOURCE_ROOT OUTPUT_ROOT MIN_CORE CONTENT_SHA"
+case "${kind}" in
+  chinese|english|lts|extended) ;;
+  *) fail "unsupported pack kind: ${kind}" ;;
+esac
+[[ "${version}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] || fail "unsafe pack version"
+[[ "${sequence}" =~ ^[1-9][0-9]*$ ]] || fail "invalid pack sequence"
+[[ "${data_abi}" =~ ^[1-9][0-9]*$ ]] || fail "invalid data ABI"
+[[ "${minimum_core_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]] ||
+  fail "invalid minimum Core version"
+[[ "${content_sha256}" =~ ^[0-9a-f]{64}$ ]] || fail "invalid content SHA-256"
+[[ "${source_root}" == /* && -d "${source_root}" && ! -L "${source_root}" ]] ||
+  fail "SOURCE_ROOT must be an absolute, non-symlink directory"
+[[ "${output_root}" == /* && -d "${output_root}" && ! -L "${output_root}" ]] ||
+  fail "OUTPUT_ROOT must be an absolute, non-symlink directory"
+[[ "${release_tool}" == /* && -x "${release_tool}" && ! -L "${release_tool}" ]] ||
+  fail "LINNET_RELEASE_TOOL must name the Swift pack tool"
+
+identity="${sequence}-${version}"
+destination="${output_root}/${kind}/${identity}"
+[[ ! -e "${destination}" && ! -L "${destination}" ]] || fail "pack output already exists"
+mkdir -p "${destination%/*}"
+"${release_tool}" build-installed \
+  --kind "${kind}" --version "${version}" --sequence "${sequence}" \
+  --data-abi "${data_abi}" --min-core "${minimum_core_version}" \
+  --content-sha256 "${content_sha256}" --source "${source_root}" \
+  --output "${destination}"
+
+printf '%s\n' "${destination}"

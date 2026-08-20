@@ -1,0 +1,679 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+package_path="${1:-}"
+source_core_app="${2:-}"
+edition="${3:-}"
+verification_scope="${4:-}"
+release_tool="${LINNET_RELEASE_TOOL:-}"
+unset LINNET_RELEASE_TOOL
+
+fail_verification() {
+  echo "verify_package: $1" >&2
+  exit 1
+}
+
+[[ "$#" -eq 4 ]] ||
+  fail_verification "usage: PKG SOURCE_CORE_APP EDITION [installation-uat|publication]"
+case "${edition}" in core|complete) ;; *) fail_verification "invalid edition" ;; esac
+case "${verification_scope}" in installation-uat|publication) ;; *)
+  fail_verification "invalid verification scope" ;;
+esac
+[[ "${package_path}" == /* && -f "${package_path}" && ! -L "${package_path}" ]] ||
+  fail_verification "PKG must be an absolute regular file"
+[[ "${source_core_app}" == /* && -d "${source_core_app}" && ! -L "${source_core_app}" ]] ||
+  fail_verification "SOURCE_CORE_APP must be an absolute App bundle"
+[[ "${release_tool}" == /* && -x "${release_tool}" && ! -L "${release_tool}" ]] ||
+  fail_verification "LINNET_RELEASE_TOOL must name the verified pack CLI"
+
+for required_tool in bash cmp codesign file find grep installer lipo pkgutil plutil readlink \
+    ruby sed shasum sort stat tr wc xar; do
+  command -v "${required_tool}" >/dev/null 2>&1 ||
+    fail_verification "required verification tool is unavailable: ${required_tool}"
+done
+
+work_root="$(mktemp -d -t linnet-package-verify)"
+cleanup() {
+  if [[ "${work_root##*/}" == linnet-package-verify.* ]]; then
+    chmod -R u+w "${work_root}" 2>/dev/null || true
+    /bin/rm -rf -- "${work_root}"
+  fi
+}
+trap cleanup EXIT
+expanded="${work_root}/expanded"
+pkgutil --expand-full "${package_path}" "${expanded}"
+
+case "${edition}" in
+  core)
+    expected_product_entries=$'Distribution\nLinnet-Core.component.pkg\nResources'
+    expected_component_names=$'Linnet-Core.component.pkg'
+    ;;
+  complete)
+    expected_product_entries=$'Distribution\nLinnet-Chinese.component.pkg\nLinnet-Core.component.pkg\nLinnet-English.component.pkg\nLinnet-Extended.component.pkg\nLinnet-LTS.component.pkg\nLinnet-Profile.component.pkg\nResources'
+    expected_component_names=$'Linnet-Chinese.component.pkg\nLinnet-Core.component.pkg\nLinnet-English.component.pkg\nLinnet-Extended.component.pkg\nLinnet-LTS.component.pkg\nLinnet-Profile.component.pkg'
+    ;;
+esac
+actual_product_entries="$(find "${expanded}" -mindepth 1 -maxdepth 1 \
+  -exec basename {} \; | LC_ALL=C sort)"
+[[ "${actual_product_entries}" == "${expected_product_entries}" ]] ||
+  fail_verification "expanded ${edition} product allowlist mismatch"
+actual_component_names="$(find "${expanded}" -mindepth 1 -maxdepth 1 \
+  -name '*.component.pkg' -exec basename {} \; | LC_ALL=C sort)"
+[[ "${actual_component_names}" == "${expected_component_names}" ]] ||
+  fail_verification "component allowlist mismatch"
+
+expected_resources=$'Conclusion-summary.txt\nLICENSE.txt\nNOTICE.md\nWELCOME.md'
+actual_resources="$(find "${expanded}/Resources" -type f |
+  sed "s#^${expanded}/Resources/##" | LC_ALL=C sort)"
+[[ "${actual_resources}" == "${expected_resources}" ]] ||
+  fail_verification "installer legal-resource allowlist mismatch"
+for direct_upstream in Squirrel Rime rime-ice Hallelujah Wanxiang; do
+  grep -Fq "${direct_upstream}" "${expanded}/Resources/NOTICE.md" ||
+    fail_verification "installer notice omits ${direct_upstream}"
+done
+
+core_version="$(plutil -extract CFBundleShortVersionString raw -o - \
+  "${source_core_app}/Contents/Info.plist")"
+core_build="$(plutil -extract CFBundleVersion raw -o - \
+  "${source_core_app}/Contents/Info.plist")"
+ruby -rjson -rrexml/document -e '
+  expanded, edition, core_version, product_build, project, source_app = ARGV
+  components = edition == "core" ? %w[core] : %w[core chinese english lts extended profile]
+  names = {"core" => "Core", "chinese" => "Chinese", "english" => "English",
+    "lts" => "LTS", "extended" => "Extended", "profile" => "Profile"}
+  ids = {"core" => "io.github.ares-x.inputmethod.Linnet.core.pkg"}
+  %w[chinese english lts extended].each do |kind|
+    ids[kind] = "io.github.ares-x.inputmethod.Linnet.data.#{kind}.pkg"
+  end
+  ids["profile"] = "io.github.ares-x.inputmethod.Linnet.profile.pkg"
+  locations = components.to_h { |kind| [kind, kind == "core" ? "/Library/Input Methods" : "/Library/Application Support/Linnet"] }
+  attrs = ->(element) { element.attributes.each_attribute.to_h { |attribute| [attribute.name, attribute.value] } }
+  children = ->(element) { element.elements.to_a }
+  empty = ->(element, name) {
+    abort "unexpected #{name} mapping" unless element&.name == name && attrs.call(element).empty? && children.call(element).empty?
+  }
+  leaf = ->(element, name, expected_attrs, text = nil) {
+    abort "unexpected #{name} contract" unless element&.name == name &&
+      attrs.call(element) == expected_attrs && children.call(element).empty? &&
+      (text.nil? || element.text.to_s.strip == text)
+  }
+  versions = {}
+  install_kbytes = {}
+  components.each do |kind|
+    component = File.join(expanded, "Linnet-#{names.fetch(kind)}.component.pkg")
+    info_path = File.join(component, "PackageInfo")
+    stat = File.lstat(info_path) rescue abort("PackageInfo is missing")
+    abort "unsafe PackageInfo" unless stat.file? && !stat.symlink? && (stat.mode & 0o7777) == 0o644
+    root = REXML::Document.new(File.binread(info_path)).root
+    abort "PackageInfo root mismatch" unless root&.name == "pkg-info"
+    expected_keys = %w[auth format-version generator-version identifier install-location minimumSystemVersion version]
+    expected_keys += %w[overwrite-permissions postinstall-action relocatable] unless kind == "core"
+    abort "PackageInfo attribute shape mismatch: #{kind}: #{attrs.call(root).keys.sort.join(",")}" unless
+      attrs.call(root).keys.sort == expected_keys.sort
+    abort "PackageInfo identity mismatch" unless
+      root.attributes["format-version"] == "2" && root.attributes["identifier"] == ids.fetch(kind) &&
+      root.attributes["install-location"] == locations.fetch(kind) && root.attributes["auth"] == "root" &&
+      root.attributes["minimumSystemVersion"] == "13.0" && !root.attributes["generator-version"].to_s.empty? &&
+      !root.attributes["version"].to_s.empty?
+    unless kind == "core"
+      abort "PackageInfo data policy mismatch" unless root.attributes["overwrite-permissions"] == "true" &&
+        root.attributes["relocatable"] == "false" && root.attributes["postinstall-action"] == "none"
+    end
+    versions[kind] = root.attributes["version"]
+    nodes = children.call(root)
+    payload = nodes.shift
+    abort "payload mapping mismatch" unless payload&.name == "payload" &&
+      attrs.call(payload).keys.sort == %w[installKBytes numberOfFiles] &&
+      attrs.call(payload).values.all? { |value| value.match?(/\A[0-9]+\z/) } && children.call(payload).empty?
+    install_kbytes[kind] = payload.attributes["installKBytes"]
+    if kind == "core"
+      product_version = core_version
+      bundle = nodes.shift
+      leaf.call(bundle, "bundle", {"path" => "./Linnet.app", "id" => "io.github.ares-x.inputmethod.Linnet",
+        "CFBundleShortVersionString" => product_version, "CFBundleVersion" => product_build})
+      settings_bundle = nodes.shift
+      leaf.call(settings_bundle, "bundle", {"path" => "./Linnet.app/Contents/Applications/Settings.app",
+        "id" => "io.github.ares-x.inputmethod.Linnet.settings",
+        "CFBundleShortVersionString" => product_version, "CFBundleVersion" => product_build})
+      bundle_version = nodes.shift
+      abort "bundle-version mapping mismatch: #{bundle_version&.name}" unless
+        bundle_version&.name == "bundle-version"
+      leaf.call(children.call(bundle_version).fetch(0), "bundle", {"id" => "io.github.ares-x.inputmethod.Linnet"})
+      abort "bundle-version contains an extra mapping" unless children.call(bundle_version).length == 1
+      upgrade = nodes.shift
+      abort "upgrade mapping mismatch" unless upgrade&.name == "upgrade-bundle" &&
+        children.call(upgrade).map { |item| attrs.call(item) } == [
+          {"id" => "io.github.ares-x.inputmethod.Linnet"},
+          {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}]
+    else
+      empty.call(nodes.shift, "bundle-version")
+      empty.call(nodes.shift, "upgrade-bundle")
+    end
+    empty.call(nodes.shift, "update-bundle")
+    empty.call(nodes.shift, "atomic-update-bundle")
+    strict = nodes.shift
+    if kind == "core"
+      abort "strict bundle mapping mismatch" unless strict&.name == "strict-identifier" &&
+        children.call(strict).map { |item| attrs.call(item) } == [
+          {"id" => "io.github.ares-x.inputmethod.Linnet"},
+          {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}]
+    else
+      empty.call(strict, "strict-identifier")
+    end
+    empty.call(nodes.shift, "relocate")
+    if %w[core profile].include?(kind)
+      scripts = nodes.shift
+      commands = if kind == "core"
+        edition == "core" ? %w[preinstall postinstall] : %w[preinstall]
+      else
+        %w[postinstall]
+      end
+      abort "installer script mapping mismatch" unless scripts&.name == "scripts" &&
+        children.call(scripts).length == commands.length
+      commands.zip(children.call(scripts)).each do |command, mapping|
+        leaf.call(mapping, command, {"file" => "./#{command}", "timeout" => "600"})
+      end
+    end
+    abort "PackageInfo contains an extra mapping" unless nodes.empty?
+  end
+  abort "Core version mismatch" unless versions.fetch("core") == core_version
+
+  distribution = REXML::Document.new(File.binread(File.join(expanded, "Distribution"))).root
+  abort "Distribution root mismatch" unless distribution&.name == "installer-gui-script" &&
+    attrs.call(distribution) == {"minSpecVersion" => "2"}
+  nodes = children.call(distribution)
+  leaf.call(nodes.shift, "title", {}, edition == "core" ? "Linnet Core" : "Linnet")
+  [["welcome", "WELCOME.md"], ["license", "LICENSE.txt"], ["readme", "NOTICE.md"],
+    ["conclusion", "Conclusion-summary.txt"]].each do |name, file|
+    leaf.call(nodes.shift, name, {"file" => file, "mime-type" => "text/plain"})
+  end
+  leaf.call(nodes.shift, "options", {"customize" => "never", "require-scripts" => "false",
+    "hostArchitectures" => "arm64"})
+  leaf.call(nodes.shift, "domains", {"enable_localSystem" => "false",
+    "enable_currentUserHome" => "true", "enable_anywhere" => "false"})
+  leaf.call(nodes.shift, "os-version", {"min" => "13.0"})
+  outline = nodes.shift
+  abort "choices outline mismatch" unless outline&.name == "choices-outline" &&
+    children.call(outline).map { |item| [item.name, attrs.call(item)] } ==
+      components.map { |kind| ["line", {"choice" => kind}] }
+  components.each do |kind|
+    choice = nodes.shift
+    abort "choice mapping mismatch" unless choice&.name == "choice" &&
+      attrs.call(choice) == {"id" => kind, "visible" => "false"} && children.call(choice).length == 1
+    leaf.call(children.call(choice).first, "pkg-ref", {"id" => ids.fetch(kind)})
+  end
+  components.each do |kind|
+    primary = nodes.shift
+    primary_attributes = {"id" => ids.fetch(kind), "version" => versions.fetch(kind),
+      "auth" => "none"}
+    if edition == "complete" && kind != "core"
+      primary_attributes["installKBytes"] = install_kbytes.fetch(kind)
+      primary_attributes["updateKBytes"] = "0"
+    end
+    primary_attributes["onConclusion"] = "RequireLogout" if edition == "complete" && kind == "core"
+    leaf.call(primary, "pkg-ref", primary_attributes,
+      "#Linnet-#{names.fetch(kind)}.component.pkg")
+  end
+  components.each do |kind|
+    secondary = nodes.shift
+    secondary_attributes = {"id" => ids.fetch(kind)}
+    if kind == "core"
+      secondary_attributes["installKBytes"] = install_kbytes.fetch(kind)
+      secondary_attributes["updateKBytes"] = "0"
+    end
+    abort "secondary pkg-ref mismatch" unless secondary&.name == "pkg-ref" &&
+      attrs.call(secondary) == secondary_attributes
+    secondary_nodes = children.call(secondary)
+    if kind == "core"
+      must_close = secondary_nodes.shift
+      abort "Core must-close mapping mismatch" unless must_close&.name == "must-close" &&
+        attrs.call(must_close).empty? && children.call(must_close).map { |app|
+          [app.name, attrs.call(app), children.call(app)]
+        } == [
+          ["app", {"id" => "io.github.ares-x.inputmethod.Linnet"}, []],
+          ["app", {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}, []],
+        ]
+    end
+    bundle_version = secondary_nodes.shift
+    abort "Distribution bundle-version mismatch" unless bundle_version.name == "bundle-version"
+    abort "secondary pkg-ref contains an extra mapping" unless secondary_nodes.empty?
+    bundles = children.call(bundle_version)
+    if kind == "core"
+      expected = [
+        {"CFBundleShortVersionString" => core_version, "CFBundleVersion" => product_build,
+          "id" => "io.github.ares-x.inputmethod.Linnet.settings", "path" => "Linnet.app/Contents/Applications/Settings.app"},
+        {"CFBundleShortVersionString" => core_version, "CFBundleVersion" => product_build,
+          "id" => "io.github.ares-x.inputmethod.Linnet", "path" => "Linnet.app"}]
+      abort "Distribution Core bundle mapping mismatch" unless bundles.map { |item| attrs.call(item) } == expected
+    else
+      abort "data component gained a bundle mapping" unless bundles.empty?
+    end
+  end
+  abort "Distribution contains an extra mapping" unless nodes.empty?
+
+  expected_resources = {
+    "LICENSE.txt" => File.binread(File.join(project, "LICENSE.txt")),
+    "WELCOME.md" => File.binread(File.join(project, "package/WELCOME.md")),
+    "Conclusion-summary.txt" => File.binread(File.join(project, "package/Conclusion-summary.txt")),
+    "NOTICE.md" => File.binread(File.join(source_app, "Contents/Resources/LinnetRelease/NOTICE.md")),
+  }
+  resources = File.join(expanded, "Resources")
+  abort "Installer resource tree mismatch" unless Dir.children(resources).sort == expected_resources.keys.sort
+  expected_resources.each do |name, bytes|
+    path = File.join(resources, name); stat = File.lstat(path)
+    abort "unsafe Installer resource" unless stat.file? && !stat.symlink? &&
+      (stat.mode & 0o7777) == 0o644 && File.binread(path) == bytes
+  end
+
+  version_document = JSON.parse(File.binread(File.join(
+    source_app, "Contents/Resources/LinnetRelease/VERSION.json")))
+  distribution = version_document.fetch("distribution")
+  signature = distribution.fetch("application_code_signature")
+  candidate_identity = {
+    "format" => nil,
+    "bundle_identifier" => "io.github.ares-x.inputmethod.Linnet",
+    "version" => core_version,
+    "build" => product_build,
+    "candidate_revision" => version_document.fetch("source").fetch("candidate_revision"),
+  }
+  case signature.fetch("profile")
+  when "uat"
+    candidate_identity["format"] = 1
+    candidate_identity["leaf_certificate_sha256"] =
+      signature.fetch("leaf_certificate_sha256")
+  when "community-adhoc"
+    abort "community trust mismatch" unless
+      signature.fetch("kind") == "adhoc" &&
+      distribution.fetch("trust_model") == "manual-user-approval"
+    candidate_identity["format"] = 2
+    candidate_identity["trust_model"] = "unsigned-community"
+  else
+    abort "unsupported candidate identity"
+  end
+  candidate_identity = JSON.generate(candidate_identity) + "\n"
+  identity_helper = File.binread(File.join(
+    project, "package/installer-scripts/candidate-app-identity.sh"))
+  core_scripts = {"candidate-app-identity.json" => [0o644, candidate_identity],
+    "candidate-app-identity.sh" => [0o755, identity_helper],
+    "candidate-core-version" => [0o644, "#{core_version}\n"],
+    "install-mode" => [0o644, edition == "core" ? "core-update\n" : "complete\n"],
+    "preinstall" => [0o755, File.binread(File.join(project, "package/core-installer-scripts/preinstall"))]}
+  if edition == "core"
+    core_scripts["postinstall"] = [0o755,
+      File.binread(File.join(project, "package/installer-scripts/postinstall"))]
+    core_scripts["quit-applications-clean.jxa"] = [0o644,
+      File.binread(File.join(project,
+        "package/installer-scripts/quit-applications-clean.jxa"))]
+  end
+  script_contracts = {
+    "core" => core_scripts,
+    "profile" => {"candidate-app-identity.json" => [0o644, candidate_identity],
+      "candidate-app-identity.sh" => [0o755, identity_helper],
+      "install-mode" => [0o644, "complete\n"],
+      "postinstall" => [0o755,
+        File.binread(File.join(project, "package/installer-scripts/postinstall"))]},
+  }
+  components.each do |kind|
+    scripts = File.join(expanded, "Linnet-#{names.fetch(kind)}.component.pkg", "Scripts")
+    expected = script_contracts[kind]
+    if expected
+      stat = File.lstat(scripts) rescue abort("Scripts tree is missing")
+      abort "unsafe Scripts directory" unless stat.directory? && !stat.symlink? && (stat.mode & 0o7777) == 0o755
+      abort "Scripts tree inventory mismatch" unless Dir.children(scripts).sort == expected.keys.sort
+      expected.each do |name, (mode, bytes)|
+        path = File.join(scripts, name); entry = File.lstat(path)
+        abort "unsafe Installer script" unless entry.file? && !entry.symlink? &&
+          (entry.mode & 0o7777) == mode && File.binread(path) == bytes
+      end
+    else
+      abort "data component gained a Scripts entry" if File.exist?(scripts) || File.symlink?(scripts)
+    end
+  end
+' "${expanded}" "${edition}" "${core_version}" "${core_build}" "${project_root}" \
+  "${source_core_app}" ||
+  fail_verification "canonical Installer metadata contract failed"
+
+expected_restart_action=None
+[[ "${edition}" != complete ]] || expected_restart_action=RequireLogout
+[[ "$(installer -query RestartAction -pkg "${package_path}")" == \
+  "${expected_restart_action}" ]] ||
+  fail_verification "Installer exposes the wrong ${edition} session conclusion"
+
+core_component="${expanded}/Linnet-Core.component.pkg"
+[[ "$(find "${core_component}/Payload" -mindepth 1 -maxdepth 1 -exec basename {} \;)" == \
+  "Linnet.app" ]] || fail_verification "Core payload is not exactly Linnet.app"
+source_shared_support="${source_core_app}/Contents/SharedSupport"
+if [[ -e "${source_shared_support}" || -L "${source_shared_support}" ]]; then
+  [[ -d "${source_shared_support}" && ! -L "${source_shared_support}" &&
+    "$(stat -f '%Lp' "${source_shared_support}")" == 755 &&
+    -z "$(find "${source_shared_support}" -mindepth 1 -print -quit)" ]] ||
+    fail_verification "accepted Core SharedSupport must be absent or empty"
+fi
+[[ -d "${core_component}/Payload/Linnet.app/Contents/SharedSupport" &&
+  "$(stat -f '%Lp' "${core_component}/Payload/Linnet.app/Contents/SharedSupport")" == 755 &&
+  -z "$(find "${core_component}/Payload/Linnet.app/Contents/SharedSupport" -mindepth 1 -print -quit)" ]] ||
+  fail_verification "Core SharedSupport is not empty"
+expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninstall-mode\npreinstall'
+[[ "${edition}" != core ]] || \
+  expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninstall-mode\npostinstall\npreinstall\nquit-applications-clean.jxa'
+actual_core_scripts="$(find "${core_component}/Scripts" -mindepth 1 -maxdepth 1 -type f \
+  -exec basename {} \; | LC_ALL=C sort)"
+[[ "${actual_core_scripts}" == "${expected_core_scripts}" ]] ||
+  fail_verification "Core compatibility script allowlist mismatch"
+bash -n "${core_component}/Scripts/preinstall"
+bash -n "${core_component}/Scripts/candidate-app-identity.sh"
+if [[ "${edition}" == core ]]; then
+  bash -n "${core_component}/Scripts/postinstall"
+  grep -Fq 'NSRunningApplication' \
+    "${core_component}/Scripts/quit-applications-clean.jxa" ||
+    fail_verification "Core application quiescence owner is incomplete"
+fi
+[[ "$(cat "${core_component}/Scripts/candidate-core-version")" == "${core_version}" ]] ||
+  fail_verification "Core compatibility candidate version mismatch"
+expected_install_mode="core-update"
+[[ "${edition}" != complete ]] || expected_install_mode=complete
+[[ "$(cat "${core_component}/Scripts/install-mode")" == "${expected_install_mode}" ]] ||
+  fail_verification "Core component installation mode mismatch"
+grep -Fq 'check_active_core' "${core_component}/Scripts/preinstall" ||
+  fail_verification "Core compatibility preflight is incomplete"
+grep -Fq '"${identity_helper}" existing' "${core_component}/Scripts/preinstall" ||
+  fail_verification "Core candidate identity preflight is incomplete"
+if [[ "${edition}" == core ]]; then
+  grep -Fq '"${identity_helper}" installed' "${core_component}/Scripts/postinstall" ||
+    fail_verification "Core installed identity gate is incomplete"
+fi
+
+ruby -rdigest -e '
+  def manifest(root)
+    Dir.glob("#{root}/**/*", File::FNM_DOTMATCH).each_with_object([]) do |path, entries|
+      next if [".", ".."].include?(File.basename(path))
+      relative = path.delete_prefix(root + "/")
+      stat = File.lstat(path)
+      next if relative == "Contents/SharedSupport" && stat.directory?
+      kind = stat.symlink? ? "symlink" : stat.directory? ? "directory" : stat.file? ? "file" : "other"
+      content = stat.file? ? Digest::SHA256.file(path).hexdigest : stat.symlink? ? File.readlink(path) : nil
+      entries << [relative, kind, stat.mode & 0o7777, content]
+    end.sort
+  end
+  abort "Core payload differs from staged Core" unless manifest(ARGV.fetch(0)) == manifest(ARGV.fetch(1))
+' "${source_core_app}" "${core_component}/Payload/Linnet.app" ||
+  fail_verification "expanded Core differs from accepted Core"
+identity_command=(verify-product)
+identity_arguments=()
+candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
+[[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
+  fail_verification "verification requires LINNET_CANDIDATE_REVISION"
+if [[ "${verification_scope}" == publication ]]; then
+  identity_command=(verify-publication-product)
+  identity_arguments=("${candidate_revision}")
+fi
+source_code_identity="$("${project_root}/scripts/linnet-code-identity" \
+  "${identity_command[@]}" "${source_core_app}" ${identity_arguments[@]+"${identity_arguments[@]}"})" ||
+  fail_verification "source Core App code identity or release metadata is invalid"
+payload_code_identity="$("${project_root}/scripts/linnet-code-identity" \
+  "${identity_command[@]}" "${core_component}/Payload/Linnet.app" ${identity_arguments[@]+"${identity_arguments[@]}"})" ||
+  fail_verification "packaged Core App code identity or release metadata is invalid"
+[[ "${payload_code_identity}" == "${source_code_identity}" ]] ||
+  fail_verification "packaged Core identity differs from its accepted source"
+if [[ "${verification_scope}" == installation-uat ]]; then
+  ruby -rjson -e '
+    identity = JSON.parse(ARGV.fetch(0))
+    abort unless identity.keys.sort ==
+      %w[candidate_revision format leaf_certificate_sha256 profile] &&
+      identity.fetch("format") == 2 && identity.fetch("profile") == "uat" &&
+      identity.fetch("candidate_revision") == ARGV.fetch(1) &&
+      identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
+  ' "${source_code_identity}" "${candidate_revision}" ||
+    fail_verification "installation-UAT code identity projection is invalid"
+fi
+cmp -s "${expanded}/Resources/NOTICE.md" \
+  "${core_component}/Payload/Linnet.app/Contents/Resources/LinnetRelease/NOTICE.md" ||
+  fail_verification "Installer notice differs from the finalized App release metadata"
+settings_app="${core_component}/Payload/Linnet.app/Contents/Applications/Settings.app"
+settings_executable="${settings_app}/Contents/MacOS/Settings"
+[[ -d "${settings_app}" && ! -L "${settings_app}" && -x "${settings_executable}" ]] ||
+  fail_verification "embedded Settings App is missing or unsafe"
+while IFS= read -r -d '' candidate; do
+  description="$(file -b "${candidate}")"
+  [[ "${description}" == *Mach-O* ]] || continue
+  [[ "$(lipo -archs "${candidate}")" == arm64 ]] ||
+    fail_verification "Core contains a non-arm64 Mach-O"
+done < <(find "${core_component}/Payload/Linnet.app" -type f -print0)
+
+verify_data_component() {
+  local filename="$1"
+  local kind="$2"
+  local receipt="$3"
+  local component="${expanded}/${filename}"
+  [[ ! -d "${component}/Scripts" ]] || fail_verification "data component carries scripts"
+  local base="${component}/Payload/Data/Packs/${kind}"
+  local identity
+  [[ -d "${base}" && ! -L "${base}" ]] ||
+    fail_verification "${kind} pack root is missing or unsafe"
+  identity="$(find "${base}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)"
+  [[ -n "${identity}" && "$(printf '%s\n' "${identity}" | wc -l | tr -d ' ')" == 1 ]] ||
+    fail_verification "${kind} pack identity layout mismatch"
+  local root="${base}/${identity}"
+  local inspected="${work_root}/installed-${kind}.json"
+  "${release_tool}" inspect-installed --root "${root}" --core-version "${core_version}" \
+    >"${inspected}" ||
+    fail_verification "${kind} installed manifest or inventory is invalid"
+  ruby -e '
+    root = ARGV.fetch(0)
+    entries = [root] + Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH)
+    entries.each do |entry|
+      next if [".", ".."].include?(File.basename(entry))
+      stat = File.lstat(entry)
+      if stat.directory?
+        abort "installed pack directory permissions do not permit Installer replacement" unless
+          (stat.mode & 0o7777) == 0o755
+      elsif stat.file?
+        abort "installed pack file permissions are not read-only" unless
+          (stat.mode & 0o7777) == 0o444
+      else
+        abort "installed pack projection contains a non-file entry"
+      end
+    end
+  ' "${root}" || fail_verification "${kind} installed pack projection permissions are invalid"
+  ruby -rjson -rrexml/document -e '
+    payload = File.realpath(ARGV.fetch(0))
+    kind = ARGV.fetch(1)
+    receipt = ARGV.fetch(2)
+    identity = ARGV.fetch(3)
+    manifest = JSON.parse(File.read(ARGV.fetch(4)))
+    abort "pack format mismatch" unless manifest.fetch("format") == 2
+    abort "pack product mismatch" unless manifest.fetch("product") == "io.github.ares-x.inputmethod.Linnet"
+    abort "pack kind mismatch" unless manifest.fetch("kind") == kind
+    abort "pack receipt mismatch" unless manifest.fetch("pack_id") == receipt.delete_suffix(".pkg")
+    abort "pack sequence mismatch" unless manifest.fetch("sequence").is_a?(Integer) &&
+      manifest.fetch("sequence").positive?
+    expected_identity = "#{manifest.fetch("sequence")}-#{manifest.fetch("version")}"
+    abort "pack identity path mismatch" unless identity == expected_identity
+    package_info = REXML::Document.new(File.read(File.join(File.dirname(payload), "PackageInfo"))).root
+    abort "data receipt is not the monotonic sequence" unless
+      package_info.attributes["version"] == manifest.fetch("sequence").to_s
+    abort "pack data ABI mismatch" unless manifest.fetch("data_abi").is_a?(Integer) &&
+      manifest.fetch("data_abi").positive?
+  ' "${component}/Payload" "${kind}" "${receipt}" "${identity}" "${inspected}" ||
+    fail_verification "${kind} pack verification failed"
+}
+
+if [[ "${edition}" != core ]]; then
+  verify_data_component Linnet-Chinese.component.pkg chinese \
+    io.github.ares-x.inputmethod.Linnet.data.chinese.pkg
+  verify_data_component Linnet-English.component.pkg english \
+    io.github.ares-x.inputmethod.Linnet.data.english.pkg
+  verify_data_component Linnet-LTS.component.pkg lts \
+    io.github.ares-x.inputmethod.Linnet.data.lts.pkg
+  verify_data_component Linnet-Extended.component.pkg extended \
+    io.github.ares-x.inputmethod.Linnet.data.extended.pkg
+
+  profile_file="Linnet-Profile.component.pkg"
+  profile_component="${expanded}/${profile_file}"
+  [[ "$(find "${profile_component}/Scripts" -mindepth 1 -maxdepth 1 -type f \
+    -exec basename {} \; | LC_ALL=C sort)" == \
+    $'candidate-app-identity.json\ncandidate-app-identity.sh\ninstall-mode\npostinstall' ]] ||
+    fail_verification "profile script allowlist mismatch"
+  [[ "$(cat "${profile_component}/Scripts/install-mode")" == complete ]] ||
+    fail_verification "profile component installation mode mismatch"
+  [[ -x "${profile_component}/Scripts/postinstall" ]] ||
+    fail_verification "postinstall is not executable"
+  bash -n "${profile_component}/Scripts/postinstall"
+  bash -n "${profile_component}/Scripts/candidate-app-identity.sh"
+  grep -Fq '"${identity_helper}" installed' \
+    "${profile_component}/Scripts/postinstall" ||
+    fail_verification "Complete installed identity gate is incomplete"
+  if grep -REn 'sudo|dscacheutil|/Library/Launch|xattr|spctl|curl|wget' \
+      "${profile_component}/Scripts"; then
+    fail_verification "profile script crosses its lifecycle boundary"
+  fi
+
+  ACTIVE_EDITION=full ruby -rdigest -rjson -rpathname -rrexml/document -rset -e '
+    expanded = File.realpath(ARGV.fetch(0))
+    profile = File.join(expanded, ARGV.fetch(1), "Payload")
+    support = Pathname.new("/Library/Application Support/Linnet")
+    active = File.join(profile, "Runtime", "Active")
+    state = File.join(profile, "State", "active.json")
+    abort "Active view is missing" unless File.directory?(active) && !File.symlink?(active)
+    abort "state pointer is not the canonical relative symlink" unless
+      File.symlink?(state) && File.readlink(state) == "../Runtime/Active/activation.json"
+    activation_path = File.join(active, "activation.json")
+    abort "activation manifest is missing" unless File.file?(activation_path) && !File.symlink?(activation_path)
+    activation = JSON.parse(File.read(activation_path))
+    abort "active-set format mismatch" unless activation.fetch("format") == "io.github.ares-x.linnet.active-set.v1"
+    abort "active edition mismatch" unless activation.fetch("edition") == ENV.fetch("ACTIVE_EDITION")
+    expected_kinds = %w[chinese english lts extended]
+    packs = activation.fetch("packs")
+    abort "active pack set mismatch" unless packs.map { |pack| pack.fetch("kind") } == expected_kinds
+    component_for = {
+      "chinese" => "Linnet-Chinese.component.pkg",
+      "english" => "Linnet-English.component.pkg",
+      "lts" => "Linnet-LTS.component.pkg",
+      "extended" => "Linnet-Extended.component.pkg",
+    }
+    installed = {}
+    manifests = {}
+    packs.each do |pack|
+      kind = pack.fetch("kind")
+      relative = pack.fetch("relative_path")
+      expected_relative = "Data/Packs/#{kind}/#{pack.fetch("sequence")}-#{pack.fetch("version")}"
+      abort "active pack path mismatch" unless relative == expected_relative
+      component_root = File.join(expanded, component_for.fetch(kind), "Payload")
+      pack_root = File.join(component_root, relative)
+      manifest_path = File.join(pack_root, "manifest.json")
+      manifest = JSON.parse(File.read(manifest_path))
+      abort "active manifest digest mismatch" unless
+        Digest::SHA256.file(manifest_path).hexdigest == pack.fetch("manifest_sha256")
+      abort "active pack compatibility metadata mismatch" unless
+        pack.fetch("sequence") == manifest.fetch("sequence") &&
+          pack.fetch("data_abi") == manifest.fetch("data_abi")
+      installed[kind] = pack_root
+      manifests[kind] = manifest
+    end
+    profile_info = REXML::Document.new(
+      File.read(File.join(expanded, ARGV.fetch(1), "PackageInfo"))).root
+    expected_profile_version = packs.map { |pack| pack.fetch("sequence") }.join(".")
+    abort "profile receipt is not the deterministic sequence composite" unless
+      profile_info.attributes["version"] == expected_profile_version
+    distribution = REXML::Document.new(File.read(File.join(expanded, "Distribution"))).root
+    receipt_versions = distribution.get_elements("pkg-ref")
+      .select { |ref| ref.attributes["version"] }
+      .to_h { |ref| [ref.attributes["id"], ref.attributes["version"]] }
+    packs.each do |pack|
+      receipt = "io.github.ares-x.inputmethod.Linnet.data.#{pack.fetch("kind")}.pkg"
+      abort "Distribution data receipt is not the monotonic sequence" unless
+        receipt_versions.fetch(receipt) == pack.fetch("sequence").to_s
+    end
+    abort "Distribution profile receipt is not the sequence composite" unless
+      receipt_versions.fetch("io.github.ares-x.inputmethod.Linnet.profile.pkg") ==
+        expected_profile_version
+    %w[default.yaml squirrel.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml
+       linnet_en.schema.yaml].each do |required|
+      # Product expansion keeps component payloads in separate roots, so these
+      # cross-component links are intentionally dangling until Installer merges
+      # them below Application Support/Linnet.  Verify the link node here; the
+      # manifest-backed target mapping below proves the installed destination.
+      abort "active view is missing #{required}" unless
+        File.symlink?(File.join(active, required))
+    end
+    abort "active view is missing build" unless
+      File.directory?(File.join(active, "build")) && !File.symlink?(File.join(active, "build"))
+    excluded = Set.new(%w[linnet_zh.dict.yaml linnet_zh_full.dict.yaml])
+    expected_links = {}
+    manifests.each do |kind, manifest|
+      manifest.fetch("files").each do |file|
+        relative = file.fetch("path")
+        next if excluded.include?(relative)
+        abort "duplicate active manifest path: #{relative}" if expected_links.key?(relative)
+        expected_links[relative] = [kind, relative]
+      end
+    end
+    abort "full dictionary selector is missing" unless
+      manifests.fetch("extended").fetch("files").any? do |file|
+        file.fetch("path") == "linnet_zh_full.dict.yaml"
+      end
+    expected_links["linnet_zh.dict.yaml"] = ["extended", "linnet_zh_full.dict.yaml"]
+    expected_directories = Set.new(["build"])
+    expected_links.each_key do |relative|
+      components = relative.split("/")
+      components.pop
+      prefix = ""
+      components.each do |component|
+        prefix = prefix.empty? ? component : "#{prefix}/#{component}"
+        expected_directories.add(prefix)
+      end
+    end
+    active_entries = Dir.glob(File.join(active, "**", "*"), File::FNM_DOTMATCH)
+    grammar = File.join(active, "linnet_grammar_active.yaml")
+    expected_grammar = "grammar:\n  language: wanxiang-lts-zh-hans\n"
+    abort "active grammar selector is not the exact regular projection" unless
+      File.file?(grammar) && !File.symlink?(grammar) && File.binread(grammar) == expected_grammar
+    actual_links = Set.new
+    actual_directories = Set.new
+    active_entries.each do |entry|
+      relative = Pathname.new(entry).relative_path_from(Pathname.new(active)).to_s
+      next if relative == "."
+      if File.directory?(entry) && !File.symlink?(entry)
+        actual_directories.add(relative)
+        next
+      end
+      next if [activation_path, grammar].include?(entry)
+      abort "active projection contains a copied payload file" unless File.symlink?(entry)
+      expected = expected_links.fetch(relative) do
+        abort "active projection contains an unexpected link: #{relative}"
+      end
+      abort "active projection contains a duplicate link: #{relative}" unless
+        actual_links.add?(relative)
+      logical_link = support.join(Pathname.new(entry).relative_path_from(Pathname.new(profile)))
+      logical_target = logical_link.dirname.join(File.readlink(entry)).cleanpath
+      prefix = support.to_s + "/"
+      abort "active link escapes Linnet support root" unless logical_target.to_s.start_with?(prefix)
+      target_relative = logical_target.relative_path_from(support).to_s
+      match = %r{\AData/Packs/(chinese|english|lts|extended)/[^/]+/(.+)\z}.match(target_relative)
+      abort "active link does not target an immutable pack" unless match
+      abort "active link differs from its manifest owner: #{relative}" unless
+        [match[1], match[2]] == expected
+      physical_target = File.join(installed.fetch(match[1]), match[2])
+      abort "active link target is missing from its pack" unless File.exist?(physical_target)
+    end
+    abort "active manifest projection is incomplete" unless
+      actual_links == expected_links.keys.to_set
+    abort "active directory projection differs from manifest parents" unless
+      actual_directories == expected_directories
+  ' "${expanded}" "${profile_file}" || fail_verification "activation profile verification failed"
+fi
+
+archive_entries="$(xar -tf "${package_path}")"
+if grep -Eq '(^|/)Signature($|/)' <<<"${archive_entries}"; then
+  fail_verification "community package unexpectedly has an installer signature"
+fi
+if find "${expanded}" -type d \( -path '*/Library/LaunchAgents' -o \
+    -path '*/Library/LaunchDaemons' -o -path '*/Library/PrivilegedHelperTools' \) \
+    -print -quit | grep -q .; then
+  fail_verification "package contains a background or privileged service"
+fi
+echo "Linnet ${edition} PKG static lifecycle: PASS"

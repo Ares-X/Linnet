@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  width="1280" height="640" viewBox="0 0 1280 640">
+  <rect width="1280" height="640" fill="#fbfcfc"/>
+  <path d="M710 510 C855 390 1000 550 1280 350" fill="none" stroke="#dfe8e7" stroke-width="12"/>
+  <path d="M720 545 C890 410 1040 585 1280 410" fill="none" stroke="#edf2f1" stroke-width="8"/>
+  <circle cx="1070" cy="155" r="5" fill="#57aaa4"/>
+  <g transform="translate(78 98) scale(.46)" fill="none" stroke="#151819"
+    stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M120 400 C160 360 180 300 240 300 C310 300 345 380 420 410"/>
+    <path d="M120 400 C185 415 185 535 300 570 C390 596 465 574 520 535"/>
+    <path d="M300 500 C390 535 410 385 505 310 C585 245 675 230 720 150"/>
+    <path d="M460 445 C540 355 640 385 700 280"/>
+    <path d="M410 505 C520 420 620 490 675 390"/>
+    <circle cx="222" cy="355" r="12" fill="#151819" stroke="none"/>
+  </g>
+  <text x="500" y="285" fill="#151819" font-family="-apple-system, BlinkMacSystemFont, Helvetica Neue, sans-serif"
+    font-size="112" font-weight="600" letter-spacing="-3">Linnet</text>
+  <rect x="503" y="326" width="70" height="5" rx="2.5" fill="#57aaa4"/>
+  <text x="500" y="390" fill="#24292a" font-family="-apple-system, BlinkMacSystemFont, Helvetica Neue, sans-serif"
+    font-size="34" font-weight="400">Chinese and English, in one flow.</text>
+  <text x="500" y="438" fill="#778080" font-family="-apple-system, BlinkMacSystemFont, Helvetica Neue, sans-serif"
+    font-size="24" font-weight="400">Open-source bilingual input method for macOS</text>
+</svg>

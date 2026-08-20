@@ -1,0 +1,167 @@
+# Linnet distribution defaults
+# encoding: utf-8
+#
+# Linnet owns its default configuration. Upstream default files
+# are NOT included at runtime.
+
+config_version: "2026.08.07"
+
+schema_list:
+  - schema: linnet_zh_pinyin
+  - schema: linnet_zh
+  - schema: linnet_zh_flypy
+  - schema: linnet_zh_mspy
+  - schema: linnet_zh_sogou
+  - schema: linnet_zh_abc
+  - schema: linnet_zh_ziguang
+  - schema: linnet_zh_jiajia
+  - schema: linnet_en
+
+# ── Menu ────────────────────────────────────────────────────────────────────
+menu:
+  page_size: 9
+  alternative_select_keys: '123456789'
+
+# ── Switcher ────────────────────────────────────────────────────────────────
+switcher:
+  caption: 「方案选单」
+  hotkeys: []
+  fix_schema_list_order: true
+  fold_options: true
+  abbreviate_options: true
+  option_list_separator: ' / '
+
+# ── ASCII composer ──────────────────────────────────────────────────────────
+ascii_composer:
+  good_old_caps_lock: true
+  switch_key:
+    Caps_Lock: clear
+    Shift_L: commit_text
+    Shift_R: commit_text
+    Control_L: noop
+    Control_R: noop
+
+# ── Punctuator ──────────────────────────────────────────────────────────────
+punctuator:
+  digit_separators: ",.:"
+  digit_separator_action: commit
+  full_shape:
+    ' ' : { commit: '　' }
+    '!' : { commit: '！' }
+    '"' : { commit: '＂' }
+    '#' : { commit: '＃' }
+    '$' : { commit: '￥' }
+    '%' : { commit: '％' }
+    '&' : { commit: '＆' }
+    '''' : { pair: ['‘', '’'] }
+    '(' : { pair: ['（', '）'] }
+    ')' : { commit: '）' }
+    '*' : { commit: '＊' }
+    '+' : { commit: '＋' }
+    ',' : { commit: '，' }
+    '-' : { commit: '－' }
+    '.' : { commit: '。' }
+    '/' : { commit: '／' }
+    ':' : { commit: '：' }
+    ';' : { commit: '；' }
+    '<' : { pair: ['《', '》'] }
+    '=' : { commit: '＝' }
+    '>' : { commit: '》' }
+    '?' : { commit: '？' }
+    '@' : { commit: '＠' }
+    '[' : { pair: ['「', '」'] }
+    '\' : { commit: '、' }
+    ']' : { commit: '」' }
+    '^' : { commit: '……' }
+    '_' : { commit: '——' }
+    '`' : { pair: ['‘', '’'] }
+    '{' : { pair: ['【', '】'] }
+    '|' : { commit: '｜' }
+    '}' : { commit: '】' }
+    '~' : { commit: '〜' }
+  half_shape:
+    '!' : { commit: '！' }
+    '"' : { pair: ['“', '”'] }
+    '#' : { commit: '#' }
+    '$' : { commit: '¥' }
+    '%' : { commit: '%' }
+    '&' : { commit: '&' }
+    '''' : { pair: ['‘', '’'] }
+    '(' : { commit: '（' }
+    ')' : { commit: '）' }
+    '*' : { commit: '*' }
+    '+' : { commit: '+' }
+    ',' : { commit: '，' }
+    '-' : { commit: '-' }
+    '.' : { commit: '。' }
+    '/' : { commit: '/' }
+    ':' : { commit: '：' }
+    ';' : { commit: '；' }
+    '<' : { commit: '《' }
+    '=' : { commit: '=' }
+    '>' : { commit: '》' }
+    '?' : { commit: '？' }
+    '@' : { commit: '@' }
+    '[' : { commit: '【' }
+    '\' : { commit: '、' }
+    ']' : { commit: '】' }
+    '^' : { commit: '……' }
+    '_' : { commit: '——' }
+    '`' : { commit: '·' }
+    '{' : { commit: '「' }
+    '|' : { commit: '|' }
+    '}' : { commit: '」' }
+    '~' : { commit: '~' }
+
+# ── Shared product feature policy ───────────────────────────────────────────
+linnet:
+  recognizer_patterns:
+    # Ordinary punctuation after lowercase input is always a word boundary;
+    # it must reach the host or Chinese punctuator immediately.  Raw routing
+    # is reserved for explicit URI schemes and unambiguous mixed-case,
+    # version, digit-bearing, uppercase filename or uppercase identifier forms.
+    # Product startup always replaces this non-matching compile placeholder
+    # through the Core-owned default.custom projection.
+    zz_code_token: "^$"
+    text_expander: "^x;[-0-9A-Za-z_]*$"
+    pinyin_reverse_lookup: "^;[a-z;']*$"
+
+  pinyin_reverse_lookup:
+    tag: linnet_pinyin
+    prefix: ";"
+    tips: "〔拼音反查英文〕"
+    # Wanxiang dictionary syllables carry tone marks. This standard Rime
+    # projection is the only runtime formatter from those syllables to the
+    # existing lowercase pinyin index keys.
+    key_format:
+      - xform/m̀/m/
+      - xlit/āáǎàōóǒòēéěèīíǐìūúǔùǖǘǚǜüńňǹḿ/aaaaooooeeeeiiiiuuuuvvvvvnnnm/
+
+  custom_words:
+    dictionary: ""
+    user_dict: linnet_custom_words
+    db_class: stabledb
+    enable_user_dict: true
+    enable_completion: false
+    enable_sentence: false
+    initial_quality: 100
+
+  text_expander:
+    dictionary: ""
+    user_dict: linnet_text_expander
+    db_class: stabledb
+    enable_user_dict: true
+    enable_completion: false
+    enable_sentence: false
+    tag: text_expander
+    initial_quality: 100
+
+  disabled_filter:
+    words:
+      __include: linnet_user.yaml:/disabled_words
+
+  english_interaction:
+    sentence_capitalization:
+      __include: linnet_user.yaml:/sentence_capitalization
+    tab_behavior:
+      __include: linnet_user.yaml:/tab_behavior

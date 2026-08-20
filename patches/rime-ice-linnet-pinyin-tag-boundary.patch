@@ -1,0 +1,99 @@
+diff --git a/upstreams/rime-ice/lua/date_translator.lua b/upstreams/rime-ice/lua/date_translator.lua
+--- a/upstreams/rime-ice/lua/date_translator.lua
++++ b/upstreams/rime-ice/lua/date_translator.lua
+@@ -20,18 +20,22 @@
+ function M.init(env)
+     local config = env.engine.schema.config
+     env.name_space = env.name_space:gsub('^*', '')
+-    M.date = config:get_string(env.name_space .. '/date') or 'rq'
+-    M.time = config:get_string(env.name_space .. '/time') or 'sj'
+-    M.week = config:get_string(env.name_space .. '/week') or 'xq'
+-    M.datetime = config:get_string(env.name_space .. '/datetime') or 'dt'
+-    M.timestamp = config:get_string(env.name_space .. '/timestamp') or 'ts'
+-    M.date_zh = config:get_string(env.name_space .. '/datezh') or 'rqzh'
+-    M.date_en = config:get_string(env.name_space .. '/dateen') or 'rqen'
++    env.date = config:get_string(env.name_space .. '/date') or 'rq'
++    env.time = config:get_string(env.name_space .. '/time') or 'sj'
++    env.week = config:get_string(env.name_space .. '/week') or 'xq'
++    env.datetime = config:get_string(env.name_space .. '/datetime') or 'dt'
++    env.timestamp = config:get_string(env.name_space .. '/timestamp') or 'ts'
++    env.date_zh = config:get_string(env.name_space .. '/datezh') or 'rqzh'
++    env.date_en = config:get_string(env.name_space .. '/dateen') or 'rqen'
+ end
+ 
+ function M.func(input, seg, env)
++    if seg:has_tag("linnet_pinyin") then
++        return
++    end
++
+     -- 日期
+-    if (input == M.date) then
++    if (input == env.date) then
+         local current_time = os.time()
+         yield_cand(seg, os.date('%Y-%m-%d', current_time))
+         yield_cand(seg, os.date('%Y/%m/%d', current_time))
+@@ -40,7 +44,7 @@
+         yield_cand(seg, os.date('%Y年%m月%d日', current_time):gsub('年0', '年'):gsub('月0', '月'))
+ 
+         -- 时间
+-    elseif (input == M.time) then
++    elseif (input == env.time) then
+         local current_time = os.time()
+ 
+         local hour = tonumber(os.date("%H", current_time))
+@@ -68,7 +72,7 @@
+         -- yield_cand(seg, os.date("%I:%M:%S %p", current_time))
+ 
+         -- 星期
+-    elseif (input == M.week) then
++    elseif (input == env.week) then
+         local current_time = os.time()
+         local week_tab = { '日', '一', '二', '三', '四', '五', '六' }
+         local text = week_tab[tonumber(os.date('%w', current_time) + 1)]
+@@ -77,7 +81,7 @@
+         yield_cand(seg, '周' .. text)
+ 
+         -- ISO 8601/RFC 3339 的时间格式
+-    elseif (input == M.datetime) then
++    elseif (input == env.datetime) then
+         local current_time = os.time()
+ 
+         -- 获取偏移量，例如 "+0800" 或 "+0000"
+@@ -95,12 +99,12 @@
+         yield_cand(seg, os.date('%Y%m%d%H%M%S', current_time))
+ 
+         -- 时间戳（十位数，到秒，示例 1650861664）
+-    elseif (input == M.timestamp) then
++    elseif (input == env.timestamp) then
+         local current_time = os.time()
+         yield_cand(seg, string.format('%d', current_time))
+ 
+         -- 中文日期
+-    elseif (input == M.date_zh) then
++    elseif (input == env.date_zh) then
+         local current_time = os.time()
+         local year_0 = convert_digits(tonumber(os.date('%Y', current_time)), true)
+         local year_zero = convert_digits(tonumber(os.date('%Y', current_time)), false)
+@@ -112,7 +116,7 @@
+         yield_cand(seg, os.date('%Y年%m月%d日', current_time):gsub('年0', '年'):gsub('月0', '月'))
+ 
+         -- 英文日期
+-    elseif (input == M.date_en) then
++    elseif (input == env.date_en) then
+         local current_time = os.time()
+         local day = tonumber(os.date("%d", current_time))
+         local month = tonumber(os.date("%m", current_time))
+diff --git a/upstreams/rime-ice/lua/uuid.lua b/upstreams/rime-ice/lua/uuid.lua
+--- a/upstreams/rime-ice/lua/uuid.lua
++++ b/upstreams/rime-ice/lua/uuid.lua
+@@ -38,6 +38,10 @@
+ end
+ 
+ function M.func(input, seg, _)
++    if seg:has_tag("linnet_pinyin") then
++        return
++    end
++
+ 	if input == M.uuid then
+ 		yield_cand(seg, generate_uuid_v4())
+ 	end

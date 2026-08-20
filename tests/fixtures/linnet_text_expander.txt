@@ -1,0 +1,7 @@
+# Rime table
+# coding: utf-8
+#@/db_name	linnet_text_expander.txt
+#@/db_type	tabledb
+#
+Best regards,	x;br
+Web Application Firewall proof of concept	x;wafpoc

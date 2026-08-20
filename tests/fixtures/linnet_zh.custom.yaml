@@ -1,0 +1,3 @@
+# Test-only proof that the schema leaves librime's auto-patch slot available.
+patch:
+  "schema/name": Linnet Custom Patch Probe
