@@ -9,7 +9,7 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 **一个输入源，两种语言，一种连贯的输入体验。**
 
 > [!NOTE]
-> Linnet 0.1.1 是首个公开社区版本。Releases 提供未使用 Apple Developer ID 签名、也未公证的安装包及 SHA-256 校验文件；macOS 会要求用户手动确认信任。请只下载同一 Release 中的文件并先校验哈希。
+> Linnet 0.1.2 的正式 Release 只提供一个完整安装包 `Linnet.pkg`。它没有使用 Apple Developer ID 签名，也未经过公证；macOS 会要求用户手动确认信任。SHA-256 直接写在同一 Release 的说明中，Core 与语言数据组件则位于同仓库、明确标注的更新频道，不再与普通用户下载混在一起。
 
 [产品体验](#产品体验) · [安装](#安装) · [使用指南](#使用指南) · [设置](#设置) · [隐私](#隐私) · [参与贡献](#参与贡献)
 
@@ -95,22 +95,13 @@ _由当前 `data/squirrel.yaml` 通过 `SquirrelView` 生成的 20pt 实际渲�
 
 ### 获取社区版本
 
-首个公开版本发布后，请只从项目 Releases 下载同一版本的以下文件：
-
-- `Linnet.pkg`；
-- `Linnet.pkg.sha256`；
-- `Linnet-<version>-Uninstall.command`；
-- `Linnet-<version>-Uninstall.command.sha256`。
-
-进入下载目录，把 `X.Y.Z` 替换为 Release 页面显示的精确版本号，然后校验文件：
+请从项目的 **Latest Release** 只下载一个文件：`Linnet.pkg`。进入下载目录后计算哈希：
 
 ```bash
-LINNET_VERSION='X.Y.Z'
-shasum -a 256 -c Linnet.pkg.sha256
-shasum -a 256 -c "Linnet-${LINNET_VERSION}-Uninstall.command.sha256"
+shasum -a 256 Linnet.pkg
 ```
 
-两项都显示 `OK`，并且版本、文件名与 Release 页面一致后再继续。Linnet 安装到当前用户目录，不需要管理员权限，也不会安装守护进程、启动项或特权辅助程序。
+输出必须与同一 Release 说明中列出的 64 位 SHA-256 完全一致。Linnet 安装到当前用户目录，不需要管理员权限，也不会安装守护进程、启动项或特权辅助程序。
 
 ### 首次启用
 
@@ -120,7 +111,7 @@ shasum -a 256 -c "Linnet-${LINNET_VERSION}-Uninstall.command.sha256"
 4. 从菜单栏输入菜单选择 Linnet。
 5. 确认菜单栏显示 `中`/`双`，中文候选可正常提交，轻按 Shift 能进入 `En`，Caps Lock 能进入 `A`，输入菜单中的 **Settings** 可以打开。
 
-Linnet 不会自动点击系统授权或替用户选择输入源。社区安装包没有 Apple Developer ID 签名或公证，因此“无法验证开发者”是预期提示；手动信任只应在文件名和同一 Release 的 SHA-256 都校验成功后进行。不要关闭 Gatekeeper、不要清除隔离属性，也不要执行来源不明的安装命令。若系统报告校验和不一致、文件损坏或恶意软件，请停止安装。
+Linnet 不会自动点击系统授权或替用户选择输入源。社区安装包没有 Apple Developer ID 签名或公证，因此“无法验证开发者”是预期提示；手动信任只应在文件名和同一 Release 说明中的 SHA-256 都校验成功后进行。不要关闭 Gatekeeper、不要清除隔离属性，也不要执行来源不明的安装命令。若系统报告校验和不一致、文件损坏或恶意软件，请停止安装。
 
 ## 使用指南
 
@@ -167,21 +158,20 @@ Linnet 不会自动点击系统授权或替用户选择输入源。社区安装�
 
 ## 升级与卸载
 
-Linnet 0.1 系列不提供后台或应用内 Core/App 自动更新。公开安装包发布后，升级仍需从同一 Release 下载并校验对应安装包；语言数据与应用本体使用不同的更新边界。
+Linnet 0.1 系列不提供后台或应用内 Core/App 自动更新。正式版本页只保留完整安装包；同仓库的 `core-v<version>` 预发布页只服务已有用户更新，`data-<sequence>` 预发布页只服务语言数据频道。两者都不会成为 Latest Release，也不会再干扰首次安装下载。
 
-已经完成首次安装和一次注销的用户，后续只下载：
+已经完成首次安装和一次注销的用户，打开同版本 `core-v<version>` 页面，只下载：
 
-- `Linnet-<version>-arm64-Core-community-beta.pkg`；
-- `Linnet-<version>-arm64-Core-community-beta.pkg.sha256`。
+- `Linnet-<version>-arm64-Core-community-beta.pkg`。
 
 ```bash
 LINNET_VERSION='X.Y.Z'
-shasum -a 256 -c "Linnet-${LINNET_VERSION}-arm64-Core-community-beta.pkg.sha256"
+shasum -a 256 "Linnet-${LINNET_VERSION}-arm64-Core-community-beta.pkg"
 ```
 
-校验成功后，在 Finder 中按住 Control 点击 Core 安装包并选择 **打开**。Core 只更新 App，保持已安装语言包、个人数据以及输入源的启用/选择意图，不要求再次注销。已有安装不要使用 `Linnet.pkg`；Complete 会拒绝覆盖并提示改用 Core。若 Core 报告身份、版本或安装状态不一致，请停止，不要手工复制 App 或改用 Complete 绕过检查。
+输出必须与 Core 更新页说明中的 SHA-256 完全一致。随后在 Finder 中按住 Control 点击 Core 安装包并选择 **打开**。Core 只更新 App，保持已安装语言包、个人数据以及输入源的启用/选择意图，不要求再次注销。已有安装不要使用 `Linnet.pkg`；Complete 会拒绝覆盖并提示改用 Core。若 Core 报告身份、版本或安装状态不一致，请停止，不要手工复制 App 或改用 Complete 绕过检查。
 
-卸载前先查看计划：
+卸载工具也在对应的 `core-v<version>` 更新页。下载并核对页面中的 SHA-256 后，先查看计划：
 
 ```bash
 LINNET_VERSION='X.Y.Z'
@@ -251,7 +241,7 @@ no_download=1 ./action-build.sh release
 
 ## 版本、来源与许可证
 
-当前版本是 **0.1.1**（2026-08-20），也是 Linnet 的首个公开源码版本。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前版本是 **0.1.2**（2026-08-21）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 

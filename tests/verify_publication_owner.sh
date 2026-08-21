@@ -6,6 +6,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 verifier="${repo_root}/package/verify_publication_artifacts"
+asset_manifest="${repo_root}/package/release_asset_manifest"
+publisher="${repo_root}/package/publish_github_release"
 workflow="${repo_root}/.github/workflows/release-ci.yml"
 
 fail() {
@@ -17,6 +19,149 @@ for retired in package/publication_plan package/publish_release \
     config/linnet-publication-acceptance.json; do
   [[ ! -e "${repo_root}/${retired}" ]] ||
     fail "retired approval-commit publication path returned: ${retired}"
+done
+
+for owner in "${asset_manifest}" "${publisher}"; do
+  [[ -f "${owner}" && ! -L "${owner}" && -x "${owner}" ]] ||
+    fail "release channel owner is missing: ${owner##*/}"
+  bash -n "${owner}"
+done
+
+version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+  "${repo_root}/config/LinnetProduct.xcconfig")"
+catalog_sequence="$("${repo_root}/package/data_release_metadata" get-catalog-sequence \
+  "${repo_root}/config/linnet-data-releases.json")"
+candidate_expected="$(printf '%s\n' \
+  Linnet.pkg \
+  "Linnet-${version}-arm64-Core-community-beta.pkg" \
+  "Linnet-${version}-Uninstall.command" \
+  Linnet-Chinese.linnetpack Linnet-English.linnetpack \
+  Linnet-LTS.linnetpack Linnet-Extended.linnetpack \
+  Linnet-Data-Channel.json | LC_ALL=C sort)"
+public_expected=Linnet.pkg
+core_expected="$(printf '%s\n' \
+  "Linnet-${version}-arm64-Core-community-beta.pkg" \
+  "Linnet-${version}-Uninstall.command" | LC_ALL=C sort)"
+data_expected="$(printf '%s\n' \
+  Linnet-Chinese.linnetpack Linnet-English.linnetpack \
+  Linnet-LTS.linnetpack Linnet-Extended.linnetpack \
+  Linnet-Data-Channel.json | LC_ALL=C sort)"
+for spec in \
+    "candidate:${candidate_expected}" \
+    "public:${public_expected}" \
+    "core:${core_expected}" \
+    "data:${data_expected}"; do
+  channel="${spec%%:*}"
+  expected="${spec#*:}"
+  actual="$("${asset_manifest}" "${channel}" "${version}" "${catalog_sequence}" |
+    LC_ALL=C sort)" || fail "cannot project ${channel} release assets"
+  [[ "${actual}" == "${expected}" ]] ||
+    fail "${channel} release asset inventory differs from the product contract"
+done
+if "${asset_manifest}" public "${version}" "${catalog_sequence}" |
+    rg -q '\.sha256$|Core|linnetpack|Data-Channel'; then
+  fail "the stable user Release regained component or checksum assets"
+fi
+for required in \
+    'release create "${tag}" "${assets[@]}"' \
+    'release delete "${tag}"' \
+    'verify_assets' \
+    'release edit "${tag}"' \
+    'core-v${version}' \
+    'data-${catalog_sequence}'; do
+  rg -Fq "${required}" "${publisher}" ||
+    fail "the bounded GitHub publication state machine is incomplete: ${required}"
+done
+if rg -n -- '--clobber|--cleanup-tag|releases/delete' "${publisher}"; then
+  fail "the publisher regained a destructive published-asset replacement path"
+fi
+
+publication_fixture="$(mktemp -d "${TMPDIR:-/tmp}/linnet-publication-owner.XXXXXX")"
+cleanup() {
+  [[ "${publication_fixture}" == "${TMPDIR:-/tmp}/linnet-publication-owner."* ]] &&
+    rm -rf -- "${publication_fixture}"
+}
+trap cleanup EXIT
+fixture_assets="${publication_fixture}/assets"
+fake_bin="${publication_fixture}/bin"
+fake_state="${publication_fixture}/state"
+mkdir -p "${fixture_assets}" "${fake_bin}" "${fake_state}"
+while IFS= read -r asset; do
+  printf 'fixture:%s\n' "${asset}" >"${fixture_assets}/${asset}"
+done < <("${asset_manifest}" candidate "${version}" "${catalog_sequence}")
+cat >"${fake_bin}/gh" <<'FAKE_GH'
+#!/usr/bin/env bash
+set -euo pipefail
+state="${FAKE_GH_STATE:?}"
+printf '%s\n' "$*" >>"${state}/calls.log"
+[[ "${1:-} ${2:-}" == "release view" || "${1:-} ${2:-}" == "release create" ||
+  "${1:-} ${2:-}" == "release edit" || "${1:-} ${2:-}" == "release delete" ]] || exit 2
+action="$2"
+tag="${3:-}"
+root="${state}/${tag}"
+case "${action}" in
+  view)
+    [[ -f "${root}/status" ]] || exit 1
+    read -r draft prerelease <"${root}/status"
+    joined=" $* "
+    if [[ "${joined}" == *" --json assets "* ]]; then
+      cat "${root}/assets"
+    elif [[ "${joined}" == *" --jq "* ]]; then
+      printf '%s\n' "${draft}"
+    else
+      printf '{"isDraft":%s,"isPrerelease":%s}\n' "${draft}" "${prerelease}"
+    fi
+    ;;
+  create)
+    mkdir -p "${root}"
+    : >"${root}/assets"
+    shift 3
+    while [[ "$#" -gt 0 && "$1" != --* ]]; do
+      digest="$(shasum -a 256 "$1" | awk '{print $1}')"
+      printf '%s\tsha256:%s\n' "${1##*/}" "${digest}" >>"${root}/assets"
+      shift
+    done
+    LC_ALL=C sort -o "${root}/assets" "${root}/assets"
+    prerelease=false
+    [[ " $* " == *" --prerelease "* ]] && prerelease=true
+    printf 'true %s\n' "${prerelease}" >"${root}/status"
+    ;;
+  edit)
+    read -r _ prerelease <"${root}/status"
+    printf 'false %s\n' "${prerelease}" >"${root}/status"
+    ;;
+  delete)
+    rm -rf -- "${root}"
+    ;;
+esac
+FAKE_GH
+chmod 755 "${fake_bin}/gh"
+candidate_revision="$(git -C "${repo_root}" rev-parse HEAD)"
+publish_fixture() {
+  GITHUB_REPOSITORY=Ares-X/Linnet GH_TOKEN=fixture \
+    FAKE_GH_STATE="${fake_state}" RUNNER_TEMP="${publication_fixture}" \
+    PATH="${fake_bin}:${PATH}" "${publisher}" "$1" "${fixture_assets}" \
+      "${version}" "${catalog_sequence}" "${candidate_revision}" >/dev/null
+}
+publish_fixture public
+publish_fixture public
+[[ "$(grep -c "^release create v${version} " "${fake_state}/calls.log")" == 1 ]] ||
+  fail "an exact published stable Release was recreated"
+[[ "$(cut -f1 "${fake_state}/v${version}/assets")" == Linnet.pkg ]] ||
+  fail "the stable Release published more than the complete installer"
+publish_fixture core
+mkdir -p "${fake_state}/data-${catalog_sequence}"
+printf 'true true\n' >"${fake_state}/data-${catalog_sequence}/status"
+printf 'stale\tsha256:%064d\n' 0 >"${fake_state}/data-${catalog_sequence}/assets"
+publish_fixture data
+grep -Fq "release delete data-${catalog_sequence}" "${fake_state}/calls.log" ||
+  fail "an interrupted data-channel draft did not enter the bounded retry path"
+for spec in core:core-v${version} data:data-${catalog_sequence}; do
+  channel="${spec%%:*}"
+  tag="${spec#*:}"
+  expected="$("${asset_manifest}" "${channel}" "${version}" "${catalog_sequence}")"
+  actual="$(cut -f1 "${fake_state}/${tag}/assets")"
+  [[ "${actual}" == "${expected}" ]] || fail "${channel} upload bypassed the manifest"
 done
 
 if rg -n 'Developer ID|notari[sz]|stapler|Gatekeeper rejected' "${verifier}"; then
@@ -62,7 +207,12 @@ ruby -e '
   abort unless workflow.include?("make --no-print-directory archive")
   abort if workflow.include?("./action-build.sh archive")
   abort unless workflow.include?("package/verify_publication_artifacts")
-  abort unless workflow.include?(%q{gh release create "${GITHUB_REF_NAME}"})
+  abort unless workflow.include?("package/publish_github_release")
+  abort if workflow.include?(%q{"${ARCHIVE_OUTPUT_DIR}"/*})
+  data = workflow.index(%q{publish_github_release data}) or abort
+  core = workflow.index(%q{publish_github_release core}) or abort
+  public_release = workflow.index(%q{publish_github_release public}) or abort
+  abort unless data < core && core < public_release
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
   abort unless workflow.match?(/publish-community:.*?contents:\s*write/m)
   abort unless workflow.scan(/^\s*run:\s*brew install ripgrep\s*$/).size == 2

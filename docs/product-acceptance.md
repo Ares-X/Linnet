@@ -2,7 +2,9 @@
 
 Current policy: a version tag authorizes one unsigned community release from
 that exact source revision. The tag workflow must build and verify the same
-18-file artifact set before upload. Installation acceptance remains separate
+eight candidate artifacts, then route one complete installer to the stable
+Release and the Core/data assets to two same-repository prerelease channels.
+Installation acceptance remains separate
 evidence and must name the exact revision, build and artifact hashes exercised.
 
 The historical UAT9 summary below is retained only as static evidence from
@@ -15,7 +17,7 @@ There is currently no eligible installable candidate. A new candidate must be re
 from one frozen revision after the current source, data, App and package gates
 pass. Valid real-window/VoiceOver evidence, controlled installed-product
 evidence, one committed revision, a canonical Catalog bound to deterministic packs,
-the Core ZIP, a published service and real Linnet large-pack transfer through
+the versioned Core update channel, a published service and real Linnet large-pack transfer through
 GH-Proxy remain required.
 
 Retired UAT9 historical artifact identity (not a current candidate):
@@ -162,7 +164,7 @@ locale. Localization completeness alone is not visual proof.
 | J17 | keyboard navigation, focus order, labels, VoiceOver and reduced-motion behavior | V, I | pending |
 | J18 | cold start, first key, sustained typing, memory, disk and p95/p99 latency | E, P, I | The native runtime gate is the threshold owner and requires p95 ≤ 5 ms and p99 ≤ 15 ms. A frozen-candidate report must retain its actual measurements; component PASS alone is not P/I evidence. Retired UAT9 historically measured 458,736,785 compressed bytes and 885,915,895 logical payload bytes. The new LTS identity and current source require a new package size projection; installed cold start, APFS usage and first-run cache growth remain I pending. |
 | J19 | empty, loading, download, validation, disk-full, conflict and rollback error states | C, V, I | partial headless coverage; visible recovery audit pending |
-| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | Retired UAT9 remains internally consistent historical evidence only. There is no current Core/complete projection; new checksums, zero-artifact scan, Full Active identity, embedded Settings parity, deterministic `.linnetpack` assets, canonical Catalog, Core ZIP and remote release evidence remain pending. |
+| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | The release owner now requires eight candidate artifacts and routes them 1/2/5 to the stable, Core and data channels. Exact remote bytes and Release-page evidence remain pending until the tagged workflow completes. |
 
 ## Finding ledger
 
@@ -179,7 +181,7 @@ locale. Localization completeness alone is not visual proof.
 | closed | P0 | During exact `83e7adb` default-uninstall UAT, the old App and generated data were removed but the preserved `linnet_zh.userdb` rotated its LevelDB log and manifest after the uninstaller invoked `--disable-input-source`; the pre-action and post-action byte manifests differed while the already-quiesced Host had no pending user input. | default uninstaller lifecycle sequence | remove the TIS disable transition from uninstall, retain the exact Host/Settings quit as the only pre-delete product action, and let the already-required fresh login retire the absent source; the real default-uninstall row must repeat from restored pre-action bytes and prove UserData, Backups and Transactions byte-identical before installation can pass |
 | closed | P1 | Caps Lock lacked an automated key-event proof across Chinese and Smart English. | input-event engine acceptance | `rime_smoke_test` now proves Caps Lock down/type/up enters and leaves raw ASCII in both schemas; installed Terminal/password-field coverage remains in J05 |
 | open | P1 | Source, LTS identity and Settings bytes changed after the retired UAT9 projection, leaving no current local package projection. | language-data release identity and local package projection | after trust and IPC owners freeze, build one new revision-bound Core/complete/uninstaller identity and pass full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity |
-| open | P1 | No current candidate has a packaged data-channel Catalog or Core ZIP; the service remains unpublished and there is no remote monotonic/CAS evidence. | archive and remote publication owners | after the exact candidate is committed and installation UAT passes, generate the four deterministic packs, canonical Catalog and Core ZIP; verify remote sequence and the digest-bound publication plan without replacing an already published identity |
+| open | P1 | The service remains unpublished and there is no installed real-network monotonic/CAS evidence. | archive and remote publication owners | publish the four deterministic packs and canonical Catalog to the versioned data prerelease; verify remote sequence and digest-bound bytes without replacing an already published identity before enabling the Settings service |
 | closed | P2 | Candidate labels/opacity/radius, fuzzy-pinyin policy, restore defaults and reviewed advanced overrides are not Beta controls. The former design draft over-promised them; font and theme presets are implemented. | typed settings document and deterministic projection renderer | retired controls remain outside the Beta contract; any future addition requires its own typed owner and product evidence |
 | closed | P1 | Settings previously shipped partial Traditional-Chinese strings beside otherwise English fallback, and dynamic status classified any Chinese locale as Simplified Chinese. | Settings bundle string catalog and typed presentation locale | Beta now supports exactly English and Simplified Chinese; every entry has reviewed Simplified Chinese, unsupported Chinese scripts uniformly fall back to English, and structural/component gates reject a mixed third locale |
 | superseded | P1 | Earlier packaging added private LaunchServices unregister calls for scratch Apps. The later upstream-alignment audit found that mature Squirrel/Hallelujah package flows do not create this cleanup owner. | ordinary temporary work-root cleanup plus macOS registration lifecycle | private `lsregister` calls are retired; current package/source guards require build products never to become selectable input sources, while actual installed registration remains J02/J16 product evidence |

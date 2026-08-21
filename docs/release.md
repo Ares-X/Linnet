@@ -7,8 +7,8 @@ Release 的源码标签、文件清单和 SHA-256，而不是开发者证书。
 
 ## 用户信任边界
 
-用户必须先校验 `Linnet.pkg.sha256`，再在 Finder 中按住 Control 点击或右键
-点击 `Linnet.pkg`，选择“打开”。若仍被 macOS 拦截，可在“系统设置 → 隐私与
+用户必须先计算 `Linnet.pkg` 的 SHA-256，并与同一正式 Release 说明中的摘要
+逐字比对，再在 Finder 中按住 Control 点击或右键点击 `Linnet.pkg`，选择“打开”。若仍被 macOS 拦截，可在“系统设置 → 隐私与
 安全性”中对该文件选择“仍要打开”。文档和脚本不得要求关闭 Gatekeeper、
 清除 quarantine 属性或修改系统安全策略。
 
@@ -17,7 +17,8 @@ Release 的源码标签、文件清单和 SHA-256，而不是开发者证书。
 - 标签、源码 revision、App 内嵌 metadata 和产物清单一致；
 - App 与嵌套 Settings、动态库、插件均通过严格 codesign 结构校验；
 - PKG 明确为 `Status: no signature`，且不能含 Installer Signature 记录；
-- Complete/Core、语言包、Catalog、卸载器共 18 个文件，全部带精确 SHA-256；
+- 候选目录只有 8 个验证产物；正式 Release 精确发布 1 个完整安装包，Core
+  更新频道发布 2 个文件，数据频道发布 5 个文件；
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
 - Complete 只用于首次安装并最多要求一次注销；之后 Core 更新不要求注销。
 
@@ -34,12 +35,12 @@ export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release.XXXXXX)"
 构建要求工作树干净，并把当前 HEAD 写入 App metadata。`make community` 负责
 ad-hoc 签名；`package/make_package` 只封装已验证字节，不重新签名或修复。
 
-最终 18 文件使用独立 pack CLI 验证：
+最终 8 个候选产物使用独立 pack CLI 验证：
 
 ```bash
 LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
   package/verify_publication_artifacts \
-  "$ARCHIVE_OUTPUT_DIR" 0.1.1 "$LINNET_CANDIDATE_REVISION"
+  "$ARCHIVE_OUTPUT_DIR" 0.1.2 "$LINNET_CANDIDATE_REVISION"
 ```
 
 测试用 UAT CMS 身份仍可用于本地、非公开的安装回归；它不是公开发布前置，
@@ -55,10 +56,13 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 
 1. 校验标签、源码与语言数据 metadata；
 2. 构建 community archive；
-3. 验证精确 18 文件、App ad-hoc 完整性及两个未签名 PKG；
-4. 使用 GitHub Actions 提供的短期仓库令牌创建对应 Release 并上传文件。
+3. 验证精确 8 个候选文件、App ad-hoc 完整性及两个未签名 PKG；
+4. 从唯一 `release_asset_manifest` 投影三个同仓库频道：`v<version>` 的稳定
+   Release 只上传 `Linnet.pkg`，`core-v<version>` 上传 Core PKG 与卸载器，
+   `data-<sequence>` 上传 Catalog 与四个语言包；
+5. 先发布两个明确标注的预发布更新频道，最后才把单安装包稳定版本设为 Latest。
 
-该令牌只用于把已经验证的字节写入当前 GitHub Release，不是 Apple 开发者
+该令牌只用于把已经验证的字节写入当前仓库的三个 Release 频道，不是 Apple 开发者
 凭据，也不会被打包或公开。
 
 ## 安装验收

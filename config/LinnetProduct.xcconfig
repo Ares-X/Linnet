@@ -2,7 +2,7 @@
 // Compiler path privacy remains owned by the included boundary-specific file.
 #include "LinnetPrivacy.xcconfig"
 
-MARKETING_VERSION = 0.1.1
-CURRENT_PROJECT_VERSION = 14
+MARKETING_VERSION = 0.1.2
+CURRENT_PROJECT_VERSION = 15
 LINNET_PRODUCT_NAME = Linnet
 LINNET_BUNDLE_IDENTIFIER = io.github.ares-x.inputmethod.Linnet

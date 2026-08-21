@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# One owner partitions the verified archive into the stable user download and
+# the two same-repository update channels. Callers may copy or upload these
+# names, but must not reconstruct channel membership themselves.
+
+set -euo pipefail
+
+channel="${1:-}"
+version="${2:-}"
+catalog_sequence="${3:-}"
+
+fail_manifest() {
+  echo "release_asset_manifest: $*" >&2
+  exit 1
+}
+
+[[ "$#" -eq 3 ]] ||
+  fail_manifest "usage: CHANNEL VERSION CATALOG_SEQUENCE"
+[[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]] ||
+  fail_manifest "invalid product version"
+[[ "${catalog_sequence}" =~ ^[1-9][0-9]*$ ]] ||
+  fail_manifest "invalid Catalog sequence"
+
+public_assets() {
+  printf '%s\n' Linnet.pkg
+}
+
+core_assets() {
+  printf '%s\n' \
+    "Linnet-${version}-arm64-Core-community-beta.pkg" \
+    "Linnet-${version}-Uninstall.command"
+}
+
+data_assets() {
+  printf '%s\n' \
+    Linnet-Chinese.linnetpack \
+    Linnet-English.linnetpack \
+    Linnet-Extended.linnetpack \
+    Linnet-LTS.linnetpack \
+    Linnet-Data-Channel.json
+}
+
+case "${channel}" in
+  public) public_assets ;;
+  core) core_assets ;;
+  data) data_assets ;;
+  candidate)
+    public_assets
+    core_assets
+    data_assets
+    ;;
+  *) fail_manifest "unknown release channel: ${channel}" ;;
+esac | LC_ALL=C sort -u

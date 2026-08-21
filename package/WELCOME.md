@@ -52,9 +52,9 @@ and every packaged file before activation. Third-party mirrors may observe your
 IP address, request time, and requested public file URLs, but Linnet does not
 send them personal dictionaries, learning data, or credentials.
 
-Keep the installer, uninstaller, and both SHA-256 sidecars until installation
-and first input are complete. Usage, privacy, upgrade, and uninstall
-instructions are on the Linnet release page.
+Keep the installer until installation and first input are complete. The exact
+SHA-256 is printed in the same stable Release notes. Core updates and the
+uninstaller live in the same repository's versioned Core update channel.
 
 ---
 
@@ -68,7 +68,7 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 管理员权限，也不安装守护进程、启动项、特权辅助程序或后台更新器。
 
 本社区安装包没有 Apple Developer ID 签名，也没有经过 Apple 公证。只有在
-安装包、卸载器与同一 Release 的精确 SHA-256 文件一致时才能继续。在 Finder
+安装包与同一正式 Release 说明中的精确 SHA-256 一致时才能继续。在 Finder
 中按住 Control 点击或右键点击安装包，选择“打开”；若仍被拦截，请前往
 系统设置 → 隐私与安全性 → 仍要打开。不要关闭 Gatekeeper，也不要清除
 隔离属性。若校验和不一致，或系统报告文件损坏、含恶意软件，请停止安装。

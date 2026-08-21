@@ -307,8 +307,8 @@ clean:
 clean-package:
 	rm -rf package/*appcast.xml > /dev/null 2>&1 || true
 	rm -rf package/*.pkg > /dev/null 2>&1 || true
-	rm -rf package/release/*.pkg package/release/*.pkg.sha256 > /dev/null 2>&1 || true
-	rm -rf package/release/*-Uninstall.command package/release/*-Uninstall.command.sha256 > /dev/null 2>&1 || true
+	rm -rf package/release/*.pkg > /dev/null 2>&1 || true
+	rm -rf package/release/*-Uninstall.command > /dev/null 2>&1 || true
 	rm -rf package/sign_update > /dev/null 2>&1 || true
 
 clean-deps:

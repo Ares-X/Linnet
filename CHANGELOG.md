@@ -3,6 +3,20 @@
 本文件记录 Linnet 自身的用户可见变化。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.2 — 2026-08-21
+
+### 下载与更新
+
+- 正式 Release 现在只展示一个完整安装包 `Linnet.pkg`，普通用户不再需要在
+  Core、语言包、Catalog、ZIP 和多份校验文件之间判断该下载什么。
+- 同仓库使用两个明确标注的预发布频道：`core-v<version>` 保存免注销 Core
+  更新与卸载器，`data-<sequence>` 保存 Linnet Settings 使用的四个语言包和
+  Catalog；它们不会成为 Latest Release。
+- SHA-256 直接写入对应 Release 说明；发布前仍对最终字节、未签名 PKG、App
+  结构、语言包和 Catalog 执行同等级验证。
+- GitHub Actions 继续复用经过重新验证的锁定依赖缓存，并升级到当前 Node 24
+  Action 运行时，减少重复下载和构建等待。
+
 ## 0.1.1 — 2026-08-20
 
 Linnet 的首个公开社区版本，提供源码、可复现构建流程、未使用 Apple Developer ID 签名的安装包及 SHA-256 校验文件。macOS 首次安装需要用户在 Finder 或“隐私与安全性”中手动确认信任。

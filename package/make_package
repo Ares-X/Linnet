@@ -31,7 +31,7 @@ fail_package() {
 [[ "${source_epoch}" =~ ^[0-9]+$ ]] || fail_package "invalid SOURCE_DATE_EPOCH"
 
 for required_tool in awk bash chmod cmp codesign cp date ditto find git grep mkdir mktemp mv \
-    pkgbuild plutil productbuild readlink ruby sed shasum sort stat touch unlink xcrun; do
+    pkgbuild plutil productbuild readlink ruby sed sort stat touch unlink xcrun; do
   command -v "${required_tool}" >/dev/null 2>&1 ||
     fail_package "required release tool is unavailable: ${required_tool}"
 done
@@ -87,9 +87,9 @@ core_package_name="${release_prefix}-Core-community-beta.pkg"
 package_name="Linnet.pkg"
 uninstaller_name="Linnet-${version}-Uninstall.command"
 outputs=(
-  "${core_package_name}" "${core_package_name}.sha256"
-  "${package_name}" "${package_name}.sha256"
-  "${uninstaller_name}" "${uninstaller_name}.sha256"
+  "${core_package_name}"
+  "${package_name}"
+  "${uninstaller_name}"
 )
 for output in "${outputs[@]}"; do
   [[ ! -e "${output_dir}/${output}" ]] ||
@@ -411,18 +411,11 @@ LINNET_RELEASE_TOOL="${pack_tool}" LINNET_CANDIDATE_REVISION="${candidate_revisi
     "${verification_scope}"
 for candidate in "${core_candidate}" "${package_candidate}"; do
   name="${candidate##*/}"
-  digest="$(shasum -a 256 "${candidate}" | /usr/bin/awk '{print $1}')"
-  printf '%s  %s\n' "${digest}" "${name}" >"${work_root}/${name}.sha256"
   mv "${candidate}" "${output_dir}/${name}"
-  mv "${work_root}/${name}.sha256" "${output_dir}/${name}.sha256"
 done
 cp "${project_root}/package/uninstall-linnet" "${work_root}/${uninstaller_name}"
 chmod 755 "${work_root}/${uninstaller_name}"
-uninstaller_sha256="$(shasum -a 256 "${work_root}/${uninstaller_name}" | /usr/bin/awk '{print $1}')"
-printf '%s  %s\n' "${uninstaller_sha256}" "${uninstaller_name}" \
-  >"${work_root}/${uninstaller_name}.sha256"
 mv "${work_root}/${uninstaller_name}" "${output_dir}/${uninstaller_name}"
-mv "${work_root}/${uninstaller_name}.sha256" "${output_dir}/${uninstaller_name}.sha256"
 
 echo "Linnet current-user Core and complete PKGs: PASS"
 printf '%s\n' "${core_package_name}" "${package_name}"

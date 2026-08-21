@@ -138,11 +138,17 @@ jobs:
             "${ARCHIVE_OUTPUT_DIR}" "${GITHUB_REF_NAME#v}" \
             "${LINNET_CANDIDATE_REVISION}"
 
-      - name: Publish the tagged community release
+      - name: Publish same-repository update channels and the stable installer
         env:
           GH_TOKEN: ${{ github.token }}
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-release
         run: |
-          gh release create "${GITHUB_REF_NAME}" "${ARCHIVE_OUTPUT_DIR}"/* \
-            --verify-tag --title "Linnet ${GITHUB_REF_NAME#v}" \
-            --notes-from-tag
+          version="${GITHUB_REF_NAME#v}"
+          catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
+            config/linnet-data-releases.json)"
+          package/publish_github_release data "${ARCHIVE_OUTPUT_DIR}" \
+            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
+          package/publish_github_release core "${ARCHIVE_OUTPUT_DIR}" \
+            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
+          package/publish_github_release public "${ARCHIVE_OUTPUT_DIR}" \
+            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"

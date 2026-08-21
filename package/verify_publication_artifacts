@@ -2,8 +2,9 @@
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Final byte-integrity boundary for the public 18-file community release. This
-# file verifies already finalized bytes; it never signs, repairs, or discovers
+# Final byte-integrity boundary for the eight channel-routed community assets.
+# This verifies already finalized bytes before the stable, Core and data
+# Releases consume the canonical manifest; it never signs, repairs or discovers
 # a replacement artifact. User approval is the explicit macOS trust boundary.
 
 set -euo pipefail
@@ -33,39 +34,19 @@ fail_publication() {
   fail_publication "candidate revision is invalid"
 [[ "${release_tool}" == /* && -x "${release_tool}" && ! -L "${release_tool}" ]] ||
   fail_publication "LINNET_RELEASE_TOOL must name the verified pack CLI"
-for tool in awk cat ditto find grep mktemp pkgutil rm ruby shasum sort stat tr wc xar; do
+for tool in find grep mktemp pkgutil rm ruby sort tr wc xar; do
   command -v "${tool}" >/dev/null 2>&1 || fail_publication "required tool is unavailable: ${tool}"
 done
 
-expected_files="$(printf '%s\n' \
-  Linnet-Data-Channel.json Linnet-Data-Channel.json.sha256 \
-  Linnet-Chinese.linnetpack Linnet-Chinese.linnetpack.sha256 \
-  Linnet-English.linnetpack Linnet-English.linnetpack.sha256 \
-  Linnet-Extended.linnetpack Linnet-Extended.linnetpack.sha256 \
-  Linnet-LTS.linnetpack Linnet-LTS.linnetpack.sha256 \
-  "Linnet-${version}-Uninstall.command" "Linnet-${version}-Uninstall.command.sha256" \
-  "Linnet-${version}-arm64-Core-community-beta.pkg" \
-  "Linnet-${version}-arm64-Core-community-beta.pkg.sha256" \
-  "Linnet-${version}-arm64-Core-community-beta.zip" \
-  "Linnet-${version}-arm64-Core-community-beta.zip.sha256" \
-  Linnet.pkg Linnet.pkg.sha256 | LC_ALL=C sort)"
+catalog_sequence="$("${project_root}/package/data_release_metadata" \
+  get-catalog-sequence "${project_root}/config/linnet-data-releases.json")"
+expected_files="$("${project_root}/package/release_asset_manifest" \
+  candidate "${version}" "${catalog_sequence}")"
 actual_files="$(find "${release_dir}" -mindepth 1 -maxdepth 1 -type f ! -type l \
   -exec basename {} \; | LC_ALL=C sort)"
 [[ "${actual_files}" == "${expected_files}" &&
-  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 18 ]] ||
-  fail_publication "public artifact inventory is not exact"
-
-for primary in \
-    Linnet.pkg \
-    "Linnet-${version}-arm64-Core-community-beta.pkg" \
-    "Linnet-${version}-arm64-Core-community-beta.zip" \
-    "Linnet-${version}-Uninstall.command" \
-    Linnet-Chinese.linnetpack Linnet-English.linnetpack \
-    Linnet-LTS.linnetpack Linnet-Extended.linnetpack Linnet-Data-Channel.json; do
-  digest="$(shasum -a 256 "${release_dir}/${primary}" | awk '{print $1}')"
-  [[ "$(cat "${release_dir}/${primary}.sha256")" == "${digest}  ${primary}" ]] ||
-    fail_publication "checksum differs from final bytes: ${primary}"
-done
+  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 8 ]] ||
+  fail_publication "candidate channel inventory is not exact"
 
 work_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-publication-artifacts.XXXXXX")"
 cleanup() {
@@ -92,15 +73,16 @@ complete_pkg="${release_dir}/Linnet.pkg"
 verify_unsigned_installer "${core_pkg}"
 verify_unsigned_installer "${complete_pkg}"
 
-archive_root="${work_root}/archive"
-ditto -x -k "${release_dir}/Linnet-${version}-arm64-Core-community-beta.zip" "${archive_root}"
+archive_root="${work_root}/expanded-core"
+pkgutil --expand-full "${core_pkg}" "${archive_root}"
 archive_apps=()
 while IFS= read -r app; do archive_apps+=("${app}"); done < <(
   find "${archive_root}" -type d -name Linnet.app ! -type l)
-[[ "${#archive_apps[@]}" -eq 1 ]] || fail_publication "Core archive does not contain exactly one Linnet App"
+[[ "${#archive_apps[@]}" -eq 1 ]] ||
+  fail_publication "Core package does not contain exactly one Linnet App"
 archive_identity="$("${project_root}/scripts/linnet-code-identity" verify-publication-product \
   "${archive_apps[0]}" "${candidate_revision}")" ||
-  fail_publication "Core archive publication identity is invalid"
+  fail_publication "Core package publication identity is invalid"
 
 for spec in "core:${core_pkg}" "complete:${complete_pkg}"; do
   edition="${spec%%:*}"; package="${spec#*:}"
@@ -120,4 +102,4 @@ ruby -rjson -e '
 ' "${archive_identity}" "${candidate_revision}" ||
   fail_publication "public artifact identity projection is invalid"
 
-echo "Linnet unsigned community artifacts: PASS (manual-user-approval)"
+echo "Linnet unsigned community channel assets: PASS (manual-user-approval)"

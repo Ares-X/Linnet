@@ -7,7 +7,6 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 app_path="${1:-}"
 output_dir="${2:-}"
-source_epoch="${SOURCE_DATE_EPOCH:-1704067200}"
 
 fail_archive() {
   echo "make_archive: $1" >&2
@@ -18,8 +17,7 @@ fail_archive() {
 [[ "${app_path}" == /* && -d "${app_path}" && ! -L "${app_path}" ]] ||
   fail_archive "APP must be an absolute, non-symlink App bundle"
 [[ "${app_path##*/}" == Linnet.app ]] || fail_archive "unexpected App name"
-[[ "${source_epoch}" =~ ^[0-9]+$ ]] || fail_archive "invalid SOURCE_DATE_EPOCH"
-for tool in awk cmp cp date find git mkdir mktemp mv pkgutil plutil ruby shasum sort stat tr wc zip; do
+for tool in awk cmp cp find git mkdir mktemp mv pkgutil plutil ruby sort stat tr wc; do
   command -v "${tool}" >/dev/null 2>&1 || fail_archive "required tool is unavailable: ${tool}"
 done
 
@@ -100,53 +98,8 @@ LINNET_RELEASE_TOOL="${pack_tool}" LINNET_CANDIDATE_REVISION="${candidate_revisi
 LINNET_RELEASE_TOOL="${pack_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
   "${project_root}/package/verify_package" "${complete_pkg}" "${app_path}" complete \
     "${verification_scope}"
-expanded_core="${work_root}/expanded-core"
 expanded_complete="${work_root}/expanded-complete"
-pkgutil --expand-full "${core_pkg}" "${expanded_core}"
 pkgutil --expand-full "${complete_pkg}" "${expanded_complete}"
-
-timestamp="$(TZ=UTC date -r "${source_epoch}" +%Y%m%d%H%M.%S)"
-publish_zip() {
-  local source_root="$1"
-  local archive_name="$2"
-  local candidate="${work_root}/${archive_name}"
-  local reproducibility="${work_root}/reproducibility-${archive_name}"
-  while IFS= read -r -d '' entry; do
-    TZ=UTC touch -h -t "${timestamp}" "${entry}"
-  done < <(find "${source_root}" -print0)
-  (
-    cd "${source_root}"
-    COPYFILE_DISABLE=1 TZ=UTC find . -print | LC_ALL=C sort |
-      COPYFILE_DISABLE=1 TZ=UTC zip -6 -X -y -q "${candidate}" -@
-    COPYFILE_DISABLE=1 TZ=UTC find . -print | LC_ALL=C sort |
-      COPYFILE_DISABLE=1 TZ=UTC zip -6 -X -y -q "${reproducibility}" -@
-  )
-  cmp -s "${candidate}" "${reproducibility}" ||
-    fail_archive "archive is not reproducible: ${archive_name}"
-  digest="$(shasum -a 256 "${candidate}" | /usr/bin/awk '{print $1}')"
-  printf '%s  %s\n' "${digest}" "${archive_name}" >"${work_root}/${archive_name}.sha256"
-  if [[ -e "${output_dir}/${archive_name}" || -e "${output_dir}/${archive_name}.sha256" ]]; then
-    [[ -f "${output_dir}/${archive_name}" &&
-      -f "${output_dir}/${archive_name}.sha256" ]] ||
-      fail_archive "partial existing release output: ${archive_name}"
-    cmp -s "${candidate}" "${output_dir}/${archive_name}" ||
-      fail_archive "existing release output is not reproducible: ${archive_name}"
-    cmp -s "${work_root}/${archive_name}.sha256" "${output_dir}/${archive_name}.sha256" ||
-      fail_archive "existing release checksum mismatch: ${archive_name}"
-    return
-  fi
-  mv "${candidate}" "${output_dir}/${archive_name}"
-  mv "${work_root}/${archive_name}.sha256" "${output_dir}/${archive_name}.sha256"
-}
-
-core_archive_root="${work_root}/core-archive/Linnet-Core-${version}"
-mkdir -p "${core_archive_root}"
-cp -R "${expanded_core}/Linnet-Core.component.pkg/Payload/Linnet.app" \
-  "${core_archive_root}/Linnet.app"
-cp "${expanded_core}/Resources/NOTICE.md" "${core_archive_root}/NOTICE.md"
-cp "${expanded_core}/Resources/LICENSE.txt" "${core_archive_root}/LICENSE.txt"
-publish_zip "${work_root}/core-archive" \
-  "${release_prefix}-Core-community-beta.zip"
 
 publish_pack() {
   local expanded="$1"
@@ -193,21 +146,14 @@ publish_pack() {
     >"${work_root}/manifest-1-${kind}.json"
   cmp -s "${installed_manifest}" "${work_root}/manifest-1-${kind}.json" ||
     fail_archive "${kind} embedded and online manifests differ"
-  local digest
-  digest="$(shasum -a 256 "${candidate}" | awk '{print $1}')"
-  printf '%s  %s\n' "${digest}" "${archive_name}" >"${work_root}/expected-${archive_name}.sha256"
-  if [[ -e "${output_dir}/${archive_name}" || -e "${output_dir}/${archive_name}.sha256" ]]; then
-    [[ -f "${output_dir}/${archive_name}" &&
-      -f "${output_dir}/${archive_name}.sha256" ]] ||
-      fail_archive "partial existing release output: ${archive_name}"
+  if [[ -e "${output_dir}/${archive_name}" ]]; then
+    [[ -f "${output_dir}/${archive_name}" && ! -L "${output_dir}/${archive_name}" ]] ||
+      fail_archive "unsafe existing release output: ${archive_name}"
     cmp -s "${candidate}" "${output_dir}/${archive_name}" ||
       fail_archive "existing pack bytes differ: ${archive_name}"
-    (cd "${output_dir}" && shasum -a 256 -c "${archive_name}.sha256" >/dev/null) ||
-      fail_archive "existing release checksum mismatch: ${archive_name}"
     return
   fi
   cp "${candidate}" "${output_dir}/${archive_name}"
-  cp "${work_root}/expected-${archive_name}.sha256" "${output_dir}/${archive_name}.sha256"
 }
 
 publish_pack "${expanded_complete}" Linnet-Chinese.component.pkg chinese
@@ -260,25 +206,19 @@ publish_catalog() {
     "${work_root}/manifest-1-chinese.json" "${work_root}/manifest-1-english.json" \
     "${work_root}/manifest-1-lts.json" "${work_root}/manifest-1-extended.json" ||
     fail_archive "external catalog differs from the accepted pack set"
-  local digest
-  digest="$(shasum -a 256 "${candidate}" | awk '{print $1}')"
-  printf '%s  %s\n' "${digest}" "${archive_name}" >"${work_root}/expected-${archive_name}.sha256"
-  if [[ -e "${output_dir}/${archive_name}" || -e "${output_dir}/${archive_name}.sha256" ]]; then
-    [[ -f "${output_dir}/${archive_name}" && -f "${output_dir}/${archive_name}.sha256" ]] ||
-      fail_archive "partial existing release output: ${archive_name}"
+  if [[ -e "${output_dir}/${archive_name}" ]]; then
+    [[ -f "${output_dir}/${archive_name}" && ! -L "${output_dir}/${archive_name}" ]] ||
+      fail_archive "unsafe existing release output: ${archive_name}"
     "${pack_tool}" inspect-catalog --catalog "${output_dir}/${archive_name}" \
       --core-version "${version}" \
       >"${work_root}/catalog-existing.json"
     cmp -s "${work_root}/catalog-1.json" "${work_root}/catalog-existing.json" ||
       fail_archive "existing data catalog content differs"
-    (cd "${output_dir}" && shasum -a 256 -c "${archive_name}.sha256" >/dev/null) ||
-      fail_archive "existing data catalog checksum mismatch"
     return
   fi
   cp "${candidate}" "${output_dir}/${archive_name}"
-  cp "${work_root}/expected-${archive_name}.sha256" "${output_dir}/${archive_name}.sha256"
 }
 
 publish_catalog
 
-echo "Linnet Core archive, deterministic language packs and Catalog: PASS"
+echo "Linnet deterministic language packs and Catalog: PASS"
