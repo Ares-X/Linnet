@@ -11,6 +11,8 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 > [!NOTE]
 > Linnet 0.1.3 的正式 Release 只提供一个完整安装包 `Linnet.pkg`。它没有使用 Apple Developer ID 签名，也未经过公证；macOS 会要求用户手动确认信任。SHA-256 直接写在同一 Release 的说明中，Core 与语言数据组件则位于同仓库、明确标注的更新频道，不再与普通用户下载混在一起。
 
+**[下载最新版 Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
+
 [产品体验](#产品体验) · [安装](#安装) · [使用指南](#使用指南) · [设置](#设置) · [隐私](#隐私) · [参与贡献](#参与贡献)
 
 ## 为什么选择 Linnet
