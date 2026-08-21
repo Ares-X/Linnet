@@ -1,6 +1,8 @@
-project: Squirrel.xcodeproj
+project: Linnet.xcodeproj
 schemes:
-- Squirrel
+- Linnet
+- Settings
 targets:
-- Squirrel
+- Linnet
+- Settings
 format: github-actions
