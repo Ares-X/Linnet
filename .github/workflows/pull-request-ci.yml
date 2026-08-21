@@ -14,8 +14,8 @@ jobs:
           # Keep all five source submodules on the lock-owning build path.
           submodules: false
 
-      - name: Install SwiftLint
-        run: brew install swiftlint
+      - name: Install build tools
+        run: brew install swiftlint ripgrep
 
       - name: Lint
         run: scripts/run_swiftlint.sh
