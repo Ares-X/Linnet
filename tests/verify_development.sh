@@ -82,7 +82,7 @@ done
 
 bash -n action-build.sh action-install.sh package/installer-scripts/postinstall
 tests/verify_runtime_footprint.sh
-LINNET_LIFECYCLE_CANDIDATE_APP="${host}" tests/verify_package_lifecycle.sh
+LINNET_LIFECYCLE_CANDIDATE_APP="${host_app}" tests/verify_package_lifecycle.sh
 tests/verify_visible_settings_fixture.sh --verify
 tests/verify_swift_units.sh
 tests/verify_chinese_source_projection.sh

@@ -186,11 +186,11 @@ if /usr/bin/osascript -l JavaScript "${quiescer}" 0 \
   echo "Core application quiescence accepted an invalid deadline." >&2
   exit 1
 fi
-rg -Fq 'if model.operationActive {' sources/LinnetSettings/SettingsMain.swift
-rg -Fq 'return .terminateCancel' sources/LinnetSettings/SettingsMain.swift
+rg -Fq 'if model.operationActive {' sources/LinnetSettings/SettingsApplication.swift
+rg -Fq 'return .terminateCancel' sources/LinnetSettings/SettingsApplication.swift
 rg -Fq 'guard model.pendingChanges else { return .terminateNow }' \
-  sources/LinnetSettings/SettingsMain.swift
-rg -Fq 'return .terminateLater' sources/LinnetSettings/SettingsMain.swift
+  sources/LinnetSettings/SettingsApplication.swift
+rg -Fq 'return .terminateLater' sources/LinnetSettings/SettingsApplication.swift
 
 copy_candidate_app() {
   local home="$1"

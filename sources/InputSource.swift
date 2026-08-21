@@ -93,8 +93,7 @@ final class SquirrelInstaller {
       currentAfterQuiescence: currentAfterQuiescence,
       targetInputSourceID: identifier)
     if desiredInputSourceID == currentAfterQuiescence
-      && currentAfterQuiescence != currentBeforeQuiescence
-    {
+      && currentAfterQuiescence != currentBeforeQuiescence {
       print("Input source changed during Host quiescence; preserving \(currentAfterQuiescence)")
     }
     try register()
@@ -123,14 +122,12 @@ final class SquirrelInstaller {
   ) -> String {
     if currentAfterQuiescence != currentBeforeQuiescence {
       if currentBeforeQuiescence != targetInputSourceID
-        || currentAfterQuiescence != postQuiescenceInputSourceID
-      {
+        || currentAfterQuiescence != postQuiescenceInputSourceID {
         return currentAfterQuiescence
       }
     }
     if currentBeforeQuiescence == targetInputSourceID
-      || (wasCurrent && currentBeforeQuiescence == postQuiescenceInputSourceID)
-    {
+      || (wasCurrent && currentBeforeQuiescence == postQuiescenceInputSourceID) {
       return targetInputSourceID
     }
     return currentBeforeQuiescence
@@ -144,8 +141,7 @@ final class SquirrelInstaller {
   ) -> String? {
     if postRegistrationInputSourceID == desiredInputSourceID { return nil }
     if postRegistrationInputSourceID != preRegistrationInputSourceID
-      && postRegistrationInputSourceID != targetInputSourceID
-    {
+      && postRegistrationInputSourceID != targetInputSourceID {
       return nil
     }
     return desiredInputSourceID

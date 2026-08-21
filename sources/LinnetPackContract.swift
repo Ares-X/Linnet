@@ -404,7 +404,7 @@ extension LinnetPackContract {
         "dicts/yaopin.dict.yaml", "dicts/mingren.dict.yaml",
         "dicts/yiren.dict.yaml", "dicts/wuzhong.dict.yaml",
         "dicts/renming.dict.yaml", "dicts/taifeng.dict.yaml",
-        "dicts/fangyan.dict.yaml",
+        "dicts/fangyan.dict.yaml"
       ]
       return names.contains(path)
     case .english:
@@ -416,13 +416,13 @@ extension LinnetPackContract {
       let names = [
         "default.yaml", "squirrel.yaml", "linnet_algebra.yaml", "linnet_user.yaml",
         "linnet_reviewed.dict.yaml", "zh-hans-t-essay-bgw.gram",
-        "symbols_v.yaml", "symbols_caps_v.yaml",
+        "symbols_v.yaml", "symbols_caps_v.yaml"
       ]
       let dictionaries = [
         "dicts/zi.dict.yaml", "dicts/jichu.dict.yaml",
         "dicts/lianxiang.dict.yaml", "dicts/cuoyin.dict.yaml",
         "dicts/duoyin.dict.yaml", "dicts/shici.dict.yaml",
-        "dicts/diming.dict.yaml",
+        "dicts/diming.dict.yaml"
       ]
       return names.contains(path) || dictionaries.contains(path)
         || ["linnet_zh", "radical_pinyin"].contains(where: path.hasPrefix)

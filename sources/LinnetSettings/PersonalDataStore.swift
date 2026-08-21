@@ -460,7 +460,7 @@ extension LinnetPersonalDataStore {
       expansionsFile: table(
         name: expansionsFile,
         rows: normalized.expansions.map { ($0.value, $0.trigger) }
-      ),
+      )
     ]
     try validateRenderedFiles(files)
     return files
@@ -508,7 +508,7 @@ extension LinnetPersonalDataStore {
       "expansions-revision": table(
         name: expansionsFile,
         rows: normalized.expansions.map { ($0.value, $0.trigger) }
-      ),
+      )
     ]
   }
 
@@ -531,7 +531,7 @@ extension LinnetPersonalDataStore {
         normalized.disabledWords,
         sentenceCapitalization: sentenceCapitalization,
         tabBehavior: tabBehavior
-      ),
+      )
     ]
     try validateRenderedFiles(files)
     return files
@@ -726,8 +726,7 @@ extension LinnetPersonalDataStore {
       buffer.append(chunk)
       var lineStart = buffer.startIndex
       while lineStart < buffer.endIndex,
-        let newline = buffer[lineStart...].firstIndex(of: 0x0a)
-      {
+        let newline = buffer[lineStart...].firstIndex(of: 0x0a) {
         try process(buffer[lineStart..<newline])
         lineStart = buffer.index(after: newline)
       }
@@ -816,10 +815,10 @@ extension LinnetPersonalDataStore {
       ([
         "# Linnet user-managed settings",
         "# encoding: utf-8",
-        "",
+        ""
       ] + disabledWords + [
         "sentence_capitalization: \(sentenceCapitalization)",
-        "tab_behavior: \(tabBehavior)",
+        "tab_behavior: \(tabBehavior)"
       ]).joined(separator: "\n") + "\n"
   }
 

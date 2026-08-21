@@ -126,8 +126,7 @@ enum LinnetSettingsAppearancePreview {
           identifier = candidate.hasPrefix("linnet_") ? candidate : nil
           fields = [:]
         } else if identifier != nil, indentation == 4,
-          let separator = trimmed.firstIndex(of: ":")
-        {
+          let separator = trimmed.firstIndex(of: ":") {
           let key = String(trimmed[..<separator])
           let value = Self.scalar(String(trimmed[trimmed.index(after: separator)...]))
           fields[key] = value
@@ -749,13 +748,13 @@ struct LinnetSettingsAppearancePreviewView: View {
       [
         "输入", "输入法", "候选", "双拼", "设置", "词库", "主题", "学习", "数据",
         "方案", "拼音", "智能", "英文", "简体", "繁体", "符号", "短语", "预测",
-        "同步", "更新", "备份", "恢复", "导入", "导出", "用户", "语言", "外观",
+        "同步", "更新", "备份", "恢复", "导入", "导出", "用户", "语言", "外观"
       ]
     case .english:
       [
         "interface", "input", "method", "context", "preview", "candidate", "typing", "language", "settings",
         "completion", "prediction", "translation", "spelling", "pronunciation", "learning", "phrase", "layout", "theme",
-        "dictionary", "update", "backup", "restore", "import", "export", "profile", "native", "glass",
+        "dictionary", "update", "backup", "restore", "import", "export", "profile", "native", "glass"
       ]
     }
   }
@@ -775,7 +774,7 @@ struct LinnetSettingsAppearancePreviewView: View {
     let candidateAttributes: [NSAttributedString.Key: Any] = [
       .font: candidateFont,
       .foregroundColor: candidateColor,
-      .baselineOffset: 0,
+      .baselineOffset: 0
     ]
     let labelAttributes: [NSAttributedString.Key: Any] = [
       .font: labelFont,
@@ -785,7 +784,7 @@ struct LinnetSettingsAppearancePreviewView: View {
         secondaryFont: labelFont,
         baseOffset: 0,
         verticalText: false,
-        placement: .inline),
+        placement: .inline)
     ]
     let line = LinnetCandidatePresentation.candidateLine(
       candidateFormat: "[label] [candidate]",
@@ -851,7 +850,7 @@ struct LinnetSettingsAppearancePreviewView: View {
         secondaryFont: detailFont,
         baseOffset: 0,
         verticalText: false,
-        placement: .standaloneDetail),
+        placement: .standaloneDetail)
     ]
     let line = LinnetCandidatePresentation.candidateLine(
       candidateFormat: "[comment]",

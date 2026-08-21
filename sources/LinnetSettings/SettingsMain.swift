@@ -14,92 +14,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
-  weak var model: SettingsModel?
-  var interfaceLocale = Locale.autoupdatingCurrent
-
-  func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool { true }
-
-  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard let model else { return .terminateNow }
-    if model.operationActive {
-      NSSound.beep()
-      return .terminateCancel
-    }
-    guard model.pendingChanges else { return .terminateNow }
-    if sender.windows.contains(where: { $0.attachedSheet != nil }) {
-      return .terminateCancel
-    }
-    SettingsPendingChangesPrompt.present(
-      for: sender.keyWindow ?? sender.windows.first(where: \.isVisible),
-      canApply: model.canApplyChanges,
-      locale: interfaceLocale
-    ) { choice in
-      switch choice {
-      case .apply:
-        model.applyConfiguration { accepted in
-          sender.reply(toApplicationShouldTerminate: accepted)
-        }
-      case .discard:
-        model.discardPendingChanges()
-        sender.reply(toApplicationShouldTerminate: true)
-      case .cancel:
-        sender.reply(toApplicationShouldTerminate: false)
-      }
-    }
-    return .terminateLater
-  }
-}
-
-@main
-struct LinnetSettingsApp: App {
-  @NSApplicationDelegateAdaptor(SettingsApplicationDelegate.self)
-  private var applicationDelegate
-
-  var body: some Scene {
-    WindowGroup {
-      SettingsRootView()
-        .frame(
-          minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth,
-          idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth,
-          minHeight: 660,
-          idealHeight: 800)
-    }
-    .defaultSize(width: LinnetSettingsLayoutMetrics.defaultWindowWidth, height: 800)
-    .windowResizability(.contentMinSize)
-    .commands { CommandGroup(replacing: .newItem) {} }
-  }
-}
-
-struct SettingsActiveOperation: Equatable {
-  let kind: SettingsOperationKind
-  var phase: SettingsOperationPhase
-  var cancellationAvailable: Bool
-  var cancellationRequested: Bool
-
-  var cancellable: Bool { cancellationAvailable && !cancellationRequested }
-}
-
-enum SettingsLegacyImportState {
-  case unavailable
-  case checking
-  case none
-  case compatible(SettingsDataCoordinator.LegacyImportCandidate)
-  case failed
-}
-
-enum SettingsLanguageDataUpdateTarget: Equatable {
-  case currentEdition
-  case completeOffline
-
-  var presentationPack: SettingsPresentationPack {
-    self == .completeOffline ? .longTailDictionaries : .languageData
-  }
-}
-
-@MainActor
 final class SettingsModel: ObservableObject {
-  private static let cloudBackupName = "Linnet-Full-Backup.\(LinnetBackupStore.portableExtension)"
+  static let cloudBackupName = "Linnet-Full-Backup.\(LinnetBackupStore.portableExtension)"
   @Published var backupRetentionPolicy: LinnetSettingsContract.BackupRetentionPolicy
   @Published var configuration: SettingsConfigurationSession {
     didSet {
@@ -109,7 +25,7 @@ final class SettingsModel: ObservableObject {
     }
   }
   @Published var exportCategories = Set(LinnetBackupStore.Category.allCases)
-  @Published private(set) var status: SettingsPresentationStatus = .ready
+  @Published var status: SettingsPresentationStatus = .ready
   @Published private(set) var activeOperation: SettingsActiveOperation?
   @Published private(set) var backupHistory: SettingsBackupHistoryState
   @Published private(set) var legacyImportState: SettingsLegacyImportState
@@ -117,17 +33,17 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var personalValidationPending = false
   @Published private(set) var portableInspectionActive = false
   @Published private(set) var diagnostics: SettingsDataCoordinator.Diagnostics?
-  @Published private(set) var installedPacks: [LinnetDataRegistry.ActivePack]
-  @Published private(set) var dataEdition: LinnetDataRegistry.Edition?
-  @Published fileprivate(set) var grammarModelStatus: GrammarModelStatus = .checking
-  @Published fileprivate(set) var packDownloadProgress: Double = 0
-  @Published fileprivate(set) var languageDataUpdateTarget: SettingsLanguageDataUpdateTarget?
-  @Published private(set) var downloadSourceMode = LinnetSettingsDownloadSource.Mode.github
-  @Published private(set) var downloadMirrorPrefix = ""
-  @Published private(set) var activeDownloadSource: LinnetSettingsDownloadSource? = .direct
-  @Published private(set) var downloadSourceFailure: LinnetSettingsDownloadSource.Failure?
+  @Published var installedPacks: [LinnetDataRegistry.ActivePack]
+  @Published var dataEdition: LinnetDataRegistry.Edition?
+  @Published var grammarModelStatus: GrammarModelStatus = .checking
+  @Published var packDownloadProgress: Double = 0
+  @Published var languageDataUpdateTarget: SettingsLanguageDataUpdateTarget?
+  @Published var downloadSourceMode = LinnetSettingsDownloadSource.Mode.github
+  @Published var downloadMirrorPrefix = ""
+  @Published var activeDownloadSource: LinnetSettingsDownloadSource? = .direct
+  @Published var downloadSourceFailure: LinnetSettingsDownloadSource.Failure?
   @Published private(set) var appearancePublishActive = false
-  @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation? = nil
+  @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
 
   let productName: String
   let appVersion: String
@@ -136,66 +52,20 @@ final class SettingsModel: ObservableObject {
   let dataChannelService: LinnetDataChannel.Service
   let updateChecker: LinnetSettingsUpdateChecker
 
-  private let coordinator: SettingsDataCoordinator
-  private let dataRegistry: LinnetDataRegistry?
+  let coordinator: SettingsDataCoordinator
+  let dataRegistry: LinnetDataRegistry?
   let userDirectory: URL?
   private let backupsRoot: URL?
   private let hallelujahDatabase: URL?
   private let legacyRimeDirectory: URL?
   private var operationTask: Task<Void, Never>?
-  private var packDownloadTask: Task<Void, Never>?
+  var packDownloadTask: Task<Void, Never>?
   private var appearanceDebounceTask: Task<Void, Never>?
   private var appearancePublishTask: Task<Void, Never>?
   private var backupRefreshTask: Task<Void, Never>?
   private var legacyInspectionTask: Task<Void, Never>?
   private let personalValidationExecutor = SettingsPersonalValidationExecutor()
   private var pendingAppearance: LinnetSettingsDocument.Appearance?
-
-  var operationActive: Bool {
-    activeOperation != nil || packDownloadActive || appearancePublishActive
-  }
-  var migrationAvailable: Bool {
-    if case .compatible = legacyImportState { return true }
-    return false
-  }
-  var documentDirty: Bool { configuration.documentDirty }
-  var personalDataDirty: Bool { configuration.personalDataDirty }
-  var pendingChanges: Bool { configuration.pendingChanges }
-  var canApplyChanges: Bool {
-    configuration.canPersist && !personalValidationPending
-      && personalValidation.isValid && !operationActive && pendingChanges
-  }
-  var displayedStatus: SettingsPresentationStatus {
-    switch configuration.readiness {
-    case .ready: status
-    case .sourceUnreadable: .settingsLoadFailed
-    case .servicesUnavailable: .operationFailed(.unavailable)
-    }
-  }
-  var packDownloadActive: Bool { languageDataUpdateTarget != nil }
-  var packDownloadCancellable: Bool {
-    languageDataUpdateTarget != nil && packDownloadTask != nil
-  }
-  var languageDataUpdatesAvailable: Bool {
-    dataServicesAvailable && dataChannelService == .published
-      && configuredDownloadSource != nil
-  }
-  var downloadSourceConfigured: Bool { configuredDownloadSource != nil }
-  var downloadSourceEditorDisabled: Bool { operationActive }
-  var downloadMirrorIsValid: Bool {
-    (try? LinnetSettingsDownloadSource.customMirror(prefix: downloadMirrorPrefix)) != nil
-  }
-  var downloadSourceNeedsSave: Bool {
-    downloadSourceMode == .customMirror && downloadMirrorIsValid
-      && configuredDownloadSource == nil
-  }
-  var canUseDownloadMirror: Bool {
-    !downloadSourceEditorDisabled && downloadSourceNeedsSave
-  }
-  var canRestoreBackup: Bool {
-    dataServicesAvailable
-      && (configuration.canPersist || configuration.readiness == .sourceUnreadable)
-  }
 
   init(bundle: Bundle = .main) {
     let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
@@ -281,418 +151,9 @@ final class SettingsModel: ObservableObject {
     detectGrammarModel()
     schedulePersonalValidation()
   }
+}
 
-  // MARK: — Grammar model management
-
-  /// The current state of the Wanxiang LTS grammar model on this machine.
-  enum GrammarModelStatus: Equatable {
-    case checking        /// still probing the filesystem
-    case ltsActive       /// Wanxiang LTS (420 MB) is the active pack
-    case missing         /// recommended data is absent; no update was attempted
-
-    var label: LocalizedStringKey {
-      switch self {
-      case .checking: return "Detecting grammar model…"
-      case .ltsActive: return "Wanxiang LTS grammar data (about 420 MB) — Active"
-      case .missing: return "Model data missing"
-      }
-    }
-  }
-
-  private func detectGrammarModel() {
-    grammarModelStatus = installedPacks.contains(where: { $0.kind == .lts })
-      ? .ltsActive : .missing
-  }
-
-  func updateLanguageData() {
-    downloadLanguageData(.currentEdition)
-  }
-
-  func installCompleteOfflineData() {
-    downloadLanguageData(.completeOffline)
-  }
-
-  func selectDownloadSourceMode(_ mode: LinnetSettingsDownloadSource.Mode) {
-    guard !downloadSourceEditorDisabled else { return }
-    downloadSourceMode = mode
-    switch mode {
-    case .github:
-      LinnetSettingsDownloadSource.save(.direct)
-      activeDownloadSource = .direct
-      downloadSourceFailure = nil
-    case .publicMirror:
-      LinnetSettingsDownloadSource.save(.publicMirror)
-      activeDownloadSource = .publicMirror
-      downloadSourceFailure = nil
-    case .customMirror:
-      refreshDownloadMirrorValidation()
-    }
-  }
-
-  func updateDownloadMirrorPrefix(_ value: String) {
-    guard !downloadSourceEditorDisabled else { return }
-    downloadMirrorPrefix = value
-    if downloadSourceMode == .customMirror { refreshDownloadMirrorValidation() }
-  }
-
-  func useDownloadMirror() {
-    guard !downloadSourceEditorDisabled else { return }
-    do {
-      let source = try LinnetSettingsDownloadSource.customMirror(prefix: downloadMirrorPrefix)
-      LinnetSettingsDownloadSource.save(source)
-      downloadSourceMode = .customMirror
-      downloadMirrorPrefix = source.mirrorPrefixString ?? downloadMirrorPrefix
-      activeDownloadSource = source
-      downloadSourceFailure = nil
-    } catch let failure as LinnetSettingsDownloadSource.Failure {
-      downloadSourceFailure = failure
-    } catch {
-      downloadSourceFailure = .invalidMirrorPrefix
-    }
-  }
-
-  private var configuredDownloadSource: LinnetSettingsDownloadSource? {
-    guard let activeDownloadSource, activeDownloadSource.mode == downloadSourceMode else {
-      return nil
-    }
-    switch downloadSourceMode {
-    case .github:
-      return activeDownloadSource
-    case .publicMirror:
-      return activeDownloadSource == .publicMirror ? activeDownloadSource : nil
-    case .customMirror:
-      guard let draft = try? LinnetSettingsDownloadSource.customMirror(
-        prefix: downloadMirrorPrefix),
-        draft == activeDownloadSource
-      else { return nil }
-      return activeDownloadSource
-    }
-  }
-
-  private func refreshDownloadMirrorValidation() {
-    do {
-      _ = try LinnetSettingsDownloadSource.customMirror(prefix: downloadMirrorPrefix)
-      downloadSourceFailure = nil
-    } catch let failure as LinnetSettingsDownloadSource.Failure {
-      downloadSourceFailure = failure
-    } catch {
-      downloadSourceFailure = .invalidMirrorPrefix
-    }
-  }
-
-  private func downloadLanguageData(_ target: SettingsLanguageDataUpdateTarget) {
-    guard languageDataUpdatesAvailable, !packDownloadActive, !operationActive else {
-      if !languageDataUpdatesAvailable { finishLanguageDataUpdate(target, failure: .unavailable) }
-      return
-    }
-
-    guard let registry = dataRegistry, let downloadSource = configuredDownloadSource,
-      dataChannelService == .published
-    else {
-      finishLanguageDataUpdate(target, failure: .unavailable)
-      return
-    }
-    languageDataUpdateTarget = target
-    packDownloadProgress = 0
-    setLanguageDataUpdateState(target, .downloading)
-    let coordinator = coordinator
-    packDownloadTask = Task.detached {
-      [weak self, registry, downloadSource, coordinator] in
-      do {
-        try registry.prepareMutableDirectories()
-        let lease = try await LinnetSettingsMutationLease.acquire(
-          at: registry.settingsMutationLeaseURL, timeout: 300)
-        defer { _ = lease }
-        try Task.checkCancellation()
-        let transport = LinnetSettingsDownloadTransport(source: downloadSource)
-        let catalogData = try await transport.downloadCatalog(
-          at: LinnetSettingsDownloadSource.canonicalCatalogURL)
-        try Task.checkCancellation()
-        await self?.setLanguageDataUpdateState(target, .verifying)
-        let catalog = try registry.verifyDataChannel(catalogData)
-        let snapshot = try registry.runtimeSnapshot()
-        let requestedEdition: LinnetDataRegistry.Edition = target == .completeOffline
-          ? .full : snapshot.state.edition
-        guard let selected = catalog.catalog.activationSet(for: requestedEdition) else {
-          throw LinnetDataRegistry.Failure.invalidActiveState
-        }
-        let update = try registry.beginDataChannelUpdate(
-          accepting: catalog, edition: requestedEdition)
-        let downloadDirectory = update.downloadDirectory
-        defer {
-          try? registry.cancelDataChannelUpdate(transactionID: update.transactionID)
-        }
-        var targetPacks: [LinnetDataRegistry.ActivePack] = []
-        for artifact in selected.packs {
-          try Task.checkCancellation()
-          if let installed = snapshot.state.packs.first(where: { artifact.matches($0) }) {
-            targetPacks.append(installed)
-            continue
-          }
-          let package = downloadDirectory.appending(
-            path: "\(artifact.kind.rawValue)-\(artifact.sequence)-\(artifact.contentSHA256).linnetpack")
-          await self?.setLanguageDataUpdateState(target, .downloading)
-          try await transport.downloadPack(artifact, to: package)
-          try Task.checkCancellation()
-          await self?.setLanguageDataUpdateState(target, .verifying)
-          let staged = try registry.verifyAndStagePack(package: package, artifact: artifact)
-          targetPacks.append(staged)
-          await self?.setPackDownloadProgress(
-            Double(targetPacks.count) / Double(selected.packs.count))
-          try Task.checkCancellation()
-        }
-        try Task.checkCancellation()
-        let activation = try registry.prepareDataChannelUpdate(update, target: targetPacks)
-        await self?.beginLanguageDataActivation(target)
-        try Task.checkCancellation()
-        try await coordinator.activateLanguage(activation)
-        await self?.finishLanguageDataUpdate(target)
-      } catch is CancellationError {
-        await self?.finishPackDownloadCancellation(target)
-      } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
-        await self?.finishPackDownloadCancellation(target)
-      } catch {
-        print("Language-data catalog update failed: \(error.localizedDescription)")
-        await self?.finishLanguageDataUpdate(
-          target, failure: Self.packUpdateFailure(for: error))
-      }
-    }
-  }
-
-  @MainActor
-  private func setPackDownloadProgress(_ progress: Double) {
-    packDownloadProgress = progress
-  }
-
-  @MainActor
-  private func setLanguageDataUpdateState(
-    _ target: SettingsLanguageDataUpdateTarget,
-    _ state: SettingsPresentationPackState
-  ) {
-    guard languageDataUpdateTarget == target else { return }
-    status = .pack(target.presentationPack, state)
-  }
-
-  @MainActor
-  private func beginLanguageDataActivation(_ target: SettingsLanguageDataUpdateTarget) {
-    guard languageDataUpdateTarget == target else { return }
-    // Activation can atomically swap live language data. Once this phase
-    // begins, cancellation is no longer advertised as a safe user action;
-    // Host health verification and rollback own the terminal result.
-    packDownloadTask = nil
-    status = .pack(target.presentationPack, .activating)
-  }
-
-  nonisolated private static func packUpdateFailure(
-    for error: Error
-  ) -> SettingsPresentationPackState {
-    if error is SettingsDataCoordinator.Failure { return .activationFailed }
-    if let leaseFailure = error as? LinnetSettingsMutationLease.Failure {
-      return leaseFailure == .timedOut ? .busy : .storageFailed
-    }
-    if let transportFailure = error as? LinnetSettingsDownloadTransport.Failure {
-      switch transportFailure {
-      case .unsafeDestination, .destinationExists, .storage:
-        return .storageFailed
-      case .invalidURL, .invalidResponse, .httpStatus:
-        return .updateServiceUnavailable
-      case .unsupportedContentEncoding, .invalidContentLength, .responseTooLarge,
-        .lengthMismatch:
-        return .verificationFailed
-      case .invalidConfiguration:
-        return .downloadFailed
-      }
-    }
-    if let urlError = error as? URLError {
-      switch urlError.code {
-      case .notConnectedToInternet, .networkConnectionLost, .internationalRoamingOff,
-        .dataNotAllowed:
-        return .offline
-      case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
-        .badServerResponse, .resourceUnavailable, .fileDoesNotExist:
-        return .updateServiceUnavailable
-      default:
-        return .downloadFailed
-      }
-    }
-    let failure = error as NSError
-    if failure.domain == NSCocoaErrorDomain {
-      let storageCodes = Set([
-        CocoaError.Code.fileWriteOutOfSpace.rawValue,
-        CocoaError.Code.fileWriteNoPermission.rawValue,
-        CocoaError.Code.fileWriteVolumeReadOnly.rawValue,
-      ])
-      if storageCodes.contains(failure.code) { return .storageFailed }
-    }
-    return .verificationFailed
-  }
-
-  @MainActor
-  fileprivate func finishLanguageDataUpdate(
-    _ target: SettingsLanguageDataUpdateTarget,
-    failure: SettingsPresentationPackState? = nil
-  ) {
-    guard languageDataUpdateTarget == target || languageDataUpdateTarget == nil else { return }
-    if let failure {
-      status = .pack(target.presentationPack, failure)
-    } else {
-      packDownloadProgress = 1
-      if let snapshot = try? dataRegistry?.runtimeSnapshot() {
-        installedPacks = snapshot.state.packs
-        dataEdition = snapshot.state.edition
-      }
-      status = .pack(target.presentationPack, .active(version: nil))
-    }
-    detectGrammarModel()
-    languageDataUpdateTarget = nil
-    packDownloadTask = nil
-    startPendingAppearancePublish()
-    if failure == nil {
-      updateChecker.refreshInstalledData(edition: dataEdition, packs: installedPacks)
-    }
-  }
-
-  func cancelLanguagePackDownload() {
-    guard packDownloadCancellable, let target = languageDataUpdateTarget else { return }
-    status = .pack(target.presentationPack, .cancelling)
-    packDownloadTask?.cancel()
-  }
-
-  fileprivate func finishPackDownloadCancellation(_ target: SettingsLanguageDataUpdateTarget) {
-    guard languageDataUpdateTarget == target else { return }
-    packDownloadProgress = 0
-    languageDataUpdateTarget = nil
-    packDownloadTask = nil
-    detectGrammarModel()
-    status = .pack(target.presentationPack, .cancelled)
-    startPendingAppearancePublish()
-  }
-
-  // MARK: — End grammar model management
-
-  func saveBackupRetentionPolicy() {
-    status =
-      LinnetSettingsContract.setBackupRetentionPolicy(backupRetentionPolicy)
-      ? .backupRetentionSaved
-      : .hostUnavailable
-  }
-
-  func openDataFolder() {
-    guard let directory = userDirectory else {
-      status = .dataFolderUnavailable
-      return
-    }
-    do {
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      NSWorkspace.shared.open(directory)
-    } catch {
-      status = .dataFolderOpenFailed
-    }
-  }
-
-  func addCustomWord() {
-    configuration.personalDraft.customWords.append(.init(value: "", code: ""))
-  }
-  func removeCustomWord(id: UUID) {
-    configuration.personalDraft.customWords.removeAll { $0.id == id }
-  }
-  func addDisabledWord() { configuration.personalDraft.disabledWords.append("") }
-  func removeDisabledWord(at index: Int) {
-    guard configuration.personalDraft.disabledWords.indices.contains(index) else { return }
-    configuration.personalDraft.disabledWords.remove(at: index)
-  }
-  func addExpansion() {
-    configuration.personalDraft.expansions.append(.init(value: "", trigger: "x;"))
-  }
-  func removeExpansion(id: UUID) {
-    configuration.personalDraft.expansions.removeAll { $0.id == id }
-  }
-
-  func reloadExternalChanges() {
-    guard configuration.resolveExternalConflictByReloading() else { return }
-    status = .ready
-  }
-
-  func keepPendingDrafts() {
-    guard configuration.resolveExternalConflictKeepingPending() else { return }
-    status = .ready
-  }
-
-  func personalValidationMessage(locale: Locale) -> String? {
-    guard let issue = personalValidation.firstIssue else { return nil }
-    let chinese = locale.usesSimplifiedChineseSettingsCopy
-    let location: String
-    switch issue.location {
-    case .customWord(let id, let field):
-      let row = configuration.personalDraft.customWords.firstIndex { $0.id == id }.map { $0 + 1 }
-      let fieldName = switch field {
-      case .value: chinese ? "词条" : "value"
-      case .code: chinese ? "编码" : "code"
-      }
-      location = chinese ? "自定义词第 \(row ?? 0) 行的\(fieldName)" : "Custom word row \(row ?? 0) \(fieldName)"
-    case .disabledWord(let index):
-      location = chinese ? "禁用词第 \(index + 1) 行" : "Disabled word row \(index + 1)"
-    case .expansion(let id, let field):
-      let row = configuration.personalDraft.expansions.firstIndex { $0.id == id }.map { $0 + 1 }
-      let fieldName = switch field {
-      case .value: chinese ? "展开内容" : "expansion"
-      case .trigger: chinese ? "触发码" : "trigger"
-      }
-      location = chinese ? "文本展开第 \(row ?? 0) 行的\(fieldName)" : "Text Expander row \(row ?? 0) \(fieldName)"
-    case .collection(let collection):
-      location = switch collection {
-      case .customWords: chinese ? "自定义词" : "Custom words"
-      case .disabledWords: chinese ? "禁用词" : "Disabled words"
-      case .expansions: chinese ? "文本展开" : "Text Expander"
-      }
-    }
-    let reason = switch issue.reason {
-    case .missing: chinese ? "不能为空。" : "is required."
-    case .invalid: chinese ? "格式无效。" : "has an invalid format."
-    case .tooLarge: chinese ? "超过安全大小限制。" : "exceeds the safe size limit."
-    case .duplicate: chinese ? "与另一行重复。" : "duplicates another row."
-    case .tooMany: chinese ? "超过允许的行数。" : "has too many rows."
-    }
-    return chinese ? "\(location)\(reason)" : "\(location) \(reason)"
-  }
-
-  func legacyImportSummary(
-    _ candidate: SettingsDataCoordinator.LegacyImportCandidate,
-    locale: Locale
-  ) -> String {
-    let chinese = locale.usesSimplifiedChineseSettingsCopy
-    let sourceNames = candidate.sources.map {
-      switch $0 {
-      case .hallelujah: "Hallelujah"
-      case .rime: chinese ? "旧 Rime 用户词典" : "legacy Rime user dictionaries"
-      }
-    }.joined(separator: chinese ? "、" : ", ")
-    if chinese {
-      return "已验证来源：\(sourceNames)。将合并 \(candidate.substitutionCount) 条替换规则和 \(candidate.recognizedLearningDictionaryCount) 个已识别学习词典；操作前会自动备份当前状态。"
-    }
-    return "Verified sources: \(sourceNames). This will merge \(candidate.substitutionCount) substitutions and \(candidate.recognizedLearningDictionaryCount) recognized learning dictionaries after backing up the current state."
-  }
-
-  func portableImportSummary(
-    _ candidate: SettingsDataCoordinator.PortableImportCandidate,
-    locale: Locale
-  ) -> String {
-    let chinese = locale.usesSimplifiedChineseSettingsCopy
-    let categories = candidate.categories.map { category in
-      switch category {
-      case .customWords: chinese ? "自定义词" : "Custom words"
-      case .disabledWords: chinese ? "禁用词" : "Disabled words"
-      case .textExpander: chinese ? "文本展开" : "Text Expander"
-      case .chineseLearning: chinese ? "中文学习" : "Chinese learning"
-      case .englishLearning: chinese ? "英文学习" : "English learning"
-      }
-    }.joined(separator: chinese ? "、" : ", ")
-    if chinese {
-      return "归档版本：应用 \(candidate.appVersion)，数据 \(candidate.dataVersion)。将替换：\(categories)（共 \(candidate.recordCount) 条记录）；其他类别保持不变，操作前会自动备份。"
-    }
-    return "Archive version: app \(candidate.appVersion), data \(candidate.dataVersion). Replace \(categories) (\(candidate.recordCount) records); preserve all other categories and back up the current state first."
-  }
-
+extension SettingsModel {
   private func schedulePersonalValidation() {
     let draft = configuration.personalDraft
     personalValidationPending = true
@@ -758,11 +219,6 @@ final class SettingsModel: ObservableObject {
     configuration.discardPendingChanges()
   }
 
-  var legacyImportCandidate: SettingsDataCoordinator.LegacyImportCandidate? {
-    guard case .compatible(let candidate) = legacyImportState else { return nil }
-    return candidate
-  }
-
   func refreshLegacyImportCandidate() {
     guard dataServicesAvailable else {
       legacyImportState = .unavailable
@@ -822,20 +278,6 @@ final class SettingsModel: ObservableObject {
       .portableExport,
       operation: .exportPortable(categories: exportCategories, destination: destination)
     ) { _ in .portableExported(productName: self.productName) }
-  }
-
-  var cloudBackupArchiveAvailable: Bool {
-    guard let archive = cloudBackupArchive else { return false }
-    var isDirectory = ObjCBool(false)
-    return FileManager.default.fileExists(
-      atPath: archive.path,
-      isDirectory: &isDirectory
-    ) && !isDirectory.boolValue
-  }
-
-  var cloudBackupArchive: URL? {
-    cloudSyncLocation?.folder.appending(
-      component: Self.cloudBackupName, directoryHint: .notDirectory)
   }
 
   func chooseCloudSyncFolder(locale: Locale) {
@@ -911,20 +353,6 @@ final class SettingsModel: ObservableObject {
       deliverImmediately: true)
   }
 
-  func choosePortableImportSource(locale: Locale) -> URL? {
-    guard !operationActive else { return nil }
-    let panel = NSOpenPanel()
-    panel.title = SettingsFilePanelTitle.portableImport.text(
-      productName: productName, locale: locale)
-    panel.canChooseDirectories = false
-    panel.allowsMultipleSelection = false
-    panel.allowedContentTypes = [
-      UTType(filenameExtension: LinnetBackupStore.portableExtension) ?? .data
-    ]
-    guard panel.runModal() == .OK else { return nil }
-    return panel.url
-  }
-
   func inspectPortableImport(
     _ source: URL
   ) async -> SettingsDataCoordinator.PortableImportCandidate? {
@@ -958,8 +386,7 @@ final class SettingsModel: ObservableObject {
   func restore(_ record: LinnetBackupStore.BackupRecord) {
     guard case .verified = record.state, canRestoreBackup, !operationActive else { return }
     if let personalTicket = configuration.makePersonalTicket(),
-      let documentTicket = configuration.makeDocumentTicket()
-    {
+      let documentTicket = configuration.makeDocumentTicket() {
       run(
         .restore,
         operation: .restoreBackup(record.backupDirectory),
@@ -995,13 +422,6 @@ final class SettingsModel: ObservableObject {
     }
   }
 
-  func reveal(_ record: LinnetBackupStore.BackupRecord) {
-    let target =
-      FileManager.default.fileExists(atPath: record.backupDirectory.path)
-      ? record.backupDirectory : record.transactionDirectory
-    NSWorkspace.shared.activateFileViewerSelecting([target])
-  }
-
   func refreshDiagnostics() {
     run(.diagnostics, operation: .diagnose) { [weak self] outcome in
       self?.diagnostics = outcome.diagnostics
@@ -1011,50 +431,12 @@ final class SettingsModel: ObservableObject {
     }
   }
 
-  func copyDiagnostics() {
-    guard let report = diagnostics?.redactedReport else { return }
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
-    pasteboard.setString(report, forType: .string)
-    status = .diagnosticsCopied
-  }
-
-  func saveDiagnostics(locale: Locale) {
-    guard let report = diagnostics?.redactedReport else { return }
-    let panel = NSSavePanel()
-    panel.title = SettingsFilePanelTitle.diagnosticsExport.text(
-      productName: productName, locale: locale)
-    panel.nameFieldStringValue = "\(productName)-diagnostics.txt"
-    panel.canCreateDirectories = true
-    panel.allowedContentTypes = [.plainText]
-    guard panel.runModal() == .OK, let destination = panel.url else { return }
-    do {
-      try report.write(to: destination, atomically: true, encoding: .utf8)
-      status = .diagnosticsSaved
-    } catch {
-      status = .diagnosticsSaveFailed
-    }
-  }
-
   func cancelActiveOperation() {
     guard activeOperation?.cancellable == true else { return }
     activeOperation?.cancellationAvailable = false
     activeOperation?.cancellationRequested = true
     status = .cancellingOperation
     operationTask?.cancel()
-  }
-
-  func categorySelected(_ category: LinnetBackupStore.Category) -> Binding<Bool> {
-    Binding(
-      get: { self.exportCategories.contains(category) },
-      set: { selected in
-        if selected {
-          self.exportCategories.insert(category)
-        } else {
-          self.exportCategories.remove(category)
-        }
-      }
-    )
   }
 
   private func run(
@@ -1074,53 +456,78 @@ final class SettingsModel: ObservableObject {
       cancellationRequested: false
     )
     status = .operationProgress(kind, .preflight)
+    let acceptance = SettingsOperationAcceptanceContext(
+      personalTicket: personalTicket,
+      documentTicket: documentTicket,
+      recoveryAfterCommit: recoveryAfterCommit
+    )
     operationTask = Task { [weak self] in
       guard let self else { return }
-      var acceptedForCompletion = false
-      do {
-        let outcome = try await coordinator.run(operation) { [weak self] update in
-          Task { @MainActor [weak self] in self?.setProgress(update, for: kind) }
-        }
-        switch accept(
-          outcome,
-          personalTicket: personalTicket,
-          documentTicket: documentTicket,
-          recoveryAfterCommit: recoveryAfterCommit
-        ) {
-        case .accepted:
-          if kind == .apply {
-            cancelPendingAppearancePublish()
-          }
-          status = success(outcome)
-          acceptedForCompletion = true
-        case .conflict:
-          status = .configurationConflict
-        case .rejected:
-          status = .operationFailed(.invalidOperation)
-        }
-      } catch SettingsDataCoordinator.Failure.staleRevision {
-        switch observeCurrentConfiguration() {
-        case .reloaded:
-          status = .staleDataReloaded
-        case .conflict:
-          status = .configurationConflict
-        default:
-          status = .operationFailed(.invalidOperation)
-        }
-      } catch SettingsDataCoordinator.Failure.cancelled {
-        status = .operationCancelled
-      } catch {
-        logDiagnostic(error, context: "Settings operation failed")
-        status = kind == .removeBackup
-          ? .backupRecordRemovalFailed
-          : .operationFailed(presentationFailure(error))
-      }
+      let acceptedForCompletion = await perform(
+        kind,
+        operation: operation,
+        acceptance: acceptance,
+        success: success
+      )
       refreshBackups()
       activeOperation = nil
       operationTask = nil
       startPendingAppearancePublish()
       completion?(acceptedForCompletion && !pendingChanges)
     }
+  }
+
+  private func perform(
+    _ kind: SettingsOperationKind,
+    operation: SettingsDataCoordinator.DataOperation,
+    acceptance: SettingsOperationAcceptanceContext,
+    success: @escaping @MainActor (SettingsDataCoordinator.Outcome) -> SettingsPresentationStatus
+  ) async -> Bool {
+    do {
+      let outcome = try await coordinator.run(operation) { [weak self] update in
+        Task { @MainActor [weak self] in self?.setProgress(update, for: kind) }
+      }
+      return present(
+        outcome,
+        for: kind,
+        acceptance: acceptance,
+        success: success
+      )
+    } catch SettingsDataCoordinator.Failure.staleRevision {
+      presentStaleOperation()
+    } catch SettingsDataCoordinator.Failure.cancelled {
+      status = .operationCancelled
+    } catch {
+      logDiagnostic(error, context: "Settings operation failed")
+      status = kind == .removeBackup
+        ? .backupRecordRemovalFailed
+        : .operationFailed(presentationFailure(error))
+    }
+    return false
+  }
+
+  private func present(
+    _ outcome: SettingsDataCoordinator.Outcome,
+    for kind: SettingsOperationKind,
+    acceptance: SettingsOperationAcceptanceContext,
+    success: @escaping @MainActor (SettingsDataCoordinator.Outcome) -> SettingsPresentationStatus
+  ) -> Bool {
+    switch accept(
+      outcome,
+      personalTicket: acceptance.personalTicket,
+      documentTicket: acceptance.documentTicket,
+      recoveryAfterCommit: acceptance.recoveryAfterCommit
+    ) {
+    case .accepted:
+      if kind == .apply { cancelPendingAppearancePublish() }
+      status = success(outcome)
+      return true
+    case .conflict:
+      status = .configurationConflict
+    case .rejected:
+      status = .operationFailed(.invalidOperation)
+    }
+    return false
   }
 
   /// Apply and Discard are terminal for work queued by the live appearance
@@ -1132,21 +539,9 @@ final class SettingsModel: ObservableObject {
     pendingAppearance = nil
   }
 
-  private func startPendingAppearancePublish() {
+  func startPendingAppearancePublish() {
     appearanceDebounceTask = nil
-    guard appearancePublishTask == nil,
-      operationTask == nil,
-      !packDownloadActive,
-      configuration.canPersist,
-      let appearance = pendingAppearance,
-      let baseline = configuration.documentBaseline,
-      let personalRevision = configuration.personalBaselineRevision,
-      let documentTicket = configuration.makeDocumentTicket()
-    else { return }
-    guard appearance != baseline.appearance else {
-      pendingAppearance = nil
-      return
-    }
+    guard let context = pendingAppearancePublishContext() else { return }
 
     pendingAppearance = nil
     appearancePublishActive = true
@@ -1156,12 +551,12 @@ final class SettingsModel: ObservableObject {
       do {
         let outcome = try await coordinator.run(
           .publishAppearance(
-            appearance: appearance,
-            basePersonalRevision: personalRevision,
-            baseDocumentRevision: documentTicket.baselineRevision)
+            appearance: context.appearance,
+            basePersonalRevision: context.personalRevision,
+            baseDocumentRevision: context.documentTicket.baselineRevision)
         )
         guard case .submittedAppearance(let snapshot) = outcome.documentEffect,
-          configuration.acceptAppearanceCommit(snapshot, ticket: documentTicket)
+          configuration.acceptAppearanceCommit(snapshot, ticket: context.documentTicket)
         else {
           status = .configurationConflict
           appearancePublishActive = false
@@ -1172,19 +567,7 @@ final class SettingsModel: ObservableObject {
           status = .appearanceLive
         }
       } catch SettingsDataCoordinator.Failure.staleRevision {
-        let observation = observeCurrentConfiguration()
-        if configuration.canPersist,
-          observation == .reloaded || observation == .unchanged,
-          let baseline = configuration.documentBaseline
-        {
-          pendingAppearance = configuration.documentDraft.appearance.livePanelProjection(
-            over: baseline.appearance)
-          status = .appearanceStaleRetry
-        } else if observation == .conflict {
-          status = .configurationConflict
-        } else {
-          status = .operationFailed(.invalidOperation)
-        }
+        presentStaleAppearancePublish()
       } catch SettingsDataCoordinator.Failure.cancelled {
         if let baseline = configuration.documentBaseline {
           pendingAppearance = configuration.documentDraft.appearance.livePanelProjection(
@@ -1197,6 +580,41 @@ final class SettingsModel: ObservableObject {
       appearancePublishActive = false
       appearancePublishTask = nil
       startPendingAppearancePublish()
+    }
+  }
+
+  private func pendingAppearancePublishContext() -> (
+    appearance: LinnetSettingsDocument.Appearance,
+    personalRevision: String,
+    documentTicket: SettingsConfigurationSession.DocumentTicket
+  )? {
+    guard appearancePublishTask == nil else { return nil }
+    guard operationTask == nil else { return nil }
+    guard !packDownloadActive else { return nil }
+    guard configuration.canPersist else { return nil }
+    guard let appearance = pendingAppearance else { return nil }
+    guard let baseline = configuration.documentBaseline else { return nil }
+    guard let personalRevision = configuration.personalBaselineRevision else { return nil }
+    guard let documentTicket = configuration.makeDocumentTicket() else { return nil }
+    guard appearance != baseline.appearance else {
+      pendingAppearance = nil
+      return nil
+    }
+    return (appearance, personalRevision, documentTicket)
+  }
+
+  private func presentStaleAppearancePublish() {
+    let observation = observeCurrentConfiguration()
+    if configuration.canPersist,
+      observation == .reloaded || observation == .unchanged,
+      let baseline = configuration.documentBaseline {
+      pendingAppearance = configuration.documentDraft.appearance.livePanelProjection(
+        over: baseline.appearance)
+      status = .appearanceStaleRetry
+    } else if observation == .conflict {
+      status = .configurationConflict
+    } else {
+      status = .operationFailed(.invalidOperation)
     }
   }
 
@@ -1218,16 +636,12 @@ final class SettingsModel: ObservableObject {
     }
   }
 
-  private enum OutcomeAcceptance {
-    case accepted, conflict, rejected
-  }
-
   private func accept(
     _ outcome: SettingsDataCoordinator.Outcome,
     personalTicket: SettingsConfigurationSession.PersonalTicket?,
     documentTicket: SettingsConfigurationSession.DocumentTicket?,
     recoveryAfterCommit: Bool
-  ) -> OutcomeAcceptance {
+  ) -> SettingsOutcomeAcceptance {
     if let result = outcome.diagnostics { diagnostics = result }
     if recoveryAfterCommit {
       guard case .externalReplacement = outcome.personalEffect,
@@ -1237,41 +651,54 @@ final class SettingsModel: ObservableObject {
       return .accepted
     }
 
-    var hasConflict = false
+    let personalAcceptance = acceptPersonalEffect(outcome, ticket: personalTicket)
+    guard personalAcceptance != .rejected else { return .rejected }
+    let documentAcceptance = acceptDocumentEffect(outcome, ticket: documentTicket)
+    guard documentAcceptance != .rejected else { return .rejected }
+    return personalAcceptance == .conflict || documentAcceptance == .conflict
+      ? .conflict : .accepted
+  }
+
+  private func acceptPersonalEffect(
+    _ outcome: SettingsDataCoordinator.Outcome,
+    ticket: SettingsConfigurationSession.PersonalTicket?
+  ) -> SettingsOutcomeAcceptance {
     switch outcome.personalEffect {
     case .observed:
-      if configuration.observePersonal(outcome.personalSnapshot) == .conflict {
-        hasConflict = true
-      }
+      return configuration.observePersonal(outcome.personalSnapshot) == .conflict
+        ? .conflict : .accepted
     case .submittedDraft:
-      guard let personalTicket else { return .rejected }
-      switch configuration.acceptPersonalCommit(
-        outcome.personalSnapshot,
-        kind: .submittedDraft,
-        ticket: personalTicket
-      ) {
-      case .conflict: hasConflict = true
-      case .rejectedStaleTicket: return .rejected
-      case .accepted, .pendingEditsPreserved: break
-      }
+      guard let ticket else { return .rejected }
+      return personalCommitAcceptance(
+        outcome.personalSnapshot, kind: .submittedDraft, ticket: ticket)
     case .externalReplacement:
-      guard let personalTicket else { return .rejected }
-      switch configuration.acceptPersonalCommit(
-        outcome.personalSnapshot,
-        kind: .externalReplacement,
-        ticket: personalTicket
-      ) {
-      case .conflict: hasConflict = true
-      case .rejectedStaleTicket: return .rejected
-      case .accepted, .pendingEditsPreserved: break
-      }
+      guard let ticket else { return .rejected }
+      return personalCommitAcceptance(
+        outcome.personalSnapshot, kind: .externalReplacement, ticket: ticket)
     }
+  }
 
+  private func personalCommitAcceptance(
+    _ snapshot: LinnetPersonalDataStore.Snapshot,
+    kind: SettingsConfigurationSession.PersonalCommitKind,
+    ticket: SettingsConfigurationSession.PersonalTicket
+  ) -> SettingsOutcomeAcceptance {
+    switch configuration.acceptPersonalCommit(snapshot, kind: kind, ticket: ticket) {
+    case .conflict: .conflict
+    case .rejectedStaleTicket: .rejected
+    case .accepted, .pendingEditsPreserved: .accepted
+    }
+  }
+
+  private func acceptDocumentEffect(
+    _ outcome: SettingsDataCoordinator.Outcome,
+    ticket: SettingsConfigurationSession.DocumentTicket?
+  ) -> SettingsOutcomeAcceptance {
     switch outcome.documentEffect {
     case .observed:
-      break
+      return .accepted
     case .submittedDraft(let snapshot), .externalReplacement(let snapshot):
-      guard let documentTicket else { return .rejected }
+      guard let ticket else { return .rejected }
       let kind: SettingsConfigurationSession.DocumentCommitKind
       if case .externalReplacement = outcome.documentEffect {
         kind = .externalReplacement
@@ -1279,19 +706,18 @@ final class SettingsModel: ObservableObject {
         kind = .submittedDraft
       }
       switch configuration.acceptDocumentCommit(
-        snapshot, kind: kind, ticket: documentTicket
+        snapshot, kind: kind, ticket: ticket
       ) {
-      case .conflict: hasConflict = true
+      case .conflict: return .conflict
       case .rejectedStaleTicket: return .rejected
-      case .accepted, .pendingEditsPreserved: break
+      case .accepted, .pendingEditsPreserved: return .accepted
       }
     case .submittedAppearance:
       return .rejected
     }
-    return hasConflict ? .conflict : .accepted
   }
 
-  private func observeCurrentConfiguration() -> SettingsConfigurationSession.ObservationResult? {
+  func observeCurrentConfiguration() -> SettingsConfigurationSession.ObservationResult? {
     guard let userDirectory else { return nil }
     do {
       let personalSnapshot = try LinnetPersonalDataStore.snapshot(from: userDirectory)
@@ -1357,50 +783,4 @@ final class SettingsModel: ObservableObject {
     }
   }
 
-  private func presentationPhase(
-    _ phase: SettingsDataCoordinator.Phase
-  ) -> SettingsOperationPhase? {
-    switch phase {
-    case .preflight: .preflight
-    case .pausing: .pausing
-    case .snapshotting: .snapshotting
-    case .staging: .staging
-    case .deploying: .deploying
-    case .activating: .activating
-    case .verifying: .verifying
-    case .cancelling: .cancelling
-    case .resuming: .resuming
-    case .completed, .cancelled, .failed: nil
-    }
-  }
-
-  private func presentationFailure(_ error: Error) -> SettingsPresentationFailure {
-    guard let failure = error as? SettingsDataCoordinator.Failure else { return .unknown }
-    return switch failure {
-    case .unavailable: .unavailable
-    case .invalidOperation: .invalidOperation
-    case .staleRevision: .staleHostState
-    case .unsafePath: .unsafePath
-    case .requestFailed(let code): presentationFailure(code)
-    case .appearanceRestoreFailed: .appearanceRecoveryFailed
-    case .configurationRestoreFailed: .configurationRecoveryFailed
-    case .timedOut: .timedOut
-    case .cancelled: .unknown
-    }
-  }
-
-  private func presentationFailure(
-    _ code: LinnetSettingsContract.RuntimeReplyCode
-  ) -> SettingsPresentationFailure {
-    return switch code {
-    case .transactionBusy: .hostBusy
-    case .appearanceDeployFailed: .deploymentFailed
-    case .staleCandidate: .staleHostState
-    default: .hostRejected
-    }
-  }
-
-  private func logDiagnostic(_ error: Error, context: String) {
-    print("\(context): \(error.localizedDescription)")
-  }
 }

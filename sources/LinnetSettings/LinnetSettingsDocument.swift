@@ -236,8 +236,7 @@ struct LinnetSettingsDocument: Codable, Equatable, Sendable {
       }
 
       if let browsingValue = try container.decodeIfPresent(
-        String.self, forKey: .candidateBrowsingMode)
-      {
+        String.self, forKey: .candidateBrowsingMode) {
         guard let mode = CandidateBrowsingMode(rawValue: browsingValue) else {
           throw DecodingError.dataCorruptedError(
             forKey: .candidateBrowsingMode,
@@ -539,8 +538,7 @@ enum LinnetSettingsDocumentStore {
       throw Failure.newerSchemaVersion(document.schemaVersion)
     }
     if shouldAdoptLegacyChineseProfile(from: stored.data),
-      let profile = legacyChineseProfile(from: directory)
-    {
+      let profile = legacyChineseProfile(from: directory) {
       document.input.chineseProfile = profile
     }
     return Snapshot(document: document, revision: stored.revision)
@@ -647,8 +645,7 @@ enum LinnetSettingsDocumentStore {
     let userSettings = directory.appending(
       path: LinnetPersonalDataStore.legacyUserSettingsFile)
     if FileManager.default.fileExists(atPath: userSettings.path),
-      let legacy = try? LinnetPersonalDataStore.readLegacyUserSettings(userSettings)
-    {
+      let legacy = try? LinnetPersonalDataStore.readLegacyUserSettings(userSettings) {
       document.english.sentenceCapitalization = legacy.sentenceCapitalization
       document.english.tabBehavior =
         LinnetSettingsDocument.TabBehavior(rawValue: legacy.tabBehavior) ?? .smartComplete

@@ -136,8 +136,7 @@ final class LinnetCandidateAccessibility {
          indexOnPage: candidates.indices.contains(highlightedIndex)
            ? candidates[highlightedIndex].indexOnPage : -1
        ),
-       announcement != lastAnnouncement
-    {
+       announcement != lastAnnouncement {
       announce(announcement)
     }
   }
@@ -207,7 +206,7 @@ final class LinnetCandidateAccessibility {
       notification: .announcementRequested,
       userInfo: [
         .announcement: message,
-        .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+        .priority: NSAccessibilityPriorityLevel.medium.rawValue
       ]
     )
   }

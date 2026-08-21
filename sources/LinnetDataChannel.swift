@@ -128,8 +128,7 @@ enum LinnetDataChannel {
       installedPacks: [LinnetDataRegistry.ActivePack]
     ) -> UpdateAvailability {
       if core.availability(currentVersion: currentVersion, currentBuild: currentBuild)
-        == .available
-      {
+        == .available {
         return .core(core)
       }
       guard let edition, let selected = activationSet(for: edition) else { return .current }

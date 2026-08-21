@@ -286,8 +286,7 @@ struct InputTabView: View {
           .foregroundStyle(.secondary)
 
         if model.configuration.documentDraft.input.chineseLearningPolicy
-          != model.configuration.documentBaseline?.input.chineseLearningPolicy
-        {
+          != model.configuration.documentBaseline?.input.chineseLearningPolicy {
           Text("Changes pending — use Apply Changes to activate this strategy.")
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -882,6 +881,9 @@ struct DataTabView: View {
     }
   }
 
+}
+
+extension DataTabView {
   private var downloadSourceControls: some View {
     VStack(alignment: .leading, spacing: 8) {
       Picker(

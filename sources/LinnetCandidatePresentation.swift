@@ -159,7 +159,7 @@ enum LinnetCandidatePresentation {
       let replacements: [(String, String, [NSAttributedString.Key: Any], Bool)] = [
         ("[label]", label, labelAttributes, false),
         ("[candidate]", normalizedCandidate, candidateAttributes, true),
-        ("[comment]", normalizedComment, commentAttributes, false),
+        ("[comment]", normalizedComment, commentAttributes, false)
       ]
       let next = replacements.compactMap { replacement ->
         (Range<String.Index>, String, [NSAttributedString.Key: Any], Bool)? in
@@ -219,12 +219,11 @@ enum LinnetCandidatePresentation {
       guard !name.isEmpty else { return nil }
       let familyFaceFont: NSFont? = if let separator = name.lastIndex(of: "-"),
         separator != name.startIndex,
-        name.index(after: separator) != name.endIndex
-      {
+        name.index(after: separator) != name.endIndex {
         NSFont(
           descriptor: NSFontDescriptor(fontAttributes: [
             .family: String(name[..<separator]),
-            .face: String(name[name.index(after: separator)...]),
+            .face: String(name[name.index(after: separator)...])
           ]),
           size: size)
       } else {
@@ -248,6 +247,9 @@ enum LinnetCandidatePresentation {
     return NSFont(descriptor: descriptor, size: size) ?? primary.withSize(size)
   }
 
+}
+
+extension LinnetCandidatePresentation {
   static func windowInset(verticalText: Bool) -> CGSize {
     guard verticalText else { return candidateWindowInset }
     return CGSize(

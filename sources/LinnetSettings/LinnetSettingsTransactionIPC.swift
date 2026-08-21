@@ -109,8 +109,7 @@ enum LinnetSettingsTransactionIPC {
       guard let socketIdentity else { return }
       var info = stat()
       if lstat(identity.endpointURL.path, &info) == 0,
-        info.st_dev == socketIdentity.0, info.st_ino == socketIdentity.1
-      {
+        info.st_dev == socketIdentity.0, info.st_ino == socketIdentity.1 {
         try? FileManager.default.removeItem(at: identity.endpointURL)
       }
     }

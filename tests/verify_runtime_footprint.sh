@@ -1052,10 +1052,11 @@ if rg -q 'commitDataChannelUpdate\(' sources/LinnetSettings/SettingsDataCoordina
   fail "Settings regained language-publication ownership"
 fi
 test "$(rg -c 'let downloadDirectory = update\.downloadDirectory' \
-  sources/LinnetSettings/SettingsMain.swift)" -eq 1 ||
+  sources/LinnetSettings/SettingsModelLanguageData.swift)" -eq 1 ||
   fail "Settings no longer consumes the Registry-owned update download directory"
 if rg -q 'downloadsDirectory\.appending\([^)]*UUID\(\)' \
-  sources/LinnetSettings/SettingsMain.swift; then
+  sources/LinnetSettings/SettingsMain.swift \
+  sources/LinnetSettings/SettingsModelLanguageData.swift; then
   fail "Settings regained an unowned random download directory"
 fi
 rg -Fq 'let createdAt: TimeInterval' sources/LinnetDataRegistry.swift ||
@@ -1082,7 +1083,7 @@ if rg -n 'abortDataChannelUpdate\(|discardActivation\(' sources --glob '*.swift'
   fail "a retired language cleanup owner returned"
 fi
 test "$(rg -c 'registry\.cancelDataChannelUpdate\(transactionID: update\.transactionID\)' \
-  sources/LinnetSettings/SettingsMain.swift)" -eq 1 ||
+  sources/LinnetSettings/SettingsModelLanguageData.swift)" -eq 1 ||
   fail "SettingsMain must cancel its one Registry transaction from one defer"
 if rg -n 'cancelDataChannelUpdate\(' sources/LinnetSettings/SettingsDataCoordinator.swift; then
   fail "the transport coordinator regained language cleanup ownership"
@@ -1100,7 +1101,8 @@ rg -Fq 'https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/Linnet-Data
   sources/LinnetSettings/LinnetSettingsDownloadSource.swift ||
   fail "the Settings network boundary lost its stable data-channel endpoint"
 if rg -Fq 'https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/Linnet-Data-Channel.json' \
-    sources/LinnetSettings/SettingsMain.swift; then
+    sources/LinnetSettings/SettingsMain.swift \
+    sources/LinnetSettings/SettingsModelLanguageData.swift; then
   fail "SettingsMain regained catalog-endpoint ownership"
 fi
 if rg -n 'https?://' sources/LinnetDataChannel.swift; then
@@ -1108,7 +1110,8 @@ if rg -n 'https?://' sources/LinnetDataChannel.swift; then
 fi
 rg -Fq 'static let service: Service = .published' sources/LinnetDataChannel.swift ||
   fail "the published update channel became unavailable"
-rg -Fq 'dataChannelService == .published' sources/LinnetSettings/SettingsMain.swift ||
+rg -Fq 'dataChannelService == .published' \
+  sources/LinnetSettings/SettingsModelLanguageData.swift ||
   fail "Settings stopped consuming the typed data-channel service state"
 test "$(rg -c 'func check\(\)' sources/LinnetSettings/LinnetSettingsUpdateChecker.swift)" -eq 1 ||
   fail "Settings lost its single bounded update-check entrypoint"
@@ -1369,7 +1372,7 @@ ruby -e '
       menu.include?("statusItem?.isVisible = showStatusIcon && inputSourceIsActive") &&
       menu.include?("func inputSourceDidActivate(session: RimeSessionId)") &&
       controller.include?("inputSourceDidActivate(session: session)")
-' Linnet.xcodeproj/project.pbxproj sources/LinnetSettings/SettingsMain.swift \
+' Linnet.xcodeproj/project.pbxproj sources/LinnetSettings/SettingsApplication.swift \
   sources/LinnetSettings/SettingsRootView.swift \
   sources/SquirrelApplicationDelegate.swift sources/SquirrelInputController.swift ||
   fail "Settings surface lifecycle or input-menu ownership regressed"
@@ -1441,7 +1444,8 @@ if rg -n 'stores one verified portable archive|Upload Current Data' \
   fail "the manual recovery archive is still presented as learning sync"
 fi
 ruby -e '
-  app = File.read("sources/LinnetSettings/SettingsMain.swift")
+  app = File.read("sources/LinnetSettings/SettingsApplication.swift")
+  model = File.read("sources/LinnetSettings/SettingsMain.swift")
   root = File.read("sources/LinnetSettings/SettingsRootView.swift")
   guard = File.read("sources/LinnetSettings/SettingsWindowCloseGuard.swift")
   session = File.read("sources/LinnetSettings/SettingsSessionState.swift")
@@ -1462,23 +1466,23 @@ ruby -e '
     guard.include?("linnet_settings.json") || guard.include?("UserDefaults")
   abort "the canonical in-memory discard transition is missing" unless
     session.include?("mutating func discardPendingChanges()")
-  publish = app[/func publishAppearance\(.*?\n  \}/m]
+  publish = model[/func publishAppearance\(.*?\n  \}/m]
   abort "Apply-only appearance fields can still enqueue a live refresh" unless
     publish &&
       publish.include?("let projectedAppearance =") &&
       publish.include?("guard projectedAppearance != baseline.appearance else") &&
       publish.include?("cancelPendingAppearancePublish()") &&
       publish.include?("pendingAppearance = projectedAppearance")
-  terminal = app[/private func cancelPendingAppearancePublish\(\).*?\n  \}/m]
+  terminal = model[/private func cancelPendingAppearancePublish\(\).*?\n  \}/m]
   abort "Settings has no single terminal owner for pending appearance work" unless
     terminal &&
       terminal.include?("appearanceDebounceTask?.cancel()") &&
       terminal.include?("appearanceDebounceTask = nil") &&
       terminal.include?("pendingAppearance = nil")
-  discard = app[/func discardPendingChanges\(\).*?\n  \}/m]
+  discard = model[/func discardPendingChanges\(\).*?\n  \}/m]
   abort "Discard can still leave a queued appearance publish behind" unless
     discard&.include?("cancelPendingAppearancePublish()")
-  accepted = app[/case \.accepted:\n(.*?)case \.conflict:/m, 1]
+  accepted = model[/case \.accepted:\n(.*?)case \.conflict:/m, 1]
   abort "a successful Apply can still start a second appearance refresh" unless
     accepted&.include?("if kind == .apply") &&
       accepted.include?("cancelPendingAppearancePublish()")
@@ -1734,7 +1738,7 @@ settings_urlsession="$(rg -l 'URLSession' sources/LinnetSettings || true)"
 
 if rg -n 'inputRuntimePreferences|chineseProfileKey|setChineseProfile|applyPreferredChineseProfileIfIdle|rimeAPI\.select_schema' \
     sources/SquirrelApplicationDelegate.swift sources/SquirrelInputController.swift \
-    sources/LinnetSettings/SettingsContract.swift sources/LinnetSettings/SettingsMain.swift; then
+    sources/LinnetSettings; then
   fail "the input frontend regained a selected-schema owner outside typed Settings Apply"
 fi
 if rg -n "Rime's menu|Rime 菜单" \

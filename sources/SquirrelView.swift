@@ -797,8 +797,7 @@ private extension SquirrelView {
     let effectiveRadius = max(0, theme.hilitedCornerRadius + 2 * extraExpansion / theme.hilitedCornerRadius * max(0, theme.cornerRadius - theme.hilitedCornerRadius))
 
     if theme.linear || usesGridLayout,
-      let highlightedTextRange = convert(range: highlightedRange)
-    {
+      let highlightedTextRange = convert(range: highlightedRange) {
       let (leadingRect, bodyRect, trailingRect) = multilineRects(forRange: highlightedTextRange, extraSurounding: separatorWidth, bounds: outerBox)
       var (highlightedPoints, highlightedPoints2, rightCorners, rightCorners2) = linearMultilineFor(body: bodyRect, leading: leadingRect, trailing: trailingRect)
 
@@ -927,8 +926,8 @@ private extension SquirrelView {
     let upPath = layout.previousPage.flatMap {
       centeredPagingPath(trianglePath, rotationAngle: .pi, in: $0)
     }
-    guard (layout.nextPage == nil || downPath != nil),
-      (layout.previousPage == nil || upPath != nil)
+    guard layout.nextPage == nil || downPath != nil,
+      layout.previousPage == nil || upPath != nil
     else { return (layer, .none, nil, nil) }
 
     if let downPath {

@@ -438,8 +438,7 @@ private extension SquirrelInputController {
 
     if let shortcut = printablePagingKey(rimeKeycode),
       (rimeModifiers & ~kLockMask.rawValue) == 0,
-      let action = printablePagingAction(shortcut)
-    {
+      let action = printablePagingAction(shortcut) {
       return rimeAPI.change_page(
         session,
         action == .pageUp)
@@ -594,8 +593,7 @@ private extension SquirrelInputController {
     var expandedItems = [CandidateItem]()
     expandedItems.reserveCapacity(expandedBounds.count)
     while expandedItems.count < expandedBounds.count,
-      rimeAPI.candidate_list_next(&iterator)
-    {
+      rimeAPI.candidate_list_next(&iterator) {
       let absoluteIndex = Int(iterator.index)
       guard expandedBounds.contains(absoluteIndex) else { break }
       let page = absoluteIndex / pageSize
@@ -631,8 +629,7 @@ private extension SquirrelInputController {
       return labels[index]
     }
     if let customLabels = labels.first, labels.count == 1,
-      index >= 0, index < customLabels.count
-    {
+      index >= 0, index < customLabels.count {
       return String(customLabels[customLabels.index(customLabels.startIndex, offsetBy: index)])
     }
     return String(index + 1)

@@ -69,7 +69,7 @@ struct LinnetRimeSyncControllerTests {
     do {
       try LinnetRimeSyncInstallation.project(syncDirectory: root, userDirectory: user)
       fail("duplicate root sync_dir owners were accepted")
-    } catch LinnetRimeSyncInstallation.Failure.duplicateSyncDirectory {}
+    } catch LinnetRimeSyncInstallationFailure.duplicateSyncDirectory {}
   }
 
   private static func testInstallationProjectionRejectsDuplicateBackupPolicy(root: URL) throws {
@@ -81,7 +81,7 @@ struct LinnetRimeSyncControllerTests {
     do {
       try LinnetRimeSyncInstallation.project(syncDirectory: root, userDirectory: user)
       fail("duplicate root automatic config backup policies were accepted")
-    } catch LinnetRimeSyncInstallation.Failure.duplicateAutomaticConfigBackupPolicy {}
+    } catch LinnetRimeSyncInstallationFailure.duplicateAutomaticConfigBackupPolicy {}
   }
 
   private static func testHourlyAutomaticLimit() {

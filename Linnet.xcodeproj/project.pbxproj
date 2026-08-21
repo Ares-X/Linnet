@@ -73,6 +73,9 @@
 		FB1000000000000000000003 /* LinnetCloudSyncLocation.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = FB1000000000000000000002 /* LinnetCloudSyncLocation.swift */; };
 		FB2000000000000000000001 /* SettingsRootView.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000002 /* SettingsRootView.swift */; };
 		FB3000000000000000000001 /* LinnetRimeSyncController.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = FB3000000000000000000002 /* LinnetRimeSyncController.swift */; };
+		FC1000000000000000000001 /* SettingsApplication.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FC1000000000000000000002 /* SettingsApplication.swift */; };
+		FC2000000000000000000001 /* SettingsModelPresentation.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FC2000000000000000000002 /* SettingsModelPresentation.swift */; };
+		FC3000000000000000000001 /* SettingsModelLanguageData.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FC3000000000000000000002 /* SettingsModelLanguageData.swift */; };
 		F50000000000000000000001 /* LinnetSettingsTransactionIPC.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */; };
 		F50000000000000000000002 /* LinnetSettingsTransactionIPC.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */; };
 		F60000000000000000000001 /* LinnetPortableJSONBudget.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000002 /* LinnetPortableJSONBudget.swift */; };
@@ -203,6 +206,9 @@
 		FB1000000000000000000002 /* LinnetCloudSyncLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCloudSyncLocation.swift; path = sources/LinnetSettings/LinnetCloudSyncLocation.swift; sourceTree = "<group>"; };
 		FB2000000000000000000002 /* SettingsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsRootView.swift; path = sources/LinnetSettings/SettingsRootView.swift; sourceTree = "<group>"; };
 		FB3000000000000000000002 /* LinnetRimeSyncController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeSyncController.swift; path = sources/LinnetSettings/LinnetRimeSyncController.swift; sourceTree = "<group>"; };
+		FC1000000000000000000002 /* SettingsApplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsApplication.swift; path = sources/LinnetSettings/SettingsApplication.swift; sourceTree = "<group>"; };
+		FC2000000000000000000002 /* SettingsModelPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsModelPresentation.swift; path = sources/LinnetSettings/SettingsModelPresentation.swift; sourceTree = "<group>"; };
+		FC3000000000000000000002 /* SettingsModelLanguageData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsModelLanguageData.swift; path = sources/LinnetSettings/SettingsModelLanguageData.swift; sourceTree = "<group>"; };
 		F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsTransactionIPC.swift; path = sources/LinnetSettings/LinnetSettingsTransactionIPC.swift; sourceTree = "<group>"; };
 		F60000000000000000000002 /* LinnetPortableJSONBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPortableJSONBudget.swift; path = sources/LinnetSettings/LinnetPortableJSONBudget.swift; sourceTree = "<group>"; };
 		F81000000000000000000002 /* SettingsWindowCloseGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsWindowCloseGuard.swift; path = sources/LinnetSettings/SettingsWindowCloseGuard.swift; sourceTree = "<group>"; };
@@ -262,7 +268,10 @@
 		D30000000000000000000050 /* LinnetSettings */ = {
 			isa = PBXGroup;
 			children = (
+				FC1000000000000000000002 /* SettingsApplication.swift */,
 				D30000000000000000000012 /* SettingsMain.swift */,
+				FC2000000000000000000002 /* SettingsModelPresentation.swift */,
+				FC3000000000000000000002 /* SettingsModelLanguageData.swift */,
 				D30000000000000000000013 /* SettingsContract.swift */,
 				F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */,
 				D30000000000000000000015 /* HallelujahSubstitutionImporter.swift */,
@@ -508,7 +517,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FC1000000000000000000001 /* SettingsApplication.swift in Settings Sources */,
 				D30000000000000000000002 /* SettingsMain.swift in Sources */,
+				FC2000000000000000000001 /* SettingsModelPresentation.swift in Settings Sources */,
+				FC3000000000000000000001 /* SettingsModelLanguageData.swift in Settings Sources */,
 				D50000000000000000000002 /* LinnetPackContract.swift in Settings Sources */,
 				D60000000000000000000002 /* LinnetDataChannel.swift in Settings Sources */,
 				D40000000000000000000002 /* LinnetDataRegistry.swift in Settings Sources */,

@@ -375,7 +375,7 @@ struct LinnetDataRegistry: Sendable {
     try verifyCanonicalRoot()
     for directory in [
       userDataDirectory, stagingDirectory, downloadsDirectory,
-      transactionsDirectory, backupsDirectory,
+      transactionsDirectory, backupsDirectory
     ] {
       try FileManager.default.createDirectory(
         at: directory,
@@ -420,6 +420,9 @@ struct LinnetDataRegistry: Sendable {
     }
   }
 
+}
+
+extension LinnetDataRegistry {
   func runtimeSnapshot() throws -> RuntimeSnapshot {
     try runtimeSnapshot(reconcilingStorage: true)
   }
@@ -577,8 +580,8 @@ struct LinnetDataRegistry: Sendable {
     let resolvedPackage = package.resolvingSymlinksInPath().standardizedFileURL
     let resolvedDownloads = downloadsDirectory.resolvingSymlinksInPath().standardizedFileURL
     let downloadOwner = resolvedPackage.deletingLastPathComponent()
-    guard (downloadOwner == resolvedDownloads
-      || downloadOwner.deletingLastPathComponent() == resolvedDownloads),
+    guard downloadOwner == resolvedDownloads
+      || downloadOwner.deletingLastPathComponent() == resolvedDownloads,
       Self.isSecureOwnedDirectory(downloadOwner) else {
       throw Failure.unsafePath(package.path)
     }
@@ -813,8 +816,7 @@ struct LinnetDataRegistry: Sendable {
             transactionID: record.transactionID, directory: entry,
             protectedPackPaths: paths, retiresCommittedTransaction: true))
         } else if now.timeIntervalSince1970 - record.createdAt >= Self.orphanSafetyAge,
-          !isLive
-        {
+          !isLive {
           languageCleanups.append(.init(
             transactionID: record.transactionID, directory: entry,
             protectedPackPaths: paths, retiresCommittedTransaction: false))
@@ -824,8 +826,7 @@ struct LinnetDataRegistry: Sendable {
         continue
       }
       if let scratch = validatedPersonalScratch(at: entry, now: now),
-        now.timeIntervalSince1970 - scratch.createdAt >= Self.orphanSafetyAge
-      {
+        now.timeIntervalSince1970 - scratch.createdAt >= Self.orphanSafetyAge {
         scratchCleanups.append(entry)
       }
     }
@@ -841,8 +842,7 @@ struct LinnetDataRegistry: Sendable {
     var preflightedTrees: [String: [URL]] = [:]
     for directory in allCleanupDirectories {
       if let tree = try boundedOwnedDirectoryEntries(
-        at: directory, recursively: true, remaining: &traversalBudget)
-      {
+        at: directory, recursively: true, remaining: &traversalBudget) {
         preflightedTrees[directory.standardizedFileURL.path] = tree
       }
     }
@@ -986,8 +986,7 @@ struct LinnetDataRegistry: Sendable {
       result[prior.kind] = prior
     }
     for current in candidate where
-      result[current.kind].map({ Self.sameImmutablePack($0, current) }) == true
-    {
+      result[current.kind].map({ Self.sameImmutablePack($0, current) }) == true {
       result.removeValue(forKey: current.kind)
     }
     let order: [PackKind: Int] = [.chinese: 0, .english: 1, .lts: 2, .extended: 3]
@@ -1315,7 +1314,7 @@ struct LinnetDataRegistry: Sendable {
     for required in [
       "default.yaml", "squirrel.yaml", "linnet_zh.schema.yaml",
       "linnet_zh.dict.yaml", "linnet_en.schema.yaml",
-      "wanxiang-lts-zh-hans.gram",
+      "wanxiang-lts-zh-hans.gram"
     ] where expectedTargets[required] == nil {
       throw Failure.incompleteActiveView(required)
     }
@@ -1354,7 +1353,7 @@ struct LinnetDataRegistry: Sendable {
         }
       case S_IFREG:
         guard (info.st_mode & (S_IWGRP | S_IWOTH)) == 0,
-          (relative == "activation.json" || relative == "linnet_grammar_active.yaml"),
+          relative == "activation.json" || relative == "linnet_grammar_active.yaml",
           actualEntries.insert(relative).inserted
         else { throw Failure.invalidActiveState }
       case S_IFLNK:

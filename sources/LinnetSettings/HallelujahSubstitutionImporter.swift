@@ -210,6 +210,9 @@ enum HallelujahSubstitutionImporter {
       })
   }
 
+}
+
+extension HallelujahSubstitutionImporter {
   private static func loadSource(
     _ url: URL,
     control: OperationControl
@@ -473,8 +476,7 @@ enum HallelujahSubstitutionImporter {
       fingerprint.utf8.count != 64
         || fingerprint.utf8.contains(where: {
           !(48...57).contains($0) && !(97...102).contains($0)
-        })
-    {
+        }) {
       throw Failure.invalidExistingTable(line: 0)
     }
     return (entries.values.sorted { $0.trigger < $1.trigger }, fingerprint)
@@ -486,8 +488,7 @@ enum HallelujahSubstitutionImporter {
     destination: URL,
     control: OperationControl
   ) throws
-    -> Data
-  {
+    -> Data {
     let name = destination.lastPathComponent
     guard !name.isEmpty, !name.contains("\t"), !name.contains("\n"), !name.contains("\r")
     else { throw Failure.unsafeDestination }

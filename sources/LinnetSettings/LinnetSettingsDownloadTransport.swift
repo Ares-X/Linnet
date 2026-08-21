@@ -260,8 +260,7 @@ private extension LinnetSettingsDownloadTransport {
           complete(.failure(URLError(.timedOut)))
           return
         }
-        do { try await Task.sleep(nanoseconds: nextDeadline - now) }
-        catch { return }
+        do { try await Task.sleep(nanoseconds: nextDeadline - now) } catch { return }
       }
     }
 

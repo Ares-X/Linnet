@@ -279,6 +279,9 @@ enum LinnetBackupStore {
   /// transition. The current draft is the only admitted 129th history entry.
   /// Every semantic rejection happens before an old verified transaction is
   /// removed; after the first old removal the new manifest is committed.
+}
+
+extension LinnetBackupStore {
   @discardableResult
   static func commitBackup(
     backupDirectory: URL,
@@ -569,8 +572,7 @@ enum LinnetBackupStore {
   /// Creates the stable half of an automatic backup without following links or
   /// copying a byte beyond the canonical per-file and aggregate limits.
   static func snapshotStable(from live: URL, to backup: URL) throws
-    -> LinnetPersonalDataStore.Snapshot
-  {
+    -> LinnetPersonalDataStore.Snapshot {
     try requireDirectory(live)
     try requireDirectory(backup)
     guard try immediateChildren(of: backup, maximumCount: 1, overflow: .unsafeArtifact("stable"))
@@ -697,12 +699,12 @@ extension LinnetBackupStore {
   fileprivate static let canonicalPersonalFiles = Set([
     LinnetPersonalDataStore.customWordsFile,
     LinnetPersonalDataStore.userSettingsFile,
-    LinnetPersonalDataStore.expansionsFile,
+    LinnetPersonalDataStore.expansionsFile
   ])
   fileprivate static let legacyV2PersonalFiles = Set([
     LinnetPersonalDataStore.customWordsFile,
     LinnetPersonalDataStore.legacyUserSettingsFile,
-    LinnetPersonalDataStore.expansionsFile,
+    LinnetPersonalDataStore.expansionsFile
   ])
   fileprivate static let stableFiles = Set(["installation.yaml", "user.yaml"])
   fileprivate static let learningFiles = Set(["linnet_zh.txt", "linnet_en.txt"])
@@ -1062,8 +1064,7 @@ extension LinnetBackupStore {
   }
 
   fileprivate static func backupArtifact(_ url: URL, path: String, learning: Bool) throws
-    -> BackupArtifact
-  {
+    -> BackupArtifact {
     let limit = learning ? maximumBackupArtifactBytes : stableArtifactLimit(url.lastPathComponent)
     let byteCount = try regularFileSize(url, limit: limit)
     let contents: String?

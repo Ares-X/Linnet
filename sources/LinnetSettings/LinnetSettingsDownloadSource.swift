@@ -220,7 +220,7 @@ struct LinnetSettingsDownloadSource: Equatable, Sendable {
   private static func isPublicDNSHost(_ value: String) -> Bool {
     let host = value.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
     let rejectedSuffixes = [
-      ".localhost", ".local", ".internal", ".home.arpa", ".test", ".example", ".invalid",
+      ".localhost", ".local", ".internal", ".home.arpa", ".test", ".example", ".invalid"
     ]
     guard host.contains("."), host != "localhost", !host.hasSuffix("."),
       host.unicodeScalars.allSatisfy({ $0.isASCII }),

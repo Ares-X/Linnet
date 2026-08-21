@@ -43,7 +43,7 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     (fileName: "linnet_zh_abc.schema.yaml", versionKey: "schema/version"),
     (fileName: "linnet_zh_ziguang.schema.yaml", versionKey: "schema/version"),
     (fileName: "linnet_zh_jiajia.schema.yaml", versionKey: "schema/version"),
-    (fileName: "squirrel.yaml", versionKey: "config_version"),
+    (fileName: "squirrel.yaml", versionKey: "config_version")
   ]
 
   let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
@@ -247,8 +247,7 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     }
     center.getNotificationSettings { settings in
       if (settings.authorizationStatus == .authorized
-        || settings.authorizationStatus == .provisional) && settings.alertSetting == .enabled
-      {
+        || settings.authorizationStatus == .provisional) && settings.alertSetting == .enabled {
         let content = UNMutableNotificationContent()
         content.title = SquirrelApp.productName
         if let msgText = msgText {
@@ -523,7 +522,7 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     DispatchQueue.main.async { [weak self] in self?.rimeSyncController.synchronizeNow() }
   }
 
-  private func performRimeUserDataSync() -> LinnetRimeSyncController.Outcome {
+  private func performRimeUserDataSync() -> LinnetRimeSyncOutcome {
     guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
     if panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true {
       return .busy
@@ -1101,8 +1100,7 @@ extension SquirrelApplicationDelegate {
     } else if active.expectedActiveGeneration != nil
       || active.expectedActiveStateSHA256 != nil
       || request.expectedActiveGeneration != nil
-      || request.expectedActiveStateSHA256 != nil
-    {
+      || request.expectedActiveStateSHA256 != nil {
       reply(
         to: request.transactionID,
         status: .rejected,

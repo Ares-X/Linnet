@@ -57,13 +57,15 @@ if rg -n 'candidate_revision|candidate-revision|signing-request-set|pack-signing
 fi
 
 rg -Fq 'verifyAndStagePack(package: package, artifact: artifact)' \
-  sources/LinnetSettings/SettingsMain.swift
+  sources/LinnetSettings/SettingsModelLanguageData.swift
 if rg -n 'verifyDownloadedArtifact\(|artifact\.matches\(staged\)' \
-    sources/LinnetSettings/SettingsMain.swift; then
+    sources/LinnetSettings/SettingsMain.swift \
+    sources/LinnetSettings/SettingsModelLanguageData.swift; then
   echo "Settings still reinterprets Registry-owned pack verification." >&2
   exit 1
 fi
-if rg -n 'publisherDocumentURL' sources/LinnetSettings/SettingsMain.swift; then
+if rg -n 'publisherDocumentURL' sources/LinnetSettings/SettingsMain.swift \
+    sources/LinnetSettings/SettingsModelLanguageData.swift; then
   echo "Settings still owns a second Catalog trust-root availability path." >&2
   exit 1
 fi

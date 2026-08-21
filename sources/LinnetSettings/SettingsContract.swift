@@ -203,8 +203,7 @@ enum LinnetSettingsContract {
     while cursor.pathComponents.count > 1 {
       if cursor.pathExtension == "app",
         let candidate = Bundle(url: cursor),
-        isInputMethod(candidate)
-      {
+        isInputMethod(candidate) {
         return candidate
       }
       cursor.deleteLastPathComponent()
@@ -343,8 +342,7 @@ extension LinnetSettingsContract {
   ) -> Bool {
     guard (expectedGeneration == nil) == (expectedDigest == nil) else { return false }
     if let expectedGeneration, let expectedDigest,
-      expectedGeneration <= 0 || !isSHA256(expectedDigest)
-    {
+      expectedGeneration <= 0 || !isSHA256(expectedDigest) {
       return false
     }
     let isConfiguration = command == .refresh || command == .reloadConfiguration

@@ -18,7 +18,7 @@ jobs:
         run: brew install swiftlint
 
       - name: Lint
-        run: swiftlint
+        run: scripts/run_swiftlint.sh
 
       - name: Check language-data release identity changes
         env:

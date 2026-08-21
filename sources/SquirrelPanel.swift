@@ -99,15 +99,13 @@ final class SquirrelPanel: NSPanel {
       pressedHit = hit
       if case .candidate(let index) = hit,
         let candidateSnapshot,
-        candidateSnapshot.items.indices.contains(index)
-      {
+        candidateSnapshot.items.indices.contains(index) {
         self.index = index
       }
     case .leftMouseUp:
       let hit = view.click(at: mousePosition(for: event))
       if case .preedit(let preeditIndex) = hit,
-        preeditIndex >= 0, preeditIndex < preedit.utf16.count
-      {
+        preeditIndex >= 0, preeditIndex < preedit.utf16.count {
         if preeditIndex < caretPos {
           _ = inputController?.moveCaret(forward: true)
         } else if preeditIndex > caretPos {
@@ -119,8 +117,7 @@ final class SquirrelPanel: NSPanel {
         case .candidate(let itemIndex):
           if itemIndex == index,
             let candidateSnapshot,
-            candidateSnapshot.items.indices.contains(itemIndex)
-          {
+            candidateSnapshot.items.indices.contains(itemIndex) {
             _ = inputController?.selectCandidate(
               absoluteIndex: candidateSnapshot.items[itemIndex].absoluteIndex)
           }
@@ -142,8 +139,7 @@ final class SquirrelPanel: NSPanel {
       if case .candidate(let itemIndex) = view.click(at: mousePosition(for: event)),
         cursorIndex != itemIndex,
         let candidateSnapshot,
-        candidateSnapshot.items.indices.contains(itemIndex)
-      {
+        candidateSnapshot.items.indices.contains(itemIndex) {
         update(
           preedit: preedit, selRange: selRange, caretPos: caretPos,
           candidates: candidateSnapshot, highlighted: itemIndex, update: false)
@@ -384,8 +380,7 @@ final class SquirrelPanel: NSPanel {
       case .sidecar:
         if let sidecarRow = visualRows.first(where: { $0.contains(index) }),
           let rowStartIndex = sidecarRow.first,
-          let anchorIndex = sidecarRow.last
-        {
+          let anchorIndex = sidecarRow.last {
           detailRange = attachSidecar(
             selectedDetail, to: text, candidateRanges: &candidateRanges,
             rowStartIndex: rowStartIndex,
@@ -431,6 +426,9 @@ final class SquirrelPanel: NSPanel {
     )
   }
 
+}
+
+extension SquirrelPanel {
   func updateStatus(long longMessage: String, short shortMessage: String) {
     let theme = view.currentTheme
     switch theme.statusMessageType {
@@ -817,7 +815,7 @@ private extension SquirrelPanel {
     guard let dividerFrame = frames.divider else { return .empty }
     paragraph.tabStops = [
       NSTextTab(textAlignment: .left, location: dividerFrame.minX),
-      NSTextTab(textAlignment: .left, location: frames.detail.minX),
+      NSTextTab(textAlignment: .left, location: frames.detail.minX)
     ]
     text.addAttribute(
       .paragraphStyle,

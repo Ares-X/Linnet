@@ -192,14 +192,13 @@ enum LinnetSettingsProjectionRenderer {
     // owner for policies that must override an older Active pack immediately.
     var entries = [
       ("ascii_composer/switch_key/Caps_Lock", "commit_text"),
-      ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern)),
+      ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern))
     ]
     if pageSize != LinnetSettingsDocument.Appearance.defaultPageSize {
       entries.append(("menu/page_size", String(pageSize)))
     }
     if let selectedIndex = LinnetSettingsContract.ChineseProfile.allCases.firstIndex(
-      of: chineseProfile), selectedIndex != 0
-    {
+      of: chineseProfile), selectedIndex != 0 {
       // switcher/fix_schema_list_order makes the first list entry authoritative
       // for every fresh session. Swap, rather than remove, so the standard Rime
       // schema switcher and runtime-health list retain all shipped profiles.

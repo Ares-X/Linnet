@@ -135,7 +135,7 @@ actor SettingsDataCoordinator {
         "data_version=\(dataVersion)",
         "settings_version=\(settingsVersion)",
         "personal_counts=custom:\(customWordCount),disabled:\(disabledWordCount),expansions:\(expansionCount)",
-        "backups=verified:\(verifiedBackupCount),incomplete:\(incompleteBackupCount),corrupt:\(corruptBackupCount)",
+        "backups=verified:\(verifiedBackupCount),incomplete:\(incompleteBackupCount),corrupt:\(corruptBackupCount)"
       ].joined(separator: "\n")
     }
   }
@@ -318,6 +318,9 @@ actor SettingsDataCoordinator {
     )
   }
 
+}
+
+extension SettingsDataCoordinator {
   func run(
     _ operation: DataOperation,
     progress: @escaping @Sendable (OperationProgress) -> Void = { _ in }
@@ -991,8 +994,7 @@ extension SettingsDataCoordinator {
       let operationError = error
       var backupCleanupError: Error?
       if !backupCommitted,
-        fileManager.fileExists(atPath: backupTransaction.path)
-      {
+        fileManager.fileExists(atPath: backupTransaction.path) {
         do {
           try LinnetBackupStore.discardIncompleteBackup(
             transactionID: transactionID,
@@ -1173,8 +1175,7 @@ extension SettingsDataCoordinator {
     if document.appearance.livePanelProjection(over: currentDocument.appearance)
       == document.appearance,
       currentDocument.input == document.input,
-      currentDocument.english == document.english
-    {
+      currentDocument.english == document.english {
       return .appearanceOnly
     }
     return .configurationOnly
@@ -1513,8 +1514,7 @@ extension SettingsDataCoordinator {
     from directory: URL,
     manifest: LinnetBackupStore.BackupManifest
   ) throws
-    -> [RimeUserDataBridge.LearningImport]
-  {
+    -> [RimeUserDataBridge.LearningImport] {
     try requireDirectory(directory)
     let prefix = "user-dictionaries/"
     return try manifest.artifacts.compactMap { artifact in

@@ -61,7 +61,7 @@ struct RimeUserDataBridge {
   private let rime = rime_get_api_stdbool().pointee
   fileprivate static let legacyMappings = [
     "rime_ice": chineseSchema,
-    "melt_eng": englishSchema,
+    "melt_eng": englishSchema
   ]
 
   func prepareLegacyDirectory(
@@ -251,8 +251,7 @@ extension RimeUserDataBridge {
   }
 
   fileprivate static func inspectUserDirectory(_ directoryURL: URL) throws
-    -> UserDirectoryIdentity
-  {
+    -> UserDirectoryIdentity {
     let descriptor = open(
       directoryURL.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard descriptor >= 0 else { throw Failure.unsafeDirectory(directoryURL.path) }
@@ -339,8 +338,7 @@ extension RimeUserDataBridge {
   }
 
   fileprivate static func directoryIdentity(_ descriptor: Int32, path: String) throws
-    -> FileIdentity
-  {
+    -> FileIdentity {
     var info = stat()
     guard fstat(descriptor, &info) == 0,
       (info.st_mode & S_IFMT) == S_IFDIR,
