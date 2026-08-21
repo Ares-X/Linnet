@@ -27,6 +27,29 @@ for owner in "${asset_manifest}" "${publisher}"; do
   bash -n "${owner}"
 done
 
+if ! ruby - "${repo_root}/CHANGELOG.md" <<'RUBY'
+text = File.read(ARGV.fetch(0))
+sections = text.scan(/^## \d+\.\d+\.\d+ — .*?(?=^## \d+\.\d+\.\d+ — |\z)/m)
+abort if sections.empty?
+forbidden = [
+  /\bREADME\b/i,
+  /\bCHANGELOG\b/i,
+  /\bGitHub Actions\b/i,
+  /\bCI\b/,
+  /文档/,
+  /安装指南/,
+  /下载入口/,
+  /发布流程/,
+  /发布脚本/,
+  /构建流程/,
+  /源码/,
+]
+abort if sections.any? { |section| forbidden.any? { |pattern| section.match?(pattern) } }
+RUBY
+then
+  fail "CHANGELOG version notes contain maintainer-only repository work"
+fi
+
 if printf '%s\n' config/LinnetProduct.xcconfig |
     "${repo_root}/package/data_release_metadata" check-source-change \
       >/dev/null 2>&1; then
