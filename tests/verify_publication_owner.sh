@@ -117,7 +117,10 @@ if [[ "${1:-}" == api ]]; then
   mkdir -p "${branch}/blobs" "${branch}/trees" "${branch}/commits"
   case "${method}:${endpoint}" in
     GET:repos/Ares-X/Linnet/git/ref/heads/data-channel)
-      [[ -f "${branch}/ref" ]] || exit 1
+      if [[ ! -f "${branch}/ref" ]]; then
+        printf '%s\n' '{"message":"Not Found","status":"404"}'
+        exit 1
+      fi
       cat "${branch}/ref"
       ;;
     GET:repos/Ares-X/Linnet/git/commits/*)
@@ -146,6 +149,11 @@ if [[ "${1:-}" == api ]]; then
       printf '%s\n' "${sha}"
       ;;
     POST:repos/Ares-X/Linnet/git/commits)
+      ruby -rjson -e '
+        document = JSON.parse(File.read(ARGV.fetch(0)))
+        parents = document.fetch("parents", [])
+        abort unless parents.all? { |parent| parent.match?(/\A[0-9a-f]{40}\z/) }
+      ' "${input}"
       tree="$(ruby -rjson -e 'print JSON.parse(File.read(ARGV.fetch(0))).fetch("tree")' "${input}")"
       count=1
       [[ ! -f "${branch}/commit-count" ]] || count=$(( $(cat "${branch}/commit-count") + 1 ))

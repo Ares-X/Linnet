@@ -131,8 +131,10 @@ publish_catalog_pointer() {
 
   local api="repos/${repository}/git"
   local old_commit=""
-  if old_commit="$(gh api "repos/${repository}/git/ref/heads/data-channel" \
-      --jq '.object.sha' 2>/dev/null)"; then
+  local ref_result=""
+  if ref_result="$(gh api "repos/${repository}/git/ref/heads/data-channel" \
+      --jq '.object.sha' 2>"${work_root}/data-channel-ref-error")"; then
+    old_commit="${ref_result}"
     [[ "${old_commit}" =~ ^[0-9a-f]{40}$ ]] ||
       fail_publish "data-channel branch identity is invalid"
     local old_tree old_blob
@@ -147,6 +149,12 @@ publish_catalog_pointer() {
         return
       fi
     fi
+  else
+    ruby -rjson -e '
+      document = JSON.parse(STDIN.read)
+      exit(document.fetch("status", "").to_s == "404" ? 0 : 1)
+    ' <<<"${ref_result}" ||
+      fail_publish "data-channel branch lookup failed"
   fi
 
   ruby -rjson -rbase64 -e '
