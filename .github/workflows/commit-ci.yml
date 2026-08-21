@@ -2,7 +2,7 @@ name: Linnet commit CI
 on:
   push:
     branches:
-      - '*'
+      - '**'
 permissions:
   contents: read
 jobs:
