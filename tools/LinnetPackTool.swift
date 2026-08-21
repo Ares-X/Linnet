@@ -60,6 +60,7 @@ struct LinnetPackTool {
         --chinese-pack DIR --english-pack DIR --lts-pack DIR \\
         --extended-pack DIR
       linnet-pack build-catalog --sequence N --core-version VERSION --output FILE
+        --core-build N --core-revision REVISION --core-package FILE
         --chinese-pack FILE --english-pack FILE --lts-pack FILE --extended-pack FILE
       linnet-pack verify-catalog --catalog FILE --core-version VERSION
       linnet-pack inspect-catalog --catalog FILE --core-version VERSION
@@ -284,9 +285,11 @@ struct LinnetPackTool {
   }
 
   static func buildCatalog(_ options: [String: String]) throws {
-    guard options.count == 7,
+    guard options.count == 10,
       let sequenceValue = options["sequence"], let sequence = UInt64(sequenceValue),
-      let coreVersion = options["core-version"]
+      let coreVersion = options["core-version"],
+      let coreBuildValue = options["core-build"], let coreBuild = UInt64(coreBuildValue),
+      let coreRevision = options["core-revision"]
     else { throw ToolFailure.usage(help) }
     let output = try requiredURL("output", options)
     guard !FileManager.default.fileExists(atPath: output.path) else {
@@ -301,9 +304,31 @@ struct LinnetPackTool {
         at: requiredURL(option, options), expected: expected,
         coreVersion: coreVersion)
     }
+    let core = try publishedCore(
+      at: requiredURL("core-package", options), version: coreVersion,
+      build: coreBuild, revision: coreRevision)
     let data = try LinnetDataCatalogBuilder.build(
-      sequence: sequence, coreVersion: coreVersion, artifacts: artifacts)
+      sequence: sequence, coreVersion: coreVersion, core: core, artifacts: artifacts)
     try writeExclusive(data, to: output, mode: 0o444)
+  }
+
+  static func publishedCore(
+    at url: URL, version: String, build: UInt64, revision: String
+  ) throws -> LinnetDataCatalogBuilder.PublishedCore {
+    let values = try url.resourceValues(
+      forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+    guard values.isRegularFile == true, values.isSymbolicLink != true,
+      let fileSize = values.fileSize, fileSize > 0
+    else { throw ToolFailure.invalidSource("Core package is unsafe") }
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    var hasher = SHA256()
+    while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+      hasher.update(data: chunk)
+    }
+    return .init(
+      version: version, build: build, revision: revision,
+      bytes: UInt64(fileSize), sha256: hex(hasher.finalize()))
   }
 
   static func verifiedCatalog(

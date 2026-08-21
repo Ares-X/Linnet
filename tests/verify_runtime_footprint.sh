@@ -1093,10 +1093,19 @@ fi
 if rg -n 'https?://' sources/LinnetDataChannel.swift; then
   fail "the shared catalog verifier regained a remote endpoint"
 fi
-rg -Fq 'static let service: Service = .unpublished' sources/LinnetDataChannel.swift ||
-  fail "the unpublished Beta exposed its online data channel"
+rg -Fq 'static let service: Service = .published' sources/LinnetDataChannel.swift ||
+  fail "the published update channel became unavailable"
 rg -Fq 'dataChannelService == .published' sources/LinnetSettings/SettingsMain.swift ||
   fail "Settings stopped consuming the typed data-channel service state"
+test "$(rg -c 'func check\(\)' sources/LinnetSettings/LinnetSettingsUpdateChecker.swift)" -eq 1 ||
+  fail "Settings lost its single bounded update-check entrypoint"
+rg -Fq 'LinnetDataChannel.verifyPublished(data)' \
+  sources/LinnetSettings/LinnetSettingsUpdateChecker.swift ||
+  fail "Settings stopped verifying the shared Core/data Catalog"
+if rg -n 'Timer|LaunchAgent|UNUserNotification|startMonitoring' \
+    sources/LinnetSettings/LinnetSettingsUpdateChecker.swift; then
+  fail "the quiet Settings update check regained a background notification owner"
+fi
 retired_catalog_url='https://github.com/Ares-X/Linnet/releases/download/'\
 'data-channel/Linnet-Data-Channel.json'
 if rg -nF "${retired_catalog_url}" \

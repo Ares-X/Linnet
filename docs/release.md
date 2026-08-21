@@ -40,7 +40,7 @@ ad-hoc 签名；`package/make_package` 只封装已验证字节，不重新签�
 ```bash
 LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
   package/verify_publication_artifacts \
-  "$ARCHIVE_OUTPUT_DIR" 0.1.2 "$LINNET_CANDIDATE_REVISION"
+  "$ARCHIVE_OUTPUT_DIR" 0.1.3 "$LINNET_CANDIDATE_REVISION"
 ```
 
 测试用 UAT CMS 身份仍可用于本地、非公开的安装回归；它不是公开发布前置，
@@ -61,6 +61,9 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
    Release 只上传 `Linnet.pkg`，`core-v<version>` 上传 Core PKG 与卸载器，
    `data-<sequence>` 上传 Catalog 与四个语言包；
 5. 先发布两个明确标注的预发布更新频道，最后才把单安装包稳定版本设为 Latest。
+   `public` 发布边界同时把同一 Catalog 字节以仅快进提交写入 `data-channel`
+   分支；Settings 只读取该稳定指针，不读取可变 Release 别名，也不维护第二份
+   Core 版本清单。
 
 该令牌只用于把已经验证的字节写入当前仓库的三个 Release 频道，不是 Apple 开发者
 凭据，也不会被打包或公开。

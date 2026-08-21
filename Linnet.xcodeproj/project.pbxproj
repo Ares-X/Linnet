@@ -68,6 +68,7 @@
 		F20000000000000000000003 /* LinnetSettingsExclusiveFileSink.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */; };
 		F30000000000000000000001 /* SettingsSessionState.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000002 /* SettingsSessionState.swift */; };
 		F40000000000000000000001 /* LinnetSettingsDownloadSource.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000002 /* LinnetSettingsDownloadSource.swift */; };
+		FA0000000000000000000001 /* LinnetSettingsUpdateChecker.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000002 /* LinnetSettingsUpdateChecker.swift */; };
 		F50000000000000000000001 /* LinnetSettingsTransactionIPC.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */; };
 		F50000000000000000000002 /* LinnetSettingsTransactionIPC.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */; };
 		F60000000000000000000001 /* LinnetPortableJSONBudget.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000002 /* LinnetPortableJSONBudget.swift */; };
@@ -194,6 +195,7 @@
 		F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsExclusiveFileSink.swift; path = sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift; sourceTree = "<group>"; };
 		F30000000000000000000002 /* SettingsSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsSessionState.swift; path = sources/LinnetSettings/SettingsSessionState.swift; sourceTree = "<group>"; };
 		F40000000000000000000002 /* LinnetSettingsDownloadSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsDownloadSource.swift; path = sources/LinnetSettings/LinnetSettingsDownloadSource.swift; sourceTree = "<group>"; };
+		FA0000000000000000000002 /* LinnetSettingsUpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsUpdateChecker.swift; path = sources/LinnetSettings/LinnetSettingsUpdateChecker.swift; sourceTree = "<group>"; };
 		F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsTransactionIPC.swift; path = sources/LinnetSettings/LinnetSettingsTransactionIPC.swift; sourceTree = "<group>"; };
 		F60000000000000000000002 /* LinnetPortableJSONBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPortableJSONBudget.swift; path = sources/LinnetSettings/LinnetPortableJSONBudget.swift; sourceTree = "<group>"; };
 		F81000000000000000000002 /* SettingsWindowCloseGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsWindowCloseGuard.swift; path = sources/LinnetSettings/SettingsWindowCloseGuard.swift; sourceTree = "<group>"; };
@@ -263,6 +265,7 @@
 				F10000000000000000000002 /* LinnetSettingsPage.swift */,
 				F81000000000000000000002 /* SettingsWindowCloseGuard.swift */,
 				F40000000000000000000002 /* LinnetSettingsDownloadSource.swift */,
+				FA0000000000000000000002 /* LinnetSettingsUpdateChecker.swift */,
 				F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */,
 				F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */,
 				F30000000000000000000002 /* SettingsSessionState.swift */,
@@ -508,6 +511,7 @@
 				F10000000000000000000001 /* LinnetSettingsPage.swift in Settings Sources */,
 				F81000000000000000000001 /* SettingsWindowCloseGuard.swift in Settings Sources */,
 				F40000000000000000000001 /* LinnetSettingsDownloadSource.swift in Settings Sources */,
+				FA0000000000000000000001 /* LinnetSettingsUpdateChecker.swift in Settings Sources */,
 				F20000000000000000000001 /* LinnetSettingsDownloadTransport.swift in Settings Sources */,
 				F20000000000000000000003 /* LinnetSettingsExclusiveFileSink.swift in Settings Sources */,
 				F30000000000000000000001 /* SettingsSessionState.swift in Settings Sources */,

@@ -43,9 +43,9 @@ correction, and selection learning; choose simplified or traditional Chinese
 output; and set a 12–32 pt candidate font size. Every font preset uses fonts
 built into macOS; Linnet does not download or require third-party fonts.
 
-Language-data update controls remain unavailable when this build identifies its
-channel as unpublished. In a release with a published channel, updates run only
-when you start them in Settings. GitHub is the default source; a third-party
+Settings checks the published Catalog once when it opens and shows a quiet
+inline Core/data update status. Core remains a user-approved package update;
+language-data downloads run only when you start them in Settings. GitHub is the default source; a third-party
 public mirror or a compatible custom HTTPS mirror can be selected explicitly.
 Linnet never switches sources automatically and verifies the catalog, container,
 and every packaged file before activation. Third-party mirrors may observe your
@@ -94,8 +94,8 @@ Settings 可分别开关智能英文的上下文预测、拼写纠错和选词�
 简体或繁体输出，并把候选字号设为 12–32 pt。所有字体预设只使用 macOS
 内置字体，不会下载或依赖第三方字体。
 
-当此构建标记为 unpublished 时，语言数据更新不可用。未来 published channel
-只在用户从 Settings 主动发起时更新；GitHub 是默认来源，也可明确选择第三方
+Settings 打开时会检查一次已发布 Catalog，并以内联方式显示 Core/数据更新状态。
+Core 仍需用户确认安装；语言数据只在用户从 Settings 主动发起时下载。GitHub 是默认来源，也可明确选择第三方
 公开镜像或兼容的自定义 HTTPS 镜像。Linnet 不自动切换来源，并在激活前校验
 Catalog、容器和每个文件。第三方镜像可能看到 IP、请求时间和公开文件 URL，
 但不会收到个人词典、学习数据或凭据。

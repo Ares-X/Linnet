@@ -49,7 +49,11 @@ for kind in chinese english lts extended; do
 done
 
 catalog="${release}/Linnet-Data-Channel.json"
+core_package="${release}/Linnet-0.1.0-arm64-Core-community-beta.pkg"
+printf 'Core fixture\n' >"${core_package}"
 "${tool}" build-catalog --sequence 7 --core-version 0.1.0 --output "${catalog}" \
+  --core-build 8 --core-revision aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --core-package "${core_package}" \
   --chinese-pack "${release}/Linnet-Chinese.linnetpack" \
   --english-pack "${release}/Linnet-English.linnetpack" \
   --lts-pack "${release}/Linnet-LTS.linnetpack" \
@@ -61,8 +65,18 @@ catalog="${release}/Linnet-Data-Channel.json"
 ruby -rjson -rdigest -e '
   catalog, root = ARGV
   document = JSON.parse(File.read(catalog))
-  abort unless document.keys.sort == %w[activation_sets format sequence]
+  abort unless document.keys.sort == %w[activation_sets core format sequence]
   abort unless document.fetch("sequence") == 7
+  core = document.fetch("core")
+  abort unless core.fetch("version") == "0.1.0" && core.fetch("build") == 8
+  abort unless core.fetch("revision") == "a" * 40
+  core_path = File.join(root, "Linnet-0.1.0-arm64-Core-community-beta.pkg")
+  abort unless core.fetch("bytes") == File.size(core_path)
+  abort unless core.fetch("sha256") == Digest::SHA256.file(core_path).hexdigest
+  abort unless core.fetch("package_url") ==
+    "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg"
+  abort unless core.fetch("release_url") ==
+    "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.0"
   artifacts = document.fetch("activation_sets").flat_map { |set| set.fetch("packs") }
   artifacts.uniq { |artifact| artifact.fetch("kind") }.each do |artifact|
     path = File.join(root, File.basename(artifact.fetch("url")))

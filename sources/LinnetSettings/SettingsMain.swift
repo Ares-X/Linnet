@@ -156,8 +156,10 @@ final class SettingsModel: ObservableObject {
 
   let productName: String
   let appVersion: String
+  let appBuild: UInt64
   let dataServicesAvailable: Bool
   let dataChannelService: LinnetDataChannel.Service
+  let updateChecker: LinnetSettingsUpdateChecker
 
   private let coordinator: SettingsDataCoordinator
   private let dataRegistry: LinnetDataRegistry?
@@ -229,6 +231,7 @@ final class SettingsModel: ObservableObject {
       (host?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
       ?? (host?.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
       ?? "development"
+    appBuild = UInt64(host?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
     let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
     dataRegistry = registry
     let runtimeSnapshot = registry.flatMap { try? $0.runtimeSnapshot() }
@@ -236,6 +239,10 @@ final class SettingsModel: ObservableObject {
     dataEdition = runtimeSnapshot?.state.edition
     dataServicesAvailable = runtimeSnapshot != nil
     dataChannelService = LinnetDataChannel.service
+    updateChecker = LinnetSettingsUpdateChecker(
+      currentVersion: appVersion, currentBuild: appBuild,
+      service: dataChannelService, edition: runtimeSnapshot?.state.edition,
+      installedPacks: runtimeSnapshot?.state.packs ?? [])
     let downloadPreference = LinnetSettingsDownloadSource.load()
     downloadSourceMode = downloadPreference.mode
     downloadMirrorPrefix = downloadPreference.mirrorPrefix
@@ -553,6 +560,9 @@ final class SettingsModel: ObservableObject {
     languageDataUpdateTarget = nil
     packDownloadTask = nil
     startPendingAppearancePublish()
+    if failure == nil {
+      updateChecker.refreshInstalledData(edition: dataEdition, packs: installedPacks)
+    }
   }
 
   func cancelLanguagePackDownload() {
@@ -1369,6 +1379,7 @@ private struct SettingsRootView: View {
           }
         DataTabView(
           model: model,
+          updateChecker: model.updateChecker,
           pendingClear: $pendingClear,
           pendingPortableImport: $pendingPortableImport,
           pendingRestore: $pendingRestore,

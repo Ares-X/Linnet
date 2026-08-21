@@ -21,13 +21,36 @@ struct LinnetDataChannelTests {
       LinnetDataChannel.minimumCatalogSequence == 4,
       "Core catalog replay floor drifted from the first public data release")
     require(
-      LinnetDataChannel.service == .unpublished,
-      "unpublished Beta exposed the online data channel")
+      LinnetDataChannel.service == .published,
+      "published update channel remained unavailable")
 
     let catalog = makeCatalog()
     let data = try catalogData(catalog)
     let verified = try LinnetDataChannel.verify(data, coreVersion: "1.0.0")
     require(verified.catalog.sequence == 5, "valid canonical catalog")
+    require(
+      verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 7)
+        == .available,
+      "newer Core build was not reported")
+    require(
+      verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 8)
+        == .current,
+      "current Core build was reported as outdated")
+    require(
+      verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 7, edition: .standard,
+        installedPacks: []) == .core(verified.catalog.core),
+      "Core update did not take priority over data")
+    require(
+      verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        installedPacks: []) == .languageData,
+      "missing language data was not reported")
+    require(
+      verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        installedPacks: installedPacks(from: catalog.activationSets[0].packs)) == .current,
+      "an exact installation was reported as outdated")
 
     do {
       _ = try LinnetDataChannel.verify(
@@ -53,12 +76,14 @@ struct LinnetDataChannelTests {
     let built = try LinnetDataCatalogBuilder.build(
       sequence: 9,
       coreVersion: "1.0.0",
+      core: publishedCore(),
       artifacts: LinnetPackContract.Kind.allCases.map(publishedArtifact))
     let builtCatalog = try LinnetDataChannel.verify(
       built, coreVersion: "1.0.0").catalog
     let repeated = try LinnetDataCatalogBuilder.build(
       sequence: 9,
       coreVersion: "1.0.0",
+      core: publishedCore(),
       artifacts: LinnetPackContract.Kind.allCases.map(publishedArtifact))
     require(built == repeated, "catalog builder is not byte-reproducible")
     require(builtCatalog.sequence == 9, "catalog sequence")
@@ -81,6 +106,7 @@ struct LinnetDataChannelTests {
       _ = try LinnetDataCatalogBuilder.build(
         sequence: 9,
         coreVersion: "1.0.0",
+        core: publishedCore(),
         artifacts: LinnetPackContract.Kind.allCases.dropLast().map(publishedArtifact))
       LinnetTestFailure.fail("catalog builder accepted a missing kind")
     } catch {}
@@ -160,7 +186,14 @@ struct LinnetDataChannelTests {
             of: "data-5", with: "data-\(sequence)") + "/\(name)")!)
     }
     return .init(
-      format: LinnetDataChannel.format, sequence: sequence,
+      format: LinnetDataChannel.format, sequence: sequence, core: .init(
+        version: "1.0.0", build: 8,
+        revision: String(repeating: "a", count: 40),
+        bytes: 16, sha256: String(repeating: "d", count: 64),
+        packageURL: URL(
+          string:
+            "https://github.com/Ares-X/Linnet/releases/download/core-v1.0.0/Linnet-1.0.0-arm64-Core-community-beta.pkg")!,
+        releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v1.0.0")!),
       activationSets: [
         .init(edition: .standard, packs: [
           artifact(.chinese, abi: 1), artifact(.english, abi: 1), artifact(.lts, abi: 1),
@@ -170,6 +203,28 @@ struct LinnetDataChannelTests {
           artifact(.extended, abi: 2),
         ]),
       ])
+  }
+
+  private static func publishedCore() -> LinnetDataCatalogBuilder.PublishedCore {
+    .init(
+      version: "1.0.0", build: 8,
+      revision: String(repeating: "a", count: 40), bytes: 16,
+      sha256: String(repeating: "d", count: 64))
+  }
+
+  private static func installedPacks(
+    from artifacts: [LinnetDataChannel.Artifact]
+  ) -> [LinnetDataRegistry.ActivePack] {
+    artifacts.map { artifact in
+      .init(
+        packID: artifact.kind.packID,
+        kind: LinnetDataRegistry.PackKind(rawValue: artifact.kind.rawValue)!,
+        version: artifact.version, sequence: artifact.sequence,
+        dataABI: artifact.dataABI, contentSHA256: artifact.contentSHA256,
+        minCore: artifact.minCore, requirements: [],
+        relativePath: "Data/Packs/\(artifact.kind.rawValue)/fixture",
+        manifestSHA256: String(repeating: "e", count: 64))
+    }
   }
 
   private static func publishedArtifact(

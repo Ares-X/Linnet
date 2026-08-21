@@ -22,7 +22,7 @@ enum LinnetDataChannel {
     case published
   }
 
-  static let service: Service = .unpublished
+  static let service: Service = .published
 
   enum Failure: LocalizedError, Equatable {
     case invalidCatalog(String)
@@ -70,18 +70,72 @@ enum LinnetDataChannel {
     let packs: [Artifact]
   }
 
+  enum CoreAvailability: Equatable, Sendable {
+    case current
+    case available
+  }
+
+  enum UpdateAvailability: Equatable, Sendable {
+    case current
+    case core(Core)
+    case languageData
+  }
+
+  struct Core: Codable, Equatable, Sendable {
+    let version: String
+    let build: UInt64
+    let revision: String
+    let bytes: UInt64
+    let sha256: String
+    let packageURL: URL
+    let releaseURL: URL
+
+    enum CodingKeys: String, CodingKey {
+      case version, build, revision, bytes, sha256
+      case packageURL = "package_url"
+      case releaseURL = "release_url"
+    }
+
+    func availability(currentVersion: String, currentBuild: UInt64) -> CoreAvailability {
+      if version == currentVersion {
+        return build > currentBuild ? .available : .current
+      }
+      return LinnetPackContract.supportsCore(required: currentVersion, actual: version)
+        && !LinnetPackContract.supportsCore(required: version, actual: currentVersion)
+        ? .available : .current
+    }
+  }
+
   struct Catalog: Codable, Equatable, Sendable {
     let format: Int
     let sequence: UInt64
+    let core: Core
     let activationSets: [ActivationSet]
 
     enum CodingKeys: String, CodingKey {
-      case format, sequence
+      case format, sequence, core
       case activationSets = "activation_sets"
     }
 
     func activationSet(for edition: LinnetDataRegistry.Edition) -> ActivationSet? {
       activationSets.first { $0.edition == edition }
+    }
+
+    func updateAvailability(
+      currentVersion: String,
+      currentBuild: UInt64,
+      edition: LinnetDataRegistry.Edition?,
+      installedPacks: [LinnetDataRegistry.ActivePack]
+    ) -> UpdateAvailability {
+      if core.availability(currentVersion: currentVersion, currentBuild: currentBuild)
+        == .available
+      {
+        return .core(core)
+      }
+      guard let edition, let selected = activationSet(for: edition) else { return .current }
+      return selected.packs.allSatisfy { artifact in
+        installedPacks.contains(where: artifact.matches)
+      } ? .current : .languageData
     }
   }
 
@@ -91,6 +145,19 @@ enum LinnetDataChannel {
   }
 
   static func verify(_ data: Data, coreVersion: String) throws -> Verified {
+    let verified = try verifyPublished(data)
+    guard verified.catalog.activationSets.allSatisfy({ set in
+      set.packs.allSatisfy {
+        LinnetPackContract.supportsCore(required: $0.minCore, actual: coreVersion)
+      }
+    }) else { throw Failure.invalidCatalog("Core compatibility") }
+    return verified
+  }
+
+  /// Update checks must be able to authenticate a newer Core even when its
+  /// accompanying data no longer supports the installed Core. Mutation paths
+  /// use `verify(_:coreVersion:)` and retain the stricter compatibility gate.
+  static func verifyPublished(_ data: Data) throws -> Verified {
     guard !data.isEmpty, data.count <= maximumCatalogBytes else {
       throw Failure.invalidCatalog("size")
     }
@@ -101,9 +168,7 @@ enum LinnetDataChannel {
       throw Failure.invalidCatalog("JSON")
     }
     let canonical = try canonicalCatalogData(catalog)
-    try validate(
-      catalog, coreVersion: coreVersion,
-      minimumSequence: minimumCatalogSequence)
+    try validate(catalog, minimumSequence: minimumCatalogSequence)
     return .init(catalog: catalog, digest: sha256(canonical))
   }
 
@@ -138,10 +203,10 @@ enum LinnetDataChannel {
   }
 
   private static func validate(
-    _ catalog: Catalog, coreVersion: String, minimumSequence: UInt64
+    _ catalog: Catalog, minimumSequence: UInt64
   ) throws {
     guard catalog.format == format, catalog.sequence >= minimumSequence,
-      catalog.activationSets.count == 2
+      catalog.activationSets.count == 2, validate(catalog.core)
     else { throw Failure.invalidCatalog("identity") }
     let expectedEditions: Set<LinnetDataRegistry.Edition> = [.standard, .full]
     guard Set(catalog.activationSets.map(\.edition)) == expectedEditions else {
@@ -161,7 +226,8 @@ enum LinnetDataChannel {
         guard isSafeIdentifier(pack.version), pack.sequence > 0, pack.dataABI > 0,
           isSHA256(pack.contentSHA256), isSHA256(pack.containerSHA256), pack.bytes > 0,
           pack.bytes <= LinnetPackContract.maximumContainerBytes,
-          LinnetPackContract.supportsCore(required: pack.minCore, actual: coreVersion),
+          LinnetPackContract.supportsCore(
+            required: pack.minCore, actual: catalog.core.version),
           isImmutableReleaseURL(
             pack.url, kind: pack.kind, catalogSequence: catalog.sequence)
         else { throw Failure.invalidCatalog("pack \(pack.kind.rawValue)") }
@@ -172,6 +238,24 @@ enum LinnetDataChannel {
         }
       }
     }
+  }
+
+  private static func validate(_ core: Core) -> Bool {
+    guard LinnetPackContract.supportsCore(required: core.version, actual: core.version),
+      core.build > 0, isRevision(core.revision),
+      core.bytes > 0, core.bytes <= LinnetPackContract.maximumContainerBytes,
+      isSHA256(core.sha256), core.packageURL.query == nil,
+      core.packageURL.fragment == nil, core.releaseURL.query == nil,
+      core.releaseURL.fragment == nil
+    else { return false }
+    let releaseTag = "core-v\(core.version)"
+    return core.packageURL.scheme == "https"
+      && core.packageURL.host?.lowercased() == "github.com"
+      && core.packageURL.path
+        == "/Ares-X/Linnet/releases/download/\(releaseTag)/Linnet-\(core.version)-arm64-Core-community-beta.pkg"
+      && core.releaseURL.scheme == "https"
+      && core.releaseURL.host?.lowercased() == "github.com"
+      && core.releaseURL.path == "/Ares-X/Linnet/releases/tag/\(releaseTag)"
   }
 
   private static func isImmutableReleaseURL(
@@ -196,6 +280,12 @@ enum LinnetDataChannel {
 
   private static func isSHA256(_ value: String) -> Bool {
     value.count == 64 && value.unicodeScalars.allSatisfy {
+      CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+    }
+  }
+
+  private static func isRevision(_ value: String) -> Bool {
+    value.count == 40 && value.unicodeScalars.allSatisfy {
       CharacterSet(charactersIn: "0123456789abcdef").contains($0)
     }
   }

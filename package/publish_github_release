@@ -118,6 +118,81 @@ EOF
     ;;
 esac
 
+publish_catalog_pointer() {
+  local catalog="${release_dir}/Linnet-Data-Channel.json"
+  [[ -f "${catalog}" && ! -L "${catalog}" ]] ||
+    fail_publish "verified data Catalog is missing"
+  local downloaded="${work_root}/published-data"
+  mkdir "${downloaded}"
+  gh release download "data-${catalog_sequence}" --repo "${repository}" \
+    --pattern Linnet-Data-Channel.json --dir "${downloaded}"
+  cmp -s "${catalog}" "${downloaded}/Linnet-Data-Channel.json" ||
+    fail_publish "stable Catalog pointer differs from the published data channel"
+
+  local api="repos/${repository}/git"
+  local old_commit=""
+  if old_commit="$(gh api "repos/${repository}/git/ref/heads/data-channel" \
+      --jq '.object.sha' 2>/dev/null)"; then
+    [[ "${old_commit}" =~ ^[0-9a-f]{40}$ ]] ||
+      fail_publish "data-channel branch identity is invalid"
+    local old_tree old_blob
+    old_tree="$(gh api "${api}/commits/${old_commit}" --jq '.tree.sha')"
+    old_blob="$(gh api "${api}/trees/${old_tree}" --jq \
+      '.tree | select(length == 1 and .[0].path == "Linnet-Data-Channel.json" and .[0].mode == "100644" and .[0].type == "blob") | .[0].sha')"
+    if [[ -n "${old_blob}" ]]; then
+      gh api "${api}/blobs/${old_blob}" --jq '.content' | tr -d '\n' | base64 -D \
+        >"${work_root}/current-catalog"
+      if cmp -s "${catalog}" "${work_root}/current-catalog"; then
+        echo "Linnet data-channel branch already names the exact Catalog"
+        return
+      fi
+    fi
+  fi
+
+  ruby -rjson -rbase64 -e '
+    File.write(ARGV.fetch(1), JSON.generate({
+      "content" => Base64.strict_encode64(File.binread(ARGV.fetch(0))),
+      "encoding" => "base64",
+    }))
+  ' "${catalog}" "${work_root}/blob.json"
+  local blob
+  blob="$(gh api --method POST "${api}/blobs" --input "${work_root}/blob.json" --jq '.sha')"
+  ruby -rjson -e '
+    File.write(ARGV.fetch(1), JSON.generate({"tree" => [{
+      "path" => "Linnet-Data-Channel.json", "mode" => "100644",
+      "type" => "blob", "sha" => ARGV.fetch(0),
+    }]}))
+  ' "${blob}" "${work_root}/tree.json"
+  local tree
+  tree="$(gh api --method POST "${api}/trees" --input "${work_root}/tree.json" --jq '.sha')"
+  ruby -rjson -e '
+    document = {"message" => ARGV.fetch(0), "tree" => ARGV.fetch(1)}
+    document["parents"] = [ARGV.fetch(2)] unless ARGV.fetch(2).empty?
+    File.write(ARGV.fetch(3), JSON.generate(document))
+  ' "Publish Linnet data channel ${catalog_sequence}" "${tree}" "${old_commit}" \
+    "${work_root}/commit.json"
+  local commit
+  commit="$(gh api --method POST "${api}/commits" --input "${work_root}/commit.json" --jq '.sha')"
+  if [[ -n "${old_commit}" ]]; then
+    gh api --method PATCH "repos/${repository}/git/refs/heads/data-channel" \
+      -f sha="${commit}" -F force=false >/dev/null
+  else
+    gh api --method POST "repos/${repository}/git/refs" \
+      -f ref=refs/heads/data-channel -f sha="${commit}" >/dev/null
+  fi
+  local final_commit final_tree final_blob
+  final_commit="$(gh api "repos/${repository}/git/ref/heads/data-channel" --jq '.object.sha')"
+  [[ "${final_commit}" == "${commit}" ]] || fail_publish "data-channel ref did not advance"
+  final_tree="$(gh api "${api}/commits/${final_commit}" --jq '.tree.sha')"
+  final_blob="$(gh api "${api}/trees/${final_tree}" --jq \
+    '.tree | select(length == 1 and .[0].path == "Linnet-Data-Channel.json" and .[0].mode == "100644" and .[0].type == "blob") | .[0].sha')"
+  [[ -n "${final_blob}" ]] || fail_publish "data-channel tree is not canonical"
+  gh api "${api}/blobs/${final_blob}" --jq '.content' | tr -d '\n' | base64 -D \
+    >"${work_root}/final-catalog"
+  cmp -s "${catalog}" "${work_root}/final-catalog" ||
+    fail_publish "data-channel bytes differ after publication"
+}
+
 release_exists=false
 release_is_draft=false
 if release_json="$(gh release view "${tag}" --repo "${repository}" \
@@ -145,6 +220,9 @@ if [[ "${release_exists}" == true && "${release_is_draft}" == false ]]; then
   [[ "${actual_prerelease}" == "${prerelease}" ]] ||
     fail_publish "${tag} release kind differs from the channel contract"
   verify_assets
+  if [[ "${channel}" == public ]]; then
+    publish_catalog_pointer
+  fi
   echo "Linnet ${channel} release already published with exact bytes: ${tag}"
   exit 0
 fi
@@ -179,4 +257,7 @@ final_draft="$(gh release view "${tag}" --repo "${repository}" --json isDraft \
   --jq '.isDraft')"
 [[ "${final_draft}" == false ]] || fail_publish "${tag} remained a draft"
 verify_assets
+if [[ "${channel}" == public ]]; then
+  publish_catalog_pointer
+fi
 echo "Linnet ${channel} release: PUBLISHED (${tag})"

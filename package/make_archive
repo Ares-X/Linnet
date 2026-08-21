@@ -23,6 +23,8 @@ done
 
 version="$(plutil -extract CFBundleShortVersionString raw -o - \
   "${app_path}/Contents/Info.plist")"
+build="$(plutil -extract CFBundleVersion raw -o - \
+  "${app_path}/Contents/Info.plist")"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
 release_tool="${LINNET_RELEASE_TOOL:-}"
 unset LINNET_RELEASE_TOOL
@@ -166,6 +168,8 @@ publish_catalog() {
   local candidate="${work_root}/${archive_name}"
   "${pack_tool}" build-catalog --sequence "${catalog_sequence}" \
     --core-version "${version}" --output "${candidate}" \
+    --core-build "${build}" --core-revision "${candidate_revision}" \
+    --core-package "${core_pkg}" \
     --chinese-pack "${output_dir}/Linnet-Chinese.linnetpack" \
     --english-pack "${output_dir}/Linnet-English.linnetpack" \
     --lts-pack "${output_dir}/Linnet-LTS.linnetpack" \
@@ -179,11 +183,18 @@ publish_catalog() {
     catalog = JSON.parse(File.read(ARGV.shift))
     expected_sequence = Integer(ARGV.shift)
     root = ARGV.shift
+    expected_version = ARGV.shift
     manifests = ARGV.to_h { |path|
       manifest = JSON.parse(File.read(path))
       [manifest.fetch("kind"), manifest]
     }
     abort "catalog sequence mismatch" unless catalog.fetch("sequence") == expected_sequence
+    core = catalog.fetch("core")
+    core_package = File.join(root, "Linnet-#{core.fetch("version")}-arm64-Core-community-beta.pkg")
+    abort "catalog Core version mismatch" unless core.fetch("version") == expected_version
+    abort "catalog Core byte count mismatch" unless core.fetch("bytes") == File.size(core_package)
+    abort "catalog Core digest mismatch" unless
+      core.fetch("sha256") == Digest::SHA256.file(core_package).hexdigest
     catalog.fetch("activation_sets").each do |set|
       set.fetch("packs").each do |artifact|
         manifest = manifests.fetch(artifact.fetch("kind"))
@@ -202,7 +213,7 @@ publish_catalog() {
           artifact.fetch("container_sha256") == Digest::SHA256.file(asset).hexdigest
       end
     end
-  ' "${work_root}/catalog-1.json" "${catalog_sequence}" "${output_dir}" \
+  ' "${work_root}/catalog-1.json" "${catalog_sequence}" "${output_dir}" "${version}" \
     "${work_root}/manifest-1-chinese.json" "${work_root}/manifest-1-english.json" \
     "${work_root}/manifest-1-lts.json" "${work_root}/manifest-1-extended.json" ||
     fail_archive "external catalog differs from the accepted pack set"

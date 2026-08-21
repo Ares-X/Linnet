@@ -68,7 +68,12 @@ for required in \
     'verify_assets' \
     'release edit "${tag}"' \
     'core-v${version}' \
-    'data-${catalog_sequence}'; do
+    'data-${catalog_sequence}' \
+    'refs/heads/data-channel' \
+    '"${api}/blobs"' \
+    '"${api}/trees"' \
+    '"${api}/commits"' \
+    'force=false'; do
   rg -Fq "${required}" "${publisher}" ||
     fail "the bounded GitHub publication state machine is incomplete: ${required}"
 done
@@ -94,8 +99,73 @@ cat >"${fake_bin}/gh" <<'FAKE_GH'
 set -euo pipefail
 state="${FAKE_GH_STATE:?}"
 printf '%s\n' "$*" >>"${state}/calls.log"
+if [[ "${1:-}" == api ]]; then
+  shift
+  method=GET
+  input=""
+  endpoint=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --method) method="$2"; shift 2 ;;
+      --input) input="$2"; shift 2 ;;
+      --jq) shift 2 ;;
+      -f|-F) shift 2 ;;
+      *) [[ -z "${endpoint}" ]] && endpoint="$1"; shift ;;
+    esac
+  done
+  branch="${state}/data-channel"
+  mkdir -p "${branch}/blobs" "${branch}/trees" "${branch}/commits"
+  case "${method}:${endpoint}" in
+    GET:repos/Ares-X/Linnet/git/ref/heads/data-channel)
+      [[ -f "${branch}/ref" ]] || exit 1
+      cat "${branch}/ref"
+      ;;
+    GET:repos/Ares-X/Linnet/git/commits/*)
+      cat "${branch}/commits/${endpoint##*/}"
+      ;;
+    GET:repos/Ares-X/Linnet/git/trees/*)
+      cat "${branch}/trees/${endpoint##*/}"
+      ;;
+    GET:repos/Ares-X/Linnet/git/blobs/*)
+      base64 <"${branch}/blobs/${endpoint##*/}" | tr -d '\n'
+      ;;
+    POST:repos/Ares-X/Linnet/git/blobs)
+      sha="$(ruby -rjson -rbase64 -e '
+        document = JSON.parse(File.read(ARGV.fetch(0)))
+        bytes = Base64.strict_decode64(document.fetch("content"))
+        File.binwrite(ARGV.fetch(1), bytes)
+        print Digest::SHA1.hexdigest(bytes)
+      ' -rdigest "${input}" "${branch}/pending-blob")"
+      mv "${branch}/pending-blob" "${branch}/blobs/${sha}"
+      printf '%s\n' "${sha}"
+      ;;
+    POST:repos/Ares-X/Linnet/git/trees)
+      blob="$(ruby -rjson -e 'print JSON.parse(File.read(ARGV.fetch(0))).fetch("tree").fetch(0).fetch("sha")' "${input}")"
+      sha="$(printf 'tree:%s' "${blob}" | shasum | awk '{print $1}')"
+      printf '%s\n' "${blob}" >"${branch}/trees/${sha}"
+      printf '%s\n' "${sha}"
+      ;;
+    POST:repos/Ares-X/Linnet/git/commits)
+      tree="$(ruby -rjson -e 'print JSON.parse(File.read(ARGV.fetch(0))).fetch("tree")' "${input}")"
+      count=1
+      [[ ! -f "${branch}/commit-count" ]] || count=$(( $(cat "${branch}/commit-count") + 1 ))
+      printf '%s\n' "${count}" >"${branch}/commit-count"
+      sha="$(printf 'commit:%s:%s' "${tree}" "${count}" | shasum | awk '{print $1}')"
+      printf '%s\n' "${tree}" >"${branch}/commits/${sha}"
+      printf '%s\n' "${sha}"
+      ;;
+    POST:repos/Ares-X/Linnet/git/refs|PATCH:repos/Ares-X/Linnet/git/refs/heads/data-channel)
+      sha="$(printf '%s\n' "$*" | sed -n 's/.*sha=\([^ ]*\).*/\1/p')"
+      [[ -n "${sha}" ]] || sha="$(ls -t "${branch}/commits" | head -1)"
+      printf '%s\n' "${sha}" >"${branch}/ref"
+      ;;
+    *) exit 2 ;;
+  esac
+  exit 0
+fi
 [[ "${1:-} ${2:-}" == "release view" || "${1:-} ${2:-}" == "release create" ||
-  "${1:-} ${2:-}" == "release edit" || "${1:-} ${2:-}" == "release delete" ]] || exit 2
+  "${1:-} ${2:-}" == "release edit" || "${1:-} ${2:-}" == "release delete" ||
+  "${1:-} ${2:-}" == "release download" ]] || exit 2
 action="$2"
 tag="${3:-}"
 root="${state}/${tag}"
@@ -133,16 +203,30 @@ case "${action}" in
   delete)
     rm -rf -- "${root}"
     ;;
+  download)
+    destination=""
+    shift 3
+    while [[ "$#" -gt 0 ]]; do
+      case "$1" in
+        --dir) destination="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [[ -f "${root}/status" && -n "${destination}" ]]
+    cp "${FAKE_RELEASE_ASSETS:?}/Linnet-Data-Channel.json" "${destination}/"
+    ;;
 esac
 FAKE_GH
 chmod 755 "${fake_bin}/gh"
 candidate_revision="$(git -C "${repo_root}" rev-parse HEAD)"
 publish_fixture() {
   GITHUB_REPOSITORY=Ares-X/Linnet GH_TOKEN=fixture \
-    FAKE_GH_STATE="${fake_state}" RUNNER_TEMP="${publication_fixture}" \
+    FAKE_GH_STATE="${fake_state}" FAKE_RELEASE_ASSETS="${fixture_assets}" \
+    RUNNER_TEMP="${publication_fixture}" \
     PATH="${fake_bin}:${PATH}" "${publisher}" "$1" "${fixture_assets}" \
       "${version}" "${catalog_sequence}" "${candidate_revision}" >/dev/null
 }
+publish_fixture data
 publish_fixture public
 publish_fixture public
 [[ "$(grep -c "^release create v${version} " "${fake_state}/calls.log")" == 1 ]] ||
@@ -150,6 +234,12 @@ publish_fixture public
 [[ "$(cut -f1 "${fake_state}/v${version}/assets")" == Linnet.pkg ]] ||
   fail "the stable Release published more than the complete installer"
 publish_fixture core
+[[ "$(cat "${fake_state}/data-channel/commit-count")" == 1 ]] ||
+  fail "an exact stable Catalog pointer created duplicate commits"
+cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${fake_state}/data-channel/blobs/$(cat "${fake_state}/data-channel/trees/$(cat "${fake_state}/data-channel/commits/$(cat "${fake_state}/data-channel/ref")")")" ||
+  fail "the data-channel branch did not publish the exact Catalog bytes"
+rm -rf -- "${fake_state}/data-${catalog_sequence}"
 mkdir -p "${fake_state}/data-${catalog_sequence}"
 printf 'true true\n' >"${fake_state}/data-${catalog_sequence}/status"
 printf 'stale\tsha256:%064d\n' 0 >"${fake_state}/data-${catalog_sequence}/assets"

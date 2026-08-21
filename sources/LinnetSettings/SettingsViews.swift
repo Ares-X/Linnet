@@ -544,6 +544,7 @@ struct EnglishTabView: View {
 struct DataTabView: View {
   @Environment(\.locale) private var locale
   @ObservedObject var model: SettingsModel
+  @ObservedObject var updateChecker: LinnetSettingsUpdateChecker
   @Binding var pendingClear: Set<SettingsDataCoordinator.LearningDomain>?
   @Binding var pendingPortableImport: SettingsDataCoordinator.PortableImportCandidate?
   @Binding var pendingRestore: LinnetBackupStore.BackupRecord?
@@ -570,8 +571,11 @@ struct DataTabView: View {
     GroupBox("Version") {
       VStack(alignment: .leading, spacing: 8) {
         LabeledContent("Application") { Text(verbatim: model.productName) }
-        LabeledContent("Version") { Text(verbatim: model.appVersion) }
+        LabeledContent("Version") {
+          Text(verbatim: "\(model.appVersion) (\(model.appBuild))")
+        }
         LabeledContent("Language data") { Text(languageDataEditionLabel) }
+        updateCheckRow
         if model.installedPacks.isEmpty {
           LabeledContent("Data status") { Text("Installation needs repair") }
           Text("Reinstall Linnet to restore the required local language data.")
@@ -591,6 +595,51 @@ struct DataTabView: View {
       .padding(8)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder private var updateCheckRow: some View {
+    Divider()
+    HStack(alignment: .center, spacing: 10) {
+      updateCheckLabel
+      Spacer()
+      if case .core = updateChecker.availability {
+        Button("View Core Update") { updateChecker.openCoreUpdate() }
+      }
+      Button("Check Again") { updateChecker.check() }
+        .disabled(updateChecker.active)
+    }
+  }
+
+  @ViewBuilder private var updateCheckLabel: some View {
+    if updateChecker.active {
+      Label("Checking for updates…", systemImage: "arrow.triangle.2.circlepath")
+        .foregroundStyle(.secondary)
+    } else if updateChecker.failed {
+      Label("Update check failed. Try again when you are online.", systemImage: "wifi.exclamationmark")
+        .foregroundStyle(.orange)
+    } else {
+      switch updateChecker.availability {
+      case .some(.current):
+        Label("Linnet and language data are up to date.", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+      case .some(.core(let core)):
+        VStack(alignment: .leading, spacing: 2) {
+          Label("Core update available", systemImage: "arrow.down.circle.fill")
+            .foregroundStyle(.orange)
+          Text(verbatim: core.version)
+            .font(.caption.monospacedDigit())
+          Text("The Core update does not require another logout. macOS may ask you to approve the unsigned package.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+      case .some(.languageData):
+        Label("A language-data update is available below. No logout is required.", systemImage: "arrow.down.circle.fill")
+          .foregroundStyle(Color.accentColor)
+      case nil:
+        Label("Update status is not available yet.", systemImage: "info.circle")
+          .foregroundStyle(.secondary)
+      }
+    }
   }
 
   private var languageDataEditionLabel: LocalizedStringKey {
