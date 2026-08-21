@@ -44,7 +44,7 @@ ruby -e '
   workflow = File.read(ARGV.fetch(0))
   uses = workflow.scan(/^\s*uses:\s*(\S+)/).flatten
   abort unless uses.all? { |value| value.match?(/@[0-9a-f]{40}\z/) }
-  cache_action = "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830"
+  cache_action = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
   abort unless uses.count(cache_action) == 2
   abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
   abort unless workflow.scan(/^\s*key:\s*linnet-build-v1-/).size == 2
