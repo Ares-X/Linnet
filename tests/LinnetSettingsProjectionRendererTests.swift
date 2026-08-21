@@ -39,13 +39,13 @@ struct LinnetSettingsProjectionRendererTests {
   }
 
   private static func testThemeFamilyAndAppearanceMapping() {
-    guard LinnetSettingsDocument.currentSchemaVersion == 10,
+    guard LinnetSettingsDocument.currentSchemaVersion == 11,
       LinnetSettingsDocument.ThemeFamily.allCases.map(\.rawValue) == [
         "paper_ledger", "moon_jade", "sidecar_slate", "clay_tiles", "mist_jade",
         "native_glass", "ink_cinnabar",
       ]
     else {
-      fail("the settings codec must publish exactly the seven ordered theme families in schema v10")
+      fail("the settings codec must publish exactly the seven ordered theme families in schema v11")
     }
     let families: [(LinnetSettingsDocument.ThemeFamily, String)] = [
       (.paperLedger, "linnet_paper"),
@@ -188,7 +188,8 @@ struct LinnetSettingsProjectionRendererTests {
       }
       guard contents.contains(
         "\"linnet_english_interaction/sentence_capitalization\": false"),
-        contents.contains("\"linnet_english_interaction/tab_behavior\": \"smart_complete\"")
+        contents.contains("\"linnet_english_interaction/tab_behavior\": \"smart_complete\""),
+        contents.contains("\"linnet_english_interaction/space_adds_trailing_space\": true")
       else {
         fail("the default interaction settings were not authoritative in \(name)")
       }
@@ -539,12 +540,14 @@ struct LinnetSettingsProjectionRendererTests {
     document.english.showTranslation = false
     document.english.predictionEnabled = false
     document.english.spellingCorrection = false
+    document.english.spaceAddsTrailingSpace = false
     let projections = LinnetSettingsProjectionRenderer.renderProjections(document: document)
     guard let english = projections[LinnetSettingsProjectionRenderer.englishCustomFile],
       english.contains("\"linnet_english_interaction/show_ipa\": false"),
       english.contains("\"linnet_english_interaction/show_translation\": false"),
       english.contains("\"switches/@1/reset\": 0"),
-      english.contains("\"linnet_english_interaction/spelling_correction\": false")
+      english.contains("\"linnet_english_interaction/spelling_correction\": false"),
+      english.contains("\"linnet_english_interaction/space_adds_trailing_space\": false")
     else {
       fail("English display, prediction, or correction settings were not projected")
     }
@@ -631,7 +634,8 @@ struct LinnetSettingsProjectionRendererTests {
         decoded.english.showIPA,
         decoded.english.showTranslation,
         decoded.english.predictionEnabled,
-        decoded.english.spellingCorrection
+        decoded.english.spellingCorrection,
+        decoded.english.spaceAddsTrailingSpace
       else {
         fail("an older settings document did not adopt the shipped behavior defaults")
       }
@@ -709,7 +713,7 @@ struct LinnetSettingsProjectionRendererTests {
         """.utf8)
       do {
         let decoded = try JSONDecoder().decode(LinnetSettingsDocument.self, from: legacy)
-        guard decoded.schemaVersion == 10,
+        guard decoded.schemaVersion == LinnetSettingsDocument.currentSchemaVersion,
           decoded.appearance.chineseCandidateLayout == expectedChinese,
           decoded.appearance.englishCandidateLayout == expectedEnglish,
           decoded.appearance.candidateBrowsingMode == expectedBrowsing
@@ -861,14 +865,15 @@ struct LinnetSettingsProjectionRendererTests {
 
   private static func testNewerDocumentFailsClosed(in directory: URL) throws {
     let document = directory.appending(path: LinnetSettingsDocumentStore.fileName)
+    let newerVersion = LinnetSettingsDocument.currentSchemaVersion + 1
     try Data("""
-      {"schemaVersion":11}
+      {"schemaVersion":\(newerVersion)}
       """.utf8).write(to: document)
     do {
       _ = try LinnetSettingsDocumentStore.load(from: directory)
       fail("a settings document from a newer schema was accepted")
     } catch LinnetSettingsDocumentStore.Failure.newerSchemaVersion(let version) {
-      guard version == 11 else { fail("the newer schema identity was lost") }
+      guard version == newerVersion else { fail("the newer schema identity was lost") }
     }
     try FileManager.default.removeItem(at: document)
   }

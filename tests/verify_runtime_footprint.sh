@@ -220,6 +220,14 @@ if rg -n '^[[:space:]]+space:[[:space:]]+confirm$' \
 fi
 rg -Fq 'key.keycode() == XK_space' plugins/smart_english/smart_english.cc ||
   fail "Smart English lost its native immediate-Space interaction owner"
+rg -Fq 'linnet_english_interaction/space_adds_trailing_space' \
+  plugins/smart_english/smart_english_domain.h ||
+  fail "Smart English lost the typed trailing-space setting boundary"
+rg -Fq 'options_.space_adds_trailing_space' \
+  plugins/smart_english/smart_english.cc ||
+  fail "the Space owner no longer consumes the trailing-space setting"
+test "$(rg -F -c 'CommitSpaceSelection(' plugins/smart_english/smart_english.cc)" -eq 3 ||
+  fail "active and focused-prediction Space paths diverged from one policy owner"
 
 test "$(rg -F -c '  page_size: 9' data/linnet/default.yaml)" -eq 1 ||
   fail "the shipped candidate page default is not owned once as nine"

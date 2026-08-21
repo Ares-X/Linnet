@@ -48,6 +48,7 @@ struct InteractionOptions {
   bool show_translation = true;
   bool spelling_correction = true;
   bool learning_enabled = true;
+  bool space_adds_trailing_space = true;
   TabBehavior tab_behavior = TabBehavior::kSmartComplete;
 
   static InteractionOptions Load(const rime::Schema* schema) {
@@ -63,6 +64,8 @@ struct InteractionOptions {
                     &result.spelling_correction);
     config->GetBool("linnet_english_interaction/learning_enabled",
                     &result.learning_enabled);
+    config->GetBool("linnet_english_interaction/space_adds_trailing_space",
+                    &result.space_adds_trailing_space);
     std::string tab_behavior;
     if (config->GetString("linnet_english_interaction/tab_behavior",
                           &tab_behavior)) {

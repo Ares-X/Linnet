@@ -522,6 +522,10 @@ struct EnglishTabView: View {
               "Learn from English selections",
               isOn: $model.configuration.documentDraft.english.learnFromSelections
             )
+            Toggle(
+              "Add a trailing space when Space accepts a candidate",
+              isOn: $model.configuration.documentDraft.english.spaceAddsTrailingSpace
+            )
             Picker("Tab key", selection: $model.configuration.documentDraft.english.tabBehavior) {
               Text("Smart complete").tag(LinnetSettingsDocument.TabBehavior.smartComplete)
               Text("Navigate candidates").tag(LinnetSettingsDocument.TabBehavior.navigate)

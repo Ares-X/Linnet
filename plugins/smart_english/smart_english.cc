@@ -314,14 +314,7 @@ class LinnetInteractionProcessor : public Processor {
     if (schema_id_ == kSmartEnglishSchema &&
         key.keycode() == XK_space &&
         IsPlainKey(key)) {
-      if (!CommitCurrentSelection(context, PostCommitPrediction::kPreserve,
-                                  true)) {
-        return kRejected;
-      }
-      // Session::OnCommit concatenates both sink writes from this key event,
-      // so the client receives the selected candidate and its boundary now.
-      engine_->CommitText(" ");
-      return kAccepted;
+      return CommitSpaceSelection(context, PostCommitPrediction::kPreserve);
     }
     if (schema_id_ == kSmartEnglishSchema &&
         key.keycode() == XK_Return && IsPlainKey(key)) {
@@ -339,6 +332,20 @@ class LinnetInteractionProcessor : public Processor {
 
  private:
   enum class PostCommitPrediction { kPreserve, kDismiss };
+
+  ProcessResult CommitSpaceSelection(
+      Context* context, PostCommitPrediction prediction) const {
+    if (!CommitCurrentSelection(context, prediction,
+                                options_.space_adds_trailing_space)) {
+      return kRejected;
+    }
+    if (options_.space_adds_trailing_space) {
+      // Session::OnCommit concatenates both sink writes from this key event,
+      // so the client receives the selected candidate and its boundary now.
+      engine_->CommitText(" ");
+    }
+    return kAccepted;
+  }
 
   bool IsPlainKey(const KeyEvent& key) const {
     return (key.modifier() & ~kLockMask) == 0;
@@ -366,12 +373,7 @@ class LinnetInteractionProcessor : public Processor {
         context->get_property(kPredictionNavigationProperty) == "1";
     if (focused && IsPlainKey(key) && key.keycode() == XK_space) {
       context->set_property(kPredictionNavigationProperty, "");
-      if (!CommitCurrentSelection(context, PostCommitPrediction::kPreserve,
-                                  true)) {
-        return kRejected;
-      }
-      engine_->CommitText(" ");
-      return kAccepted;
+      return CommitSpaceSelection(context, PostCommitPrediction::kPreserve);
     }
     if (focused && IsPlainKey(key) && key.keycode() == XK_Return) {
       context->set_property(kPredictionNavigationProperty, "");

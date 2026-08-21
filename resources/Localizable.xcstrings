@@ -218,6 +218,7 @@
     "Disabled words" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"停用词"}}}},
     "English learning" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"英文学习数据"}}}},
     "Learn from English selections" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"学习英文选词"}}}},
+    "Add a trailing space when Space accepts a candidate" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"按空格键上屏候选时附加空格"}}}},
     "English candidates" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"英文候选"}}}},
     "Existing Rime / Hallelujah data" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"现有 Rime / Hallelujah 数据"}}}},
     "Expansion" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"扩展内容"}}}},

@@ -10,11 +10,11 @@ import CryptoKit
 import Darwin
 import Foundation
 
-/// Canonical settings document (schema v10). Every default below matches the
+/// Canonical settings document (schema v11). Every default below matches the
 /// bundled distribution defaults, so a fresh install renders an identical
 /// configuration without emitting any projection file.
 struct LinnetSettingsDocument: Codable, Equatable, Sendable {
-  static let currentSchemaVersion = 10
+  static let currentSchemaVersion = 11
 
   var schemaVersion: Int
   var appearance: Appearance
@@ -370,6 +370,7 @@ struct LinnetSettingsDocument: Codable, Equatable, Sendable {
     var predictionEnabled: Bool
     var spellingCorrection: Bool
     var learnFromSelections: Bool
+    var spaceAddsTrailingSpace: Bool
 
     static let `default` = English(
       sentenceCapitalization: false,
@@ -378,7 +379,8 @@ struct LinnetSettingsDocument: Codable, Equatable, Sendable {
       showTranslation: true,
       predictionEnabled: true,
       spellingCorrection: true,
-      learnFromSelections: true
+      learnFromSelections: true,
+      spaceAddsTrailingSpace: true
     )
 
     init(
@@ -388,7 +390,8 @@ struct LinnetSettingsDocument: Codable, Equatable, Sendable {
       showTranslation: Bool = true,
       predictionEnabled: Bool = true,
       spellingCorrection: Bool = true,
-      learnFromSelections: Bool = true
+      learnFromSelections: Bool = true,
+      spaceAddsTrailingSpace: Bool = true
     ) {
       self.sentenceCapitalization = sentenceCapitalization
       self.tabBehavior = tabBehavior
@@ -397,6 +400,7 @@ struct LinnetSettingsDocument: Codable, Equatable, Sendable {
       self.predictionEnabled = predictionEnabled
       self.spellingCorrection = spellingCorrection
       self.learnFromSelections = learnFromSelections
+      self.spaceAddsTrailingSpace = spaceAddsTrailingSpace
     }
 
     init(from decoder: Decoder) throws {
@@ -414,6 +418,8 @@ struct LinnetSettingsDocument: Codable, Equatable, Sendable {
         try container.decodeIfPresent(Bool.self, forKey: .spellingCorrection) ?? true
       learnFromSelections =
         try container.decodeIfPresent(Bool.self, forKey: .learnFromSelections) ?? true
+      spaceAddsTrailingSpace =
+        try container.decodeIfPresent(Bool.self, forKey: .spaceAddsTrailingSpace) ?? true
     }
   }
 

@@ -9,7 +9,7 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 **一个输入源，两种语言，一种连贯的输入体验。**
 
 > [!NOTE]
-> Linnet 0.1.3 的正式 Release 只提供一个完整安装包 `Linnet.pkg`。它没有使用 Apple Developer ID 签名，也未经过公证；macOS 会要求用户手动确认信任。SHA-256 直接写在同一 Release 的说明中，Core 与语言数据组件则位于同仓库、明确标注的更新频道，不再与普通用户下载混在一起。
+> Linnet 0.1.4 的正式 Release 只提供一个完整安装包 `Linnet.pkg`。它没有使用 Apple Developer ID 签名，也未经过公证；macOS 会要求用户手动确认信任。SHA-256 直接写在同一 Release 的说明中，Core 与语言数据组件则位于同仓库、明确标注的更新频道，不再与普通用户下载混在一起。
 
 **[下载最新版 Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
@@ -60,7 +60,7 @@ Smart English 适合连续英文写作，也适合在中文工作流中临时输
 - 前缀补全、拼写建议与下一词预测；
 - 可选 IPA 和中文释义；
 - 保留首字母大写或全大写；
-- Space、Return、数字键和方向键均可按当前候选状态提交；
+- Space、Return、数字键和方向键均可按当前候选状态提交；Space 上屏时是否自动附加空格可在 Settings 中配置；
 - URL、邮箱、路径、版本号和代码标识符尽可能保持原文；
 - 原始输入始终作为安全候选，不会被建议静默替换。
 
@@ -97,7 +97,7 @@ _由当前 `data/squirrel.yaml` 通过 `SquirrelView` 生成的 20pt 实际渲�
 
 ### 获取社区版本
 
-请从项目的 **Latest Release** 只下载一个文件：`Linnet.pkg`。进入下载目录后计算哈希：
+请从项目的 **[Latest Release](https://github.com/Ares-X/Linnet/releases/latest)** 只下载一个文件：`Linnet.pkg`。进入下载目录后计算哈希：
 
 ```bash
 shasum -a 256 Linnet.pkg
@@ -151,7 +151,7 @@ Linnet 不会自动点击系统授权或替用户选择输入源。社区安装�
 | 外观 | 七套主题、浅色/深色、字体、字号、候选数量、横排/竖排与候选展开方式 |
 | 输入 | 全拼/双拼、中文学习、简繁、Emoji、标点、辅助码和拼音反查触发键 |
 | 词典 | 自定义词、禁用英文词、Text Expander，以及带自动备份的安全应用 |
-| 英文 | 自动大写、IPA、中文释义、上下文预测、拼写建议、英文学习和 Tab 行为 |
+| 英文 | 自动大写、IPA、中文释义、上下文预测、拼写建议、英文学习、Space 尾随空格和 Tab 行为 |
 | 数据 | 组件版本、数据导入导出、学习数据清理、备份恢复与隐私处理后的诊断 |
 
 外观预览会使用所选主题、字号与布局；需要改变输入行为的选项在点击 **Apply Changes** 后生效。请不要手工编辑 Linnet 生成的 `linnet_user.custom.yaml`、`squirrel.custom.yaml`、`default.custom.yaml` 或 schema custom 文件。
@@ -243,7 +243,7 @@ no_download=1 ./action-build.sh release
 
 ## 版本、来源与许可证
 
-当前版本是 **0.1.3**（2026-08-21）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前版本是 **0.1.4**（2026-08-21）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 

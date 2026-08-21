@@ -3,6 +3,13 @@
 本文件记录 Linnet 自身的用户可见变化。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.4 — 2026-08-21
+
+### 英文输入与下载
+
+- Settings 的英文页新增“按空格键上屏候选时附加空格”开关；默认开启以保持既有连续输入体验，关闭后 Space 只提交当前候选，不再自动补尾随空格。
+- 主 README 提供始终指向最新稳定版本的单一下载入口，首次安装仍只需下载 `Linnet.pkg`。
+
 ## 0.1.3 — 2026-08-21
 
 ### 更新体验

@@ -53,6 +53,7 @@ struct LinnetSettingsProjectionFixture {
       document.input.traditionalChinese = true
       document.english.sentenceCapitalization = false
       document.english.tabBehavior = .pass
+      document.english.spaceAddsTrailingSpace = false
       runtimePersonal = .init(
         customWords: [], disabledWords: ["hello"], expansions: [])
       directory = URL(filePath: arguments[2], directoryHint: .isDirectory)

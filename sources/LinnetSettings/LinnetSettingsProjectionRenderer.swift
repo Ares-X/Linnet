@@ -300,6 +300,10 @@ enum LinnetSettingsProjectionRenderer {
       "linnet_english_interaction/tab_behavior",
       quoted(english.tabBehavior.rawValue)
     ))
+    entries.append((
+      "linnet_english_interaction/space_adds_trailing_space",
+      english.spaceAddsTrailingSpace ? "true" : "false"
+    ))
     if !english.showIPA {
       entries.append(("linnet_english_interaction/show_ipa", "false"))
     }

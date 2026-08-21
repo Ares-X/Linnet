@@ -191,6 +191,8 @@ for settings_schema in \
     "${user}/${settings_schema}.custom.yaml"
   rg -Fq '"linnet_english_interaction/tab_behavior": "pass"' \
     "${user}/${settings_schema}.custom.yaml"
+  rg -Fq '"linnet_english_interaction/space_adds_trailing_space": false' \
+    "${user}/${settings_schema}.custom.yaml"
 done
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   bin/rime_deployer --build "${user}" "${shared}" "${user}/build" >/dev/null

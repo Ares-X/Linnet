@@ -4266,6 +4266,7 @@ int main(int argc, char** argv) {
     ExpectCandidate(api, english, "|suanfa", "algorithm");
     const auto live_english = rime::Service::instance().GetSession(english);
     bool capitalization = true;
+    bool space_adds_trailing_space = true;
     std::string tab_behavior;
     if (!live_english || !live_english->schema() ||
         !live_english->schema()->config() ||
@@ -4275,7 +4276,11 @@ int main(int argc, char** argv) {
         capitalization ||
         !live_english->schema()->config()->GetString(
             "linnet_english_interaction/tab_behavior", &tab_behavior) ||
-        tab_behavior != "pass") {
+        tab_behavior != "pass" ||
+        !live_english->schema()->config()->GetBool(
+            "linnet_english_interaction/space_adds_trailing_space",
+            &space_adds_trailing_space) ||
+        space_adds_trailing_space) {
       Fail("the production runtime-settings projection was not loaded");
     }
     api->destroy_session(english);
@@ -4292,6 +4297,21 @@ int main(int argc, char** argv) {
     }
     ExpectNoCommit(api, tab_pass, "production pass-through Tab");
     api->destroy_session(tab_pass);
+
+    const RimeSessionId unspaced = CreateSchemaSession(api, "linnet_en");
+    Enter(api, unspaced, "world");
+    const size_t world_index = CandidateIndex(api, unspaced, "world");
+    const auto live_unspaced = rime::Service::instance().GetSession(unspaced);
+    if (!live_unspaced || !live_unspaced->context() ||
+        live_unspaced->context()->composition().empty()) {
+      Fail("the no-trailing-space fixture has no active composition");
+    }
+    live_unspaced->context()->Highlight(world_index);
+    if (!api->process_key(unspaced, XK_space, 0) ||
+        TakeCommit(api, unspaced) != "world") {
+      Fail("the graphical Space setting did not commit without a trailing space");
+    }
+    api->destroy_session(unspaced);
     api->finalize();
     std::cout << "rime_smoke_test: graphical input and runtime settings: PASS\n";
     return 0;
