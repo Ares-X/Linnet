@@ -46,9 +46,10 @@ ruby -e '
   abort "the upstream report still presents mutable release assets as unconditionally locked" if
     reporter.include?(%q{grammar.fetch("sha256")[0, 12], grammar.fetch("release"), "locked"})
   report = release.index("ruby scripts/upstream-sync report")
-  archive = release.index("./action-build.sh archive")
+  prepare = release.index("./action-install.sh")
+  archive = release.index("make --no-print-directory archive")
   abort "release validation no longer checks locked upstream identities before the expensive build" unless
-    report && archive && report < archive
+    report && prepare && archive && report < prepare && prepare < archive
 ' "${reporter}" "${release_workflow}"
 
 echo "Chinese upstream workflow: PASS (read-only standard upstream report; no Python composer)"

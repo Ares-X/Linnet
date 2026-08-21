@@ -44,7 +44,23 @@ ruby -e '
   workflow = File.read(ARGV.fetch(0))
   uses = workflow.scan(/^\s*uses:\s*(\S+)/).flatten
   abort unless uses.all? { |value| value.match?(/@[0-9a-f]{40}\z/) }
-  abort unless workflow.include?("./action-build.sh archive")
+  cache_action = "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830"
+  abort unless uses.count(cache_action) == 2
+  abort unless workflow.scan(/^\s*submodules:\s*true\s*$/).size == 2
+  abort unless workflow.scan(/^\s*key:\s*linnet-build-v1-/).size == 2
+  abort unless workflow.scan(/^\s*restore-keys:\s*\|/).size == 2
+  %w[
+    build/upstreams
+    build/dependencies
+    data/chinese/grammar
+    build/linnet-english-cache
+    data/plum/build
+    librime/dist
+  ].each { |path| abort unless workflow.scan(/^\s*#{Regexp.escape(path)}\s*$/).size == 2 }
+  abort unless workflow.include?("Restored cache bytes are untrusted")
+  abort unless workflow.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 2
+  abort unless workflow.include?("make --no-print-directory archive")
+  abort if workflow.include?("./action-build.sh archive")
   abort unless workflow.include?("package/verify_publication_artifacts")
   abort unless workflow.include?(%q{gh release create "${GITHUB_REF_NAME}"})
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})

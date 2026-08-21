@@ -23,7 +23,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          submodules: false
+          submodules: true
+      - name: Fingerprint the Xcode toolchain
+        id: toolchain
+        run: |
+          fingerprint="$(xcodebuild -version | shasum -a 256 | awk '{print $1}')"
+          echo "sha256=${fingerprint}" >> "${GITHUB_OUTPUT}"
+      # Restored cache bytes are untrusted acceleration only. action-install.sh
+      # revalidates locked commits, digests, fingerprints, and artifact shapes.
+      - name: Restore locked build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: |
+            build/upstreams
+            build/dependencies
+            build/rime-runtime.fingerprint
+            data/chinese/grammar
+            build/linnet-english-cache
+            build/linnet-english.fingerprint
+            data/plum/build
+            build/precompiled.fingerprint
+            librime/dist
+            librime/share/opencc
+          key: linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/**', 'sources/**', 'data/linnet/**', 'data/chinese/**', 'config/linnet-data-releases.json') }}
+          restore-keys: |
+            linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
       - name: Install declared build tools
         run: brew install ripgrep
       - name: Validate key-free source and data inputs
@@ -36,7 +60,8 @@ jobs:
           product_version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' config/LinnetProduct.xcconfig | LC_ALL=C sort -u)"
           package/data_release_metadata check-core config/linnet-data-releases.json "${product_version}"
           ruby scripts/upstream-sync report
-          ./action-install.sh
+      - name: Prepare locked dependencies and generated data
+        run: ./action-install.sh
 
   publish-community:
     if: startsWith(github.ref, 'refs/tags/')
@@ -49,7 +74,33 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          submodules: false
+          submodules: true
+
+      - name: Fingerprint the Xcode toolchain
+        id: toolchain
+        run: |
+          fingerprint="$(xcodebuild -version | shasum -a 256 | awk '{print $1}')"
+          echo "sha256=${fingerprint}" >> "${GITHUB_OUTPUT}"
+
+      # Restored cache bytes are untrusted acceleration only. action-install.sh
+      # revalidates locked commits, digests, fingerprints, and artifact shapes.
+      - name: Restore locked build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: |
+            build/upstreams
+            build/dependencies
+            build/rime-runtime.fingerprint
+            data/chinese/grammar
+            build/linnet-english-cache
+            build/linnet-english.fingerprint
+            data/plum/build
+            build/precompiled.fingerprint
+            librime/dist
+            librime/share/opencc
+          key: linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/**', 'sources/**', 'data/linnet/**', 'data/chinese/**', 'config/linnet-data-releases.json') }}
+          restore-keys: |
+            linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
 
       - name: Install declared build tools
         run: brew install ripgrep
@@ -66,13 +117,16 @@ jobs:
           package/data_release_metadata check-core config/linnet-data-releases.json "${product_version}"
           ruby scripts/upstream-sync report
 
-      - name: Build unsigned community artifacts
+      - name: Prepare locked dependencies and generated data
+        run: ./action-install.sh
+
+      - name: Build and verify unsigned community artifacts
         env:
           LINNET_CANDIDATE_REVISION: ${{ github.sha }}
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-release
         run: |
           mkdir -p "${ARCHIVE_OUTPUT_DIR}"
-          ./action-build.sh archive
+          make --no-print-directory archive
 
       - name: Verify the exact public artifact set
         env:

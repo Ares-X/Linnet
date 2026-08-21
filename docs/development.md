@@ -120,6 +120,19 @@ scripts/upstream-sync verify
 
 `report` 不得修改仓库。升级时在隔离 checkout 中同时更新精确 lock 和 gitlink，比较 effective product projection；不能直接合并 Stable，也不能从运行时自动跟随上游。
 
+上游升级始终先在本地完成：获取候选 revision，审查许可证、源码差异、现有
+patch 是否仍精确适用，以及 Linnet 自己的词典和交互优化是否被保留；然后运行
+focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有这些结果都
+通过后，才在同一个提交中更新 gitlink、`upstreams.lock.json`、必要 patch 和数据
+release identity，再由标签触发发布。定时 GitHub workflow 只报告候选更新，不得
+自动修改仓库、合并上游或发布。
+
+GitHub Actions 会缓存锁定下载、原生 runtime、英文生成数据和 Rime 预编译产物。
+缓存不是版本或发布权威：每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、
+内部 fingerprint 与产物形状；不匹配时只重建受影响部分。缓存命中也不会跳过
+archive 和 publication 验证。发布 workflow 把“准备锁定依赖”和“构建并验证归档”
+显示为独立步骤，便于直接看到下载、生成、编译和打包进度。
+
 ## 构建
 
 普通本地 Release：
