@@ -46,7 +46,7 @@ ruby -e '
   abort unless uses.all? { |value| value.match?(/@[0-9a-f]{40}\z/) }
   cache_action = "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830"
   abort unless uses.count(cache_action) == 2
-  abort unless workflow.scan(/^\s*submodules:\s*true\s*$/).size == 2
+  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
   abort unless workflow.scan(/^\s*key:\s*linnet-build-v1-/).size == 2
   abort unless workflow.scan(/^\s*restore-keys:\s*\|/).size == 2
   %w[
@@ -55,8 +55,8 @@ ruby -e '
     data/chinese/grammar
     build/linnet-english-cache
     data/plum/build
-    librime/dist
   ].each { |path| abort unless workflow.scan(/^\s*#{Regexp.escape(path)}\s*$/).size == 2 }
+  abort if workflow.match?(%r{^\s*(?:librime|plum|upstreams/[^/]+)\s*$})
   abort unless workflow.include?("Restored cache bytes are untrusted")
   abort unless workflow.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 2
   abort unless workflow.include?("make --no-print-directory archive")

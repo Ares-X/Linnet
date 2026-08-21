@@ -127,7 +127,7 @@ focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有�
 release identity，再由标签触发发布。定时 GitHub workflow 只报告候选更新，不得
 自动修改仓库、合并上游或发布。
 
-GitHub Actions 会缓存锁定下载、原生 runtime、英文生成数据和 Rime 预编译产物。
+GitHub Actions 会缓存锁定下载、runtime 构建依赖、英文生成数据和 Rime 预编译产物。
 缓存不是版本或发布权威：每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、
 内部 fingerprint 与产物形状；不匹配时只重建受影响部分。缓存命中也不会跳过
 archive 和 publication 验证。发布 workflow 把“准备锁定依赖”和“构建并验证归档”

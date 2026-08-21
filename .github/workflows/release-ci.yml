@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          submodules: true
+          submodules: false
       - name: Fingerprint the Xcode toolchain
         id: toolchain
         run: |
@@ -37,14 +37,11 @@ jobs:
           path: |
             build/upstreams
             build/dependencies
-            build/rime-runtime.fingerprint
             data/chinese/grammar
             build/linnet-english-cache
             build/linnet-english.fingerprint
             data/plum/build
             build/precompiled.fingerprint
-            librime/dist
-            librime/share/opencc
           key: linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/**', 'sources/**', 'data/linnet/**', 'data/chinese/**', 'config/linnet-data-releases.json') }}
           restore-keys: |
             linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
@@ -74,7 +71,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          submodules: true
+          submodules: false
 
       - name: Fingerprint the Xcode toolchain
         id: toolchain
@@ -90,14 +87,11 @@ jobs:
           path: |
             build/upstreams
             build/dependencies
-            build/rime-runtime.fingerprint
             data/chinese/grammar
             build/linnet-english-cache
             build/linnet-english.fingerprint
             data/plum/build
             build/precompiled.fingerprint
-            librime/dist
-            librime/share/opencc
           key: linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/**', 'sources/**', 'data/linnet/**', 'data/chinese/**', 'config/linnet-data-releases.json') }}
           restore-keys: |
             linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
