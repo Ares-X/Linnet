@@ -210,10 +210,29 @@ case "${action}" in
     LC_ALL=C sort -o "${root}/assets" "${root}/assets"
     prerelease=false
     [[ " $* " == *" --prerelease "* ]] && prerelease=true
+    while [[ "$#" -gt 0 ]]; do
+      case "$1" in
+        --notes-file)
+          cp "$2" "${root}/notes"
+          shift 2
+          ;;
+        *) shift ;;
+      esac
+    done
     printf 'true %s\n' "${prerelease}" >"${root}/status"
     ;;
   edit)
     read -r _ prerelease <"${root}/status"
+    shift 3
+    while [[ "$#" -gt 0 ]]; do
+      case "$1" in
+        --notes-file)
+          cp "$2" "${root}/notes"
+          shift 2
+          ;;
+        *) shift ;;
+      esac
+    done
     printf 'false %s\n' "${prerelease}" >"${root}/status"
     ;;
   delete)
@@ -244,12 +263,32 @@ publish_fixture() {
 }
 publish_fixture data
 publish_fixture public
+rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
+  fail "the stable Release omitted the version change summary"
+rg -Fq '按空格键上屏候选时附加空格' "${fake_state}/v${version}/notes" ||
+  fail "the stable Release did not consume the current CHANGELOG section"
+if rg -Fq '## 0.1.3' "${fake_state}/v${version}/notes"; then
+  fail "the stable Release leaked an adjacent CHANGELOG version"
+fi
+printf 'stale release notes\n' >"${fake_state}/v${version}/notes"
 publish_fixture public
+rg -Fq '按空格键上屏候选时附加空格' "${fake_state}/v${version}/notes" ||
+  fail "an exact published Release did not repair stale notes"
 [[ "$(grep -c "^release create v${version} " "${fake_state}/calls.log")" == 1 ]] ||
   fail "an exact published stable Release was recreated"
 [[ "$(cut -f1 "${fake_state}/v${version}/assets")" == Linnet.pkg ]] ||
   fail "the stable Release published more than the complete installer"
 publish_fixture core
+rg -Fq '按空格键上屏候选时附加空格' \
+  "${fake_state}/core-v${version}/notes" ||
+  fail "the Core Release omitted the version change summary"
+printf 'stale core notes\n' >"${fake_state}/core-v${version}/notes"
+publish_fixture core
+rg -Fq '按空格键上屏候选时附加空格' \
+  "${fake_state}/core-v${version}/notes" ||
+  fail "an exact published Core Release did not repair stale notes"
+[[ "$(grep -c "^release create core-v${version} " "${fake_state}/calls.log")" == 1 ]] ||
+  fail "an exact published Core Release was recreated"
 [[ "$(cat "${fake_state}/data-channel/commit-count")" == 1 ]] ||
   fail "an exact stable Catalog pointer created duplicate commits"
 cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
