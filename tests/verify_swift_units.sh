@@ -56,6 +56,12 @@ compile_run settings-page-layout -framework SwiftUI \
 compile_run presentation-status \
   sources/LinnetSettings/SettingsPresentationStatus.swift \
   tests/SettingsPresentationStatusTests.swift
+compile_run cloud-sync-location \
+  sources/LinnetSettings/LinnetCloudSyncLocation.swift \
+  tests/LinnetCloudSyncLocationTests.swift
+compile_run rime-sync-controller \
+  sources/LinnetSettings/LinnetRimeSyncController.swift \
+  tests/LinnetRimeSyncControllerTests.swift
 compile_run settings-session \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \

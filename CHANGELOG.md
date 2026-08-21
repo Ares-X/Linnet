@@ -4,6 +4,17 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.6 — 2026-08-22
+
+### 输入体验
+
+- 修复没有候选词时按 Shift 切换中英文不显示光标旁状态提示的问题。
+
+### 个人数据
+
+- Settings 新增可选的 iCloud Drive 学习词同步：直接复用 Rime 的多设备增量合并，自动检查严格限制为每小时最多一次，也可由用户立即触发。
+- 自动同步只处理 Rime 学习词，不会自动上传完整备份、设置、自定义词、停用词或 Text Expander；完整个人数据仍通过独立的手动恢复归档传输。
+
 ## 0.1.5 — 2026-08-21
 
 ### 英文输入

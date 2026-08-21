@@ -45,6 +45,45 @@ enum LinnetCandidatePresentation {
     return nil
   }
 
+  struct CandidateMenuPage: Equatable {
+    let currentPage: Int
+    let pageSize: Int
+    let candidateCount: Int
+    let highlighted: Int
+  }
+
+  /// Rime legitimately exposes an all-zero menu while the input session is
+  /// idle. Keep that state presentable so schema-transition feedback can use
+  /// the normal caret-anchored panel without treating missing menu data as an
+  /// input-session failure.
+  static func candidateMenuPage(
+    currentPage: Int32,
+    pageSize: Int32,
+    candidateCount: Int32,
+    highlighted: Int32
+  ) -> CandidateMenuPage? {
+    guard let currentPage = Int(exactly: currentPage),
+      let pageSize = Int(exactly: pageSize),
+      let candidateCount = Int(exactly: candidateCount),
+      let highlighted = Int(exactly: highlighted),
+      currentPage >= 0,
+      pageSize >= 0,
+      candidateCount >= 0,
+      highlighted >= 0
+    else { return nil }
+    guard pageSize > 0 else {
+      return currentPage == 0 && candidateCount == 0 && highlighted == 0
+        ? CandidateMenuPage(
+          currentPage: 0, pageSize: 0, candidateCount: 0, highlighted: 0)
+        : nil
+    }
+    return CandidateMenuPage(
+      currentPage: currentPage,
+      pageSize: pageSize,
+      candidateCount: candidateCount,
+      highlighted: highlighted)
+  }
+
   enum CandidateSelectionStyle: String, Equatable {
     case tile, underline, bar
   }

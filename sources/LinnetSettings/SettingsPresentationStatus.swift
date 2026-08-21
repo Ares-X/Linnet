@@ -113,6 +113,10 @@ enum SettingsPresentationStatus: Equatable {
   case legacyImported(substitutions: Int, learningRecords: Int)
   case portableExported(productName: String)
   case portableImported
+  case cloudSyncFolderSelected(name: String)
+  case cloudSyncRequested
+  case cloudBackupUploaded
+  case cloudSyncDisconnected
   case backupRestored
   case backupRecordRemoved
   case backupRecordRemovalFailed
@@ -189,6 +193,17 @@ enum SettingsPresentationStatus: Equatable {
       pair = ("Portable \(productName) data exported.", "已导出可迁移的 \(productName) 数据。")
     case .portableImported:
       pair = ("Selected portable categories were replaced; other data was preserved.", "已替换所选迁移数据类别，其他数据保持不变。")
+    case .cloudSyncFolderSelected(let name):
+      pair = ("Sync folder connected: \(name).", "已连接同步文件夹：\(name)。")
+    case .cloudSyncRequested:
+      pair = ("Learning synchronization requested.", "已请求同步学习词。")
+    case .cloudBackupUploaded:
+      pair = ("Full recovery backup uploaded.", "已上传完整恢复备份。")
+    case .cloudSyncDisconnected:
+      pair = (
+        "Sync folder disconnected. No local or cloud data was deleted.",
+        "已断开同步文件夹，未删除本地或云端数据。"
+      )
     case .backupRestored:
       pair = ("Verified backup restored. The previous state was backed up first.", "已恢复通过校验的备份，并先备份了原状态。")
     case .backupRecordRemoved:
@@ -272,6 +287,10 @@ enum SettingsPresentationStatus: Equatable {
       .legacyImported,
       .portableExported,
       .portableImported,
+      .cloudSyncFolderSelected,
+      .cloudSyncRequested,
+      .cloudBackupUploaded,
+      .cloudSyncDisconnected,
       .backupRestored,
       .backupRecordRemoved,
       .learningCleared,
@@ -347,6 +366,7 @@ enum SettingsFilePanelTitle: Equatable {
   case portableExport
   case portableImport
   case diagnosticsExport
+  case cloudSyncFolder
 
   func text(productName: String, locale: Locale) -> String {
     let chinese = locale.usesSimplifiedChineseSettingsCopy
@@ -357,6 +377,8 @@ enum SettingsFilePanelTitle: Equatable {
       return chinese ? "导入 \(productName) 数据" : "Import \(productName) Data"
     case .diagnosticsExport:
       return chinese ? "导出 \(productName) 诊断报告" : "Export \(productName) Diagnostics"
+    case .cloudSyncFolder:
+      return chinese ? "选择 iCloud Drive 同步文件夹" : "Choose an iCloud Drive Sync Folder"
     }
   }
 }

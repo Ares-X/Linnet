@@ -208,6 +208,9 @@ if ! ruby -e '
   abort "controller does not consume the typed mode-transition label" unless
     controller.include?("inputModeTransitionLabel(") &&
       controller.include?("panel.updateStatus(long: modeLabel, short: modeLabel)")
+  abort "idle Shift feedback no longer reaches the normal caret panel" unless
+    controller.include?("LinnetCandidatePresentation.candidateMenuPage(") &&
+      controller.include?("guard menuPage.pageSize > 0 else")
   schema = delegate[/if messageType == "schema".*?\n  \}/m]
   abort "generic schema notification still owns caret feedback" if
     schema&.include?("showStatusMessage")
@@ -974,12 +977,14 @@ test "$(rg -F -c 'LinnetSettingsThemeSurface(' \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift)" -eq 2 ||
   fail "the theme cards and candidate preview stopped sharing one material surface"
 if rg -n 'textformat\.abc' sources/LinnetSettings/SettingsMain.swift \
+    sources/LinnetSettings/SettingsRootView.swift \
     sources/LinnetSettings/SettingsViews.swift; then
   fail "the English Settings mark regained a locale-dependent SF Symbol"
 fi
 test "$(rg -F -c 'Text(verbatim: "ABC")' sources/LinnetSettings/LinnetSettingsPage.swift)" -eq 1 ||
   fail "the Settings ABC mark regained a second glyph owner"
 test "$(rg -F -o 'mark: .latinABC' sources/LinnetSettings/SettingsMain.swift \
+  sources/LinnetSettings/SettingsRootView.swift \
   sources/LinnetSettings/SettingsViews.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "the Settings tab and English page must share the fixed ABC mark"
 test "$(rg -F -c 'NSSelectorFromString("windowEffectiveAppearance")' \
@@ -1321,7 +1326,7 @@ test "$(rg -F -c 'private var settingsTransactionHost: LinnetSettingsTransaction
   sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
   fail "the authenticated Settings transaction Host owner count changed"
 ruby -e '
-  project, settings, menu, controller = ARGV.map { |path| File.read(path) }
+  project, settings, root, menu, controller = ARGV.map { |path| File.read(path) }
   abort "retired Settings Info.plist reference returned" if project.include?("Settings-Info.plist")
   abort "retired nonexistent Frameworks search path returned" if
     project.include?("$(PROJECT_DIR)/Frameworks")
@@ -1333,8 +1338,7 @@ ruby -e '
     settings.include?("minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth") &&
       settings.include?("idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth") &&
       settings.include?(".defaultSize(")
-  root = settings[/private struct SettingsRootView: View \{.*\z/m]
-  abort "Settings root is missing" unless root
+  abort "Settings root is missing" unless root.include?("struct SettingsRootView: View")
   conflict = root.index("if model.configuration.hasExternalConflict")
   tabs = root.index("TabView {")
   abort "the global configuration-conflict entry is missing" unless conflict && tabs && conflict < tabs
@@ -1366,6 +1370,7 @@ ruby -e '
       menu.include?("func inputSourceDidActivate(session: RimeSessionId)") &&
       controller.include?("inputSourceDidActivate(session: session)")
 ' Linnet.xcodeproj/project.pbxproj sources/LinnetSettings/SettingsMain.swift \
+  sources/LinnetSettings/SettingsRootView.swift \
   sources/SquirrelApplicationDelegate.swift sources/SquirrelInputController.swift ||
   fail "Settings surface lifecycle or input-menu ownership regressed"
 [[ "$(/usr/bin/plutil -extract TISInputSourceID raw -o - resources/Info.plist)" == \
@@ -1400,8 +1405,44 @@ ruby -e '
 
 test -f sources/LinnetSettings/SettingsWindowCloseGuard.swift ||
   fail "Settings has no native pending-change close boundary"
+
+# Rime remains the only learned-word merge owner. Linnet contributes one Host
+# scheduler and one learning-only installation projection, never a second
+# userdb parser or an automatic portable/config backup path.
+test "$(rg -F -o 'rimeAPI.sync_user_data()' sources | wc -l | tr -d ' ')" -eq 1 ||
+  fail "Rime user-data synchronization regained another runtime caller"
+rg -Fq 'rimeAPI.sync_user_data()' sources/SquirrelApplicationDelegate.swift ||
+  fail "the Host stopped owning the single upstream Rime synchronization call"
+rg -Fq 'static let automaticInterval: TimeInterval = 60 * 60' \
+  sources/LinnetSettings/LinnetRimeSyncController.swift ||
+  fail "automatic learning synchronization is no longer hourly"
+test "$(rg -F -o 'backup_config_files: false' \
+  sources/LinnetSettings/LinnetRimeSyncController.swift | wc -l | tr -d ' ')" -eq 1 ||
+  fail "the installation projection no longer disables Rime automatic config backup"
+if rg -Fq 'backup_config_files: true' \
+    sources/LinnetSettings/LinnetRimeSyncController.swift; then
+  fail "the learning-sync owner re-enabled Rime automatic config backup"
+fi
+if rg -n 'userdb[.]txt|UserDbMerger|commit_count|dynamic_weight' \
+    sources/LinnetSettings/LinnetRimeSyncController.swift; then
+  fail "Linnet regained a second user-dictionary merge implementation"
+fi
+if rg -n 'exportPortable|uploadCloudBackupArchive|cloudBackupArchive' \
+    sources/LinnetSettings/LinnetRimeSyncController.swift \
+    sources/SquirrelApplicationDelegate.swift \
+    sources/SquirrelInputController.swift; then
+  fail "the automatic learning-sync path regained a full recovery archive"
+fi
+test "$(rg -F -c 'LinnetRimeSyncController.swift in Linnet Sources' \
+  Linnet.xcodeproj/project.pbxproj)" -eq 2 ||
+  fail "the Rime sync scheduler is not compiled exactly once into the Host"
+if rg -n 'stores one verified portable archive|Upload Current Data' \
+    sources/LinnetSettings/SettingsViews.swift; then
+  fail "the manual recovery archive is still presented as learning sync"
+fi
 ruby -e '
   app = File.read("sources/LinnetSettings/SettingsMain.swift")
+  root = File.read("sources/LinnetSettings/SettingsRootView.swift")
   guard = File.read("sources/LinnetSettings/SettingsWindowCloseGuard.swift")
   session = File.read("sources/LinnetSettings/SettingsSessionState.swift")
   abort "Cmd-Q can still bypass pending Settings changes" unless
@@ -1415,7 +1456,8 @@ ruby -e '
   abort "the AppKit close prompt no longer follows the selected Settings language" unless
     app.include?("interfaceLocale = Locale.autoupdatingCurrent") &&
       app.include?("locale: interfaceLocale") &&
-      app.include?("SettingsWindowCloseGuard(model: model, locale: interfaceLanguage.locale)")
+      root.include?("SettingsWindowCloseGuard(model: model, locale: interfaceLanguage.locale)") &&
+      root.include?("delegate.interfaceLocale = interfaceLanguage.locale")
   abort "pending drafts gained a second persistence owner" if
     guard.include?("linnet_settings.json") || guard.include?("UserDefaults")
   abort "the canonical in-memory discard transition is missing" unless

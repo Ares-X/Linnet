@@ -551,6 +551,7 @@ struct DataTabView: View {
   @ObservedObject var updateChecker: LinnetSettingsUpdateChecker
   @Binding var pendingClear: Set<SettingsDataCoordinator.LearningDomain>?
   @Binding var pendingPortableImport: SettingsDataCoordinator.PortableImportCandidate?
+  @Binding var pendingCloudBackupUpload: Bool
   @Binding var pendingRestore: LinnetBackupStore.BackupRecord?
   @Binding var pendingBackupRemoval: LinnetBackupStore.BackupRecord?
   @Binding var pendingLegacyImport: SettingsDataCoordinator.LegacyImportCandidate?
@@ -558,17 +559,82 @@ struct DataTabView: View {
   var body: some View {
     LinnetSettingsPage(
       "Data",
-      summary: "Update language data, move personal data, and review backups and diagnostics.",
+      summary: "Update language data, sync or move personal data, and review backups and diagnostics.",
       systemImage: "internaldrive"
     ) {
       VStack(alignment: .leading, spacing: 16) {
         versionSection
         grammarModelSection
         dataManagementSection
+        cloudSyncSection
         backupSection
         diagnosticsSection
       }
     }
+  }
+
+  private var cloudSyncSection: some View {
+    GroupBox("iCloud Drive sync") {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .firstTextBaseline) {
+          VStack(alignment: .leading, spacing: 3) {
+            if let location = model.cloudSyncLocation {
+              Text(location.displayName).font(.callout.weight(.medium))
+              Text(verbatim: location.learningDirectory.lastPathComponent)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            } else {
+              Text("No sync folder selected").font(.callout.weight(.medium))
+              Text("Choose a folder inside iCloud Drive to connect this Mac.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+          Spacer()
+          Button {
+            model.chooseCloudSyncFolder(locale: locale)
+          } label: {
+            Text(
+              model.cloudSyncLocation == nil
+                ? String(localized: "Choose Folder…")
+                : String(localized: "Change Folder…")
+            )
+          }
+          .disabled(model.operationActive)
+        }
+
+        Text(
+          "Rime incrementally merges learned Chinese and English words between your Macs. Linnet checks at most once per hour while it is running; the next activation catches up. It does not read or merge the user dictionary format itself."
+        )
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+
+        HStack {
+          Button("Sync Learning Now") { model.synchronizeLearningNow() }
+            .disabled(model.cloudSyncLocation == nil || model.operationActive)
+          Button("Upload Full Backup…") { pendingCloudBackupUpload = true }
+            .disabled(model.cloudSyncLocation == nil || model.operationActive)
+          Button("Review Full Backup…") {
+            Task {
+              pendingPortableImport = await model.inspectCloudBackupArchive()
+            }
+          }
+          .disabled(
+            model.cloudSyncLocation == nil || !model.configuration.canPersist
+              || model.operationActive || model.portableInspectionActive)
+          Spacer()
+          Button("Disconnect") { model.disconnectCloudSyncFolder() }
+            .disabled(model.cloudSyncLocation == nil || model.operationActive)
+        }
+        Text(
+          "The full backup also includes personal words, disabled words, and Text Expander data. It is a manual recovery archive, not a second learning-sync engine."
+        )
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      }
+      .padding(8)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var versionSection: some View {

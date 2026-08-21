@@ -26,6 +26,7 @@ struct LinnetCandidatePresentationTests {
     testCanonicalInlineMetricsAndMaterial()
     testCandidateDetailGeometry()
     testInputModeTransitions()
+    testIdleMenuPresentationState()
 
     var accessibilitySurface =
       LinnetCandidatePresentation.AccessibilitySurface.candidates
@@ -162,6 +163,27 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.inputModeTransitionLabel(
         previousSchemaID: "linnet_en", currentSchemaID: "linnet_en") == nil,
       "an unchanged Smart English schema emitted duplicate feedback"
+    )
+  }
+
+  private static func testIdleMenuPresentationState() {
+    require(
+      LinnetCandidatePresentation.candidateMenuPage(
+        currentPage: 0, pageSize: 0, candidateCount: 0, highlighted: 0
+      ) == .init(currentPage: 0, pageSize: 0, candidateCount: 0, highlighted: 0),
+      "an idle schema switch was rejected because it has no candidate menu"
+    )
+    require(
+      LinnetCandidatePresentation.candidateMenuPage(
+        currentPage: 0, pageSize: 9, candidateCount: 0, highlighted: 0
+      ) == .init(currentPage: 0, pageSize: 9, candidateCount: 0, highlighted: 0),
+      "a valid empty candidate page was rejected"
+    )
+    require(
+      LinnetCandidatePresentation.candidateMenuPage(
+        currentPage: 1, pageSize: 0, candidateCount: 0, highlighted: 0
+      ) == nil,
+      "an inconsistent zero-sized candidate page was accepted"
     )
   }
 

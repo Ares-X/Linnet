@@ -108,6 +108,65 @@ fi
 rg -Fq 'shared PredictEngine factory/engine identity: PASS' "${scratch}/stdout"
 test "$(LC_ALL=C grep -a -F -c 'loading predict db:' "${scratch}/stderr")" -eq 1
 
+# Exercise librime's canonical multi-device user-dictionary merge. Linnet only
+# schedules this upstream owner; it never interprets snapshot rows itself.
+sync_root="${scratch}/rime-sync"
+device_a="${scratch}/device-a"
+device_b="${scratch}/device-b"
+mkdir "${sync_root}" "${device_a}" "${device_b}"
+"${swiftc}" -warnings-as-errors -sdk "${sdk}" \
+  sources/LinnetSettings/LinnetRimeSyncController.swift \
+  tests/LinnetRimeSyncProjectionFixture.swift \
+  -o "${scratch}/rime-sync-projection"
+for dictionary in linnet_zh linnet_en; do
+  test -d "${user}/${dictionary}.userdb"
+  cp -R "${user}/${dictionary}.userdb" "${device_a}/${dictionary}.userdb"
+  cp -R "${user}/${dictionary}.userdb" "${device_b}/${dictionary}.userdb"
+done
+printf 'installation_id: device-a\n' >"${device_a}/installation.yaml"
+printf 'installation_id: device-b\n' >"${device_b}/installation.yaml"
+"${scratch}/rime-sync-projection" "${device_a}" "${sync_root}"
+"${scratch}/rime-sync-projection" "${device_b}" "${sync_root}"
+printf '# Rime user dictionary export\n云同步甲\tyun tong bu jia\t7\nlinnetclouda\tlinnetclouda\t7\n' \
+  >"${scratch}/device-a-rows.txt"
+printf '# Rime user dictionary export\n云同步乙\tyun tong bu yi\t9\nlinnetcloudb\tlinnetcloudb\t9\n' \
+  >"${scratch}/device-b-rows.txt"
+for dictionary in linnet_zh linnet_en; do
+  (
+    cd "${device_a}"
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${repo_root}/bin/rime_dict_manager" --import "${dictionary}" \
+        "${scratch}/device-a-rows.txt" >/dev/null
+  )
+  (
+    cd "${device_b}"
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${repo_root}/bin/rime_dict_manager" --import "${dictionary}" \
+        "${scratch}/device-b-rows.txt" >/dev/null
+  )
+done
+for device in "${device_a}" "${device_b}" "${device_a}"; do
+  (
+    cd "${device}"
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${repo_root}/bin/rime_dict_manager" --sync >/dev/null
+  )
+done
+for dictionary in linnet_zh linnet_en; do
+  export_file="${scratch}/${dictionary}-merged.txt"
+  (
+    cd "${device_a}"
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${repo_root}/bin/rime_dict_manager" --export "${dictionary}" \
+        "${export_file}" >/dev/null
+  )
+  rg -Fq $'云同步甲\t' "${export_file}"
+  rg -Fq $'云同步乙\t' "${export_file}"
+  rg -Fq $'linnetclouda\t' "${export_file}"
+  rg -Fq $'linnetcloudb\t' "${export_file}"
+done
+echo "Linnet upstream multi-device user dictionary sync: PASS"
+
 # Exercise the production-shaped exact-11 configuration reload in its own
 # user directory so its same-second projections and session invalidation never
 # become implicit setup for the remaining Settings/runtime matrix.

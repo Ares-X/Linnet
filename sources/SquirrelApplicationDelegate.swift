@@ -75,13 +75,30 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
   // setupRime ran at most once per process; an explicit runtime retry needs to
   // know whether the traits/notification handler are already in place.
   private var runtimeDataSnapshot: LinnetDataRegistry.RuntimeSnapshot?
+  private lazy var rimeSyncController = LinnetRimeSyncController(
+    loadConfiguration: {
+      let bookmark = LinnetSettingsContract.cloudSyncFolderBookmark()
+      let syncDirectory = try bookmark.map {
+        try LinnetCloudSyncLocation.resolve(bookmark: $0).prepareLearningDirectory()
+      }
+      return .init(
+        userDirectory: SquirrelApp.userDir,
+        syncDirectory: syncDirectory,
+        lastAttempt: LinnetSettingsContract.cloudSyncLastAttempt())
+    },
+    recordAttempt: { LinnetSettingsContract.setCloudSyncLastAttempt($0) },
+    operation: { [weak self] in self?.performRimeUserDataSync() ?? .failed }
+  )
+
   func applicationWillFinishLaunching(_ notification: Notification) {
     panel = SquirrelPanel(position: .zero)
     addObservers()
     refreshStatusItem()
+    rimeSyncController.start()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    rimeSyncController.stop()
     removeObservers()
     transactionMonitor?.cancel()
     transactionMonitor = nil
@@ -457,6 +474,20 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
       object: nil,
       suspensionBehavior: .deliverImmediately
     )
+    notifCenter.addObserver(
+      self,
+      selector: #selector(cloudSyncConfigurationChanged(_:)),
+      name: LinnetSettingsContract.cloudSyncConfigurationDidChange,
+      object: nil,
+      suspensionBehavior: .deliverImmediately
+    )
+    notifCenter.addObserver(
+      self,
+      selector: #selector(cloudSyncNowRequested(_:)),
+      name: LinnetSettingsContract.cloudSyncNowRequested,
+      object: nil,
+      suspensionBehavior: .deliverImmediately
+    )
   }
 
   private func removeObservers() {
@@ -472,6 +503,42 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
       name: .init(kTISNotifySelectedKeyboardInputSourceChanged as String),
       object: nil
     )
+    distributed.removeObserver(
+      self,
+      name: LinnetSettingsContract.cloudSyncConfigurationDidChange,
+      object: nil
+    )
+    distributed.removeObserver(
+      self,
+      name: LinnetSettingsContract.cloudSyncNowRequested,
+      object: nil
+    )
+  }
+
+  @objc private func cloudSyncConfigurationChanged(_: Notification) {
+    DispatchQueue.main.async { [weak self] in self?.rimeSyncController.reload() }
+  }
+
+  @objc private func cloudSyncNowRequested(_: Notification) {
+    DispatchQueue.main.async { [weak self] in self?.rimeSyncController.synchronizeNow() }
+  }
+
+  private func performRimeUserDataSync() -> LinnetRimeSyncController.Outcome {
+    guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
+    if panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true {
+      return .busy
+    }
+
+    isRimeInputSuspended = true
+    panel?.inputController?.prepareForRimeMaintenance()
+    panel?.hide()
+    guard rimeAPI.sync_user_data() else {
+      isRimeInputSuspended = false
+      return .failed
+    }
+    rimeAPI.join_maintenance_thread()
+    isRimeInputSuspended = false
+    return .completed
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

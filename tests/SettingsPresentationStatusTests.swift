@@ -11,6 +11,34 @@ struct SettingsPresentationStatusTests {
 
     expect(.ready, en: "Settings are ready.", zh: "设置已就绪。", english, chinese)
     expect(
+      .cloudSyncFolderSelected(name: "iCloud Drive"),
+      en: "Sync folder connected: iCloud Drive.",
+      zh: "已连接同步文件夹：iCloud Drive。",
+      english,
+      chinese
+    )
+    expect(
+      .cloudSyncRequested,
+      en: "Learning synchronization requested.",
+      zh: "已请求同步学习词。",
+      english,
+      chinese
+    )
+    expect(
+      .cloudBackupUploaded,
+      en: "Full recovery backup uploaded.",
+      zh: "已上传完整恢复备份。",
+      english,
+      chinese
+    )
+    expect(
+      .cloudSyncDisconnected,
+      en: "Sync folder disconnected. No local or cloud data was deleted.",
+      zh: "已断开同步文件夹，未删除本地或云端数据。",
+      english,
+      chinese
+    )
+    expect(
       .publishingAppearance,
       en: "Publishing candidate appearance…",
       zh: "正在发布候选窗口外观…",
@@ -247,6 +275,14 @@ struct SettingsPresentationStatusTests {
       english,
       chinese
     )
+    expectPanel(
+      .cloudSyncFolder,
+      productName: "Linnet",
+      en: "Choose an iCloud Drive Sync Folder",
+      zh: "选择 iCloud Drive 同步文件夹",
+      english,
+      chinese
+    )
     expect(
       .backupVerified(.restore),
       en: "Verified · Restore backup",
@@ -340,7 +376,7 @@ struct SettingsPresentationStatusTests {
   private static func expectFooterConsumesTypedPresentation() {
     let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
       .deletingLastPathComponent()
-    let sourceURL = repository.appending(path: "sources/LinnetSettings/SettingsMain.swift")
+    let sourceURL = repository.appending(path: "sources/LinnetSettings/SettingsRootView.swift")
     guard let source = try? String(contentsOf: sourceURL, encoding: .utf8),
       let start = source.range(of: "  private var footer: some View {"),
       let end = source.range(of: "\n  }\n}", range: start.upperBound..<source.endIndex)

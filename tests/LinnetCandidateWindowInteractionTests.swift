@@ -203,7 +203,7 @@ struct LinnetCandidateWindowInteractionTests {
     panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: .init(
-        items: [], pageSize: 9, currentPage: 0, isLastPage: true,
+        items: [], pageSize: 0, currentPage: 0, isLastPage: true,
         isExpanded: false, canExpand: false),
       highlighted: 0, update: true)
     let text = panel.contentView?.subviews.compactMap { $0 as? NSTextView }.first?

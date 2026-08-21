@@ -186,7 +186,13 @@ enum LinnetSettingsContract {
   }
 
   private static let backupRetentionPolicyKey = "backup.retention_policy"
+  private static let cloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
+  private static let cloudSyncLastAttemptKey = "cloud_sync.last_attempt_v1"
   private static let inputMethodConnectionKey = "InputMethodConnectionName"
+  static let cloudSyncConfigurationDidChange = Notification.Name(
+    "io.github.ares-x.inputmethod.Linnet.cloud-sync-configuration-v1")
+  static let cloudSyncNowRequested = Notification.Name(
+    "io.github.ares-x.inputmethod.Linnet.cloud-sync-now-v1")
 
   static func hostBundle(startingAt bundle: Bundle = .main) -> Bundle? {
     if isInputMethod(bundle) {
@@ -224,6 +230,40 @@ enum LinnetSettingsContract {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
     defaults.set(policy.rawValue, forKey: backupRetentionPolicyKey)
     return true
+  }
+
+  static func cloudSyncFolderBookmark(
+    startingAt bundle: Bundle = .main
+  ) -> Data? {
+    hostDefaults(startingAt: bundle)?.data(forKey: cloudSyncFolderBookmarkKey)
+  }
+
+  @discardableResult
+  static func setCloudSyncFolderBookmark(
+    _ bookmark: Data?,
+    startingAt bundle: Bundle = .main
+  ) -> Bool {
+    guard let defaults = hostDefaults(startingAt: bundle) else { return false }
+    if let bookmark {
+      defaults.set(bookmark, forKey: cloudSyncFolderBookmarkKey)
+    } else {
+      defaults.removeObject(forKey: cloudSyncFolderBookmarkKey)
+    }
+    return defaults.synchronize()
+  }
+
+  static func cloudSyncLastAttempt(startingAt bundle: Bundle = .main) -> Date? {
+    hostDefaults(startingAt: bundle)?.object(forKey: cloudSyncLastAttemptKey) as? Date
+  }
+
+  @discardableResult
+  static func setCloudSyncLastAttempt(
+    _ date: Date,
+    startingAt bundle: Bundle = .main
+  ) -> Bool {
+    guard let defaults = hostDefaults(startingAt: bundle) else { return false }
+    defaults.set(date, forKey: cloudSyncLastAttemptKey)
+    return defaults.synchronize()
   }
 
   static func dataRegistry(startingAt bundle: Bundle = .main) -> LinnetDataRegistry? {

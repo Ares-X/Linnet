@@ -209,6 +209,21 @@ final class SquirrelInputController: IMKInputController {
       from: CGEventSource.flagsState(.combinedSessionState))
   }
 
+  var hasPendingRimeInput: Bool {
+    guard session != 0, rimeAPI.find_session(session), let input = rimeAPI.get_input(session)
+    else { return false }
+    return input.pointee != 0
+  }
+
+  /// Rime's upstream synchronization owns session cleanup. Retire this
+  /// controller's stale generation before that maintenance boundary.
+  func prepareForRimeMaintenance() {
+    session = 0
+    preedit = ""
+    clearChord()
+    hidePalettes()
+  }
+
   override func activateServer(_ sender: Any!) {
     self.client ?= sender as? IMKTextInput
     if let panel = NSApp.squirrelAppDelegate.panel {
@@ -517,15 +532,28 @@ private extension SquirrelInputController {
     labels: [String],
     expansionRequested: Bool
   ) -> CandidateSnapshot? {
-    guard let currentPage = Int(exactly: context.menu.page_no),
-      let pageSize = Int(exactly: context.menu.page_size),
-      let currentCount = Int(exactly: context.menu.num_candidates),
-      let highlightedOnPage = Int(exactly: context.menu.highlighted_candidate_index),
-      pageSize > 0,
-      currentCount >= 0,
-      highlightedOnPage >= 0,
-      let expandedBounds = LinnetCandidatePresentation.expandedCandidateRange(
-        page: currentPage, pageSize: pageSize)
+    guard let menuPage = LinnetCandidatePresentation.candidateMenuPage(
+      currentPage: context.menu.page_no,
+      pageSize: context.menu.page_size,
+      candidateCount: context.menu.num_candidates,
+      highlighted: context.menu.highlighted_candidate_index)
+    else { return nil }
+    guard menuPage.pageSize > 0 else {
+      return CandidateSnapshot(
+        items: [],
+        currentPage: 0,
+        pageSize: 0,
+        highlightedItemIndex: 0,
+        isLastPage: true,
+        canExpand: false,
+        isExpanded: false)
+    }
+    let currentPage = menuPage.currentPage
+    let pageSize = menuPage.pageSize
+    let currentCount = menuPage.candidateCount
+    let highlightedOnPage = menuPage.highlighted
+    guard let expandedBounds = LinnetCandidatePresentation.expandedCandidateRange(
+      page: currentPage, pageSize: pageSize)
     else { return nil }
 
     let hasActiveInput = context.composition.length > 0

@@ -9,11 +9,12 @@
 //
 
 import AppKit
+import Darwin
 import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-private final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
+final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   weak var model: SettingsModel?
   var interfaceLocale = Locale.autoupdatingCurrent
 
@@ -70,34 +71,6 @@ struct LinnetSettingsApp: App {
   }
 }
 
-private enum SettingsInterfaceLanguage: String, CaseIterable {
-  static let defaultsKey = "Linnet.Settings.InterfaceLanguage"
-
-  case system
-  case english
-  case simplifiedChinese
-
-  var locale: Locale {
-    switch self {
-    case .system: .autoupdatingCurrent
-    case .english: Locale(identifier: "en")
-    case .simplifiedChinese: Locale(identifier: "zh-Hans")
-    }
-  }
-}
-
-private extension SettingsPresentationSeverity {
-  var footerColor: Color {
-    switch self {
-    case .informational: .secondary
-    case .success: .green
-    case .progress: .accentColor
-    case .warning: .orange
-    case .error: .red
-    }
-  }
-}
-
 struct SettingsActiveOperation: Equatable {
   let kind: SettingsOperationKind
   var phase: SettingsOperationPhase
@@ -126,6 +99,7 @@ enum SettingsLanguageDataUpdateTarget: Equatable {
 
 @MainActor
 final class SettingsModel: ObservableObject {
+  private static let cloudBackupName = "Linnet-Full-Backup.\(LinnetBackupStore.portableExtension)"
   @Published var backupRetentionPolicy: LinnetSettingsContract.BackupRetentionPolicy
   @Published var configuration: SettingsConfigurationSession {
     didSet {
@@ -153,6 +127,7 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var activeDownloadSource: LinnetSettingsDownloadSource? = .direct
   @Published private(set) var downloadSourceFailure: LinnetSettingsDownloadSource.Failure?
   @Published private(set) var appearancePublishActive = false
+  @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation? = nil
 
   let productName: String
   let appVersion: String
@@ -291,6 +266,18 @@ final class SettingsModel: ObservableObject {
     configuration = initialConfiguration
     personalValidation = .valid(initialConfiguration.personalDraft)
     legacyImportState = dataServicesAvailable ? .checking : .unavailable
+    if let bookmark = LinnetSettingsContract.cloudSyncFolderBookmark(startingAt: bundle) {
+      do {
+        let location = try LinnetCloudSyncLocation.resolve(bookmark: bookmark)
+        cloudSyncLocation = location
+        if location.bookmark != bookmark {
+          _ = LinnetSettingsContract.setCloudSyncFolderBookmark(
+            location.bookmark, startingAt: bundle)
+        }
+      } catch {
+        print("The selected sync folder is unavailable: \(error.localizedDescription)")
+      }
+    }
     detectGrammarModel()
     schedulePersonalValidation()
   }
@@ -837,6 +824,93 @@ final class SettingsModel: ObservableObject {
     ) { _ in .portableExported(productName: self.productName) }
   }
 
+  var cloudBackupArchiveAvailable: Bool {
+    guard let archive = cloudBackupArchive else { return false }
+    var isDirectory = ObjCBool(false)
+    return FileManager.default.fileExists(
+      atPath: archive.path,
+      isDirectory: &isDirectory
+    ) && !isDirectory.boolValue
+  }
+
+  var cloudBackupArchive: URL? {
+    cloudSyncLocation?.folder.appending(
+      component: Self.cloudBackupName, directoryHint: .notDirectory)
+  }
+
+  func chooseCloudSyncFolder(locale: Locale) {
+    guard !operationActive else { return }
+    let panel = NSOpenPanel()
+    panel.title = SettingsFilePanelTitle.cloudSyncFolder.text(
+      productName: productName, locale: locale)
+    panel.prompt = locale.usesSimplifiedChineseSettingsCopy ? "使用此文件夹" : "Use Folder"
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.canCreateDirectories = true
+    panel.allowsMultipleSelection = false
+    guard panel.runModal() == .OK, let folder = panel.url else { return }
+    do {
+      let location = try LinnetCloudSyncLocation.select(folder: folder)
+      guard LinnetSettingsContract.setCloudSyncFolderBookmark(location.bookmark) else {
+        status = .operationFailed(.unavailable)
+        return
+      }
+      cloudSyncLocation = location
+      notifyCloudSyncConfigurationChanged()
+      status = .cloudSyncFolderSelected(name: location.displayName)
+    } catch {
+      logDiagnostic(error, context: "Sync folder selection failed")
+      status = .operationFailed(.unsafePath)
+    }
+  }
+
+  func disconnectCloudSyncFolder() {
+    guard !operationActive,
+      LinnetSettingsContract.setCloudSyncFolderBookmark(nil)
+    else { return }
+    cloudSyncLocation = nil
+    notifyCloudSyncConfigurationChanged()
+    status = .cloudSyncDisconnected
+  }
+
+  func synchronizeLearningNow() {
+    guard cloudSyncLocation != nil, !operationActive else { return }
+    DistributedNotificationCenter.default().postNotificationName(
+      LinnetSettingsContract.cloudSyncNowRequested,
+      object: nil,
+      userInfo: nil,
+      deliverImmediately: true)
+    status = .cloudSyncRequested
+  }
+
+  func uploadCloudBackupArchive() {
+    guard let destination = cloudBackupArchive, !operationActive else { return }
+    run(
+      .portableExport,
+      operation: .exportPortable(
+        categories: Set(LinnetBackupStore.Category.allCases),
+        destination: destination
+      )
+    ) { _ in .cloudBackupUploaded }
+  }
+
+  func inspectCloudBackupArchive(
+  ) async -> SettingsDataCoordinator.PortableImportCandidate? {
+    guard let source = cloudBackupArchive, cloudBackupArchiveAvailable else {
+      status = .operationFailed(.unavailable)
+      return nil
+    }
+    return await inspectPortableImport(source)
+  }
+
+  private func notifyCloudSyncConfigurationChanged() {
+    DistributedNotificationCenter.default().postNotificationName(
+      LinnetSettingsContract.cloudSyncConfigurationDidChange,
+      object: nil,
+      userInfo: nil,
+      deliverImmediately: true)
+  }
+
   func choosePortableImportSource(locale: Locale) -> URL? {
     guard !operationActive else { return nil }
     let panel = NSOpenPanel()
@@ -1328,244 +1402,5 @@ final class SettingsModel: ObservableObject {
 
   private func logDiagnostic(_ error: Error, context: String) {
     print("\(context): \(error.localizedDescription)")
-  }
-}
-
-private struct SettingsRootView: View {
-  @StateObject private var model = SettingsModel()
-  @AppStorage(SettingsInterfaceLanguage.defaultsKey)
-  private var interfaceLanguageRawValue = SettingsInterfaceLanguage.system.rawValue
-  @State private var pendingClear: Set<SettingsDataCoordinator.LearningDomain>?
-  @State private var pendingPortableImport: SettingsDataCoordinator.PortableImportCandidate?
-  @State private var pendingRestore: LinnetBackupStore.BackupRecord?
-  @State private var pendingBackupRemoval: LinnetBackupStore.BackupRecord?
-  @State private var pendingLegacyImport: SettingsDataCoordinator.LegacyImportCandidate?
-
-  var body: some View {
-    VStack(spacing: 0) {
-      if model.configuration.hasExternalConflict {
-        GroupBox("Settings data changed elsewhere") {
-          VStack(alignment: .leading, spacing: 8) {
-            Text(
-              "Your unsaved drafts were preserved. Reload the current settings data, or keep your drafts and review them before applying."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            HStack {
-              Button("Reload Current Data") { model.reloadExternalChanges() }
-              Button("Keep My Drafts") { model.keepPendingDrafts() }
-            }
-          }
-          .padding(8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-      }
-      TabView {
-        AppearanceTabView(model: model)
-          .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
-        InputTabView(model: model)
-          .tabItem { Label("Input", systemImage: "keyboard") }
-        DictionaryTabView(model: model)
-          .tabItem { Label("Dictionary", systemImage: "text.book.closed") }
-        EnglishTabView(model: model)
-          .tabItem {
-            Label {
-              Text("English")
-            } icon: {
-              LinnetSettingsPageMarkView(mark: .latinABC, context: .tab)
-                .font(.system(size: 10, weight: .bold))
-            }
-          }
-        DataTabView(
-          model: model,
-          updateChecker: model.updateChecker,
-          pendingClear: $pendingClear,
-          pendingPortableImport: $pendingPortableImport,
-          pendingRestore: $pendingRestore,
-          pendingBackupRemoval: $pendingBackupRemoval,
-          pendingLegacyImport: $pendingLegacyImport
-        )
-        .tabItem { Label("Data", systemImage: "internaldrive") }
-      }
-      Divider()
-      footer
-    }
-    .task {
-      model.refreshBackups()
-      model.refreshLegacyImportCandidate()
-      if model.diagnostics == nil { model.refreshDiagnostics() }
-    }
-    .confirmationDialog(
-      "Import existing Rime / Hallelujah data?",
-      isPresented: Binding(
-        get: { pendingLegacyImport != nil },
-        set: { if !$0 { pendingLegacyImport = nil } }
-      ),
-      titleVisibility: .visible
-    ) {
-      Button("Import Existing", role: .destructive) {
-        if let pendingLegacyImport { model.importExistingData(pendingLegacyImport) }
-        pendingLegacyImport = nil
-      }
-      Button("Cancel", role: .cancel) { pendingLegacyImport = nil }
-    } message: {
-      if let pendingLegacyImport {
-        Text(verbatim: model.legacyImportSummary(pendingLegacyImport, locale: interfaceLanguage.locale))
-      }
-    }
-    .confirmationDialog(
-      "Clear selected learning data?",
-      isPresented: Binding(
-        get: { pendingClear != nil },
-        set: { if !$0 { pendingClear = nil } }
-      ),
-      titleVisibility: .visible
-    ) {
-      Button("Clear Learning", role: .destructive) {
-        if let pendingClear { model.clearLearning(pendingClear) }
-        pendingClear = nil
-      }
-      Button("Cancel", role: .cancel) { pendingClear = nil }
-    } message: {
-      Text(
-        "Personal words, disabled words, Text Expander, and English interaction settings are preserved. An automatic backup is created first."
-      )
-    }
-    .confirmationDialog(
-      "Replace categories from this portable archive?",
-      isPresented: Binding(
-        get: { pendingPortableImport != nil },
-        set: { if !$0 { pendingPortableImport = nil } }
-      ),
-      titleVisibility: .visible
-    ) {
-      Button("Import and Replace", role: .destructive) {
-        if let pendingPortableImport { model.importPortable(pendingPortableImport) }
-        pendingPortableImport = nil
-      }
-      Button("Cancel", role: .cancel) { pendingPortableImport = nil }
-    } message: {
-      if let pendingPortableImport {
-        Text(verbatim: model.portableImportSummary(
-          pendingPortableImport, locale: interfaceLanguage.locale))
-      }
-    }
-    .confirmationDialog(
-      "Restore this verified backup?",
-      isPresented: Binding(
-        get: { pendingRestore != nil },
-        set: { if !$0 { pendingRestore = nil } }
-      ),
-      titleVisibility: .visible
-    ) {
-      Button("Restore Backup", role: .destructive) {
-        if let pendingRestore { model.restore(pendingRestore) }
-        pendingRestore = nil
-      }
-      Button("Cancel", role: .cancel) { pendingRestore = nil }
-    } message: {
-      Text("The verified backup replaces current data. The current state is backed up first.")
-    }
-    .confirmationDialog(
-      SettingsBackupRemovalCopy.title(locale: interfaceLanguage.locale),
-      isPresented: Binding(
-        get: { pendingBackupRemoval != nil },
-        set: { if !$0 { pendingBackupRemoval = nil } }
-      ),
-      titleVisibility: .visible
-    ) {
-      Button(
-        SettingsBackupRemovalCopy.confirmAction(locale: interfaceLanguage.locale),
-        role: .destructive
-      ) {
-        if let pendingBackupRemoval { model.removeBackupRecord(pendingBackupRemoval) }
-        pendingBackupRemoval = nil
-      }
-      Button("Cancel", role: .cancel) { pendingBackupRemoval = nil }
-    } message: {
-      Text(verbatim: SettingsBackupRemovalCopy.message(locale: interfaceLanguage.locale))
-    }
-    .background(SettingsWindowCloseGuard(model: model, locale: interfaceLanguage.locale))
-    .onAppear {
-      registerApplicationDelegate()
-    }
-    .onChange(of: interfaceLanguageRawValue) { _ in
-      registerApplicationDelegate()
-    }
-    .environment(\.locale, interfaceLanguage.locale)
-  }
-
-  private var interfaceLanguage: SettingsInterfaceLanguage {
-    SettingsInterfaceLanguage(rawValue: interfaceLanguageRawValue) ?? .system
-  }
-
-  private func registerApplicationDelegate() {
-    guard let delegate = NSApp.delegate as? SettingsApplicationDelegate else { return }
-    delegate.model = model
-    delegate.interfaceLocale = interfaceLanguage.locale
-  }
-
-  private var interfaceLanguageBinding: Binding<SettingsInterfaceLanguage> {
-    Binding(
-      get: { interfaceLanguage },
-      set: { interfaceLanguageRawValue = $0.rawValue }
-    )
-  }
-
-  private var footer: some View {
-    let presentation = model.displayedStatus.presentation(locale: interfaceLanguage.locale)
-    return HStack(spacing: 12) {
-      HStack(alignment: .firstTextBaseline, spacing: 7) {
-        Image(systemName: presentation.systemImage)
-          .accessibilityHidden(true)
-        Text(verbatim: presentation.text)
-          .font(.callout)
-          .lineLimit(2)
-          .help(presentation.text)
-      }
-      .foregroundStyle(presentation.severity.footerColor)
-      .accessibilityElement(children: .ignore)
-      .accessibilityLabel(Text(verbatim: presentation.accessibilityLabel))
-      .accessibilityAddTraits(.updatesFrequently)
-      Spacer()
-      if let active = model.activeOperation {
-        ProgressView().controlSize(.small)
-        Text(
-          SettingsPresentationStatus.operationProgress(active.kind, active.phase)
-            .text(locale: interfaceLanguage.locale)
-        )
-          .font(.callout)
-        Button("Cancel") { model.cancelActiveOperation() }
-          .disabled(!active.cancellable)
-      } else if model.packDownloadCancellable {
-        ProgressView(value: model.packDownloadProgress)
-          .frame(width: 80)
-          .accessibilityLabel("Language data download")
-          .accessibilityValue(
-            Text(
-              model.packDownloadProgress,
-              format: .percent.precision(.fractionLength(0))))
-        Button("Cancel Download") { model.cancelLanguagePackDownload() }
-      }
-      Picker(selection: interfaceLanguageBinding) {
-        Text("Follow System").tag(SettingsInterfaceLanguage.system)
-        Text(verbatim: "English").tag(SettingsInterfaceLanguage.english)
-        Text(verbatim: "简体中文").tag(SettingsInterfaceLanguage.simplifiedChinese)
-      } label: {
-        Label("Language", systemImage: "globe")
-      }
-      .pickerStyle(.menu)
-      .fixedSize()
-      Button("Apply Changes") { model.applyConfiguration() }
-        .buttonStyle(.borderedProminent)
-        .disabled(!model.canApplyChanges)
-        .help(
-          "Theme, font, and appearance mode save and apply to the candidate window live. Candidate count, candidate layouts, Input, English, and personal data require Apply Changes."
-        )
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 8)
-    .background(.bar)
   }
 }

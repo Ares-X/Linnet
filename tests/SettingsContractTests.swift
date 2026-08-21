@@ -4,6 +4,8 @@ import Foundation
 @main
 struct SettingsContractTests {
   private static let backupRetentionPolicyKey = "backup.retention_policy"
+  private static let cloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
+  private static let cloudSyncLastAttemptKey = "cloud_sync.last_attempt_v1"
 
   static func main() {
     do {
@@ -88,6 +90,22 @@ struct SettingsContractTests {
       LinnetSettingsContract.backupRetentionPolicy(startingAt: host) == .keepLatest30
     else {
       fail("the backup policy did not share the host suite")
+    }
+    let bookmark = Data("folder-bookmark".utf8)
+    let attemptedAt = Date(timeIntervalSince1970: 12_345)
+    guard LinnetSettingsContract.setCloudSyncFolderBookmark(
+        bookmark,
+        startingAt: settings
+      ),
+      defaults.data(forKey: cloudSyncFolderBookmarkKey) == bookmark,
+      LinnetSettingsContract.cloudSyncFolderBookmark(startingAt: host) == bookmark,
+      LinnetSettingsContract.setCloudSyncLastAttempt(attemptedAt, startingAt: settings),
+      defaults.object(forKey: cloudSyncLastAttemptKey) as? Date == attemptedAt,
+      LinnetSettingsContract.cloudSyncLastAttempt(startingAt: host) == attemptedAt,
+      LinnetSettingsContract.setCloudSyncFolderBookmark(nil, startingAt: settings),
+      defaults.object(forKey: cloudSyncFolderBookmarkKey) == nil
+    else {
+      fail("the cloud sync folder bookmark did not share the host suite")
     }
   }
 
