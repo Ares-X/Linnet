@@ -12,6 +12,7 @@ SEMVER = /\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(
 SHA256 = /\A[0-9a-f]{64}\z/
 RELEASE_METADATA_PATH = "config/linnet-data-releases.json"
 RELEASE_SOURCE_PREFIXES = %w[data/chinese/ data/linnet/ data/opencc/].freeze
+RELEASE_SOURCE_PATHS = %w[config/LinnetProduct.xcconfig].freeze
 
 def fail_metadata(message)
   warn "data_release_metadata: #{message}"
@@ -85,11 +86,12 @@ def check_source_change(paths)
     path.start_with?("/") || path.split("/").include?("..")
   end
   source_changed = normalized.any? do |path|
-    RELEASE_SOURCE_PREFIXES.any? { |prefix| path.start_with?(prefix) }
+    RELEASE_SOURCE_PATHS.include?(path) ||
+      RELEASE_SOURCE_PREFIXES.any? { |prefix| path.start_with?(prefix) }
   end
   metadata_changed = normalized.include?(RELEASE_METADATA_PATH)
   if source_changed && !metadata_changed
-    fail_metadata("language-data sources changed without #{RELEASE_METADATA_PATH}")
+    fail_metadata("Catalog inputs changed without #{RELEASE_METADATA_PATH}")
   end
 end
 

@@ -27,6 +27,14 @@ for owner in "${asset_manifest}" "${publisher}"; do
   bash -n "${owner}"
 done
 
+if printf '%s\n' config/LinnetProduct.xcconfig |
+    "${repo_root}/package/data_release_metadata" check-source-change \
+      >/dev/null 2>&1; then
+  fail "a Core identity change can still reuse an already-published Catalog sequence"
+fi
+printf '%s\n' config/LinnetProduct.xcconfig config/linnet-data-releases.json |
+  "${repo_root}/package/data_release_metadata" check-source-change >/dev/null
+
 version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
   "${repo_root}/config/LinnetProduct.xcconfig")"
 catalog_sequence="$("${repo_root}/package/data_release_metadata" get-catalog-sequence \

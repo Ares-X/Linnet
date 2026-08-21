@@ -40,7 +40,7 @@ ad-hoc 签名；`package/make_package` 只封装已验证字节，不重新签�
 ```bash
 LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
   package/verify_publication_artifacts \
-  "$ARCHIVE_OUTPUT_DIR" 0.1.4 "$LINNET_CANDIDATE_REVISION"
+  "$ARCHIVE_OUTPUT_DIR" 0.1.5 "$LINNET_CANDIDATE_REVISION"
 ```
 
 测试用 UAT CMS 身份仍可用于本地、非公开的安装回归；它不是公开发布前置，

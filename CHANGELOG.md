@@ -3,7 +3,7 @@
 本文件记录 Linnet 自身的用户可见变化。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
-## 0.1.4 — 2026-08-21
+## 0.1.5 — 2026-08-21
 
 ### 英文输入与下载
 
