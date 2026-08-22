@@ -14,6 +14,18 @@ gitlink="$(git ls-files --stage -- upstreams/weasel | awk '{print $2}')"
   exit 1
 }
 
+while IFS= read -r locked_patch; do
+  [[ "$(git check-attr eol -- "${locked_patch}")" == \
+      "${locked_patch}: eol: lf" ]] || {
+    echo "Locked patch checkout bytes are not fixed to LF: ${locked_patch}" >&2
+    exit 1
+  }
+done < <(ruby -rjson -e '
+  JSON.parse(File.read(ARGV.fetch(0))).fetch("downstream_patches").each_value do |item|
+    puts item.fetch("path")
+  end
+' upstreams.lock.json)
+
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/linnet-weasel-verify.XXXXXX")"
 cleanup() {
   find "${scratch}" -depth -delete

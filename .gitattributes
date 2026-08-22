@@ -1,7 +1,7 @@
 # These files are patches as data. Their added-line markers are interpreted by
 # the downstream patch owner, so the outer repository must not reinterpret
 # `+ ` lines as its own trailing whitespace.
-patches/*.patch -whitespace
-platforms/windows/patches/*.patch -whitespace
+patches/*.patch text eol=lf -whitespace
+platforms/windows/patches/*.patch text eol=lf -whitespace
 # Third-party license texts are pinned verbatim by the release metadata owner.
 LICENSES/*.txt -whitespace

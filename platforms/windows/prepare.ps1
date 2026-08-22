@@ -98,7 +98,7 @@ function Apply-LockedPatch {
   $Patch = Join-Path $RepoRoot $RelativePath
   $Actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Patch).Hash.ToLowerInvariant()
   if ($Actual -ne $Sha256) {
-    throw "Locked patch digest differs: $RelativePath"
+    throw "Locked patch digest differs: $RelativePath (expected=$Sha256 actual=$Actual)"
   }
   Push-Location $Target
   try {
