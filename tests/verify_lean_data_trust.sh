@@ -93,6 +93,10 @@ if rg -n 'PASS \(librime correction' scripts/build-rime-runtime; then
   echo "Runtime build status still advertises the retired global correction owner." >&2
   exit 1
 fi
+if rg -n 'cmake.*--version.*\| head -n 1' scripts/build-rime-runtime; then
+  echo "Runtime build can misclassify valid CMake output as SIGPIPE under pipefail." >&2
+  exit 1
+fi
 fetch_guard='fetch_grammar_model() ('
 rg -Fq "${fetch_guard}" action-install.sh || {
   echo "Grammar download does not own a scoped cleanup subshell." >&2

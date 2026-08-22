@@ -402,7 +402,8 @@ if [[ -e "${cmake_target}" ]]; then
 fi
 mv "${cmake_extract}/${cmake_top}" "${cmake_target}"
 cmake="${cmake_target}/${cmake_archive_root#*/}/${cmake_relative_exec}"
-cmake_report="$(capture "${cmake}" --version | head -n 1)"
+cmake_report="$(capture "${cmake}" --version)"
+cmake_report="${cmake_report%%$'\n'*}"
 [[ "${cmake_report}" == "cmake version ${cmake_version}" ]] || fail "CMake version differs from lock"
 
 librime_checkout="${repo_root}/librime"
