@@ -84,11 +84,11 @@ Product version and build number come only from `config/LinnetProduct.xcconfig`.
 CI then runs `platforms/windows/preflight.ps1`; the installer is not uploaded
 unless both Win32 and x64 `rime.dll` builds pass real Chinese/English candidate
 sessions and the package passes silent Traditional Chinese installation,
-Simplified Chinese upgrade, both 32/64-bit TSF registration, deploy, service
-startup and uninstall lifecycle on the Windows runner. The gate uses an
-isolated temporary `%AppData%`, checks every runtime file referenced by OpenCC,
-then reruns the same input sessions against the installed shared data and the
-dictionaries generated on Windows. The installer carries the canonical
+Simplified Chinese upgrade, both 32/64-bit TSF registration, installer-owned
+deployment, service startup and uninstall lifecycle on the Windows runner. The
+gate uses an isolated temporary `%AppData%`, checks every runtime file referenced
+by OpenCC, then reruns the same input sessions against the installed shared data
+and the dictionaries generated on Windows. The installer carries the canonical
 `data/dicts` source graph needed for a clean-machine Chinese build; macOS-built
 dictionary binaries are not treated as Windows evidence. Setup or deployment
 failures must propagate as a nonzero installer result. It also installs the
@@ -118,7 +118,8 @@ has zero Windows Release paths; the existing publisher remains macOS-only.
 - Windows CI: Visual Studio x64/Win32 runtime plus ARM/ARM64/ARM64X TSF
   compilation; Win32 and installed x64 `rime.dll` black-box input sessions;
   silent Traditional install and Simplified upgrade, package,
-  registry, TSF, deploy, service-start and uninstall lifecycle.
+  registry, TSF, installer-owned deployment, service-start and uninstall
+  lifecycle.
 - Still required before calling a Windows release accepted: install/uninstall
   on a clean Windows 10 and Windows 11 VM, coexistence with upstream Weasel,
   typing in Win32 and modern applications, candidate UI, native ARM64 runtime,

@@ -316,10 +316,6 @@ try {
     throw "Linnet upgrade did not migrate uniquely to the Simplified Chinese TSF profile"
   }
   Wait-ForServer $InstalledServer
-  Invoke-CheckedProcess `
-    -FilePath (Join-Path $InstallRoot "WeaselDeployer.exe") `
-    -Arguments @("/deploy") -Description "Deploy installed Linnet data" `
-    -TimeoutSeconds 1800
   foreach ($Deployed in @(
     "build\default.yaml",
     "build\linnet_en.schema.yaml",

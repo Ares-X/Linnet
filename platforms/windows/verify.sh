@@ -153,6 +153,9 @@ rg -Fq 'File "data\opencc\*.txt"' "${scratch}/output/install.nsi"
 rg -Fq 'File "data\dicts\*.yaml"' "${scratch}/output/install.nsi"
 rg -Fq 'return deployment_succeeded ? 0 : 1;' \
   "${scratch}/WeaselDeployer/Configurator.cpp"
+rg -Fq 'ExecWait '\''"$INSTDIR\WeaselDeployer.exe" /deploy'\'' $R3' \
+  "${scratch}/output/install.nsi"
+rg -Fq 'IntCmp $R3 0 deploy_done' "${scratch}/output/install.nsi"
 rg -Fq 'ExecWait '\''"$INSTDIR\WeaselSetup.exe" $R2'\'' $R3' \
   "${scratch}/output/install.nsi"
 rg -Fq 'SetErrorLevel $R3' "${scratch}/output/install.nsi"
@@ -405,14 +408,15 @@ if rg -Fq '$Process.Kill($true)' platforms/windows/preflight.ps1; then
 fi
 rg -Fq 'Write-Host "Windows preflight: $Description"' \
   platforms/windows/preflight.ps1
-test "$(rg -F -c -- '-TimeoutSeconds ' platforms/windows/preflight.ps1)" -eq 5
+test "$(rg -F -c -- '-TimeoutSeconds ' platforms/windows/preflight.ps1)" -eq 4
 rg -Fq -- '-Description "Install Traditional Chinese candidate" -TimeoutSeconds 120' \
   platforms/windows/preflight.ps1
 rg -Fq -- '-Description "Upgrade to Simplified Chinese candidate" -TimeoutSeconds 120' \
   platforms/windows/preflight.ps1
-rg -Fq -- '-Arguments @("/deploy") -Description "Deploy installed Linnet data"' \
-  platforms/windows/preflight.ps1
-rg -Fq -- '-TimeoutSeconds 1800' platforms/windows/preflight.ps1
+if rg -Fq -- '-Arguments @("/deploy")' platforms/windows/preflight.ps1; then
+  echo "Windows preflight duplicates the installer's authoritative deployment." >&2
+  exit 1
+fi
 if rg -Fq -- '-Arguments @("/quit")' platforms/windows/preflight.ps1; then
   echo "Windows preflight duplicates the upstream deploy/uninstall service lifecycle." >&2
   exit 1
