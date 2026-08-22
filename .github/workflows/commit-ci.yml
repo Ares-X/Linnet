@@ -10,7 +10,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout last commit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -20,7 +20,7 @@ jobs:
           submodules: false
 
       - name: Install build tools
-        run: brew install swiftlint ripgrep
+        run: scripts/install_ci_build_tools.sh quality
 
       - name: Lint
         run: scripts/run_swiftlint.sh
@@ -47,9 +47,6 @@ jobs:
 
       - name: Build and verify Linnet
         run: ./action-build.sh release && tests/verify_development.sh
-
-      - name: Install periphery
-        run: brew install peripheryapp/periphery/periphery
 
       - name: Check Unused Code
         run: scripts/run_periphery.sh

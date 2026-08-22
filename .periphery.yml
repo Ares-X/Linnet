@@ -2,7 +2,4 @@ project: Linnet.xcodeproj
 schemes:
 - Linnet
 - Settings
-targets:
-- Linnet
-- Settings
 format: github-actions

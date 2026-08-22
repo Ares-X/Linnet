@@ -19,7 +19,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -46,7 +46,7 @@ jobs:
           restore-keys: |
             linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
       - name: Install declared build tools
-        run: brew install ripgrep
+        run: scripts/install_ci_build_tools.sh release
       - name: Validate key-free source and data inputs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,7 +67,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout the tagged source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -97,7 +97,7 @@ jobs:
             linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
 
       - name: Install declared build tools
-        run: brew install ripgrep
+        run: scripts/install_ci_build_tools.sh release
 
       - name: Validate tag and release data
         env:

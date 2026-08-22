@@ -7,6 +7,31 @@ cd "${project_root}"
 
 readonly baseline_path=".periphery-baseline.json"
 readonly maximum_baseline_entries=72
+readonly periphery_version="3.8.0"
+readonly periphery_archive_sha256="07d4e286e31dd79164df39097e0b59f533c94badbe18158464a455ea88a166d7"
+
+if [[ -n "${RUNNER_TEMP:-}" ]]; then
+  periphery_root="${RUNNER_TEMP}/linnet-periphery-${periphery_version}"
+else
+  periphery_root="${project_root}/build/tools/periphery-${periphery_version}"
+fi
+periphery_binary="${periphery_root}/periphery"
+
+if [[ ! -x "${periphery_binary}" ]]; then
+  archive_url="https://github.com/peripheryapp/periphery/releases/download/"
+  archive_url+="${periphery_version}/periphery-${periphery_version}.zip"
+  download_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-periphery.XXXXXX")"
+  archive_path="${download_root}/periphery.zip"
+  trap 'rm -rf -- "${download_root}"' EXIT
+
+  curl --fail --location --silent --show-error \
+    "${archive_url}" \
+    --output "${archive_path}"
+  printf '%s  %s\n' "${periphery_archive_sha256}" "${archive_path}" |
+    shasum -a 256 -c - >/dev/null
+  mkdir -p "${periphery_root}"
+  unzip -q "${archive_path}" -d "${periphery_root}"
+fi
 
 baseline_entries="$(
   ruby -rjson -e '
@@ -21,7 +46,7 @@ if (( baseline_entries > maximum_baseline_entries )); then
   exit 1
 fi
 
-periphery scan \
+"${periphery_binary}" scan \
   --relative-results \
   --strict \
   --baseline "${baseline_path}"
