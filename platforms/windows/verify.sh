@@ -244,6 +244,8 @@ if rg -n 'status --porcelain[^\r\n]*\)\.Trim\(\)' \
 fi
 rg -Fq 'Copy-Item -LiteralPath $WeaselConfig' \
   platforms/windows/prepare.ps1
+test "$(rg -F -c '$global:LASTEXITCODE = 0' \
+  platforms/windows/prepare.ps1)" -eq 2
 rg -Fq 'weasel_config_sha256 = $Prepared.weasel_config_sha256' \
   platforms/windows/build.ps1
 if rg -n 'features\.json|portable_features|required_target_acceptance|data_owner|runtime_owner' \

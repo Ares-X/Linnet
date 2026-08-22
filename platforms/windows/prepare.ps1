@@ -63,6 +63,7 @@ function Copy-Tree {
   if ($LASTEXITCODE -gt 7) {
     throw "robocopy failed for $Source"
   }
+  $global:LASTEXITCODE = 0
 }
 
 function Copy-DataTree {
@@ -72,6 +73,7 @@ function Copy-DataTree {
   if ($LASTEXITCODE -gt 7) {
     throw "robocopy failed for staged data $Source"
   }
+  $global:LASTEXITCODE = 0
 }
 
 function Export-LockedGitCommit {
