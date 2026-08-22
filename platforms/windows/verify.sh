@@ -229,6 +229,12 @@ rg -Fq '$env:RIME_PLUGINS = "lua octagram predict smart_english"' \
   platforms/windows/build.ps1
 rg -Fq 'Copy-DataTree (Join-Path $DataRoot "plum")' \
   platforms/windows/prepare.ps1
+rg -Fq 'Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE.txt")' \
+  platforms/windows/prepare.ps1
+if rg -Fq 'Join-Path $RepoRoot "LICENSE")' platforms/windows/prepare.ps1; then
+  echo "Windows packaging still references the nonexistent root LICENSE path." >&2
+  exit 1
+fi
 rg -Fq '$Dirty = @(& git -C $Path status --porcelain --untracked-files=all)' \
   platforms/windows/prepare.ps1
 if rg -n 'status --porcelain[^\r\n]*\)\.Trim\(\)' \

@@ -348,7 +348,7 @@ Copy-DataTree (Join-Path $DataRoot "plum") $OutputData
 Copy-DataTree (Join-Path $DataRoot "opencc") (Join-Path $OutputData "opencc")
 Copy-Item -LiteralPath $WeaselConfig -Destination (Join-Path $OutputData "weasel.yaml")
 Copy-DataTree $ThemePreviewRoot (Join-Path $OutputData "preview")
-Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") `
+Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE.txt") `
   -Destination (Join-Path $Projection "output\LICENSE.txt")
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "README.md") `
   -Destination (Join-Path $Projection "output\README.txt")
