@@ -27,6 +27,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Locked digests name canonical Git blob bytes. The ephemeral runner
+          # must not rewrite nested source and license files during checkout.
+          git config --global core.autocrlf false
           git submodule update --init --depth 1 -- librime upstreams/weasel
           if ($LASTEXITCODE -ne 0) { throw 'Root submodule hydration failed' }
           git -C librime submodule update --init --recursive --depth 1

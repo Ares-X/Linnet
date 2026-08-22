@@ -331,6 +331,12 @@ BUILD_BAT="${scratch}/build.bat" ruby -e '
 rg -Fq 'Boost-BSL-1.0.txt' platforms/windows/build.ps1
 rg -Fq 'Darts-clone-BSD-3-Clause.txt' platforms/windows/prepare.ps1
 rg -Fq 'platforms/windows/preflight.ps1' .github/workflows/windows-build.yml
+ruby -e '
+  workflow = File.binread(ARGV.fetch(0))
+  canonical = workflow.index("git config --global core.autocrlf false") or abort
+  hydrate = workflow.index("git submodule update --init --depth 1") or abort
+  abort unless canonical < hydrate
+' .github/workflows/windows-build.yml
 if rg -n 'publish-windows:|Attach Windows installer|gh release upload.*[Ww]indows' \
     .github/workflows/release-ci.yml; then
   echo "An unsigned Windows candidate can still reach the public release." >&2
