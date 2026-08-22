@@ -15,6 +15,11 @@ $BoostRoot = (Resolve-Path -LiteralPath $BoostRoot).Path
 if (-not (Test-Path -LiteralPath (Join-Path $BoostRoot "boost") -PathType Container)) {
   throw "BOOST_ROOT does not contain Boost headers"
 }
+$WindowsSDK = "10.0.22621.0"
+$WindowsSDKLib = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Lib\$WindowsSDK"
+if (-not (Test-Path -LiteralPath $WindowsSDKLib -PathType Container)) {
+  throw "Required Windows SDK is missing: $WindowsSDK"
+}
 
 $ProductConfig = Get-Content -LiteralPath (Join-Path $RepoRoot "config\LinnetProduct.xcconfig")
 $Version = (($ProductConfig | Select-String '^MARKETING_VERSION = ([^ ]+)$').Matches.Groups[1].Value)
@@ -47,8 +52,9 @@ $EnvFile = @"
 set "WEASEL_ROOT=$Projection"
 set "BOOST_ROOT=$BoostRoot"
 set "BJAM_TOOLSET=msvc-14.3"
-set "CMAKE_GENERATOR=Visual Studio 17 2022"
+set CMAKE_GENERATOR="Visual Studio 17 2022"
 set "PLATFORM_TOOLSET=v143"
+set "WindowsTargetPlatformVersion=$WindowsSDK"
 "@
 [IO.File]::WriteAllText((Join-Path $Projection "env.bat"), $EnvFile, [Text.Encoding]::ASCII)
 
@@ -63,7 +69,8 @@ $env:FILE_VERSION = "$Version.$Build"
 $env:RELEASE_BUILD = "1"
 $env:LINNET_DATA_READY = "1"
 $env:RIME_PLUGINS = "lua octagram predict smart_english"
-$env:common_cmake_flags = "-DBUILD_MERGED_PLUGINS:BOOL=ON -DBUILD_TOOLS:BOOL=OFF"
+$env:WindowsTargetPlatformVersion = $WindowsSDK
+$env:common_cmake_flags = "-DBUILD_MERGED_PLUGINS:BOOL=ON -DBUILD_TOOLS:BOOL=OFF -DCMAKE_SYSTEM_VERSION:STRING=$WindowsSDK"
 
 $BoostLicense = Join-Path $BoostRoot $Lock.build_inputs.boost_headers.license_path
 $BoostLicenseDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath $BoostLicense).Hash.ToLowerInvariant()
@@ -86,6 +93,7 @@ try {
 & msbuild.exe (Join-Path $PSScriptRoot "runtime-smoke.vcxproj") `
   /m /nologo /verbosity:minimal `
   /p:Configuration=Release /p:Platform=x64 `
+  "/p:WindowsTargetPlatformVersion=$WindowsSDK" `
   "/p:ProjectionRoot=$Projection"
 if ($LASTEXITCODE -ne 0) {
   throw "Windows runtime smoke probe compilation failed with exit code $LASTEXITCODE"
@@ -94,6 +102,7 @@ if ($LASTEXITCODE -ne 0) {
 & msbuild.exe (Join-Path $PSScriptRoot "runtime-smoke.vcxproj") `
   /m /nologo /verbosity:minimal `
   /p:Configuration=Release /p:Platform=Win32 `
+  "/p:WindowsTargetPlatformVersion=$WindowsSDK" `
   "/p:ProjectionRoot=$Projection"
 if ($LASTEXITCODE -ne 0) {
   throw "Windows Win32 runtime smoke probe compilation failed with exit code $LASTEXITCODE"

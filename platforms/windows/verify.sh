@@ -37,6 +37,23 @@ git -C "${scratch}" apply --check --ignore-space-change \
 git -C "${scratch}" apply --ignore-space-change \
   "${repo_root}/platforms/windows/patches/weasel-linnet.patch"
 
+projection_repo="${scratch}/projection-repo"
+projection_root="${projection_repo}/build/windows/weasel"
+git init --quiet "${projection_repo}"
+mkdir -p "${projection_root}"
+git -C upstreams/weasel archive "${weasel_commit}" | tar -xf - -C "${projection_root}"
+git -C "${projection_repo}" apply --check --ignore-space-change \
+  --directory=build/windows/weasel \
+  "${repo_root}/platforms/windows/patches/weasel-linnet.patch"
+git -C "${projection_repo}" apply --ignore-space-change \
+  --directory=build/windows/weasel \
+  "${repo_root}/platforms/windows/patches/weasel-linnet.patch"
+git -C "${projection_repo}" apply --reverse --check --ignore-space-change \
+  --directory=build/windows/weasel \
+  "${repo_root}/platforms/windows/patches/weasel-linnet.patch"
+rg -Fq 'if %build_data% == 1 goto linnet_data_error' \
+  "${projection_root}/build.bat"
+
 generated_weasel="${scratch}/linnet-generated-weasel.yaml"
 generated_previews="${scratch}/linnet-theme-previews"
 scripts/project-windows-weasel-config platforms/windows/weasel.base.yaml \
@@ -244,6 +261,12 @@ if rg -n 'status --porcelain[^\r\n]*\)\.Trim\(\)' \
 fi
 rg -Fq 'Copy-Item -LiteralPath $WeaselConfig' \
   platforms/windows/prepare.ps1
+rg -Fq '"--directory=$Directory", $Patch' platforms/windows/prepare.ps1
+rg -Fq '"--reverse", "--check"' platforms/windows/prepare.ps1
+if rg -Fq 'Push-Location $Target' platforms/windows/prepare.ps1; then
+  echo "Locked patches can silently miss the untracked Windows projection." >&2
+  exit 1
+fi
 test "$(rg -F -c '$global:LASTEXITCODE = 0' \
   platforms/windows/prepare.ps1)" -eq 2
 rg -Fq 'weasel_config_sha256 = $Prepared.weasel_config_sha256' \
@@ -319,6 +342,15 @@ rg -Fq '@("WeaselSetup\WeaselSetup.rc", "WeaselSetup Module", "Linnet Setup")' \
 rg -Fq "Enable automatic update check', \"\")" \
   platforms/windows/prepare.ps1
 rg -Fq 'upstream_updater = "disabled"' platforms/windows/build.ps1
+rg -Fq '$WindowsSDK = "10.0.22621.0"' platforms/windows/build.ps1
+rg -Fq 'set CMAKE_GENERATOR="Visual Studio 17 2022"' \
+  platforms/windows/build.ps1
+rg -Fq 'set "WindowsTargetPlatformVersion=$WindowsSDK"' \
+  platforms/windows/build.ps1
+rg -Fq -- '-DCMAKE_SYSTEM_VERSION:STRING=$WindowsSDK' \
+  platforms/windows/build.ps1
+test "$(rg -F -c '"/p:WindowsTargetPlatformVersion=$WindowsSDK"' \
+  platforms/windows/build.ps1)" -eq 2
 rg -Fq 'runtime-smoke.vcxproj' platforms/windows/build.ps1
 rg -Fq '/p:Configuration=Release /p:Platform=Win32' platforms/windows/build.ps1
 rg -Fq 'build.bat boost librime weasel installer arm64' platforms/windows/build.ps1

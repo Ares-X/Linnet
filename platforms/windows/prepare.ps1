@@ -102,13 +102,18 @@ function Apply-LockedPatch {
   if ($Actual -ne $Sha256) {
     throw "Locked patch digest differs: $RelativePath (expected=$Sha256 actual=$Actual)"
   }
-  Push-Location $Target
-  try {
-    Invoke-Native git @("apply", "--check", "--ignore-space-change", $Patch)
-    Invoke-Native git @("apply", "--ignore-space-change", $Patch)
-  } finally {
-    Pop-Location
+  $Target = [IO.Path]::GetFullPath($Target)
+  $Directory = [IO.Path]::GetRelativePath($RepoRoot, $Target).Replace('\', '/')
+  if ([IO.Path]::IsPathRooted($Directory) -or $Directory -eq '..' -or `
+      $Directory.StartsWith('../')) {
+    throw "Locked patch target escapes the repository: $Target"
   }
+  Invoke-Native git @("-C", $RepoRoot, "apply", "--check", "--ignore-space-change", `
+    "--directory=$Directory", $Patch)
+  Invoke-Native git @("-C", $RepoRoot, "apply", "--ignore-space-change", `
+    "--directory=$Directory", $Patch)
+  Invoke-Native git @("-C", $RepoRoot, "apply", "--reverse", "--check", `
+    "--ignore-space-change", "--directory=$Directory", $Patch)
 }
 
 function Replace-RequiredText {
