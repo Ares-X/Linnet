@@ -306,7 +306,10 @@ final class SquirrelInputController: IMKInputController {
     // print("[DEBUG] commitComposition: \(sender ?? "nil")")
     if session != 0 {
       if let input = rimeAPI.get_input(session) {
-        commit(string: String(cString: input))
+        let pendingInput = String(cString: input)
+        if !pendingInput.isEmpty {
+          commit(string: pendingInput)
+        }
         rimeAPI.clear_composition(session)
       }
     }
@@ -646,6 +649,7 @@ private extension SquirrelInputController {
     // print("[DEBUG] rimeUpdate")
     rimeConsumeCommittedText()
 
+    var presentsModeTransition = false
     var status = RimeStatus_stdbool.rimeStructInit()
     if rimeAPI.get_status(session, &status) {
       let liveSchemaID = status.schema_id.map { String(cString: $0) }
@@ -664,6 +668,7 @@ private extension SquirrelInputController {
           rimeAPI.set_option(session, "soft_cursor", !inlinePreedit)
         }
         if let modeLabel, let panel = NSApp.squirrelAppDelegate.panel {
+          presentsModeTransition = true
           panel.updateStatus(long: modeLabel, short: modeLabel)
         }
       }
@@ -777,6 +782,13 @@ private extension SquirrelInputController {
         labels: labels,
         expansionRequested: expansionRequested)
       else {
+        _ = rimeAPI.free_context(&ctx)
+        hidePalettes()
+        return
+      }
+      if preedit.isEmpty,
+        candidateSnapshot.items.isEmpty,
+        !presentsModeTransition {
         _ = rimeAPI.free_context(&ctx)
         hidePalettes()
         return

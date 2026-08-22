@@ -43,6 +43,7 @@ final class SettingsModel: ObservableObject {
   @Published var activeDownloadSource: LinnetSettingsDownloadSource? = .direct
   @Published var downloadSourceFailure: LinnetSettingsDownloadSource.Failure?
   @Published private(set) var appearancePublishActive = false
+  @Published private(set) var cloudSyncEnabled = false
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
 
   let productName: String
@@ -136,16 +137,12 @@ final class SettingsModel: ObservableObject {
     configuration = initialConfiguration
     personalValidation = .valid(initialConfiguration.personalDraft)
     legacyImportState = dataServicesAvailable ? .checking : .unavailable
-    if let bookmark = LinnetSettingsContract.cloudSyncFolderBookmark(startingAt: bundle) {
+    cloudSyncEnabled = LinnetSettingsContract.cloudSyncEnabled(startingAt: bundle)
+    if cloudSyncEnabled {
       do {
-        let location = try LinnetCloudSyncLocation.resolve(bookmark: bookmark)
-        cloudSyncLocation = location
-        if location.bookmark != bookmark {
-          _ = LinnetSettingsContract.setCloudSyncFolderBookmark(
-            location.bookmark, startingAt: bundle)
-        }
+        cloudSyncLocation = try LinnetCloudSyncLocation.productLocation()
       } catch {
-        print("The selected sync folder is unavailable: \(error.localizedDescription)")
+        print("The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription)")
       }
     }
     detectGrammarModel()
@@ -280,39 +277,34 @@ extension SettingsModel {
     ) { _ in .portableExported(productName: self.productName) }
   }
 
-  func chooseCloudSyncFolder(locale: Locale) {
+  func setCloudSyncEnabled(_ enabled: Bool) {
     guard !operationActive else { return }
-    let panel = NSOpenPanel()
-    panel.title = SettingsFilePanelTitle.cloudSyncFolder.text(
-      productName: productName, locale: locale)
-    panel.prompt = locale.usesSimplifiedChineseSettingsCopy ? "使用此文件夹" : "Use Folder"
-    panel.canChooseDirectories = true
-    panel.canChooseFiles = false
-    panel.canCreateDirectories = true
-    panel.allowsMultipleSelection = false
-    guard panel.runModal() == .OK, let folder = panel.url else { return }
-    do {
-      let location = try LinnetCloudSyncLocation.select(folder: folder)
-      guard LinnetSettingsContract.setCloudSyncFolderBookmark(location.bookmark) else {
+    if enabled {
+      do {
+        let location = try LinnetCloudSyncLocation.productLocation()
+        _ = try location.prepareLearningDirectory()
+        guard LinnetSettingsContract.setCloudSyncEnabled(true) else {
+          status = .operationFailed(.unavailable)
+          return
+        }
+        cloudSyncEnabled = true
+        cloudSyncLocation = location
+        notifyCloudSyncConfigurationChanged()
+        status = .cloudSyncEnabled
+      } catch {
+        logDiagnostic(error, context: "Linnet iCloud Drive folder is unavailable")
+        status = .operationFailed(.unavailable)
+      }
+    } else {
+      guard LinnetSettingsContract.setCloudSyncEnabled(false) else {
         status = .operationFailed(.unavailable)
         return
       }
-      cloudSyncLocation = location
+      cloudSyncEnabled = false
+      cloudSyncLocation = nil
       notifyCloudSyncConfigurationChanged()
-      status = .cloudSyncFolderSelected(name: location.displayName)
-    } catch {
-      logDiagnostic(error, context: "Sync folder selection failed")
-      status = .operationFailed(.unsafePath)
+      status = .cloudSyncDisabled
     }
-  }
-
-  func disconnectCloudSyncFolder() {
-    guard !operationActive,
-      LinnetSettingsContract.setCloudSyncFolderBookmark(nil)
-    else { return }
-    cloudSyncLocation = nil
-    notifyCloudSyncConfigurationChanged()
-    status = .cloudSyncDisconnected
   }
 
   func synchronizeLearningNow() {

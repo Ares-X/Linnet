@@ -132,7 +132,9 @@ compile_run pack \
 
 "${swiftc}" -parse-as-library -warnings-as-errors -sdk "${sdk}" \
   tests/RimeFilesystemPathProjectionTests.swift -o "${scratch}/rime-path"
-"${scratch}/rime-path" sources/SquirrelApplicationDelegate.swift
+"${scratch}/rime-path" \
+  sources/SquirrelApplicationDelegate.swift \
+  sources/SquirrelApplicationPresentation.swift
 
 common_settings_sources=(
   sources/LinnetPackContract.swift

@@ -4,7 +4,8 @@ import Foundation
 @main
 struct SettingsContractTests {
   private static let backupRetentionPolicyKey = "backup.retention_policy"
-  private static let cloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
+  private static let cloudSyncEnabledKey = "cloud_sync.enabled_v1"
+  private static let legacyCloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
   private static let cloudSyncLastAttemptKey = "cloud_sync.last_attempt_v1"
 
   static func main() {
@@ -91,21 +92,27 @@ struct SettingsContractTests {
     else {
       fail("the backup policy did not share the host suite")
     }
-    let bookmark = Data("folder-bookmark".utf8)
     let attemptedAt = Date(timeIntervalSince1970: 12_345)
-    guard LinnetSettingsContract.setCloudSyncFolderBookmark(
-        bookmark,
-        startingAt: settings
-      ),
-      defaults.data(forKey: cloudSyncFolderBookmarkKey) == bookmark,
-      LinnetSettingsContract.cloudSyncFolderBookmark(startingAt: host) == bookmark,
+    guard !LinnetSettingsContract.cloudSyncEnabled(startingAt: host),
+      LinnetSettingsContract.setCloudSyncEnabled(true, startingAt: settings),
+      defaults.bool(forKey: cloudSyncEnabledKey),
+      LinnetSettingsContract.cloudSyncEnabled(startingAt: host),
       LinnetSettingsContract.setCloudSyncLastAttempt(attemptedAt, startingAt: settings),
       defaults.object(forKey: cloudSyncLastAttemptKey) as? Date == attemptedAt,
       LinnetSettingsContract.cloudSyncLastAttempt(startingAt: host) == attemptedAt,
-      LinnetSettingsContract.setCloudSyncFolderBookmark(nil, startingAt: settings),
-      defaults.object(forKey: cloudSyncFolderBookmarkKey) == nil
+      LinnetSettingsContract.setCloudSyncEnabled(false, startingAt: settings),
+      !defaults.bool(forKey: cloudSyncEnabledKey)
     else {
-      fail("the cloud sync folder bookmark did not share the host suite")
+      fail("the cloud sync enabled state did not share the host suite")
+    }
+
+    defaults.removeObject(forKey: cloudSyncEnabledKey)
+    defaults.set(Data("legacy-bookmark".utf8), forKey: legacyCloudSyncFolderBookmarkKey)
+    guard LinnetSettingsContract.cloudSyncEnabled(startingAt: settings),
+      defaults.bool(forKey: cloudSyncEnabledKey),
+      defaults.object(forKey: legacyCloudSyncFolderBookmarkKey) == nil
+    else {
+      fail("the legacy folder selection did not migrate to the product-owned location")
     }
   }
 

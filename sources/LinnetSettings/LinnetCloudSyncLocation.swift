@@ -1,22 +1,21 @@
 import Darwin
 import Foundation
 
-/// Owns the durable user-selected folder boundary for Rime learning sync.
+/// Owns Linnet's single product-defined iCloud Drive boundary.
 struct LinnetCloudSyncLocation: Equatable, Sendable {
   enum Failure: Error, Equatable {
+    case iCloudDriveUnavailable
     case invalidFolder
-    case invalidBookmark
   }
 
   let folder: URL
-  let bookmark: Data
 
   var learningDirectory: URL {
     folder.appending(component: "Linnet-Rime-Sync", directoryHint: .isDirectory)
   }
 
   var displayName: String {
-    folder.lastPathComponent.isEmpty ? folder.path : folder.lastPathComponent
+    "iCloud Drive/Linnet"
   }
 
   func prepareLearningDirectory() throws -> URL {
@@ -34,36 +33,36 @@ struct LinnetCloudSyncLocation: Equatable, Sendable {
     return try Self.validatedFolder(directory)
   }
 
-  static func select(folder: URL) throws -> Self {
-    let normalized = try validatedFolder(folder)
-    do {
-      let bookmark = try normalized.bookmarkData(
-        options: [.minimalBookmark],
-        includingResourceValuesForKeys: nil,
-        relativeTo: nil
-      )
-      return Self(folder: normalized, bookmark: bookmark)
-    } catch {
-      throw Failure.invalidBookmark
+  static func productLocation() throws -> Self {
+    guard let libraryDirectory = FileManager.default.urls(
+      for: .libraryDirectory, in: .userDomainMask
+    ).first else {
+      throw Failure.iCloudDriveUnavailable
     }
+    return try productLocation(libraryDirectory: libraryDirectory)
   }
 
-  static func resolve(bookmark: Data) throws -> Self {
-    var stale = false
-    let resolved: URL
-    do {
-      resolved = try URL(
-        resolvingBookmarkData: bookmark,
-        options: [.withoutUI],
-        relativeTo: nil,
-        bookmarkDataIsStale: &stale
-      )
-    } catch {
-      throw Failure.invalidBookmark
+  static func productLocation(libraryDirectory: URL) throws -> Self {
+    let library = try validatedFolder(libraryDirectory)
+    let mobileDocuments = try validatedFolder(
+      library.appending(component: "Mobile Documents", directoryHint: .isDirectory))
+    let cloudDocuments = try validatedFolder(
+      mobileDocuments.appending(
+        component: "com~apple~CloudDocs", directoryHint: .isDirectory))
+    let productDirectory = cloudDocuments.appending(
+      component: "Linnet", directoryHint: .isDirectory)
+
+    var info = stat()
+    if lstat(productDirectory.path, &info) != 0 {
+      guard errno == ENOENT else { throw Failure.invalidFolder }
+      do {
+        try FileManager.default.createDirectory(
+          at: productDirectory, withIntermediateDirectories: false)
+      } catch {
+        throw Failure.invalidFolder
+      }
     }
-    let normalized = try validatedFolder(resolved)
-    if stale { return try select(folder: normalized) }
-    return Self(folder: normalized, bookmark: bookmark)
+    return Self(folder: try validatedFolder(productDirectory))
   }
 
   private static func validatedFolder(_ candidate: URL) throws -> URL {

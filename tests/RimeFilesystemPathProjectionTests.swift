@@ -14,11 +14,12 @@ struct RimeFilesystemPathProjectionTests {
 
   static func main() {
     do {
-      guard CommandLine.arguments.count == 2 else {
-        throw Failure.requirement("expected SquirrelApplicationDelegate.swift path")
+      guard CommandLine.arguments.count >= 2 else {
+        throw Failure.requirement("expected Host source paths")
       }
-      let source = try String(
-        contentsOfFile: CommandLine.arguments[1], encoding: .utf8)
+      let source = try CommandLine.arguments.dropFirst().map {
+        try String(contentsOfFile: $0, encoding: .utf8)
+      }.joined(separator: "\n")
       let expected = "/Linnet Runtime/Application Support"
       let spacedURL = URL(fileURLWithPath: expected)
 

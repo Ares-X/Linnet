@@ -1264,8 +1264,10 @@ ruby -e '
   ensure_session = controller[/func ensureSession\(\) -> Bool \{.*?\n  \}/m]
   handle = controller[/override func handle\(.*?\n  \}/m]
   activation = controller[/override func activateServer\(.*?\n  \}/m]
+  commit = controller[/override func commitComposition\(.*?\n  \}/m]
+  update = controller[/func rimeUpdate\(\) \{.*?\n  \}\n\n  func commit\(string:/m]
   abort "the canonical live-session recovery owner is missing" unless
-    ensure_session && handle && activation
+    ensure_session && handle && activation && commit && update
   abort "live-session recovery no longer validates and recreates one generation" unless
     ensure_session.scan("rimeAPI.find_session(session)").length == 1 &&
       ensure_session.scan("createSession()").length == 1
@@ -1280,6 +1282,19 @@ ruby -e '
     baseline && recover < baseline && baseline < publish
   abort "activation retained raw nonzero-session inference" if
     activation.include?("if session != 0")
+  pending = commit.index("let pendingInput = String(cString: input)")
+  nonempty = commit.index("if !pendingInput.isEmpty")
+  insert = commit.index("commit(string: pendingInput)")
+  clear = commit.index("rimeAPI.clear_composition(session)")
+  abort "an empty composition can still cross the synchronous InputMethodKit insert boundary" unless
+    pending && nonempty && insert && clear &&
+      pending < nonempty && nonempty < insert && insert < clear &&
+      !commit.include?("commit(string: String(cString: input))")
+  idle = update.index("if preedit.isEmpty,")
+  geometry = update.index("showPanel(")
+  abort "idle activation can still request synchronous client geometry without visible feedback" unless
+    update.include?("candidateSnapshot.items.isEmpty,") &&
+      update.include?("!presentsModeTransition") && idle && geometry && idle < geometry
 ' || fail "live input-session recovery ownership regressed"
 for boundary in \
   'override func handle' \
@@ -1329,7 +1344,9 @@ test "$(rg -F -c 'private var settingsTransactionHost: LinnetSettingsTransaction
   sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
   fail "the authenticated Settings transaction Host owner count changed"
 ruby -e '
-  project, settings, root, menu, controller = ARGV.map { |path| File.read(path) }
+  project, settings, root, delegate, presentation, controller =
+    ARGV.map { |path| File.read(path) }
+  menu = delegate + presentation
   abort "retired Settings Info.plist reference returned" if project.include?("Settings-Info.plist")
   abort "retired nonexistent Frameworks search path returned" if
     project.include?("$(PROJECT_DIR)/Frameworks")
@@ -1361,11 +1378,11 @@ ruby -e '
       controller.include?("@objc func openSettings()")
   abort "the status-item menu no longer targets the application delegate" unless
     menu.include?("inputMenuItems(actionTarget: self)")
-  apply_status = menu[/private func applyStatusIcon\(asciiMode: Bool, schemaLabel: String\?\) \{.*?\n  \}/m]
+  apply_status = menu[/func applyStatusIcon\(asciiMode: Bool, schemaLabel: String\?\) \{.*?\n  \}/m]
   abort "status-label projection regained visibility ownership" unless
     apply_status && !apply_status.include?(".isVisible")
   abort "status and input menus no longer share the live Rime mode projection" unless
-    menu.include?("private var currentModeLabel = \"中\"") &&
+    menu.scan("var currentModeLabel = \"中\"").length == 1 &&
       menu.include?("currentModeLabel = label") &&
       menu.include?("button.title = label") &&
       menu.include?("private func setStatusItemVisibility(inputSourceIsActive: Bool)") &&
@@ -1374,7 +1391,9 @@ ruby -e '
       controller.include?("inputSourceDidActivate(session: session)")
 ' Linnet.xcodeproj/project.pbxproj sources/LinnetSettings/SettingsApplication.swift \
   sources/LinnetSettings/SettingsRootView.swift \
-  sources/SquirrelApplicationDelegate.swift sources/SquirrelInputController.swift ||
+  sources/SquirrelApplicationDelegate.swift \
+  sources/SquirrelApplicationPresentation.swift \
+  sources/SquirrelInputController.swift ||
   fail "Settings surface lifecycle or input-menu ownership regressed"
 [[ "$(/usr/bin/plutil -extract TISInputSourceID raw -o - resources/Info.plist)" == \
   '$(PRODUCT_BUNDLE_IDENTIFIER)' ]] ||
@@ -1490,9 +1509,22 @@ ruby -e '
 
 ruby -rjson -e '
   catalog = JSON.parse(File.read("resources/Localizable.xcstrings"))
-  retired_menu_keys = ["Deploy", "Logs..."]
-  returned = retired_menu_keys & catalog.fetch("strings", {}).keys
-  abort "retired input-menu localization keys returned: #{returned.join(", ")}" unless returned.empty?
+  retired_keys = [
+    "Deploy", "Logs...", "Change Folder…",
+    "Choose a folder inside iCloud Drive to connect this Mac.", "Choose Folder…",
+    "Disconnect", "No sync folder selected",
+    "This replaces Linnet-Full-Backup.linnet-data in the selected folder. Local data is not changed."
+  ]
+  returned = retired_keys & catalog.fetch("strings", {}).keys
+  abort "retired localization keys returned: #{returned.join(", ")}" unless returned.empty?
+  required_cloud_keys = [
+    "Sync learned words with iCloud Drive", "Location",
+    "iCloud Drive is unavailable. Check iCloud Drive in System Settings.",
+    "Linnet always uses iCloud Drive/Linnet; no folder selection is required.",
+    "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed."
+  ]
+  absent_cloud_keys = required_cloud_keys - catalog.fetch("strings", {}).keys
+  abort "fixed iCloud localization keys are missing: #{absent_cloud_keys.join(", ")}" unless absent_cloud_keys.empty?
   missing = catalog.fetch("strings", {}).each_with_object([]) do |(key, entry), result|
     unit = entry.dig("localizations", "zh-Hans", "stringUnit")
     result << key unless unit.is_a?(Hash) && unit["state"] == "translated" &&
@@ -1553,7 +1585,8 @@ ruby -e '
       source.scan("TISSelectInputSource").length == 1
 ' || fail "input-source register/enable/no-select ownership regressed"
 ruby -e '
-  delegate = File.read("sources/SquirrelApplicationDelegate.swift")
+  delegate = File.read("sources/SquirrelApplicationDelegate.swift") +
+    File.read("sources/SquirrelApplicationPresentation.swift")
   controller = File.read("sources/SquirrelInputController.swift")
   update = delegate[/func updateStatusIcon\(session: RimeSessionId\) \{.*?\n  \}/m]
   option_notification = delegate[/if messageType == "option".*?\n    return\n  \}/m]
@@ -1708,6 +1741,17 @@ if rg -n '~/Library/Linnet|Library/Linnet|\.DataTransactions|sharedSupportPath|C
   fail "a retired runtime-data path or grammar fallback returned"
 fi
 
+if rg -n 'cloudSyncFolderBookmark|setCloudSyncFolderBookmark|chooseCloudSyncFolder|disconnectCloudSyncFolder|cloudSyncFolderSelected|cloudSyncDisconnected|LinnetCloudSyncLocation\.(select|resolve)' \
+    sources README.md; then
+  fail "the retired user-selected iCloud sync-folder path returned"
+fi
+rg -Fq 'component: "com~apple~CloudDocs"' \
+  sources/LinnetSettings/LinnetCloudSyncLocation.swift ||
+  fail "the product-owned iCloud Drive root is missing"
+rg -Fq 'component: "Linnet"' \
+  sources/LinnetSettings/LinnetCloudSyncLocation.swift ||
+  fail "the fixed Linnet iCloud Drive directory is missing"
+
 rg -Fq 'to: \.prebuilt_data_dir' sources/SquirrelApplicationDelegate.swift ||
   fail "librime prebuilt data is not explicit"
 rg -Fq 'to: \.staging_dir' sources/SquirrelApplicationDelegate.swift ||
@@ -1766,14 +1810,17 @@ if rg -n -- '--ascii|--nascii|--getascii|asciiModeToggleNotification|asciiModeQu
   fail "a non-upstream cross-process ASCII mode bridge returned"
 fi
 rg -Fq 'applyStatusIcon(asciiMode: false, schemaLabel: nil)' \
-  sources/SquirrelApplicationDelegate.swift ||
+  sources/SquirrelApplicationPresentation.swift ||
   fail "status initialization is not derived from the standard live Rime state"
 if rg -n 'schemaLabel: "双"|asciiMode \? "EN"' \
-    sources/SquirrelApplicationDelegate.swift; then
+    sources/SquirrelApplicationDelegate.swift \
+    sources/SquirrelApplicationPresentation.swift; then
   fail "the status item retains a hard-coded or ambiguous language state"
 fi
 if rg -n 'NSLocalizedString\("Deploy"|NSLocalizedString\("Logs\.\.\."|#selector\(deploy\)|openLogFolder' \
-    sources/SquirrelApplicationDelegate.swift sources/SquirrelInputController.swift; then
+    sources/SquirrelApplicationDelegate.swift \
+    sources/SquirrelApplicationPresentation.swift \
+    sources/SquirrelInputController.swift; then
   fail "maintenance-only Deploy or Logs actions returned to the user input menu"
 fi
 rg -Fq 'selection: $model.configuration.documentDraft.input.chineseProfile' \
@@ -1797,7 +1844,7 @@ rg -Fq 'Ticket(engine_, "linnet_pinyin")' plugins/smart_english/smart_english.cc
 if rg -n 'F4|Control\+grave|Control\+Shift\+grave' data/linnet/default.yaml; then
   fail "the product switcher regained global system-key hotkeys"
 fi
-rg -Fq 'commit(string: String(cString: input))' \
+rg -Fq 'commit(string: pendingInput)' \
   sources/SquirrelInputController.swift ||
   fail "the standard Squirrel IMK composition exit is missing"
 if rg -n 'rimeCommitCompositionThroughReturn|process_key\(session, XK_Return, 0\)' \
