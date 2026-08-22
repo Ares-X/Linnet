@@ -1,0 +1,127 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "fileutils"
+require "yaml"
+require "zlib"
+
+def fail_projection(message)
+  warn "project-windows-weasel-config: #{message}"
+  exit 1
+end
+
+base_path, themes_path, output_path, preview_root = ARGV
+fail_projection("usage: BASE_YAML THEMES_YAML OUTPUT_YAML PREVIEW_ROOT") unless
+  preview_root
+
+base_text = File.binread(base_path)
+base = YAML.safe_load(base_text, aliases: false)
+themes = YAML.safe_load(File.binread(themes_path), aliases: false)
+fail_projection("base must not own preset_color_schemes") if
+  base.key?("preset_color_schemes")
+fail_projection("base default light theme is not canonical") unless
+  base.dig("style", "color_scheme") == "linnet_paper_light"
+fail_projection("base default dark theme is not canonical") unless
+  base.dig("style", "color_scheme_dark") == "linnet_paper_dark"
+
+catalog = themes.fetch("preset_color_schemes").select do |name, _scheme|
+  name.match?(/\Alinnet_.+_(?:light|dark)\z/)
+end
+families = catalog.keys.map { |name| name.sub(/_(?:light|dark)\z/, "") }.uniq.sort
+fail_projection("expected seven Linnet theme families") unless families.length == 7
+families.each do |family|
+  %w[light dark].each do |mode|
+    fail_projection("missing #{family}_#{mode}") unless catalog.key?("#{family}_#{mode}")
+  end
+end
+fail_projection("unexpected Linnet theme count") unless catalog.length == 14
+
+same_keys = %w[
+  back_color border_color text_color candidate_text_color label_color
+  comment_text_color hilited_text_color hilited_back_color
+  hilited_candidate_text_color hilited_candidate_back_color
+  hilited_comment_text_color
+].freeze
+
+format_color = lambda do |value|
+  fail_projection("theme color is not an integer") unless value.is_a?(Integer)
+  width = value > 0xffffff ? 8 : 6
+  format("0x%0#{width}x", value)
+end
+
+lines = [base_text.rstrip, "", "preset_color_schemes:"]
+catalog.each do |name, scheme|
+  fail_projection("theme #{name} has no name") unless scheme["name"].is_a?(String)
+  lines << "  #{name}:"
+  lines << "    name: #{scheme.fetch("name").to_json}"
+  lines << "    author: #{scheme.fetch("author", "Linnet contributors").to_json}"
+  lines << "    color_format: argb"
+  same_keys.each do |key|
+    next unless scheme.key?(key)
+
+    lines << "    #{key}: #{format_color.call(scheme.fetch(key))}"
+  end
+  if scheme.key?("hilited_candidate_label_color")
+    lines << "    hilited_label_color: #{format_color.call(scheme.fetch("hilited_candidate_label_color"))}"
+  end
+end
+
+File.binwrite(output_path, lines.join("\n") + "\n")
+
+decode_argb = lambda do |value|
+  fail_projection("theme color is not an integer") unless value.is_a?(Integer)
+  alpha = value > 0xffffff ? (value >> 24) & 0xff : 0xff
+  [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff, alpha]
+end
+
+png_chunk = lambda do |type, data|
+  [data.bytesize].pack("N") + type + data +
+    [Zlib.crc32(type + data)].pack("N")
+end
+
+write_preview = lambda do |path, scheme|
+  width = 320
+  height = 180
+  background = decode_argb.call(scheme.fetch("back_color"))
+  border = decode_argb.call(scheme.fetch("border_color"))
+  text = decode_argb.call(scheme.fetch("candidate_text_color"))
+  comment = decode_argb.call(scheme.fetch("comment_text_color", scheme.fetch("label_color")))
+  selected_background = decode_argb.call(scheme.fetch("hilited_candidate_back_color"))
+  selected_text = decode_argb.call(scheme.fetch("hilited_candidate_text_color"))
+  pixels = Array.new(width * height) { background.dup }
+  fill = lambda do |left, top, right, bottom, color|
+    top.upto(bottom - 1) do |y|
+      left.upto(right - 1) { |x| pixels[y * width + x] = color }
+    end
+  end
+  fill.call(0, 0, width, 3, border)
+  fill.call(0, height - 3, width, height, border)
+  fill.call(0, 0, 3, height, border)
+  fill.call(width - 3, 0, width, height, border)
+  fill.call(20, 20, 142, 26, text)
+  fill.call(20, 45, width - 20, 76, selected_background)
+  fill.call(34, 56, 154, 63, selected_text)
+  fill.call(174, 57, 278, 62, selected_text)
+  fill.call(34, 94, 178, 101, text)
+  fill.call(198, 95, 282, 100, comment)
+  fill.call(34, 128, 144, 135, text)
+  fill.call(164, 129, 270, 134, comment)
+  rows = height.times.map do |y|
+    "\0" + pixels.slice(y * width, width).flatten.pack("C*")
+  end.join
+  ihdr = [width, height, 8, 6, 0, 0, 0].pack("NNCCCCC")
+  png = "\x89PNG\r\n\x1a\n".b + png_chunk.call("IHDR", ihdr) +
+    png_chunk.call("IDAT", Zlib::Deflate.deflate(rows, Zlib::BEST_COMPRESSION)) +
+    png_chunk.call("IEND", "")
+  File.binwrite(path, png)
+end
+
+FileUtils.mkdir_p(preview_root)
+families.each do |family|
+  scheme_id = "#{family}_light"
+  write_preview.call(
+    File.join(preview_root, "color_scheme_#{scheme_id}.png"),
+    catalog.fetch(scheme_id)
+  )
+end

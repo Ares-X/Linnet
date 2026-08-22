@@ -61,6 +61,11 @@ def load_lock
   unless policy["squirrel_provenance"] == "locked-tag-and-sbom-variant"
     fail_lock("Squirrel provenance must be owned by the lock and release SBOM")
   end
+  unless policy["platform_frontends"] == {
+    "macos" => "squirrel", "windows" => "weasel"
+  }
+    fail_lock("platform frontend ownership must be explicit")
+  end
   unless policy["direct_product_upstreams"] ==
          %w[squirrel_rime rime_ice hallelujah rime_wanxiang rime_lmdg_grammar]
     fail_lock("direct product upstream set must contain exactly five owners")
@@ -110,6 +115,10 @@ def load_lock
       "target" => "sources.librime.bundled_plugins.predict",
       "path" => "patches/librime-predict-linnet-session-state.patch",
     },
+    "weasel_linnet_windows_projection" => {
+      "target" => "sources.weasel",
+      "path" => "platforms/windows/patches/weasel-linnet.patch",
+    },
   }
   fail_lock("unexpected downstream patch set") unless
     patches.keys.sort == expected_patches.keys.sort
@@ -127,7 +136,7 @@ def load_lock
   sources = require_hash(lock, "sources")
   expected_sources = %w[
     hallelujah librime plum rime_ice rime_lmdg_grammar rime_octagram_data
-    rime_wanxiang squirrel
+    rime_wanxiang squirrel weasel
   ]
   fail_lock("unexpected source set") unless sources.keys.sort == expected_sources
 
@@ -185,6 +194,21 @@ def load_lock
   fail_lock("unexpected Squirrel license path") unless
     require_string(squirrel, "license_path") == "LICENSE.txt"
   require_string(squirrel, "license_sha256", SHA256)
+
+  weasel = require_hash(sources, "weasel")
+  require_string(weasel, "submodule_path")
+  require_string(weasel, "submodule_name")
+  require_string(weasel, "tag")
+  require_string(weasel, "tag_ref")
+  require_string(weasel, "tag_object", SHA1)
+  require_string(weasel, "commit", SHA1)
+  require_string(weasel, "tree", SHA1)
+  require_string(weasel, "stable_tag_pattern")
+  fail_lock("unexpected Weasel license") unless
+    require_string(weasel, "declared_license") == "GPL-3.0-only"
+  fail_lock("unexpected Weasel license path") unless
+    require_string(weasel, "license_path") == "LICENSE.txt"
+  require_string(weasel, "license_sha256", SHA256)
 
   librime = require_hash(sources, "librime")
   require_string(librime, "submodule_path")
@@ -457,7 +481,7 @@ def verify_local(lock)
     fail_lock("downstream patch digest differs for #{name}") unless
       actual == item.fetch("sha256")
   end
-  %w[librime plum rime_ice hallelujah rime_octagram_data rime_wanxiang].each do |name|
+  %w[librime plum rime_ice hallelujah rime_octagram_data rime_wanxiang weasel].each do |name|
     source = sources.fetch(name)
     path = source.fetch("submodule_path")
     submodule_name = source.fetch("submodule_name", path)
@@ -568,7 +592,7 @@ end
 def report(lock)
   sources = lock.fetch("sources")
   rows = []
-  %w[squirrel librime rime_ice hallelujah rime_wanxiang].each do |name|
+  %w[squirrel weasel librime rime_ice hallelujah rime_wanxiang].each do |name|
     pinned, latest, _commit, status = stable_status(sources.fetch(name))
     rows << [name, "stable tag", pinned, latest, status]
   end
@@ -604,8 +628,9 @@ def report(lock)
   puts "# Linnet upstream report"
   puts
   puts "Stable updates are candidates only; this command never fetches submodules, edits the lock, or merges code."
-  puts "Direct product upstreams: Squirrel/Rime, rime-ice, Hallelujah, " \
-       "Wanxiang, Rime LMDG grammar."
+  puts "Platform frontends: Squirrel/Rime (macOS), Weasel/Rime (Windows)."
+  puts "Shared data upstreams: rime-ice, Hallelujah, Wanxiang, " \
+       "Rime LMDG grammar."
   puts
   puts "| Source | Track | Locked | Remote candidate | Status |"
   puts "| --- | --- | --- | --- | --- |"

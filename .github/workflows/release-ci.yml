@@ -60,10 +60,8 @@ jobs:
       - name: Prepare locked dependencies and generated data
         run: ./action-install.sh
 
-  publish-community:
+  prepare-community:
     if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
     runs-on: macos-latest
     steps:
       - name: Checkout the tagged source
@@ -114,6 +112,22 @@ jobs:
       - name: Prepare locked dependencies and generated data
         run: ./action-install.sh
 
+      - name: Stage shared Windows build inputs
+        run: scripts/stage-windows-build-inputs
+
+      - name: Upload root-owned Windows build inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: linnet-windows-inputs-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            data/plum
+            data/opencc
+            build/windows-inputs/linnet_embedded_lua.h
+            build/windows-inputs/weasel.yaml
+            build/windows-inputs/preview
+
       - name: Build and verify unsigned community artifacts
         env:
           LINNET_CANDIDATE_REVISION: ${{ github.sha }}
@@ -137,6 +151,39 @@ jobs:
           LINNET_RELEASE_TOOL="${pack_tool}" package/verify_publication_artifacts \
             "${ARCHIVE_OUTPUT_DIR}" "${GITHUB_REF_NAME#v}" \
             "${LINNET_CANDIDATE_REVISION}"
+
+      - name: Upload verified community release inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: linnet-community-release-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: ${{ runner.temp }}/linnet-release
+
+  build-windows:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: prepare-community
+    uses: ./.github/workflows/windows-build.yml
+
+  publish-community:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [prepare-community, build-windows]
+    permissions:
+      contents: write
+    runs-on: macos-latest
+    steps:
+      - name: Checkout the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Download verified community release inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: linnet-community-release-${{ github.sha }}
+          path: ${{ runner.temp }}/linnet-release
 
       - name: Publish same-repository update channels and the stable installer
         env:

@@ -11,7 +11,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          # Keep all five source submodules on the lock-owning build path.
+          # Keep source submodules on their lock-owning build paths.
           submodules: false
 
       - name: Install build tools
@@ -34,8 +34,31 @@ jobs:
               "${previous}" config/linnet-data-releases.json
           fi
 
+      - name: Hydrate locked Windows frontend for root lock verification
+        run: scripts/stage-windows-build-inputs hydrate
+
       - name: Build and verify Linnet
         run: ./action-build.sh release && tests/verify_development.sh
 
+      - name: Stage shared Windows build inputs
+        run: scripts/stage-windows-build-inputs
+
+      - name: Upload root-owned Windows build inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: linnet-windows-inputs-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            data/plum
+            data/opencc
+            build/windows-inputs/linnet_embedded_lua.h
+            build/windows-inputs/weasel.yaml
+            build/windows-inputs/preview
+
       - name: Check Unused Code
         run: scripts/run_periphery.sh
+
+  windows:
+    needs: build
+    uses: ./.github/workflows/windows-build.yml

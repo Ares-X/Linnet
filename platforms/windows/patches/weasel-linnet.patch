@@ -1,0 +1,1825 @@
+diff --git a/RimeWithWeasel/RimeWithWeasel.cpp b/RimeWithWeasel/RimeWithWeasel.cpp
+index 3f4e59d..b962e92 100644
+--- a/RimeWithWeasel/RimeWithWeasel.cpp
++++ b/RimeWithWeasel/RimeWithWeasel.cpp
+@@ -46,7 +46,7 @@ static void CleanOldLogs() {
+   time_t now = time(NULL);
+   strftime(ymd, sizeof(ymd), ".%Y%m%d", localtime(&now));
+   std::string today(ymd);
+-  const std::string app_name = "rime.weasel";
++  const std::string app_name = "rime.linnet";
+   std::string dir = WeaselLogPath().string();
+   if (!fs::exists(fs::path(dir)))
+     return;
+@@ -137,7 +137,7 @@ void RimeWithWeaselHandler::_Setup() {
+   weasel_traits.distribution_name = distribution_name.c_str();
+   weasel_traits.distribution_code_name = WEASEL_CODE_NAME;
+   weasel_traits.distribution_version = WEASEL_VERSION;
+-  weasel_traits.app_name = "rime.weasel";
++  weasel_traits.app_name = "rime.linnet.windows";
+   std::string log_dir = WeaselLogPath().u8string();
+   weasel_traits.log_dir = log_dir.c_str();
+   rime_api->setup(&weasel_traits);
+@@ -150,9 +150,9 @@ void RimeWithWeaselHandler::Initialize() {
+     return;
+   }
+ 
+-  LOG(INFO) << "Initializing la rime.";
+-  rime_api->initialize(NULL);
+-#if 0
++  LOG(INFO) << "Initializing la rime.";
++  rime_api->initialize(NULL);
++#if 0
+   if (rime_api->start_maintenance(/*full_check = */ False)) {
+     m_disabled = true;
+   }
+@@ -555,7 +555,7 @@ void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
+ }
+ 
+ bool RimeWithWeaselHandler::_IsDeployerRunning() {
+-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
++  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerMutex");
+   bool deployer_detected = hMutex && GetLastError() == ERROR_ALREADY_EXISTS;
+   if (hMutex) {
+     CloseHandle(hMutex);
+@@ -738,14 +738,14 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
+     else if (m_message_value == "failure") {
+       if (GetThreadUILanguage() ==
+           MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL))
+-        tips = L"有錯誤，請查看日誌 %TEMP%\\rime.weasel\\rime.weasel.*.INFO";
++        tips = L"有錯誤，請查看日誌 %TEMP%\\rime.linnet\\rime.linnet.*.INFO";
+       else if (GetThreadUILanguage() ==
+                MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED))
+-        tips = L"有错误，请查看日志 %TEMP%\\rime.weasel\\rime.weasel.*.INFO";
++        tips = L"有错误，请查看日志 %TEMP%\\rime.linnet\\rime.linnet.*.INFO";
+       else
+         tips =
+             L"There is an error, please check the logs "
+-            L"%TEMP%\\rime.weasel\\rime.weasel.*.INFO";
++            L"%TEMP%\\rime.linnet\\rime.linnet.*.INFO";
+     }
+   } else if (m_message_type == "schema") {
+     tips = /*L"【" + */ status.schema_name /* + L"】"*/;
+diff --git a/RimeWithWeasel/WeaselUtility.cpp b/RimeWithWeasel/WeaselUtility.cpp
+index 9a07343..0ba5076 100644
+--- a/RimeWithWeasel/WeaselUtility.cpp
++++ b/RimeWithWeasel/WeaselUtility.cpp
+@@ -5,7 +5,7 @@
+ 
+ fs::path WeaselUserDataPath() {
+   WCHAR _path[MAX_PATH] = {0};
+-  const WCHAR KEY[] = L"Software\\Rime\\Weasel";
++  const WCHAR KEY[] = WEASEL_REG_KEY;
+   HKEY hKey;
+   LSTATUS ret = RegOpenKey(HKEY_CURRENT_USER, KEY, &hKey);
+   if (ret == ERROR_SUCCESS) {
+@@ -20,7 +20,7 @@ fs::path WeaselUserDataPath() {
+     }
+   }
+   // default location
+-  ExpandEnvironmentStringsW(L"%AppData%\\Rime", _path, _countof(_path));
++  ExpandEnvironmentStringsW(L"%AppData%\\Linnet", _path, _countof(_path));
+   return fs::path(_path);
+ }
+ 
+diff --git a/WeaselDeployer/Configurator.cpp b/WeaselDeployer/Configurator.cpp
+index 1502322..61804ef 100644
+--- a/WeaselDeployer/Configurator.cpp
++++ b/WeaselDeployer/Configurator.cpp
+@@ -42,13 +42,13 @@ void Configurator::Initialize() {
+   weasel_traits.distribution_name = distribution_name.c_str();
+   weasel_traits.distribution_code_name = WEASEL_CODE_NAME;
+   weasel_traits.distribution_version = WEASEL_VERSION;
+-  weasel_traits.app_name = "rime.weasel";
++  weasel_traits.app_name = "rime.linnet.windows.deployer";
+   std::string log_dir = WeaselLogPath().u8string();
+   weasel_traits.log_dir = log_dir.c_str();
+   RimeApi* rime_api = rime_get_api();
+   assert(rime_api);
+   rime_api->setup(&weasel_traits);
+-  LOG(INFO) << "WeaselDeployer reporting.";
++  LOG(INFO) << "Linnet deployer reporting.";
+   rime_api->deployer_initialize(NULL);
+ }
+ 
+@@ -114,7 +114,7 @@ int Configurator::Run(bool installing) {
+ }
+ 
+ int Configurator::UpdateWorkspace(bool report_errors) {
+-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
++  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerMutex");
+   if (!hMutex) {
+     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+     return 1;
+@@ -138,12 +138,18 @@ int Configurator::UpdateWorkspace(bool report_errors) {
+     client.StartMaintenance();
+   }
+ 
+-  {
+-    RimeApi* rime = rime_get_api();
+-    // initialize default config, preset schemas
+-    rime->deploy();
+-    // initialize weasel config
+-    rime->deploy_config_file("weasel.yaml", "config_version");
++  bool deployment_succeeded = false;
++  {
++    RimeApi* rime = rime_get_api();
++    // initialize default config, preset schemas
++    const bool workspace_deployed = rime->deploy();
++    // initialize weasel config
++    const bool frontend_config_deployed =
++        rime->deploy_config_file("weasel.yaml", "config_version");
++    deployment_succeeded = workspace_deployed && frontend_config_deployed;
++    if (!deployment_succeeded) {
++      LOG(ERROR) << "Linnet workspace deployment failed.";
++    }
+   }
+ 
+   CloseHandle(hMutex);  // should be closed before resuming service.
+@@ -152,11 +158,11 @@ int Configurator::UpdateWorkspace(bool report_errors) {
+     LOG(INFO) << "Resuming service.";
+     client.EndMaintenance();
+   }
+-  return 0;
++  return deployment_succeeded ? 0 : 1;
+ }
+ 
+ int Configurator::DictManagement() {
+-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
++  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerMutex");
+   if (!hMutex) {
+     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+     return 1;
+@@ -196,7 +202,7 @@ int Configurator::DictManagement() {
+ }
+ 
+ int Configurator::SyncUserData() {
+-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
++  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerMutex");
+   if (!hMutex) {
+     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+     return 1;
+diff --git a/WeaselDeployer/SwitcherSettingsDialog.cpp b/WeaselDeployer/SwitcherSettingsDialog.cpp
+index 587cbc7..a2735f8 100644
+--- a/WeaselDeployer/SwitcherSettingsDialog.cpp
++++ b/WeaselDeployer/SwitcherSettingsDialog.cpp
+@@ -95,10 +95,7 @@ LRESULT SwitcherSettingsDialog::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
+   hotkeys_.Attach(GetDlgItem(IDC_HOTKEYS));
+   hotkeys_.EnableWindow(FALSE);
+ 
+-  get_schemata_.Attach(GetDlgItem(IDC_GET_SCHEMATA));
+-  get_schemata_.EnableWindow(TRUE);
+-
+-  Populate();
++  Populate();
+ 
+   CenterWindow();
+   BringWindowToTop();
+@@ -110,52 +107,6 @@ LRESULT SwitcherSettingsDialog::OnClose(UINT, WPARAM, LPARAM, BOOL&) {
+   return 0;
+ }
+ 
+-LRESULT SwitcherSettingsDialog::OnGetSchemata(WORD, WORD, HWND hWndCtl, BOOL&) {
+-  HKEY hKey;
+-  std::wstring hPath;
+-  if (is_wow64())
+-    hPath = _T("Software\\WOW6432Node\\Rime\\Weasel");
+-  else
+-    hPath = _T("Software\\Rime\\Weasel");
+-  LSTATUS ret = RegOpenKey(HKEY_LOCAL_MACHINE, hPath.c_str(), &hKey);
+-  if (ret == ERROR_SUCCESS) {
+-    WCHAR value[MAX_PATH];
+-    DWORD len = sizeof(value);
+-    DWORD type = 0;
+-    DWORD data = 0;
+-    ret =
+-        RegQueryValueExW(hKey, L"WeaselRoot", NULL, &type, (LPBYTE)value, &len);
+-    if (ret == ERROR_SUCCESS && type == REG_SZ) {
+-      WCHAR parameters[MAX_PATH + 37];
+-      wcscpy_s<_countof(parameters)>(
+-          parameters,
+-          (std::wstring(L"/k \"") + value + L"\\rime-install.bat\"").c_str());
+-      SHELLEXECUTEINFOW cmd = {sizeof(SHELLEXECUTEINFO),
+-                               SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+-                               hWndCtl,
+-                               L"open",
+-                               L"cmd",
+-                               parameters,
+-                               NULL,
+-                               SW_SHOW,
+-                               NULL,
+-                               NULL,
+-                               NULL,
+-                               NULL,
+-                               NULL,
+-                               NULL,
+-                               NULL};
+-      ShellExecuteExW(&cmd);
+-      WaitForSingleObject(cmd.hProcess, INFINITE);
+-      CloseHandle(cmd.hProcess);
+-      api_->load_settings(reinterpret_cast<RimeCustomSettings*>(settings_));
+-      Populate();
+-    }
+-  }
+-  RegCloseKey(hKey);
+-  return 0;
+-}
+-
+ LRESULT SwitcherSettingsDialog::OnOK(WORD, WORD code, HWND, BOOL&) {
+   if (modified_ && settings_ && schema_list_.GetItemCount() != 0) {
+     const char** selection = new const char*[schema_list_.GetItemCount()];
+diff --git a/WeaselDeployer/SwitcherSettingsDialog.h b/WeaselDeployer/SwitcherSettingsDialog.h
+index 08305c3..e7f354b 100644
+--- a/WeaselDeployer/SwitcherSettingsDialog.h
++++ b/WeaselDeployer/SwitcherSettingsDialog.h
+@@ -14,14 +14,12 @@ class SwitcherSettingsDialog : public CDialogImpl<SwitcherSettingsDialog> {
+   BEGIN_MSG_MAP(SwitcherSettingsDialog)
+   MESSAGE_HANDLER(WM_INITDIALOG, OnInitDialog)
+   MESSAGE_HANDLER(WM_CLOSE, OnClose)
+-  COMMAND_HANDLER(IDC_GET_SCHEMATA, BN_CLICKED, OnGetSchemata)
+   COMMAND_ID_HANDLER(IDOK, OnOK)
+   NOTIFY_HANDLER(IDC_SCHEMA_LIST, LVN_ITEMCHANGED, OnSchemaListItemChanged)
+   END_MSG_MAP()
+ 
+   LRESULT OnInitDialog(UINT, WPARAM, LPARAM, BOOL&);
+   LRESULT OnClose(UINT, WPARAM, LPARAM, BOOL&);
+-  LRESULT OnGetSchemata(WORD, WORD, HWND, BOOL&);
+   LRESULT OnOK(WORD, WORD, HWND, BOOL&);
+   LRESULT OnSchemaListItemChanged(int, LPNMHDR, BOOL&);
+ 
+@@ -33,8 +31,7 @@ class SwitcherSettingsDialog : public CDialogImpl<SwitcherSettingsDialog> {
+   bool loaded_;
+   bool modified_;
+ 
+-  CCheckListViewCtrl schema_list_;
+-  CStatic description_;
+-  CEdit hotkeys_;
+-  CButton get_schemata_;
+-};
++  CCheckListViewCtrl schema_list_;
++  CStatic description_;
++  CEdit hotkeys_;
++};
+diff --git a/WeaselDeployer/UIStyleSettings.cpp b/WeaselDeployer/UIStyleSettings.cpp
+index 22e7380..7b77608 100644
+--- a/WeaselDeployer/UIStyleSettings.cpp
++++ b/WeaselDeployer/UIStyleSettings.cpp
+@@ -20,6 +20,16 @@ bool UIStyleSettings::GetPresetColorSchemes(
+     return false;
+   }
+   while (rime->config_next(&preset)) {
++    const std::string color_scheme_id(preset.key);
++    constexpr char kLinnetPrefix[] = "linnet_";
++    constexpr char kDarkSuffix[] = "_dark";
++    if (color_scheme_id.compare(0, sizeof(kLinnetPrefix) - 1,
++                                kLinnetPrefix) == 0 &&
++        color_scheme_id.size() >= sizeof(kDarkSuffix) - 1 &&
++        color_scheme_id.compare(
++            color_scheme_id.size() - (sizeof(kDarkSuffix) - 1),
++            sizeof(kDarkSuffix) - 1, kDarkSuffix) == 0)
++      continue;
+     std::string name_key(preset.path);
+     name_key += "/name";
+     const char* name = rime->config_get_cstring(&config, name_key.c_str());
+@@ -29,7 +39,7 @@ bool UIStyleSettings::GetPresetColorSchemes(
+     if (!name)
+       continue;
+     ColorSchemeInfo info;
+-    info.color_scheme_id = preset.key;
++    info.color_scheme_id = color_scheme_id;
+     info.name = name;
+     if (author)
+       info.author = author;
+@@ -68,8 +78,25 @@ std::string UIStyleSettings::GetActiveColorScheme() {
+   return std::string(value);
+ }
+ 
+-bool UIStyleSettings::SelectColorScheme(const std::string& color_scheme_id) {
+-  api_->customize_string(settings_, "style/color_scheme",
+-                         color_scheme_id.c_str());
++bool UIStyleSettings::SelectColorScheme(const std::string& color_scheme_id) {
++  constexpr char kLinnetPrefix[] = "linnet_";
++  constexpr char kLightSuffix[] = "_light";
++  const size_t suffix_length = sizeof(kLightSuffix) - 1;
++  if (color_scheme_id.compare(0, sizeof(kLinnetPrefix) - 1,
++                              kLinnetPrefix) == 0 &&
++      color_scheme_id.size() >= suffix_length &&
++      color_scheme_id.compare(color_scheme_id.size() - suffix_length,
++                              suffix_length, kLightSuffix) == 0) {
++    const std::string family =
++        color_scheme_id.substr(0, color_scheme_id.size() - suffix_length);
++    const std::string dark_scheme = family + "_dark";
++    api_->customize_string(settings_, "style/color_scheme",
++                           color_scheme_id.c_str());
++    api_->customize_string(settings_, "style/color_scheme_dark",
++                           dark_scheme.c_str());
++  } else {
++    api_->customize_string(settings_, "style/color_scheme",
++                           color_scheme_id.c_str());
++  }
+   return true;
+ }
+diff --git a/WeaselDeployer/WeaselDeployer.cpp b/WeaselDeployer/WeaselDeployer.cpp
+index a578014..0507745 100644
+--- a/WeaselDeployer/WeaselDeployer.cpp
++++ b/WeaselDeployer/WeaselDeployer.cpp
+@@ -40,7 +40,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
+   CreateDirectory(WeaselUserDataPath().c_str(), NULL);
+ 
+   int ret = 0;
+-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerExclusiveMutex");
++  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerExclusiveMutex");
+   if (!hMutex) {
+     ret = 1;
+   } else if (GetLastError() == ERROR_ALREADY_EXISTS) {
+@@ -66,7 +66,7 @@ static int Run(LPTSTR lpCmdLine) {
+     WCHAR msg[1024] = {0};
+     if (LoadString(GetModuleHandle(NULL), IDS_STR_HELP, msg,
+                    sizeof(msg) / sizeof(TCHAR))) {
+-      MessageBox(NULL, msg, L"Weasel Deployer", MB_ICONINFORMATION | MB_OK);
++      MessageBox(NULL, msg, L"Linnet Deployer", MB_ICONINFORMATION | MB_OK);
+     } else {
+       MessageBox(NULL,
+                  L"Usage: WeaselDeployer.exe [options]\n"
+@@ -74,8 +74,8 @@ static int Run(LPTSTR lpCmdLine) {
+                  L"/deploy		- Update Workspace\n"
+                  L"/dict		- Manage dictionary\n"
+                  L"/sync		- Sync user data\n"
+-                 L"/install		- Install Weasel (Initial deployment)",
+-                 L"Weasel Deployer", MB_ICONINFORMATION | MB_OK);
++                 L"/install		- Install Linnet (Initial deployment)",
++                 L"Linnet Deployer", MB_ICONINFORMATION | MB_OK);
+     }
+     return 0;
+   }
+diff --git a/WeaselDeployer/resource.h b/WeaselDeployer/resource.h
+index 25bc31a..3f33a37 100644
+--- a/WeaselDeployer/resource.h
++++ b/WeaselDeployer/resource.h
+@@ -40,8 +40,7 @@
+ #define IDS_STR_HELP                    158
+ #define IDC_SCHEMA_LIST                 1000
+ #define IDC_SCHEMA_DESCRIPTION          1001
+-#define IDC_GET_SCHEMATA                1002
+-#define IDC_HOTKEYS                     1003
++#define IDC_HOTKEYS                     1003
+ #define IDC_COLOR_SCHEME                1004
+ #define IDC_SELECT_FONT                 1005
+ #define IDC_PREVIEW                     1006
+diff --git a/WeaselServer/WeaselServer.cpp b/WeaselServer/WeaselServer.cpp
+index b4cf8b2..f8fa7fc 100644
+--- a/WeaselServer/WeaselServer.cpp
++++ b/WeaselServer/WeaselServer.cpp
+@@ -9,7 +9,6 @@
+ #include <WeaselUI.h>
+ #include <RimeWithWeasel.h>
+ #include <WeaselUtility.h>
+-#include <winsparkle.h>
+ #include <functional>
+ #include <ShellScalingApi.h>
+ #include <WinUser.h>
+@@ -106,11 +105,6 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
+       return 0;
+   }
+ 
+-  bool check_updates = !wcscmp(L"/update", lpstrCmdLine);
+-  if (check_updates) {
+-    WeaselServerApp::check_update();
+-  }
+-
+   CreateDirectory(WeaselUserDataPath().c_str(), NULL);
+ 
+   int nRet = 0;
+diff --git a/WeaselServer/WeaselServerApp.cpp b/WeaselServer/WeaselServerApp.cpp
+index e09c4c5..a05fe84 100644
+--- a/WeaselServer/WeaselServerApp.cpp
++++ b/WeaselServer/WeaselServerApp.cpp
+@@ -16,17 +16,6 @@ int WeaselServerApp::Run() {
+   if (!m_server.Start())
+     return -1;
+ 
+-  // win_sparkle_set_appcast_url("http://localhost:8000/weasel/update/appcast.xml");
+-  win_sparkle_set_registry_path("Software\\Rime\\Weasel\\Updates");
+-  if (GetThreadUILanguage() ==
+-      MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL))
+-    win_sparkle_set_lang("zh-TW");
+-  else if (GetThreadUILanguage() ==
+-           MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED))
+-    win_sparkle_set_lang("zh-CN");
+-  else
+-    win_sparkle_set_lang("en");
+-  win_sparkle_init();
+   m_ui.Create(m_server.GetHWnd());
+ 
+   m_handler->Initialize();
+@@ -40,8 +29,6 @@ int WeaselServerApp::Run() {
+   m_handler->Finalize();
+   m_ui.Destroy();
+   tray_icon.RemoveIcon();
+-  win_sparkle_cleanup();
+-
+   return ret;
+ }
+ 
+@@ -64,10 +51,9 @@ void WeaselServerApp::SetupMenuHandlers() {
+   m_server.AddMenuHandler(ID_WEASELTRAY_WIKI,
+                           std::bind(open, L"https://rime.im/docs/"));
+   m_server.AddMenuHandler(ID_WEASELTRAY_HOMEPAGE,
+-                          std::bind(open, L"https://rime.im/"));
++                          std::bind(open, L"https://github.com/Ares-X/Linnet"));
+   m_server.AddMenuHandler(ID_WEASELTRAY_FORUM,
+                           std::bind(open, L"https://rime.im/discuss/"));
+-  m_server.AddMenuHandler(ID_WEASELTRAY_CHECKUPDATE, check_update);
+   m_server.AddMenuHandler(ID_WEASELTRAY_INSTALLDIR, std::bind(explore, dir));
+   m_server.AddMenuHandler(ID_WEASELTRAY_USERCONFIG,
+                           std::bind(explore, WeaselUserDataPath()));
+diff --git a/WeaselServer/WeaselServerApp.h b/WeaselServer/WeaselServerApp.h
+index d5e32e0..0a9b735 100644
+--- a/WeaselServer/WeaselServerApp.h
++++ b/WeaselServer/WeaselServerApp.h
+@@ -9,7 +9,6 @@
+ #include <filesystem>
+ #include <functional>
+ #include <memory>
+-#include <winsparkle.h>
+ 
+ #include "WeaselTrayIcon.h"
+ 
+@@ -33,22 +32,6 @@ class WeaselServerApp {
+                                     SW_SHOWNORMAL) > 32;
+   }
+ 
+-  static bool check_update() {
+-    // when checked manually, show testing versions too
+-    std::string feed_url = GetCustomResource("ManualUpdateFeedURL", "APPCAST");
+-    std::wstring channel{};
+-    auto ret = RegGetStringValue(HKEY_CURRENT_USER, L"Software\\Rime\\Weasel",
+-                                 L"UpdateChannel", channel);
+-    if (!ret && channel == L"testing") {
+-      feed_url = GetCustomResource("TestingManualUpdateFeedURL", "APPCAST");
+-    }
+-    if (!feed_url.empty()) {
+-      win_sparkle_set_appcast_url(feed_url.c_str());
+-    }
+-    win_sparkle_check_update_with_ui();
+-    return true;
+-  }
+-
+   static fs::path install_dir() {
+     WCHAR exe_path[MAX_PATH] = {0};
+     GetModuleFileNameW(GetModuleHandle(NULL), exe_path, _countof(exe_path));
+diff --git a/WeaselServer/WeaselService.h b/WeaselServer/WeaselService.h
+index 28927fb..f4c3c78 100644
+--- a/WeaselServer/WeaselService.h
++++ b/WeaselServer/WeaselService.h
+@@ -5,7 +5,7 @@
+ 
+ #include "WeaselServerApp.h"
+ 
+-#define WEASEL_SERVICE_NAME L"WeaselInputService"
++#define WEASEL_SERVICE_NAME L"LinnetInputService"
+ 
+ class WeaselService {
+  public:
+diff --git a/WeaselServer/resource.h b/WeaselServer/resource.h
+index c6655b8..29e701a 100644
+--- a/WeaselServer/resource.h
++++ b/WeaselServer/resource.h
+@@ -14,8 +14,7 @@
+ #define IDS_STR_UNDER_MAINTENANCE       302
+ #define ID_WEASELTRAY_QUIT              40001
+ #define ID_WEASELTRAY_DEPLOY            40002
+-#define ID_WEASELTRAY_CHECKUPDATE       40003
+-#define ID_WEASELTRAY_FORUM             40004
++#define ID_WEASELTRAY_FORUM             40004
+ #define ID_WEASELTRAY_HOMEPAGE          40005
+ #define ID_WEASELTRAY_INSTALLDIR        40006
+ #define ID_WEASELTRAY_USERCONFIG        40007
+diff --git a/WeaselSetup/WeaselSetup.cpp b/WeaselSetup/WeaselSetup.cpp
+index 9b2a240..37576f8 100644
+--- a/WeaselSetup/WeaselSetup.cpp
++++ b/WeaselSetup/WeaselSetup.cpp
+@@ -41,9 +41,19 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
+ 
+   return nRet;
+ }
+-int install(bool hant, bool silent, bool old_ime_support);
+-int uninstall(bool silent);
+-bool has_installed();
++int install(bool hant, bool silent, bool old_ime_support);
++int uninstall(bool silent);
++bool has_installed();
++
++static int InstallAndRememberProfile(bool hant,
++                                     bool silent,
++                                     bool old_ime_support) {
++  const int result = install(hant, silent, old_ime_support);
++  if (result != 0)
++    return result;
++  return SetRegKeyValue(HKEY_CURRENT_USER, WEASEL_REG_KEY, L"Hant",
++                        (hant ? 1 : 0), REG_DWORD);
++}
+ 
+ static std::wstring install_dir() {
+   WCHAR exe_path[MAX_PATH] = {0};
+@@ -60,7 +70,7 @@ static int CustomInstall(bool installing) {
+   bool old_ime_support = false;
+   std::wstring user_dir;
+ 
+-  const WCHAR KEY[] = L"Software\\Rime\\Weasel";
++  const WCHAR KEY[] = WEASEL_REG_KEY;
+   HKEY hKey;
+   LSTATUS ret = RegOpenKey(HKEY_CURRENT_USER, KEY, &hKey);
+   if (ret == ERROR_SUCCESS) {
+@@ -103,9 +113,9 @@ static int CustomInstall(bool installing) {
+       return 1;
+ 
+   if (user_dir.empty()) {
+-    // default user dir %APPDATA%\Rime
++    // default isolated Linnet user directory
+     WCHAR _path[MAX_PATH] = {0};
+-    ExpandEnvironmentStringsW(L"%APPDATA%\\Rime", _path, _countof(_path));
++    ExpandEnvironmentStringsW(L"%APPDATA%\\Linnet", _path, _countof(_path));
+     user_dir = std::wstring(_path);
+   }
+   ret = SetRegKeyValue(HKEY_CURRENT_USER, KEY, L"RimeUserDir", user_dir.c_str(),
+@@ -125,10 +135,10 @@ static int CustomInstall(bool installing) {
+   if (_has_installed) {
+     std::wstring dir(install_dir());
+     std::thread th([dir]() {
+-      ShellExecuteW(NULL, NULL, (dir + L"\\WeaselServer.exe").c_str(), L"/q",
++      ShellExecuteW(NULL, NULL, (dir + L"\\LinnetServer.exe").c_str(), L"/q",
+                     NULL, SW_SHOWNORMAL);
+       Sleep(500);
+-      ShellExecuteW(NULL, NULL, (dir + L"\\WeaselServer.exe").c_str(), L"",
++      ShellExecuteW(NULL, NULL, (dir + L"\\LinnetServer.exe").c_str(), L"",
+                     NULL, SW_SHOWNORMAL);
+       Sleep(500);
+       ShellExecuteW(NULL, NULL, (dir + L"\\WeaselDeployer.exe").c_str(),
+@@ -156,27 +166,23 @@ static int Run(LPTSTR lpCmdLine) {
+     WCHAR msg[1024] = {0};
+     if (LoadString(GetModuleHandle(NULL), IDS_STR_HELP, msg,
+                    sizeof(msg) / sizeof(TCHAR))) {
+-      MessageBox(NULL, msg, L"WeaselSetup", MB_ICONINFORMATION | MB_OK);
++      MessageBox(NULL, msg, L"Linnet Setup", MB_ICONINFORMATION | MB_OK);
+     } else {
+       MessageBox(
+           NULL,
+-          L"Usage: WeaselSetup.exe [options]\n"
++          L"Usage: Linnet's WeaselSetup.exe [options]\n"
+           L"/? or /help    - Show this help message\n"
+-          L"/u             - Uninstall Weasel\n"
+-          L"/i             - Install Weasel\n"
+-          L"/s             - Install Weasel (Simplified Chinese)\n"
+-          L"/t             - Install Weasel (Traditional Chinese)\n"
+-          L"/ls            - Set Weasel language to Simplified Chinese\n"
+-          L"/lt            - Set Weasel language to Traditional Chinese\n"
+-          L"/le            - Set Weasel language to English\n"
+-          L"/eu            - Enable automatic update check\n"
+-          L"/du            - Disable automatic update check\n"
++          L"/u             - Uninstall Linnet\n"
++          L"/i             - Install Linnet\n"
++          L"/s             - Install Linnet (Simplified Chinese)\n"
++          L"/t             - Install Linnet (Traditional Chinese)\n"
++          L"/ls            - Set Linnet language to Simplified Chinese\n"
++          L"/lt            - Set Linnet language to Traditional Chinese\n"
++          L"/le            - Set Linnet language to English\n"
+           L"/toggleime     - Toggle IME on open/close(ctrl+space)\n"
+           L"/toggleascii   - Toggle ASCII on open/close(ctrl+space)\n"
+-          L"/testing       - Set update channel to testing\n"
+-          L"/release       - Set update channel to release\n"
+           L"/userdir:<dir> - Set user directory\n",
+-          L"WeaselSetup", MB_ICONINFORMATION | MB_OK);
++          L"Linnet Setup", MB_ICONINFORMATION | MB_OK);
+     }
+     return 0;
+   }
+@@ -189,57 +195,39 @@ static int Run(LPTSTR lpCmdLine) {
+   }
+ 
+   if (auto res = GetParamByPrefix(lpCmdLine, L"/userdir:")) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
++    return SetRegKeyValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                           L"RimeUserDir", res, REG_SZ);
+   }
+ 
+   if (!wcscmp(L"/ls", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
++    return SetRegKeyValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                           L"Language", L"chs", REG_SZ);
+   } else if (!wcscmp(L"/lt", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
++    return SetRegKeyValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                           L"Language", L"cht", REG_SZ);
+   } else if (!wcscmp(L"/le", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
++    return SetRegKeyValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                           L"Language", L"eng", REG_SZ);
+   }
+ 
+-  if (!wcscmp(L"/eu", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel\\Updates",
+-                          L"CheckForUpdates", L"1", REG_SZ);
+-  }
+-  if (!wcscmp(L"/du", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel\\Updates",
+-                          L"CheckForUpdates", L"0", REG_SZ);
+-  }
+-
+   if (!wcscmp(L"/toggleime", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
++    return SetRegKeyValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                           L"ToggleImeOnOpenClose", L"yes", REG_SZ);
+   }
+   if (!wcscmp(L"/toggleascii", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
++    return SetRegKeyValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                           L"ToggleImeOnOpenClose", L"no", REG_SZ);
+   }
+-  if (!wcscmp(L"/testing", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
+-                          L"UpdateChannel", L"testing", REG_SZ);
+-  }
+-  if (!wcscmp(L"/release", lpCmdLine)) {
+-    return SetRegKeyValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
+-                          L"UpdateChannel", L"release", REG_SZ);
+-  }
+-
+   if (!IsProcAdmin()) {
+     return RestartAsAdmin(lpCmdLine);
+   }
+ 
+-  bool hans = !wcscmp(L"/s", lpCmdLine);
+-  if (hans)
+-    return install(false, silent, old_ime_support);
+-  bool hant = !wcscmp(L"/t", lpCmdLine);
+-  if (hant)
+-    return install(true, silent, old_ime_support);
++  bool hans = !wcscmp(L"/s", lpCmdLine);
++  if (hans)
++    return InstallAndRememberProfile(false, silent, old_ime_support);
++  bool hant = !wcscmp(L"/t", lpCmdLine);
++  if (hant)
++    return InstallAndRememberProfile(true, silent, old_ime_support);
+   bool installing = !wcscmp(L"/i", lpCmdLine);
+   return CustomInstall(installing);
+ }
+diff --git a/WeaselSetup/imesetup.cpp b/WeaselSetup/imesetup.cpp
+index ed48aea..8503fa0 100644
+--- a/WeaselSetup/imesetup.cpp
++++ b/WeaselSetup/imesetup.cpp
+@@ -8,35 +8,35 @@
+ #include <WeaselUtility.h>
+ #include "InstallOptionsDlg.h"
+ 
+-// {A3F4CDED-B1E9-41EE-9CA6-7B4D0DE6CB0A}
+-static const GUID c_clsidTextService = {
+-    0xa3f4cded,
+-    0xb1e9,
+-    0x41ee,
+-    {0x9c, 0xa6, 0x7b, 0x4d, 0xd, 0xe6, 0xcb, 0xa}};
+-
+-// {3D02CAB6-2B8E-4781-BA20-1C9267529467}
+-static const GUID c_guidProfile = {
+-    0x3d02cab6,
+-    0x2b8e,
+-    0x4781,
+-    {0xba, 0x20, 0x1c, 0x92, 0x67, 0x52, 0x94, 0x67}};
++// {660F0020-8849-43B3-8FB0-806CF516F3B0}
++static const GUID c_clsidTextService = {
++    0x660f0020,
++    0x8849,
++    0x43b3,
++    {0x8f, 0xb0, 0x80, 0x6c, 0xf5, 0x16, 0xf3, 0xb0}};
++
++// {EE2C8B48-FE3C-441F-AB71-D94B8E63573E}
++static const GUID c_guidProfile = {
++    0xee2c8b48,
++    0xfe3c,
++    0x441f,
++    {0xab, 0x71, 0xd9, 0x4b, 0x8e, 0x63, 0x57, 0x3e}};
+ 
+ // if in the future, option hant is extended, maybe a function to generate this
+ // info is required
+ #define PSZTITLE_HANS                                                     \
+-  L"0804:{A3F4CDED-B1E9-41EE-9CA6-7B4D0DE6CB0A}{3D02CAB6-2B8E-4781-BA20-" \
+-  L"1C9267529467}"
++  L"0804:{660F0020-8849-43B3-8FB0-806CF516F3B0}{EE2C8B48-FE3C-441F-AB71-" \
++  L"D94B8E63573E}"
+ #define PSZTITLE_HANT                                                     \
+-  L"0404:{A3F4CDED-B1E9-41EE-9CA6-7B4D0DE6CB0A}{3D02CAB6-2B8E-4781-BA20-" \
+-  L"1C9267529467}"
+-#define ILOT_UNINSTALL 0x00000001
+-typedef HRESULT(WINAPI* PTF_INSTALLLAYOUTORTIP)(LPCWSTR psz, DWORD dwFlags);
+-
+-#define WEASEL_WER_KEY                            \
+-  L"SOFTWARE\\Microsoft\\Windows\\Windows Error " \
+-  L"Reporting\\LocalDumps\\WeaselServer.exe"
+-
++  L"0404:{660F0020-8849-43B3-8FB0-806CF516F3B0}{EE2C8B48-FE3C-441F-AB71-" \
++  L"D94B8E63573E}"
++#define ILOT_UNINSTALL 0x00000001
++typedef HRESULT(WINAPI* PTF_INSTALLLAYOUTORTIP)(LPCWSTR psz, DWORD dwFlags);
++
++#define LINNET_WER_KEY                            \
++  L"SOFTWARE\\Microsoft\\Windows\\Windows Error " \
++  L"Reporting\\LocalDumps\\LinnetServer.exe"
++
+ BOOL copy_file(const std::wstring& src, const std::wstring& dest) {
+   BOOL ret = CopyFile(src.c_str(), dest.c_str(), FALSE);
+   if (!ret) {
+@@ -136,7 +136,7 @@ int install_ime_file(std::wstring& srcPath,
+   srcPath = std::wstring(drive) + dir + srcFileName;
+ 
+   GetSystemDirectoryW(path, _countof(path));
+-  std::wstring destPath = std::wstring(path) + L"\\weasel" + ext;
++  std::wstring destPath = std::wstring(path) + L"\\linnet" + ext;
+ 
+   int retval = 0;
+   // 复制 .dll/.ime 到系统目录
+@@ -168,7 +168,7 @@ int install_ime_file(std::wstring& srcPath,
+         std::wstring srcPathARM32 = srcPath;
+         ireplace_last(srcPathARM32, ext, L"ARM" + ext);
+ 
+-        std::wstring destPathARM32 = std::wstring(sysarm32) + L"\\weasel" + ext;
++        std::wstring destPathARM32 = std::wstring(sysarm32) + L"\\linnet" + ext;
+         if (!copy_file(srcPathARM32, destPathARM32)) {
+           MSG_NOT_SILENT_ID_CAP(silent, destPathARM32.c_str(),
+                                 IDS_STR_INSTALL_FAILED, MB_ICONERROR | MB_OK);
+@@ -232,22 +232,22 @@ int uninstall_ime_file(const std::wstring& ext,
+   WCHAR path[MAX_PATH];
+   GetSystemDirectoryW(path, _countof(path));
+   std::wstring imePath(path);
+-  imePath += L"\\weasel" + ext;
++  imePath += L"\\linnet" + ext;
+   retval += func(imePath, false, false, false, false, silent);
+   delete_file(imePath);
+   if (is_wow64()) {
+-    retval += func(imePath, false, true, false, false, silent);
+     PVOID OldValue = NULL;
+     if (Wow64DisableWow64FsRedirection(&OldValue) == FALSE) {
+       MSG_NOT_SILENT_BY_IDS(silent, IDS_STR_ERRCANCELFSREDIRECT,
+                             IDS_STR_UNINSTALL_FAILED, MB_ICONERROR | MB_OK);
+       return 1;
+     }
++    retval += func(imePath, false, true, false, false, silent);
+ 
+     if (is_arm64_machine()) {
+       WCHAR sysarm32[MAX_PATH];
+       if (get_wow_arm32_system_dir(sysarm32, _countof(sysarm32)) > 0) {
+-        std::wstring imePathARM32 = std::wstring(sysarm32) + L"\\weasel" + ext;
++        std::wstring imePathARM32 = std::wstring(sysarm32) + L"\\linnet" + ext;
+         retval += func(imePathARM32, false, true, true, false, silent);
+         delete_file(imePathARM32);
+       }
+@@ -305,8 +305,8 @@ int register_ime(const std::wstring& ime_path,
+             DWORD type = 0;
+             ret = RegQueryValueEx(hSubKey, L"Ime File", NULL, &type,
+                                   (LPBYTE)imeFile, &len);
+-            if (ret = ERROR_SUCCESS) {
+-              if (_wcsicmp(imeFile, L"weasel.ime") == 0) {
++            if (ret == ERROR_SUCCESS) {
++              if (_wcsicmp(imeFile, L"linnet.ime") == 0) {
+                 hKL = (HKL)k;  // already there
+               }
+             }
+@@ -315,7 +315,7 @@ int register_ime(const std::wstring& ime_path,
+             // found a spare number to register
+             ret = RegCreateKey(hKey, hkl_str, &hSubKey);
+             if (ret == ERROR_SUCCESS) {
+-              const WCHAR ime_file[] = L"weasel.ime";
++              const WCHAR ime_file[] = L"linnet.ime";
+               RegSetValueEx(hSubKey, L"Ime File", 0, REG_SZ, (LPBYTE)ime_file,
+                             sizeof(ime_file));
+               const WCHAR layout_file[] = L"kbdus.dll";
+@@ -401,7 +401,7 @@ int register_ime(const std::wstring& ime_path,
+         continue;
+ 
+       // 小狼毫?
+-      if (_wcsicmp(imeFile, L"weasel.ime") == 0) {
++      if (_wcsicmp(imeFile, L"linnet.ime") == 0) {
+         DWORD value;
+         swscanf_s(subKey, L"%x", &value);
+         UnloadKeyboardLayout((HKL)value);
+@@ -521,10 +521,7 @@ int register_text_service(const std::wstring& tsf_path,
+   shExInfo.lpDirectory = 0;
+   shExInfo.nShow = SW_SHOW;
+   shExInfo.hInstApp = 0;
+-  if (ShellExecuteExW(&shExInfo)) {
+-    WaitForSingleObject(shExInfo.hProcess, INFINITE);
+-    CloseHandle(shExInfo.hProcess);
+-  } else {
++  if (!ShellExecuteExW(&shExInfo)) {
+     WCHAR msg[100];
+     CString str;
+     str.LoadStringW(IDS_STR_ERRREGTSF);
+@@ -536,6 +533,19 @@ int register_text_service(const std::wstring& tsf_path,
+                           MB_ICONERROR | MB_OK);
+     return 1;
+   }
++  WaitForSingleObject(shExInfo.hProcess, INFINITE);
++  DWORD exit_code = ERROR_GEN_FAILURE;
++  const BOOL got_exit_code = GetExitCodeProcess(shExInfo.hProcess, &exit_code);
++  CloseHandle(shExInfo.hProcess);
++  if (!got_exit_code || exit_code != ERROR_SUCCESS) {
++    WCHAR msg[100];
++    CString str;
++    str.LoadStringW(IDS_STR_ERRREGTSF);
++    StringCchPrintfW(msg, _countof(msg), str, params.c_str());
++    MSG_NOT_SILENT_ID_CAP(silent, msg, IDS_STR_INORUN_FAILED,
++                          MB_ICONERROR | MB_OK);
++    return 1;
++  }
+ 
+   if (register_ime)
+     enable_profile(TRUE, hant);
+@@ -568,7 +578,7 @@ int install(bool hant, bool silent, bool old_ime_support) {
+     return 1;
+   }
+ 
+-  const std::wstring executable = L"WeaselServer.exe";
++  const std::wstring executable = L"LinnetServer.exe";
+   ret = SetRegKeyValue(HKEY_LOCAL_MACHINE, WEASEL_REG_KEY, L"ServerExecutable",
+                        executable.c_str(), REG_SZ);
+   if (FAILED(HRESULT_FROM_WIN32(ret))) {
+@@ -592,25 +602,21 @@ int install(bool hant, bool silent, bool old_ime_support) {
+       else
+         (*pfnInstallLayoutOrTip)(PSZTITLE_HANS, 0);
+     }
+-    FreeLibrary(hInputDLL);
+-  }
+-
+-  // https://learn.microsoft.com/zh-cn/windows/win32/wer/collecting-user-mode-dumps
+-  const std::wstring dmpPathW = WeaselLogPath().wstring();
+-  // DumpFolder
+-  SetRegKeyValue(HKEY_LOCAL_MACHINE, WEASEL_WER_KEY, L"DumpFolder",
+-                 dmpPathW.c_str(), REG_SZ, true);
+-  // dump type 0
+-  SetRegKeyValue(HKEY_LOCAL_MACHINE, WEASEL_WER_KEY, L"DumpType", 0, REG_DWORD,
+-                 true);
+-  // CustomDumpFlags, MiniDumpNormal
+-  SetRegKeyValue(HKEY_LOCAL_MACHINE, WEASEL_WER_KEY, L"CustomDumpFlags", 0,
+-                 REG_DWORD, true);
+-  // maximium dump count 10
+-  SetRegKeyValue(HKEY_LOCAL_MACHINE, WEASEL_WER_KEY, L"DumpCount", 10,
+-                 REG_DWORD, true);
+-
+-  if (retval)
++    FreeLibrary(hInputDLL);
++  }
++
++  // Preserve Weasel's crash diagnostics under Linnet's unique process name.
++  const std::wstring dmpPathW = WeaselLogPath().wstring();
++  SetRegKeyValue(HKEY_LOCAL_MACHINE, LINNET_WER_KEY, L"DumpFolder",
++                 dmpPathW.c_str(), REG_SZ, true);
++  SetRegKeyValue(HKEY_LOCAL_MACHINE, LINNET_WER_KEY, L"DumpType", 0,
++                 REG_DWORD, true);
++  SetRegKeyValue(HKEY_LOCAL_MACHINE, LINNET_WER_KEY, L"CustomDumpFlags", 0,
++                 REG_DWORD, true);
++  SetRegKeyValue(HKEY_LOCAL_MACHINE, LINNET_WER_KEY, L"DumpCount", 10,
++                 REG_DWORD, true);
++
++  if (retval)
+     return 1;
+ 
+   MSG_NOT_SILENT_BY_IDS(silent, IDS_STR_INSTALL_SUCCESS_INFO,
+@@ -623,7 +629,7 @@ int uninstall(bool silent) {
+   // 注销输入法
+   int retval = 0;
+ 
+-  const WCHAR KEY[] = L"Software\\Rime\\Weasel";
++  const WCHAR KEY[] = WEASEL_REG_KEY;
+   HKEY hKey;
+   LSTATUS ret = RegOpenKey(HKEY_CURRENT_USER, KEY, &hKey);
+   if (ret == ERROR_SUCCESS) {
+@@ -652,16 +658,12 @@ int uninstall(bool silent) {
+   uninstall_ime_file(L".ime", silent, &register_ime);
+   retval += uninstall_ime_file(L".dll", silent, &register_text_service);
+ 
+-  // 清除注册信息
+-  RegDeleteKey(HKEY_LOCAL_MACHINE, WEASEL_REG_KEY);
+-  RegDeleteKey(HKEY_LOCAL_MACHINE, RIME_REG_KEY);
+-
+-  // delete WER register,
+-  // "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error
+-  // Reporting\\LocalDumps\\WeaselServer.exe" no WOW64 redirect
+-
+-  auto flag_wow64 = is_wow64() ? KEY_WOW64_64KEY : 0;
+-  RegDeleteKeyEx(HKEY_LOCAL_MACHINE, WEASEL_WER_KEY, flag_wow64, 0);
++  // 清除注册信息
++  RegDeleteKey(HKEY_LOCAL_MACHINE, WEASEL_REG_KEY);
++
++  auto flag_wow64 = is_wow64() ? KEY_WOW64_64KEY : 0;
++  RegDeleteKeyEx(HKEY_LOCAL_MACHINE, LINNET_WER_KEY, flag_wow64, 0);
++
+   if (retval)
+     return 1;
+ 
+@@ -675,7 +677,7 @@ bool has_installed() {
+   WCHAR path[MAX_PATH];
+   GetSystemDirectory(path, _countof(path));
+   std::wstring sysPath(path);
+-  DWORD attr = GetFileAttributesW((sysPath + L"\\weasel.dll").c_str());
++  DWORD attr = GetFileAttributesW((sysPath + L"\\linnet.dll").c_str());
+   return (attr != INVALID_FILE_ATTRIBUTES &&
+           !(attr & FILE_ATTRIBUTE_DIRECTORY));
+ }
+diff --git a/WeaselTSF/Globals.cpp b/WeaselTSF/Globals.cpp
+index c5d28b9..9386bb2 100644
+--- a/WeaselTSF/Globals.cpp
++++ b/WeaselTSF/Globals.cpp
+@@ -7,33 +7,33 @@ LONG g_cRefDll = -1;
+ 
+ CRITICAL_SECTION g_cs;
+ 
+-// {A3F4CDED-B1E9-41EE-9CA6-7B4D0DE6CB0A}
++// {660F0020-8849-43B3-8FB0-806CF516F3B0}
+ static const GUID c_clsidTextService = {
+-    0xa3f4cded,
+-    0xb1e9,
+-    0x41ee,
+-    {0x9c, 0xa6, 0x7b, 0x4d, 0xd, 0xe6, 0xcb, 0xa}};
++    0x660f0020,
++    0x8849,
++    0x43b3,
++    {0x8f, 0xb0, 0x80, 0x6c, 0xf5, 0x16, 0xf3, 0xb0}};
+ 
+-// {3D02CAB6-2B8E-4781-BA20-1C9267529467}
++// {EE2C8B48-FE3C-441F-AB71-D94B8E63573E}
+ static const GUID c_guidProfile = {
+-    0x3d02cab6,
+-    0x2b8e,
+-    0x4781,
+-    {0xba, 0x20, 0x1c, 0x92, 0x67, 0x52, 0x94, 0x67}};
++    0xee2c8b48,
++    0xfe3c,
++    0x441f,
++    {0xab, 0x71, 0xd9, 0x4b, 0x8e, 0x63, 0x57, 0x3e}};
+ 
+-// {341F9E3A-B8AD-499D-936C-48701E329FB2}
++// {3CC0A2D5-3711-4FD3-8A4E-B864E980CA1D}
+ static const GUID c_guidLangBarItemButton = {
+-    0x341f9e3a,
+-    0xb8ad,
+-    0x499d,
+-    {0x93, 0x6c, 0x48, 0x70, 0x1e, 0x32, 0x9f, 0xb2}};
++    0x3cc0a2d5,
++    0x3711,
++    0x4fd3,
++    {0x8a, 0x4e, 0xb8, 0x64, 0xe9, 0x80, 0xca, 0x1d}};
+ 
+-// {2AC87E79-3260-4B32-9DEA-F8390976C20B}
++// {8264D220-379C-4AEA-AC02-75894D35099C}
+ static const GUID c_guidDisplayAttributeInput = {
+-    0x2ac87e79,
+-    0x3260,
+-    0x4b32,
+-    {0x9d, 0xea, 0xf8, 0x39, 0x09, 0x76, 0xc2, 0x0b}};
++    0x8264d220,
++    0x379c,
++    0x4aea,
++    {0xac, 0x02, 0x75, 0x89, 0x4d, 0x35, 0x09, 0x9c}};
+ 
+ #ifdef WEASEL_USING_OLDER_TSF_SDK
+ 
+@@ -52,14 +52,16 @@ const GUID GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT = {
+ 
+ #endif
+ 
++// {3804FAEF-3FFE-470C-93B3-C2F3FC65C08A}
+ const GUID GUID_LBI_INPUTMODE = {
+-    0x2C77A81E,
+-    0x41CC,
+-    0x4178,
+-    {0xA3, 0xA7, 0x5F, 0x8A, 0x98, 0x75, 0x68, 0xE6}};
++    0x3804faef,
++    0x3ffe,
++    0x470c,
++    {0x93, 0xb3, 0xc2, 0xf3, 0xfc, 0x65, 0xc0, 0x8a}};
+ 
++// {7C8CA636-A2B2-47E5-B681-54A542530151}
+ const GUID GUID_IME_MODE_PRESERVED_KEY = {
+-    0x0bd899fc,
+-    0xa8f7,
+-    0x4b42,
+-    {0xa9, 0x6d, 0xce, 0xc7, 0xc5, 0x0e, 0x0e, 0xae}};
++    0x7c8ca636,
++    0xa2b2,
++    0x47e5,
++    {0xb6, 0x81, 0x54, 0xa5, 0x42, 0x53, 0x01, 0x51}};
+diff --git a/WeaselTSF/LanguageBar.cpp b/WeaselTSF/LanguageBar.cpp
+index a03b615..1a863c5 100644
+--- a/WeaselTSF/LanguageBar.cpp
++++ b/WeaselTSF/LanguageBar.cpp
+@@ -35,13 +35,9 @@ static void HMENU2ITfMenu(HMENU hMenu, ITfMenu* pTfMenu) {
+ }
+ 
+ static LPCWSTR GetWeaselRegName() {
+-  LPCWSTR WEASEL_REG_NAME_;
+   if (is_wow64())
+-    WEASEL_REG_NAME_ = L"Software\\WOW6432Node\\Rime\\Weasel";
+-  else
+-    WEASEL_REG_NAME_ = L"Software\\Rime\\Weasel";
+-
+-  return WEASEL_REG_NAME_;
++    return L"Software\\WOW6432Node\\Linnet";
++  return WEASEL_REG_KEY;
+ }
+ 
+ static bool open(const std::wstring& path) {
+@@ -111,7 +107,7 @@ STDAPI CLangBarItemButton::GetInfo(TF_LANGBARITEMINFO* pInfo) {
+   pInfo->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_MENU |
+                    TF_LBI_STYLE_SHOWNINTRAY;
+   pInfo->ulSort = 1;
+-  lstrcpyW(pInfo->szDescription, L"WeaselTSF Button");
++  lstrcpyW(pInfo->szDescription, L"Linnet input mode");
+   return S_OK;
+ }
+ 
+@@ -227,7 +223,7 @@ STDAPI CLangBarItemButton::GetIcon(HICON* phIcon) {
+ }
+ 
+ STDAPI CLangBarItemButton::GetText(BSTR* pbstrText) {
+-  *pbstrText = SysAllocString(L"WeaselTSF Button");
++  *pbstrText = SysAllocString(L"Linnet input mode");
+   return (*pbstrText == NULL) ? E_OUTOFMEMORY : S_OK;
+ }
+ 
+@@ -316,11 +312,11 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
+       }
+       break;
+     case ID_WEASELTRAY_USERCONFIG:
+-      if (FAILED(RegGetStringValue(HKEY_CURRENT_USER, L"Software\\Rime\\Weasel",
++      if (FAILED(RegGetStringValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                                    L"RimeUserDir", dir)) ||
+           dir.empty()) {
+         WCHAR _path[MAX_PATH] = {0};
+-        ExpandEnvironmentStringsW(L"%AppData%\\Rime", _path, _countof(_path));
++        ExpandEnvironmentStringsW(L"%AppData%\\Linnet", _path, _countof(_path));
+         dir = std::wstring(_path);
+       }
+       if (!dir.empty() && fs::exists(dir))
+diff --git a/WeaselTSF/Register.cpp b/WeaselTSF/Register.cpp
+index 69dccc5..0a9b6a4 100644
+--- a/WeaselTSF/Register.cpp
++++ b/WeaselTSF/Register.cpp
+@@ -31,7 +31,7 @@ HKL FindIME(LANGID langid) {
+         ret = RegQueryValueExW(hSubKey, L"Ime File", NULL, &type, (LPBYTE)data,
+                                &size);
+         if (ret == ERROR_SUCCESS && type == REG_SZ &&
+-            _wcsicmp(data, L"weasel.ime") == 0)
++            _wcsicmp(data, L"linnet.ime") == 0)
+           hKL = (HKL)id;
+       }
+       RegCloseKey(hSubKey);
+@@ -215,14 +215,14 @@ BOOL RegisterServer() {
+ #ifdef _M_ARM64
+       {
+         // On ARM64 we use ARM64X redirection DLL.
+-        // When loaded, weasel.dll will be redirected to weaselARM64.dll on
+-        // ARM64 processes, and weaselx64.dll on x64 processes.
++        // When loaded, linnet.dll will be redirected to linnetARM64.dll on
++        // ARM64 processes, and linnetx64.dll on x64 processes.
+         //
+         // But GetModuleFileNameA will return the actual loaded DLL name aka
+-        // weaselARM64.dll Rewrite the path to point to the redirector.
++        // linnetARM64.dll: rewrite the path to point to the redirector.
+ 
+         char wrapperPath[MAX_PATH];
+-        StringCbCatA(achFileName, MAX_PATH, "\\..\\weasel.dll");
++        StringCbCatA(achFileName, MAX_PATH, "\\..\\linnet.dll");
+         GetFullPathNameA(achFileName, MAX_PATH, wrapperPath, NULL);
+         memcpy(achFileName, wrapperPath, MAX_PATH);
+       }
+diff --git a/WeaselTSF/WeaselTSF.cpp b/WeaselTSF/WeaselTSF.cpp
+index 590d3b8..36c3536 100644
+--- a/WeaselTSF/WeaselTSF.cpp
++++ b/WeaselTSF/WeaselTSF.cpp
+@@ -170,7 +170,7 @@ ExitError:
+ 
+ STDMETHODIMP WeaselTSF::OnSetThreadFocus() {
+   std::wstring _ToggleImeOnOpenClose{};
+-  RegGetStringValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
++  RegGetStringValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                     L"ToggleImeOnOpenClose", _ToggleImeOnOpenClose);
+   _isToOpenClose = (_ToggleImeOnOpenClose == L"yes");
+   if (m_client.Echo()) {
+@@ -239,7 +239,7 @@ bool WeaselTSF::_EnsureServerConnected() {
+     _Reconnect();
+     retry++;
+     if (retry >= 6) {
+-      HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerExclusiveMutex");
++      HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerExclusiveMutex");
+       if (!m_client.Echo() && GetLastError() != ERROR_ALREADY_EXISTS) {
+         std::wstring dir = _GetRootDir();
+         std::thread th([dir, this]() {
+diff --git a/WeaselTSF/dllmain.cpp b/WeaselTSF/dllmain.cpp
+index 212eea1..94e6a57 100644
+--- a/WeaselTSF/dllmain.cpp
++++ b/WeaselTSF/dllmain.cpp
+@@ -39,7 +39,7 @@ LONG WINAPI _UnhandledExceptionFilter(EXCEPTION_POINTERS* pExceptionPointers) {
+   }
+   WCHAR _path[MAX_PATH] = {0};
+   // default location
+-  ExpandEnvironmentStringsW(L"%TEMP%\\rime.weasel", _path, _countof(_path));
++  ExpandEnvironmentStringsW(L"%TEMP%\\rime.linnet", _path, _countof(_path));
+   // 构造 dump 文件名：应用程序名称-DLL名称-时间.进程号.dmp
+   _stprintf_s(szFileName, MAX_PATH, _T("%s\\%s-%s-%s.%lu.dmp"), _path,
+               pszBaseName, pszDllBaseName, szDateTime, dwProcessId);
+diff --git a/build.bat b/build.bat
+index 6cdb23e..34499a4 100644
+--- a/build.bat
++++ b/build.bat
+@@ -160,25 +160,20 @@ if %build_rime% == 1 (
+   rem build x64 librime
+   set ARCH=x64
+   call :build_librime_platform x64 %WEASEL_ROOT%\lib64 %WEASEL_ROOT%\output
++  if errorlevel 1 goto error
+   rem build Win32 librime
+   set ARCH=Win32
+   call :build_librime_platform Win32 %WEASEL_ROOT%\lib %WEASEL_ROOT%\output\Win32
++  if errorlevel 1 goto error
+   rem clean the modified file
+   rem git checkout .
+   rem git submodule foreach git checkout .
+ )
+ 
+ rem -------------------------------------------------------------------------
+-if %build_weasel% == 1 (
+-  if not exist output\data\essay.txt (
+-    set build_data=1
+-  )
+-  if not exist output\data\opencc\TSCharacters.ocd* (
+-    set build_opencc=1
+-  )
+-)
+-if %build_data% == 1 call :build_data
+-if %build_opencc% == 1 call :build_opencc_data
++if %build_data% == 1 goto linnet_data_error
++if %build_opencc% == 1 goto linnet_data_error
++if %build_weasel% == 1 if not defined LINNET_DATA_READY goto linnet_data_error
+ 
+ if %build_weasel% == 0 goto end
+ 
+@@ -283,31 +278,6 @@ rem build boost
+   )
+   exit /b
+ 
+-rem ---------------------------------------------------------------------------
+-:build_data
+-  copy %WEASEL_ROOT%\LICENSE.txt output\
+-  copy %WEASEL_ROOT%\README.md output\README.txt
+-  copy %WEASEL_ROOT%\plum\rime-install.bat output\
+-  set plum_dir=plum
+-  set rime_dir=output/data
+-  set WSLENV=plum_dir:rime_dir
+-  bash plum/rime-install %WEASEL_BUNDLED_RECIPES%
+-  if errorlevel 1 goto error
+-  exit /b
+-
+-rem ---------------------------------------------------------------------------
+-:build_opencc_data
+-  if not exist %WEASEL_ROOT%\librime\share\opencc\TSCharacters.ocd2 (
+-    cd %WEASEL_ROOT%\librime
+-    call build.bat deps %rime_build_variant%
+-    if errorlevel 1 goto error
+-  )
+-  cd %WEASEL_ROOT%
+-  if not exist output\data\opencc mkdir output\data\opencc
+-  copy %WEASEL_ROOT%\librime\share\opencc\*.* output\data\opencc\
+-  if errorlevel 1 goto error
+-  exit /b
+-
+ rem ---------------------------------------------------------------------------
+ rem %1 : ARCH
+ rem %2 : push | pop , push to backup when pop to restore
+@@ -368,9 +338,14 @@ rem %3 : target_path of rime.dll, base %WEASEL_ROOT% or abs path
+   exit /b
+ rem ---------------------------------------------------------------------------
+ 
+-:error
+-
+-echo error building weasel...
+-
+-:end
++:error
++
++echo error building weasel...
++exit /b 1
++
++:linnet_data_error
++echo Linnet data must come from the root repository staging pipeline.
++exit /b 1
++
++:end
+ cd %WEASEL_ROOT%
+diff --git a/include/WeaselConstants.h b/include/WeaselConstants.h
+index 09625e4..58b7bf6 100644
+--- a/include/WeaselConstants.h
++++ b/include/WeaselConstants.h
+@@ -1,8 +1,7 @@
+ ﻿#pragma once
+ 
+-#define WEASEL_CODE_NAME "Weasel"
+-#define WEASEL_REG_KEY L"Software\\Rime\\Weasel"
+-#define RIME_REG_KEY L"Software\\Rime"
++#define WEASEL_CODE_NAME "Linnet"
++#define WEASEL_REG_KEY L"Software\\Linnet"
+ 
+ #define STRINGIZE(x) #x
+ #define VERSION_STR(x) STRINGIZE(x)
+diff --git a/include/WeaselIPC.h b/include/WeaselIPC.h
+index 3065cb5..a9e4a97 100644
+--- a/include/WeaselIPC.h
++++ b/include/WeaselIPC.h
+@@ -6,8 +6,8 @@
+ #include <memory>
+ #include <KeyEvent.h>
+ 
+-#define WEASEL_IPC_WINDOW L"WeaselIPCWindow_1.0"
+-#define WEASEL_IPC_PIPE_NAME L"WeaselNamedPipe"
++#define WEASEL_IPC_WINDOW L"LinnetIPCWindow_1.0"
++#define WEASEL_IPC_PIPE_NAME L"LinnetNamedPipe"
+ 
+ #define WEASEL_IPC_METADATA_SIZE 1024
+ #define WEASEL_IPC_BUFFER_SIZE (4 * 1024)
+diff --git a/include/WeaselUtility.h b/include/WeaselUtility.h
+index 54f840f..2fa1789 100755
+--- a/include/WeaselUtility.h
++++ b/include/WeaselUtility.h
+@@ -2,7 +2,8 @@
+ #include <filesystem>
+ #include <string>
+ #include <sstream>
+-#include <wrl/client.h>
++#include <wrl/client.h>
++#include <WeaselConstants.h>
+ using namespace Microsoft::WRL;
+ 
+ namespace fs = std::filesystem;
+@@ -37,7 +38,7 @@ std::filesystem::path WeaselUserDataPath();
+ inline fs::path WeaselLogPath() {
+   WCHAR _path[MAX_PATH] = {0};
+   // default location
+-  ExpandEnvironmentStringsW(L"%TEMP%\\rime.weasel", _path, _countof(_path));
++  ExpandEnvironmentStringsW(L"%TEMP%\\rime.linnet", _path, _countof(_path));
+   fs::path path = fs::path(_path);
+   if (!fs::exists(path)) {
+     fs::create_directories(path);
+@@ -186,18 +187,8 @@ inline std::basic_string<CharT> unescape_string(
+ // resource
+ std::string GetCustomResource(const char* name, const char* type);
+ 
+-inline std::wstring get_weasel_ime_name() {
+-  LANGID langId = GetUserDefaultUILanguage();
+-
+-  if (langId == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL) ||
+-      langId == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED) ||
+-      langId == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_HONGKONG) ||
+-      langId == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SINGAPORE) ||
+-      langId == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_MACAU)) {
+-    return L"小狼毫";
+-  } else {
+-    return L"Weasel";
+-  }
++inline std::wstring get_weasel_ime_name() {
++  return L"Linnet";
+ }
+ 
+ inline LONG RegGetStringValue(HKEY key,
+@@ -217,7 +208,7 @@ inline LONG RegGetStringValue(HKEY key,
+ 
+ inline LANGID get_language_id() {
+   std::wstring lang{};
+-  if (RegGetStringValue(HKEY_CURRENT_USER, L"Software\\Rime\\Weasel",
++  if (RegGetStringValue(HKEY_CURRENT_USER, WEASEL_REG_KEY,
+                         L"Language", lang) == ERROR_SUCCESS) {
+     if (lang == L"chs")
+       return MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED);
+diff --git a/include/resource.h b/include/resource.h
+index 3a40f51..7af1f8d 100644
+--- a/include/resource.h
++++ b/include/resource.h
+@@ -14,8 +14,7 @@
+ #define IDS_STR_UNDER_MAINTENANCE       302
+ #define ID_WEASELTRAY_QUIT              40001
+ #define ID_WEASELTRAY_DEPLOY            40002
+-#define ID_WEASELTRAY_CHECKUPDATE       40003
+-#define ID_WEASELTRAY_FORUM             40004
++#define ID_WEASELTRAY_FORUM             40004
+ #define ID_WEASELTRAY_HOMEPAGE          40005
+ #define ID_WEASELTRAY_INSTALLDIR        40006
+ #define ID_WEASELTRAY_USERCONFIG        40007
+diff --git a/output/install.nsi b/output/install.nsi
+index 3d5130c..1feccf6 100644
+--- a/output/install.nsi
++++ b/output/install.nsi
+@@ -18,21 +18,23 @@ Unicode true
+ !define WEASEL_BUILD 0
+ !endif
+ 
+-!define WEASEL_ROOT $INSTDIR\weasel-${WEASEL_VERSION}
+-!define REG_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Weasel"
++!define WEASEL_ROOT $INSTDIR\Linnet-${WEASEL_VERSION}
++!define REG_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Linnet"
++
++Var LinnetCandidateStarted
+ 
+ ; The name of the installer
+-Name "小狼毫 ${WEASEL_VERSION}"
++Name "Linnet ${WEASEL_VERSION}"
+ 
+ ; The file to write
+-OutFile "archives\weasel-${PRODUCT_VERSION}-installer.exe"
++OutFile "archives\Linnet-Windows-${PRODUCT_VERSION}-installer.exe"
+ 
+ VIProductVersion "${WEASEL_VERSION}.${WEASEL_BUILD}"
+-VIAddVersionKey /LANG=2052 "ProductName" "小狼毫"
++VIAddVersionKey /LANG=2052 "ProductName" "Linnet"
+ VIAddVersionKey /LANG=2052 "Comments" "Powered by RIME | 中州韻輸入法引擎"
+-VIAddVersionKey /LANG=2052 "CompanyName" "式恕堂"
+-VIAddVersionKey /LANG=2052 "LegalCopyright" "Copyleft RIME Developers"
+-VIAddVersionKey /LANG=2052 "FileDescription" "小狼毫輸入法"
++VIAddVersionKey /LANG=2052 "CompanyName" "Linnet contributors"
++VIAddVersionKey /LANG=2052 "LegalCopyright" "Copyleft Linnet and RIME contributors"
++VIAddVersionKey /LANG=2052 "FileDescription" "Linnet Windows input method"
+ VIAddVersionKey /LANG=2052 "FileVersion" "${WEASEL_VERSION}"
+ 
+ !define MUI_ICON ..\resource\weasel.ico
+@@ -60,59 +62,54 @@ RequestExecutionLevel admin
+ ; Languages
+ 
+ !insertmacro MUI_LANGUAGE "TradChinese"
+-LangString DISPLAYNAME ${LANG_TRADCHINESE} "小狼毫輸入法"
+-LangString LNKFORMANUAL ${LANG_TRADCHINESE} "【小狼毫】說明書"
+-LangString LNKFORSETTING ${LANG_TRADCHINESE} "【小狼毫】輸入法設定"
+-LangString LNKFORDICT ${LANG_TRADCHINESE} "【小狼毫】用戶詞典管理"
+-LangString LNKFORSYNC ${LANG_TRADCHINESE} "【小狼毫】用戶資料同步"
+-LangString LNKFORDEPLOY ${LANG_TRADCHINESE} "【小狼毫】重新部署"
+-LangString LNKFORSERVER ${LANG_TRADCHINESE} "小狼毫算法服務"
+-LangString LNKFORUSERFOLDER ${LANG_TRADCHINESE} "【小狼毫】用戶文件夾"
+-LangString LNKFORAPPFOLDER ${LANG_TRADCHINESE} "【小狼毫】程序文件夾"
+-LangString LNKFORUPDATER ${LANG_TRADCHINESE} "【小狼毫】檢查新版本"
+-LangString LNKFORSETUP ${LANG_TRADCHINESE} "【小狼毫】安裝選項"
+-LangString LNKFORUNINSTALL ${LANG_TRADCHINESE} "卸載小狼毫"
+-LangString CONFIRMATION ${LANG_TRADCHINESE} "安裝前，請先卸載舊版本的小狼毫。$\n$\n按下「確定」移除舊版本，按下「取消」放棄本次安裝。"
++LangString DISPLAYNAME ${LANG_TRADCHINESE} "Linnet 輸入法"
++LangString LNKFORMANUAL ${LANG_TRADCHINESE} "Linnet 說明書"
++LangString LNKFORSETTING ${LANG_TRADCHINESE} "Linnet 輸入法設定"
++LangString LNKFORDICT ${LANG_TRADCHINESE} "Linnet 用戶詞典管理"
++LangString LNKFORSYNC ${LANG_TRADCHINESE} "Linnet 用戶資料同步"
++LangString LNKFORDEPLOY ${LANG_TRADCHINESE} "Linnet 重新部署"
++LangString LNKFORSERVER ${LANG_TRADCHINESE} "Linnet 輸入服務"
++LangString LNKFORUSERFOLDER ${LANG_TRADCHINESE} "Linnet 用戶文件夾"
++LangString LNKFORAPPFOLDER ${LANG_TRADCHINESE} "Linnet 程序文件夾"
++LangString LNKFORSETUP ${LANG_TRADCHINESE} "Linnet 安裝選項"
++LangString LNKFORUNINSTALL ${LANG_TRADCHINESE} "卸載 Linnet"
++LangString CONFIRMATION ${LANG_TRADCHINESE} "安裝前，請先卸載舊版本的 Linnet。$\n$\n按下「確定」移除舊版本，按下「取消」放棄本次安裝。"
+ LangString SYSTEMVERSIONNOTOK ${LANG_TRADCHINESE} "您的系统不被支持，最低系統要求:Windows 8.1!"
+-LangString AUTOCHKUPDATE ${LANG_TRADCHINESE} "自動檢查版本更新？"
+ 
+ !insertmacro MUI_LANGUAGE "SimpChinese"
+-LangString DISPLAYNAME ${LANG_SIMPCHINESE} "小狼毫输入法"
+-LangString LNKFORMANUAL ${LANG_SIMPCHINESE} "【小狼毫】说明书"
+-LangString LNKFORSETTING ${LANG_SIMPCHINESE} "【小狼毫】输入法设定"
+-LangString LNKFORDICT ${LANG_SIMPCHINESE} "【小狼毫】用户词典管理"
+-LangString LNKFORSYNC ${LANG_SIMPCHINESE} "【小狼毫】用户资料同步"
+-LangString LNKFORDEPLOY ${LANG_SIMPCHINESE} "【小狼毫】重新部署"
+-LangString LNKFORSERVER ${LANG_SIMPCHINESE} "小狼毫算法服务"
+-LangString LNKFORUSERFOLDER ${LANG_SIMPCHINESE} "【小狼毫】用户文件夹"
+-LangString LNKFORAPPFOLDER ${LANG_SIMPCHINESE} "【小狼毫】程序文件夹"
+-LangString LNKFORUPDATER ${LANG_SIMPCHINESE} "【小狼毫】检查新版本"
+-LangString LNKFORSETUP ${LANG_SIMPCHINESE} "【小狼毫】安装选项"
+-LangString LNKFORUNINSTALL ${LANG_SIMPCHINESE} "卸载小狼毫"
+-LangString CONFIRMATION ${LANG_SIMPCHINESE} '安装前，请先卸载旧版本的小狼毫。$\n$\n点击 "确定" 移除旧版本，或点击 "取消" 放弃本次安装。'
++LangString DISPLAYNAME ${LANG_SIMPCHINESE} "Linnet 输入法"
++LangString LNKFORMANUAL ${LANG_SIMPCHINESE} "Linnet 说明书"
++LangString LNKFORSETTING ${LANG_SIMPCHINESE} "Linnet 输入法设定"
++LangString LNKFORDICT ${LANG_SIMPCHINESE} "Linnet 用户词典管理"
++LangString LNKFORSYNC ${LANG_SIMPCHINESE} "Linnet 用户资料同步"
++LangString LNKFORDEPLOY ${LANG_SIMPCHINESE} "Linnet 重新部署"
++LangString LNKFORSERVER ${LANG_SIMPCHINESE} "Linnet 输入服务"
++LangString LNKFORUSERFOLDER ${LANG_SIMPCHINESE} "Linnet 用户文件夹"
++LangString LNKFORAPPFOLDER ${LANG_SIMPCHINESE} "Linnet 程序文件夹"
++LangString LNKFORSETUP ${LANG_SIMPCHINESE} "Linnet 安装选项"
++LangString LNKFORUNINSTALL ${LANG_SIMPCHINESE} "卸载 Linnet"
++LangString CONFIRMATION ${LANG_SIMPCHINESE} '安装前，请先卸载旧版本的 Linnet。$\n$\n点击 "确定" 移除旧版本，或点击 "取消" 放弃本次安装。'
+ LangString SYSTEMVERSIONNOTOK ${LANG_SIMPCHINESE} "您的系統不被支持，最低系统要求:Windows 8.1!"
+-LangString AUTOCHKUPDATE ${LANG_SIMPCHINESE} "自动检查版本更新？"
+ 
+ !insertmacro MUI_LANGUAGE "English"
+-LangString DISPLAYNAME ${LANG_ENGLISH} "Weasel"
+-LangString LNKFORMANUAL ${LANG_ENGLISH} "Weasel Manual"
+-LangString LNKFORSETTING ${LANG_ENGLISH} "Weasel Settings"
+-LangString LNKFORDICT ${LANG_ENGLISH} "Weasel Dictionary Manager"
+-LangString LNKFORSYNC ${LANG_ENGLISH} "Weasel Sync User Profile"
+-LangString LNKFORDEPLOY ${LANG_ENGLISH} "Weasel Deploy"
+-LangString LNKFORSERVER ${LANG_ENGLISH} "Weasel Server"
+-LangString LNKFORUSERFOLDER ${LANG_ENGLISH} "Weasel User Folder"
+-LangString LNKFORAPPFOLDER ${LANG_ENGLISH} "Weasel App Folder"
+-LangString LNKFORUPDATER ${LANG_ENGLISH} "Weasel Check for Updates"
+-LangString LNKFORSETUP ${LANG_ENGLISH} "Weasel Installation Preference"
+-LangString LNKFORUNINSTALL ${LANG_ENGLISH} "Uninstall Weasel"
+-LangString CONFIRMATION ${LANG_ENGLISH} "Before installation, please uninstall the old version of Weasel.$\n$\nPress 'OK' to remove the old version, or 'Cancel' to abort installation."
++LangString DISPLAYNAME ${LANG_ENGLISH} "Linnet"
++LangString LNKFORMANUAL ${LANG_ENGLISH} "Linnet Manual"
++LangString LNKFORSETTING ${LANG_ENGLISH} "Linnet Settings"
++LangString LNKFORDICT ${LANG_ENGLISH} "Linnet Dictionary Manager"
++LangString LNKFORSYNC ${LANG_ENGLISH} "Linnet Sync User Profile"
++LangString LNKFORDEPLOY ${LANG_ENGLISH} "Linnet Deploy"
++LangString LNKFORSERVER ${LANG_ENGLISH} "Linnet Server"
++LangString LNKFORUSERFOLDER ${LANG_ENGLISH} "Linnet User Folder"
++LangString LNKFORAPPFOLDER ${LANG_ENGLISH} "Linnet App Folder"
++LangString LNKFORSETUP ${LANG_ENGLISH} "Linnet Installation Preference"
++LangString LNKFORUNINSTALL ${LANG_ENGLISH} "Uninstall Linnet"
++LangString CONFIRMATION ${LANG_ENGLISH} "Before installation, please uninstall the old version of Linnet.$\n$\nPress 'OK' to remove the old version, or 'Cancel' to abort installation."
+ LangString SYSTEMVERSIONNOTOK ${LANG_ENGLISH} "Your system not supported, minimium system required: Windows 8.1!"
+-LangString AUTOCHKUPDATE ${LANG_ENGLISH} "Automatically check for updates?"
+ 
+ ;--------------------------------
+ 
+ Function .onInit
++  StrCpy $LinnetCandidateStarted 0
+   ; if not version >= 8.1, quit and MessageBox(if not silent)
+   ${IfNot} ${AtLeastWin8.1}
+     IfSilent toquit
+@@ -121,29 +118,29 @@ toquit:
+     Quit
+   ${EndIf}
+ 
+-  ReadRegStr $R0 HKLM "Software\Rime\Weasel" "InstallDir"
++  ReadRegStr $R0 HKLM "Software\Linnet" "InstallDir"
+   StrCmp $R0 "" 0 skip
+   ; The default installation directory
+   ; install x64 build for NativeARM64_WINDOWS11 and NativeAMD64_WINDOWS11
+   ${If} ${AtLeastWin11} ; Windows 11 and above
+     ${If} ${IsNativeARM64}
+-      StrCpy $INSTDIR "$PROGRAMFILES64\Rime"
++      StrCpy $INSTDIR "$PROGRAMFILES64\Linnet"
+     ${ElseIf} ${IsNativeAMD64}
+-      StrCpy $INSTDIR "$PROGRAMFILES64\Rime"
++      StrCpy $INSTDIR "$PROGRAMFILES64\Linnet"
+     ${Else}
+-      StrCpy $INSTDIR "$PROGRAMFILES\Rime"
++      StrCpy $INSTDIR "$PROGRAMFILES\Linnet"
+     ${Endif}
+   ; install x64 build for NativeAMD64_BELLOW_WINDOWS11
+   ${Else} ; Windows 10 or bellow
+     ${If} ${IsNativeAMD64}
+-      StrCpy $INSTDIR "$PROGRAMFILES64\Rime"
++      StrCpy $INSTDIR "$PROGRAMFILES64\Linnet"
+     ${Else}
+-      StrCpy $INSTDIR "$PROGRAMFILES\Rime"
++      StrCpy $INSTDIR "$PROGRAMFILES\Linnet"
+     ${Endif}
+   ${Endif}
+ skip:
+   ReadRegStr $R0 HKLM \
+-  "Software\Microsoft\Windows\CurrentVersion\Uninstall\Weasel" \
++  "Software\Microsoft\Windows\CurrentVersion\Uninstall\Linnet" \
+   "UninstallString"
+   StrCmp $R0 "" done
+ 
+@@ -153,36 +150,50 @@ skip:
+   Abort
+ 
+ uninst:
+-  ; Backup data directory from previous installation, user files may exist
+-  ReadRegStr $R1 HKLM SOFTWARE\Rime\Weasel "WeaselRoot"
+-  StrCmp $R1 "" call_uninstaller
+-  IfFileExists $R1\data\*.* 0 call_uninstaller
+-  CreateDirectory $TEMP\weasel-backup
+-  CopyFiles $R1\data\*.* $TEMP\weasel-backup
++  ; Shared data is package-owned. User data remains in %AppData%\Linnet.
++  ReadRegStr $R1 HKLM SOFTWARE\Linnet "WeaselRoot"
++  StrCmp $R1 "" invalid_upgrade
++  GoTo call_uninstaller
++
++invalid_upgrade:
++  SetErrorLevel 1
++  Abort
+ 
+ call_uninstaller:
+-  ExecWait '"$R1\WeaselServer.exe" /quit'
+-  ExecWait '"$R1\WeaselSetup.exe" /u'
++  ExecWait '"$R1\LinnetServer.exe" /quit' $R3
++  IntCmp $R3 0 old_server_stopped
++  SetErrorLevel $R3
++  Abort
++old_server_stopped:
++  ExecWait '"$R1\WeaselSetup.exe" /u' $R3
++  IntCmp $R3 0 old_frontend_removed
++  SetErrorLevel $R3
++  Abort
++old_frontend_removed:
+   ; Remove registry keys
+-  DeleteRegKey HKLM SOFTWARE\Rime
+-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Weasel"
++  DeleteRegKey HKLM SOFTWARE\Linnet
++  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Linnet"
+   ; don't redirect on 64 bit system for auto run setting
+   ${If} ${IsNativeARM64}
+     SetRegView 64
+   ${ElseIf} ${IsNativeAMD64}
+     SetRegView 64
+   ${Endif}
+-  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "WeaselServer"
++  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "LinnetServer"
+   ; recover back to 32bit view
+   SetRegView 32
+   ; Remove files and uninstaller
+   Delete  "$R1\data\opencc\*.*"
+   Delete  "$R1\data\preview\*.*"
++  Delete  "$R1\data\dicts\*.*"
++  Delete  "$R1\licenses\*.*"
+   Delete  "$R1\data\*.*"
+   Delete  "$R1\*.*"
+   RMDir   "$R1\data\opencc"
+   RMDir   "$R1\data\preview"
++  RMDir   "$R1\data\dicts"
+   RMDir   "$R1\data"
++  RMDir   "$R1\licenses"
+   RMDir   "$R1"
+   SetShellVarContext all
+   Delete  "$SMPROGRAMS\$(DISPLAYNAME)\*.*"
+@@ -194,48 +205,68 @@ call_uninstaller:
+ done:
+ FunctionEnd
+ 
++Function CleanupFailedCandidate
++  StrCmp $LinnetCandidateStarted 1 0 cleanup_done
++  IfFileExists "$INSTDIR\LinnetServer.exe" 0 +2
++  ExecWait '"$INSTDIR\LinnetServer.exe" /quit'
++  IfFileExists "$INSTDIR\WeaselSetup.exe" 0 +2
++  ExecWait '"$INSTDIR\WeaselSetup.exe" /u'
++  DeleteRegKey HKLM SOFTWARE\Linnet
++  DeleteRegKey HKLM "${REG_UNINST_KEY}"
++  ${If} ${IsNativeARM64}
++    SetRegView 64
++  ${ElseIf} ${IsNativeAMD64}
++    SetRegView 64
++  ${Endif}
++  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "LinnetServer"
++  SetRegView 32
++  SetOutPath $TEMP
++  RMDir /r "$INSTDIR"
++  SetShellVarContext all
++  RMDir /r "$SMPROGRAMS\$(DISPLAYNAME)"
++  StrCpy $LinnetCandidateStarted 0
++cleanup_done:
++FunctionEnd
++
++Function .onInstFailed
++  Call CleanupFailedCandidate
++FunctionEnd
++
++Function .onInstSuccess
++  StrCpy $LinnetCandidateStarted 0
++FunctionEnd
++
+ ; Registry key to check for directory (so if you install again, it will
+ ; overwrite the old one automatically)
+-InstallDirRegKey HKLM "Software\Rime\Weasel" "InstallDir"
++InstallDirRegKey HKLM "Software\Linnet" "InstallDir"
+ 
+ ; The stuff to install
+-Section "Weasel"
++Section "Linnet"
+ 
+   SectionIn RO
++  StrCpy $LinnetCandidateStarted 1
+ 
+   ; Write the new installation path into the registry
+   ; redirect on 64 bit system
+-  ; HKLM SOFTWARE\WOW6432Node\Rime\Weasel "InstallDir" "$INSTDIR"
+-  WriteRegStr HKLM SOFTWARE\Rime\Weasel "InstallDir" "$INSTDIR"
++  WriteRegStr HKLM SOFTWARE\Linnet "InstallDir" "$INSTDIR"
+ 
+   ; Reset INSTDIR for the new version
+   StrCpy $INSTDIR "${WEASEL_ROOT}"
+ 
+-  IfFileExists "$INSTDIR\WeaselServer.exe" 0 +2
+-  ExecWait '"$INSTDIR\WeaselServer.exe" /quit'
++  IfFileExists "$INSTDIR\LinnetServer.exe" 0 +2
++  ExecWait '"$INSTDIR\LinnetServer.exe" /quit'
+ 
+   SetOverwrite try
+   ; Set output path to the installation directory.
+   SetOutPath $INSTDIR
+ 
+-  IfFileExists $TEMP\weasel-backup\*.* 0 program_files
+-  CreateDirectory $INSTDIR\data
+-  CopyFiles $TEMP\weasel-backup\*.* $INSTDIR\data
+-  RMDir /r $TEMP\weasel-backup
+-
+ program_files:
+   File "LICENSE.txt"
+   File "README.txt"
+-  File "7-zip-license.txt"
+-  File "7z.dll"
+-  File "7z.exe"
+-  File "COPYING-curl.txt"
+-  File "curl.exe"
+-  File "curl-ca-bundle.crt"
+-  File "rime-install.bat"
+-  File "rime-install-config.bat"
+-  File "start_service.bat"
+-  File "stop_service.bat"
++  File "linnet-windows-manifest.json"
++  SetOutPath $INSTDIR\licenses
++  File /r "licenses\*.*"
++  SetOutPath $INSTDIR
+   File "weasel.dll"
+   ${If} ${RunningX64}
+     File "weaselx64.dll"
+@@ -258,32 +289,27 @@ program_files:
+   ${If} ${AtLeastWin11} ; Windows 11 and above
+     ${If} ${IsNativeARM64}
+       File "WeaselDeployer.exe"
+-      File "WeaselServer.exe"
++      File /oname=LinnetServer.exe "WeaselServer.exe"
+       File "rime.dll"
+-      File "WinSparkle.dll"
+     ${ElseIf} ${IsNativeAMD64}
+       File "WeaselDeployer.exe"
+-      File "WeaselServer.exe"
++      File /oname=LinnetServer.exe "WeaselServer.exe"
+       File "rime.dll"
+-      File "WinSparkle.dll"
+     ${Else}
+       File "Win32\WeaselDeployer.exe"
+-      File "Win32\WeaselServer.exe"
++      File /oname=LinnetServer.exe "Win32\WeaselServer.exe"
+       File "Win32\rime.dll"
+-      File "Win32\WinSparkle.dll"
+     ${Endif}
+   ; install x64 build for NativeAMD64_BELLOW_WINDOWS11
+   ${Else} ; Windows 10 or bellow
+     ${If} ${IsNativeAMD64}
+       File "WeaselDeployer.exe"
+-      File "WeaselServer.exe"
++      File /oname=LinnetServer.exe "WeaselServer.exe"
+       File "rime.dll"
+-      File "WinSparkle.dll"
+     ${Else}
+       File "Win32\WeaselDeployer.exe"
+-      File "Win32\WeaselServer.exe"
++      File /oname=LinnetServer.exe "Win32\WeaselServer.exe"
+       File "Win32\rime.dll"
+-      File "Win32\WinSparkle.dll"
+     ${Endif}
+   ${Endif}
+ 
+@@ -293,13 +319,19 @@ program_files:
+   File "data\*.yaml"
+   File /nonfatal "data\*.txt"
+   File /nonfatal "data\*.gram"
++  File "data\*.db"
++  File "data\*.json"
++  ; source dictionaries required for clean Windows deployment
++  SetOutPath $INSTDIR\data\dicts
++  File "data\dicts\*.yaml"
+   ; opencc data files
+   SetOutPath $INSTDIR\data\opencc
+   File "data\opencc\*.json"
+   File "data\opencc\*.ocd*"
++  File "data\opencc\*.txt"
+   ; images
+   SetOutPath $INSTDIR\data\preview
+-  File "data\preview\*.png"
++  File /nonfatal "data\preview\*.png"
+ 
+   SetOutPath $INSTDIR
+ 
+@@ -314,27 +346,39 @@ program_files:
+   IfErrors +2 0
+   StrCpy $R2 "/t"
+ 
+-  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2'
++  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2' $R3
++  IntCmp $R3 0 setup_done
++  StrCpy $R4 $R3
++  Call CleanupFailedCandidate
++  SetErrorLevel $R4
++  Abort
++  setup_done:
+ 
+   ; Write the uninstall keys for Windows
+   WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayName" "$(DISPLAYNAME)"
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayIcon" '"$INSTDIR\WeaselServer.exe"'
++  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayIcon" '"$INSTDIR\LinnetServer.exe"'
+   WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayVersion" "${WEASEL_VERSION}.${WEASEL_BUILD}"
+   WriteRegStr HKLM "${REG_UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "Publisher" "式恕堂"
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "URLInfoAbout" "https://rime.im/"
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "HelpLink" "https://rime.im/docs/"
++  WriteRegStr HKLM "${REG_UNINST_KEY}" "Publisher" "Linnet contributors"
++  WriteRegStr HKLM "${REG_UNINST_KEY}" "URLInfoAbout" "https://github.com/Ares-X/Linnet"
++  WriteRegStr HKLM "${REG_UNINST_KEY}" "HelpLink" "https://github.com/Ares-X/Linnet"
+   WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoModify" 1
+   WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoRepair" 1
+   WriteUninstaller "$INSTDIR\uninstall.exe"
+ 
+   ; run as user...
+   IfSilent deploy_silently
+-  ExecWait "$INSTDIR\WeaselDeployer.exe /install"
+-  GoTo deploy_done
++  ExecWait '"$INSTDIR\WeaselDeployer.exe" /install' $R3
++  GoTo deploy_checked
+ 
+   deploy_silently:
+-  ExecWait "$INSTDIR\WeaselDeployer.exe /deploy"
++  ExecWait '"$INSTDIR\WeaselDeployer.exe" /deploy' $R3
++  deploy_checked:
++  IntCmp $R3 0 deploy_done
++  StrCpy $R4 $R3
++  Call CleanupFailedCandidate
++  SetErrorLevel $R4
++  Abort
+   deploy_done:
+ 
+   ; don't redirect on 64 bit system for auto run setting
+@@ -344,19 +388,9 @@ program_files:
+     SetRegView 64
+   ${Endif}
+   ; Write autorun key
+-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "WeaselServer" "$INSTDIR\WeaselServer.exe"
++  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "LinnetServer" "$INSTDIR\LinnetServer.exe"
+   ; Start WeaselServer
+-  Exec "$INSTDIR\WeaselServer.exe"
+-
+-  ; option CheckForUpdates
+-  IfSilent DisableAutoCheckUpdate
+-  MessageBox MB_YESNO|MB_ICONINFORMATION "$(AUTOCHKUPDATE)" IDYES EnableAutoCheckUpdate
+-  DisableAutoCheckUpdate:
+-  WriteRegStr HKCU "Software\Rime\Weasel\Updates" "CheckForUpdates" "0"
+-  GoTo end
+-  EnableAutoCheckUpdate:
+-  WriteRegStr HKCU "Software\Rime\Weasel\Updates" "CheckForUpdates" "1"
+-  end:
++  Exec "$INSTDIR\LinnetServer.exe"
+ 
+   ; Prompt reboot
+   StrCmp $0 "Upgrade" 0 +2
+@@ -373,10 +407,9 @@ Section "Start Menu Shortcuts"
+   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
+   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
+   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDEPLOY).lnk" "$INSTDIR\WeaselDeployer.exe" "/deploy" "$SYSDIR\shell32.dll" 144
+-  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSERVER).lnk" "$INSTDIR\WeaselServer.exe" "" "$INSTDIR\WeaselServer.exe" 0
+-  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUSERFOLDER).lnk" "$INSTDIR\WeaselServer.exe" "/userdir" "$SYSDIR\shell32.dll" 126
+-  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORAPPFOLDER).lnk" "$INSTDIR\WeaselServer.exe" "/weaseldir" "$SYSDIR\shell32.dll" 19
+-  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUPDATER).lnk" "$INSTDIR\WeaselServer.exe" "/update" "$SYSDIR\shell32.dll" 13
++  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSERVER).lnk" "$INSTDIR\LinnetServer.exe" "" "$INSTDIR\LinnetServer.exe" 0
++  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUSERFOLDER).lnk" "$INSTDIR\LinnetServer.exe" "/userdir" "$SYSDIR\shell32.dll" 126
++  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORAPPFOLDER).lnk" "$INSTDIR\LinnetServer.exe" "/weaseldir" "$SYSDIR\shell32.dll" 19
+   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
+   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
+ 
+@@ -388,30 +421,41 @@ SectionEnd
+ 
+ Section "Uninstall"
+ 
+-  ExecWait '"$INSTDIR\WeaselServer.exe" /quit'
+-
+-  ExecWait '"$INSTDIR\WeaselSetup.exe" /u'
++  ExecWait '"$INSTDIR\LinnetServer.exe" /quit' $R3
++  IntCmp $R3 0 uninstall_server_stopped
++  SetErrorLevel $R3
++  Abort
++uninstall_server_stopped:
++  ExecWait '"$INSTDIR\WeaselSetup.exe" /u' $R3
++  IntCmp $R3 0 uninstall_frontend_removed
++  SetErrorLevel $R3
++  Abort
++uninstall_frontend_removed:
+ 
+   ; Remove registry keys
+-  DeleteRegKey HKLM SOFTWARE\Rime
+-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Weasel"
++  DeleteRegKey HKLM SOFTWARE\Linnet
++  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Linnet"
+   ; don't redirect on 64 bit system for auto run setting
+   ${If} ${IsNativeARM64}
+     SetRegView 64
+   ${ElseIf} ${IsNativeAMD64}
+     SetRegView 64
+   ${Endif}
+-  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "WeaselServer"
++  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "LinnetServer"
+ 
+   ; Remove files and uninstaller
+   SetOutPath $TEMP
+   Delete  "$INSTDIR\data\opencc\*.*"
+   Delete  "$INSTDIR\data\preview\*.*"
++  Delete  "$INSTDIR\data\dicts\*.*"
++  Delete  "$INSTDIR\licenses\*.*"
+   Delete  "$INSTDIR\data\*.*"
+   Delete  "$INSTDIR\*.*"
+   RMDir  "$INSTDIR\data\opencc"
+   RMDir  "$INSTDIR\data\preview"
++  RMDir  "$INSTDIR\data\dicts"
+   RMDir  "$INSTDIR\data"
++  RMDir  "$INSTDIR\licenses"
+   RMDir  "$INSTDIR"
+   SetShellVarContext all
+   Delete  "$SMPROGRAMS\$(DISPLAYNAME)\*.*"

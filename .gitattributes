@@ -2,5 +2,6 @@
 # the downstream patch owner, so the outer repository must not reinterpret
 # `+ ` lines as its own trailing whitespace.
 patches/*.patch -whitespace
+platforms/windows/patches/*.patch -whitespace
 # Third-party license texts are pinned verbatim by the release metadata owner.
 LICENSES/*.txt -whitespace

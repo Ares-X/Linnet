@@ -17,3 +17,6 @@
 [submodule "rime-wanxiang"]
 	path = upstreams/rime-wanxiang
 	url = https://github.com/amzxyz/rime-wanxiang.git
+[submodule "upstreams/weasel"]
+	path = upstreams/weasel
+	url = https://github.com/rime/weasel.git

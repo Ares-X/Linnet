@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "${repo_root}"
+
+git submodule update --init --depth 1 -- upstreams/weasel
+[[ "${1:-}" != "hydrate" ]] || exit 0
+[[ "$#" -eq 0 ]] || {
+  echo "usage: scripts/stage-windows-build-inputs [hydrate]" >&2
+  exit 1
+}
+
+mkdir -p build/windows-inputs
+ruby scripts/generate-linnet-lua-embedding \
+  "${repo_root}/build/windows-inputs/linnet_embedded_lua.h"
+scripts/project-windows-weasel-config platforms/windows/weasel.base.yaml \
+  data/squirrel.yaml build/windows-inputs/weasel.yaml \
+  build/windows-inputs/preview
+platforms/windows/verify.sh

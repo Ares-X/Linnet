@@ -1,0 +1,89 @@
+name: Linnet Windows build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    env:
+      WINDOWS_INPUTS: ${{ runner.temp }}\linnet-windows-inputs
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Download root-owned runtime data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: linnet-windows-inputs-${{ github.sha }}
+          path: ${{ env.WINDOWS_INPUTS }}
+
+      - name: Hydrate locked Windows and runtime sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git submodule update --init --depth 1 -- librime upstreams/weasel
+          if ($LASTEXITCODE -ne 0) { throw 'Root submodule hydration failed' }
+          git -C librime submodule update --init --recursive --depth 1
+          if ($LASTEXITCODE -ne 0) { throw 'librime dependency hydration failed' }
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce  # v2.0.0
+
+      - name: Prepare locked Boost source
+        id: boost
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content -Raw upstreams.lock.json | ConvertFrom-Json
+          $archive = Join-Path $env:RUNNER_TEMP 'boost.tar.gz'
+          Invoke-WebRequest -Uri $lock.build_inputs.boost_headers.url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $lock.build_inputs.boost_headers.sha256) {
+            throw 'Boost archive digest differs from upstreams.lock.json'
+          }
+          tar -xzf $archive -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Boost extraction failed' }
+          $root = Join-Path $env:RUNNER_TEMP $lock.build_inputs.boost_headers.archive_root
+          "root=$root" >> $env:GITHUB_OUTPUT
+          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\Bin\makensis.exe'
+          if (-not (Test-Path -LiteralPath $nsis -PathType Leaf)) {
+            throw 'The Windows runner does not provide the NSIS compiler required by Weasel'
+          }
+
+      - name: Project Linnet onto locked Weasel
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          platforms/windows/prepare.ps1 `
+            -DataRoot "$env:WINDOWS_INPUTS/data" `
+            -EmbeddedLuaHeader "$env:WINDOWS_INPUTS/build/windows-inputs/linnet_embedded_lua.h" `
+            -WeaselConfig "$env:WINDOWS_INPUTS/build/windows-inputs/weasel.yaml" `
+            -ThemePreviewRoot "$env:WINDOWS_INPUTS/build/windows-inputs/preview"
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          platforms/windows/build.ps1 -BoostRoot '${{ steps.boost.outputs.root }}'
+
+      - name: Verify candidate runtime and install lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          platforms/windows/preflight.ps1
+
+      - name: Upload Windows candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: Linnet-Windows-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: build/windows/weasel/output/archives/Linnet-Windows-*-installer.exe

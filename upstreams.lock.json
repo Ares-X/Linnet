@@ -5,6 +5,10 @@
     "nested_submodules": "pinned-current-tree-only",
     "automatic_stable_merge": false,
     "squirrel_provenance": "locked-tag-and-sbom-variant",
+    "platform_frontends": {
+      "macos": "squirrel",
+      "windows": "weasel"
+    },
     "direct_product_upstreams": [
       "squirrel_rime",
       "rime_ice",
@@ -47,6 +51,11 @@
       "target": "sources.librime.bundled_plugins.predict",
       "path": "patches/librime-predict-linnet-session-state.patch",
       "sha256": "fbfbce1bc0f4bc194471b47ed508a0c74940d9eec91b2f53045c3a4a866909d4"
+    },
+    "weasel_linnet_windows_projection": {
+      "target": "sources.weasel",
+      "path": "platforms/windows/patches/weasel-linnet.patch",
+      "sha256": "90ef0125fd2806699ea44d6c14eebe72c071140f04cef4354c3262707c361a6b"
     }
   },
   "sources": {
@@ -94,6 +103,20 @@
       "declared_license": "GPL-3.0-only",
       "license_path": "LICENSE.txt",
       "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    "weasel": {
+      "repository": "https://github.com/rime/weasel.git",
+      "submodule_path": "upstreams/weasel",
+      "submodule_name": "upstreams/weasel",
+      "tag": "0.17.4",
+      "tag_ref": "refs/tags/0.17.4",
+      "tag_object": "f53a92543f2ef890503d0391e595af8fa9abdb02",
+      "commit": "9cc96e20dc71b80876b12f689bb5863c76c2a7ed",
+      "tree": "1be214a90d3362618605e968b8e443abf68ea7c6",
+      "stable_tag_pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "declared_license": "GPL-3.0-only",
+      "license_path": "LICENSE.txt",
+      "license_sha256": "0b383d5a63da644f628d99c33976ea6487ed89aaa59f0b3257992deac1171e6b"
     },
     "librime": {
       "repository": "https://github.com/rime/librime.git",
