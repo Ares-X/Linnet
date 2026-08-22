@@ -217,6 +217,13 @@ rg -Fq '$env:RIME_PLUGINS = "lua octagram predict smart_english"' \
   platforms/windows/build.ps1
 rg -Fq 'Copy-DataTree (Join-Path $DataRoot "plum")' \
   platforms/windows/prepare.ps1
+rg -Fq '$Dirty = @(& git -C $Path status --porcelain --untracked-files=all)' \
+  platforms/windows/prepare.ps1
+if rg -n 'status --porcelain[^\r\n]*\)\.Trim\(\)' \
+    platforms/windows/prepare.ps1; then
+  echo "A clean upstream snapshot still becomes null before validation." >&2
+  exit 1
+fi
 rg -Fq 'Copy-Item -LiteralPath $WeaselConfig' \
   platforms/windows/prepare.ps1
 rg -Fq 'weasel_config_sha256 = $Prepared.weasel_config_sha256' \

@@ -48,8 +48,8 @@ function Assert-GitSnapshot {
       throw "Unexpected tree in $Path"
     }
   }
-  $Dirty = (& git -C $Path status --porcelain --untracked-files=all).Trim()
-  if ($LASTEXITCODE -ne 0 -or $Dirty) {
+  $Dirty = @(& git -C $Path status --porcelain --untracked-files=all)
+  if ($LASTEXITCODE -ne 0 -or $Dirty.Count -ne 0) {
     throw "Refusing dirty upstream snapshot: $Path"
   }
 }
