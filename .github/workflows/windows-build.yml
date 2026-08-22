@@ -9,8 +9,6 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-2022
-    env:
-      WINDOWS_INPUTS: ${{ runner.temp }}\linnet-windows-inputs
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -23,7 +21,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: linnet-windows-inputs-${{ github.sha }}
-          path: ${{ env.WINDOWS_INPUTS }}
+          path: ${{ runner.temp }}\linnet-windows-inputs
 
       - name: Hydrate locked Windows and runtime sources
         shell: pwsh
@@ -62,11 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $windowsInputs = Join-Path $env:RUNNER_TEMP 'linnet-windows-inputs'
           platforms/windows/prepare.ps1 `
-            -DataRoot "$env:WINDOWS_INPUTS/data" `
-            -EmbeddedLuaHeader "$env:WINDOWS_INPUTS/build/windows-inputs/linnet_embedded_lua.h" `
-            -WeaselConfig "$env:WINDOWS_INPUTS/build/windows-inputs/weasel.yaml" `
-            -ThemePreviewRoot "$env:WINDOWS_INPUTS/build/windows-inputs/preview"
+            -DataRoot (Join-Path $windowsInputs 'data') `
+            -EmbeddedLuaHeader (Join-Path $windowsInputs 'build/windows-inputs/linnet_embedded_lua.h') `
+            -WeaselConfig (Join-Path $windowsInputs 'build/windows-inputs/weasel.yaml') `
+            -ThemePreviewRoot (Join-Path $windowsInputs 'build/windows-inputs/preview')
 
       - name: Build Windows installer
         shell: pwsh
