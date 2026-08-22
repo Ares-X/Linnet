@@ -4,6 +4,16 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.7 — 2026-08-23
+
+### 输入体验
+
+- 减少空闲输入状态下不必要的光标位置查询和空文本提交，降低候选关闭、模式切换及跨应用输入时的延迟与超时风险。
+
+### 个人数据
+
+- iCloud Drive 学习词同步改用产品固定的 `iCloud Drive/Linnet` 目录；用户启用后无需再选择文件夹，并继续按每小时最多一次进行 Rime 增量同步。
+
 ## 0.1.6 — 2026-08-22
 
 ### 输入体验

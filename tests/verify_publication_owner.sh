@@ -60,6 +60,17 @@ printf '%s\n' config/LinnetProduct.xcconfig config/linnet-data-releases.json |
 
 version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
   "${repo_root}/config/LinnetProduct.xcconfig")"
+current_release_change="$(ruby - "${repo_root}/CHANGELOG.md" "${version}" <<'RUBY'
+path, version = ARGV
+lines = File.readlines(path, chomp: true)
+start = lines.index { |line| line.start_with?("## #{version} — ") }
+abort unless start
+finish = ((start + 1)...lines.size).find { |index| lines.fetch(index).start_with?("## ") } || lines.size
+change = lines[(start + 1)...finish].find { |line| line.start_with?("- ") }
+abort unless change
+puts change
+RUBY
+)"
 catalog_sequence="$("${repo_root}/package/data_release_metadata" get-catalog-sequence \
   "${repo_root}/config/linnet-data-releases.json")"
 candidate_expected="$(printf '%s\n' \
@@ -288,26 +299,26 @@ publish_fixture data
 publish_fixture public
 rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
   fail "the stable Release omitted the version change summary"
-rg -Fq '按 Shift 切换中英文不显示光标旁状态提示' "${fake_state}/v${version}/notes" ||
+rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
   fail "the stable Release did not consume the current CHANGELOG section"
 if rg -Fq '## 0.1.3' "${fake_state}/v${version}/notes"; then
   fail "the stable Release leaked an adjacent CHANGELOG version"
 fi
 printf 'stale release notes\n' >"${fake_state}/v${version}/notes"
 publish_fixture public
-rg -Fq '按 Shift 切换中英文不显示光标旁状态提示' "${fake_state}/v${version}/notes" ||
+rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
   fail "an exact published Release did not repair stale notes"
 [[ "$(grep -c "^release create v${version} " "${fake_state}/calls.log")" == 1 ]] ||
   fail "an exact published stable Release was recreated"
 [[ "$(cut -f1 "${fake_state}/v${version}/assets")" == Linnet.pkg ]] ||
   fail "the stable Release published more than the complete installer"
 publish_fixture core
-rg -Fq '按 Shift 切换中英文不显示光标旁状态提示' \
+rg -Fq -- "${current_release_change}" \
   "${fake_state}/core-v${version}/notes" ||
   fail "the Core Release omitted the version change summary"
 printf 'stale core notes\n' >"${fake_state}/core-v${version}/notes"
 publish_fixture core
-rg -Fq '按 Shift 切换中英文不显示光标旁状态提示' \
+rg -Fq -- "${current_release_change}" \
   "${fake_state}/core-v${version}/notes" ||
   fail "an exact published Core Release did not repair stale notes"
 [[ "$(grep -c "^release create core-v${version} " "${fake_state}/calls.log")" == 1 ]] ||
@@ -383,7 +394,7 @@ ruby -e '
   abort unless data < core && core < public_release
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
   abort unless workflow.match?(/publish-community:.*?contents:\s*write/m)
-  abort unless workflow.scan(/^\s*run:\s*brew install ripgrep\s*$/).size == 2
+  abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 2
   abort if workflow.match?(/LINNET_CODE_SIGN|notary|Developer ID|publication_plan/)
 ' "${workflow}" || fail "tag-authorized community workflow is incomplete"
 
