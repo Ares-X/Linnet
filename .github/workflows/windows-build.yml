@@ -77,7 +77,9 @@ jobs:
           platforms/windows/build.ps1 -BoostRoot '${{ steps.boost.outputs.root }}'
 
       - name: Verify candidate runtime and install lifecycle
-        shell: pwsh
+        # The Windows International module used to inspect enabled TIPs is a
+        # Windows PowerShell module and fails to marshal its result in pwsh 7.
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           platforms/windows/preflight.ps1

@@ -398,6 +398,11 @@ rg -Fq '$Process = Start-Process -FilePath $FilePath -ArgumentList $Arguments' \
   platforms/windows/preflight.ps1
 rg -Fq '$Process.WaitForExit($TimeoutSeconds * 1000)' \
   platforms/windows/preflight.ps1
+rg -Fq '"System32\taskkill.exe") `' platforms/windows/preflight.ps1
+if rg -Fq '$Process.Kill($true)' platforms/windows/preflight.ps1; then
+  echo "Windows preflight still requires the pwsh-only process-tree API." >&2
+  exit 1
+fi
 rg -Fq 'Write-Host "Windows preflight: $Description"' \
   platforms/windows/preflight.ps1
 test "$(rg -F -c -- '-TimeoutSeconds ' platforms/windows/preflight.ps1)" -eq 6
@@ -421,6 +426,16 @@ rg -Fq '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>' \
   platforms/windows/runtime-smoke.vcxproj
 rg -Fq -- '-Arguments @("/S") -Description "Uninstall candidate" -TimeoutSeconds 120' \
   platforms/windows/preflight.ps1
+
+ruby -e '
+  workflow = File.read(".github/workflows/windows-build.yml")
+  step = workflow[/      - name: Verify candidate runtime and install lifecycle\n(.*?)(?=      - name:|      # This is)/m]
+  abort "Windows preflight workflow step is missing" unless step
+  abort "Windows preflight must use Windows PowerShell for the International module" unless
+    step.include?("        shell: powershell\n")
+  abort "Windows preflight still runs the incompatible pwsh host" if
+    step.include?("        shell: pwsh\n")
+'
 
 if rg -n 'linnet\.\*\.old\.\*' platforms/windows/preflight.ps1; then
   echo "Windows preflight still rejects Weasel's scheduled-deletion contract." >&2

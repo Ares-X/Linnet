@@ -108,7 +108,11 @@ function Invoke-CheckedProcess {
   try {
     if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
       try {
-        $Process.Kill($true)
+        & (Join-Path $env:SystemRoot "System32\taskkill.exe") `
+          /PID $($Process.Id) /T /F | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+          throw "taskkill failed with exit code $LASTEXITCODE"
+        }
         [void]$Process.WaitForExit(10000)
       } catch {
         Write-Warning "Could not terminate timed-out process $($Process.Id): $_"
