@@ -798,7 +798,7 @@ fi
 
 # Every shipped macOS candidate has one new build identity, and the expanded
 # package verifier mirrors (rather than contradicts) each product conclusion.
-grep -Fqx 'CURRENT_PROJECT_VERSION = 19' config/LinnetProduct.xcconfig
+grep -Fqx 'CURRENT_PROJECT_VERSION = 20' config/LinnetProduct.xcconfig
 rg -Fq 'if edition == "complete" && kind == "core"' package/verify_package
 
 # The user-owned support root is a deletion trust boundary. A replaced root
