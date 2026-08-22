@@ -9,6 +9,7 @@ verifier="${repo_root}/package/verify_publication_artifacts"
 asset_manifest="${repo_root}/package/release_asset_manifest"
 publisher="${repo_root}/package/publish_github_release"
 workflow="${repo_root}/.github/workflows/release-ci.yml"
+windows_workflow="${repo_root}/.github/workflows/windows-build.yml"
 
 fail() {
   echo "verify_publication_owner: $*" >&2
@@ -356,10 +357,12 @@ fi
 ruby -e '
   workflow = File.read(ARGV.fetch(0))
   uses = workflow.scan(/^\s*uses:\s*(\S+)/).flatten
-  abort unless uses.all? { |value| value.match?(/@[0-9a-f]{40}\z/) }
+  local_workflow = "./.github/workflows/windows-build.yml"
+  abort unless uses.all? { |value| value == local_workflow || value.match?(/@[0-9a-f]{40}\z/) }
+  abort unless uses.count(local_workflow) == 1
   cache_action = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
   abort unless uses.count(cache_action) == 2
-  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
+  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 3
   abort unless workflow.scan(/^\s*key:\s*linnet-build-v1-/).size == 2
   abort unless workflow.scan(/^\s*restore-keys:\s*\|/).size == 2
   %w[
@@ -383,8 +386,28 @@ ruby -e '
   abort unless data < core && core < public_release
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
   abort unless workflow.match?(/publish-community:.*?contents:\s*write/m)
-  abort unless workflow.scan(/^\s*run:\s*brew install ripgrep\s*$/).size == 2
+  abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 2
   abort if workflow.match?(/LINNET_CODE_SIGN|notary|Developer ID|publication_plan/)
 ' "${workflow}" || fail "tag-authorized community workflow is incomplete"
+
+ruby -e '
+  release = File.read(ARGV.fetch(0))
+  windows = File.read(ARGV.fetch(1))
+  manifest = File.read(ARGV.fetch(2))
+
+  abort unless windows.match?(/^permissions:\n  contents: read$/m)
+  abort unless windows.include?("Upload private Windows UAT candidate")
+  abort unless windows.include?(%q{name: Linnet-Windows-${{ github.sha }}})
+  abort unless windows.match?(/^\s*retention-days:\s*7\s*$/)
+  installer = %r{^\s*path:\s*build/windows/weasel/output/archives/Linnet-Windows-\*-installer\.exe\s*$}
+  abort unless windows.match?(installer)
+
+  jobs = release.scan(/^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m)
+  writers = jobs.select { |_, body| body.match?(/^\s*contents:\s*write\s*$/) }
+  abort unless writers.map(&:first) == ["publish-community"]
+  abort if writers.any? { |_, body| body.match?(/Linnet-Windows|installer\.exe/i) }
+  abort if manifest.match?(/\.exe\b|Linnet-Windows/i)
+' "${workflow}" "${windows_workflow}" "${asset_manifest}" ||
+  fail "a pre-UAT Windows candidate can reach a GitHub Release"
 
 echo "Linnet unsigned community publication owner: PASS"

@@ -79,7 +79,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           platforms/windows/preflight.ps1
 
-      - name: Upload Windows candidate
+      # This is a private, expiring Actions artifact for real-machine UAT.
+      # No workflow may attach it to a GitHub Release before that UAT passes.
+      - name: Upload private Windows UAT candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: Linnet-Windows-${{ github.sha }}

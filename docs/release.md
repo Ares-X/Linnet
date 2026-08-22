@@ -68,6 +68,18 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 该令牌只用于把已经验证的字节写入当前仓库的三个 Release 频道，不是 Apple 开发者
 凭据，也不会被打包或公开。
 
+### Windows 发布边界
+
+当前三个 Release 频道只发布 macOS 安装包、Core 更新和共享语言数据。Windows
+构建上传的安装程序只是有时限的私有 Actions 候选产物，不属于任何 Release
+清单，发布任务也不得下载或转发它。
+
+在同一份 Windows 安装程序完成真实 Windows 10/11 安装、升级、卸载、共存、
+Win32/现代应用输入、候选界面、用户数据隔离、失败回滚及原生 ARM64 等 UAT
+之前，不得在 GitHub 创建 Windows Release，也不得把它附加到现有 Release。
+CI 通过、签名通过和 macOS 验证都不能替代该验收。未来增加 Windows 发布入口
+时，必须绑定被测源码 revision 和安装程序 SHA-256，并在字节不一致时停止发布。
+
 ## 安装验收
 
 代码、静态产物和安装产品必须分别报告。首次 Complete 安装需验证一次注销

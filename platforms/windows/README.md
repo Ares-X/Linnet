@@ -98,10 +98,17 @@ and uninstall.
 An unrun or failing Windows preflight is a UAT `NO-GO`; manual testing starts
 only from an uploaded candidate that passed this gate.
 
-Tag builds retain the verified Windows installer as a private workflow artifact.
-The unsigned candidate is deliberately not attached to the public release;
-publication remains blocked until a Windows signing owner and verification gate
-exist.
+Tag and branch builds retain the verified Windows installer only as a private,
+expiring Actions artifact for real-machine UAT. It is deliberately absent from
+the public release manifest and no publication job downloads it. Passing CI,
+adding a signature, or manually renaming that artifact does not authorize a
+Windows GitHub Release.
+
+Windows publication remains blocked until the complete target-Windows UAT below
+passes against one exact candidate. A later publication milestone must bind the
+public asset to that candidate revision and installer SHA-256, retain the UAT
+environment and result, and fail if the bytes differ. Until then the repository
+has zero Windows Release paths; the existing publisher remains macOS-only.
 
 ## Acceptance status
 
@@ -119,4 +126,6 @@ exist.
   verification.
 
 A passing macOS check or headless Windows compile is component evidence only;
-it is not Windows product UAT.
+it is not Windows product UAT. Every required row must be exercised on the
+exact installer that would be published; an unexecuted row is `NOT_EXERCISED`,
+not a pass.
