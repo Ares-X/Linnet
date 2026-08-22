@@ -163,20 +163,6 @@ function Wait-ForServer {
   throw "Installed Linnet input service did not stay running"
 }
 
-function Wait-ForServerExit {
-  param([string]$ExpectedPath)
-  for ($Attempt = 0; $Attempt -lt 40; $Attempt++) {
-    $Found = Get-Process -Name "LinnetServer" -ErrorAction SilentlyContinue |
-      Where-Object {
-        try { [IO.Path]::GetFullPath($_.Path) -eq [IO.Path]::GetFullPath($ExpectedPath) }
-        catch { $false }
-      }
-    if (-not $Found) { return }
-    Start-Sleep -Milliseconds 500
-  }
-  throw "Installed Linnet input service did not stop"
-}
-
 foreach ($Required in @(
   $Installer,
   $Smoke,
@@ -330,9 +316,6 @@ try {
     throw "Linnet upgrade did not migrate uniquely to the Simplified Chinese TSF profile"
   }
   Wait-ForServer $InstalledServer
-  Invoke-CheckedProcess -FilePath $InstalledServer -Arguments @("/quit") `
-    -Description "Stop installed input service" -TimeoutSeconds 30
-  Wait-ForServerExit $InstalledServer
   Invoke-CheckedProcess `
     -FilePath (Join-Path $InstallRoot "WeaselDeployer.exe") `
     -Arguments @("/deploy") -Description "Deploy installed Linnet data" `
@@ -351,7 +334,6 @@ try {
   Invoke-RuntimeSmoke $InstalledProbe $InstallRoot `
     (Join-Path $InstallRoot "data") $UserData `
     "Installed Linnet data failed Windows-generated dictionary verification"
-  Start-Process -FilePath $InstalledServer
   Wait-ForServer $InstalledServer
 
   Invoke-CheckedProcess -FilePath (Join-Path $InstallRoot "uninstall.exe") `

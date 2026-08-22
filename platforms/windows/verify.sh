@@ -405,7 +405,7 @@ if rg -Fq '$Process.Kill($true)' platforms/windows/preflight.ps1; then
 fi
 rg -Fq 'Write-Host "Windows preflight: $Description"' \
   platforms/windows/preflight.ps1
-test "$(rg -F -c -- '-TimeoutSeconds ' platforms/windows/preflight.ps1)" -eq 6
+test "$(rg -F -c -- '-TimeoutSeconds ' platforms/windows/preflight.ps1)" -eq 5
 rg -Fq -- '-Description "Install Traditional Chinese candidate" -TimeoutSeconds 120' \
   platforms/windows/preflight.ps1
 rg -Fq -- '-Description "Upgrade to Simplified Chinese candidate" -TimeoutSeconds 120' \
@@ -413,6 +413,14 @@ rg -Fq -- '-Description "Upgrade to Simplified Chinese candidate" -TimeoutSecond
 rg -Fq -- '-Arguments @("/deploy") -Description "Deploy installed Linnet data"' \
   platforms/windows/preflight.ps1
 rg -Fq -- '-TimeoutSeconds 1800' platforms/windows/preflight.ps1
+if rg -Fq -- '-Arguments @("/quit")' platforms/windows/preflight.ps1; then
+  echo "Windows preflight duplicates the upstream deploy/uninstall service lifecycle." >&2
+  exit 1
+fi
+if rg -Fq 'Start-Process -FilePath $InstalledServer' platforms/windows/preflight.ps1; then
+  echo "Windows preflight restarts the server outside the upstream lifecycle." >&2
+  exit 1
+fi
 rg -Fq '$env:APPDATA = $TestAppData' platforms/windows/preflight.ps1
 rg -Fq 'Invoke-RuntimeSmoke $InstalledProbe $InstallRoot' \
   platforms/windows/preflight.ps1
