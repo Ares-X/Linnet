@@ -95,12 +95,34 @@ function Get-LinnetInputMethodTipCount {
 }
 
 function Invoke-CheckedProcess {
-  param([string]$FilePath, [string[]]$Arguments)
+  param(
+    [string]$FilePath,
+    [string[]]$Arguments,
+    [string]$Description,
+    [int]$TimeoutSeconds
+  )
+  Write-Host "Windows preflight: $Description"
   $Process = Start-Process -FilePath $FilePath -ArgumentList $Arguments `
-    -Wait -PassThru
-  if ($Process.ExitCode -ne 0) {
-    throw "$FilePath failed with exit code $($Process.ExitCode)"
+    -PassThru
+  $ExitCode = $null
+  try {
+    if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+      try {
+        $Process.Kill($true)
+        [void]$Process.WaitForExit(10000)
+      } catch {
+        Write-Warning "Could not terminate timed-out process $($Process.Id): $_"
+      }
+      throw "$Description timed out after $TimeoutSeconds seconds"
+    }
+    $ExitCode = $Process.ExitCode
+  } finally {
+    $Process.Dispose()
   }
+  if ($ExitCode -ne 0) {
+    throw "$Description failed with exit code $ExitCode"
+  }
+  Write-Host "${Description}: PASS"
 }
 
 function Invoke-RuntimeSmoke {
@@ -176,7 +198,8 @@ try {
     "Built Windows Win32 rime.dll failed candidate black-box verification"
 
   try {
-    Invoke-CheckedProcess $Installer @("/S", "/T")
+    Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S", "/T") `
+      -Description "Install Traditional Chinese candidate" -TimeoutSeconds 120
     $Installed = $true
 
   $InstallDir = Get-RegistryValue LocalMachine Registry32 `
@@ -289,7 +312,8 @@ try {
   $PreservedUserData = Join-Path $UserData "preserved-preflight.txt"
   Set-Content -LiteralPath $ObsoleteSharedData -Value "obsolete package data"
   Set-Content -LiteralPath $PreservedUserData -Value "preserve user data"
-  Invoke-CheckedProcess $Installer @("/S")
+  Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S") `
+    -Description "Upgrade to Simplified Chinese candidate" -TimeoutSeconds 120
   Assert-Absent $ObsoleteSharedData
   Assert-File $PreservedUserData
   $HansProfilePath = "Software\Microsoft\CTF\TIP\$Clsid\LanguageProfile\0x00000804\$Profile"
@@ -302,9 +326,13 @@ try {
     throw "Linnet upgrade did not migrate uniquely to the Simplified Chinese TSF profile"
   }
   Wait-ForServer $InstalledServer
-  Invoke-CheckedProcess $InstalledServer @("/quit")
+  Invoke-CheckedProcess -FilePath $InstalledServer -Arguments @("/quit") `
+    -Description "Stop installed input service" -TimeoutSeconds 30
   Wait-ForServerExit $InstalledServer
-  Invoke-CheckedProcess (Join-Path $InstallRoot "WeaselDeployer.exe") @("/deploy")
+  Invoke-CheckedProcess `
+    -FilePath (Join-Path $InstallRoot "WeaselDeployer.exe") `
+    -Arguments @("/deploy") -Description "Deploy installed Linnet data" `
+    -TimeoutSeconds 1800
   foreach ($Deployed in @(
     "build\default.yaml",
     "build\linnet_en.schema.yaml",
@@ -322,7 +350,8 @@ try {
   Start-Process -FilePath $InstalledServer
   Wait-ForServer $InstalledServer
 
-  Invoke-CheckedProcess (Join-Path $InstallRoot "uninstall.exe") @("/S")
+  Invoke-CheckedProcess -FilePath (Join-Path $InstallRoot "uninstall.exe") `
+    -Arguments @("/S") -Description "Uninstall candidate" -TimeoutSeconds 120
   for ($Attempt = 0; $Attempt -lt 40 -and (Test-Path -LiteralPath $InstallRoot); $Attempt++) {
     Start-Sleep -Milliseconds 500
   }
@@ -363,7 +392,9 @@ try {
     if ($Installed -and $InstallRoot -and
         (Test-Path -LiteralPath (Join-Path $InstallRoot "uninstall.exe") -PathType Leaf)) {
       try {
-        Invoke-CheckedProcess (Join-Path $InstallRoot "uninstall.exe") @("/S")
+        Invoke-CheckedProcess -FilePath (Join-Path $InstallRoot "uninstall.exe") `
+          -Arguments @("/S") -Description "Emergency candidate cleanup" `
+          -TimeoutSeconds 120
       } catch {
         Write-Warning "Emergency CI cleanup could not uninstall Linnet: $_"
       }
