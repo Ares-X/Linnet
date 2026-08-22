@@ -20,7 +20,7 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 - **中英自然切换**：中文与 Smart English 共用一个 macOS 输入源，不用在系统输入法列表里来回寻找。
 - **完整的中文体验**：内置全拼与七种双拼方案，共用同一套中文候选、学习数据和本地语言模型。
 - **真正面向英文输入**：Smart English 提供补全、拼写建议、IPA、中文释义、上下文预测与连续输入处理，同时始终保留原始输入。
-- **离线且可掌控**：个人词、学习数据、Text Expander 和备份默认保存在本机；启用后，macOS 可通过用户选择的 iCloud Drive 文件夹同步 Rime 学习词。
+- **离线且可掌控**：个人词、学习数据、Text Expander 和备份默认保存在本机；启用后，macOS 通过 Linnet 固定的 `iCloud Drive/Linnet` 目录同步 Rime 学习词。
 - **原生 macOS 产品**：菜单栏状态、候选窗与 Settings 形成统一体验，并提供浅色、深色和多套候选主题。
 
 ### 基于成熟上游，由 Linnet 精校与增强
@@ -96,7 +96,7 @@ _由当前 `data/squirrel.yaml` 通过 `SquirrelView` 生成的 20pt 实际渲�
 - 以 `x;` 开头的 Text Expander，例如 `x;addr`；
 - 中文、英文学习数据的独立开关与清理；
 - 个人数据导入、导出、自动备份与恢复。
-- 通过用户自选的 iCloud Drive 文件夹增量同步中英文学习词，自动检查严格限制为每小时最多一次；完整个人数据另以手动恢复归档传输。
+- 通过产品固定的 `iCloud Drive/Linnet` 目录增量同步中英文学习词，无需选择文件夹；自动检查严格限制为每小时最多一次，完整个人数据另以手动恢复归档传输。
 
 ## 系统要求
 
@@ -237,7 +237,7 @@ Linnet 没有账户体系、遥测、广告或分析 SDK，也不调用在线翻
 
 只有用户在 Settings 中明确选择导入时，Linnet 才会读取其他 Rime 或 Hallelujah 数据。导出文件可能包含用户主动选择的个人数据，需由用户自行妥善保存与删除。
 
-iCloud Drive 学习词同步仅在用户选择文件夹后启用。Linnet 把该目录配置为 Rime 的标准 `sync_dir`，由 Rime 按设备导出并增量合并中英文学习词，同时明确关闭 Rime 的自动配置备份；自动周期最多每小时一次，输入框或数据事务忙时会延后，用户也可主动点按“立即同步”。Linnet 不实现第二套词频或冲突算法，也不直接访问 iCloud 账户；云端传输由 macOS 的 iCloud Drive 完成。
+iCloud Drive 学习词同步由用户显式启用，但目录固定为 `iCloud Drive/Linnet`，不提供目录选择器。Linnet 把其中的 `Linnet-Rime-Sync` 配置为 Rime 的标准 `sync_dir`，由 Rime 按设备导出并增量合并中英文学习词，同时明确关闭 Rime 的自动配置备份；自动周期最多每小时一次，输入框或数据事务忙时会延后，用户也可主动点按“立即同步”。Linnet 不实现第二套词频或冲突算法，也不直接访问 iCloud 账户；云端传输由 macOS 的 iCloud Drive 完成。
 
 自定义词、停用词、Text Expander 和设置不属于 Rime 学习词同步。需要迁移这些数据时，可手动上传或审阅 `Linnet-Full-Backup.linnet-data`；导入仍需确认，并会先创建本地备份。
 

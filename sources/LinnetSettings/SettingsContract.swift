@@ -186,7 +186,8 @@ enum LinnetSettingsContract {
   }
 
   private static let backupRetentionPolicyKey = "backup.retention_policy"
-  private static let cloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
+  private static let cloudSyncEnabledKey = "cloud_sync.enabled_v1"
+  private static let legacyCloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
   private static let cloudSyncLastAttemptKey = "cloud_sync.last_attempt_v1"
   private static let inputMethodConnectionKey = "InputMethodConnectionName"
   static let cloudSyncConfigurationDidChange = Notification.Name(
@@ -231,23 +232,30 @@ enum LinnetSettingsContract {
     return true
   }
 
-  static func cloudSyncFolderBookmark(
-    startingAt bundle: Bundle = .main
-  ) -> Data? {
-    hostDefaults(startingAt: bundle)?.data(forKey: cloudSyncFolderBookmarkKey)
-  }
-
-  @discardableResult
-  static func setCloudSyncFolderBookmark(
-    _ bookmark: Data?,
+  static func cloudSyncEnabled(
     startingAt bundle: Bundle = .main
   ) -> Bool {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
-    if let bookmark {
-      defaults.set(bookmark, forKey: cloudSyncFolderBookmarkKey)
-    } else {
-      defaults.removeObject(forKey: cloudSyncFolderBookmarkKey)
+    if defaults.object(forKey: cloudSyncEnabledKey) != nil {
+      return defaults.bool(forKey: cloudSyncEnabledKey)
     }
+    guard defaults.data(forKey: legacyCloudSyncFolderBookmarkKey) != nil else {
+      return false
+    }
+    defaults.set(true, forKey: cloudSyncEnabledKey)
+    defaults.removeObject(forKey: legacyCloudSyncFolderBookmarkKey)
+    _ = defaults.synchronize()
+    return true
+  }
+
+  @discardableResult
+  static func setCloudSyncEnabled(
+    _ enabled: Bool,
+    startingAt bundle: Bundle = .main
+  ) -> Bool {
+    guard let defaults = hostDefaults(startingAt: bundle) else { return false }
+    defaults.set(enabled, forKey: cloudSyncEnabledKey)
+    defaults.removeObject(forKey: legacyCloudSyncFolderBookmarkKey)
     return defaults.synchronize()
   }
 

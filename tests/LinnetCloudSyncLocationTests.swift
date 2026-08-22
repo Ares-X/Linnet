@@ -6,9 +6,8 @@ struct LinnetCloudSyncLocationTests {
   static func main() {
     do {
       try withTemporaryDirectory { root in
-        try testFolderBookmarkRoundTrip(root: root)
-        try testNonDirectoryAndSymlinkAreRejected(root: root)
-        try testCorruptBookmarkIsRejected()
+        try testProductLocation(root: root)
+        try testUnavailableAndUnsafeCloudRootsAreRejected(root: root)
       }
       print("LinnetCloudSyncLocationTests: PASS")
     } catch {
@@ -16,50 +15,65 @@ struct LinnetCloudSyncLocationTests {
     }
   }
 
-  private static func testFolderBookmarkRoundTrip(root: URL) throws {
-    let folder = root.appending(component: "iCloud Drive", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
-
-    let selected = try LinnetCloudSyncLocation.select(folder: folder)
-    let restored = try LinnetCloudSyncLocation.resolve(bookmark: selected.bookmark)
-    let learningDirectory = try restored.prepareLearningDirectory()
-    guard restored.folder.standardizedFileURL == folder.resolvingSymlinksInPath(),
+  private static func testProductLocation(root: URL) throws {
+    let library = root.appending(component: "Product", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: library, withIntermediateDirectories: false)
+    let cloudDocuments = try makeCloudDocuments(in: library)
+    let location = try LinnetCloudSyncLocation.productLocation(libraryDirectory: library)
+    let learningDirectory = try location.prepareLearningDirectory()
+    guard location.folder.standardizedFileURL
+        == cloudDocuments.appending(component: "Linnet", directoryHint: .isDirectory),
       learningDirectory.lastPathComponent == "Linnet-Rime-Sync",
       learningDirectory.hasDirectoryPath,
-      restored.displayName == "iCloud Drive"
+      location.displayName == "iCloud Drive/Linnet"
     else {
-      fail("the selected sync folder did not survive its bookmark round trip")
+      fail("the product-owned iCloud Drive location was not derived deterministically")
     }
   }
 
-  private static func testNonDirectoryAndSymlinkAreRejected(root: URL) throws {
-    let file = root.appending(component: "not-a-folder", directoryHint: .notDirectory)
-    try Data("x".utf8).write(to: file)
-    expectFailure("a regular file was accepted as a sync folder") {
-      _ = try LinnetCloudSyncLocation.select(folder: file)
+  private static func testUnavailableAndUnsafeCloudRootsAreRejected(root: URL) throws {
+    let unavailableLibrary = root.appending(
+      component: "Unavailable", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(
+      at: unavailableLibrary, withIntermediateDirectories: false)
+    expectFailure("a missing iCloud Drive root was accepted") {
+      _ = try LinnetCloudSyncLocation.productLocation(
+        libraryDirectory: unavailableLibrary)
     }
 
-    let target = root.appending(component: "target", directoryHint: .isDirectory)
-    let link = root.appending(component: "linked-folder", directoryHint: .isDirectory)
+    let unsafeLibrary = root.appending(component: "Unsafe", directoryHint: .isDirectory)
+    let target = root.appending(component: "CloudTarget", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: unsafeLibrary, withIntermediateDirectories: false)
     try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
-    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
-    expectFailure("a symlink was accepted as the durable sync folder owner") {
-      _ = try LinnetCloudSyncLocation.select(folder: link)
+    let mobileDocuments = unsafeLibrary.appending(
+      component: "Mobile Documents", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: mobileDocuments, withIntermediateDirectories: false)
+    try FileManager.default.createSymbolicLink(
+      at: mobileDocuments.appending(
+        component: "com~apple~CloudDocs", directoryHint: .isDirectory),
+      withDestinationURL: target)
+    expectFailure("a symlink was accepted as the iCloud Drive root") {
+      _ = try LinnetCloudSyncLocation.productLocation(libraryDirectory: unsafeLibrary)
     }
 
-    let selected = try LinnetCloudSyncLocation.select(folder: target)
+    let safeLibrary = root.appending(component: "Safe", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: safeLibrary, withIntermediateDirectories: false)
+    _ = try makeCloudDocuments(in: safeLibrary)
+    let location = try LinnetCloudSyncLocation.productLocation(libraryDirectory: safeLibrary)
     try FileManager.default.createSymbolicLink(
-      at: selected.learningDirectory,
+      at: location.learningDirectory,
       withDestinationURL: root)
     expectFailure("a symlink was accepted as Rime's learning sync directory") {
-      _ = try selected.prepareLearningDirectory()
+      _ = try location.prepareLearningDirectory()
     }
   }
 
-  private static func testCorruptBookmarkIsRejected() throws {
-    expectFailure("corrupt bookmark bytes resolved to a sync folder") {
-      _ = try LinnetCloudSyncLocation.resolve(bookmark: Data("not-a-bookmark".utf8))
-    }
+  private static func makeCloudDocuments(in library: URL) throws -> URL {
+    let directory = library
+      .appending(component: "Mobile Documents", directoryHint: .isDirectory)
+      .appending(component: "com~apple~CloudDocs", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
   }
 
   private static func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {

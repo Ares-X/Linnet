@@ -50,9 +50,9 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
   var config: SquirrelConfig?
   var panel: SquirrelPanel?
   var enableNotifications = false
-  private var showStatusIcon = true
-  private var statusItem: NSStatusItem?
-  private var currentModeLabel = "中"
+  var showStatusIcon = true
+  var statusItem: NSStatusItem?
+  var currentModeLabel = "中"
   private var activeSettingsRevision: String?
   private var activeDataTransaction: ActiveDataTransaction?
   private var transactionMonitor: DispatchSourceTimer?
@@ -77,9 +77,17 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
   private var runtimeDataSnapshot: LinnetDataRegistry.RuntimeSnapshot?
   private lazy var rimeSyncController = LinnetRimeSyncController(
     loadConfiguration: {
-      let bookmark = LinnetSettingsContract.cloudSyncFolderBookmark()
-      let syncDirectory = try bookmark.map {
-        try LinnetCloudSyncLocation.resolve(bookmark: $0).prepareLearningDirectory()
+      let syncDirectory: URL?
+      if LinnetSettingsContract.cloudSyncEnabled() {
+        do {
+          syncDirectory = try LinnetCloudSyncLocation.productLocation()
+            .prepareLearningDirectory()
+        } catch {
+          syncDirectory = nil
+          print("The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription)")
+        }
+      } else {
+        syncDirectory = nil
       }
       return .init(
         userDirectory: SquirrelApp.userDir,
@@ -96,174 +104,11 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     refreshStatusItem()
     rimeSyncController.start()
   }
-
-  func applicationWillTerminate(_ notification: Notification) {
-    rimeSyncController.stop()
-    removeObservers()
-    transactionMonitor?.cancel()
-    transactionMonitor = nil
-    panel?.hide()
-    shutdownRime()
-    if let statusItem {
-      NSStatusBar.system.removeStatusItem(statusItem)
-      self.statusItem = nil
-    }
-  }
-
   deinit {
     removeObservers()
   }
 
   // MARK: Rime-owned status projection
-
-  func updateStatusIcon(session: RimeSessionId) {
-    guard canAcceptRimeInput, session != 0, rimeAPI.find_session(session) else { return }
-    let asciiMode = rimeAPI.get_option(session, "ascii_mode")
-    let schemaLabel = rimeAPI.get_state_label_abbreviated(
-      session, "ascii_mode", asciiMode, true).asString
-    DispatchQueue.main.async { [weak self] in
-      self?.applyStatusIcon(asciiMode: asciiMode, schemaLabel: schemaLabel)
-    }
-  }
-
-  func inputSourceDidActivate(session: RimeSessionId) {
-    updateStatusIcon(session: session)
-    DispatchQueue.main.async { [weak self] in
-      self?.setStatusItemVisibility(inputSourceIsActive: true)
-    }
-  }
-
-  private func refreshStatusItem() {
-    if showStatusIcon, statusItem == nil {
-      setupStatusItem()
-    } else if !showStatusIcon, let statusItem {
-      NSStatusBar.system.removeStatusItem(statusItem)
-      self.statusItem = nil
-    }
-  }
-
-  private func setupStatusItem() {
-    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    if let button = item.button {
-      button.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
-      button.toolTip = SquirrelApp.productName
-    }
-    let menu = NSMenu()
-    menu.delegate = self
-    item.menu = menu
-    statusItem = item
-    applyStatusIcon(asciiMode: false, schemaLabel: nil)
-    updateStatusItemVisibility()
-  }
-
-  private func applyStatusIcon(asciiMode: Bool, schemaLabel: String?) {
-    let label = if let schemaLabel, !schemaLabel.isEmpty {
-      schemaLabel
-    } else {
-      asciiMode ? "A" : "中"
-    }
-    currentModeLabel = label
-    guard let button = statusItem?.button else { return }
-    button.title = label
-    button.toolTip = "\(SquirrelApp.productName) · \(label)"
-    button.setAccessibilityLabel("\(SquirrelApp.productName), \(label)")
-  }
-
-  private func updateStatusItemVisibility() {
-    setStatusItemVisibility(
-      inputSourceIsActive:
-        SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier)
-  }
-
-  private func setStatusItemVisibility(inputSourceIsActive: Bool) {
-    statusItem?.isVisible = showStatusIcon && inputSourceIsActive
-  }
-
-  @objc private func inputSourceChanged(_: Notification) {
-    DispatchQueue.main.async { [weak self] in
-      self?.updateStatusItemVisibility()
-      self?.finalizeStrandedComposition()
-    }
-  }
-
-  // macOS may omit deactivateServer when another process selects an input
-  // source through TIS. The selection notification is still delivered, so
-  // finish through the existing controller lifecycle exactly as upstream does.
-  private func finalizeStrandedComposition() {
-    guard SquirrelInstaller.currentInputSourceID() != SquirrelApp.bundleIdentifier else {
-      return
-    }
-    if let inputController = panel?.inputController {
-      inputController.deactivateServer(inputController.client())
-    }
-  }
-
-  // MARK: input menu
-
-  // The same menu backs the input source menu (SquirrelInputController
-  // .menu()) and the status-bar indicator's click menu.
-  func makeInputMenu(actionTarget: AnyObject) -> NSMenu {
-    let menu = NSMenu()
-    for item in inputMenuItems(actionTarget: actionTarget) {
-      menu.addItem(item)
-    }
-    return menu
-  }
-
-  private func inputMenuItems(actionTarget: AnyObject) -> [NSMenuItem] {
-    let mode = NSMenuItem(
-      title: "\(NSLocalizedString("Input mode", comment: "Menu status")): \(currentModeLabel)",
-      action: nil,
-      keyEquivalent: "")
-    mode.isEnabled = false
-    let settings = NSMenuItem(title: NSLocalizedString("Settings...", comment: "Menu item"), action: #selector(openSettings), keyEquivalent: "")
-    settings.target = actionTarget
-    return [mode, .separator(), settings]
-  }
-
-  @objc func openSettings() {
-    let settingsURL = Bundle.main.bundleURL
-      .appending(path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
-    guard FileManager.default.fileExists(atPath: settingsURL.path) else {
-      Self.showMessage(msgText: "Settings are unavailable in this build.")
-      return
-    }
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = true
-    NSWorkspace.shared.openApplication(at: settingsURL, configuration: configuration) {
-      _, error in
-      if error != nil {
-        Self.showMessage(msgText: "Settings could not be opened.")
-      }
-    }
-  }
-
-  static func showMessage(msgText: String?) {
-    let center = UNUserNotificationCenter.current()
-    center.requestAuthorization(options: [.alert, .provisional]) { _, error in
-      if let error = error {
-        print("User notification authorization error: \(error.localizedDescription)")
-      }
-    }
-    center.getNotificationSettings { settings in
-      if (settings.authorizationStatus == .authorized
-        || settings.authorizationStatus == .provisional) && settings.alertSetting == .enabled {
-        let content = UNMutableNotificationContent()
-        content.title = SquirrelApp.productName
-        if let msgText = msgText {
-          content.subtitle = msgText
-        }
-        content.interruptionLevel = .active
-        let request = UNNotificationRequest(
-          identifier: Self.notificationIdentifier, content: content, trigger: nil)
-        center.add(request) { error in
-          if let error = error {
-            print("User notification request error: \(error.localizedDescription)")
-          }
-        }
-      }
-    }
-  }
 
   @discardableResult
   func setupRime(tentativeLanguageActivation: Bool = false) -> Bool {
@@ -522,6 +367,22 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     DispatchQueue.main.async { [weak self] in self?.rimeSyncController.synchronizeNow() }
   }
 
+}
+
+extension SquirrelApplicationDelegate {
+  func applicationWillTerminate(_ notification: Notification) {
+    rimeSyncController.stop()
+    removeObservers()
+    transactionMonitor?.cancel()
+    transactionMonitor = nil
+    panel?.hide()
+    shutdownRime()
+    if let statusItem {
+      NSStatusBar.system.removeStatusItem(statusItem)
+      self.statusItem = nil
+    }
+  }
+
   private func performRimeUserDataSync() -> LinnetRimeSyncOutcome {
     guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
     if panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true {
@@ -538,84 +399,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     rimeAPI.join_maintenance_thread()
     isRimeInputSuspended = false
     return .completed
-  }
-
-  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    print("\(SquirrelApp.productName) is quitting.")
-    return .terminateNow
-  }
-
-}
-
-extension RimeStringSlice {
-  var asString: String? {
-    guard let str else { return nil }
-    let data = Data(bytes: UnsafeRawPointer(str), count: Int(length))
-    return String(data: data, encoding: .utf8)
-  }
-}
-
-private func notificationHandler(
-  contextObject: UnsafeMutableRawPointer?, sessionId: RimeSessionId,
-  messageTypeC: UnsafePointer<CChar>?, messageValueC: UnsafePointer<CChar>?
-) {
-  guard let contextObject else { return }
-  let delegate = Unmanaged<SquirrelApplicationDelegate>.fromOpaque(contextObject)
-    .takeUnretainedValue()
-
-  let messageType = messageTypeC.map { String(cString: $0) }
-  let messageValue = messageValueC.map { String(cString: $0) }
-  if messageType == "deploy" {
-    switch messageValue {
-    case "start":
-      SquirrelApplicationDelegate.showMessage(
-        msgText: NSLocalizedString("deploy_start", comment: ""))
-    case "success":
-      SquirrelApplicationDelegate.showMessage(
-        msgText: NSLocalizedString("deploy_success", comment: ""))
-    case "failure":
-      SquirrelApplicationDelegate.showMessage(
-        msgText: NSLocalizedString("deploy_failure", comment: ""))
-    default:
-      break
-    }
-    return
-  }
-  if messageType == "option" {
-    let state = messageValue?.first != "!"
-    let optionName: String?
-    if state {
-      optionName = messageValue
-    } else if let messageValue, !messageValue.isEmpty {
-      optionName = String(messageValue.dropFirst())
-    } else {
-      optionName = nil
-    }
-    if let optionName = optionName {
-      optionName.withCString { name in
-        let shortLabel = delegate.rimeAPI.get_state_label_abbreviated(
-          sessionId, name, state, true).asString
-        let longLabel = delegate.rimeAPI.get_state_label_abbreviated(
-          sessionId, name, state, false).asString
-        if optionName == "ascii_mode" { delegate.updateStatusIcon(session: sessionId) }
-        if delegate.enableNotifications {
-          delegate.showStatusMessage(msgTextLong: longLabel, msgTextShort: shortLabel)
-        }
-      }
-    }
-    return
-  }
-
-  if messageType == "schema" {
-    delegate.updateStatusIcon(session: sessionId)
-  }
-}
-
-extension SquirrelApplicationDelegate {
-  fileprivate func showStatusMessage(msgTextLong: String?, msgTextShort: String?) {
-    if !(msgTextLong ?? "").isEmpty || !(msgTextShort ?? "").isEmpty {
-      panel?.updateStatus(long: msgTextLong ?? "", short: msgTextShort ?? "")
-    }
   }
 
   // Finish the one current composition, close the input gate, then invalidate
@@ -1407,23 +1190,5 @@ extension SquirrelApplicationDelegate {
         print("Error creating user data directory: \(path.path)")
       }
     }
-  }
-}
-
-extension SquirrelApplicationDelegate: NSMenuDelegate {
-  func menuNeedsUpdate(_ menu: NSMenu) {
-    menu.removeAllItems()
-    for item in inputMenuItems(actionTarget: self) {
-      menu.addItem(item)
-    }
-  }
-}
-
-extension NSApplication {
-  var squirrelAppDelegate: SquirrelApplicationDelegate {
-    guard let delegate = self.delegate as? SquirrelApplicationDelegate else {
-      SquirrelApp.configurationFailure("The application delegate contract is unavailable")
-    }
-    return delegate
   }
 }

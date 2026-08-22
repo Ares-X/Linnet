@@ -61,7 +61,7 @@ struct SettingsRootView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text(
-        "This replaces Linnet-Full-Backup.linnet-data in the selected folder. Local data is not changed."
+        "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed."
       )
     }
     .confirmationDialog(

@@ -11,9 +11,9 @@ struct SettingsPresentationStatusTests {
 
     expect(.ready, en: "Settings are ready.", zh: "设置已就绪。", english, chinese)
     expect(
-      .cloudSyncFolderSelected(name: "iCloud Drive"),
-      en: "Sync folder connected: iCloud Drive.",
-      zh: "已连接同步文件夹：iCloud Drive。",
+      .cloudSyncEnabled,
+      en: "iCloud Drive learning synchronization enabled.",
+      zh: "已启用 iCloud Drive 学习词同步。",
       english,
       chinese
     )
@@ -32,9 +32,9 @@ struct SettingsPresentationStatusTests {
       chinese
     )
     expect(
-      .cloudSyncDisconnected,
-      en: "Sync folder disconnected. No local or cloud data was deleted.",
-      zh: "已断开同步文件夹，未删除本地或云端数据。",
+      .cloudSyncDisabled,
+      en: "iCloud Drive learning synchronization disabled. No data was deleted.",
+      zh: "已停用 iCloud Drive 学习词同步，未删除任何数据。",
       english,
       chinese
     )
@@ -272,14 +272,6 @@ struct SettingsPresentationStatusTests {
       productName: "Linnet",
       en: "Export Linnet Diagnostics",
       zh: "导出 Linnet 诊断报告",
-      english,
-      chinese
-    )
-    expectPanel(
-      .cloudSyncFolder,
-      productName: "Linnet",
-      en: "Choose an iCloud Drive Sync Folder",
-      zh: "选择 iCloud Drive 同步文件夹",
       english,
       chinese
     )

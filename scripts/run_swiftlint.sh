@@ -15,8 +15,8 @@ case "${baseline_root}" in
 esac
 
 baseline_count="$(awk -F'"violation"' '{ count += NF - 1 } END { print count + 0 }' "${baseline_source}")"
-if (( baseline_count > 141 )); then
-  echo "SwiftLint baseline grew from its reviewed maximum of 141 violations." >&2
+if (( baseline_count > 131 )); then
+  echo "SwiftLint baseline grew from its reviewed maximum of 131 violations." >&2
   exit 1
 fi
 
