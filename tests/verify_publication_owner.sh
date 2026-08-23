@@ -60,6 +60,14 @@ printf '%s\n' config/LinnetProduct.xcconfig config/linnet-data-releases.json |
 
 version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
   "${repo_root}/config/LinnetProduct.xcconfig")"
+if ! ruby - "${repo_root}/README.md" "${version}" <<'RUBY'
+readme, version = ARGV
+versions = File.read(readme).scan(/\b\d+\.\d+\.\d+\b/)
+abort unless versions == [version]
+RUBY
+then
+  fail "README must project the current Core version exactly once"
+fi
 current_release_change="$(ruby - "${repo_root}/CHANGELOG.md" "${version}" <<'RUBY'
 path, version = ARGV
 lines = File.readlines(path, chomp: true)
