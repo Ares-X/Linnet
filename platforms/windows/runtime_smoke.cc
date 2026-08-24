@@ -121,6 +121,26 @@ void ExpectCorrection(RimeApi* api, RimeSessionId session) {
   }
 }
 
+void ExpectPrediction(RimeApi* api, RimeSessionId session) {
+  api->clear_composition(session);
+  if (!api->simulate_key_sequence(session, "he ")) {
+    Fail("could not commit the prediction seed");
+  }
+  RimeCommit commit = {};
+  RIME_STRUCT_INIT(RimeCommit, commit);
+  if (!api->get_commit(session, &commit)) {
+    Fail("prediction seed did not produce a commit");
+  }
+  const std::string committed = commit.text ? commit.text : "";
+  api->free_commit(&commit);
+  if (committed != "he ") {
+    Fail("prediction seed committed unexpected text: " + committed);
+  }
+  if (Candidates(api, session).empty()) {
+    Fail("predict module produced no candidates after an English word");
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -162,6 +182,7 @@ int main(int argc, char** argv) {
   ExpectComment(api, english, "cloud", "cloud", "klaʊd", "云");
   ExpectCorrection(api, english);
   ExpectCandidate(api, english, "yun", "cloud");
+  ExpectPrediction(api, english);
   api->destroy_session(english);
 
   const RimeSessionId pinyin = CreateSession(api, "linnet_zh_pinyin");

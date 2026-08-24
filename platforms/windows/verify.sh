@@ -181,11 +181,19 @@ if rg -Fq 'if (ret = ERROR_SUCCESS)' "${scratch}/WeaselSetup/imesetup.cpp"; then
   exit 1
 fi
 test "$(rg -F -c 'Delete  "$INSTDIR\licenses\*.*"' "${scratch}/output/install.nsi")" -eq 1
-test "$(rg -F -c 'Delete  "$R1\licenses\*.*"' "${scratch}/output/install.nsi")" -eq 1
 test "$(rg -F -c 'RMDir  "$INSTDIR\licenses"' "${scratch}/output/install.nsi")" -eq 1
-test "$(rg -F -c 'RMDir   "$R1\licenses"' "${scratch}/output/install.nsi")" -eq 1
 test "$(rg -F -c 'Delete  "$INSTDIR\data\dicts\*.*"' "${scratch}/output/install.nsi")" -eq 1
-test "$(rg -F -c 'Delete  "$R1\data\dicts\*.*"' "${scratch}/output/install.nsi")" -eq 1
+ruby -e '
+  source = File.binread(ARGV.fetch(0))
+  prepare = source[/old_frontend_removed:(.*?)\ndone:/m]
+  abort "upgrade preservation state is missing" unless prepare
+  destructive = /\b(?:DeleteRegKey|DeleteRegValue|Delete|RMDir)\b/
+  abort "upgrade destroys the prior package before commit" if prepare.match?(destructive)
+  commit = source.index("deploy_done:") or abort "deployment commit state is missing"
+  metadata = source.index(%(WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayName")) or
+    abort "public install metadata owner is missing"
+  abort "public install metadata precedes deployment commit" unless commit < metadata
+' "${scratch}/output/install.nsi"
 
 ruby -e '
   source = File.binread(ARGV.fetch(0))
@@ -222,9 +230,42 @@ rg -Fq 'InstallAndRememberProfile' "${scratch}/WeaselSetup/WeaselSetup.cpp"
 rg -Fq 'File /oname=LinnetServer.exe "WeaselServer.exe"' \
   "${scratch}/output/install.nsi"
 rg -Fq 'Function CleanupFailedCandidate' "${scratch}/output/install.nsi"
+rg -Fq 'Function RestorePriorFrontend' "${scratch}/output/install.nsi"
 rg -Fq 'Function .onInstFailed' "${scratch}/output/install.nsi"
 test "$(rg -F -c 'Call CleanupFailedCandidate' \
-  "${scratch}/output/install.nsi")" -eq 3
+  "${scratch}/output/install.nsi")" -eq 4
+rg -Fq 'Rename "$LinnetPriorRoot" "$LinnetRollbackRoot"' \
+  "${scratch}/output/install.nsi"
+rg -Fq 'Rename "$LinnetUserDataRoot\build" "$LinnetUserBuildRollback"' \
+  "${scratch}/output/install.nsi"
+rg -Fq 'Rename "$LinnetUserBuildRollback" "$LinnetUserDataRoot\build"' \
+  "${scratch}/output/install.nsi"
+rg -Fq 'ExecWait '\''"$LinnetPriorRoot\WeaselSetup.exe" /t'\'' $R5' \
+  "${scratch}/output/install.nsi"
+rg -Fq 'ExecWait '\''"$LinnetPriorRoot\WeaselSetup.exe" /s'\'' $R5' \
+  "${scratch}/output/install.nsi"
+test "$(rg -F -c 'SetErrorLevel 5' "${scratch}/output/install.nsi")" -eq 5
+rg -Fq 'StrCpy $LinnetRollbackFailed 1' "${scratch}/output/install.nsi"
+ruby -e '
+  source = File.binread(ARGV.fetch(0))
+  unregister = source[/old_server_stopped:(.*?)old_frontend_removed:/m] or
+    abort "old frontend unregister failure state is missing"
+  required = [
+    %(StrCpy $R4 $R3),
+    %(Call RestorePriorFrontend),
+    %(Pop $R5),
+    %(SetErrorLevel 5),
+    %(unregister_failure_restored:),
+    %(SetErrorLevel $R4),
+  ]
+  missing = required.reject { |line| unregister.include?(line) }
+  abort "unregister failure bypasses prior frontend restoration: #{missing.join(", ")}" unless
+    missing.empty?
+  cleanup = source[/Function CleanupFailedCandidate(.*?)FunctionEnd/m] or
+    abort "candidate cleanup owner is missing"
+  abort "rollback restore failures can still report the original candidate error" unless
+    cleanup.scan(%(StrCpy $LinnetRollbackFailed 1)).length == 3
+' "${scratch}/output/install.nsi"
 if rg -n '\$INSTDIR\\WeaselServer\.exe|\$R1\\WeaselServer\.exe' \
     "${scratch}/output/install.nsi"; then
   echo "The installed process identity still uses WeaselServer.exe." >&2
@@ -391,6 +432,7 @@ rg -Fq 'ExpectCandidate(api, reverse, "U4e2d", "中")' \
   platforms/windows/runtime_smoke.cc
 rg -Fq 'ExpectCandidateContaining(api, pinyin, "nihao", "👋")' \
   platforms/windows/runtime_smoke.cc
+rg -Fq 'ExpectPrediction(api, english);' platforms/windows/runtime_smoke.cc
 rg -Fq '"linnet_zh_sogou", "linnet_zh_ziguang"' \
   platforms/windows/runtime_smoke.cc
 if rg -n -- '-Wait -PassThru' platforms/windows/preflight.ps1; then
@@ -408,11 +450,17 @@ if rg -Fq '$Process.Kill($true)' platforms/windows/preflight.ps1; then
 fi
 rg -Fq 'Write-Host "Windows preflight: $Description"' \
   platforms/windows/preflight.ps1
-test "$(rg -F -c -- '-TimeoutSeconds ' platforms/windows/preflight.ps1)" -eq 4
+test "$(rg -F -c -- '-TimeoutSeconds ' platforms/windows/preflight.ps1)" -eq 5
 rg -Fq -- '-Description "Install Traditional Chinese candidate" -TimeoutSeconds 120' \
   platforms/windows/preflight.ps1
 rg -Fq -- '-Description "Upgrade to Simplified Chinese candidate" -TimeoutSeconds 120' \
   platforms/windows/preflight.ps1
+rg -Fq -- '-Description "Reject broken Simplified upgrade and restore prior candidate"' \
+  platforms/windows/preflight.ps1
+rg -Fq -- '-TimeoutSeconds 120 -ExpectedExitCode 1' platforms/windows/preflight.ps1
+rg -Fq 'Assert-Absent "$InstallRoot.linnet-rollback"' \
+  platforms/windows/preflight.ps1
+rg -Fq 'Assert-File $PreservedUserData' platforms/windows/preflight.ps1
 if rg -Fq -- '-Arguments @("/deploy")' platforms/windows/preflight.ps1; then
   echo "Windows preflight duplicates the installer's authoritative deployment." >&2
   exit 1
@@ -438,6 +486,18 @@ rg -Fq '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>' \
   platforms/windows/runtime-smoke.vcxproj
 rg -Fq -- '-Arguments @("/S") -Description "Uninstall candidate" -TimeoutSeconds 120' \
   platforms/windows/preflight.ps1
+
+test "$(rg -l 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' \
+  .github/workflows/*.yml | wc -l | tr -d ' ')" -eq 4
+test "$(rg -l 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' \
+  .github/workflows/*.yml | wc -l | tr -d ' ')" -eq 2
+rg -Fq 'microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57' \
+  .github/workflows/windows-build.yml
+if rg -n 'actions/(upload|download)-artifact@(ea165f8|d3f86a)|setup-msbuild@6fb022' \
+    .github/workflows; then
+  echo "A Node 20 Windows CI action pin returned." >&2
+  exit 1
+fi
 
 ruby -e '
   workflow = File.read(".github/workflows/windows-build.yml")

@@ -415,7 +415,7 @@ ruby -e '
   manifest = File.read(ARGV.fetch(2))
 
   abort unless windows.match?(/^permissions:\n  contents: read$/m)
-  abort unless windows.include?("Upload private Windows UAT candidate")
+  abort unless windows.include?("Upload private Windows engineering candidate")
   abort unless windows.include?(%q{name: Linnet-Windows-${{ github.sha }}})
   abort unless windows.match?(/^\s*retention-days:\s*7\s*$/)
   installer = %r{^\s*path:\s*build/windows/weasel/output/archives/Linnet-Windows-\*-installer\.exe\s*$}

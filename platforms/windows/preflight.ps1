@@ -99,7 +99,8 @@ function Invoke-CheckedProcess {
     [string]$FilePath,
     [string[]]$Arguments,
     [string]$Description,
-    [int]$TimeoutSeconds
+    [int]$TimeoutSeconds,
+    [int]$ExpectedExitCode = 0
   )
   Write-Host "Windows preflight: $Description"
   $Process = Start-Process -FilePath $FilePath -ArgumentList $Arguments `
@@ -123,10 +124,10 @@ function Invoke-CheckedProcess {
   } finally {
     $Process.Dispose()
   }
-  if ($ExitCode -ne 0) {
-    throw "$Description failed with exit code $ExitCode"
+  if ($ExitCode -ne $ExpectedExitCode) {
+    throw "$Description returned exit code $ExitCode; expected $ExpectedExitCode"
   }
-  Write-Host "${Description}: PASS"
+  Write-Host "${Description}: PASS (exit $ExitCode)"
 }
 
 function Invoke-RuntimeSmoke {
@@ -302,8 +303,44 @@ try {
   $PreservedUserData = Join-Path $UserData "preserved-preflight.txt"
   Set-Content -LiteralPath $ObsoleteSharedData -Value "obsolete package data"
   Set-Content -LiteralPath $PreservedUserData -Value "preserve user data"
+  $RollbackPackageSentinel = Join-Path $InstallRoot "rollback-preflight.txt"
+  $InvalidUserConfig = Join-Path $UserData "default.custom.yaml"
+  $PriorBuildFingerprint = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+    (Join-Path $UserData "build\default.yaml")).Hash
+  Set-Content -LiteralPath $RollbackPackageSentinel -Value "prior package"
+  Set-Content -LiteralPath $InvalidUserConfig -Value "patch: ["
+  try {
+    Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S") `
+      -Description "Reject broken Simplified upgrade and restore prior candidate" `
+      -TimeoutSeconds 120 -ExpectedExitCode 1
+  } finally {
+    Remove-Item -LiteralPath $InvalidUserConfig -Force -ErrorAction SilentlyContinue
+  }
+  Assert-File $RollbackPackageSentinel
+  Assert-File $PreservedUserData
+  $RestoredBuildFingerprint = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+    (Join-Path $UserData "build\default.yaml")).Hash
+  if ($RestoredBuildFingerprint -ne $PriorBuildFingerprint) {
+    throw "Failed upgrade did not restore the prior generated Rime build"
+  }
+  if ((Get-LinnetInputMethodTipCount $HantInputMethodTip) -ne 1 -or
+      (Get-LinnetInputMethodTipCount $HansInputMethodTip) -ne 0) {
+    throw "Failed upgrade did not restore the prior Traditional Chinese profile"
+  }
+  $RestoredRoot = Get-RegistryValue LocalMachine Registry32 `
+    "Software\Linnet" "WeaselRoot"
+  if (-not $RestoredRoot -or
+      [IO.Path]::GetFullPath($RestoredRoot) -ne [IO.Path]::GetFullPath($InstallRoot)) {
+    throw "Failed upgrade did not restore the prior package registry owner"
+  }
+  Assert-Absent "$InstallRoot.linnet-rollback"
+  Assert-Absent (Join-Path $UserData "build.linnet-rollback")
+  Wait-ForServer $InstalledServer
+
   Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S") `
     -Description "Upgrade to Simplified Chinese candidate" -TimeoutSeconds 120
+  Assert-Absent "$InstallRoot.linnet-rollback"
+  Assert-Absent (Join-Path $UserData "build.linnet-rollback")
   Assert-Absent $ObsoleteSharedData
   Assert-File $PreservedUserData
   $HansProfilePath = "Software\Microsoft\CTF\TIP\$Clsid\LanguageProfile\0x00000804\$Profile"
@@ -369,6 +406,7 @@ try {
   if (-not (Test-Path -LiteralPath $UserData -PathType Container)) {
     throw "Uninstall unexpectedly deleted the user's isolated Linnet data"
   }
+  Assert-File $PreservedUserData
   $Installed = $false
   } finally {
     if ($Installed -and $InstallRoot -and
