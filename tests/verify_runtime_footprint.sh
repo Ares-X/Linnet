@@ -608,12 +608,16 @@ smart_english_main=plugins/smart_english/smart_english.cc
 smart_english_domain=plugins/smart_english/smart_english_domain.h
 smart_english_filter_header=plugins/smart_english/smart_english_filter.h
 smart_english_filter=plugins/smart_english/smart_english_filter.cc
+smart_english_mixed_header=plugins/smart_english/smart_english_mixed_decoder.h
+smart_english_mixed_decoder=plugins/smart_english/smart_english_mixed_decoder.cc
 test "$(wc -l < "${smart_english_main}" | tr -d ' ')" -lt 1500 ||
   fail "the Smart English module owner again exceeds 1500 lines"
 for extracted_owner in \
   "${smart_english_domain}" \
   "${smart_english_filter_header}" \
-  "${smart_english_filter}"; do
+  "${smart_english_filter}" \
+  "${smart_english_mixed_header}" \
+  "${smart_english_mixed_decoder}"; do
   test -f "${extracted_owner}" ||
     fail "the Smart English candidate owner extraction is missing ${extracted_owner}"
   test "$(wc -l < "${extracted_owner}" | tr -d ' ')" -lt 500 ||
@@ -621,10 +625,60 @@ for extracted_owner in \
 done
 rg -Fq 'plugins/smart_english/smart_english_filter.cc' Makefile ||
   fail "the extracted Smart English filter is absent from the plugin build"
-for extracted_header in smart_english_domain.h smart_english_filter.h; do
+rg -Fq 'plugins/smart_english/smart_english_mixed_decoder.cc' Makefile ||
+  fail "the modeless mixed decoder is absent from the plugin build"
+for extracted_header in smart_english_domain.h smart_english_filter.h \
+  smart_english_mixed_decoder.h; do
   rg -Fq "plugins/smart_english/${extracted_header}" Makefile ||
     fail "the extracted Smart English contract is absent from build dependencies: ${extracted_header}"
 done
+test "$(rg -l '^class ModelessMixedDecoder' plugins/smart_english | wc -l | tr -d ' ')" -eq 1 ||
+  fail "modeless mixed generation no longer has one typed owner"
+test "$(rg -F --no-filename 'mixed_decoder_.Query(' plugins/smart_english | wc -l | tr -d ' ')" -eq 1 ||
+  fail "modeless mixed generation gained a second runtime entrypoint"
+for mixed_contract in \
+  'entry->IsExactMatch() && entry->text == uppercase' \
+  'if (start == 0 && length == input.size()) continue;' \
+  'for (const auto& range : ChineseRanges(entities, input.size()))' \
+  'target_ends.count(end.first)' \
+  'user_dictionary->Lookup(syllable_graph, range.first,' \
+  'dictionary->Lookup(syllable_graph, range.first, &blacklist)' \
+  'poet_->MakeSentences(' \
+  'input.size() > kMaximumInputLength' \
+  'result.size() == kMaximumMixedCandidates'; do
+  rg -Fq "${mixed_contract}" "${smart_english_mixed_decoder}" ||
+    fail "modeless mixed generation lost its bounded canonical contract: ${mixed_contract}"
+done
+test "$(rg -F -c 'BuildSyllableGraph(' "${smart_english_mixed_decoder}")" -eq 1 ||
+  fail "modeless mixed generation no longer builds exactly one Chinese SyllableGraph"
+if rg -Fq 'const string suffix = input.substr(start);' \
+    "${smart_english_mixed_decoder}"; then
+  fail "modeless mixed generation regained per-start suffix graph rebuilding"
+fi
+if rg -Fq 'for (const auto& vertex : syllable_graph.edges)' \
+    "${smart_english_mixed_decoder}"; then
+  fail "modeless mixed generation regained duplicate all-vertex dictionary lookup"
+fi
+rg -Fq 'mixed->model_weight() - best_chinese_sentence_weight' \
+  "${smart_english_filter}" ||
+  fail "mixed and canonical Chinese sentences no longer share one model comparison owner"
+rg -Fq 'return has_exact ? !item.mixed : item.preferred_mixed;' \
+  "${smart_english_filter}" ||
+  fail "whole exact English no longer closes before contextual mixed ranking"
+if rg -n 'process_key|ProcessKey|keycode|XK_[0-9]|SelectionIndex|select_keys' \
+    "${smart_english_mixed_header}" "${smart_english_mixed_decoder}"; then
+  fail "modeless mixed generation attempted to own digit or key interaction"
+fi
+for retired_mixed_owner in \
+  plugins/smart_english/smart_english_mixed_projection.h \
+  plugins/smart_english/smart_english_mixed_projection.cc; do
+  [[ ! -e "${retired_mixed_owner}" ]] ||
+    fail "the retired lossy mixed projection returned: ${retired_mixed_owner}"
+done
+if rg -n 'xuexicsjiting|liaojieaijishu|shiyongcpuxingneng|学习CS急停|了解AI技术|使用CPU性能' \
+    plugins/smart_english; then
+  fail "a mixed-input acceptance fixture leaked into production code"
+fi
 if rg -n \
   'ProjectSmartEnglishCandidate|class SmartEnglishTailTranslation|class SmartEnglishFilter' \
   "${smart_english_main}"; then

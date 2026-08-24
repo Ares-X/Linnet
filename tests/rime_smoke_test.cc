@@ -569,6 +569,142 @@ void ExpectGlobalAmbiguousEnglishFirstWithoutChinese(RimeApi_stdbool* api,
   }
 }
 
+RimeSessionId CreateSchemaSession(RimeApi_stdbool* api,
+                                  const char* schema_id);
+std::string TakeCommit(RimeApi_stdbool* api, RimeSessionId session);
+
+void ExpectSingleSyllablePreferenceLearning(RimeApi_stdbool* api) {
+  constexpr char kSchema[] = "linnet_zh_pinyin";
+  constexpr char kInput[] = "a";
+  const RimeSessionId learning = CreateSchemaSession(api, kSchema);
+  api->set_option(learning, "emoji", false);
+  Enter(api, learning, kInput);
+  const auto before = CandidateOrigins(learning);
+  if (before.empty()) {
+    Fail("single-syllable learning fixture has no Chinese candidates");
+  }
+  const auto chosen = std::find_if(
+      std::next(before.begin()), before.end(), [](const auto& candidate) {
+        return candidate.genuine_language == "linnet_zh" &&
+               candidate.start == 0 && candidate.end == 1 &&
+               !BaseText(candidate.text).empty();
+      });
+  if (chosen == before.end()) {
+    Fail("single-syllable learning fixture has no non-first Chinese choice");
+  }
+  const std::string expected = BaseText(chosen->text);
+  if (!api->select_candidate(
+          learning, static_cast<size_t>(std::distance(before.begin(), chosen))) ||
+      BaseText(TakeCommit(api, learning)) != expected) {
+    Fail("single-syllable learning fixture could not select " + expected);
+  }
+  api->destroy_session(learning);
+
+  const RimeSessionId learned = CreateSchemaSession(api, kSchema);
+  api->set_option(learned, "emoji", false);
+  Enter(api, learned, kInput);
+  const auto after = CandidateOrigins(learned);
+  if (after.empty() || BaseText(after.front().text) != expected ||
+      after.front().genuine_type != "user_phrase") {
+    Fail("single-syllable Chinese preference was not first after learning " +
+         expected);
+  }
+  api->destroy_session(learned);
+}
+
+void ExpectModelessMixedInput(RimeApi_stdbool* api) {
+  struct MixedCase {
+    const char* input;
+    const char* expected;
+  };
+  constexpr std::array<MixedCase, 3> kCases{{
+      {"xuexicsjiting", "学习CS急停"},
+      {"liaojieaijishu", "了解AI技术"},
+      {"shiyongcpuxingneng", "使用CPU性能"},
+  }};
+
+  for (const auto& ordinary_case :
+       std::array<std::pair<const char*, const char*>, 2>{{
+           {"xuexihejishu", "学习和技术"},
+           {"woaini", "我爱你"},
+       }}) {
+    const RimeSessionId ordinary =
+        CreateSchemaSession(api, "linnet_zh_pinyin");
+    Enter(api, ordinary, ordinary_case.first);
+    const auto ordinary_candidates = CandidateOrigins(ordinary);
+    if (ordinary_candidates.empty() ||
+        BaseText(ordinary_candidates.front().text) != ordinary_case.second ||
+        ordinary_candidates.front().type == "linnet_mixed") {
+      Fail("an acronym-shaped substring displaced ordinary Chinese context " +
+           std::string(ordinary_case.first));
+    }
+    api->destroy_session(ordinary);
+  }
+
+  for (const auto& test : kCases) {
+    const RimeSessionId session =
+        CreateSchemaSession(api, "linnet_zh_pinyin");
+    Enter(api, session, test.input);
+    const auto candidates = CandidateOrigins(session);
+    const auto mixed = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return candidate.type == "linnet_mixed" &&
+                 BaseText(candidate.text) == test.expected &&
+                 candidate.start == 0 && candidate.end == std::strlen(test.input);
+        });
+    if (mixed == candidates.end() || mixed != candidates.begin()) {
+      std::cerr << "Mixed origins for '" << test.input << "':";
+      for (const auto& candidate : candidates) {
+        std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                  << candidate.genuine_type << ":"
+                  << candidate.genuine_language << ":q="
+                  << candidate.quality << "]";
+      }
+      std::cerr << '\n';
+      Fail("modeless mixed input did not rank '" +
+           std::string(test.expected) + "' first");
+    }
+    if (!api->process_key(session, '1', 0) ||
+        BaseText(TakeCommit(api, session)) != test.expected) {
+      Fail("digit selection did not commit modeless mixed candidate " +
+           std::string(test.expected));
+    }
+    api->destroy_session(session);
+  }
+
+  const RimeSessionId ambiguous =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, ambiguous, "cs");
+  const auto standalone = CandidateOrigins(ambiguous);
+  const bool has_english = std::any_of(
+      standalone.begin(), standalone.end(), [](const auto& candidate) {
+        const std::string text = BaseText(candidate.text);
+        return candidate.genuine_language == "linnet_en" &&
+               (text == "cs" || text == "CS");
+      });
+  const bool has_chinese = std::any_of(
+      standalone.begin(), standalone.end(), [](const auto& candidate) {
+        return candidate.genuine_language == "linnet_zh" &&
+               candidate.start == 0 && candidate.end == 2;
+      });
+  const bool synthesized_standalone = std::any_of(
+      standalone.begin(), standalone.end(), [](const auto& candidate) {
+        return candidate.type == "linnet_mixed";
+      });
+  if (!has_english || !has_chinese || synthesized_standalone) {
+    std::cerr << "Standalone origins for 'cs':";
+    for (const auto& candidate : standalone) {
+      std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                << candidate.genuine_type << ":"
+                << candidate.genuine_language << ":" << candidate.start
+                << "-" << candidate.end << ":q=" << candidate.quality << "]";
+    }
+    std::cerr << '\n';
+    Fail("standalone cs did not preserve Chinese/English ambiguity");
+  }
+  api->destroy_session(ambiguous);
+}
+
 void ExpectCandidateAbsent(RimeApi_stdbool* api,
                            RimeSessionId session,
                            const std::string& input,
@@ -1016,7 +1152,8 @@ LatencySample NearestRank(std::vector<LatencySample>* samples,
 
 void BenchmarkSchema(RimeApi_stdbool* api,
                      const char* schema_id,
-                     const std::string& sequence) {
+                     const std::string& sequence,
+                     bool enforce_contract = true) {
   const RimeSessionId session = CreateSchemaSession(api, schema_id);
   RunLatencySteps(api, session, sequence, kLatencyWarmupSamples, nullptr);
 
@@ -1036,7 +1173,7 @@ void BenchmarkSchema(RimeApi_stdbool* api,
   std::cout << "rime_smoke_test: latency schema=" << schema_id
             << " samples=" << kLatencySamples << " p95_ns=" << p95
             << " p99_ns=" << p99 << '\n';
-  if (p95 > p95_limit || p99 > p99_limit) {
+  if (enforce_contract && (p95 > p95_limit || p99 > p99_limit)) {
     Fail("per-key latency exceeded the product contract");
   }
 }
@@ -4170,15 +4307,21 @@ int main(int argc, char** argv) {
   const bool prediction_punctuation_probe =
       argc == 4 &&
       std::strcmp(argv[3], "--prediction-punctuation-probe") == 0;
+  const bool mixed_input_probe =
+      argc == 4 && std::strcmp(argv[3], "--mixed-input-probe") == 0;
+  const bool mixed_latency_probe =
+      argc == 4 && std::strcmp(argv[3], "--mixed-latency-probe") == 0;
   if (argc != 3 && !input_options_probe && !input_switches_probe &&
       !settings_off_probe && !learning_off_probe &&
       !shift_probe && !page_size_probe && !english_profile_probe &&
-      !fast_config_reload_probe && !prediction_punctuation_probe) {
+      !fast_config_reload_probe && !prediction_punctuation_probe &&
+      !mixed_input_probe && !mixed_latency_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|--shift-probe|"
          "--page-size-probe EXPECTED|"
          "--english-profile-probe PROFILE CHINESE_SCHEMA CODE PREFIX|"
-         "--fast-config-reload-probe|--prediction-punctuation-probe]");
+         "--fast-config-reload-probe|--prediction-punctuation-probe|"
+         "--mixed-input-probe|--mixed-latency-probe]");
   }
   int expected_page_size = 0;
   if (page_size_probe) {
@@ -4246,6 +4389,23 @@ int main(int argc, char** argv) {
     ExpectPredictionPunctuationExitContract(api);
     api->finalize();
     std::cout << "rime_smoke_test: prediction punctuation exits: PASS\n";
+    return 0;
+  }
+
+  if (mixed_input_probe) {
+    ExpectSingleSyllablePreferenceLearning(api);
+    std::cout << "rime_smoke_test: single-syllable preference learning: PASS\n";
+    ExpectModelessMixedInput(api);
+    BenchmarkSchema(api, "linnet_zh_pinyin", "xuexicsjiting");
+    api->finalize();
+    std::cout << "rime_smoke_test: modeless mixed input: PASS\n";
+    return 0;
+  }
+
+  if (mixed_latency_probe) {
+    BenchmarkSchema(api, "linnet_zh_pinyin", "xuexicsjiting", false);
+    api->finalize();
+    std::cout << "rime_smoke_test: mixed-input latency measurement: COMPLETE\n";
     return 0;
   }
 
@@ -5563,6 +5723,8 @@ int main(int argc, char** argv) {
   for (const std::string& token : {"uUser", "U2", "cCalculator", "V2"}) {
     ExpectFirstCandidate(api, english, token, token);
   }
+  ExpectModelessMixedInput(api);
+  ExpectSingleSyllablePreferenceLearning(api);
   api->destroy_session(isolated_session);
   api->destroy_session(prediction);
   api->destroy_session(learned_only);

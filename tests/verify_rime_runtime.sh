@@ -9,6 +9,15 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
+runtime_probe="${1:-}"
+if [[ "${1:-}" == --mixed-input-probe ||
+      "${1:-}" == --mixed-latency-probe ]]; then
+  :
+elif [[ $# -ne 0 ]]; then
+  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe]" >&2
+  exit 64
+fi
+
 scratch="$(mktemp -d /tmp/linnet-rime-runtime.XXXXXX)"
 cleanup() {
   local status=$?
@@ -98,13 +107,28 @@ cxx="$(xcrun --find clang++)"
   lib/librime.1.dylib lib/rime-plugins/librime-lua.dylib \
   lib/rime-plugins/librime-predict.dylib -o "${scratch}/rime-smoke"
 
+smoke_args=("${shared}" "${user}")
+if [[ -n "${runtime_probe}" ]]; then
+  smoke_args+=("${runtime_probe}")
+fi
 if ! DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-    "${scratch}/rime-smoke" "${shared}" "${user}" \
+    "${scratch}/rime-smoke" "${smoke_args[@]}" \
     >"${scratch}/stdout" 2>"${scratch}/stderr"; then
   tail -n 160 "${scratch}/stdout" >&2 || true
   tail -n 160 "${scratch}/stderr" >&2 || true
   exit 1
 fi
+
+if [[ -n "${runtime_probe}" ]]; then
+  cat "${scratch}/stdout"
+  if [[ "${runtime_probe}" == --mixed-latency-probe ]]; then
+    echo "Linnet native Rime mixed-input latency measurement: COMPLETE"
+  else
+    echo "Linnet native Rime focused mixed-input probe: PASS"
+  fi
+  exit 0
+fi
+
 rg -Fq 'shared PredictEngine factory/engine identity: PASS' "${scratch}/stdout"
 test "$(LC_ALL=C grep -a -F -c 'loading predict db:' "${scratch}/stderr")" -eq 1
 

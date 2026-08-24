@@ -20,10 +20,12 @@ RIME_TOOLS = bin/rime_deployer bin/rime_dict_manager
 SMART_ENGLISH_PLUGIN = lib/rime-plugins/librime-smart-english.dylib
 SMART_ENGLISH_SOURCES = plugins/smart_english/smart_english.cc \
 	plugins/smart_english/smart_english_filter.cc \
-	plugins/smart_english/smart_english_index.cc
+	plugins/smart_english/smart_english_index.cc \
+	plugins/smart_english/smart_english_mixed_decoder.cc
 SMART_ENGLISH_HEADERS = plugins/smart_english/smart_english_domain.h \
 	plugins/smart_english/smart_english_filter.h \
-	plugins/smart_english/smart_english_index.h
+	plugins/smart_english/smart_english_index.h \
+	plugins/smart_english/smart_english_mixed_decoder.h
 SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
 	librime/dist/include/glog/logging.h \
 	librime/dist/include/marisa.h \

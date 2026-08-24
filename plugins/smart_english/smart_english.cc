@@ -39,6 +39,7 @@
 #include "smart_english_domain.h"
 #include "smart_english_filter.h"
 #include "smart_english_index.h"
+#include "smart_english_mixed_decoder.h"
 
 namespace linnet {
 namespace {
@@ -700,7 +701,7 @@ class SmartEnglishTranslator : public Translator {
  public:
   explicit SmartEnglishTranslator(const Ticket& ticket)
       : Translator(ticket), schema_id_(ticket.schema ? ticket.schema->schema_id() : string()), options_(InteractionOptions::Load(ticket.schema)),
-        predict_engine_(PredictEngineComponent::Shared()->GetInstance(ticket)), index_(predict_engine_) {
+        predict_engine_(PredictEngineComponent::Shared()->GetInstance(ticket)), index_(predict_engine_), mixed_decoder_(ticket) {
     if (!engine_) return;
     Context* context = engine_->context();
     commit_connection_ = context->commit_notifier().connect([this](Context* ctx) { OnCommit(ctx); });
@@ -748,6 +749,11 @@ class SmartEnglishTranslator : public Translator {
         result->Append(candidate);
       }
       return result;
+    }
+    if (schema_id_ != kSmartEnglishSchema && IsOrdinarySegment(segment)) {
+      for (const auto& candidate : mixed_decoder_.Query(input, segment)) {
+        result->Append(candidate);
+      }
     }
     if (!segment.HasTag("zz_english")) return result;
     const string normalized = LowerAsciiWord(input);
@@ -1029,6 +1035,7 @@ class SmartEnglishTranslator : public Translator {
   const InteractionOptions options_;
   const an<PredictEngine> predict_engine_;
   const SmartEnglishIndex index_;
+  ModelessMixedDecoder mixed_decoder_;
   bool pinyin_decoder_initialized_ = false;
   bool pinyin_formatter_loaded_ = false;
   the<Dictionary> pinyin_dictionary_;
