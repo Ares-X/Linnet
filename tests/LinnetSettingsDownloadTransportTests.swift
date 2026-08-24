@@ -616,13 +616,6 @@ struct LinnetSettingsDownloadTransportTests {
     try (encoder.encode(state) + Data("\n".utf8)).write(
       to: active.appending(path: "activation.json"),
       options: .atomic)
-    try FileManager.default.createDirectory(
-      at: registry.activeStateURL.deletingLastPathComponent(),
-      withIntermediateDirectories: true,
-      attributes: [.posixPermissions: 0o700])
-    try FileManager.default.createSymbolicLink(
-      atPath: registry.activeStateURL.path,
-      withDestinationPath: "../Runtime/Active/activation.json")
   }
 
   private static func writeInstalledPack(

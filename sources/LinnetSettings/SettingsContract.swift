@@ -137,7 +137,6 @@ enum LinnetSettingsContract {
     let octagramAvailable: Bool
     let availableSchemaCount: Int
     let requiredSchemaCount: Int
-    let activeTransactionID: UUID?
     let activeSettingsRevision: String?
   }
 
@@ -294,10 +293,6 @@ enum LinnetSettingsContract {
 
   static func dataTransactionsRoot(startingAt bundle: Bundle = .main) -> URL? {
     dataRegistry(startingAt: bundle)?.transactionsDirectory
-  }
-
-  static func backupsRoot(startingAt bundle: Bundle = .main) -> URL? {
-    dataRegistry(startingAt: bundle)?.backupsDirectory
   }
 
   static func validDataRequest(_ request: DataRequest) -> Bool {

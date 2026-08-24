@@ -321,20 +321,20 @@ struct SettingsSessionStateTests {
 
   private static func testBackupHistory() {
     var unavailable = SettingsBackupHistoryState(rootAvailable: false)
-    guard unavailable == .unavailable, !unavailable.isAuthoritativelyEmpty else {
+    guard unavailable == .unavailable else {
       fail("an unavailable backup root presented as empty")
     }
 
     var history = SettingsBackupHistoryState(rootAvailable: true)
-    guard history == .loading(previous: []), !history.isAuthoritativelyEmpty else {
+    guard history == .loading(previous: []) else {
       fail("backup loading presented as empty")
     }
     history.finishLoading([])
-    guard history == .loaded([]), history.isAuthoritativelyEmpty else {
+    guard history == .loaded([]) else {
       fail("a successful empty read was not authoritative")
     }
     history.failLoading()
-    guard history == .failed(previous: []), !history.isAuthoritativelyEmpty else {
+    guard history == .failed(previous: []) else {
       fail("a failed backup read presented as empty")
     }
 
@@ -350,7 +350,7 @@ struct SettingsSessionStateTests {
       fail("refresh did not preserve the last verified backup view")
     }
     history.failLoading()
-    guard history == .failed(previous: [record]), !history.isAuthoritativelyEmpty else {
+    guard history == .failed(previous: [record]) else {
       fail("backup failure discarded the previous verified view")
     }
     unavailable.beginLoading()
@@ -376,21 +376,24 @@ struct SettingsSessionStateTests {
     func draft(_ value: String) -> LinnetPersonalData {
       .init(customWords: [.init(value: value, code: value.lowercased())], disabledWords: [], expansions: [])
     }
+    func record(_ validation: LinnetPersonalDataStore.Validation) {
+      guard case .valid(let data) = validation else { return }
+      completed.append(data.customWords.first?.value ?? "")
+    }
     executor.submit(draft("First")) { validation in
-      completed.append(validation.normalized?.customWords.first?.value ?? "")
+      record(validation)
     }
     await waitUntil { recorder.started > 0 }
     executor.submit(draft("Second")) { validation in
-      completed.append(validation.normalized?.customWords.first?.value ?? "")
+      record(validation)
     }
     executor.submit(draft("Latest")) { validation in
-      completed.append(validation.normalized?.customWords.first?.value ?? "")
+      record(validation)
     }
     await waitUntil { completed.count == 1 }
     guard completed == ["Latest"], recorder.maximumActive == 1,
       recorder.cancelledWorkObserved
     else { fail("personal validation was not latest-only and serial") }
-    executor.cancel()
   }
 
   @MainActor

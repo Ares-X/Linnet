@@ -1028,7 +1028,6 @@ extension SquirrelApplicationDelegate {
         octagramAvailable: false,
         availableSchemaCount: 0,
         requiredSchemaCount: requiredSchemas.count,
-        activeTransactionID: active.transactionID,
         activeSettingsRevision: activeSettingsRevision
       )
     }
@@ -1065,7 +1064,6 @@ extension SquirrelApplicationDelegate {
       octagramAvailable: octagramLoaded,
       availableSchemaCount: available,
       requiredSchemaCount: requiredSchemas.count,
-      activeTransactionID: activeDataTransaction?.transactionID,
       activeSettingsRevision: activeSettingsRevision
     )
   }
@@ -1086,7 +1084,6 @@ extension SquirrelApplicationDelegate {
       octagramAvailable: false,
       availableSchemaCount: 0,
       requiredSchemaCount: requiredSchemas.count,
-      activeTransactionID: activeDataTransaction?.transactionID,
       activeSettingsRevision: activeSettingsRevision
     )
   }

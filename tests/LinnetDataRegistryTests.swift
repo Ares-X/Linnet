@@ -488,7 +488,6 @@ struct LinnetDataRegistryTests {
         samePath(snapshot.backupsDirectory, registry.rootDirectory.appending(path: "Backups")),
         "backups"
       )
-      require(snapshot.state.grammarProfile == .lts, "grammar")
     }
   }
 
@@ -820,7 +819,6 @@ struct LinnetDataRegistryTests {
       try registry.commitDataChannelUpdate(transactionID: activation.transactionID)
       let snapshot = try registry.runtimeSnapshot()
       require(snapshot.state.edition == .full, "full edition")
-      require(snapshot.state.grammarProfile == .lts, "LTS grammar")
       require(snapshot.state.packs.last == fixture.pack, "Extended pack")
       require(
         FileManager.default.fileExists(
@@ -868,7 +866,8 @@ struct LinnetDataRegistryTests {
       require(healthy.state.rollbackPacks.isEmpty, "unchanged activation created rollback packs")
       require(FileManager.default.fileExists(atPath: marker.path),
         "cleanup failure removed its transaction owner")
-      let stateDirectory = registry.activeStateURL.deletingLastPathComponent()
+      let stateDirectory = registry.rootDirectory.appending(
+        path: "State", directoryHint: .isDirectory)
       require(!FileManager.default.fileExists(
         atPath: stateDirectory.appending(path: "data-channel.json").path),
         "receipt side file returned")
@@ -1360,8 +1359,6 @@ struct LinnetDataRegistryTests {
         .appending(path: "linnet_zh.dict.yaml"))
     try Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8).write(
       to: active.appending(path: "linnet_grammar_active.yaml"))
-    try FileManager.default.createDirectory(
-      at: registry.activeStateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try writeState(
       .init(
         format: LinnetDataRegistry.stateFormat,
@@ -1371,10 +1368,6 @@ struct LinnetDataRegistryTests {
         packs: packs
       ),
       to: active.appending(path: "activation.json")
-    )
-    try FileManager.default.createSymbolicLink(
-      atPath: registry.activeStateURL.path,
-      withDestinationPath: "../Runtime/Active/activation.json"
     )
     try body(registry)
   }

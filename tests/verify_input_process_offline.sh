@@ -172,10 +172,10 @@ fi
 [[ "$(rg -F -c 'socket(AF_UNIX, SOCK_STREAM, 0)' "${local_ipc_owner}")" -eq 2 ]] ||
   fail "the local IPC owner changed its socket creation contract"
 for call_contract in \
-  'Darwin.bind(fd, address, length)' \
-  'listen(fd, 8)' \
+  'Darwin.bind(fileDescriptor, address, length)' \
+  'listen(fileDescriptor, 8)' \
   'accept(listener, nil, nil)' \
-  'Darwin.connect(fd, address, length)' \
+  'Darwin.connect(fileDescriptor, address, length)' \
   'MSG_DONTWAIT | MSG_NOSIGNAL)'
 do
   [[ "$(rg -F -c "${call_contract}" "${local_ipc_owner}")" -eq 1 ]] ||
@@ -183,9 +183,9 @@ do
 done
 [[ "$(rg -c --pcre2 "${local_ipc_source_pattern}" "${local_ipc_owner}")" -eq 5 ]] ||
   fail "the local IPC owner gained another network-shaped call"
-[[ "$(rg -F -c 'getpeereid(fd, &uid, &gid)' "${local_ipc_owner}")" -eq 1 ]] ||
+[[ "$(rg -F -c 'getpeereid(fileDescriptor, &uid, &gid)' "${local_ipc_owner}")" -eq 1 ]] ||
   fail "the local IPC owner lost peer-UID authentication"
-[[ "$(rg -F -c 'getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID' "${local_ipc_owner}")" -eq 1 ]] ||
+[[ "$(rg -F -c 'getsockopt(fileDescriptor, SOL_LOCAL, LOCAL_PEERPID' "${local_ipc_owner}")" -eq 1 ]] ||
   fail "the local IPC owner lost peer-PID authentication"
 # Same-user local IPC has one identity owner: kernel UID/PID plus the exact
 # counterpart executable path. Product code signing is a release boundary, not

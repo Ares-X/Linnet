@@ -29,11 +29,22 @@ extension NSAttributedString.Key {
 }
 
 final class SquirrelView: NSView {
-  enum Hit: Equatable {
+  enum HitTarget: Equatable {
     case none
     case candidate(Int)
     case preedit(Int)
     case control(LinnetCandidatePresentation.CandidateControlAction)
+  }
+
+  struct PagingLayerResult {
+    let layer: CAShapeLayer
+    let layout: LinnetPanelGeometry.PagingLayout
+    let nextPath: CGPath?
+    let previousPath: CGPath?
+
+    static func empty(layer: CAShapeLayer) -> PagingLayerResult {
+      .init(layer: layer, layout: .none, nextPath: nil, previousPath: nil)
+    }
   }
 
   let textView: NSTextView
@@ -151,7 +162,6 @@ final class SquirrelView: NSView {
   }
 
   // Will triger - (void)drawRect:(NSRect)dirtyRect
-  // swiftlint:disable:next function_parameter_count
   func drawView(
     candidateRanges: [NSRange], detailRange: NSRange, hilightedIndex: Int,
     preeditRange: NSRange, highlightedPreeditRange: NSRange,
@@ -381,24 +391,24 @@ final class SquirrelView: NSView {
     let panelPath = CGMutablePath()
     panelPath.addPath(backgroundPath, transform: panelLayer.affineTransform().scaledBy(x: 1, y: -1).translatedBy(x: 0, y: -self.bounds.height))
 
-    let (pagingLayer, pagingLayout, downPath, upPath) = pagingLayer(
+    let paging = pagingLayer(
       theme: theme, metrics: presentationMetrics, preeditRect: preeditRect)
-    self.pagingLayout = pagingLayout
-    if let sublayers = pagingLayer.sublayers, !sublayers.isEmpty {
-      self.layer?.addSublayer(pagingLayer)
+    self.pagingLayout = paging.layout
+    if let sublayers = paging.layer.sublayers, !sublayers.isEmpty {
+      self.layer?.addSublayer(paging.layer)
     }
     let flipTransform = CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -self.bounds.height)
-    if let downPath {
-      panelPath.addPath(downPath, transform: flipTransform)
+    if let nextPath = paging.nextPath {
+      panelPath.addPath(nextPath, transform: flipTransform)
     }
-    if let upPath {
-      panelPath.addPath(upPath, transform: flipTransform)
+    if let previousPath = paging.previousPath {
+      panelPath.addPath(previousPath, transform: flipTransform)
     }
 
     shape.path = panelPath
   }
 
-  func click(at clickPoint: NSPoint) -> Hit {
+  func click(at clickPoint: NSPoint) -> HitTarget {
     guard presentationMetrics != nil else { return .none }
     var index = 0
     var preeditIndex: Int?
@@ -888,17 +898,12 @@ private extension SquirrelView {
     theme: SquirrelTheme,
     metrics: LinnetPanelGeometry.PresentationMetrics,
     preeditRect: CGRect
-  ) -> (
-    CAShapeLayer,
-    LinnetPanelGeometry.PagingLayout,
-    CGPath?,
-    CGPath?
-  ) {
+  ) -> PagingLayerResult {
     let layer = CAShapeLayer()
     guard metrics.paging.isVisible,
       let firstCandidate = candidateRanges.first,
       let range = convert(range: firstCandidate)
-    else { return (layer, .none, nil, nil) }
+    else { return .empty(layer: layer) }
     var height = contentRect(range: range).height
     let preeditHeight = max(0, preeditRect.height + theme.preeditLinespace / 2 + theme.linespace / 2 - theme.edgeInset.height) + theme.edgeInset.height - theme.linespace / 2
     height += theme.linespace
@@ -909,7 +914,7 @@ private extension SquirrelView {
       vertical: metrics.vertical
     )
     guard layout.previousPage != nil || layout.nextPage != nil else {
-      return (layer, .none, nil, nil)
+      return .empty(layer: layer)
     }
     let radius = min(0.5 * metrics.paging.themeOffset, 2 * height / 9)
     let effectiveRadius = min(metrics.cornerRadius, 0.6 * radius)
@@ -917,7 +922,7 @@ private extension SquirrelView {
       triangle(center: .zero, radius: radius),
       straightCorner: [], alpha: 0.3 * effectiveRadius, beta: 1.4 * effectiveRadius
     ) else {
-      return (layer, .none, nil, nil)
+      return .empty(layer: layer)
     }
 
     let downPath = layout.nextPage.flatMap {
@@ -928,7 +933,7 @@ private extension SquirrelView {
     }
     guard layout.nextPage == nil || downPath != nil,
       layout.previousPage == nil || upPath != nil
-    else { return (layer, .none, nil, nil) }
+    else { return .empty(layer: layer) }
 
     if let downPath {
       let downLayer = shapeFromPath(path: downPath)
@@ -940,6 +945,10 @@ private extension SquirrelView {
       upLayer.fillColor = (theme.labelAttrs[.foregroundColor] as? NSColor)?.cgColor
       layer.addSublayer(upLayer)
     }
-    return (layer, layout, downPath, upPath)
+    return .init(
+      layer: layer,
+      layout: layout,
+      nextPath: downPath,
+      previousPath: upPath)
   }
 }

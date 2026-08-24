@@ -9,6 +9,18 @@ import AppKit
 import Foundation
 
 enum LinnetCandidatePresentation {
+  private struct LineReplacement {
+    let marker: String
+    let value: String
+    let attributes: [NSAttributedString.Key: Any]
+    let isCandidate: Bool
+  }
+
+  private struct LocatedReplacement {
+    let range: Range<String.Index>
+    let replacement: LineReplacement
+  }
+
   static let maximumDetailCharacterCount = 72
   static let maximumExpandedPageCount = 3
   static let maximumExpandedCandidateCount = 27
@@ -156,16 +168,20 @@ enum LinnetCandidatePresentation {
     var labelPrefix: NSAttributedString?
     var remainingFormat = candidateFormat
     while !remainingFormat.isEmpty {
-      let replacements: [(String, String, [NSAttributedString.Key: Any], Bool)] = [
-        ("[label]", label, labelAttributes, false),
-        ("[candidate]", normalizedCandidate, candidateAttributes, true),
-        ("[comment]", normalizedComment, commentAttributes, false)
+      let replacements = [
+        LineReplacement(
+          marker: "[label]", value: label, attributes: labelAttributes, isCandidate: false),
+        LineReplacement(
+          marker: "[candidate]", value: normalizedCandidate,
+          attributes: candidateAttributes, isCandidate: true),
+        LineReplacement(
+          marker: "[comment]", value: normalizedComment,
+          attributes: commentAttributes, isCandidate: false)
       ]
-      let next = replacements.compactMap { replacement ->
-        (Range<String.Index>, String, [NSAttributedString.Key: Any], Bool)? in
-        guard let range = remainingFormat.range(of: replacement.0) else { return nil }
-        return (range, replacement.1, replacement.2, replacement.3)
-      }.min { $0.0.lowerBound < $1.0.lowerBound }
+      let next = replacements.compactMap { replacement -> LocatedReplacement? in
+        guard let range = remainingFormat.range(of: replacement.marker) else { return nil }
+        return LocatedReplacement(range: range, replacement: replacement)
+      }.min { $0.range.lowerBound < $1.range.lowerBound }
       guard let next else {
         line.append(NSAttributedString(
           string: remainingFormat,
@@ -173,15 +189,18 @@ enum LinnetCandidatePresentation {
         break
       }
 
-      let literal = String(remainingFormat[..<next.0.lowerBound])
+      let literal = String(remainingFormat[..<next.range.lowerBound])
       line.append(NSAttributedString(string: literal, attributes: labelAttributes))
-      let token = String(remainingFormat[next.0])
+      let token = String(remainingFormat[next.range])
       if labelPrefix == nil, token == "[candidate]" || token == "[comment]" {
         labelPrefix = NSAttributedString(attributedString: line)
       }
       let replacementStart = line.length
-      line.append(NSAttributedString(string: next.1, attributes: next.2))
-      if next.3, normalizedCandidate.count <= 5, normalizedCandidate.count > 1 {
+      line.append(NSAttributedString(
+        string: next.replacement.value,
+        attributes: next.replacement.attributes))
+      if next.replacement.isCandidate,
+        normalizedCandidate.count <= 5, normalizedCandidate.count > 1 {
         let firstCharacterEnd = normalizedCandidate.index(after: normalizedCandidate.startIndex)
           .utf16Offset(in: normalizedCandidate)
         line.addAttribute(
@@ -191,7 +210,7 @@ enum LinnetCandidatePresentation {
             location: replacementStart + firstCharacterEnd,
             length: normalizedCandidate.utf16.count - firstCharacterEnd))
       }
-      remainingFormat = String(remainingFormat[next.0.upperBound...])
+      remainingFormat = String(remainingFormat[next.range.upperBound...])
     }
 
     if line.length > 1, line.length <= 10 {

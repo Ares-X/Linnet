@@ -41,7 +41,7 @@ enum LinnetSettingsAppearancePreview {
     }
   }
 
-  struct RGB: Equatable {
+  struct RimeColor: Equatable {
     let red: UInt8
     let green: UInt8
     let blue: UInt8
@@ -75,12 +75,12 @@ enum LinnetSettingsAppearancePreview {
   }
 
   struct Palette: Equatable {
-    let background: RGB
-    let border: RGB
-    let primary: RGB
-    let secondary: RGB
-    let selectedBackground: RGB
-    let selectedPrimary: RGB
+    let background: RimeColor
+    let border: RimeColor
+    let primary: RimeColor
+    let secondary: RimeColor
+    let selectedBackground: RimeColor
+    let selectedPrimary: RimeColor
   }
 
   struct Catalog {
@@ -218,13 +218,13 @@ enum LinnetSettingsAppearancePreview {
       )
     }
 
-    private static func color(_ key: String, _ fields: [String: String]) throws -> RGB {
+    private static func color(_ key: String, _ fields: [String: String]) throws -> RimeColor {
       guard let raw = fields[key]?.lowercased().replacingOccurrences(of: "0x", with: ""),
         let value = UInt32(raw, radix: 16)
       else {
         throw Failure.malformedThemeData
       }
-      return RGB(value)
+      return RimeColor(value)
     }
 
     private static func metric(_ key: String, _ fields: [String: String]) throws -> Double {

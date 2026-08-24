@@ -31,16 +31,6 @@ struct LinnetPersonalData: Equatable, Sendable {
   var disabledWords: [String]
   var expansions: [Expansion]
 
-  init(
-    customWords: [CustomWord],
-    disabledWords: [String],
-    expansions: [Expansion]
-  ) {
-    self.customWords = customWords
-    self.disabledWords = disabledWords
-    self.expansions = expansions
-  }
-
   static let empty = LinnetPersonalData(
     customWords: [],
     disabledWords: [],
@@ -110,17 +100,17 @@ enum LinnetPersonalDataStore {
     case valid(LinnetPersonalData)
     case invalid(Issue)
 
-    var normalized: LinnetPersonalData? {
-      guard case .valid(let data) = self else { return nil }
-      return data
-    }
-
     var firstIssue: Issue? {
       guard case .invalid(let issue) = self else { return nil }
       return issue
     }
 
     var isValid: Bool { if case .valid = self { true } else { false } }
+  }
+
+  private enum CollectionValidation<Value> {
+    case valid(Value)
+    case invalid(Validation.Issue)
   }
 
   enum Failure: LocalizedError, Equatable {
@@ -281,109 +271,140 @@ enum LinnetPersonalDataStore {
     checkCancellation: CancellationCheck
   ) rethrows -> Validation {
     try checkCancellation()
-    func failed(_ location: Validation.Location, _ reason: Validation.Reason) -> Validation {
-      .invalid(.init(location: location, reason: reason))
-    }
-    func addRenderedBytes(_ bytes: Int, to total: inout Int) -> Bool {
-      guard bytes >= 0, bytes <= maximumFileBytes - total else { return false }
-      total += bytes
-      return true
-    }
     guard data.customWords.count <= maximumRows else {
-      return failed(.collection(.customWords), .tooMany)
+      return invalid(.collection(.customWords), .tooMany)
     }
     guard data.disabledWords.count <= maximumRows else {
-      return failed(.collection(.disabledWords), .tooMany)
+      return invalid(.collection(.disabledWords), .tooMany)
     }
     guard data.expansions.count <= maximumRows else {
-      return failed(.collection(.expansions), .tooMany)
+      return invalid(.collection(.expansions), .tooMany)
     }
+
+    let customWords: [LinnetPersonalData.CustomWord]
+    switch try validateCustomWords(data.customWords, checkCancellation: checkCancellation) {
+    case .valid(let rows): customWords = rows
+    case .invalid(let issue): return .invalid(issue)
+    }
+    let expansions: [LinnetPersonalData.Expansion]
+    switch try validateExpansions(data.expansions, checkCancellation: checkCancellation) {
+    case .valid(let rows): expansions = rows
+    case .invalid(let issue): return .invalid(issue)
+    }
+    let disabledWords: [String]
+    switch try validateDisabledWords(data.disabledWords, checkCancellation: checkCancellation) {
+    case .valid(let rows): disabledWords = rows
+    case .invalid(let issue): return .invalid(issue)
+    }
+    try checkCancellation()
+    return .valid(.init(
+      customWords: customWords,
+      disabledWords: disabledWords,
+      expansions: expansions))
+  }
+
+  private static func validateCustomWords(
+    _ rows: [LinnetPersonalData.CustomWord],
+    checkCancellation: CancellationCheck
+  ) rethrows -> CollectionValidation<[LinnetPersonalData.CustomWord]> {
     var customFileBytes = table(name: customWordsFile, rows: []).utf8.count
-    var expansionFileBytes = table(name: expansionsFile, rows: []).utf8.count
     var customCodes = Set<String>()
     var customWords: [LinnetPersonalData.CustomWord] = []
-    for row in data.customWords {
+    for row in rows {
       try checkCancellation()
       let value = row.value.trimmingCharacters(in: .whitespaces)
       let code = row.code.trimmingCharacters(in: .whitespaces).lowercased()
       if value.isEmpty, code.isEmpty { continue }
-      if value.isEmpty { return failed(.customWord(row.id, .value), .missing) }
-      if code.isEmpty { return failed(.customWord(row.id, .code), .missing) }
+      if value.isEmpty { return invalidCollection(.customWord(row.id, .value), .missing) }
+      if code.isEmpty { return invalidCollection(.customWord(row.id, .code), .missing) }
       guard fieldIsBounded(value) else {
-        return failed(.customWord(row.id, .value), .tooLarge)
+        return invalidCollection(.customWord(row.id, .value), .tooLarge)
       }
       guard fieldIsBounded(code) else {
-        return failed(.customWord(row.id, .code), .tooLarge)
+        return invalidCollection(.customWord(row.id, .code), .tooLarge)
       }
       guard validValue(value) else {
-        return failed(.customWord(row.id, .value), .invalid)
+        return invalidCollection(.customWord(row.id, .value), .invalid)
       }
       guard code.range(
         of: #"^[a-z0-9;']+(?: [a-z0-9;']+)*$"#,
         options: .regularExpression
       ) != nil else {
-        return failed(.customWord(row.id, .code), .invalid)
+        return invalidCollection(.customWord(row.id, .code), .invalid)
       }
       guard customCodes.insert(code).inserted else {
-        return failed(.customWord(row.id, .code), .duplicate)
+        return invalidCollection(.customWord(row.id, .code), .duplicate)
       }
       let lineBytes = value.utf8.count + 1 + code.utf8.count
       guard lineBytes <= maximumLineBytes,
         addRenderedBytes(lineBytes + (customWords.isEmpty ? 0 : 1), to: &customFileBytes)
       else {
-        return failed(.collection(.customWords), .tooLarge)
+        return invalidCollection(.collection(.customWords), .tooLarge)
       }
       customWords.append(LinnetPersonalData.CustomWord(id: row.id, value: value, code: code))
     }
+    return .valid(customWords)
+  }
 
+  private static func validateExpansions(
+    _ rows: [LinnetPersonalData.Expansion],
+    checkCancellation: CancellationCheck
+  ) rethrows -> CollectionValidation<[LinnetPersonalData.Expansion]> {
+    var expansionFileBytes = table(name: expansionsFile, rows: []).utf8.count
     var triggers = Set<String>()
     var expansions: [LinnetPersonalData.Expansion] = []
-    for row in data.expansions {
+    for row in rows {
       try checkCancellation()
       let value = row.value.trimmingCharacters(in: .whitespaces)
       let trigger = row.trigger.trimmingCharacters(in: .whitespaces)
       if value.isEmpty, trigger.isEmpty || trigger == "x;" { continue }
-      if value.isEmpty { return failed(.expansion(row.id, .value), .missing) }
+      if value.isEmpty { return invalidCollection(.expansion(row.id, .value), .missing) }
       if trigger.isEmpty || trigger == "x;" {
-        return failed(.expansion(row.id, .trigger), .missing)
+        return invalidCollection(.expansion(row.id, .trigger), .missing)
       }
       guard fieldIsBounded(value) else {
-        return failed(.expansion(row.id, .value), .tooLarge)
+        return invalidCollection(.expansion(row.id, .value), .tooLarge)
       }
       guard fieldIsBounded(trigger) else {
-        return failed(.expansion(row.id, .trigger), .tooLarge)
+        return invalidCollection(.expansion(row.id, .trigger), .tooLarge)
       }
       guard validValue(value) else {
-        return failed(.expansion(row.id, .value), .invalid)
+        return invalidCollection(.expansion(row.id, .value), .invalid)
       }
       guard trigger.range(
         of: #"^x;[-0-9A-Za-z_]+$"#,
         options: .regularExpression
       ) != nil else {
-        return failed(.expansion(row.id, .trigger), .invalid)
+        return invalidCollection(.expansion(row.id, .trigger), .invalid)
       }
       guard triggers.insert(trigger).inserted else {
-        return failed(.expansion(row.id, .trigger), .duplicate)
+        return invalidCollection(.expansion(row.id, .trigger), .duplicate)
       }
       let lineBytes = value.utf8.count + 1 + trigger.utf8.count
       guard lineBytes <= maximumLineBytes,
         addRenderedBytes(lineBytes + (expansions.isEmpty ? 0 : 1), to: &expansionFileBytes)
       else {
-        return failed(.collection(.expansions), .tooLarge)
+        return invalidCollection(.collection(.expansions), .tooLarge)
       }
       expansions.append(LinnetPersonalData.Expansion(id: row.id, value: value, trigger: trigger))
     }
+    return .valid(expansions)
+  }
 
+  private static func validateDisabledWords(
+    _ rows: [String],
+    checkCancellation: CancellationCheck
+  ) rethrows -> CollectionValidation<[String]> {
     var disabledWords: [String] = []
-    for (index, word) in data.disabledWords.enumerated() {
+    for (index, word) in rows.enumerated() {
       try checkCancellation()
       let normalized = word.trimmingCharacters(in: .whitespaces).lowercased()
       if normalized.isEmpty { continue }
       guard fieldIsBounded(normalized) else {
-        return failed(.disabledWord(index), .tooLarge)
+        return invalidCollection(.disabledWord(index), .tooLarge)
       }
       guard validValue(normalized) else {
-        return failed(.disabledWord(index), .invalid)
+        return invalidCollection(.disabledWord(index), .invalid)
       }
       disabledWords.append(normalized)
     }
@@ -394,24 +415,37 @@ enum LinnetPersonalDataStore {
       for (index, word) in uniqueDisabledWords.enumerated() {
         try checkCancellation()
         guard let json = try? JSONEncoder().encode(word) else {
-          return failed(.collection(.disabledWords), .invalid)
+          return invalidCollection(.collection(.disabledWords), .invalid)
         }
         let lineBytes = 4 + json.count
         guard lineBytes <= maximumLineBytes,
           addRenderedBytes(lineBytes + (index == 0 ? 0 : 1), to: &userSettingsBytes)
         else {
-          return failed(.collection(.disabledWords), .tooLarge)
+          return invalidCollection(.collection(.disabledWords), .tooLarge)
         }
       }
     }
-    try checkCancellation()
-    return .valid(
-      .init(
-        customWords: customWords,
-        disabledWords: uniqueDisabledWords,
-        expansions: expansions
-      )
-    )
+    return .valid(uniqueDisabledWords)
+  }
+
+  private static func invalid(
+    _ location: Validation.Location,
+    _ reason: Validation.Reason
+  ) -> Validation {
+    .invalid(.init(location: location, reason: reason))
+  }
+
+  private static func invalidCollection<Value>(
+    _ location: Validation.Location,
+    _ reason: Validation.Reason
+  ) -> CollectionValidation<Value> {
+    .invalid(.init(location: location, reason: reason))
+  }
+
+  private static func addRenderedBytes(_ bytes: Int, to total: inout Int) -> Bool {
+    guard bytes >= 0, bytes <= maximumFileBytes - total else { return false }
+    total += bytes
+    return true
   }
 
   static func normalized(_ data: LinnetPersonalData) throws -> LinnetPersonalData {

@@ -194,10 +194,12 @@ private extension LinnetSettingsDownloadTransport {
     private var catalogData = Data()
     private var sink: LinnetSettingsExclusiveFileSink?
 
-    init(request: URLRequest, source: LinnetSettingsDownloadSource, mode: Mode,
+    init(
+      request: URLRequest, source: LinnetSettingsDownloadSource, mode: Mode,
       configuration: URLSessionConfiguration,
       idleNanoseconds: UInt64, deadlineUptimeNanoseconds: UInt64,
-      maximumRedirects: Int) throws {
+      maximumRedirects: Int
+    ) throws {
       guard let url = request.url, source.allowsTransferURL(url) else {
         throw Failure.invalidURL
       }
@@ -273,9 +275,11 @@ private extension LinnetSettingsDownloadTransport {
       return min(deadlineUptimeNanoseconds, idleDeadline)
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask,
+    func urlSession(
+      _ session: URLSession, task: URLSessionTask,
       willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
-      completionHandler: @escaping (URLRequest?) -> Void) {
+      completionHandler: @escaping (URLRequest?) -> Void
+    ) {
       lock.lock()
       redirects += 1
       let allowed = !terminal && redirects <= maximumRedirects
@@ -290,9 +294,11 @@ private extension LinnetSettingsDownloadTransport {
       completionHandler(request)
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+    func urlSession(
+      _ session: URLSession, dataTask: URLSessionDataTask,
       didReceive response: URLResponse,
-      completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+      completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
       let validation: Result<UInt64?, Error>
       do {
         validation = .success(try validate(response))
@@ -322,8 +328,10 @@ private extension LinnetSettingsDownloadTransport {
       }
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
-      didReceive data: Data) {
+    func urlSession(
+      _ session: URLSession, dataTask: URLSessionDataTask,
+      didReceive data: Data
+    ) {
       var failure: Error?
       lock.lock()
       if !terminal && responseAccepted {
@@ -352,8 +360,10 @@ private extension LinnetSettingsDownloadTransport {
       if let failure { complete(.failure(failure)) }
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask,
-      didCompleteWithError error: Error?) {
+    func urlSession(
+      _ session: URLSession, task: URLSessionTask,
+      didCompleteWithError error: Error?
+    ) {
       if let error {
         lock.lock()
         let cancelled = cancellationRequested

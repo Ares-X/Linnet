@@ -314,6 +314,20 @@ enum LinnetPackContract {
 
 extension LinnetPackContract {
   static func validate(_ manifest: Manifest, coreVersion: String) throws {
+    try validateIdentity(manifest)
+    try validateFiles(manifest)
+    try validateRequirements(manifest)
+    guard let required = SemanticVersion(manifest.minCore),
+      let actual = SemanticVersion(coreVersion)
+    else {
+      throw Failure.invalidManifest("core version")
+    }
+    guard actual >= required else {
+      throw Failure.incompatibleCore(required: manifest.minCore, actual: coreVersion)
+    }
+  }
+
+  private static func validateIdentity(_ manifest: Manifest) throws {
     guard manifest.format == manifestFormat else { throw Failure.invalidManifest("format") }
     guard manifest.product == productIdentifier else { throw Failure.invalidManifest("product") }
     guard manifest.packID == manifest.kind.packID else { throw Failure.invalidManifest("pack_id") }
@@ -326,6 +340,9 @@ extension LinnetPackContract {
     guard !manifest.files.isEmpty, manifest.files.count <= maximumFiles else {
       throw Failure.invalidManifest("file count")
     }
+  }
+
+  private static func validateFiles(_ manifest: Manifest) throws {
     var total: UInt64 = 0
     var portablePaths = Set<String>()
     var previous: String?
@@ -349,6 +366,9 @@ extension LinnetPackContract {
     guard total > 0, total <= UInt64(maximumPayloadBytes) else {
       throw Failure.invalidManifest("payload size")
     }
+  }
+
+  private static func validateRequirements(_ manifest: Manifest) throws {
     let requirements = manifest.requires.sorted { $0.kind.rawValue < $1.kind.rawValue }
     guard requirements == manifest.requires,
       Set(requirements.map(\.kind)).count == requirements.count,
@@ -364,14 +384,6 @@ extension LinnetPackContract {
       guard requirements.isEmpty else {
         throw Failure.invalidManifest("unsupported requirement")
       }
-    }
-    guard let required = SemanticVersion(manifest.minCore),
-      let actual = SemanticVersion(coreVersion)
-    else {
-      throw Failure.invalidManifest("core version")
-    }
-    guard actual >= required else {
-      throw Failure.incompatibleCore(required: manifest.minCore, actual: coreVersion)
     }
   }
 

@@ -720,7 +720,7 @@ struct LinnetBackupStoreTests {
     let currentBackup = try makeBackup(
       root: recoverable, transactionID: current, customValue: "Current"
     )
-    _ = try LinnetBackupStore.commitBackup(
+    _ = try LinnetBackupStore.commitBackup(.init(
       backupDirectory: currentBackup,
       backupID: UUID(),
       transactionID: current,
@@ -729,9 +729,9 @@ struct LinnetBackupStoreTests {
       appVersion: "1.0.0",
       dataVersion: "2026.08.06",
       transactionsRoot: recoverable,
-      keepingMostRecent: 100,
-      preserving: [current, verified[0]]
-    )
+      maximumCount: 100,
+      protectedTransactionIDs: [current, verified[0]]
+    ))
     let recovered = try LinnetBackupStore.listBackups(in: recoverable)
     guard recovered.count == LinnetBackupStore.maximumHistoryEntries,
       recovered.filter({ isVerified($0.state) }).count == 100,
@@ -759,7 +759,7 @@ struct LinnetBackupStoreTests {
       root: exhausted, transactionID: rejected, customValue: "Rejected"
     )
     expectFailure(.historyTooLarge) {
-      _ = try LinnetBackupStore.commitBackup(
+      _ = try LinnetBackupStore.commitBackup(.init(
         backupDirectory: rejectedBackup,
         backupID: UUID(),
         transactionID: rejected,
@@ -768,9 +768,9 @@ struct LinnetBackupStoreTests {
         appVersion: "1.0.0",
         dataVersion: "2026.08.06",
         transactionsRoot: exhausted,
-        keepingMostRecent: 100,
-        preserving: [rejected]
-      )
+        maximumCount: 100,
+        protectedTransactionIDs: [rejected]
+      ))
     }
     guard try Set(FileManager.default.contentsOfDirectory(atPath: exhausted.path)) == oldNames,
       try Data(contentsOf: sentinelFile) == Data("keep".utf8)
@@ -1043,7 +1043,7 @@ struct LinnetBackupStoreTests {
     keepingMostRecent: Int = 100,
     preserving: Set<UUID> = []
   ) throws -> LinnetBackupStore.BackupManifest {
-    try LinnetBackupStore.commitBackup(
+    try LinnetBackupStore.commitBackup(.init(
       backupDirectory: backup,
       backupID: UUID(),
       transactionID: transactionID,
@@ -1052,9 +1052,9 @@ struct LinnetBackupStoreTests {
       appVersion: "1.0.0",
       dataVersion: "2026.08.06",
       transactionsRoot: backup.deletingLastPathComponent().deletingLastPathComponent(),
-      keepingMostRecent: keepingMostRecent,
-      preserving: preserving.union([transactionID])
-    )
+      maximumCount: keepingMostRecent,
+      protectedTransactionIDs: preserving.union([transactionID])
+    ))
   }
 
   private static func makeDirectory(_ url: URL) throws {

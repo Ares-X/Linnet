@@ -164,6 +164,22 @@ enum LinnetBackupStore {
     }
   }
 
+  /// The complete immutable publication request for one backup transaction.
+  /// Keeping these fields together prevents callers from assembling parallel
+  /// retention, identity and version arguments through different paths.
+  struct CommitRequest: Sendable {
+    let backupDirectory: URL
+    let backupID: UUID
+    let transactionID: UUID
+    let operation: BackupOperation
+    let createdAt: Date
+    let appVersion: String
+    let dataVersion: String
+    let transactionsRoot: URL
+    let maximumCount: Int
+    let protectedTransactionIDs: Set<UUID>
+  }
+
   static func encodePortable(
     personalData: LinnetPersonalData,
     learning: [String: String],
@@ -283,18 +299,17 @@ enum LinnetBackupStore {
 
 extension LinnetBackupStore {
   @discardableResult
-  static func commitBackup(
-    backupDirectory: URL,
-    backupID: UUID,
-    transactionID: UUID,
-    operation: BackupOperation,
-    createdAt: Date,
-    appVersion: String,
-    dataVersion: String,
-    transactionsRoot: URL,
-    keepingMostRecent maximumCount: Int,
-    preserving protectedTransactionIDs: Set<UUID>
-  ) throws -> BackupManifest {
+  static func commitBackup(_ request: CommitRequest) throws -> BackupManifest {
+    let backupDirectory = request.backupDirectory
+    let backupID = request.backupID
+    let transactionID = request.transactionID
+    let operation = request.operation
+    let createdAt = request.createdAt
+    let appVersion = request.appVersion
+    let dataVersion = request.dataVersion
+    let transactionsRoot = request.transactionsRoot
+    let maximumCount = request.maximumCount
+    let protectedTransactionIDs = request.protectedTransactionIDs
     try requireDirectory(transactionsRoot)
     let root = transactionsRoot.standardizedFileURL
     let transaction = backupDirectory.deletingLastPathComponent().standardizedFileURL
@@ -586,14 +601,13 @@ extension LinnetBackupStore {
     let canonicalComplete = canonicalURLs.allSatisfy {
       FileManager.default.fileExists(atPath: $0.path)
     }
-    for source in canonicalURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-      if FileManager.default.fileExists(atPath: source.path) {
-        _ = try copyBoundedRegularFile(
-          source,
-          to: backup.appending(path: source.lastPathComponent),
-          limit: stableArtifactLimit(source.lastPathComponent)
-        )
-      }
+    for source in canonicalURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+    where FileManager.default.fileExists(atPath: source.path) {
+      _ = try copyBoundedRegularFile(
+        source,
+        to: backup.appending(path: source.lastPathComponent),
+        limit: stableArtifactLimit(source.lastPathComponent)
+      )
     }
     if !canonicalComplete {
       try LinnetPersonalDataStore.writeBackupNormalization(
@@ -908,40 +922,11 @@ extension LinnetBackupStore {
     guard categories.count == archive.categories.count else {
       throw Failure.invalidCategory("duplicate category")
     }
-    var payloadCategories = Set<Category>()
-    for artifact in archive.personal {
-      guard artifact.category.learningSchema == nil,
-        payloadCategories.insert(artifact.category).inserted
-      else {
-        throw Failure.invalidCategory(artifact.category.rawValue)
-      }
-      try validateRows(artifact.rows, category: artifact.category)
-      guard artifact.rowCount == artifact.rows.count else {
-        throw Failure.invalidRowCount(artifact.category.rawValue)
-      }
-      guard artifact.sha256 == sha256(try encoder().encode(artifact.rows)) else {
-        throw Failure.invalidHash(artifact.category.rawValue)
-      }
-    }
-    for artifact in archive.learning {
-      guard artifact.category.learningSchema == artifact.schema,
-        payloadCategories.insert(artifact.category).inserted
-      else {
-        throw Failure.invalidCategory(artifact.schema)
-      }
-      let data = Data(artifact.contents.utf8)
-      guard data.count <= maximumLearningBytes else {
-        throw Failure.artifactTooLarge(artifact.schema)
-      }
-      let rowCount = try validateLearningContents(artifact.contents, name: artifact.schema)
-      guard artifact.rowCount == rowCount else {
-        throw Failure.invalidRowCount(artifact.schema)
-      }
-      guard artifact.sha256 == sha256(data) else {
-        throw Failure.invalidHash(artifact.schema)
-      }
-    }
-    guard payloadCategories == categories else {
+    let personalCategories = try validatePortablePersonal(archive.personal)
+    let learningCategories = try validatePortableLearning(archive.learning)
+    guard personalCategories.isDisjoint(with: learningCategories),
+      personalCategories.union(learningCategories) == categories
+    else {
       throw Failure.invalidCategory("payload does not match selected categories")
     }
 
@@ -967,6 +952,48 @@ extension LinnetBackupStore {
     } catch {
       throw Failure.invalidDocument("personal data")
     }
+  }
+
+  private static func validatePortablePersonal(
+    _ artifacts: [PortablePersonalArtifact]
+  ) throws -> Set<Category> {
+    var categories = Set<Category>()
+    for artifact in artifacts {
+      guard artifact.category.learningSchema == nil,
+        categories.insert(artifact.category).inserted
+      else { throw Failure.invalidCategory(artifact.category.rawValue) }
+      try validateRows(artifact.rows, category: artifact.category)
+      guard artifact.rowCount == artifact.rows.count else {
+        throw Failure.invalidRowCount(artifact.category.rawValue)
+      }
+      guard artifact.sha256 == sha256(try encoder().encode(artifact.rows)) else {
+        throw Failure.invalidHash(artifact.category.rawValue)
+      }
+    }
+    return categories
+  }
+
+  private static func validatePortableLearning(
+    _ artifacts: [PortableLearningArtifact]
+  ) throws -> Set<Category> {
+    var categories = Set<Category>()
+    for artifact in artifacts {
+      guard artifact.category.learningSchema == artifact.schema,
+        categories.insert(artifact.category).inserted
+      else { throw Failure.invalidCategory(artifact.schema) }
+      let data = Data(artifact.contents.utf8)
+      guard data.count <= maximumLearningBytes else {
+        throw Failure.artifactTooLarge(artifact.schema)
+      }
+      let rowCount = try validateLearningContents(artifact.contents, name: artifact.schema)
+      guard artifact.rowCount == rowCount else {
+        throw Failure.invalidRowCount(artifact.schema)
+      }
+      guard artifact.sha256 == sha256(data) else {
+        throw Failure.invalidHash(artifact.schema)
+      }
+    }
+    return categories
   }
 
   fileprivate static func validateRows(_ rows: [PortableRow], category: Category) throws {

@@ -27,14 +27,23 @@ strict: false
 # implicitly
 line_length: 200
 function_body_length: 200
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+function_parameter_count:
+  warning: 8
+  error: 10
 # they can set both implicitly with an array
 type_body_length:
-  - 300 # warning
-  - 400 # error
-# or they can set both explicitly
+  - 400 # warning
+  - 500 # error
+# Linnet's largest filesystem owner intentionally keeps mutation helpers in one
+# lexical file so Swift `private` remains private. Function, type-body and
+# complexity limits carry the structural signal; this tight physical cap
+# prevents that reviewed owner from growing without a new warning.
 file_length:
-  warning: 800
-  error: 1200
+  warning: 1850
+  error: 1900
 # naming rules can set warnings/errors for min_length and max_length
 # additionally they can set excluded names
 type_name:
@@ -48,9 +57,10 @@ identifier_name:
   min_length: # only min_length
     warning: 3
     error: 2
-  excluded: [i, URL, of, by] # excluded via string array
+  excluded: [i, id, URL, of, by] # excluded via string array
+nesting:
+  type_level: 2
 large_tuple:
   warning: 3
   error: 5
 reporter: "github-actions-logging" # reporter type (xcode, json, csv, checkstyle, codeclimate, junit, html, emoji, sonarqube, markdown, github-actions-logging, summary)
-

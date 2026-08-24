@@ -141,14 +141,12 @@ actor SettingsDataCoordinator {
   }
 
   struct Outcome: Sendable {
-    let transactionID: UUID
     let backupDirectory: URL?
     let personalSnapshot: LinnetPersonalDataStore.Snapshot
     let personalEffect: PersonalEffect
     let documentEffect: DocumentEffect
     let importReport: HallelujahSubstitutionImporter.Report?
     let legacyImportedCount: Int
-    let portableURL: URL?
     let diagnostics: Diagnostics?
   }
 
@@ -220,6 +218,26 @@ actor SettingsDataCoordinator {
     case appearanceOnly
     case configurationOnly
     case full
+  }
+
+  /// Complete inputs for the already-paused candidate-materialization phase.
+  private struct CandidateStagingRequest {
+    let operation: PreparedOperation
+    let stableBackup: URL
+    let currentPersonal: LinnetPersonalDataStore.Snapshot
+    let currentLearningFiles: [RimeUserDataBridge.LearningFile]
+    let inputs: URL
+    let candidate: URL
+    let environment: Environment
+    let deadline: Date
+  }
+
+  private struct CandidateMaterialization {
+    let imports: [RimeUserDataBridge.LearningImport]
+    let report: HallelujahSubstitutionImporter.Report?
+    let legacyImportedCount: Int
+    let personal: LinnetPersonalData?
+    let document: LinnetSettingsDocument?
   }
 
   private let bundle: Bundle
@@ -368,10 +386,9 @@ extension SettingsDataCoordinator {
           progress: phaseProgress
         )
       case .apply(
-        let data, let document, let basePersonalRevision,
+        _, let document, let basePersonalRevision,
         let baseDocumentRevision, .appearanceOnly):
         outcome = try await applyAppearance(
-          data: data,
           document: document,
           basePersonalRevision: basePersonalRevision,
           baseDocumentRevision: baseDocumentRevision,
@@ -380,10 +397,9 @@ extension SettingsDataCoordinator {
           progress: phaseProgress
         )
       case .apply(
-        let data, let document, let basePersonalRevision,
+        _, let document, let basePersonalRevision,
         let baseDocumentRevision, .configurationOnly):
         outcome = try await applyConfiguration(
-          data: data,
           document: document,
           basePersonalRevision: basePersonalRevision,
           baseDocumentRevision: baseDocumentRevision,
@@ -546,33 +562,18 @@ extension SettingsDataCoordinator {
     switch operation {
     case .publishAppearance(
       let appearance, let personalRevision, let documentRevision):
-      guard !personalRevision.isEmpty, !documentRevision.isEmpty else {
-        throw Failure.invalidOperation("empty revision")
-      }
-      let live = try liveUserDirectory()
-      let snapshot = try LinnetPersonalDataStore.snapshot(from: live)
-      var document = try liveDocument()
-      document.appearance = appearance.livePanelProjection(over: document.appearance)
-      return .apply(
-        snapshot.data,
-        document: document.normalized(),
-        basePersonalRevision: personalRevision,
-        baseDocumentRevision: documentRevision,
-        scope: .appearanceOnly
+      return try prepareAppearance(
+        appearance,
+        personalRevision: personalRevision,
+        documentRevision: documentRevision
       )
     case .applyConfiguration(
       let data, let document, let personalRevision, let documentRevision):
-      guard !personalRevision.isEmpty, !documentRevision.isEmpty else {
-        throw Failure.invalidOperation("empty revision")
-      }
-      let normalizedData = try LinnetPersonalDataStore.normalized(data)
-      let normalizedDocument = document.normalized()
-      return .apply(
-        normalizedData,
-        document: normalizedDocument,
-        basePersonalRevision: personalRevision,
-        baseDocumentRevision: documentRevision,
-        scope: try applyScope(data: normalizedData, document: normalizedDocument)
+      return try prepareConfiguration(
+        data,
+        document: document,
+        personalRevision: personalRevision,
+        documentRevision: documentRevision
       )
     case .importLegacy(let candidate):
       if let legacy = candidate.legacyUserDirectory {
@@ -583,12 +584,7 @@ extension SettingsDataCoordinator {
         legacyUserDirectory: candidate.legacyUserDirectory
       )
     case .exportPortable(let categories, let destination):
-      guard !categories.isEmpty else { throw Failure.invalidOperation("no export category") }
-      guard destination.pathExtension == LinnetBackupStore.portableExtension else {
-        throw Failure.invalidOperation("portable extension")
-      }
-      try requireWritableDestination(destination)
-      return .export(categories, destination: destination)
+      return try preparePortableExport(categories, destination: destination)
     case .importPortable(let candidate, let revision):
       guard !revision.isEmpty else { throw Failure.invalidOperation("empty revision") }
       return .portable(candidate.archive, baseRevision: revision)
@@ -596,19 +592,79 @@ extension SettingsDataCoordinator {
       let manifest = try LinnetBackupStore.verifyBackup(at: backup)
       return .restore(backup, manifest)
     case .removeBackupRecord(let record):
-      guard record.transactionID != nil else {
-        throw Failure.invalidOperation("backup transaction identity")
-      }
-      if case .verified = record.state {
-        throw Failure.invalidOperation("verified backup removal")
-      }
-      return .removeBackup(record)
+      return try prepareBackupRemoval(record)
     case .clearLearning(let domains):
       guard !domains.isEmpty else { throw Failure.invalidOperation("no learning domain") }
       return .clear(domains)
     case .diagnose:
       return .diagnose
     }
+  }
+
+  private func prepareAppearance(
+    _ appearance: LinnetSettingsDocument.Appearance,
+    personalRevision: String,
+    documentRevision: String
+  ) throws -> PreparedOperation {
+    try requireSubmittedRevisions(personalRevision, documentRevision)
+    let snapshot = try LinnetPersonalDataStore.snapshot(from: liveUserDirectory())
+    var document = try liveDocument()
+    document.appearance = appearance.livePanelProjection(over: document.appearance)
+    return .apply(
+      snapshot.data,
+      document: document.normalized(),
+      basePersonalRevision: personalRevision,
+      baseDocumentRevision: documentRevision,
+      scope: .appearanceOnly
+    )
+  }
+
+  private func prepareConfiguration(
+    _ data: LinnetPersonalData,
+    document: LinnetSettingsDocument,
+    personalRevision: String,
+    documentRevision: String
+  ) throws -> PreparedOperation {
+    try requireSubmittedRevisions(personalRevision, documentRevision)
+    let normalizedData = try LinnetPersonalDataStore.normalized(data)
+    let normalizedDocument = document.normalized()
+    return .apply(
+      normalizedData,
+      document: normalizedDocument,
+      basePersonalRevision: personalRevision,
+      baseDocumentRevision: documentRevision,
+      scope: try applyScope(data: normalizedData, document: normalizedDocument)
+    )
+  }
+
+  private func requireSubmittedRevisions(_ personal: String, _ document: String) throws {
+    guard !personal.isEmpty, !document.isEmpty else {
+      throw Failure.invalidOperation("empty revision")
+    }
+  }
+
+  private func preparePortableExport(
+    _ categories: Set<LinnetBackupStore.Category>,
+    destination: URL
+  ) throws -> PreparedOperation {
+    guard !categories.isEmpty else { throw Failure.invalidOperation("no export category") }
+    guard destination.pathExtension == LinnetBackupStore.portableExtension else {
+      throw Failure.invalidOperation("portable extension")
+    }
+    try requireWritableDestination(destination)
+    return .export(categories, destination: destination)
+  }
+
+  private func prepareBackupRemoval(
+    _ record: LinnetBackupStore.BackupRecord
+  ) throws -> PreparedOperation {
+    guard record.transactionID != nil else {
+      throw Failure.invalidOperation("backup transaction identity")
+    }
+    if case .verified = record.state {
+      throw Failure.invalidOperation("verified backup removal")
+    }
+    return .removeBackup(record)
   }
 
   private func sourceExists(_ source: URL) throws -> Bool {
@@ -698,14 +754,12 @@ extension SettingsDataCoordinator {
       )
       try document.write(to: destination, options: .atomic)
       return Outcome(
-        transactionID: transactionID,
         backupDirectory: nil,
         personalSnapshot: personal,
         personalEffect: personalEffect,
         documentEffect: .observed,
         importReport: nil,
         legacyImportedCount: 0,
-        portableURL: destination,
         diagnostics: nil
       )
     } catch {
@@ -773,21 +827,11 @@ extension SettingsDataCoordinator {
       try ensureDirectory(environment.backupsRoot)
       try requireSameVolume(environment.live, environment.transactionsRoot)
       let observedPersonal = try LinnetPersonalDataStore.snapshot(from: environment.live)
-      let observedDocument: LinnetSettingsDocumentStore.Snapshot?
-      switch operation {
-      case .apply(
-        _, _, let basePersonalRevision, let baseDocumentRevision, _):
-        let documentSnapshot = try LinnetSettingsDocumentStore.snapshot(
-          from: environment.live)
-        try requireRevision(basePersonalRevision, current: observedPersonal.revision)
-        try requireRevision(baseDocumentRevision, current: documentSnapshot.revision)
-        observedDocument = documentSnapshot
-      case .portable(_, let baseRevision):
-        try requireRevision(baseRevision, current: observedPersonal.revision)
-        observedDocument = nil
-      default:
-        observedDocument = nil
-      }
+      let observedDocument = try verifySubmittedRevisions(
+        for: operation,
+        observedPersonal: observedPersonal,
+        live: environment.live
+      )
 
       let backup = backupTransaction.appending(path: "backup", directoryHint: .isDirectory)
       let stableBackup = backup.appending(path: "stable", directoryHint: .isDirectory)
@@ -822,11 +866,9 @@ extension SettingsDataCoordinator {
         shared: environment.shared,
         product: environment.product
       )
-      var protectedTransactions: Set<UUID> = [transactionID]
-      if case .restore(_, let sourceManifest) = operation {
-        protectedTransactions.insert(sourceManifest.transactionID)
-      }
-      _ = try LinnetBackupStore.commitBackup(
+      let protectedTransactions = protectedBackupTransactions(
+        for: operation, current: transactionID)
+      _ = try LinnetBackupStore.commitBackup(.init(
         backupDirectory: backup,
         backupID: UUID(),
         transactionID: transactionID,
@@ -835,99 +877,26 @@ extension SettingsDataCoordinator {
         appVersion: environment.appVersion,
         dataVersion: environment.dataVersion,
         transactionsRoot: environment.backupsRoot,
-        keepingMostRecent: environment.maximumVerifiedBackups,
-        preserving: protectedTransactions
-      )
+        maximumCount: environment.maximumVerifiedBackups,
+        protectedTransactionIDs: protectedTransactions
+      ))
       backupCommitted = true
       try Task.checkCancellation()
       progress(.staging)
+      let staging = try materializeCandidate(.init(
+        operation: operation,
+        stableBackup: stableBackup,
+        currentPersonal: currentPersonal,
+        currentLearningFiles: currentLearningFiles,
+        inputs: inputs,
+        candidate: candidate,
+        environment: environment,
+        deadline: deadline
+      ))
 
-      var imports = currentLearningFiles.map {
-        RimeUserDataBridge.LearningImport(schema: $0.schema, file: $0.file)
-      }
-      var report: HallelujahSubstitutionImporter.Report?
-      var legacyImportedCount = 0
-      var materializedPersonal: LinnetPersonalData?
-      var materializedDocument: LinnetSettingsDocument?
-
-      switch operation {
-      case .apply(let data, let document, _, _, _):
-        try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
-        materializedPersonal = data
-        materializedDocument = document
-
-      case .legacy(let hallelujah, let legacyDirectory):
-        try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
-        if let legacyDirectory {
-          let legacyInputs = inputs.appending(path: "legacy-rime", directoryHint: .isDirectory)
-          try ensureDirectory(legacyInputs)
-          let legacy = try bridge.snapshotLegacy(
-            from: legacyDirectory,
-            to: legacyInputs,
-            shared: environment.shared,
-            product: environment.product
-          )
-          legacyImportedCount = legacy.importedRows
-          imports =
-            legacy.files.map {
-              .init(schema: $0.schema, file: $0.file)
-            } + imports
-        }
-        if let hallelujah {
-          report = try HallelujahSubstitutionImporter.merge(
-            hallelujah,
-            destinationTable: candidate.appending(
-              path: LinnetPersonalDataStore.expansionsFile
-            ),
-            timeout: try remainingTransactionTime(until: deadline)
-          )
-        }
-
-      case .portable(let archive, _):
-        try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
-        let replacement = try LinnetBackupStore.replacement(
-          currentPersonalData: currentPersonal.data,
-          currentLearning: try learningContents(currentLearningFiles),
-          archive: archive
-        )
-        materializedPersonal = replacement.personalData
-        imports = try stagedLearningImports(
-          replacement.learning,
-          at: inputs.appending(path: "portable", directoryHint: .isDirectory)
-        )
-
-      case .restore(let sourceBackup, let preflightManifest):
-        let verified = try LinnetBackupStore.verifyBackup(at: sourceBackup)
-        guard verified == preflightManifest else {
-          throw Failure.invalidOperation("backup changed during restore")
-        }
-        try LinnetBackupStore.copyStable(
-          from: sourceBackup.appending(path: "stable", directoryHint: .isDirectory),
-          to: candidate
-        )
-        imports = try learningImports(
-          from: sourceBackup.appending(
-            path: "user-dictionaries", directoryHint: .isDirectory),
-          manifest: verified
-        )
-
-      case .removeBackup:
-        throw Failure.invalidOperation("backup removal mutation")
-
-      case .clear(let domains):
-        try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
-        let cleared = Set(domains.map(\.schema))
-        imports.removeAll { cleared.contains($0.schema) }
-
-      case .export:
-        throw Failure.invalidOperation("export mutation")
-      case .diagnose:
-        throw Failure.invalidOperation("diagnose mutation")
-      }
-
-      let runtimeDocument = try materializedDocument
+      let runtimeDocument = try staging.document
         ?? LinnetSettingsDocumentStore.load(from: candidate)
-      let runtimePersonal = try materializedPersonal
+      let runtimePersonal = try staging.personal
         ?? LinnetPersonalDataStore.load(from: candidate)
       try LinnetSettingsDocumentStore.write(runtimeDocument, to: candidate)
       try LinnetPersonalDataStore.writePersonalFiles(runtimePersonal, to: candidate)
@@ -935,23 +904,15 @@ extension SettingsDataCoordinator {
       try LinnetSettingsProjectionRenderer.reconcile(document: runtimeDocument, to: candidate)
       let finalPersonal = try LinnetPersonalDataStore.snapshot(from: candidate)
       let finalDocument = try LinnetSettingsDocumentStore.snapshot(from: candidate)
-      let documentEffect: DocumentEffect
-      switch operation {
-      case .apply:
-        documentEffect = .submittedDraft(finalDocument)
-      case .restore:
-        documentEffect = .externalReplacement(finalDocument)
-      default:
-        documentEffect = .observed
-      }
+      let documentEffect = documentEffect(for: operation, finalDocument: finalDocument)
       try Task.checkCancellation()
       progress(.deploying)
       try bridge.deploy(
         candidate: candidate,
         shared: environment.shared,
         product: environment.product,
-        imports: imports,
-        substitutionProbe: report?.smokeProbe
+        imports: staging.imports,
+        substitutionProbe: staging.report?.smokeProbe
       )
       try Task.checkCancellation()
       progress(.activating)
@@ -980,14 +941,12 @@ extension SettingsDataCoordinator {
       paused = false
       try? fileManager.removeItem(at: transaction)
       return Outcome(
-        transactionID: transactionID,
         backupDirectory: backup,
         personalSnapshot: finalPersonal,
         personalEffect: personalEffect,
         documentEffect: documentEffect,
-        importReport: report,
-        legacyImportedCount: legacyImportedCount,
-        portableURL: nil,
+        importReport: staging.report,
+        legacyImportedCount: staging.legacyImportedCount,
         diagnostics: nil
       )
     } catch {
@@ -1027,6 +986,139 @@ extension SettingsDataCoordinator {
       }
       if let backupCleanupError { throw backupCleanupError }
       throw operationError
+    }
+  }
+
+  /// Validates the revision contract that belongs to each prepared mutation.
+  private func verifySubmittedRevisions(
+    for operation: PreparedOperation,
+    observedPersonal: LinnetPersonalDataStore.Snapshot,
+    live: URL
+  ) throws -> LinnetSettingsDocumentStore.Snapshot? {
+    switch operation {
+    case .apply(_, _, let personalRevision, let documentRevision, _):
+      let observedDocument = try LinnetSettingsDocumentStore.snapshot(from: live)
+      try requireRevision(personalRevision, current: observedPersonal.revision)
+      try requireRevision(documentRevision, current: observedDocument.revision)
+      return observedDocument
+    case .portable(_, let personalRevision):
+      try requireRevision(personalRevision, current: observedPersonal.revision)
+      return nil
+    default:
+      return nil
+    }
+  }
+
+  private func protectedBackupTransactions(
+    for operation: PreparedOperation,
+    current transactionID: UUID
+  ) -> Set<UUID> {
+    guard case .restore(_, let sourceManifest) = operation else { return [transactionID] }
+    return [transactionID, sourceManifest.transactionID]
+  }
+
+  /// Materializes exactly one prepared operation into the already-isolated
+  /// candidate. It neither publishes the backup nor activates the candidate.
+  private func materializeCandidate(
+    _ request: CandidateStagingRequest
+  ) throws -> CandidateMaterialization {
+    var imports = request.currentLearningFiles.map {
+      RimeUserDataBridge.LearningImport(schema: $0.schema, file: $0.file)
+    }
+    var report: HallelujahSubstitutionImporter.Report?
+    var legacyImportedCount = 0
+    var personal: LinnetPersonalData?
+    var document: LinnetSettingsDocument?
+
+    switch request.operation {
+    case .apply(let data, let submittedDocument, _, _, _):
+      try LinnetBackupStore.copyStable(from: request.stableBackup, to: request.candidate)
+      personal = data
+      document = submittedDocument
+
+    case .legacy(let hallelujah, let legacyDirectory):
+      try LinnetBackupStore.copyStable(from: request.stableBackup, to: request.candidate)
+      if let legacyDirectory {
+        let legacyInputs = request.inputs.appending(
+          path: "legacy-rime", directoryHint: .isDirectory)
+        try ensureDirectory(legacyInputs)
+        let legacy = try bridge.snapshotLegacy(
+          from: legacyDirectory,
+          to: legacyInputs,
+          shared: request.environment.shared,
+          product: request.environment.product
+        )
+        legacyImportedCount = legacy.importedRows
+        imports = legacy.files.map {
+          .init(schema: $0.schema, file: $0.file)
+        } + imports
+      }
+      if let hallelujah {
+        report = try HallelujahSubstitutionImporter.merge(
+          hallelujah,
+          destinationTable: request.candidate.appending(
+            path: LinnetPersonalDataStore.expansionsFile),
+          timeout: try remainingTransactionTime(until: request.deadline)
+        )
+      }
+
+    case .portable(let archive, _):
+      try LinnetBackupStore.copyStable(from: request.stableBackup, to: request.candidate)
+      let replacement = try LinnetBackupStore.replacement(
+        currentPersonalData: request.currentPersonal.data,
+        currentLearning: try learningContents(request.currentLearningFiles),
+        archive: archive
+      )
+      personal = replacement.personalData
+      imports = try stagedLearningImports(
+        replacement.learning,
+        at: request.inputs.appending(path: "portable", directoryHint: .isDirectory)
+      )
+
+    case .restore(let sourceBackup, let preflightManifest):
+      let verified = try LinnetBackupStore.verifyBackup(at: sourceBackup)
+      guard verified == preflightManifest else {
+        throw Failure.invalidOperation("backup changed during restore")
+      }
+      try LinnetBackupStore.copyStable(
+        from: sourceBackup.appending(path: "stable", directoryHint: .isDirectory),
+        to: request.candidate
+      )
+      imports = try learningImports(
+        from: sourceBackup.appending(
+          path: "user-dictionaries", directoryHint: .isDirectory),
+        manifest: verified
+      )
+
+    case .clear(let domains):
+      try LinnetBackupStore.copyStable(from: request.stableBackup, to: request.candidate)
+      let cleared = Set(domains.map(\.schema))
+      imports.removeAll { cleared.contains($0.schema) }
+
+    case .removeBackup:
+      throw Failure.invalidOperation("backup removal mutation")
+    case .export:
+      throw Failure.invalidOperation("export mutation")
+    case .diagnose:
+      throw Failure.invalidOperation("diagnose mutation")
+    }
+    return .init(
+      imports: imports,
+      report: report,
+      legacyImportedCount: legacyImportedCount,
+      personal: personal,
+      document: document
+    )
+  }
+
+  private func documentEffect(
+    for operation: PreparedOperation,
+    finalDocument: LinnetSettingsDocumentStore.Snapshot
+  ) -> DocumentEffect {
+    switch operation {
+    case .apply: .submittedDraft(finalDocument)
+    case .restore: .externalReplacement(finalDocument)
+    default: .observed
     }
   }
 
@@ -1083,14 +1175,12 @@ extension SettingsDataCoordinator {
       corruptBackupCount: corrupt
     )
     return Outcome(
-      transactionID: transactionID,
       backupDirectory: nil,
       personalSnapshot: personal,
       personalEffect: personalEffect,
       documentEffect: .observed,
       importReport: nil,
       legacyImportedCount: 0,
-      portableURL: nil,
       diagnostics: diagnostics
     )
   }
@@ -1126,14 +1216,12 @@ extension SettingsDataCoordinator {
     let refreshed = try? await diagnose(
       environment: environment, personalEffect: personalEffect)
     return Outcome(
-      transactionID: transactionID,
       backupDirectory: nil,
       personalSnapshot: refreshed?.personalSnapshot ?? personal,
       personalEffect: personalEffect,
       documentEffect: .observed,
       importReport: nil,
       legacyImportedCount: 0,
-      portableURL: nil,
       diagnostics: refreshed?.diagnostics
     )
   }
@@ -1184,7 +1272,6 @@ extension SettingsDataCoordinator {
   /// Document-only apply stages one canonical document. Host owns the atomic
   /// live exchange, projection reconciliation, deployment, and rollback.
   private func applyConfiguration(
-    data: LinnetPersonalData,
     document: LinnetSettingsDocument,
     basePersonalRevision: String,
     baseDocumentRevision: String,
@@ -1240,14 +1327,12 @@ extension SettingsDataCoordinator {
 
     let committedDocument = try LinnetSettingsDocumentStore.snapshot(from: environment.live)
     return Outcome(
-      transactionID: transactionID,
       backupDirectory: nil,
       personalSnapshot: try LinnetPersonalDataStore.snapshot(from: environment.live),
       personalEffect: personalEffect,
       documentEffect: .submittedDraft(committedDocument),
       importReport: nil,
       legacyImportedCount: 0,
-      portableURL: nil,
       diagnostics: nil
     )
   }
@@ -1255,7 +1340,6 @@ extension SettingsDataCoordinator {
   /// Lightweight appearance apply uses the same atomic document publication
   /// boundary while Host limits deployment to squirrel.yaml.
   private func applyAppearance(
-    data: LinnetPersonalData,
     document: LinnetSettingsDocument,
     basePersonalRevision: String,
     baseDocumentRevision: String,
@@ -1313,14 +1397,12 @@ extension SettingsDataCoordinator {
       ? .submittedDraft(committedDocument)
       : .submittedAppearance(committedDocument)
     return Outcome(
-      transactionID: transactionID,
       backupDirectory: nil,
       personalSnapshot: try LinnetPersonalDataStore.snapshot(from: environment.live),
       personalEffect: personalEffect,
       documentEffect: documentEffect,
       importReport: nil,
       legacyImportedCount: 0,
-      portableURL: nil,
       diagnostics: nil
     )
   }

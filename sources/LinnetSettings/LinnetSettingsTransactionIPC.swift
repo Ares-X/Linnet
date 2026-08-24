@@ -64,13 +64,13 @@ enum LinnetSettingsTransactionIPC {
       try LinnetSettingsTransactionIPC.prepareEndpointParent(
         identity.endpointURL.deletingLastPathComponent())
       try LinnetSettingsTransactionIPC.removeStaleSocket(at: identity.endpointURL)
-      let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-      guard fd >= 0 else { throw Failure.unavailable }
+      let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+      guard fileDescriptor >= 0 else { throw Failure.unavailable }
       do {
         try withSocketAddress(identity.endpointURL.path) { address, length in
-          guard Darwin.bind(fd, address, length) == 0,
+          guard Darwin.bind(fileDescriptor, address, length) == 0,
             chmod(identity.endpointURL.path, S_IRUSR | S_IWUSR) == 0,
-            listen(fd, 8) == 0
+            listen(fileDescriptor, 8) == 0
           else { throw Failure.unavailable }
         }
         var info = stat()
@@ -78,17 +78,17 @@ enum LinnetSettingsTransactionIPC {
           (info.st_mode & S_IFMT) == S_IFSOCK,
           info.st_uid == geteuid()
         else { throw Failure.unavailable }
-        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        let source = DispatchSource.makeReadSource(fileDescriptor: fileDescriptor, queue: queue)
         source.setEventHandler { [weak self] in self?.acceptPendingConnections() }
-        source.setCancelHandler { Darwin.close(fd) }
+        source.setCancelHandler { Darwin.close(fileDescriptor) }
         lock.lock()
-        listener = fd
+        listener = fileDescriptor
         listenerIdentity = (info.st_dev, info.st_ino)
         self.source = source
         lock.unlock()
         source.resume()
       } catch {
-        Darwin.close(fd)
+        Darwin.close(fileDescriptor)
         try? FileManager.default.removeItem(at: identity.endpointURL)
         throw error
       }
@@ -117,18 +117,20 @@ enum LinnetSettingsTransactionIPC {
     deinit { stop() }
 
     private func acceptPendingConnections() {
-      let fd = accept(listener, nil, nil)
-      guard fd >= 0 else { return }
-      let channel = Channel(fd: fd) { [weak self] fd in self?.removeChannel(fd) }
+      let fileDescriptor = accept(listener, nil, nil)
+      guard fileDescriptor >= 0 else { return }
+      let channel = Channel(fileDescriptor: fileDescriptor) { [weak self] descriptor in
+        self?.removeChannel(descriptor)
+      }
       lock.lock()
-      channels[fd] = channel
+      channels[fileDescriptor] = channel
       lock.unlock()
       queue.async { [weak self, channel] in self?.receiveRequest(on: channel) }
     }
 
     private func receiveRequest(on channel: Channel) {
-      guard let pid = peerPID(channel.fd),
-        authenticate(fd: channel.fd, pid: pid, as: identity),
+      guard let pid = peerPID(channel.fileDescriptor),
+        authenticate(fileDescriptor: channel.fileDescriptor, pid: pid, as: identity),
         let payload = try? channel.readFrame(deadline: Date().addingTimeInterval(3)),
         let request = try? decode(LinnetSettingsContract.DataRequest.self, from: payload),
         LinnetSettingsContract.validDataRequest(request),
@@ -153,9 +155,9 @@ enum LinnetSettingsTransactionIPC {
       }
     }
 
-    private func removeChannel(_ fd: Int32) {
+    private func removeChannel(_ fileDescriptor: Int32) {
       lock.lock()
-      channels.removeValue(forKey: fd)
+      channels.removeValue(forKey: fileDescriptor)
       lock.unlock()
     }
   }
@@ -205,16 +207,21 @@ enum LinnetSettingsTransactionIPC {
       identity: Identity,
       progress: @Sendable (LinnetSettingsContract.RuntimeReply) -> Void
     ) throws -> LinnetSettingsContract.RuntimeReply {
-      let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-      guard fd >= 0 else { throw Failure.unavailable }
-      let channel = Channel(fd: fd)
+      let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+      guard fileDescriptor >= 0 else { throw Failure.unavailable }
+      let channel = Channel(fileDescriptor: fileDescriptor)
       defer { channel.close() }
       let deadline = Date().addingTimeInterval(timeout)
       try withSocketAddress(identity.endpointURL.path) { address, length in
         try connectUnixSocket(
-          fd: fd, address: address, length: length, deadline: deadline)
+          fileDescriptor: fileDescriptor,
+          address: address,
+          length: length,
+          deadline: deadline)
       }
-      guard let pid = peerPID(fd), authenticate(fd: fd, pid: pid, as: identity) else {
+      guard let pid = peerPID(fileDescriptor),
+        authenticate(fileDescriptor: fileDescriptor, pid: pid, as: identity)
+      else {
         throw Failure.unavailable
       }
       try channel.writeFrame(try encode(request), deadline: deadline)
@@ -243,13 +250,13 @@ extension LinnetSettingsTransactionIPC {
   }
 
   private final class Channel: @unchecked Sendable {
-    let fd: Int32
+    let fileDescriptor: Int32
     private let onClose: ((Int32) -> Void)?
     private let lock = NSLock()
     private var closed = false
 
-    init(fd: Int32, onClose: ((Int32) -> Void)? = nil) {
-      self.fd = fd
+    init(fileDescriptor: Int32, onClose: ((Int32) -> Void)? = nil) {
+      self.fileDescriptor = fileDescriptor
       self.onClose = onClose
     }
 
@@ -280,10 +287,10 @@ extension LinnetSettingsTransactionIPC {
         return
       }
       closed = true
-      Darwin.shutdown(fd, SHUT_RDWR)
-      Darwin.close(fd)
+      Darwin.shutdown(fileDescriptor, SHUT_RDWR)
+      Darwin.close(fileDescriptor)
       lock.unlock()
-      onClose?(fd)
+      onClose?(fileDescriptor)
     }
 
     private func read(count: Int, deadline: Date) throws -> Data {
@@ -292,14 +299,14 @@ extension LinnetSettingsTransactionIPC {
       while offset < count {
         let remaining = deadline.timeIntervalSinceNow
         guard remaining > 0 else { throw Failure.timedOut }
-        var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
         let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
         if result == 0 { continue }
         guard result > 0, descriptor.revents & Int16(POLLIN) != 0 else {
           throw Failure.unavailable
         }
         let readCount = data.withUnsafeMutableBytes { buffer in
-          Darwin.read(fd, buffer.baseAddress!.advanced(by: offset), count - offset)
+          Darwin.read(fileDescriptor, buffer.baseAddress!.advanced(by: offset), count - offset)
         }
         if readCount < 0, errno == EINTR { continue }
         guard readCount > 0 else { throw Failure.unavailable }
@@ -313,7 +320,7 @@ extension LinnetSettingsTransactionIPC {
       while offset < data.count {
         let remaining = deadline.timeIntervalSinceNow
         guard remaining > 0 else { throw Failure.timedOut }
-        var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
         let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
         if result == 0 { continue }
         guard result > 0, descriptor.revents & Int16(POLLOUT) != 0 else {
@@ -321,7 +328,7 @@ extension LinnetSettingsTransactionIPC {
         }
         let written = data.withUnsafeBytes { buffer in
           send(
-            fd, buffer.baseAddress!.advanced(by: offset), data.count - offset,
+            fileDescriptor, buffer.baseAddress!.advanced(by: offset), data.count - offset,
             MSG_DONTWAIT | MSG_NOSIGNAL)
         }
         if written < 0, errno == EINTR { continue }
@@ -365,10 +372,12 @@ extension LinnetSettingsTransactionIPC {
       peerExecutableURL: executable)
   }
 
-  private static func authenticate(fd: Int32, pid: pid_t, as identity: Identity) -> Bool {
+  private static func authenticate(
+    fileDescriptor: Int32, pid: pid_t, as identity: Identity
+  ) -> Bool {
     var uid: uid_t = 0
     var gid: gid_t = 0
-    guard getpeereid(fd, &uid, &gid) == 0, uid == geteuid(), pid != getpid() else {
+    guard getpeereid(fileDescriptor, &uid, &gid) == 0, uid == geteuid(), pid != getpid() else {
       return false
     }
     var path = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
@@ -378,37 +387,37 @@ extension LinnetSettingsTransactionIPC {
   }
 
   private static func connectUnixSocket(
-    fd: Int32,
+    fileDescriptor: Int32,
     address: UnsafePointer<sockaddr>,
     length: socklen_t,
     deadline: Date
   ) throws {
-    let flags = fcntl(fd, F_GETFL)
-    guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+    let flags = fcntl(fileDescriptor, F_GETFL)
+    guard flags >= 0, fcntl(fileDescriptor, F_SETFL, flags | O_NONBLOCK) == 0 else {
       throw Failure.unavailable
     }
-    defer { _ = fcntl(fd, F_SETFL, flags) }
-    if Darwin.connect(fd, address, length) == 0 { return }
+    defer { _ = fcntl(fileDescriptor, F_SETFL, flags) }
+    if Darwin.connect(fileDescriptor, address, length) == 0 { return }
     guard errno == EINPROGRESS else { throw Failure.unavailable }
     while true {
       let remaining = deadline.timeIntervalSinceNow
       guard remaining > 0 else { throw Failure.timedOut }
-      var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+      var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
       let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
       if result == 0 { continue }
       guard result > 0 else { throw Failure.unavailable }
       var error: Int32 = 0
       var size = socklen_t(MemoryLayout<Int32>.size)
-      guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0, error == 0
+      guard getsockopt(fileDescriptor, SOL_SOCKET, SO_ERROR, &error, &size) == 0, error == 0
       else { throw Failure.unavailable }
       return
     }
   }
 
-  private static func peerPID(_ fd: Int32) -> pid_t? {
+  private static func peerPID(_ fileDescriptor: Int32) -> pid_t? {
     var pid: pid_t = 0
     var size = socklen_t(MemoryLayout<pid_t>.size)
-    guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0, pid > 0
+    guard getsockopt(fileDescriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0, pid > 0
     else { return nil }
     return pid
   }

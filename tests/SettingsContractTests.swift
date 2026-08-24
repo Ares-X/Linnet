@@ -159,11 +159,8 @@ struct SettingsContractTests {
   ) {
     guard let userDirectory = LinnetSettingsContract.hostUserDirectory(startingAt: settings),
       let transactionsRoot = LinnetSettingsContract.dataTransactionsRoot(startingAt: settings),
-      let backupsRoot = LinnetSettingsContract.backupsRoot(startingAt: settings),
       transactionsRoot == userDirectory.deletingLastPathComponent().appending(
-        component: "Transactions", directoryHint: .isDirectory),
-      backupsRoot == userDirectory.deletingLastPathComponent().appending(
-        component: "Backups", directoryHint: .isDirectory)
+        component: "Transactions", directoryHint: .isDirectory)
     else {
       fail("data transaction roots are not derived from the host contract")
     }
@@ -224,7 +221,6 @@ struct SettingsContractTests {
         octagramAvailable: true,
         availableSchemaCount: 9,
         requiredSchemaCount: 9,
-        activeTransactionID: nil,
         activeSettingsRevision: settingsDigest))
     guard LinnetSettingsContract.validDataRequest(expectedPause),
       LinnetSettingsContract.validDataRequest(expectedActivate),

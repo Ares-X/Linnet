@@ -210,10 +210,6 @@ enum SettingsBackupHistoryState: Equatable, Sendable {
   init(rootAvailable: Bool) {
     self = rootAvailable ? .loading(previous: []) : .unavailable
   }
-  var isAuthoritativelyEmpty: Bool {
-    if case .loaded(let records) = self { return records.isEmpty }
-    return false
-  }
   mutating func beginLoading() {
     switch self {
     case .unavailable:
@@ -302,11 +298,6 @@ final class SettingsPersonalValidationExecutor {
     let token = CancellationToken()
     activeToken = token
     continuation.yield(Request(data: data, token: token, completion: completion))
-  }
-
-  func cancel() {
-    activeToken?.cancel()
-    activeToken = nil
   }
 
   private func startWorkerIfNeeded() {

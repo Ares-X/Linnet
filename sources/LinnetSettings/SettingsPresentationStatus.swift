@@ -157,6 +157,9 @@ enum SettingsPresentationStatus: Equatable {
     )
   }
 
+  // This is a flat exhaustive enum-to-copy table; its branches do not share
+  // mutable state or form a decision tree worth decomposing into fallbacks.
+  // swiftlint:disable:next cyclomatic_complexity
   func text(locale: Locale) -> String {
     let chinese = locale.usesSimplifiedChineseSettingsCopy
     let pair: (english: String, chinese: String)
@@ -415,6 +418,8 @@ private func failureText(_ failure: SettingsPresentationFailure) -> SettingsLoca
   }
 }
 
+// This flat state-to-copy table is the canonical pack-status vocabulary.
+// swiftlint:disable:next cyclomatic_complexity
 private func packText(
   pack: SettingsPresentationPack,
   state: SettingsPresentationPackState

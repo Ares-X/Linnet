@@ -6,6 +6,14 @@ import SQLite3
 /// Offline, one-shot migration from Hallelujah's substitution store into the
 /// Linnet `x;` stable table. The input process never links or calls this type.
 enum HallelujahSubstitutionImporter {
+  private struct ColumnDefinition {
+    let name: String
+    let type: String
+    let notNull: Int32
+    let primaryKey: Int32
+    let defaultIsNull: Bool
+  }
+
   static let maximumSourceDatabaseBytes = 64 * 1024 * 1024
   static let maximumSourceSidecarBytes = 64 * 1024 * 1024
   static let maximumSourceAggregateBytes = 128 * 1024 * 1024
@@ -124,8 +132,7 @@ enum HallelujahSubstitutionImporter {
     }
   }
 
-  private static let sqliteProgressCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = {
-    pointer in
+  private static let sqliteProgressCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { pointer in
     guard let pointer else { return 1 }
     return Unmanaged<OperationControl>.fromOpaque(pointer).takeUnretainedValue()
       .interruptSQLite()
@@ -313,25 +320,25 @@ extension HallelujahSubstitutionImporter {
         == SQLITE_OK, let schemaStatement
     else { try control.rethrowInterruption(or: .invalidSchema) }
     defer { sqlite3_finalize(schemaStatement) }
-    var columns: [(String, String, Int32, Int32, Bool)] = []
+    var columns: [ColumnDefinition] = []
     var result = sqlite3_step(schemaStatement)
     while result == SQLITE_ROW {
       guard let name = rawText(schemaStatement, column: 1),
         let type = rawText(schemaStatement, column: 2)
       else { try control.rethrowInterruption(or: .invalidSchema) }
-      columns.append(
-        (
-          name, type.uppercased(), sqlite3_column_int(schemaStatement, 3),
-          sqlite3_column_int(schemaStatement, 5),
-          sqlite3_column_type(schemaStatement, 4) == SQLITE_NULL
-        ))
+      columns.append(.init(
+        name: name,
+        type: type.uppercased(),
+        notNull: sqlite3_column_int(schemaStatement, 3),
+        primaryKey: sqlite3_column_int(schemaStatement, 5),
+        defaultIsNull: sqlite3_column_type(schemaStatement, 4) == SQLITE_NULL))
       result = sqlite3_step(schemaStatement)
     }
     guard result == SQLITE_DONE, columns.count == 2,
-      columns[0].0 == "key", columns[0].1 == "TEXT", columns[0].2 == 0,
-      columns[0].3 == 1, columns[0].4,
-      columns[1].0 == "value", columns[1].1 == "TEXT", columns[1].2 == 0,
-      columns[1].3 == 0, columns[1].4
+      columns[0].name == "key", columns[0].type == "TEXT", columns[0].notNull == 0,
+      columns[0].primaryKey == 1, columns[0].defaultIsNull,
+      columns[1].name == "value", columns[1].type == "TEXT", columns[1].notNull == 0,
+      columns[1].primaryKey == 0, columns[1].defaultIsNull
     else { try control.rethrowInterruption(or: .invalidSchema) }
   }
 
@@ -369,7 +376,8 @@ extension HallelujahSubstitutionImporter {
       default: return nil
       }
     }
-    return "x;" + String(decoding: normalized, as: UTF8.self)
+    guard let key = String(bytes: normalized, encoding: .utf8) else { return nil }
+    return "x;" + key
   }
 
   private static func validateValue(_ value: String, row: Int) throws {
@@ -445,32 +453,13 @@ extension HallelujahSubstitutionImporter {
       }
       let rawLine = String(lineSlice)
       let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
-      if line.isEmpty { continue }
-      if commentsEnabled && line == "# no comment" {
-        commentsEnabled = false
-        continue
-      }
-      if commentsEnabled && line.hasPrefix("#") {
-        let prefix = "#@\(fingerprintKey)\t"
-        if line.hasPrefix(prefix) {
-          guard fingerprint == nil else { throw Failure.invalidExistingTable(line: lineNumber) }
-          fingerprint = String(line.dropFirst(prefix.count))
-        }
-        continue
-      }
-      let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-      guard fields.count == 2 || fields.count == 3,
-        fields.allSatisfy({ $0.utf8.count <= maximumFieldBytes }),
-        !fields[0].isEmpty, fields[1].hasPrefix("x;"),
-        let trigger = normalizeTrigger(String(fields[1].dropFirst(2)))
-      else {
-        throw Failure.invalidExistingTable(line: lineNumber)
-      }
-      try validateValue(fields[0], row: lineNumber)
-      guard entries[trigger] == nil else { throw Failure.duplicateExistingTrigger(trigger) }
-      guard entries.count < maximumRows else { throw Failure.tooManyRows }
-      entries[trigger] = Entry(
-        trigger: trigger, value: fields[0], weight: fields.count == 3 ? fields[2] : nil)
+      try parseExistingLine(
+        line,
+        number: lineNumber,
+        entries: &entries,
+        fingerprint: &fingerprint,
+        commentsEnabled: &commentsEnabled
+      )
     }
     if let fingerprint,
       fingerprint.utf8.count != 64
@@ -480,6 +469,43 @@ extension HallelujahSubstitutionImporter {
       throw Failure.invalidExistingTable(line: 0)
     }
     return (entries.values.sorted { $0.trigger < $1.trigger }, fingerprint)
+  }
+
+  /// Owns the accepted Rime-table line grammar. The reader above owns only
+  /// bounded byte traversal and delegates every non-byte interpretation here.
+  private static func parseExistingLine(
+    _ line: String,
+    number: Int,
+    entries: inout [String: Entry],
+    fingerprint: inout String?,
+    commentsEnabled: inout Bool
+  ) throws {
+    if line.isEmpty { return }
+    if commentsEnabled, line == "# no comment" {
+      commentsEnabled = false
+      return
+    }
+    if commentsEnabled, line.hasPrefix("#") {
+      let prefix = "#@\(fingerprintKey)\t"
+      if line.hasPrefix(prefix) {
+        guard fingerprint == nil else { throw Failure.invalidExistingTable(line: number) }
+        fingerprint = String(line.dropFirst(prefix.count))
+      }
+      return
+    }
+    let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+    guard fields.count == 2 || fields.count == 3,
+      fields.allSatisfy({ $0.utf8.count <= maximumFieldBytes }),
+      !fields[0].isEmpty, fields[1].hasPrefix("x;"),
+      let trigger = normalizeTrigger(String(fields[1].dropFirst(2)))
+    else {
+      throw Failure.invalidExistingTable(line: number)
+    }
+    try validateValue(fields[0], row: number)
+    guard entries[trigger] == nil else { throw Failure.duplicateExistingTrigger(trigger) }
+    guard entries.count < maximumRows else { throw Failure.tooManyRows }
+    entries[trigger] = Entry(
+      trigger: trigger, value: fields[0], weight: fields.count == 3 ? fields[2] : nil)
   }
 
   private static func render(

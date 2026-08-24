@@ -1,5 +1,5 @@
 {
-  "catalog_sequence": 26,
+  "catalog_sequence": 27,
   "format": "io.github.ares-x.linnet.data-releases.v1",
   "packs": {
     "chinese": {
@@ -17,11 +17,11 @@
       "content_sha256": "3749dbafc7886e0d6f3ac82a6fc31178d00829435846188495b29b6a20b0f3b3"
     },
     "lts": {
-      "version": "c5fca7cf43af",
-      "sequence": 5,
+      "version": "01ffe37f2260",
+      "sequence": 6,
       "data_abi": 2,
       "min_core": "0.1.0",
-      "content_sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
+      "content_sha256": "01ffe37f22607bf8a5cd5d82a3349f6df97744369464aee4577585112d85469d"
     },
     "extended": {
       "version": "0.2.2",

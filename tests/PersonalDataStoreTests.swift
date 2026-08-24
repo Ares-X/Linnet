@@ -258,9 +258,9 @@ struct PersonalDataStoreTests {
         expansions: [.init(value: "Best regards,", trigger: "x;br"), .init(value: "", trigger: "x;")]
       )
       let blankValidation = LinnetPersonalDataStore.validate(validationDraft)
-      guard blankValidation.isValid,
+      guard case .valid(let validatedData) = blankValidation,
         blankValidation.firstIssue == nil,
-        blankValidation.normalized == (try LinnetPersonalDataStore.normalized(validationDraft))
+        validatedData == (try LinnetPersonalDataStore.normalized(validationDraft))
       else { fail("typed validation diverged from canonical normalization") }
       try testBoundedStreamingLoad(
         in: directory.appending(path: "bounded-stream", directoryHint: .isDirectory)
@@ -320,8 +320,7 @@ struct PersonalDataStoreTests {
     in data: LinnetPersonalData
   ) {
     let validation = LinnetPersonalDataStore.validate(data)
-    guard !validation.isValid, validation.normalized == nil,
-      validation.firstIssue == expected
+    guard !validation.isValid, validation.firstIssue == expected
     else { fail("typed validation did not return the expected first issue") }
     expectFailure(.invalidData(expected)) {
       _ = try LinnetPersonalDataStore.normalized(data)

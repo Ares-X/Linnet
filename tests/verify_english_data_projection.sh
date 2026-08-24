@@ -5,6 +5,15 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
+for retired_english_fixture in \
+  tests/linnet_pinyin_probe.cc \
+  tests/fixtures/linnet_zh_english_metadata_off.custom.yaml; do
+  [[ ! -e "${retired_english_fixture}" ]] || {
+    echo "verify_english_data_projection: retired fixture returned: ${retired_english_fixture}" >&2
+    exit 1
+  }
+done
+
 generator=build/linnet-english-data-generator
 cache=build/linnet-english-cache
 [[ -x "${generator}" && "$(lipo -archs "${generator}")" == arm64 ]] || {
@@ -17,6 +26,9 @@ actual="$(find "${cache}" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; |
   echo "verify_english_data_projection: cache inventory changed" >&2
   exit 1
 }
+
+# The reviewed pinyin snapshot owns ranking, embargo, and review-queue quality.
+ruby tests/verify_pinyin_english_quality.rb
 
 ruby -rjson -rdigest -e '
   root, cache = ARGV

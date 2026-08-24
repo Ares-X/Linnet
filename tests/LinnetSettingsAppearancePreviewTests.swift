@@ -347,7 +347,7 @@ struct LinnetSettingsAppearancePreviewTests {
 
   private static func testTranslucentSelectionContrast() {
     let catalog = canonicalCatalog()
-    let materialBaselines: [(Bool, [LinnetSettingsAppearancePreview.RGB])] = [
+    let materialBaselines: [(Bool, [LinnetSettingsAppearancePreview.RimeColor])] = [
       (false, [.init(0xFFFFFF), .init(0xF4F4F4), .init(0xECECEC)]),
       (true, [.init(0x1C1C1E), .init(0x242426), .init(0x2C2C2E)]),
     ]
@@ -541,14 +541,14 @@ struct LinnetSettingsAppearancePreviewTests {
   }
 
   private static func contrast(
-    _ lhs: LinnetSettingsAppearancePreview.RGB,
-    _ rhs: LinnetSettingsAppearancePreview.RGB
+    _ lhs: LinnetSettingsAppearancePreview.RimeColor,
+    _ rhs: LinnetSettingsAppearancePreview.RimeColor
   ) -> Double {
     let values = [relativeLuminance(lhs), relativeLuminance(rhs)].sorted()
     return (values[1] + 0.05) / (values[0] + 0.05)
   }
 
-  private static func relativeLuminance(_ color: LinnetSettingsAppearancePreview.RGB) -> Double {
+  private static func relativeLuminance(_ color: LinnetSettingsAppearancePreview.RimeColor) -> Double {
     func linear(_ byte: UInt8) -> Double {
       let value = Double(byte) / 255
       return value <= 0.03928
@@ -561,9 +561,9 @@ struct LinnetSettingsAppearancePreviewTests {
   }
 
   private static func compositedContrast(
-    foreground: LinnetSettingsAppearancePreview.RGB,
-    surface: LinnetSettingsAppearancePreview.RGB,
-    over baseline: LinnetSettingsAppearancePreview.RGB
+    foreground: LinnetSettingsAppearancePreview.RimeColor,
+    surface: LinnetSettingsAppearancePreview.RimeColor,
+    over baseline: LinnetSettingsAppearancePreview.RimeColor
   ) -> Double {
     func channel(_ foreground: UInt8, _ background: UInt8, alpha: UInt8) -> Double {
       let opacity = Double(alpha) / 255

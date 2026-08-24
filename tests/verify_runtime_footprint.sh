@@ -1020,10 +1020,14 @@ test "$(rg -c 'for: \.applicationSupportDirectory' sources/LinnetDataRegistry.sw
   fail "the Linnet Application Support root owner count changed"
 rg -Fq 'struct LinnetDataRegistry' sources/LinnetDataRegistry.swift ||
   fail "the language-data registry owner is missing"
-for root in UserData Build Downloads Transactions Backups Runtime/Active State/active.json; do
+for root in UserData Build Downloads Transactions Backups Runtime/Active; do
   rg -Fq "${root}" sources/LinnetDataRegistry.swift ||
     fail "the registry no longer owns ${root}"
 done
+if rg -Fq 'State/active.json' sources --glob '*.swift' \
+    tests --glob '*.swift'; then
+  fail "the package-only Active-state compatibility link escaped into a runtime owner or Swift fixture"
+fi
 test "$(rg -c 'return try LinnetDataRegistry' sources/Main.swift)" -eq 1 ||
   fail "the host must consume one canonical registry"
 test "$(rg -c 'runtimeSnapshot\(\)' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||

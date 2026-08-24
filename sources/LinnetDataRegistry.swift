@@ -18,11 +18,6 @@ struct LinnetDataRegistry: Sendable {
   // User-writable Registry JSON documents share the manifest cap.
   private static let ownedMetadataMaximumBytes = LinnetPackContract.maximumManifestBytes
 
-  enum GrammarProfile: String, Codable, Equatable, Sendable {
-    case compact
-    case lts
-  }
-
   enum Edition: String, Codable, Equatable, Hashable, Sendable {
     case standard
     case full
@@ -149,10 +144,6 @@ struct LinnetDataRegistry: Sendable {
       try values.encode(rollbackPacks, forKey: .rollbackPacks)
     }
 
-    var grammarProfile: GrammarProfile {
-      .lts
-    }
-
     var dataVersion: String {
       packs.map { "\($0.kind.rawValue)-\($0.version)" }.joined(separator: "_")
     }
@@ -245,6 +236,28 @@ struct LinnetDataRegistry: Sendable {
   private struct VerifiedInstalledManifest {
     let manifest: LinnetPackContract.Manifest
     let manifestData: Data
+  }
+
+  private struct ValidatedActivationSet {
+    let packs: [ActivePack]
+    let edition: Edition
+  }
+
+  private struct StorageCleanupDiscovery {
+    let pendingPackPaths: Set<String>
+    let language: [LanguageTransactionCleanup]
+    let personalScratch: [URL]
+  }
+
+  private struct ActiveProjectionExpectation {
+    let targets: [String: URL]
+    let entries: Set<String>
+    let directories: Set<String>
+  }
+
+  private struct ActiveProjectionInventory {
+    let entries: Set<String>
+    let directories: Set<String>
   }
 
   struct DataChannelReceipt: Codable, Equatable, Sendable {
@@ -347,10 +360,6 @@ struct LinnetDataRegistry: Sendable {
 
   var backupsDirectory: URL {
     rootDirectory.appending(path: "Backups", directoryHint: .isDirectory)
-  }
-
-  var activeStateURL: URL {
-    rootDirectory.appending(path: "State/active.json", directoryHint: .notDirectory)
   }
 
   var activeSharedDataDirectory: URL {
@@ -649,28 +658,9 @@ extension LinnetDataRegistry {
     target: [ActivePack]
   ) throws -> ActivationCandidate {
     let snapshot = try runtimeSnapshot(reconcilingStorage: false)
-    guard Set(target.map(\.kind)).count == target.count else { throw Failure.invalidActiveState }
-    let current = Dictionary(uniqueKeysWithValues: snapshot.state.packs.map { ($0.kind, $0) })
-    let requested = Dictionary(uniqueKeysWithValues: target.map { ($0.kind, $0) })
-    for pack in target {
-      if let previous = current[pack.kind] {
-        guard pack.sequence > previous.sequence
-          || (pack.sequence == previous.sequence && Self.sameImmutablePack(previous, pack))
-        else { throw Failure.invalidActiveState }
-      } else {
-        guard pack.kind == .extended else { throw Failure.invalidActiveState }
-      }
-    }
-    for previous in snapshot.state.packs where requested[previous.kind] == nil {
-      guard previous.kind == .extended else { throw Failure.invalidActiveState }
-    }
-    var packs = target
-    let order: [PackKind: Int] = [.chinese: 0, .english: 1, .lts: 2, .extended: 3]
-    packs.sort { order[$0.kind, default: 99] < order[$1.kind, default: 99] }
-    let edition: Edition = packs.contains(where: { $0.kind == .extended }) ? .full : .standard
-    guard packsAreCompatible(packs, edition: edition) else {
-      throw Failure.invalidActiveState
-    }
+    let activation = try validatedActivationSet(target, replacing: snapshot.state.packs)
+    let packs = activation.packs
+    let edition = activation.edition
 
     let transactionID = update.transactionID
     let transaction = transactionsDirectory.appending(
@@ -772,6 +762,37 @@ extension LinnetDataRegistry {
     }
   }
 
+  /// Validates the complete replacement set before any activation directory
+  /// is created. This is the only owner of pack transition and edition rules.
+  private func validatedActivationSet(
+    _ target: [ActivePack],
+    replacing active: [ActivePack]
+  ) throws -> ValidatedActivationSet {
+    guard Set(target.map(\.kind)).count == target.count else { throw Failure.invalidActiveState }
+    let current = Dictionary(uniqueKeysWithValues: active.map { ($0.kind, $0) })
+    let requested = Dictionary(uniqueKeysWithValues: target.map { ($0.kind, $0) })
+    for pack in target {
+      if let previous = current[pack.kind] {
+        guard pack.sequence > previous.sequence
+          || (pack.sequence == previous.sequence && Self.sameImmutablePack(previous, pack))
+        else { throw Failure.invalidActiveState }
+      } else {
+        guard pack.kind == .extended else { throw Failure.invalidActiveState }
+      }
+    }
+    for previous in active where requested[previous.kind] == nil {
+      guard previous.kind == .extended else { throw Failure.invalidActiveState }
+    }
+    var packs = target
+    let order: [PackKind: Int] = [.chinese: 0, .english: 1, .lts: 2, .extended: 3]
+    packs.sort { order[$0.kind, default: 99] < order[$1.kind, default: 99] }
+    let edition: Edition = packs.contains(where: { $0.kind == .extended }) ? .full : .standard
+    guard packsAreCompatible(packs, edition: edition) else {
+      throw Failure.invalidActiveState
+    }
+    return .init(packs: packs, edition: edition)
+  }
+
   /// Completes the successful publication. Active becomes the immutable
   /// runtime state; the shared reconciler retires superseded data.
   func commitDataChannelUpdate(transactionID: UUID) throws {
@@ -803,33 +824,11 @@ extension LinnetDataRegistry {
     guard let entries = try boundedOwnedDirectoryEntries(
       at: transactionsDirectory, recursively: false, remaining: &traversalBudget)
     else { throw Failure.invalidActiveState }
-    var pendingPackPaths = Set<String>()
-    var languageCleanups: [LanguageTransactionCleanup] = []
-    var scratchCleanups: [URL] = []
-
-    for entry in entries {
-      if let record = validatedLanguageTransaction(at: entry, now: now) {
-        let paths = record.artifacts.map(Self.packPath)
-        let isLive = activeState.transactionID == record.transactionID
-        if isLive, activeState.publication == .committed {
-          languageCleanups.append(.init(
-            transactionID: record.transactionID, directory: entry,
-            protectedPackPaths: paths, retiresCommittedTransaction: true))
-        } else if now.timeIntervalSince1970 - record.createdAt >= Self.orphanSafetyAge,
-          !isLive {
-          languageCleanups.append(.init(
-            transactionID: record.transactionID, directory: entry,
-            protectedPackPaths: paths, retiresCommittedTransaction: false))
-        } else {
-          pendingPackPaths.formUnion(paths)
-        }
-        continue
-      }
-      if let scratch = validatedPersonalScratch(at: entry, now: now),
-        now.timeIntervalSince1970 - scratch.createdAt >= Self.orphanSafetyAge {
-        scratchCleanups.append(entry)
-      }
-    }
+    let discovery = discoverStorageCleanup(
+      among: entries, activeState: activeState, now: now)
+    let pendingPackPaths = discovery.pendingPackPaths
+    let languageCleanups = discovery.language
+    let scratchCleanups = discovery.personalScratch
 
     let packCleanups = try supersededPackCleanups(
       active: activeState.packs, rollback: activeState.rollbackPacks,
@@ -881,6 +880,50 @@ extension LinnetDataRegistry {
     for cleanup in packCleanups where !protected.contains(cleanup.relativePath) {
       try? FileManager.default.removeItem(at: cleanup.directory)
     }
+  }
+
+  /// Classifies only Registry-owned transaction records. Foreign or invalid
+  /// entries are deliberately absent from the returned deletion plan.
+  private func discoverStorageCleanup(
+    among entries: [URL],
+    activeState: ActiveState,
+    now: Date
+  ) -> StorageCleanupDiscovery {
+    var pendingPackPaths = Set<String>()
+    var language: [LanguageTransactionCleanup] = []
+    var personalScratch: [URL] = []
+    for entry in entries {
+      if let record = validatedLanguageTransaction(at: entry, now: now) {
+        let paths = record.artifacts.map(Self.packPath)
+        let isLive = activeState.transactionID == record.transactionID
+        if isLive, activeState.publication == .committed {
+          language.append(.init(
+            transactionID: record.transactionID,
+            directory: entry,
+            protectedPackPaths: paths,
+            retiresCommittedTransaction: true
+          ))
+        } else if now.timeIntervalSince1970 - record.createdAt >= Self.orphanSafetyAge,
+          !isLive {
+          language.append(.init(
+            transactionID: record.transactionID,
+            directory: entry,
+            protectedPackPaths: paths,
+            retiresCommittedTransaction: false
+          ))
+        } else {
+          pendingPackPaths.formUnion(paths)
+        }
+      } else if let scratch = validatedPersonalScratch(at: entry, now: now),
+        now.timeIntervalSince1970 - scratch.createdAt >= Self.orphanSafetyAge {
+        personalScratch.append(entry)
+      }
+    }
+    return .init(
+      pendingPackPaths: pendingPackPaths,
+      language: language,
+      personalScratch: personalScratch
+    )
   }
 
   private func validatedPersonalScratch(
@@ -1274,21 +1317,44 @@ extension LinnetDataRegistry {
     manifests: [PackKind: LinnetPackContract.Manifest]
   ) throws {
     let active = activeSharedDataDirectory.standardizedFileURL
+    let expectation = try activeProjectionExpectation(state: state, manifests: manifests)
+    let inventory = try activeProjectionInventory(at: active, targets: expectation.targets)
+    guard inventory.entries == expectation.entries,
+      inventory.directories == expectation.directories
+    else {
+      throw Failure.invalidActiveState
+    }
+    let grammar: Data
+    do {
+      grammar = try readOwnedFile(active.appending(path: "linnet_grammar_active.yaml"))
+    } catch {
+      throw Failure.invalidActiveState
+    }
+    guard grammar == Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8) else {
+      throw Failure.invalidActiveState
+    }
+  }
+
+  /// Derives the one legal immutable projection from the accepted pack set.
+  private func activeProjectionExpectation(
+    state: ActiveState,
+    manifests: [PackKind: LinnetPackContract.Manifest]
+  ) throws -> ActiveProjectionExpectation {
     let excluded = Set(["linnet_zh.dict.yaml", "linnet_zh_full.dict.yaml"])
-    var expectedTargets: [String: URL] = [:]
+    var targets: [String: URL] = [:]
     for pack in state.packs {
       guard let manifest = manifests[pack.kind] else { throw Failure.invalidActiveState }
       let packRoot = rootDirectory.appending(
         path: pack.relativePath, directoryHint: .isDirectory)
       for entry in manifest.files where !excluded.contains(entry.path) {
-        guard expectedTargets.updateValue(
+        guard targets.updateValue(
           packRoot.appending(path: entry.path, directoryHint: .notDirectory),
           forKey: entry.path) == nil
         else { throw Failure.invalidActiveState }
       }
     }
-    expectedTargets.removeValue(forKey: "linnet_zh.dict.yaml")
-    expectedTargets.removeValue(forKey: "linnet_zh_full.dict.yaml")
+    targets.removeValue(forKey: "linnet_zh.dict.yaml")
+    targets.removeValue(forKey: "linnet_zh_full.dict.yaml")
     guard let chinese = state.packs.first(where: { $0.kind == .chinese }) else {
       throw Failure.invalidActiveState
     }
@@ -1305,7 +1371,7 @@ extension LinnetDataRegistry {
       selectorName = "linnet_zh.dict.yaml"
     }
     guard manifests[selectorPack.kind]?.files.contains(where: { $0.path == selectorName }) == true,
-      expectedTargets.updateValue(
+      targets.updateValue(
         rootDirectory.appending(path: selectorPack.relativePath)
           .appending(path: selectorName),
         forKey: "linnet_zh.dict.yaml") == nil
@@ -1315,27 +1381,38 @@ extension LinnetDataRegistry {
       "default.yaml", "squirrel.yaml", "linnet_zh.schema.yaml",
       "linnet_zh.dict.yaml", "linnet_en.schema.yaml",
       "wanxiang-lts-zh-hans.gram"
-    ] where expectedTargets[required] == nil {
+    ] where targets[required] == nil {
       throw Failure.incompleteActiveView(required)
     }
-    var expectedDirectories: Set<String> = ["build"]
-    for path in expectedTargets.keys {
+    var directories: Set<String> = ["build"]
+    for path in targets.keys {
       var components = path.split(separator: "/").map(String.init)
       _ = components.popLast()
       var prefix = ""
       for component in components {
         prefix = prefix.isEmpty ? component : "\(prefix)/\(component)"
-        expectedDirectories.insert(prefix)
+        directories.insert(prefix)
       }
     }
-    let expectedEntries = Set(expectedTargets.keys)
-      .union(["activation.json", "linnet_grammar_active.yaml"])
+    return .init(
+      targets: targets,
+      entries: Set(targets.keys).union(["activation.json", "linnet_grammar_active.yaml"]),
+      directories: directories
+    )
+  }
+
+  /// Reads the live projection without interpreting pack policy. It reports
+  /// only the bounded, owner-checked filesystem inventory it observed.
+  private func activeProjectionInventory(
+    at active: URL,
+    targets: [String: URL]
+  ) throws -> ActiveProjectionInventory {
     var remaining = Self.maximumActiveProjectionEntries
     guard let entries = try boundedOwnedDirectoryEntries(
       at: active, recursively: true, remaining: &remaining)
     else { throw Failure.invalidActiveState }
-    var actualEntries = Set<String>()
-    var actualDirectories = Set<String>()
+    var observedEntries = Set<String>()
+    var observedDirectories = Set<String>()
     let prefix = active.path + "/"
     for entry in entries {
       let path = entry.standardizedFileURL.path
@@ -1348,36 +1425,25 @@ extension LinnetDataRegistry {
       switch info.st_mode & S_IFMT {
       case S_IFDIR:
         guard (info.st_mode & (S_IWGRP | S_IWOTH)) == 0,
-          actualDirectories.insert(relative).inserted else {
+          observedDirectories.insert(relative).inserted else {
           throw Failure.invalidActiveState
         }
       case S_IFREG:
         guard (info.st_mode & (S_IWGRP | S_IWOTH)) == 0,
           relative == "activation.json" || relative == "linnet_grammar_active.yaml",
-          actualEntries.insert(relative).inserted
+          observedEntries.insert(relative).inserted
         else { throw Failure.invalidActiveState }
       case S_IFLNK:
-        guard let expected = expectedTargets[relative],
+        guard let expected = targets[relative],
           entry.resolvingSymlinksInPath().standardizedFileURL
             == expected.resolvingSymlinksInPath().standardizedFileURL,
-          actualEntries.insert(relative).inserted
+          observedEntries.insert(relative).inserted
         else { throw Failure.invalidActiveState }
       default:
         throw Failure.invalidActiveState
       }
     }
-    guard actualEntries == expectedEntries, actualDirectories == expectedDirectories else {
-      throw Failure.invalidActiveState
-    }
-    let grammar: Data
-    do {
-      grammar = try readOwnedFile(active.appending(path: "linnet_grammar_active.yaml"))
-    } catch {
-      throw Failure.invalidActiveState
-    }
-    guard grammar == Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8) else {
-      throw Failure.invalidActiveState
-    }
+    return .init(entries: observedEntries, directories: observedDirectories)
   }
 
   private func verifyInstalledInventory(

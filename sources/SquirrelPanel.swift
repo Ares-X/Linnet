@@ -45,7 +45,7 @@ final class SquirrelPanel: NSPanel {
   private var cursorIndex: Int = 0
   private var scrollDirection: CGVector = .zero
   private var scrollTime: Date = .distantPast
-  private var pressedHit: SquirrelView.Hit?
+  private var pressedHit: SquirrelView.HitTarget?
   private(set) var candidateExpansionRequested = false
 
   init(position: NSRect) {
@@ -235,7 +235,7 @@ final class SquirrelPanel: NSPanel {
   }
 
   // Main function to add attributes to text output from librime
-  // swiftlint:disable:next cyclomatic_complexity function_parameter_count
+  // swiftlint:disable:next cyclomatic_complexity
   func update(
     preedit: String,
     selRange: NSRange,

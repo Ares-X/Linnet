@@ -637,7 +637,6 @@ struct SettingsDataCoordinatorTests {
               octagramAvailable: true,
               availableSchemaCount: 9,
               requiredSchemaCount: 9,
-              activeTransactionID: nil,
               activeSettingsRevision: try? LinnetSettingsDocumentStore.snapshot(from: live).revision
             )
           )
@@ -1599,7 +1598,6 @@ struct SettingsDataCoordinatorTests {
       )
       let exported = try LinnetBackupStore.decodePortable(Data(contentsOf: portableURL))
       guard exportResult.backupDirectory == nil,
-        exportResult.portableURL == portableURL,
         Set(exported.categories) == Set(LinnetBackupStore.Category.allCases),
         Set(exported.learning.map(\.schema)) == RimeUserDataBridge.learningSchemas
       else {
@@ -2285,11 +2283,6 @@ struct SettingsDataCoordinatorTests {
     )
     try JSONEncoder().encode(state).write(
       to: active.appending(path: "activation.json"), options: .atomic)
-    try makeDirectory(registry.activeStateURL.deletingLastPathComponent())
-    try FileManager.default.createSymbolicLink(
-      atPath: registry.activeStateURL.path,
-      withDestinationPath: "../Runtime/Active/activation.json"
-    )
   }
 
   private static func verifySelectedChineseProfile(
@@ -2584,7 +2577,6 @@ struct SettingsDataCoordinatorTests {
       octagramAvailable: true,
       availableSchemaCount: 9,
       requiredSchemaCount: 9,
-      activeTransactionID: nil,
       activeSettingsRevision: activeRevision
     )
   }
