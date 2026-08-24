@@ -366,11 +366,69 @@ index 25bc31a..3f33a37 100644
  #define IDC_COLOR_SCHEME                1004
  #define IDC_SELECT_FONT                 1005
  #define IDC_PREVIEW                     1006
+diff --git a/WeaselIPC/WeaselClientImpl.cpp b/WeaselIPC/WeaselClientImpl.cpp
+index 26122ad..a964ffa 100644
+--- a/WeaselIPC/WeaselClientImpl.cpp
++++ b/WeaselIPC/WeaselClientImpl.cpp
+@@ -51,8 +51,19 @@ void ClientImpl::Disconnect() {
+   channel.Disconnect();
+ }
+ 
+-void ClientImpl::ShutdownServer() {
+-  _SendMessage(WEASEL_IPC_SHUTDOWN_SERVER, 0, 0);
++bool ClientImpl::ShutdownServer() {
++  constexpr DWORD kShutdownTimeoutMs = 10000;
++  DWORD process_id = channel.ServerProcessId();
++  if (!process_id)
++    return false;
++  HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, process_id);
++  if (!process)
++    return false;
++  _SendMessage(WEASEL_IPC_SHUTDOWN_SERVER, 0, 0);
++  channel.Disconnect();
++  DWORD wait_result = WaitForSingleObject(process, kShutdownTimeoutMs);
++  CloseHandle(process);
++  return wait_result == WAIT_OBJECT_0;
+ }
+ 
+ bool ClientImpl::ProcessKeyEvent(KeyEvent const& keyEvent) {
+@@ -216,9 +227,9 @@ void Client::Disconnect() {
+   m_pImpl->Disconnect();
+ }
+ 
+-void Client::ShutdownServer() {
+-  m_pImpl->ShutdownServer();
+-}
++bool Client::ShutdownServer() {
++  return m_pImpl->ShutdownServer();
++}
+ 
+ bool Client::ProcessKeyEvent(KeyEvent const& keyEvent) {
+   return m_pImpl->ProcessKeyEvent(keyEvent);
+diff --git a/WeaselIPC/WeaselClientImpl.h b/WeaselIPC/WeaselClientImpl.h
+index 7602792..0fa20df 100644
+--- a/WeaselIPC/WeaselClientImpl.h
++++ b/WeaselIPC/WeaselClientImpl.h
+@@ -11,7 +11,7 @@ class ClientImpl {
+ 
+   bool Connect(ServerLauncher const& launcher);
+   void Disconnect();
+-  void ShutdownServer();
++  bool ShutdownServer();
+   void StartSession();
+   void EndSession();
+   void StartMaintenance();
 diff --git a/WeaselServer/WeaselServer.cpp b/WeaselServer/WeaselServer.cpp
-index b4cf8b2..f8fa7fc 100644
+index b4cf8b2..df9b7ca 100644
 --- a/WeaselServer/WeaselServer.cpp
 +++ b/WeaselServer/WeaselServer.cpp
-@@ -9,7 +9,6 @@
+@@ -4,12 +4,10 @@
+ 
+ #include "stdafx.h"
+ #include "resource.h"
+-#include "WeaselService.h"
+-#include <WeaselIPC.h>
++#include <WeaselIPC.h>
  #include <WeaselUI.h>
  #include <RimeWithWeasel.h>
  #include <WeaselUtility.h>
@@ -378,18 +436,102 @@ index b4cf8b2..f8fa7fc 100644
  #include <functional>
  #include <ShellScalingApi.h>
  #include <WinUser.h>
-@@ -106,11 +105,6 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
-       return 0;
-   }
- 
+@@ -88,27 +86,16 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
+   bool quit = !wcscmp(L"/q", lpstrCmdLine) || !wcscmp(L"/quit", lpstrCmdLine);
+   // restart if already running
+   {
+-    weasel::Client client;
+-    if (client.Connect())  // try to connect to running server
+-    {
+-      client.ShutdownServer();
+-      if (quit)
+-        return 0;
+-      int retry = 0;
+-      while (client.Connect() && retry < 10) {
+-        client.ShutdownServer();
+-        retry++;
+-        Sleep(50);
+-      }
+-      if (retry >= 10)
+-        return 0;
+-    } else if (quit)
+-      return 0;
+-  }
+-
 -  bool check_updates = !wcscmp(L"/update", lpstrCmdLine);
 -  if (check_updates) {
 -    WeaselServerApp::check_update();
--  }
--
-   CreateDirectory(WeaselUserDataPath().c_str(), NULL);
++    weasel::Client client;
++    if (client.Connect())  // try to connect to running server
++    {
++      bool stopped = client.ShutdownServer();
++      if (quit)
++        return stopped ? 0 : 1;
++      if (!stopped)
++        return 1;
++    } else if (quit)
++      return 0;
+   }
  
-   int nRet = 0;
+   CreateDirectory(WeaselUserDataPath().c_str(), NULL);
+diff --git a/WeaselServer/WeaselServer.vcxproj b/WeaselServer/WeaselServer.vcxproj
+index 8e3cc1f..cc437eb 100644
+--- a/WeaselServer/WeaselServer.vcxproj
++++ b/WeaselServer/WeaselServer.vcxproj
+@@ -498,7 +498,6 @@
+     <ClCompile Include="SystemTraySDK.cpp" />
+     <ClCompile Include="WeaselServer.cpp" />
+     <ClCompile Include="WeaselServerApp.cpp" />
+-    <ClCompile Include="WeaselService.cpp" />
+     <ClCompile Include="WeaselTrayIcon.cpp" />
+   </ItemGroup>
+   <ItemGroup>
+@@ -506,7 +505,6 @@
+     <ClInclude Include="stdafx.h" />
+     <ClInclude Include="SystemTraySDK.h" />
+     <ClInclude Include="WeaselServerApp.h" />
+-    <ClInclude Include="WeaselService.h" />
+     <ClInclude Include="WeaselTrayIcon.h" />
+   </ItemGroup>
+   <ItemGroup>
+@@ -539,4 +537,4 @@
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+   <ImportGroup Label="ExtensionTargets">
+   </ImportGroup>
+-</Project>
+\ No newline at end of file
++</Project>
+diff --git a/WeaselServer/WeaselServer.vcxproj.filters b/WeaselServer/WeaselServer.vcxproj.filters
+index 9054fc4..de6693f 100644
+--- a/WeaselServer/WeaselServer.vcxproj.filters
++++ b/WeaselServer/WeaselServer.vcxproj.filters
+@@ -21,9 +21,6 @@
+     <ClCompile Include="WeaselServer.cpp">
+       <Filter>Source Files</Filter>
+     </ClCompile>
+-    <ClCompile Include="WeaselService.cpp">
+-      <Filter>Source Files</Filter>
+-    </ClCompile>
+     <ClCompile Include="WeaselServerApp.cpp">
+       <Filter>Source Files</Filter>
+     </ClCompile>
+@@ -38,9 +35,6 @@
+     <ClInclude Include="stdafx.h">
+       <Filter>Header Files</Filter>
+     </ClInclude>
+-    <ClInclude Include="WeaselService.h">
+-      <Filter>Header Files</Filter>
+-    </ClInclude>
+     <ClInclude Include="WeaselServerApp.h">
+       <Filter>Header Files</Filter>
+     </ClInclude>
+@@ -81,4 +75,4 @@
+       <Filter>Resource Files</Filter>
+     </Image>
+   </ItemGroup>
+-</Project>
+\ No newline at end of file
++</Project>
 diff --git a/WeaselServer/WeaselServerApp.cpp b/WeaselServer/WeaselServerApp.cpp
 index e09c4c5..a05fe84 100644
 --- a/WeaselServer/WeaselServerApp.cpp
@@ -1213,6 +1355,23 @@ index 6cdb23e..34499a4 100644
 +
 +:end
  cd %WEASEL_ROOT%
+diff --git a/include/PipeChannel.h b/include/PipeChannel.h
+index bebc73a..3302ff2 100644
+--- a/include/PipeChannel.h
++++ b/include/PipeChannel.h
+@@ -72,6 +72,12 @@ class PipeChannel : public PipeChannelBase {
+ 
+   bool Connect() { return _Ensure(); }
+   bool Connected() const { return !_Invalid(hpipe); }
++  DWORD ServerProcessId() const {
++    DWORD process_id = 0;
++    return Connected() && GetNamedPipeServerProcessId(hpipe, &process_id)
++               ? process_id
++               : 0;
++  }
+   void Disconnect() { _FinalizePipe(hpipe); }
+ 
+   /* Write data to buffer */
 diff --git a/include/WeaselConstants.h b/include/WeaselConstants.h
 index 09625e4..58b7bf6 100644
 --- a/include/WeaselConstants.h
@@ -1229,7 +1388,7 @@ index 09625e4..58b7bf6 100644
  #define STRINGIZE(x) #x
  #define VERSION_STR(x) STRINGIZE(x)
 diff --git a/include/WeaselIPC.h b/include/WeaselIPC.h
-index 3065cb5..a9e4a97 100644
+index 3065cb5..9fd3808 100644
 --- a/include/WeaselIPC.h
 +++ b/include/WeaselIPC.h
 @@ -6,8 +6,8 @@
@@ -1243,6 +1402,15 @@ index 3065cb5..a9e4a97 100644
  
  #define WEASEL_IPC_METADATA_SIZE 1024
  #define WEASEL_IPC_BUFFER_SIZE (4 * 1024)
+@@ -109,7 +109,7 @@ class Client {
+   // 断开连接
+   void Disconnect();
+   // 终止服务
+-  void ShutdownServer();
++  bool ShutdownServer();
+   // 發起會話
+   void StartSession();
+   // 結束會話
 diff --git a/include/WeaselUtility.h b/include/WeaselUtility.h
 index 54f840f..2fa1789 100755
 --- a/include/WeaselUtility.h
@@ -1311,7 +1479,7 @@ index 3a40f51..7af1f8d 100644
  #define ID_WEASELTRAY_INSTALLDIR        40006
  #define ID_WEASELTRAY_USERCONFIG        40007
 diff --git a/output/install.nsi b/output/install.nsi
-index 3d5130c..d5066f1 100644
+index 3d5130c..ae70f24 100644
 --- a/output/install.nsi
 +++ b/output/install.nsi
 @@ -18,21 +18,32 @@ Unicode true
@@ -1332,7 +1500,7 @@ index 3d5130c..d5066f1 100644
 +Var LinnetPriorHant
 +Var LinnetUserDataRoot
 +Var LinnetUserBuildRollback
-+Var LinnetRollbackFailed
++Var LinnetRollbackExitCode
  
  ; The name of the installer
 -Name "小狼毫 ${WEASEL_VERSION}"
@@ -1497,7 +1665,7 @@ index 3d5130c..d5066f1 100644
    "UninstallString"
    StrCmp $R0 "" done
  
-@@ -153,89 +167,192 @@ skip:
+@@ -153,89 +167,210 @@ skip:
    Abort
  
  uninst:
@@ -1566,7 +1734,6 @@ index 3d5130c..d5066f1 100644
 +  StrCpy $LinnetRollbackReady 1
 +  ; Prompt reboot
 +  SetRebootFlag true
-+  Sleep 800
 +  GoTo done
 +
 +old_package_not_preserved:
@@ -1599,13 +1766,28 @@ index 3d5130c..d5066f1 100644
 +
 +Function CleanupFailedCandidate
 +  StrCmp $LinnetCandidateStarted 1 0 cleanup_done
-+  StrCpy $LinnetRollbackFailed 0
-+  IfFileExists "$INSTDIR\LinnetServer.exe" 0 +2
-+  ExecWait '"$INSTDIR\LinnetServer.exe" /quit'
-+  IfFileExists "$INSTDIR\WeaselSetup.exe" 0 +2
-+  ExecWait '"$INSTDIR\WeaselSetup.exe" /u'
++  StrCpy $LinnetRollbackExitCode 0
++  IfFileExists "$INSTDIR\LinnetServer.exe" 0 cleanup_candidate_frontend
++  ExecWait '"$INSTDIR\LinnetServer.exe" /quit' $R5
++  IntCmp $R5 0 cleanup_candidate_frontend
++  StrCpy $LinnetRollbackExitCode 9
++  GoTo cleanup_state
++cleanup_candidate_frontend:
++  IfFileExists "$INSTDIR\WeaselSetup.exe" 0 cleanup_candidate_package
++  ExecWait '"$INSTDIR\WeaselSetup.exe" /u' $R5
++  IntCmp $R5 0 cleanup_candidate_package
++  StrCpy $LinnetRollbackExitCode 10
++  GoTo cleanup_state
++cleanup_candidate_package:
 +  SetOutPath $TEMP
++  ClearErrors
 +  RMDir /r "$INSTDIR"
++  IfErrors candidate_package_remove_failed
++  GoTo candidate_package_removed
++candidate_package_remove_failed:
++  StrCpy $LinnetRollbackExitCode 11
++  GoTo cleanup_state
++candidate_package_removed:
 +  StrCmp $LinnetRollbackReady 1 restore_prior
 +  DeleteRegKey HKLM SOFTWARE\Linnet
 +  DeleteRegKey HKLM "${REG_UNINST_KEY}"
@@ -1635,7 +1817,8 @@ index 3d5130c..d5066f1 100644
 -  Sleep 800
 +  RMDir /r "$SMPROGRAMS\$(DISPLAYNAME)"
 +  GoTo cleanup_state
-+
+ 
+-done:
 +restore_prior:
 +  StrCmp $LinnetBuildRollbackReady 1 0 restore_package
 +  RMDir /r "$LinnetUserDataRoot\build"
@@ -1645,7 +1828,7 @@ index 3d5130c..d5066f1 100644
 +  StrCpy $LinnetBuildRollbackReady 0
 +  GoTo restore_package
 +build_restore_failed:
-+  StrCpy $LinnetRollbackFailed 1
++  StrCpy $LinnetRollbackExitCode 6
 +restore_package:
 +  ClearErrors
 +  Rename "$LinnetRollbackRoot" "$LinnetPriorRoot"
@@ -1654,21 +1837,22 @@ index 3d5130c..d5066f1 100644
 +  Call RestorePriorFrontend
 +  Pop $R5
 +  StrCmp $R5 0 restore_prior_finished
-+  StrCpy $LinnetRollbackFailed 1
++  StrCmp $LinnetRollbackExitCode 0 0 cleanup_state
++  StrCpy $LinnetRollbackExitCode 8
 +  GoTo cleanup_state
 +restore_prior_finished:
 +  StrCpy $LinnetRollbackReady 0
 +  GoTo cleanup_state
 +
 +package_restore_failed:
-+  StrCpy $LinnetRollbackFailed 1
++  StrCmp $LinnetRollbackExitCode 0 0 cleanup_state
++  StrCpy $LinnetRollbackExitCode 7
 +
 +cleanup_state:
 +  StrCpy $LinnetCandidateStarted 0
 +cleanup_done:
 +FunctionEnd
- 
--done:
++
 +Function .onInstFailed
 +  Call CleanupFailedCandidate
 +FunctionEnd
@@ -1695,21 +1879,28 @@ index 3d5130c..d5066f1 100644
 +Section "Linnet"
  
    SectionIn RO
-+  StrCpy $LinnetCandidateStarted 1
- 
-   ; Write the new installation path into the registry
-   ; redirect on 64 bit system
+-
+-  ; Write the new installation path into the registry
+-  ; redirect on 64 bit system
 -  ; HKLM SOFTWARE\WOW6432Node\Rime\Weasel "InstallDir" "$INSTDIR"
 -  WriteRegStr HKLM SOFTWARE\Rime\Weasel "InstallDir" "$INSTDIR"
-+  WriteRegStr HKLM SOFTWARE\Linnet "InstallDir" "$INSTDIR"
- 
-   ; Reset INSTDIR for the new version
+-
+-  ; Reset INSTDIR for the new version
++  ; Keep the selected base directory while targeting the versioned package.
++  StrCpy $R0 $INSTDIR
    StrCpy $INSTDIR "${WEASEL_ROOT}"
  
 -  IfFileExists "$INSTDIR\WeaselServer.exe" 0 +2
 -  ExecWait '"$INSTDIR\WeaselServer.exe" /quit'
-+  IfFileExists "$INSTDIR\LinnetServer.exe" 0 +2
-+  ExecWait '"$INSTDIR\LinnetServer.exe" /quit'
++  ; A same-version residue must be idle before this transaction owns it.
++  IfFileExists "$INSTDIR\LinnetServer.exe" 0 candidate_root_idle
++  ExecWait '"$INSTDIR\LinnetServer.exe" /quit' $R3
++  IntCmp $R3 0 candidate_root_idle
++  SetErrorLevel $R3
++  Abort
++candidate_root_idle:
++  StrCpy $LinnetCandidateStarted 1
++  WriteRegStr HKLM SOFTWARE\Linnet "InstallDir" "$R0"
  
    SetOverwrite try
    ; Set output path to the installation directory.
@@ -1740,7 +1931,7 @@ index 3d5130c..d5066f1 100644
    File "weasel.dll"
    ${If} ${RunningX64}
      File "weaselx64.dll"
-@@ -258,32 +375,27 @@ program_files:
+@@ -258,32 +393,27 @@ program_files:
    ${If} ${AtLeastWin11} ; Windows 11 and above
      ${If} ${IsNativeARM64}
        File "WeaselDeployer.exe"
@@ -1778,7 +1969,7 @@ index 3d5130c..d5066f1 100644
      ${Endif}
    ${Endif}
  
-@@ -293,13 +405,19 @@ program_files:
+@@ -293,13 +423,19 @@ program_files:
    File "data\*.yaml"
    File /nonfatal "data\*.txt"
    File /nonfatal "data\*.gram"
@@ -1799,7 +1990,7 @@ index 3d5130c..d5066f1 100644
  
    SetOutPath $INSTDIR
  
-@@ -314,28 +432,66 @@ program_files:
+@@ -314,28 +450,66 @@ program_files:
    IfErrors +2 0
    StrCpy $R2 "/t"
  
@@ -1808,8 +1999,8 @@ index 3d5130c..d5066f1 100644
 +  IntCmp $R3 0 setup_done
 +  StrCpy $R4 $R3
 +  Call CleanupFailedCandidate
-+  StrCmp $LinnetRollbackFailed 1 0 +3
-+  SetErrorLevel 5
++  StrCmp $LinnetRollbackExitCode 0 +3 0
++  SetErrorLevel $LinnetRollbackExitCode
 +  Abort
 +  SetErrorLevel $R4
 +  Abort
@@ -1824,27 +2015,27 @@ index 3d5130c..d5066f1 100644
 +build_backup_failed:
 +  StrCpy $R4 4
 +  Call CleanupFailedCandidate
-+  StrCmp $LinnetRollbackFailed 1 0 +3
-+  SetErrorLevel 5
++  StrCmp $LinnetRollbackExitCode 0 +3 0
++  SetErrorLevel $LinnetRollbackExitCode
 +  Abort
 +  SetErrorLevel $R4
 +  Abort
 +build_backup_done:
- 
--  ; Write the uninstall keys for Windows
++
 +  ; run as user...
 +  IfSilent deploy_silently
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /install' $R3
 +  GoTo deploy_checked
-+
+ 
+-  ; Write the uninstall keys for Windows
 +  deploy_silently:
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /deploy' $R3
 +  deploy_checked:
 +  IntCmp $R3 0 deploy_done
 +  StrCpy $R4 $R3
 +  Call CleanupFailedCandidate
-+  StrCmp $LinnetRollbackFailed 1 0 +3
-+  SetErrorLevel 5
++  StrCmp $LinnetRollbackExitCode 0 +3 0
++  SetErrorLevel $LinnetRollbackExitCode
 +  Abort
 +  SetErrorLevel $R4
 +  Abort
@@ -1881,7 +2072,7 @@ index 3d5130c..d5066f1 100644
  
    ; don't redirect on 64 bit system for auto run setting
    ${If} ${IsNativeARM64}
-@@ -344,19 +500,9 @@ program_files:
+@@ -344,19 +518,9 @@ program_files:
      SetRegView 64
    ${Endif}
    ; Write autorun key
@@ -1903,7 +2094,7 @@ index 3d5130c..d5066f1 100644
  
    ; Prompt reboot
    StrCmp $0 "Upgrade" 0 +2
-@@ -373,10 +519,9 @@ Section "Start Menu Shortcuts"
+@@ -373,10 +537,9 @@ Section "Start Menu Shortcuts"
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDEPLOY).lnk" "$INSTDIR\WeaselDeployer.exe" "/deploy" "$SYSDIR\shell32.dll" 144
@@ -1917,7 +2108,7 @@ index 3d5130c..d5066f1 100644
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
  
-@@ -388,30 +533,41 @@ SectionEnd
+@@ -388,30 +551,41 @@ SectionEnd
  
  Section "Uninstall"
  
@@ -1965,3 +2156,17 @@ index 3d5130c..d5066f1 100644
    RMDir  "$INSTDIR"
    SetShellVarContext all
    Delete  "$SMPROGRAMS\$(DISPLAYNAME)\*.*"
+diff --git a/test/TestWeaselIPC/TestWeaselIPC.cpp b/test/TestWeaselIPC/TestWeaselIPC.cpp
+index efa98c7..871cb93 100644
+--- a/test/TestWeaselIPC/TestWeaselIPC.cpp
++++ b/test/TestWeaselIPC/TestWeaselIPC.cpp
+@@ -31,8 +31,7 @@ int _tmain(int argc, _TCHAR* argv[]) {
+       std::cerr << "server not running." << std::endl;
+       return 0;
+     }
+-    client.ShutdownServer();
+-    return 0;
++    return client.ShutdownServer() ? 0 : 1;
+   } else if (argc > 1 && !wcscmp(L"/console", argv[1])) {
+     return console_main();
+     return 0;

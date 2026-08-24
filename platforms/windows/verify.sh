@@ -244,8 +244,11 @@ rg -Fq 'ExecWait '\''"$LinnetPriorRoot\WeaselSetup.exe" /t'\'' $R5' \
   "${scratch}/output/install.nsi"
 rg -Fq 'ExecWait '\''"$LinnetPriorRoot\WeaselSetup.exe" /s'\'' $R5' \
   "${scratch}/output/install.nsi"
-test "$(rg -F -c 'SetErrorLevel 5' "${scratch}/output/install.nsi")" -eq 5
-rg -Fq 'StrCpy $LinnetRollbackFailed 1' "${scratch}/output/install.nsi"
+test "$(rg -F -c 'SetErrorLevel 5' "${scratch}/output/install.nsi")" -eq 2
+for rollback_code in 6 7 8 9 10 11; do
+  rg -Fq "StrCpy \$LinnetRollbackExitCode ${rollback_code}" \
+    "${scratch}/output/install.nsi"
+done
 ruby -e '
   source = File.binread(ARGV.fetch(0))
   unregister = source[/old_server_stopped:(.*?)old_frontend_removed:/m] or
@@ -263,12 +266,92 @@ ruby -e '
     missing.empty?
   cleanup = source[/Function CleanupFailedCandidate(.*?)FunctionEnd/m] or
     abort "candidate cleanup owner is missing"
-  abort "rollback restore failures can still report the original candidate error" unless
-    cleanup.scan(%(StrCpy $LinnetRollbackFailed 1)).length == 3
+  typed = [
+    %(StrCpy $LinnetRollbackExitCode 6),
+    %(StrCpy $LinnetRollbackExitCode 7),
+    %(StrCpy $LinnetRollbackExitCode 8),
+    %(StrCpy $LinnetRollbackExitCode 9),
+    %(StrCpy $LinnetRollbackExitCode 10),
+    %(StrCpy $LinnetRollbackExitCode 11),
+  ]
+  abort "rollback restore failures can still report one ambiguous result" unless
+    typed.all? { |state| cleanup.include?(state) }
+' "${scratch}/output/install.nsi"
+if rg -n '^\s*Sleep 800\s*$|SetErrorLevel \$R3\r?$\n\s*SetErrorLevel \$R3' \
+    "${scratch}/output/install.nsi" -U; then
+  echo "The installer retained a duplicate error write or unexplained delay." >&2
+  exit 1
+fi
+ruby -e '
+  source = File.binread(ARGV.fetch(0))
+  cleanup = source[/Function CleanupFailedCandidate(.*?)FunctionEnd/m] or
+    abort "candidate cleanup owner is missing"
+  ordered = [
+    %q(ExecWait '\''"$INSTDIR\LinnetServer.exe" /quit'\'' $R5),
+    %(StrCpy $LinnetRollbackExitCode 9),
+    %q(ExecWait '\''"$INSTDIR\WeaselSetup.exe" /u'\'' $R5),
+    %(StrCpy $LinnetRollbackExitCode 10),
+    %(RMDir /r "$INSTDIR"),
+    %(StrCpy $LinnetRollbackExitCode 11),
+    %(Rename "$LinnetRollbackRoot" "$LinnetPriorRoot"),
+  ]
+  positions = ordered.map { |line| cleanup.index(line) }
+  abort "candidate cleanup can mutate after an unverified transition" unless
+    positions.all? && positions == positions.sort
+' "${scratch}/output/install.nsi"
+ruby -e '
+  source = File.binread(ARGV.fetch(0))
+  section = source[/Section "Linnet"(.*?)program_files:/m] or
+    abort "main install transaction is missing"
+  ordered = [
+    %(StrCpy $R0 $INSTDIR),
+    %(StrCpy $INSTDIR "${WEASEL_ROOT}"),
+    %q(ExecWait '\''"$INSTDIR\LinnetServer.exe" /quit'\'' $R3),
+    %(IntCmp $R3 0 candidate_root_idle),
+    %(candidate_root_idle:),
+    %(StrCpy $LinnetCandidateStarted 1),
+    %q(WriteRegStr HKLM SOFTWARE\Linnet "InstallDir" "$R0"),
+  ]
+  positions = ordered.map { |line| section.index(line) }
+  abort "candidate overwrite is not guarded before transaction start" unless
+    positions.all? && positions == positions.sort
 ' "${scratch}/output/install.nsi"
 if rg -n '\$INSTDIR\\WeaselServer\.exe|\$R1\\WeaselServer\.exe' \
     "${scratch}/output/install.nsi"; then
   echo "The installed process identity still uses WeaselServer.exe." >&2
+  exit 1
+fi
+ruby -e '
+  source = File.binread(ARGV.fetch(0))
+  if source.match?(/client\.ShutdownServer\(\);\s*if \(quit\)\s*return 0;/)
+    abort "LinnetServer /quit still reports success before the server exits"
+  end
+  shutdown = source.index(%(bool stopped = client.ShutdownServer();))
+  result = shutdown && source.index(%(return stopped ? 0 : 1;), shutdown)
+  abort "LinnetServer /quit does not wait for the exact server process" unless
+    shutdown && result && shutdown < result
+  if source.match?(/while \(client\.Connect\(\).*?Sleep\(/m)
+    abort "LinnetServer retained a second shutdown-completion owner"
+  end
+' "${scratch}/WeaselServer/WeaselServer.cpp"
+rg -Fq 'bool ShutdownServer();' \
+  "${scratch}/include/WeaselIPC.h"
+rg -Fq 'GetNamedPipeServerProcessId(hpipe, &process_id)' \
+  "${scratch}/include/PipeChannel.h"
+rg -Fq 'constexpr DWORD kShutdownTimeoutMs = 10000;' \
+  "${scratch}/WeaselIPC/WeaselClientImpl.cpp"
+rg -Fq 'WaitForSingleObject(process, kShutdownTimeoutMs)' \
+  "${scratch}/WeaselIPC/WeaselClientImpl.cpp"
+if rg -n 'ShutdownServer\([0-9]' "${scratch}" \
+    --glob '!include/wtl/**'; then
+  echo "A shutdown caller retained a duplicate timeout policy." >&2
+  exit 1
+fi
+if rg -n 'WeaselService' \
+    "${scratch}/WeaselServer/WeaselServer.cpp" \
+    "${scratch}/WeaselServer/WeaselServer.vcxproj" \
+    "${scratch}/WeaselServer/WeaselServer.vcxproj.filters"; then
+  echo "The unowned Windows service path is still compiled or referenced." >&2
   exit 1
 fi
 if rg -n 'get_schemata_|IDC_GET_SCHEMATA' \
