@@ -1,0 +1,60 @@
+name: Restore locked Linnet build cache
+description: Restore verified build inputs for the current Xcode toolchain.
+
+inputs:
+  save:
+    description: Save a new cache after a successful default-branch job.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate cache write policy
+      shell: bash
+      env:
+        LINNET_SAVE_BUILD_CACHE: ${{ inputs.save }}
+      run: |
+        set -euo pipefail
+        case "${LINNET_SAVE_BUILD_CACHE}" in
+          true|false) ;;
+          *) echo "save must be true or false" >&2; exit 2 ;;
+        esac
+
+    - name: Fingerprint the Xcode toolchain
+      id: toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        fingerprint="$(xcodebuild -version | shasum -a 256 | awk '{print $1}')"
+        [[ "${fingerprint}" =~ ^[0-9a-f]{64}$ ]]
+        echo "sha256=${fingerprint}" >> "${GITHUB_OUTPUT}"
+
+    # Restored bytes are acceleration only. action-install.sh revalidates every
+    # locked commit, digest, fingerprint and artifact shape before using them.
+    - name: Restore and save the default-branch cache
+      if: inputs.save == 'true'
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+      with:
+        path: |
+          build/upstreams
+          build/dependencies
+          data/chinese/grammar
+          build/linnet-english-cache
+          build/linnet-english.fingerprint
+        key: linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/LinnetEnglishDataSources.swift', 'tools/LinnetEnglishDataGenerator.swift', 'data/linnet/**', 'data/chinese/**') }}
+        restore-keys: |
+          linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
+
+    - name: Restore the read-only ref cache
+      if: inputs.save == 'false'
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+      with:
+        path: |
+          build/upstreams
+          build/dependencies
+          data/chinese/grammar
+          build/linnet-english-cache
+          build/linnet-english.fingerprint
+        key: linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/LinnetEnglishDataSources.swift', 'tools/LinnetEnglishDataGenerator.swift', 'data/linnet/**', 'data/chinese/**') }}
+        restore-keys: |
+          linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-

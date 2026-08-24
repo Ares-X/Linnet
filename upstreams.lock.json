@@ -320,7 +320,15 @@
       "license_path": "LICENSES/RIME-LMDG-CC-BY-4.0.txt",
       "license_sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
       "bytes": 420246572,
-      "sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
+      "sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc",
+      "linnet_pack": {
+        "repository": "https://github.com/Ares-X/Linnet.git",
+        "release": "data-26",
+        "asset": "Linnet-LTS.linnetpack",
+        "asset_download_url": "https://github.com/Ares-X/Linnet/releases/download/data-26/Linnet-LTS.linnetpack",
+        "bytes": 371932250,
+        "sha256": "0e48509e9294757c84eb8d157e13587aa447063277acbeb0afde04b7fe11ffb3"
+      }
     }
   }
 }

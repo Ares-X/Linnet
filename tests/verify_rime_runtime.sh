@@ -12,10 +12,11 @@ cd "${repo_root}"
 runtime_probe="${1:-}"
 if [[ "${1:-}" == --single-key-ranking-probe ||
       "${1:-}" == --mixed-input-probe ||
-      "${1:-}" == --mixed-latency-probe ]]; then
+      "${1:-}" == --mixed-latency-probe ||
+      "${1:-}" == --shift-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe]" >&2
+  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--shift-probe]" >&2
   exit 64
 fi
 
@@ -180,6 +181,8 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime mixed-input latency measurement: COMPLETE"
   elif [[ "${runtime_probe}" == --single-key-ranking-probe ]]; then
     echo "Linnet native Rime focused single-key ranking probe: PASS"
+  elif [[ "${runtime_probe}" == --shift-probe ]]; then
+    echo "Linnet native Rime focused Shift probe: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi

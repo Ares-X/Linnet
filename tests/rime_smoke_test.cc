@@ -1729,6 +1729,25 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
         api, session, kModeReturnSchemaProperty,
         std::string(chinese_schema) + " direct Shift return identity");
     api->destroy_session(session);
+
+    const RimeSessionId composing_profile =
+        CreateSchemaSession(api, chinese_schema);
+    Enter(api, composing_profile, "a");
+    if (Candidates(api, composing_profile).empty()) {
+      Fail(std::string(chinese_schema) +
+           " direct Shift fixture produced no Chinese candidate");
+    }
+    TapShift(api, composing_profile, XK_Shift_L);
+    ExpectCurrentSchema(api, composing_profile, "linnet_en",
+                        std::string(chinese_schema) +
+                            " direct Shift with pending code");
+    if (TakeCommit(api, composing_profile) != "a") {
+      Fail(std::string(chinese_schema) +
+           " direct Shift did not commit pending code exactly once");
+    }
+    ExpectNoCommit(api, composing_profile,
+                   std::string(chinese_schema) + " duplicate Shift commit");
+    api->destroy_session(composing_profile);
   }
 
   // Global switcher history has second-level timestamps and is shared across
@@ -1774,10 +1793,31 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
   TapShift(api, composing, XK_Shift_L);
   ExpectCurrentSchema(api, composing, "linnet_en",
                       "direct Shift with a Chinese composition");
-  if (TakeCommit(api, composing) != composing_candidates.front().text) {
-    Fail("direct Shift did not commit the selected Chinese candidate");
+  if (TakeCommit(api, composing) != "shuru") {
+    Fail("direct Shift did not preserve uncommitted full-pinyin letters");
+  }
+  const char* remaining_composition = api->get_input(composing);
+  ExpectNoCommit(api, composing, "duplicate full-pinyin Shift commit");
+  if (remaining_composition && remaining_composition[0] != '\0') {
+    Fail("direct Shift duplicated or retained the full-pinyin composition");
   }
   api->destroy_session(composing);
+
+  const RimeSessionId english_composing =
+      CreateSchemaSession(api, "linnet_en");
+  Enter(api, english_composing, "worl");
+  if (Candidates(api, english_composing).empty()) {
+    Fail("direct Shift Smart English fixture produced no completion");
+  }
+  TapShift(api, english_composing, XK_Shift_L);
+  ExpectCurrentSchema(api, english_composing, "linnet_zh_pinyin",
+                      "direct Shift with pending Smart English letters");
+  if (TakeCommit(api, english_composing) != "worl") {
+    Fail("direct Shift accepted or duplicated a Smart English completion");
+  }
+  ExpectNoCommit(api, english_composing,
+                 "duplicate Smart English Shift commit");
+  api->destroy_session(english_composing);
 
   const RimeSessionId raw_composing =
       CreateSchemaSession(api, "linnet_zh_pinyin");
@@ -1799,9 +1839,8 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
   }
   api->destroy_session(raw_composing);
 
-  // A partial Chinese match plus an untranslated suffix is the destructive
-  // schema-boundary case: ascii_composer confirms the prefix but cannot
-  // auto-commit until the canonical raw tail is preserved as well.
+  // A partial Chinese match plus an untranslated suffix must stay literal too;
+  // Shift changes modes and must not choose any translated prefix for the user.
   const RimeSessionId partial_composing =
       CreateSchemaSession(api, "linnet_zh_pinyin");
   constexpr char kPartialInput[] = "thisisenglish";
@@ -1814,17 +1853,15 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
       !partial_session || !partial_session->context()) {
     Fail("direct Shift partial-match fixture lost its untranslated suffix");
   }
-  const std::string partial_preview =
-      partial_session->context()->GetCommitText();
+  const std::string partial_preview = partial_session->context()->GetCommitText();
   if (partial_preview.empty() || partial_preview == kPartialInput) {
     Fail("direct Shift partial-match fixture has no canonical mixed preview");
   }
   TapShift(api, partial_composing, XK_Shift_L);
   ExpectCurrentSchema(api, partial_composing, "linnet_en",
                       "direct Shift with a partial Chinese match");
-  if (TakeCommit(api, partial_composing) != partial_preview) {
-    Fail("direct Shift discarded the untranslated suffix after a partial "
-         "Chinese match");
+  if (TakeCommit(api, partial_composing) != kPartialInput) {
+    Fail("direct Shift translated part of a pending letter composition");
   }
   api->destroy_session(partial_composing);
 

@@ -9,6 +9,9 @@ verifier="${repo_root}/package/verify_publication_artifacts"
 asset_manifest="${repo_root}/package/release_asset_manifest"
 publisher="${repo_root}/package/publish_github_release"
 workflow="${repo_root}/.github/workflows/release-ci.yml"
+commit_workflow="${repo_root}/.github/workflows/commit-ci.yml"
+pull_request_workflow="${repo_root}/.github/workflows/pull-request-ci.yml"
+cache_action="${repo_root}/.github/actions/restore-locked-build-cache/action.yml"
 
 fail() {
   echo "verify_publication_owner: $*" >&2
@@ -396,22 +399,50 @@ fi
 
 ruby -e '
   workflow = File.read(ARGV.fetch(0))
-  uses = workflow.scan(/^\s*uses:\s*(\S+)/).flatten
-  abort unless uses.all? { |value| value.match?(/@[0-9a-f]{40}\z/) }
-  cache_action = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
-  abort unless uses.count(cache_action) == 2
+  commit = File.read(ARGV.fetch(1))
+  pull_request = File.read(ARGV.fetch(2))
+  cache = File.read(ARGV.fetch(3))
+  local_cache = "./.github/actions/restore-locked-build-cache"
+  pinned_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
+  pinned_restore = "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25"
+  workflow_uses = workflow.scan(/^\s*uses:\s*(\S+)/).flatten
+  commit_uses = commit.scan(/^\s*uses:\s*(\S+)/).flatten
+  pull_request_uses = pull_request.scan(/^\s*uses:\s*(\S+)/).flatten
+  cache_uses = cache.scan(/^\s*uses:\s*(\S+)/).flatten
+  all_uses = workflow_uses + commit_uses + pull_request_uses + cache_uses
+  abort unless all_uses.all? { |value|
+    value == local_cache || value.match?(/@[0-9a-f]{40}\z/)
+  }
+  abort unless workflow_uses.count(local_cache) == 2
+  abort unless commit_uses.count(local_cache) == 1
+  abort unless pull_request_uses.count(local_cache) == 1
+  abort unless cache_uses == [pinned_cache, pinned_restore]
+  abort if workflow.include?("actions/cache") || commit.include?("actions/cache") ||
+    pull_request.include?("actions/cache")
+  save_policy = "save: ${{ github.ref == \x27refs/heads/main\x27 }}"
+  abort unless workflow.scan(save_policy).size == 2 && commit.scan(save_policy).size == 1
+  abort unless pull_request.scan(/^\s*save:\s*false\s*$/).size == 1
+  abort unless cache.include?("if: inputs.save == \x27true\x27") &&
+    cache.include?("if: inputs.save == \x27false\x27")
+  abort unless cache.match?(/inputs:\s*\n\s*save:.*?required:\s*true/m)
   abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
-  abort unless workflow.scan(/^\s*key:\s*linnet-build-v1-/).size == 2
-  abort unless workflow.scan(/^\s*restore-keys:\s*\|/).size == 2
+  abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 1
+  abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 1
+  abort unless cache.scan(/^\s*key:\s*linnet-build-v2-/).size == 2
+  abort unless cache.scan(/^\s*restore-keys:\s*\|/).size == 2
   %w[
     build/upstreams
     build/dependencies
     data/chinese/grammar
     build/linnet-english-cache
-    data/plum/build
-  ].each { |path| abort unless workflow.scan(/^\s*#{Regexp.escape(path)}\s*$/).size == 2 }
-  abort if workflow.match?(%r{^\s*(?:librime|plum|upstreams/[^/]+)\s*$})
-  abort unless workflow.include?("Restored cache bytes are untrusted")
+  ].each { |path| abort unless cache.scan(/^\s*#{Regexp.escape(path)}\s*$/).size == 2 }
+  %w[data/plum/build build/precompiled.fingerprint].each do |path|
+    abort if cache.match?(/^\s*#{Regexp.escape(path)}\s*$/)
+  end
+  abort if cache.include?("sources/**") || cache.include?("tools/**") ||
+    cache.include?("config/linnet-data-releases.json")
+  abort if cache.match?(%r{^\s*(?:librime|plum|upstreams/[^/]+)\s*$})
+  abort unless cache.include?("Restored bytes are acceleration only")
   abort unless workflow.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 2
   abort unless workflow.include?("make --no-print-directory archive")
   abort if workflow.include?("./action-build.sh archive")
@@ -428,7 +459,10 @@ ruby -e '
   abort unless workflow.match?(/^permissions:\s*\n\s*contents:\s*read\s*$/m)
   abort unless workflow.match?(/publish-community:.*?contents:\s*write/m)
   abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 2
+  abort unless commit.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
+  abort unless pull_request.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort if workflow.match?(/LINNET_CODE_SIGN|notary|Developer ID|publication_plan/)
-' "${workflow}" || fail "tag-authorized community workflow is incomplete"
+' "${workflow}" "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" ||
+  fail "tag-authorized community workflow is incomplete"
 
 echo "Linnet unsigned community publication owner: PASS"

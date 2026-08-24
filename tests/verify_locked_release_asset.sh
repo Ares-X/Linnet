@@ -23,7 +23,12 @@ printf '%s\n' \
   '"release":"LTS","asset":"model.gram",' \
   '"asset_id":123,"asset_api_url":"https://api.github.com/repos/example/model/releases/assets/123",' \
   '"asset_download_url":"https://github.com/example/model/releases/download/LTS/model.gram",' \
-  '"bytes":12,"sha256":"'"${payload_sha}"'"}}}' >"${lock}"
+  '"bytes":12,"sha256":"'"${payload_sha}"'","pack":{' \
+  '"repository":"https://github.com/example/model.git","release":"LTS",' \
+  '"asset":"model.gram","asset_id":123,' \
+  '"asset_api_url":"https://api.github.com/repos/example/model/releases/assets/123",' \
+  '"asset_download_url":"https://github.com/example/model/releases/download/LTS/model.gram",' \
+  '"bytes":12,"sha256":"'"${payload_sha}"'"}}}}' >"${lock}"
 
 fake_bin="${fixture}/bin"
 mkdir "${fake_bin}"
@@ -68,6 +73,16 @@ FAKE_ASSET_RESPONSE=direct PATH="${fake_bin}:${PATH}" \
   "${repo_root}/scripts/fetch-locked-release-asset" \
   "${lock}" model "${direct_output}" >/dev/null
 [[ "$(cat "${direct_output}")" == "${payload}" ]]
+nested_output="${fixture}/model-nested.gram"
+PATH="${fake_bin}:${PATH}" "${repo_root}/scripts/fetch-locked-release-asset" \
+  "${lock}" model.pack "${nested_output}" >/dev/null
+[[ "$(cat "${nested_output}")" == "${payload}" ]]
+if PATH="${fake_bin}:${PATH}" "${repo_root}/scripts/fetch-locked-release-asset" \
+    "${lock}" model..pack "${fixture}/unsafe-path.gram" >/dev/null 2>&1; then
+  echo "verify_locked_release_asset: unsafe nested source path was accepted" >&2
+  exit 1
+fi
+[[ ! -e "${fixture}/unsafe-path.gram" ]]
 if rg -n 'GITHUB_TOKEN|Authorization:' \
     "${repo_root}/scripts/fetch-locked-release-asset"; then
   echo "verify_locked_release_asset: bulk release bytes regained an API credential path" >&2

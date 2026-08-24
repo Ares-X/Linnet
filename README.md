@@ -45,6 +45,7 @@ Linnet 复用 Squirrel、librime、万象、RIME-LMDG、rime-ice 与 Hallelujah 
 | 原始 ASCII | `A` | 代码、密码、终端和任何不希望被转换的文本 |
 
 独立轻按左 Shift 或右 Shift，在中文与 Smart English 之间切换；Caps Lock 进入或退出原始 ASCII。组合键、Shift 加字母以及长按 Shift 都不会误触发模式切换。
+若切换前仍有未上位的拼音或英文，Linnet 会先原样提交这些字母，不会替用户选择中文候选或英文补全。
 
 ![Linnet 中文、Smart English 与原始 ASCII 三种输入状态的真实光标提示](resources/readme/input-modes.png)
 

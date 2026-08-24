@@ -116,7 +116,7 @@ bool HasHostShortcutModifier(const KeyEvent& key) {
 }
 
 // `ascii_composer` immediately precedes this processor and remains the sole
-// owner of Shift tap/chord/hold classification and composition commit policy.
+// owner of Shift tap/chord/hold classification and raw-code commit policy.
 // A true ascii_mode on Shift release therefore means librime accepted one
 // isolated Shift tap. Linnet maps only that accepted transition to its Smart
 // English schema; Caps Lock remains the explicit raw-ASCII path.
@@ -149,15 +149,6 @@ class ModeSwitchProcessor : public Processor {
         return_schema = direct_chinese_schema_;
       }
       if (return_schema.empty()) return kNoop;
-    }
-
-    // commit_text can confirm a translated prefix while leaving an
-    // untranslated suffix in the same composition. ApplySchema() clears the
-    // old context, so close that canonical mixed preview at this destructive
-    // schema boundary. Full-span candidates and raw input have already
-    // auto-committed and therefore cannot be emitted twice here.
-    if (context->IsComposing()) {
-      context->Commit();
     }
 
     // Do not expose ascii_composer's transient classification state after the

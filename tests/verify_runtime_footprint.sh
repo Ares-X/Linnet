@@ -155,13 +155,10 @@ ruby -e '
   source = File.read("plugins/smart_english/smart_english.cc")
   owner = source[/class ModeSwitchProcessor : public Processor \{.*?\n\};/m]
   abort "the direct Shift transition owner is missing" unless owner
-  commit = owner.index("if (context->IsComposing())")
-  close = owner.index("context->Commit()")
   apply = owner.index("engine_->ApplySchema")
-  abort "direct Shift can clear an untranslated suffix at schema change" unless
-    commit && close && apply && commit < close && close < apply &&
-      owner.scan("context->Commit()").length == 1
-' || fail "direct Shift partial-composition preservation regressed"
+  abort "direct Shift regained a second composition-commit owner" unless
+    apply && !owner.include?("context->Commit()")
+' || fail "direct Shift raw-code ownership regressed"
 rg -Fq 'kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1"' \
   plugins/smart_english/smart_english.cc ||
   fail "direct Shift lost its session-owned Chinese return identity"
@@ -184,6 +181,9 @@ if ! ruby -ryaml -e '
   default = YAML.load_file("data/linnet/default.yaml")
   abort "the bundled pack regained the product Caps policy" unless
     default.dig("ascii_composer", "switch_key", "Caps_Lock") == "clear"
+  abort "pending letters can again select a translated candidate on Shift" unless
+    default.dig("ascii_composer", "switch_key", "Shift_L") == "commit_code" &&
+      default.dig("ascii_composer", "switch_key", "Shift_R") == "commit_code"
   renderer = File.read("sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift")
   abort "the Core renderer does not own the effective Caps policy" unless
     renderer.scan(%q{"ascii_composer/switch_key/Caps_Lock"}).length == 1 &&

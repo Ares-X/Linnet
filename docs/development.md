@@ -51,7 +51,7 @@
 
 macOS 只看到一个 Linnet 输入源。Rime 内部包含八个中文 profile 和一个 `linnet_en`：
 
-- `ascii_composer` 负责独立 Shift、组合键、长按、组词提交和 Caps Lock；
+- `ascii_composer` 负责独立 Shift、组合键、长按、未上位编码的原样提交和 Caps Lock；
 - 紧随其后的 `linnet_mode_switch_processor` 只把已确认的 Shift 转换映射为中文/Smart English schema 切换；
 - 当前 `Context` 保存直接 Shift 的来源中文 schema，返回后清空；
 - Settings typed document 唯一拥有中文方案选择；fresh document 默认全拼，已有 document 的显式选择保持不变。renderer 将同一选择投影为 `default.custom.yaml` 的首个中文 schema、Smart English 反查 Prism 和直接 Shift 返回目标；
@@ -127,7 +127,33 @@ focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有�
 release identity，再由标签触发发布。定时 GitHub workflow 只报告候选更新，不得
 自动修改仓库、合并上游或发布。
 
-GitHub Actions 会缓存锁定下载、runtime 构建依赖、英文生成数据和 Rime 预编译产物。
+RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此上游 URL 只用于
+发现和本地审查候选；被 Linnet 接纳的原始模型字节数与摘要仍记录在
+`rime_lmdg_grammar`，冷构建只从 lock 指定的同仓库固定 `data-N` LTS 包获取，再由
+PackTool 验证容器、解包并复核内部原始模型。接受新模型时，维护者须先在隔离
+checkout 中预计算未来 LTS 包摘要，并在同一个最终提交里写入未来 `data-N` URL、
+容器摘要、原始模型摘要和数据 release identity。本地已验证的原始模型允许这个最终
+提交在远端包尚未存在时生成并验证完整八件归档。随后先把该精确提交推到一个临时、
+不匹配 `v*.*.*` 的 seed tag，再由唯一 mutation owner 发布同一提交的五件数据资产：
+
+```bash
+git tag "data-seed-${sequence}" "${candidate_revision}"
+git push origin "refs/tags/data-seed-${sequence}"
+GH_TOKEN=... GITHUB_REPOSITORY=Ares-X/Linnet \
+  package/publish_github_release data "${archive_dir}" \
+  "${version}" "${sequence}" "${candidate_revision}"
+git push origin ":refs/tags/data-seed-${sequence}"
+git tag -d "data-seed-${sequence}"
+```
+
+发布后必须从 clean checkout 走一次固定包冷构建，确认外层容器和内部原始模型都与
+lock 一致；只有同一个 `candidate_revision` 才能快进到 `main` 并打产品版本标签。
+临时 seed tag 不触发产品发布 workflow，发布成功后立即删除；正式 `data-N` tag 继续
+绑定该提交。普通构建没有回退到可变上游资产的路径。
+
+GitHub Actions 会缓存锁定下载、runtime 构建依赖和英文生成数据。只有默认 `main`
+可以在成功任务结束后写入缓存；功能分支和版本标签只读取当前 ref 或默认分支缓存，
+避免每个标签保存一份无法被后续标签复用的大型副本。
 缓存不是版本或发布权威：每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、
 内部 fingerprint 与产物形状；不匹配时只重建受影响部分。缓存命中也不会跳过
 archive 和 publication 验证。发布 workflow 把“准备锁定依赖”和“构建并验证归档”

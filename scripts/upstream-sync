@@ -46,6 +46,33 @@ rescue URI::InvalidURIError
   fail_lock("#{name}.repository is not a valid URL")
 end
 
+def validate_release_download(source, name)
+  repository_path = URI.parse(require_string(source, "repository")).path
+  repository_slug = repository_path.delete_prefix("/").delete_suffix(".git")
+  release = require_string(source, "release", SAFE_COMPONENT)
+  asset = require_string(source, "asset", SAFE_COMPONENT)
+  expected_download_url =
+    "https://github.com/#{repository_slug}/releases/download/#{release}/#{asset}"
+  fail_lock("#{name} download URL must match its repository, release, and asset") unless
+    require_string(source, "asset_download_url") == expected_download_url
+  fail_lock("invalid #{name} asset size") unless
+    source["bytes"].is_a?(Integer) && source["bytes"].positive?
+  require_string(source, "sha256", SHA256)
+end
+
+def validate_release_asset_identity(source, name)
+  validate_release_download(source, name)
+  asset_id = source["asset_id"]
+  fail_lock("#{name} asset id must be a positive integer") unless
+    asset_id.is_a?(Integer) && asset_id.positive?
+  repository_path = URI.parse(require_string(source, "repository")).path
+  repository_slug = repository_path.delete_prefix("/").delete_suffix(".git")
+  expected_api_url =
+    "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
+  fail_lock("#{name} asset API URL must match its repository and immutable id") unless
+    require_string(source, "asset_api_url") == expected_api_url
+end
+
 def load_lock
   lock = JSON.parse(File.read(LOCK_PATH))
   fail_lock("unsupported lock format") unless lock["format"] == 1
@@ -412,34 +439,28 @@ def load_lock
     data_inputs == expected_wanxiang_inputs
 
   rime_lmdg_grammar = require_hash(sources, "rime_lmdg_grammar")
-  require_string(rime_lmdg_grammar, "release")
-  require_string(rime_lmdg_grammar, "asset")
-  asset_id = rime_lmdg_grammar["asset_id"]
-  fail_lock("grammar asset id must be a positive integer") unless
-    asset_id.is_a?(Integer) && asset_id.positive?
-  asset_api_url = require_string(rime_lmdg_grammar, "asset_api_url")
-  repository_path = URI.parse(require_string(rime_lmdg_grammar, "repository")).path
-  repository_slug = repository_path.delete_prefix("/").delete_suffix(".git")
-  expected_asset_api_url =
-    "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
-  fail_lock("grammar asset API URL must match its repository and immutable id") unless
-    asset_api_url == expected_asset_api_url
-  release = require_string(rime_lmdg_grammar, "release", SAFE_COMPONENT)
-  asset = require_string(rime_lmdg_grammar, "asset", SAFE_COMPONENT)
-  asset_download_url = require_string(rime_lmdg_grammar, "asset_download_url")
-  expected_asset_download_url =
-    "https://github.com/#{repository_slug}/releases/download/#{release}/#{asset}"
-  fail_lock("grammar download URL must match its repository, release, and asset") unless
-    asset_download_url == expected_asset_download_url
+  validate_release_asset_identity(rime_lmdg_grammar, "grammar")
   unless require_string(rime_lmdg_grammar, "declared_license") == "CC-BY-4.0"
     fail_lock("unexpected Rime LMDG declared license")
   end
   require_string(rime_lmdg_grammar, "license_path")
   require_string(rime_lmdg_grammar, "license_sha256", SHA256)
-  unless rime_lmdg_grammar["bytes"].is_a?(Integer) && rime_lmdg_grammar["bytes"].positive?
-    fail_lock("invalid Rime LMDG grammar model size")
+  linnet_pack = require_hash(rime_lmdg_grammar, "linnet_pack")
+  expected_pack_keys = %w[
+    asset asset_download_url bytes release repository sha256
+  ]
+  fail_lock("unexpected Linnet LTS pack identity shape") unless
+    linnet_pack.keys.sort == expected_pack_keys
+  validate_repository(linnet_pack, "rime_lmdg_grammar.linnet_pack")
+  validate_release_download(linnet_pack, "Linnet LTS pack")
+  unless require_string(linnet_pack, "repository") ==
+         "https://github.com/Ares-X/Linnet.git"
+    fail_lock("the grammar recovery pack must be owned by Ares-X/Linnet")
   end
-  require_string(rime_lmdg_grammar, "sha256", SHA256)
+  unless require_string(linnet_pack, "release").match?(/\Adata-[1-9][0-9]*\z/) &&
+         require_string(linnet_pack, "asset") == "Linnet-LTS.linnetpack"
+    fail_lock("the grammar recovery pack must be one fixed Linnet data release")
+  end
   lock
 rescue Errno::ENOENT
   fail_lock("missing upstreams.lock.json")

@@ -24,27 +24,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           submodules: false
-      - name: Fingerprint the Xcode toolchain
-        id: toolchain
-        run: |
-          fingerprint="$(xcodebuild -version | shasum -a 256 | awk '{print $1}')"
-          echo "sha256=${fingerprint}" >> "${GITHUB_OUTPUT}"
-      # Restored cache bytes are untrusted acceleration only. action-install.sh
-      # revalidates locked commits, digests, fingerprints, and artifact shapes.
       - name: Restore locked build cache
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        uses: ./.github/actions/restore-locked-build-cache
         with:
-          path: |
-            build/upstreams
-            build/dependencies
-            data/chinese/grammar
-            build/linnet-english-cache
-            build/linnet-english.fingerprint
-            data/plum/build
-            build/precompiled.fingerprint
-          key: linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/**', 'sources/**', 'data/linnet/**', 'data/chinese/**', 'config/linnet-data-releases.json') }}
-          restore-keys: |
-            linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
+          save: ${{ github.ref == 'refs/heads/main' }}
       - name: Install declared build tools
         run: scripts/install_ci_build_tools.sh release
       - name: Validate key-free source and data inputs
@@ -73,28 +56,10 @@ jobs:
           persist-credentials: false
           submodules: false
 
-      - name: Fingerprint the Xcode toolchain
-        id: toolchain
-        run: |
-          fingerprint="$(xcodebuild -version | shasum -a 256 | awk '{print $1}')"
-          echo "sha256=${fingerprint}" >> "${GITHUB_OUTPUT}"
-
-      # Restored cache bytes are untrusted acceleration only. action-install.sh
-      # revalidates locked commits, digests, fingerprints, and artifact shapes.
       - name: Restore locked build cache
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        uses: ./.github/actions/restore-locked-build-cache
         with:
-          path: |
-            build/upstreams
-            build/dependencies
-            data/chinese/grammar
-            build/linnet-english-cache
-            build/linnet-english.fingerprint
-            data/plum/build
-            build/precompiled.fingerprint
-          key: linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/**', 'sources/**', 'data/linnet/**', 'data/chinese/**', 'config/linnet-data-releases.json') }}
-          restore-keys: |
-            linnet-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install declared build tools
         run: scripts/install_ci_build_tools.sh release
