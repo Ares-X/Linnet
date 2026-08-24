@@ -124,8 +124,10 @@ scripts/upstream-sync verify
 patch 是否仍精确适用，以及 Linnet 自己的词典和交互优化是否被保留；然后运行
 focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有这些结果都
 通过后，才在同一个提交中更新 gitlink、`upstreams.lock.json`、必要 patch 和数据
-release identity，再由标签触发发布。定时 GitHub workflow 只报告候选更新，不得
-自动修改仓库、合并上游或发布。
+release identity。进入发布时，只有精确 main revision、该 revision 的成功 CI 和最终
+八件产物 `package/verify_publication_artifacts` 验证才能授权预标签 `core` / `data` /
+`catalog`；完成真实安装验收后，版本标签只授权 `public` / Latest。定时 GitHub
+workflow 只报告候选更新，不得自动修改仓库、合并上游或发布。
 
 RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此上游 URL 只用于
 发现和本地审查候选；被 Linnet 接纳的原始模型字节数与摘要仍记录在
@@ -140,23 +142,28 @@ checkout 中预计算未来 LTS 包摘要，并在同一个最终提交里写入
 git tag "data-seed-${sequence}" "${candidate_revision}"
 git push origin "refs/tags/data-seed-${sequence}"
 GH_TOKEN=... GITHUB_REPOSITORY=Ares-X/Linnet \
-  package/publish_github_release data "${archive_dir}" \
+  LINNET_RELEASE_TOOL=/absolute/path/to/verified/linnet-pack \
+  package/publish_github_release data-seed "${archive_dir}" \
   "${version}" "${sequence}" "${candidate_revision}"
 git push origin ":refs/tags/data-seed-${sequence}"
 git tag -d "data-seed-${sequence}"
 ```
 
-这个 seed 步骤只允许发布 `data` 预发布资产，不得调用 `catalog`，也不得推进
-`data-channel`；因此尚未验收的未来模型不会被已安装用户看到。发布后必须从 clean
-checkout 走一次固定包冷构建，确认外层容器和内部原始模型都与 lock 一致；只有同一
-个 `candidate_revision` 才能快进到 `main`。临时 seed tag 不触发产品发布 workflow，
+这个 `data-seed` 步骤是正常 main/CI 发布门之外唯一的冷构建启动边界：它仍须由最终
+八件产物 verifier 接受，并且远端 `data-seed-N` 必须精确指向 candidate revision；
+它只允许发布五件 `data` 预发布资产，不得调用 `catalog`，也不得推进 `data-channel`，
+因此尚未验收的未来模型不会被已安装用户看到。发布后必须从 clean checkout 走一次
+固定包冷构建，确认外层容器和内部原始模型都与 lock 一致；只有同一个
+`candidate_revision` 才能快进到 `main`。临时 seed tag 不触发产品发布 workflow，
 发布成功后立即删除；正式 `data-N` tag 继续绑定该提交。普通构建没有回退到可变
 上游资产的路径。
 
-进入正常产品发布时，再从该精确 main revision 构建八件归档并依次执行 `core`、
-`data`（此时只接受既有 seed 的相同字节）、`catalog`。真实安装态 Settings 激活和
-InputMethodKit 验收通过后才打产品版本标签；标签 workflow 最后重验同一状态并发布
-`public` / Latest。稳定 Catalog 仍只有一个 owner 和一个 URL。
+进入正常产品发布时，候选必须是当前精确 main revision，该 revision 的 main CI 已
+成功，并且从同一干净 revision 构建的八件归档已通过最终独立 verifier；随后才依次
+执行 `core`、`data`（此时只接受既有 seed 的相同字节）、`catalog`。真实安装态
+Settings 激活和 InputMethodKit 验收通过后才打产品版本标签；标签不再拥有或推进
+Core/data/Catalog，只授权 workflow 重验同一状态并发布 `public` / Latest。稳定
+Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖和英文生成数据。只有默认 `main`
 可以在成功任务结束后写入缓存；功能分支和版本标签只读取当前 ref 或默认分支缓存，

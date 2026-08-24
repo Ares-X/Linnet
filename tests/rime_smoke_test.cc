@@ -1783,25 +1783,37 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
                       "direct Smart English fallback to bundled Chinese");
   api->destroy_session(direct_english);
 
-  const RimeSessionId composing =
-      CreateSchemaSession(api, "linnet_zh_pinyin");
-  Enter(api, composing, "shuru");
-  const auto composing_candidates = Candidates(api, composing);
-  if (composing_candidates.empty()) {
-    Fail("direct Shift composition fixture produced no Chinese candidate");
+  const std::array<std::pair<int, const char*>, 2> full_pinyin_shift_keys = {{
+      {XK_Shift_L, "Shift_L"},
+      {XK_Shift_R, "Shift_R"},
+  }};
+  for (const auto& shift : full_pinyin_shift_keys) {
+    const RimeSessionId composing =
+        CreateSchemaSession(api, "linnet_zh_pinyin");
+    Enter(api, composing, "shuru");
+    const auto composing_candidates = Candidates(api, composing);
+    if (composing_candidates.empty()) {
+      Fail(std::string(shift.second) +
+           " full-pinyin composition fixture produced no Chinese candidate");
+    }
+    TapShift(api, composing, shift.first);
+    ExpectCurrentSchema(api, composing, "linnet_en",
+                        std::string(shift.second) +
+                            " with an active full-pinyin composition");
+    if (TakeCommit(api, composing) != "shuru") {
+      Fail(std::string(shift.second) +
+           " did not preserve uncommitted full-pinyin letters");
+    }
+    const char* remaining_composition = api->get_input(composing);
+    ExpectNoCommit(api, composing,
+                   std::string(shift.second) +
+                       " duplicate full-pinyin composition commit");
+    if (remaining_composition && remaining_composition[0] != '\0') {
+      Fail(std::string(shift.second) +
+           " duplicated or retained the full-pinyin composition");
+    }
+    api->destroy_session(composing);
   }
-  TapShift(api, composing, XK_Shift_L);
-  ExpectCurrentSchema(api, composing, "linnet_en",
-                      "direct Shift with a Chinese composition");
-  if (TakeCommit(api, composing) != "shuru") {
-    Fail("direct Shift did not preserve uncommitted full-pinyin letters");
-  }
-  const char* remaining_composition = api->get_input(composing);
-  ExpectNoCommit(api, composing, "duplicate full-pinyin Shift commit");
-  if (remaining_composition && remaining_composition[0] != '\0') {
-    Fail("direct Shift duplicated or retained the full-pinyin composition");
-  }
-  api->destroy_session(composing);
 
   const RimeSessionId english_composing =
       CreateSchemaSession(api, "linnet_en");

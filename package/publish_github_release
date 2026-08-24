@@ -50,6 +50,11 @@ case "${channel}" in
     title="Linnet automatic data channel ${catalog_sequence}"
     prerelease=true
     ;;
+  data-seed)
+    tag="data-${catalog_sequence}"
+    title="Linnet automatic data channel ${catalog_sequence}"
+    prerelease=true
+    ;;
   catalog)
     tag=""
     title=""
@@ -57,6 +62,11 @@ case "${channel}" in
     ;;
   *) fail_publish "unknown release channel: ${channel}" ;;
 esac
+
+asset_channel="${channel}"
+if [[ "${channel}" == data-seed ]]; then
+  asset_channel=data
+fi
 
 assets=()
 if [[ "${channel}" != catalog ]]; then
@@ -67,7 +77,7 @@ if [[ "${channel}" != catalog ]]; then
       fail_publish "verified release asset is missing: ${name}"
     assets+=("${path}")
   done < <("${project_root}/package/release_asset_manifest" \
-    "${channel}" "${version}" "${catalog_sequence}")
+    "${asset_channel}" "${version}" "${catalog_sequence}")
   [[ "${#assets[@]}" -gt 0 ]] || fail_publish "release channel is empty"
 fi
 
@@ -117,6 +127,56 @@ verify_release_revision() {
     fail_publish "${requested_tag} does not resolve to a commit"
   [[ "${resolved_revision}" == "${candidate_revision}" ]] ||
     fail_publish "${requested_tag} resolves to a different source revision"
+}
+
+verify_candidate_archive() {
+  LINNET_RELEASE_TOOL="${LINNET_RELEASE_TOOL:-}" \
+    "${project_root}/package/verify_publication_artifacts" \
+      "${release_dir}" "${version}" "${candidate_revision}" >/dev/null ||
+    fail_publish "candidate archive failed final artifact verification"
+}
+
+verify_candidate_source() {
+  if [[ "${channel}" == data-seed ]]; then
+    verify_release_revision "data-seed-${catalog_sequence}"
+    return
+  fi
+
+  local main_revision
+  main_revision="$(gh api "repos/${repository}/git/ref/heads/main" \
+    --jq '.object.sha')" || fail_publish "remote main identity is unavailable"
+  [[ "${main_revision}" =~ ^[0-9a-f]{40}$ ]] ||
+    fail_publish "remote main identity is invalid"
+
+  if [[ "${channel}" == catalog ]]; then
+    [[ "${main_revision}" == "${candidate_revision}" ]] ||
+      fail_publish "Catalog candidate is not the current remote main revision"
+  elif [[ "${main_revision}" != "${candidate_revision}" ]]; then
+    verify_release_revision "v${version}"
+  fi
+  if [[ "${channel}" == public ]]; then
+    verify_release_revision "v${version}"
+  fi
+
+  local runs="${work_root}/main-ci-runs.json"
+  gh api --method GET "repos/${repository}/actions/runs" \
+    -f head_sha="${candidate_revision}" -f branch=main -f event=push \
+    -F per_page=100 >"${runs}" ||
+    fail_publish "main CI evidence is unavailable"
+  ruby -rjson -e '
+    document = JSON.parse(File.binread(ARGV.fetch(0)))
+    revision = ARGV.fetch(1)
+    accepted = document.fetch("workflow_runs").any? do |run|
+      run.fetch("name") == "Linnet commit CI" &&
+        run.fetch("head_sha") == revision &&
+        run.fetch("head_branch") == "main" &&
+        run.fetch("event") == "push" &&
+        run.fetch("status") == "completed" &&
+        run.fetch("conclusion") == "success"
+    end
+    abort unless accepted
+  ' "${runs}" "${candidate_revision}" ||
+    fail_publish "candidate has no successful exact main CI run"
 }
 
 verify_published_channel() {
@@ -201,7 +261,7 @@ EOF
       done <"${expected_assets}"
     } >"${notes}"
     ;;
-  data)
+  data|data-seed)
     {
       echo "Linnet Settings 使用的同仓库自动数据频道。普通用户无需手动下载这些文件。"
       echo "Catalog 绑定每个语言包的字节数和 SHA-256。"
@@ -216,6 +276,13 @@ EOF
     : >"${notes}"
     ;;
 esac
+
+# Every remote mutation revalidates the final eight-file candidate itself.
+# Catalog additionally requires the candidate to remain the current remote
+# main revision; the version tag is the only later authority for Public. The
+# data-seed bootstrap is isolated to one exact seed tag and the data prerelease.
+verify_candidate_archive
+verify_candidate_source
 
 ensure_catalog_pointer() {
   local allow_promotion="$1"

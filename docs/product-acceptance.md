@@ -1,13 +1,15 @@
 # Linnet product acceptance
 
-Current policy: an exact main revision with passing CI may stage the verified
-Core/data prereleases and promote their byte-identical Catalog through the one
-stable pointer. Real installed Settings and InputMethodKit acceptance then use
-that same candidate. A version tag alone authorizes the final unsigned public
-Release / Latest from that exact revision; the tag workflow revalidates the
-staged channels before routing the complete installer. Installation acceptance
-remains separate evidence and must name the exact revision, build and artifact
-hashes exercised.
+Current policy: except for the isolated cold-build `data-seed` boundary below,
+only an exact main revision with successful exact-revision CI
+and a passing final eight-artifact `package/verify_publication_artifacts` run
+may stage the verified Core/data prereleases and promote their byte-identical
+Catalog through the one stable pointer. Real installed Settings and
+InputMethodKit acceptance then use that same candidate. A version tag
+authorizes only the final unsigned public Release / Latest from that exact
+revision; the tag workflow revalidates the staged channels before routing the
+complete installer. Installation acceptance remains separate evidence and
+must name the exact revision, build and artifact hashes exercised.
 
 The historical UAT9 summary below is retained only as static evidence from
 2026-08-12; its former artifact directory has been removed from versioned
@@ -42,8 +44,9 @@ is no longer a candidate or a current product projection.
 
 `README.md` defines the user-visible product promise; this file records the
 evidence required before those promises may be reported as installed-product
-acceptance. The Git tag and embedded release metadata own publication identity;
-this document defines evidence levels but does not authorize publication.
+acceptance. Exact main plus embedded release metadata own the staged candidate
+identity; the version tag alone owns public Release / Latest identity. This
+document defines evidence levels but does not authorize either mutation.
 
 Passing source tests, engine smoke tests or package expansion is necessary but
 not sufficient for installed-product acceptance. Each V/I claim below requires
@@ -75,9 +78,17 @@ all non-install blockers are closed.
   `NOT_EXERCISED` and `ENVIRONMENT_INVALID` are evidence gaps: they block only
   the corresponding V/I claim. P2 findings require an explicit product
   decision and must be listed in the release notes.
-- A published asset must come from the exact tagged revision and pass the
-  community artifact verifier before upload. A later source revision requires
-  a new version tag and fresh artifacts.
+- Pre-public Core/data assets and stable Catalog promotion must come from the
+  exact current main revision, its successful CI run and the final
+  eight-artifact `package/verify_publication_artifacts` verifier. Only the
+  later public `Linnet.pkg` requires and is authorized by the matching version
+  tag. A later source revision requires fresh artifacts, CI, staged channels
+  and installed acceptance before a new version tag.
+- The sole bootstrap exception is `data-seed-N`: an exact temporary seed tag
+  plus the same final eight-artifact verifier may publish only the five data
+  prerelease assets needed by a future cold build. It cannot call `catalog`,
+  advance `data-channel`, publish Core or create Public / Latest; normal main
+  and CI gates must later reaccept the same bytes before installed acceptance.
 - No validation step may push, create a tag, publish a GitHub Release, weaken
   macOS security settings or delete user data.
 - Manual release-CI dispatch is a read-only source verifier. A tag job uses the
@@ -155,7 +166,7 @@ locale. Localization completeness alone is not visual proof.
 | J01 | Download, checksum and trust instructions | P, I, R | No current package exists. Retired UAT9 checksums remain historical evidence only; a new revision-bound Core/complete projection, installed trust flow and public Release bytes are pending. |
 | J02 | Clean install, add/enable Linnet and coexist with Squirrel | I | `NOT_EXERCISED`. There is no current package candidate. Contributors may run non-authoritative local UAT after their own candidate passes build/package/checksum gates. The machine record can change to `passed` only through the canonical result workflow after this row and the full required matrix succeed. |
 | J03 | First Chinese input and candidate commit | E, I | E covers same-event commit for ordinary Chinese punctuation and ASCII `,`/`.`/`:` inside numbers, plus idle `/` and `~` as ordinary symbols; installed workflow remains pending. |
-| J04 | left/right Shift tap, chord, hold and active composition | C, E, I | replay/engine covers exact-once raw-letter commit rather than candidate/completion selection in every Chinese profile and Smart English; the required six-application installed workflow (Terminal, VS Code, Chrome, Apple Notes, Word and Teams) is `NOT_EXERCISED` |
+| J04 | left/right Shift tap, chord, hold and active composition | C, E, I | replay/engine covers exact-once raw-letter commit rather than candidate/completion selection in every Chinese profile and Smart English; active full-pinyin composition explicitly exercises both `Shift_L` and `Shift_R`. The required six-application installed workflow (Terminal, VS Code, Chrome, Apple Notes, Word and Teams) is `NOT_EXERCISED` |
 | J05 | Caps Lock, passwords, URLs, paths and code identifiers | E, I | E passed: Caps Lock down/type/up enters and leaves raw ASCII in both Chinese and Smart English; installed Terminal/password-field behavior remains pending |
 | J06 | full pinyin and all seven double-pinyin profiles, including the live Chinese/English candidate boundary | E, I | The focused native engine gate passes all eight profile overlap and page-tail boundaries on the working tree; the canonical Release rerun and installed profile selection remain pending. |
 | J07 | Smart English completion, correction, ranking, independently configurable IPA/definition, prediction, correction and selection learning | C, E, I | C/E pass after the final lexicon rebuild and graphical-control projection probes. Native engine rows prove same-event Space commit with the trailing space, prediction selection by arrows and `1–9`, `Esc` cancellation, and that disabling selection learning stops both learned-candidate reads and bigram writes while static context suggestions and spacing remain available; installed interaction remains pending. |
@@ -171,7 +182,7 @@ locale. Localization completeness alone is not visual proof.
 | J17 | keyboard navigation, focus order, labels, VoiceOver and reduced-motion behavior | V, I | pending |
 | J18 | cold start, first key, sustained typing, memory, disk and p95/p99 latency | E, P, I | The native runtime gate is the threshold owner and requires p95 ≤ 5 ms and p99 ≤ 15 ms. A frozen-candidate report must retain its actual measurements; component PASS alone is not P/I evidence. Retired UAT9 historically measured 458,736,785 compressed bytes and 885,915,895 logical payload bytes. The new LTS identity and current source require a new package size projection; installed cold start, APFS usage and first-run cache growth remain I pending. |
 | J19 | empty, loading, download, validation, disk-full, conflict and rollback error states | C, V, I | partial headless coverage; visible recovery audit pending |
-| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | The release owner now requires eight candidate artifacts and routes them 1/2/5 to the stable, Core and data channels. Exact remote bytes and Release-page evidence remain pending until the tagged workflow completes. |
+| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | The pre-public owner accepts one exact main revision only after its successful CI and `package/verify_publication_artifacts` has accepted exactly eight candidate artifacts. Before the version tag, it routes 2 Core and 5 data assets, verifies their remote bytes, and promotes the one stable Catalog pointer for installed acceptance. Only that acceptance may authorize the tag; the tag routes the remaining `Linnet.pkg` to public Release / Latest. Staged remote-byte and final Release-page evidence remain distinct R rows. |
 
 ## Finding ledger
 
@@ -187,7 +198,7 @@ locale. Localization completeness alone is not visual proof.
 | closed | P1 | The Host lifecycle CLI discarded InputMethodKit failures and postinstall treated the Installer service as the user's Text Input UI session, so transient enable/selection results could be reported as success without adding Linnet to the user's persistent input-source list. | `SquirrelInstaller` TIS boundary and Host CLI exit projection | registration, explicit enablement, selection and disablement retain typed failures. Complete registers and requests enablement but never selects. Core accepts only its package-bound prior-state tuple and may conditionally restore Linnet within its single refresh transition; it cannot enable or accept an alternate target identifier. Uninstall leaves source retirement to the required fresh login session. |
 | closed | P0 | During exact `83e7adb` default-uninstall UAT, the old App and generated data were removed but the preserved `linnet_zh.userdb` rotated its LevelDB log and manifest after the uninstaller invoked `--disable-input-source`; the pre-action and post-action byte manifests differed while the already-quiesced Host had no pending user input. | default uninstaller lifecycle sequence | remove the TIS disable transition from uninstall, retain the exact Host/Settings quit as the only pre-delete product action, and let the already-required fresh login retire the absent source; the real default-uninstall row must repeat from restored pre-action bytes and prove UserData, Backups and Transactions byte-identical before installation can pass |
 | closed | P1 | Caps Lock lacked an automated key-event proof across Chinese and Smart English. | input-event engine acceptance | `rime_smoke_test` now proves Caps Lock down/type/up enters and leaves raw ASCII in both schemas; installed Terminal/password-field coverage remains in J05 |
-| gate | P1 | Every tagged candidate requires a fresh revision-bound Core/complete/uninstaller projection after source, LTS identity or Settings bytes change. | language-data release identity and local package projection | before tagging, pass full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity |
+| gate | P1 | Every publication candidate requires a fresh revision-bound Core/complete/uninstaller projection after source, LTS identity or Settings bytes change. | language-data release identity and local package projection | before any pre-public mutation, require exact current main, successful exact-revision CI and the final eight-artifact `package/verify_publication_artifacts` verifier; before tagging, also pass installed Settings/InputMethodKit acceptance on those same bytes. Full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity remain candidate gates. |
 | evidence-gap | — | Remote fast-forward Catalog and real-network evidence require the exact main/CI/archive candidate to be staged before the public tag. | archive and remote publication owners | publish Core and deterministic packs, have the explicit `catalog` stage verify their exact remote bytes and fast-forward the canonical Catalog, then exercise real installed Settings before authorizing the public tag |
 | closed | P2 | Candidate labels/opacity/radius, fuzzy-pinyin policy, restore defaults and reviewed advanced overrides are not Beta controls. The former design draft over-promised them; font and theme presets are implemented. | typed settings document and deterministic projection renderer | retired controls remain outside the Beta contract; any future addition requires its own typed owner and product evidence |
 | closed | P1 | Settings previously shipped partial Traditional-Chinese strings beside otherwise English fallback, and dynamic status classified any Chinese locale as Simplified Chinese. | Settings bundle string catalog and typed presentation locale | Beta now supports exactly English and Simplified Chinese; every entry has reviewed Simplified Chinese, unsupported Chinese scripts uniformly fall back to English, and structural/component gates reject a mixed third locale |
@@ -219,10 +230,12 @@ The credential-free manual candidate job verifies source and locked inputs; it
 does not create a signing handoff or publish. Local package and installation
 UAT may retain exact revision and artifact hashes as evidence, but an
 acceptance record does not authorize publication. Formal archive
-assembly creates all eight product assets from the exact main revision. The
-pre-public publisher stages Core/data and the stable Catalog for installed
-acceptance; the later tag workflow revalidates their digest-bound manifests
-before creating the public Release. An existing data or Core release must be a
+assembly creates all eight product assets from the exact main revision. Only a
+successful exact-revision main CI run plus the final eight-artifact verifier may
+hand those bytes to the pre-public publisher, which stages Core/data and the
+stable Catalog for installed acceptance. The later version tag authorizes only
+public Release / Latest, whose workflow revalidates the staged digest-bound
+manifests before uploading `Linnet.pkg`. An existing data or Core release must be a
 prerelease with the same verified bytes; an existing stable product release
 must retain the exact verified asset set. Any extra or differing asset is a
 hard failure, while a byte-identical planned subset is the only retry state.
