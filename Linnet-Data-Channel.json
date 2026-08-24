@@ -11,7 +11,7 @@
           "kind" : "chinese",
           "min_core" : "0.1.1",
           "sequence" : 30,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-30/Linnet-Chinese.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-31/Linnet-Chinese.linnetpack",
           "version" : "0.5.22"
         },
         {
@@ -22,7 +22,7 @@
           "kind" : "english",
           "min_core" : "0.1.1",
           "sequence" : 19,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-30/Linnet-English.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-31/Linnet-English.linnetpack",
           "version" : "0.4.14"
         },
         {
@@ -33,7 +33,7 @@
           "kind" : "lts",
           "min_core" : "0.1.0",
           "sequence" : 5,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-30/Linnet-LTS.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-31/Linnet-LTS.linnetpack",
           "version" : "c5fca7cf43af"
         }
       ]
@@ -49,7 +49,7 @@
           "kind" : "chinese",
           "min_core" : "0.1.1",
           "sequence" : 30,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-30/Linnet-Chinese.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-31/Linnet-Chinese.linnetpack",
           "version" : "0.5.22"
         },
         {
@@ -60,7 +60,7 @@
           "kind" : "english",
           "min_core" : "0.1.1",
           "sequence" : 19,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-30/Linnet-English.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-31/Linnet-English.linnetpack",
           "version" : "0.4.14"
         },
         {
@@ -71,7 +71,7 @@
           "kind" : "lts",
           "min_core" : "0.1.0",
           "sequence" : 5,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-30/Linnet-LTS.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-31/Linnet-LTS.linnetpack",
           "version" : "c5fca7cf43af"
         },
         {
@@ -82,21 +82,21 @@
           "kind" : "extended",
           "min_core" : "0.1.0",
           "sequence" : 6,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-30/Linnet-Extended.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-31/Linnet-Extended.linnetpack",
           "version" : "0.2.2"
         }
       ]
     }
   ],
   "core" : {
-    "build" : 25,
-    "bytes" : 2603901,
-    "package_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.8/Linnet-0.1.8-arm64-Core-community-beta.pkg",
-    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.8",
-    "revision" : "6be979318abcfcf984701cc3262e8ec374b63a4f",
-    "sha256" : "b1e803a35bcd627f60e40a33a9185914a448f5d18212edb9ec51540d25ec6849",
-    "version" : "0.1.8"
+    "build" : 26,
+    "bytes" : 2603000,
+    "package_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.9/Linnet-0.1.9-arm64-Core-community-beta.pkg",
+    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.9",
+    "revision" : "fe02e1aa64bf8461179368f9e553c8a317490e73",
+    "sha256" : "9c2e0357bddf37674498217f3120a31fa2b45561fe69f56a3c356c6d42dd2315",
+    "version" : "0.1.9"
   },
   "format" : 1,
-  "sequence" : 30
+  "sequence" : 31
 }
