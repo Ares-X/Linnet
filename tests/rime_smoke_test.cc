@@ -573,8 +573,47 @@ RimeSessionId CreateSchemaSession(RimeApi_stdbool* api,
                                   const char* schema_id);
 std::string TakeCommit(RimeApi_stdbool* api, RimeSessionId session);
 
+void ExpectNaturalSingleKeyDefaultRanking(RimeApi_stdbool* api) {
+  const RimeSessionId session = CreateSchemaSession(api, "linnet_zh");
+  api->set_option(session, "emoji", false);
+  Enter(api, session, "a");
+  const auto candidates = CandidateOrigins(session);
+  if (candidates.empty() || BaseText(candidates.front().text) != "啊" ||
+      candidates.front().genuine_language != "linnet_zh") {
+    std::cerr << "Natural-code candidates for single key 'a':";
+    for (const auto& candidate : candidates) {
+      std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                << candidate.genuine_type << ":"
+                << candidate.genuine_language << ":q="
+                << candidate.quality << ":preedit=" << candidate.preedit
+                << "]";
+    }
+    std::cerr << '\n';
+    Fail("natural-code single key 'a' did not rank 啊 first");
+  }
+  const bool retained_english = std::any_of(
+      candidates.begin(), candidates.end(), [](const auto& candidate) {
+        return BaseText(candidate.text) == "a" &&
+               candidate.genuine_language == "linnet_en";
+      });
+  if (!retained_english) {
+    Fail("natural-code single key 'a' lost its explicit English candidate");
+  }
+  api->destroy_session(session);
+
+  const RimeSessionId full_code = CreateSchemaSession(api, "linnet_zh");
+  api->set_option(full_code, "emoji", false);
+  Enter(api, full_code, "aa");
+  const auto full_code_candidates = CandidateOrigins(full_code);
+  if (full_code_candidates.empty() ||
+      BaseText(full_code_candidates.front().text) != "啊") {
+    Fail("natural-code full code 'aa' no longer ranks 啊 first");
+  }
+  api->destroy_session(full_code);
+}
+
 void ExpectSingleSyllablePreferenceLearning(RimeApi_stdbool* api) {
-  constexpr char kSchema[] = "linnet_zh_pinyin";
+  constexpr char kSchema[] = "linnet_zh";
   constexpr char kInput[] = "a";
   const RimeSessionId learning = CreateSchemaSession(api, kSchema);
   api->set_option(learning, "emoji", false);
@@ -4098,10 +4137,19 @@ void WriteFastReloadProjection(const std::filesystem::path& user_directory,
            << "  \"ascii_composer/switch_key/Caps_Lock\": commit_text\n"
            << "  \"linnet/recognizer_patterns/zz_code_token\": \"^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$\"\n"
            << "  \"menu/page_size\": 5\n";
-  if (schema_id != "linnet_zh_pinyin") {
-    defaults << "  \"schema_list/@0/schema\": \"" << schema_id << "\"\n"
-             << "  \"schema_list/@" << original_index
-             << "/schema\": \"linnet_zh_pinyin\"\n";
+  if (original_index + 1 >= kProductSchemaIDs.size() ||
+      schema_id != std::string(kProductSchemaIDs[original_index])) {
+    Fail("fast reload profile is outside the canonical schema order");
+  }
+  for (size_t index = 0; index < kProductSchemaIDs.size(); ++index) {
+    size_t source_index = index;
+    if (index == 0) {
+      source_index = original_index;
+    } else if (index == original_index) {
+      source_index = 0;
+    }
+    defaults << "  \"schema_list/@" << index << "/schema\": \""
+             << kProductSchemaIDs[source_index] << "\"\n";
   }
   WritePinnedFile(user_directory / "default.custom.yaml", defaults.str(),
                   fixed_time);
@@ -4307,6 +4355,9 @@ int main(int argc, char** argv) {
   const bool prediction_punctuation_probe =
       argc == 4 &&
       std::strcmp(argv[3], "--prediction-punctuation-probe") == 0;
+  const bool single_key_ranking_probe =
+      argc == 4 &&
+      std::strcmp(argv[3], "--single-key-ranking-probe") == 0;
   const bool mixed_input_probe =
       argc == 4 && std::strcmp(argv[3], "--mixed-input-probe") == 0;
   const bool mixed_latency_probe =
@@ -4315,13 +4366,15 @@ int main(int argc, char** argv) {
       !settings_off_probe && !learning_off_probe &&
       !shift_probe && !page_size_probe && !english_profile_probe &&
       !fast_config_reload_probe && !prediction_punctuation_probe &&
-      !mixed_input_probe && !mixed_latency_probe) {
+      !single_key_ranking_probe && !mixed_input_probe &&
+      !mixed_latency_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|--shift-probe|"
          "--page-size-probe EXPECTED|"
          "--english-profile-probe PROFILE CHINESE_SCHEMA CODE PREFIX|"
          "--fast-config-reload-probe|--prediction-punctuation-probe|"
-         "--mixed-input-probe|--mixed-latency-probe]");
+         "--single-key-ranking-probe|--mixed-input-probe|"
+         "--mixed-latency-probe]");
   }
   int expected_page_size = 0;
   if (page_size_probe) {
@@ -4392,7 +4445,16 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  if (single_key_ranking_probe) {
+    ExpectNaturalSingleKeyDefaultRanking(api);
+    ExpectSingleSyllablePreferenceLearning(api);
+    api->finalize();
+    std::cout << "rime_smoke_test: natural single-key ranking and learning: PASS\n";
+    return 0;
+  }
+
   if (mixed_input_probe) {
+    ExpectNaturalSingleKeyDefaultRanking(api);
     ExpectSingleSyllablePreferenceLearning(api);
     std::cout << "rime_smoke_test: single-syllable preference learning: PASS\n";
     ExpectModelessMixedInput(api);
@@ -5724,6 +5786,7 @@ int main(int argc, char** argv) {
     ExpectFirstCandidate(api, english, token, token);
   }
   ExpectModelessMixedInput(api);
+  ExpectNaturalSingleKeyDefaultRanking(api);
   ExpectSingleSyllablePreferenceLearning(api);
   api->destroy_session(isolated_session);
   api->destroy_session(prediction);

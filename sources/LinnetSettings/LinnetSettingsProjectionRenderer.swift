@@ -197,16 +197,18 @@ enum LinnetSettingsProjectionRenderer {
     if pageSize != LinnetSettingsDocument.Appearance.defaultPageSize {
       entries.append(("menu/page_size", String(pageSize)))
     }
-    if let selectedIndex = LinnetSettingsContract.ChineseProfile.allCases.firstIndex(
-      of: chineseProfile), selectedIndex != 0 {
-      // switcher/fix_schema_list_order makes the first list entry authoritative
-      // for every fresh session. Swap, rather than remove, so the standard Rime
-      // schema switcher and runtime-health list retain all shipped profiles.
-      entries.append(("schema_list/@0/schema", quoted(chineseProfile.schemaID)))
-      entries.append(("schema_list/@\(selectedIndex)/schema", quoted(
-        LinnetSettingsContract.ChineseProfile.fullPinyin.schemaID
-      )))
+    // A Core update deliberately preserves the installed language pack, whose
+    // historical schema defaults can differ from this document. Publish the
+    // complete order so the selected profile never falls back to pack age.
+    var orderedProfiles = LinnetSettingsContract.ChineseProfile.allCases
+    if let selectedIndex = orderedProfiles.firstIndex(of: chineseProfile) {
+      orderedProfiles.swapAt(0, selectedIndex)
     }
+    for (index, profile) in orderedProfiles.enumerated() {
+      entries.append(("schema_list/@\(index)/schema", quoted(profile.schemaID)))
+    }
+    entries.append(("schema_list/@\(orderedProfiles.count)/schema",
+                    quoted(LinnetSettingsContract.englishSchemaID)))
     return renderPatch(entries)
   }
 
@@ -267,12 +269,10 @@ enum LinnetSettingsProjectionRenderer {
       to: &entries
     )
     appendPinyinReverseTrigger(input.pinyinReverseTrigger, to: &entries)
-    if input.chineseProfile != .fullPinyin {
-      entries.append(("linnet_pinyin/prism", quoted(input.chineseProfile.schemaID)))
-      entries.append((
-        "linnet_mode_switch/chinese_schema", quoted(input.chineseProfile.schemaID)
-      ))
-    }
+    entries.append(("linnet_pinyin/prism", quoted(input.chineseProfile.schemaID)))
+    entries.append((
+      "linnet_mode_switch/chinese_schema", quoted(input.chineseProfile.schemaID)
+    ))
     appendEnglishMetadataOptions(english, to: &entries)
     if !english.predictionEnabled {
       entries.append(("switches/@\(englishPredictionSwitchIndex)/reset", "0"))

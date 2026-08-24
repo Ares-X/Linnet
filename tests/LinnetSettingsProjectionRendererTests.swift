@@ -133,13 +133,14 @@ struct LinnetSettingsProjectionRendererTests {
       )[LinnetSettingsProjectionRenderer.defaultCustomFile]
       if pageSize == LinnetSettingsDocument.Appearance.defaultPageSize {
         require(
-          projection == coreInteractionProjection,
+          projection == coreInteractionProjection + defaultSchemaOrderProjection,
           "the default document did not preserve unfinished text on Caps Lock"
         )
       } else {
         require(
           projection == coreInteractionProjection
-            + "  \"menu/page_size\": \(pageSize)\n",
+            + "  \"menu/page_size\": \(pageSize)\n"
+            + defaultSchemaOrderProjection,
           "page size \(pageSize) displaced the canonical Caps Lock policy"
         )
       }
@@ -179,7 +180,7 @@ struct LinnetSettingsProjectionRendererTests {
     }
     require(
       projections[LinnetSettingsProjectionRenderer.defaultCustomFile]
-        == coreInteractionProjection,
+        == coreInteractionProjection + defaultSchemaOrderProjection,
       "the default Core projection did not own the complete installed interaction policy"
     )
     for name in schemaFiles {
@@ -288,33 +289,26 @@ struct LinnetSettingsProjectionRendererTests {
         LinnetSettingsProjectionRenderer.englishCustomFile]
       let defaultCustom = LinnetSettingsProjectionRenderer.renderProjections(document: document)[
         LinnetSettingsProjectionRenderer.defaultCustomFile]
-      if profile == .fullPinyin {
-        require(
-          english?.contains("linnet_pinyin/prism") == false
-            && english?.contains("linnet_mode_switch/chinese_schema") == false,
-          "the bundled full-pinyin default emitted a redundant English prism projection"
-        )
-        require(
-          defaultCustom == coreInteractionProjection,
-          "the bundled first Chinese profile displaced the Caps Lock policy"
-        )
-      } else {
-        guard let selectedIndex = expectedProfiles.firstIndex(where: { $0.0 == profile }) else {
-          fail("the selected Chinese profile was absent from the shipped schema list")
-        }
-        require(
-          english?.contains("\"linnet_pinyin/prism\": \"\(prism)\"") == true &&
-            english?.contains("\"linnet_mode_switch/chinese_schema\": \"\(prism)\"") == true,
-          "the selected Chinese profile did not drive English reverse lookup and Shift return"
-        )
-        require(
-          defaultCustom
-            == coreInteractionProjection
-              + "  \"schema_list/@0/schema\": \"\(prism)\"\n"
-              + "  \"schema_list/@\(selectedIndex)/schema\": \"linnet_zh_pinyin\"\n",
-          "the selected Chinese profile displaced the canonical Caps Lock policy"
-        )
+      guard let selectedIndex = expectedProfiles.firstIndex(where: { $0.0 == profile }) else {
+        fail("the selected Chinese profile was absent from the shipped schema list")
       }
+      var orderedSchemas = expectedProfiles.map(\.1)
+      orderedSchemas.swapAt(0, selectedIndex)
+      orderedSchemas.append(LinnetSettingsContract.englishSchemaID)
+      let expectedDefault = orderedSchemas.enumerated().reduce(
+        coreInteractionProjection
+      ) { projection, entry in
+        projection + "  \"schema_list/@\(entry.offset)/schema\": \"\(entry.element)\"\n"
+      }
+      require(
+        english?.contains("\"linnet_pinyin/prism\": \"\(prism)\"") == true &&
+          english?.contains("\"linnet_mode_switch/chinese_schema\": \"\(prism)\"") == true,
+        "the selected Chinese profile did not explicitly own English lookup and Shift return"
+      )
+      require(
+        defaultCustom == expectedDefault,
+        "the selected Chinese profile did not explicitly own the complete schema order"
+      )
     }
 
     do {
@@ -899,7 +893,7 @@ struct LinnetSettingsProjectionRendererTests {
       let english = try? String(contentsOf: englishCustom, encoding: .utf8),
       english.contains("\"style/candidate_list_layout\": \"stacked\""),
       try String(contentsOf: defaultCustom, encoding: .utf8)
-        == coreInteractionProjection,
+        == coreInteractionProjection + defaultSchemaOrderProjection,
       !FileManager.default.fileExists(
         atPath: directory.appending(path: LinnetSettingsProjectionRenderer.squirrelCustomFile).path
       )
@@ -933,7 +927,7 @@ struct LinnetSettingsProjectionRendererTests {
     }
     let revertedDefault = try String(contentsOf: defaultCustom, encoding: .utf8)
     require(
-      revertedDefault == coreInteractionProjection,
+      revertedDefault == coreInteractionProjection + defaultSchemaOrderProjection,
       "reverting settings deleted the Core-owned interaction policy"
     )
     guard reverted.contains("linnet_zh.custom.yaml") else {
@@ -992,6 +986,19 @@ struct LinnetSettingsProjectionRendererTests {
     patch:
       "ascii_composer/switch_key/Caps_Lock": commit_text
       "linnet/recognizer_patterns/zz_code_token": "^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$"
+
+    """
+
+  private static let defaultSchemaOrderProjection = """
+      "schema_list/@0/schema": "linnet_zh_pinyin"
+      "schema_list/@1/schema": "linnet_zh"
+      "schema_list/@2/schema": "linnet_zh_flypy"
+      "schema_list/@3/schema": "linnet_zh_mspy"
+      "schema_list/@4/schema": "linnet_zh_sogou"
+      "schema_list/@5/schema": "linnet_zh_abc"
+      "schema_list/@6/schema": "linnet_zh_ziguang"
+      "schema_list/@7/schema": "linnet_zh_jiajia"
+      "schema_list/@8/schema": "linnet_en"
 
     """
 

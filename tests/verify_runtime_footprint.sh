@@ -1721,9 +1721,13 @@ ruby -e '
     activation.include?("commitComposition") ||
       activation.include?("isRimeInputSuspended = true")
   abort "configuration reload can publish success before fresh-schema validation" unless
-    activation.include?("ChineseProfile(schemaID:") &&
+    activation.include?("LinnetSettingsDocumentStore.snapshot(from: live)") &&
+      activation.include?("settingsSnapshot.document.input.chineseProfile") &&
       activation.include?("rimeAPI.get_current_schema") &&
       activation.include?("activeSchemaID == selectedProfile.schemaID")
+  abort "configuration reload inferred intent from its own compiled output" if
+    activation.include?("ChineseProfile(schemaID:") ||
+      activation.include?("linnet_mode_switch/chinese_schema")
 
   coordinator = File.read("sources/LinnetSettings/SettingsDataCoordinator.swift")
   apply = coordinator[/private func applyConfiguration\(.*?\n  \}\n\n  \/\/\/ Lightweight appearance apply/m]

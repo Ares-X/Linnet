@@ -678,22 +678,22 @@ extension SquirrelApplicationDelegate {
       return true
 
     case .configuration:
-      guard isRimeRunning, deployConfigurationReloadTargets() else { return false }
+      guard isRimeRunning,
+        let live = runtimeDataSnapshot?.userDataDirectory,
+        let settingsSnapshot = try? LinnetSettingsDocumentStore.snapshot(from: live),
+        deployConfigurationReloadTargets()
+      else { return false }
       invalidateRimeSessions()
       config?.close()
       config = nil
 
-      let englishConfig = SquirrelConfig()
-      guard loadSettings(),
-        englishConfig.open(schemaID: LinnetSettingsContract.englishSchemaID, baseConfig: nil),
-        let selectedSchemaID = englishConfig.getString("linnet_mode_switch/chinese_schema"),
-        let selectedProfile = LinnetSettingsContract.ChineseProfile(schemaID: selectedSchemaID)
-      else {
-        englishConfig.close()
-        return false
-      }
-      englishConfig.close()
+      guard loadSettings() else { return false }
+      let selectedProfile = settingsSnapshot.document.input.chineseProfile
 
+      // The typed Settings document is the sole profile intent owner.
+      // The compiled schema is deployment output and must never select intent.
+      // Readiness below only compares that intent with the fresh session,
+      // so a stale or mismatched deployment fails before acknowledgement.
       let readinessSession = rimeAPI.create_session()
       var activeSchemaBuffer = [CChar](repeating: 0, count: Int(PATH_MAX))
       let readActiveSchema = readinessSession != 0

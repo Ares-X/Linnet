@@ -1,13 +1,13 @@
 {
-  "catalog_sequence": 26,
+  "catalog_sequence": 27,
   "format": "io.github.ares-x.linnet.data-releases.v1",
   "packs": {
     "chinese": {
-      "version": "0.5.20",
-      "sequence": 28,
+      "version": "0.5.21",
+      "sequence": 29,
       "data_abi": 2,
       "min_core": "0.1.1",
-      "content_sha256": "941e2c7ed76d2540725cff5eafaed8276d187ec1be1f3d7312f8c5d14a680621"
+      "content_sha256": "ee170e23b1563dfe804affbe1c62b4666a7dec4cbcdb6858a54b1b7cf43ad208"
     },
     "english": {
       "version": "0.4.14",

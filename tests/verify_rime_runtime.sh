@@ -10,11 +10,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 runtime_probe="${1:-}"
-if [[ "${1:-}" == --mixed-input-probe ||
+if [[ "${1:-}" == --single-key-ranking-probe ||
+      "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --mixed-latency-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe]" >&2
+  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe]" >&2
   exit 64
 fi
 
@@ -40,18 +41,35 @@ cp -R data/plum/. "${shared}/"
 # canonical default owner, just as packaging does when it stages a candidate.
 cp data/linnet/default.yaml "${shared}/default.yaml"
 # Core-only updates deliberately keep the installed language pack. Reproduce
-# build 10's old Active owner so the native suite proves the Core projection,
-# not a coincidentally current pack, retires the hidden / and ~ raw prefixes.
+# old Active owners so the native suite proves the Core projections, not a
+# coincidentally current pack, retire stale routing and schema defaults.
 ruby -e '
   path = ARGV.fetch(0)
   source = File.binread(path)
   placeholder = "    zz_code_token: \"^$\"\n"
   stale = "    zz_code_token: \"^(?:(?:/|~).*|(?:www[.]|https?:|ftp[.:]|mailto:|file:).*)$\"\n"
+  current_schemas = "  - schema: linnet_zh_pinyin\n  - schema: linnet_zh\n"
+  stale_schemas = "  - schema: linnet_zh\n  - schema: linnet_zh_pinyin\n"
   abort "Core compile placeholder is missing" unless source.scan(placeholder).length == 1
-  File.binwrite(path, source.sub(placeholder, stale))
+  abort "current schema order is missing" unless source.scan(current_schemas).length == 1
+  File.binwrite(path, source.sub(placeholder, stale).sub(current_schemas, stale_schemas))
 ' "${shared}/default.yaml"
 cp data/linnet/linnet_zh.schema.yaml "${shared}/linnet_zh.schema.yaml"
+cp data/linnet/linnet_algebra.yaml "${shared}/linnet_algebra.yaml"
 cp data/linnet/linnet_en.schema.yaml "${shared}/linnet_en.schema.yaml"
+ruby -e '
+  path = ARGV.fetch(0)
+  source = File.binread(path)
+  current_prism = "  prism: linnet_zh_pinyin\n"
+  current_return = "  chinese_schema: linnet_zh_pinyin\n"
+  abort "current full-pinyin Prism is missing" unless source.scan(current_prism).length == 1
+  abort "current full-pinyin return is missing" unless source.scan(current_return).length == 1
+  File.binwrite(
+    path,
+    source.sub(current_prism, "  prism: linnet_zh\n")
+      .sub(current_return, "  chinese_schema: linnet_zh\n")
+  )
+' "${shared}/linnet_en.schema.yaml"
 cp -R data/opencc/. "${shared}/opencc/"
 cp tests/fixtures/linnet_pinyin_limit.dict.yaml \
   tests/fixtures/linnet_pinyin_limit_algebra.yaml \
@@ -123,6 +141,8 @@ if [[ -n "${runtime_probe}" ]]; then
   cat "${scratch}/stdout"
   if [[ "${runtime_probe}" == --mixed-latency-probe ]]; then
     echo "Linnet native Rime mixed-input latency measurement: COMPLETE"
+  elif [[ "${runtime_probe}" == --single-key-ranking-probe ]]; then
+    echo "Linnet native Rime focused single-key ranking probe: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi
