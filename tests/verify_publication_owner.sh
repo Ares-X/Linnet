@@ -168,6 +168,8 @@ mkdir -p "${fixture_assets}" "${fake_bin}" "${fake_state}"
 while IFS= read -r asset; do
   printf 'fixture:%s\n' "${asset}" >"${fixture_assets}/${asset}"
 done < <("${asset_manifest}" candidate "${version}" "${catalog_sequence}")
+printf '{"sequence":%s}\n' "${catalog_sequence}" \
+  >"${fixture_assets}/Linnet-Data-Channel.json"
 cat >"${fake_bin}/gh" <<'FAKE_GH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -190,6 +192,11 @@ if [[ "${1:-}" == api ]]; then
   branch="${state}/data-channel"
   mkdir -p "${branch}/blobs" "${branch}/trees" "${branch}/commits"
   case "${method}:${endpoint}" in
+    GET:repos/Ares-X/Linnet/commits/*)
+      release_tag="${endpoint##*/}"
+      [[ -f "${state}/${release_tag}/revision" ]] || exit 1
+      cat "${state}/${release_tag}/revision"
+      ;;
     GET:repos/Ares-X/Linnet/git/ref/heads/data-channel)
       if [[ ! -f "${branch}/ref" ]]; then
         printf '%s\n' '{"message":"Not Found","status":"404"}'
@@ -275,6 +282,7 @@ case "${action}" in
     done
     LC_ALL=C sort -o "${root}/assets" "${root}/assets"
     prerelease=false
+    revision="${FAKE_CANDIDATE_REVISION:?}"
     [[ " $* " == *" --prerelease "* ]] && prerelease=true
     while [[ "$#" -gt 0 ]]; do
       case "$1" in
@@ -282,9 +290,14 @@ case "${action}" in
           cp "$2" "${root}/notes"
           shift 2
           ;;
+        --target)
+          revision="$2"
+          shift 2
+          ;;
         *) shift ;;
       esac
     done
+    printf '%s\n' "${revision}" >"${root}/revision"
     printf 'true %s\n' "${prerelease}" >"${root}/status"
     ;;
   edit)
@@ -306,45 +319,70 @@ case "${action}" in
     ;;
   download)
     destination=""
+    pattern=""
     shift 3
     while [[ "$#" -gt 0 ]]; do
       case "$1" in
         --dir) destination="$2"; shift 2 ;;
+        --pattern) pattern="$2"; shift 2 ;;
+        --repo) shift 2 ;;
         *) shift ;;
       esac
     done
-    [[ -f "${root}/status" && -n "${destination}" ]]
-    cp "${FAKE_RELEASE_ASSETS:?}/Linnet-Data-Channel.json" "${destination}/"
+    [[ -f "${root}/status" && -n "${destination}" && -n "${pattern}" ]]
+    [[ "${pattern}" == "${pattern##*/}" && -f "${FAKE_RELEASE_ASSETS:?}/${pattern}" ]]
+    cut -f1 "${root}/assets" | grep -Fxq "${pattern}"
+    cp "${FAKE_RELEASE_ASSETS}/${pattern}" "${destination}/${pattern}"
     ;;
 esac
 FAKE_GH
 chmod 755 "${fake_bin}/gh"
 candidate_revision="$(git -C "${repo_root}" rev-parse HEAD)"
-publish_fixture() {
+run_fixture() {
   GITHUB_REPOSITORY=Ares-X/Linnet GH_TOKEN=fixture \
     FAKE_GH_STATE="${fake_state}" FAKE_RELEASE_ASSETS="${fixture_assets}" \
+    FAKE_CANDIDATE_REVISION="${candidate_revision}" \
     RUNNER_TEMP="${publication_fixture}" \
     PATH="${fake_bin}:${PATH}" "${publisher}" "$1" "${fixture_assets}" \
-      "${version}" "${catalog_sequence}" "${candidate_revision}" >/dev/null
+      "${version}" "${catalog_sequence}" "${candidate_revision}"
 }
-publish_fixture data
-publish_fixture public
-rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
-  fail "the stable Release omitted the version change summary"
-rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
-  fail "the stable Release did not consume the current CHANGELOG section"
-if rg -Fq -- "${adjacent_release_heading}" \
-    "${fake_state}/v${version}/notes"; then
-  fail "the stable Release leaked an adjacent CHANGELOG version"
-fi
-printf 'stale release notes\n' >"${fake_state}/v${version}/notes"
-publish_fixture public
-rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
-  fail "an exact published Release did not repair stale notes"
-[[ "$(grep -c "^release create v${version} " "${fake_state}/calls.log")" == 1 ]] ||
-  fail "an exact published stable Release was recreated"
-[[ "$(cut -f1 "${fake_state}/v${version}/assets")" == Linnet.pkg ]] ||
-  fail "the stable Release published more than the complete installer"
+publish_fixture() {
+  if ! run_fixture "$1" >/dev/null; then
+    fail "publisher rejected the ${1} fixture"
+  fi
+}
+require_public_fixture_rejection() {
+  local ref_before="" commits_before=""
+  if [[ -f "${fake_state}/data-channel/ref" ]]; then
+    ref_before="$(cat "${fake_state}/data-channel/ref")"
+    commits_before="$(cat "${fake_state}/data-channel/commit-count")"
+  fi
+  if run_fixture public >"${publication_fixture}/rejected-public.log" 2>&1; then
+    fail "the public Release accepted incomplete staged publication state"
+  fi
+  [[ ! -e "${fake_state}/v${version}" ]] ||
+    fail "a rejected public publication left a formal Release"
+  if [[ -n "${ref_before}" ]]; then
+    [[ "$(cat "${fake_state}/data-channel/ref")" == "${ref_before}" &&
+      "$(cat "${fake_state}/data-channel/commit-count")" == "${commits_before}" ]] ||
+      fail "a rejected public publication changed stable pointer state"
+  else
+    [[ ! -e "${fake_state}/data-channel/ref" &&
+      ! -e "${fake_state}/data-channel/commit-count" ]] ||
+      fail "a rejected public publication created stable pointer state"
+  fi
+}
+require_catalog_fixture_rejection() {
+  local ref_before commits_before
+  ref_before="$(cat "${fake_state}/data-channel/ref")"
+  commits_before="$(cat "${fake_state}/data-channel/commit-count")"
+  if run_fixture catalog >"${publication_fixture}/rejected-catalog.log" 2>&1; then
+    fail "Catalog promotion accepted a non-monotonic stable pointer"
+  fi
+  [[ "$(cat "${fake_state}/data-channel/ref")" == "${ref_before}" &&
+    "$(cat "${fake_state}/data-channel/commit-count")" == "${commits_before}" ]] ||
+    fail "a rejected Catalog promotion changed stable pointer state"
+}
 publish_fixture core
 rg -Fq -- "${current_release_change}" \
   "${fake_state}/core-v${version}/notes" ||
@@ -356,11 +394,14 @@ rg -Fq -- "${current_release_change}" \
   fail "an exact published Core Release did not repair stale notes"
 [[ "$(grep -c "^release create core-v${version} " "${fake_state}/calls.log")" == 1 ]] ||
   fail "an exact published Core Release was recreated"
-[[ "$(cat "${fake_state}/data-channel/commit-count")" == 1 ]] ||
-  fail "an exact stable Catalog pointer created duplicate commits"
-cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
-  "${fake_state}/data-channel/blobs/$(cat "${fake_state}/data-channel/trees/$(cat "${fake_state}/data-channel/commits/$(cat "${fake_state}/data-channel/ref")")")" ||
-  fail "the data-channel branch did not publish the exact Catalog bytes"
+[[ ! -e "${fake_state}/data-channel/ref" &&
+  ! -e "${fake_state}/data-channel/commit-count" ]] ||
+  fail "the Core channel changed the stable Catalog pointer"
+
+publish_fixture data
+[[ ! -e "${fake_state}/data-channel/ref" &&
+  ! -e "${fake_state}/data-channel/commit-count" ]] ||
+  fail "the data channel changed the stable Catalog pointer before promotion"
 rm -rf -- "${fake_state}/data-${catalog_sequence}"
 mkdir -p "${fake_state}/data-${catalog_sequence}"
 printf 'true true\n' >"${fake_state}/data-${catalog_sequence}/status"
@@ -368,6 +409,9 @@ printf 'stale\tsha256:%064d\n' 0 >"${fake_state}/data-${catalog_sequence}/assets
 publish_fixture data
 grep -Fq "release delete data-${catalog_sequence}" "${fake_state}/calls.log" ||
   fail "an interrupted data-channel draft did not enter the bounded retry path"
+[[ ! -e "${fake_state}/data-channel/ref" &&
+  ! -e "${fake_state}/data-channel/commit-count" ]] ||
+  fail "a data-channel retry changed the stable Catalog pointer"
 for spec in core:core-v${version} data:data-${catalog_sequence}; do
   channel="${spec%%:*}"
   tag="${spec#*:}"
@@ -375,6 +419,128 @@ for spec in core:core-v${version} data:data-${catalog_sequence}; do
   actual="$(cut -f1 "${fake_state}/${tag}/assets")"
   [[ "${actual}" == "${expected}" ]] || fail "${channel} upload bypassed the manifest"
 done
+
+require_public_fixture_rejection
+[[ ! -e "${fake_state}/data-channel/ref" &&
+  ! -e "${fake_state}/data-channel/commit-count" ]] ||
+  fail "a rejected public publication created the stable Catalog pointer"
+
+publish_fixture catalog
+[[ "$(cat "${fake_state}/data-channel/commit-count")" == 1 ]] ||
+  fail "Catalog promotion did not create exactly one stable pointer commit"
+catalog_ref="$(cat "${fake_state}/data-channel/ref")"
+catalog_tree="$(cat "${fake_state}/data-channel/commits/${catalog_ref}")"
+catalog_blob="$(cat "${fake_state}/data-channel/trees/${catalog_tree}")"
+cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${fake_state}/data-channel/blobs/${catalog_blob}" ||
+  fail "the data-channel branch did not publish the exact Catalog bytes"
+rg -Fq "release download data-${catalog_sequence} --repo Ares-X/Linnet --pattern Linnet-Data-Channel.json" \
+  "${fake_state}/calls.log" ||
+  fail "Catalog promotion did not verify the exact published data asset"
+core_package="Linnet-${version}-arm64-Core-community-beta.pkg"
+rg -Fq "release download core-v${version} --repo Ares-X/Linnet --pattern ${core_package}" \
+  "${fake_state}/calls.log" ||
+  fail "Catalog promotion did not verify the exact published Core asset"
+
+for release_tag in "core-v${version}" "data-${catalog_sequence}"; do
+  revision="${fake_state}/${release_tag}/revision"
+  exact_revision="${publication_fixture}/${release_tag}-exact-revision"
+  cp "${revision}" "${exact_revision}"
+  printf '%040d\n' 0 >"${revision}"
+  require_catalog_fixture_rejection
+  require_public_fixture_rejection
+  mv "${exact_revision}" "${revision}"
+done
+
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document["sequence"] = Integer(ARGV.fetch(2), 10) + 1
+  File.binwrite(ARGV.fetch(1), JSON.generate(document))
+' "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${fake_state}/data-channel/blobs/${catalog_blob}" "${catalog_sequence}"
+require_catalog_fixture_rejection
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document["same_sequence_different_bytes"] = true
+  File.binwrite(ARGV.fetch(1), JSON.generate(document))
+' "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${fake_state}/data-channel/blobs/${catalog_blob}"
+require_catalog_fixture_rejection
+cp "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${fake_state}/data-channel/blobs/${catalog_blob}"
+publish_fixture catalog
+[[ "$(cat "${fake_state}/data-channel/ref")" == "${catalog_ref}" &&
+  "$(cat "${fake_state}/data-channel/commit-count")" == 1 ]] ||
+  fail "restoring the exact Catalog pointer changed stable state"
+
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document["sequence"] = Integer(ARGV.fetch(2), 10) - 1
+  File.binwrite(ARGV.fetch(1), JSON.generate(document))
+' "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${fake_state}/data-channel/blobs/${catalog_blob}" "${catalog_sequence}"
+require_public_fixture_rejection
+publish_fixture catalog
+[[ "$(cat "${fake_state}/data-channel/commit-count")" == 2 ]] ||
+  fail "Catalog promotion did not fast-forward a stale stable pointer"
+rg -Fq "api --method PATCH repos/Ares-X/Linnet/git/refs/heads/data-channel" \
+  "${fake_state}/calls.log" ||
+  fail "Catalog promotion did not use a non-destructive pointer fast-forward"
+rg -Fq -- "-F force=false" "${fake_state}/calls.log" ||
+  fail "Catalog pointer fast-forward regained forced replacement"
+publish_fixture catalog
+[[ "$(cat "${fake_state}/data-channel/commit-count")" == 2 ]] ||
+  fail "an exact Catalog promotion created a duplicate stable pointer commit"
+
+cp "${fake_state}/core-v${version}/assets" \
+  "${publication_fixture}/exact-core-assets"
+printf 'stale\tsha256:%064d\n' 0 >"${fake_state}/core-v${version}/assets"
+require_public_fixture_rejection
+mv "${publication_fixture}/exact-core-assets" \
+  "${fake_state}/core-v${version}/assets"
+cp "${fake_state}/data-${catalog_sequence}/assets" \
+  "${publication_fixture}/exact-data-assets"
+printf 'stale\tsha256:%064d\n' 0 >"${fake_state}/data-${catalog_sequence}/assets"
+require_public_fixture_rejection
+mv "${publication_fixture}/exact-data-assets" \
+  "${fake_state}/data-${catalog_sequence}/assets"
+
+pointer_ref_before_public="$(cat "${fake_state}/data-channel/ref")"
+pointer_commits_before_public="$(cat "${fake_state}/data-channel/commit-count")"
+publish_fixture public
+rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
+  fail "the stable Release omitted the version change summary"
+rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
+  fail "the stable Release did not consume the current CHANGELOG section"
+if rg -Fq -- "${adjacent_release_heading}" \
+    "${fake_state}/v${version}/notes"; then
+  fail "the stable Release leaked an adjacent CHANGELOG version"
+fi
+printf 'stale release notes\n' >"${fake_state}/v${version}/notes"
+latest_edits_before="$(awk -v tag="v${version}" '
+  $1 == "release" && $2 == "edit" && $3 == tag && $0 ~ / --latest( |$)/ {
+    count += 1
+  }
+  END { print count + 0 }
+' "${fake_state}/calls.log")"
+publish_fixture public
+latest_edits_after="$(awk -v tag="v${version}" '
+  $1 == "release" && $2 == "edit" && $3 == tag && $0 ~ / --latest( |$)/ {
+    count += 1
+  }
+  END { print count + 0 }
+' "${fake_state}/calls.log")"
+(( latest_edits_after == latest_edits_before + 1 )) ||
+  fail "an exact published stable Release rerun did not retain Latest"
+rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
+  fail "an exact published Release did not repair stale notes"
+[[ "$(grep -c "^release create v${version} " "${fake_state}/calls.log")" == 1 ]] ||
+  fail "an exact published stable Release was recreated"
+[[ "$(cut -f1 "${fake_state}/v${version}/assets")" == Linnet.pkg ]] ||
+  fail "the stable Release published more than the complete installer"
+[[ "$(cat "${fake_state}/data-channel/ref")" == "${pointer_ref_before_public}" &&
+  "$(cat "${fake_state}/data-channel/commit-count")" == "${pointer_commits_before_public}" ]] ||
+  fail "the public Release changed the already-promoted Catalog pointer"
 
 if rg -n 'Developer ID|notari[sz]|stapler|Gatekeeper rejected' "${verifier}"; then
   fail "the community artifact owner still requires Apple publisher trust"
@@ -402,6 +568,7 @@ ruby -e '
   commit = File.read(ARGV.fetch(1))
   pull_request = File.read(ARGV.fetch(2))
   cache = File.read(ARGV.fetch(3))
+  publisher = File.read(ARGV.fetch(4))
   local_cache = "./.github/actions/restore-locked-build-cache"
   pinned_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
   pinned_restore = "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25"
@@ -428,6 +595,7 @@ ruby -e '
   abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
   abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 1
   abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 1
+  abort unless workflow.scan(/^\s*group:\s*linnet-release-publication\s*$/).size == 1
   abort unless cache.scan(/^\s*key:\s*linnet-build-v2-/).size == 2
   abort unless cache.scan(/^\s*restore-keys:\s*\|/).size == 2
   %w[
@@ -449,10 +617,26 @@ ruby -e '
   abort unless workflow.include?("package/verify_publication_artifacts")
   abort unless workflow.include?("package/publish_github_release")
   abort if workflow.include?(%q{"${ARCHIVE_OUTPUT_DIR}"/*})
-  data = workflow.index(%q{publish_github_release data}) or abort
-  core = workflow.index(%q{publish_github_release core}) or abort
-  public_release = workflow.index(%q{publish_github_release public}) or abort
-  abort unless data < core && core < public_release
+  release_positions = %w[core data public].map do |channel|
+    needle = "package/publish_github_release #{channel}"
+    abort unless workflow.scan(needle).size == 1
+    workflow.index(needle)
+  end
+  abort unless release_positions.each_cons(2).all? { |left, right| left < right }
+  abort if workflow.include?("package/publish_github_release catalog")
+  catalog_gate = <<~'BASH'
+    if [[ "${channel}" == catalog ]]; then
+      ensure_catalog_pointer true
+  BASH
+  public_gate = <<~'BASH'
+    if [[ "${channel}" == public ]]; then
+      ensure_catalog_pointer false
+  BASH
+  pointer_calls = publisher.scan(/^\s+ensure_catalog_pointer\s+\S+\s*$/).map(&:strip)
+  abort unless publisher.scan(/^ensure_catalog_pointer\(\) \{$/).size == 1
+  abort unless pointer_calls == ["ensure_catalog_pointer true", "ensure_catalog_pointer false"]
+  abort unless publisher.scan(catalog_gate).size == 1
+  abort unless publisher.scan(public_gate).size == 1
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
   abort unless workflow.match?(/validate-source:\s*\n\s*if:\s*github\.event_name == ["\x27]workflow_dispatch["\x27]/)
   abort unless workflow.match?(/publish-community:\s*\n\s*if:\s*startsWith\(github\.ref, ["\x27]refs\/tags\/["\x27]\)/)
@@ -462,7 +646,8 @@ ruby -e '
   abort unless commit.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort unless pull_request.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort if workflow.match?(/LINNET_CODE_SIGN|notary|Developer ID|publication_plan/)
-' "${workflow}" "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" ||
+' "${workflow}" "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" \
+    "${publisher}" ||
   fail "tag-authorized community workflow is incomplete"
 
 echo "Linnet unsigned community publication owner: PASS"

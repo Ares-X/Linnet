@@ -146,10 +146,17 @@ git push origin ":refs/tags/data-seed-${sequence}"
 git tag -d "data-seed-${sequence}"
 ```
 
-发布后必须从 clean checkout 走一次固定包冷构建，确认外层容器和内部原始模型都与
-lock 一致；只有同一个 `candidate_revision` 才能快进到 `main` 并打产品版本标签。
-临时 seed tag 不触发产品发布 workflow，发布成功后立即删除；正式 `data-N` tag 继续
-绑定该提交。普通构建没有回退到可变上游资产的路径。
+这个 seed 步骤只允许发布 `data` 预发布资产，不得调用 `catalog`，也不得推进
+`data-channel`；因此尚未验收的未来模型不会被已安装用户看到。发布后必须从 clean
+checkout 走一次固定包冷构建，确认外层容器和内部原始模型都与 lock 一致；只有同一
+个 `candidate_revision` 才能快进到 `main`。临时 seed tag 不触发产品发布 workflow，
+发布成功后立即删除；正式 `data-N` tag 继续绑定该提交。普通构建没有回退到可变
+上游资产的路径。
+
+进入正常产品发布时，再从该精确 main revision 构建八件归档并依次执行 `core`、
+`data`（此时只接受既有 seed 的相同字节）、`catalog`。真实安装态 Settings 激活和
+InputMethodKit 验收通过后才打产品版本标签；标签 workflow 最后重验同一状态并发布
+`public` / Latest。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖和英文生成数据。只有默认 `main`
 可以在成功任务结束后写入缓存；功能分支和版本标签只读取当前 ref 或默认分支缓存，

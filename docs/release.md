@@ -51,11 +51,24 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 
 ## GitHub 发布
 
-版本标签是唯一发布授权。标签必须为 `v<MARKETING_VERSION>` 并直接指向要
-发布的源码 revision；安装验收记录不授权发布，因此单一根提交仓库不会产生
-第二条发布真相。
+版本标签是把候选版本公开为正式 Release / Latest 的唯一授权。标签必须为
+`v<MARKETING_VERSION>` 并直接指向要发布的源码 revision；安装验收记录本身
+不授权公开 Release，因此单一根提交仓库不会产生第二条正式版本真相。
 
-推送标签后，`.github/workflows/release-ci.yml` 会在无证书环境中：
+正式标签之前先完成一次可安装候选收口：
+
+1. 候选 revision 已推送到 `main`，且该精确 revision 的 main CI 全部通过；
+2. 从同一干净 revision 构建并独立验证 8 个归档文件；
+3. 依次运行唯一 publisher 的 `core`、`data`、`catalog` 阶段。`catalog` 只有在
+   远端 Core 和 data 预发布的状态、文件名和 SHA-256 全部与本地候选一致后，
+   才把同一 Catalog 仅快进写入 `data-channel`；
+4. 使用该 Core 包在已完成首次安装的账号内原位升级，不注销；再从真实安装态
+   Settings 获取并激活该 Catalog，完成输入源、个人数据、Shift、全拼/双拼和
+   Smart English 的 InputMethodKit 验收；
+5. 任一项失败都停止，不创建正式版本标签。修复必须形成新的 revision、build
+   和必要的数据 sequence，再重新走上述候选流程；不能替换已经公开的资产。
+
+验收通过后才推送版本标签。`.github/workflows/release-ci.yml` 会在无证书环境中：
 
 1. 校验标签、源码与语言数据 metadata；
 2. 构建 community archive；
@@ -63,13 +76,15 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 4. 从唯一 `release_asset_manifest` 投影三个同仓库频道：`v<version>` 的稳定
    Release 只上传 `Linnet.pkg`，`core-v<version>` 上传 Core PKG 与卸载器，
    `data-<sequence>` 上传 Catalog 与四个语言包；
-5. 先发布两个明确标注的预发布更新频道，最后才把单安装包稳定版本设为 Latest。
-   `public` 发布边界同时把同一 Catalog 字节以仅快进提交写入 `data-channel`
-   分支；Settings 只读取该稳定指针，不读取可变 Release 别名，也不维护第二份
-   Core 版本清单。
+5. 按 `core` → `data` 重验候选阶段的精确远端字节；`public` 创建正式版本前还
+   必须确认稳定指针已经是同一 Catalog，但无权改写它，最后才把单安装包设为
+   Latest。重复执行只能接受字节完全相同的已发布状态。
 
-该令牌只用于把已经验证的字节写入当前仓库的三个 Release 频道，不是 Apple 开发者
-凭据，也不会被打包或公开。
+Settings 只读取 `data-channel` 的一个稳定指针，不读取可变 Release 别名，也不
+维护第二份 Core 版本清单。仓库没有候选 Catalog 地址或自动回退路径。
+
+该令牌只用于把已经验证的字节写入当前仓库的两个预发布频道、一个稳定 Catalog
+指针和一个正式 Release，不是 Apple 开发者凭据，也不会被打包或公开。
 
 ## 安装验收
 

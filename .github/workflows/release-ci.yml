@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: linnet-release-${{ github.ref }}
+  group: linnet-release-publication
   cancel-in-progress: false
 
 jobs:
@@ -111,9 +111,9 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
             config/linnet-data-releases.json)"
-          package/publish_github_release data "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
           package/publish_github_release core "${ARCHIVE_OUTPUT_DIR}" \
+            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
+          package/publish_github_release data "${ARCHIVE_OUTPUT_DIR}" \
             "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
           package/publish_github_release public "${ARCHIVE_OUTPUT_DIR}" \
             "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
