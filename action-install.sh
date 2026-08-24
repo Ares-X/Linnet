@@ -60,7 +60,7 @@ octagram_data_git_tree="$(lock_value sources.rime_octagram_data.tree)"
 octagram_license_path="$(lock_value sources.rime_octagram_data.license_path)"
 octagram_license_sha="$(lock_value sources.rime_octagram_data.license_sha256)"
 lmdg_model_name="$(lock_value sources.rime_lmdg_grammar.asset)"
-lmdg_asset_download_url="$(lock_value sources.rime_lmdg_grammar.asset_download_url)"
+lmdg_asset_api_url="$(lock_value sources.rime_lmdg_grammar.asset_api_url)"
 
 verify_git_clean() {
     local repo_path="$1"
@@ -179,7 +179,7 @@ fetch_grammar_model() (
     download_dir="$(mktemp -d "${project_root}/build/linnet-grammar.XXXXXX")"
     download_file="${download_dir}/${lmdg_model_name}"
     echo "Downloading locked Wanxiang LTS grammar model:" >&2
-    echo "  ${lmdg_asset_download_url}" >&2
+    echo "  ${lmdg_asset_api_url}" >&2
     scripts/fetch-locked-release-asset \
         "${lock_file}" rime_lmdg_grammar "${download_file}"
     scripts/verify-linnet-grammar-model "${download_file}" >/dev/null
@@ -192,7 +192,7 @@ octagram_license="${octagram_data_path}/${octagram_license_path}"
 if [[ ! -f "${grammar_model}" || -L "${grammar_model}" ]]; then
     if [[ -n "${no_download:-}" ]]; then
         echo "Missing locked Rime grammar model in offline mode: ${grammar_model}" >&2
-        echo "Place the locked asset ${lmdg_asset_download_url} there before re-running." >&2
+        echo "Place the locked asset ${lmdg_asset_api_url} there before re-running." >&2
         exit 1
     fi
     fetch_grammar_model "${grammar_model}"

@@ -448,13 +448,8 @@ def load_lock
     "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
   fail_lock("grammar asset API URL must match its repository and immutable id") unless
     asset_api_url == expected_asset_api_url
-  release = require_string(rime_lmdg_grammar, "release", SAFE_COMPONENT)
-  asset = require_string(rime_lmdg_grammar, "asset", SAFE_COMPONENT)
-  asset_download_url = require_string(rime_lmdg_grammar, "asset_download_url")
-  expected_asset_download_url =
-    "https://github.com/#{repository_slug}/releases/download/#{release}/#{asset}"
-  fail_lock("grammar download URL must match its repository, release, and asset") unless
-    asset_download_url == expected_asset_download_url
+  require_string(rime_lmdg_grammar, "release", SAFE_COMPONENT)
+  require_string(rime_lmdg_grammar, "asset", SAFE_COMPONENT)
   unless require_string(rime_lmdg_grammar, "declared_license") == "CC-BY-4.0"
     fail_lock("unexpected Rime LMDG declared license")
   end
@@ -579,8 +574,11 @@ def release_asset_status(source)
   expected_url = "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
   fail_lock("remote grammar asset API URL is inconsistent") unless
     asset.fetch("url") == expected_url
+  expected_browser_url =
+    "https://github.com/#{repository_slug}/releases/download/" \
+    "#{source.fetch('release')}/#{source.fetch('asset')}"
   fail_lock("remote grammar download URL is inconsistent") unless
-    asset.fetch("browser_download_url") == source.fetch("asset_download_url")
+    asset.fetch("browser_download_url") == expected_browser_url
   current = asset_id == source.fetch("asset_id") &&
     bytes == source.fetch("bytes") && sha256 == source.fetch("sha256")
   status = current ? "current" : "review #{sha256[0, 12]} (asset #{asset_id})"

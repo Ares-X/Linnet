@@ -336,14 +336,13 @@
       "repository": "https://github.com/amzxyz/RIME-LMDG.git",
       "release": "LTS",
       "asset": "wanxiang-lts-zh-hans.gram",
-      "asset_id": 522394578,
-      "asset_api_url": "https://api.github.com/repos/amzxyz/RIME-LMDG/releases/assets/522394578",
-      "asset_download_url": "https://github.com/amzxyz/RIME-LMDG/releases/download/LTS/wanxiang-lts-zh-hans.gram",
+      "asset_id": 526165714,
+      "asset_api_url": "https://api.github.com/repos/amzxyz/RIME-LMDG/releases/assets/526165714",
       "declared_license": "CC-BY-4.0",
       "license_path": "LICENSES/RIME-LMDG-CC-BY-4.0.txt",
       "license_sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
-      "bytes": 420246572,
-      "sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
+      "bytes": 420250668,
+      "sha256": "01ffe37f22607bf8a5cd5d82a3349f6df97744369464aee4577585112d85469d"
     }
   }
 }

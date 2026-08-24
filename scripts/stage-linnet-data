@@ -193,8 +193,8 @@ done
   -d "${plum_stage}" -p1 \
   < patches/rime-wanxiang-linnet-reviewed.patch
 # Wanxiang LTS grammar model, pinned only by upstreams.lock.json;
-# action-install.sh downloads it on demand from the
-# locked RIME-LMDG release URL and verifies its digest before staging.
+# action-install.sh downloads it on demand from the locked RIME-LMDG asset-id
+# API and verifies its size and digest before staging.
 cp -X "${repo_root}/data/chinese/grammar/wanxiang-lts-zh-hans.gram" "${plum_stage}/"
 # Compact octagram model retained only in the source-build projection for
 # runtime/plugin smoke coverage. Public installer membership excludes it.
