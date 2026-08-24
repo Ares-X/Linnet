@@ -120,13 +120,66 @@ write_expected_channel_assets() {
   LC_ALL=C sort -o "${output}" "${output}"
 }
 
+tag_lookup_sequence=0
+inspect_exact_tag() {
+  local requested_tag="$1"
+  tag_lookup_sequence=$((tag_lookup_sequence + 1))
+  local response="${work_root}/tag-ref-${tag_lookup_sequence}-response"
+  local error="${work_root}/tag-ref-${tag_lookup_sequence}-error"
+  exact_tag_status=""
+  exact_tag_revision=""
+
+  if gh api --include "repos/${repository}/git/ref/tags/${requested_tag}" \
+      >"${response}" 2>"${error}"; then
+    grep -Eq '^HTTP/[0-9.]+ 200([[:space:]]|$)' "${response}" ||
+      fail_publish "${requested_tag} tag lookup returned an invalid success response"
+    local object_record object_type object_sha depth=0
+    object_record="$(ruby -rjson -e '
+      lines = File.binread(ARGV.fetch(0)).lines
+      body = lines.drop_while { |line| !line.start_with?("{") }.join
+      object = JSON.parse(body).fetch("object")
+      puts [object.fetch("type"), object.fetch("sha")].join("\t")
+    ' "${response}")" || fail_publish "${requested_tag} tag response is invalid"
+    IFS=$'\t' read -r object_type object_sha <<<"${object_record}"
+    while [[ "${object_type}" == tag ]]; do
+      depth=$((depth + 1))
+      [[ "${depth}" -le 8 ]] ||
+        fail_publish "${requested_tag} annotated tag chain is too deep"
+      object_record="$(gh api \
+        "repos/${repository}/git/tags/${object_sha}" \
+        --jq '[.object.type, .object.sha] | @tsv')" ||
+        fail_publish "${requested_tag} annotated tag is unavailable"
+      IFS=$'\t' read -r object_type object_sha <<<"${object_record}"
+    done
+    [[ "${object_type}" == commit && "${object_sha}" =~ ^[0-9a-f]{40}$ ]] ||
+      fail_publish "${requested_tag} does not resolve to a commit"
+    exact_tag_status=present
+    exact_tag_revision="${object_sha}"
+  elif grep -Eq '^HTTP/[0-9.]+ 404([[:space:]]|$)' "${response}"; then
+    exact_tag_status=absent
+  else
+    [[ ! -s "${error}" ]] || cat "${error}" >&2
+    fail_publish "${requested_tag} tag identity is unavailable"
+  fi
+}
+
 verify_release_revision() {
   local requested_tag="$1"
-  local resolved_revision
-  resolved_revision="$(gh api "repos/${repository}/commits/${requested_tag}" --jq '.sha')" ||
-    fail_publish "${requested_tag} does not resolve to a commit"
-  [[ "${resolved_revision}" == "${candidate_revision}" ]] ||
+  inspect_exact_tag "${requested_tag}"
+  [[ "${exact_tag_status}" == present ]] ||
+    fail_publish "${requested_tag} tag does not exist"
+  [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
     fail_publish "${requested_tag} resolves to a different source revision"
+}
+
+verify_draft_target() {
+  local requested_tag="$1"
+  local target_revision
+  target_revision="$(gh release view "${requested_tag}" --repo "${repository}" \
+    --json targetCommitish --jq '.targetCommitish')" ||
+    fail_publish "${requested_tag} draft target is unavailable"
+  [[ "${target_revision}" == "${candidate_revision}" ]] ||
+    fail_publish "${requested_tag} draft targets a different source revision"
 }
 
 verify_candidate_archive() {
@@ -420,13 +473,34 @@ if [[ "${channel}" == public ]]; then
   ensure_catalog_pointer false
 fi
 
+release_tag_preexisting=false
+inspect_exact_tag "${tag}"
+if [[ "${exact_tag_status}" == present ]]; then
+  [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
+    fail_publish "${tag} already resolves to a different source revision"
+  release_tag_preexisting=true
+elif [[ "${exact_tag_status}" == absent ]]; then
+  release_tag_preexisting=false
+else
+  fail_publish "${tag} tag identity is invalid"
+fi
+
 release_exists=false
 release_is_draft=false
-if release_json="$(gh release view "${tag}" --repo "${repository}" \
-    --json isDraft,isPrerelease 2>/dev/null)"; then
+release_view_output="${work_root}/release-view-output"
+release_view_error="${work_root}/release-view-error"
+if gh release view "${tag}" --repo "${repository}" \
+    --json isDraft,isPrerelease >"${release_view_output}" \
+    2>"${release_view_error}"; then
+  release_json="$(cat "${release_view_output}")"
   release_exists=true
   release_is_draft="$(ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("isDraft")' \
     <<<"${release_json}")"
+elif [[ "$(tr -d '\r\n' <"${release_view_error}")" == "release not found" ]]; then
+  release_exists=false
+else
+  [[ ! -s "${release_view_error}" ]] || cat "${release_view_error}" >&2
+  fail_publish "${tag} release identity is unavailable"
 fi
 
 actual_assets() {
@@ -442,11 +516,43 @@ verify_assets() {
     fail_publish "${tag} assets differ from the verified ${channel} channel"
 }
 
+verify_draft_assets() {
+  local actual="${work_root}/actual-draft-assets.tsv"
+  if [[ "${release_tag_preexisting}" == false ]]; then
+    verify_draft_target "${tag}"
+  fi
+  actual_assets >"${actual}"
+  cmp -s "${expected_assets}" "${actual}" ||
+    fail_publish "${tag} draft assets differ from the verified ${channel} channel"
+}
+
+verify_retryable_draft_assets() {
+  local actual="${work_root}/actual-retry-draft-assets.tsv"
+  if [[ "${release_tag_preexisting}" == false ]]; then
+    verify_draft_target "${tag}"
+  fi
+  actual_assets >"${actual}"
+  if LC_ALL=C comm -23 "${actual}" "${expected_assets}" | grep -q .; then
+    fail_publish "${tag} draft contains assets outside the verified ${channel} channel"
+  fi
+}
+
+verify_release_state() {
+  local state_json
+  state_json="$(gh release view "${tag}" --repo "${repository}" \
+    --json isDraft,isPrerelease)" ||
+    fail_publish "${tag} release state is unavailable"
+  ruby -rjson -e '
+    document = JSON.parse(STDIN.read)
+    expected_prerelease = ARGV.fetch(0) == "true"
+    abort unless document.fetch("isDraft") == false
+    abort unless document.fetch("isPrerelease") == expected_prerelease
+  ' "${prerelease}" <<<"${state_json}" ||
+    fail_publish "${tag} release state differs from the ${channel} contract"
+}
+
 if [[ "${release_exists}" == true && "${release_is_draft}" == false ]]; then
-  actual_prerelease="$(ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("isPrerelease")' \
-    <<<"${release_json}")"
-  [[ "${actual_prerelease}" == "${prerelease}" ]] ||
-    fail_publish "${tag} release kind differs from the channel contract"
+  verify_release_state
   verify_assets
   existing_edit_args=(release edit "${tag}" --repo "${repository}" --notes-file "${notes}")
   if [[ "${channel}" == public ]]; then
@@ -459,7 +565,13 @@ fi
 
 if [[ "${release_is_draft}" == true ]]; then
   # One retry owns only the unpublished draft with this exact channel tag.
-  # The tag is retained so a rerun cannot silently move an existing identity.
+  # Existing assets may be incomplete, but every uploaded byte and the source
+  # identity must still belong to this exact candidate before deletion.
+  actual_prerelease="$(ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("isPrerelease")' \
+    <<<"${release_json}")"
+  [[ "${actual_prerelease}" == "${prerelease}" ]] ||
+    fail_publish "${tag} draft kind differs from the channel contract"
+  verify_retryable_draft_assets
   gh release delete "${tag}" --repo "${repository}" --yes
 fi
 
@@ -468,14 +580,13 @@ create_args=(release create "${tag}" "${assets[@]}" --repo "${repository}"
 if [[ "${prerelease}" == true ]]; then
   create_args+=(--prerelease)
 fi
-if git -C "${project_root}" rev-parse --verify --quiet "refs/tags/${tag}^{commit}" \
-    >/dev/null; then
+if [[ "${release_tag_preexisting}" == true ]]; then
   create_args+=(--verify-tag)
 else
   create_args+=(--target "${candidate_revision}")
 fi
 gh "${create_args[@]}"
-verify_assets
+verify_draft_assets
 
 edit_args=(release edit "${tag}" --repo "${repository}" --draft=false)
 if [[ "${channel}" == public ]]; then
@@ -483,8 +594,6 @@ if [[ "${channel}" == public ]]; then
 fi
 gh "${edit_args[@]}"
 
-final_draft="$(gh release view "${tag}" --repo "${repository}" --json isDraft \
-  --jq '.isDraft')"
-[[ "${final_draft}" == false ]] || fail_publish "${tag} remained a draft"
+verify_release_state
 verify_assets
 echo "Linnet ${channel} release: PUBLISHED (${tag})"

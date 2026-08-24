@@ -143,6 +143,10 @@ for required in \
     'data-seed-${catalog_sequence}' \
     'release create "${tag}" "${assets[@]}"' \
     'release delete "${tag}"' \
+    'release_tag_preexisting' \
+    'git/ref/tags/${requested_tag}' \
+    'verify_retryable_draft_assets' \
+    'verify_release_state' \
     'verify_assets' \
     'release edit "${tag}"' \
     'core-v${version}' \
@@ -157,6 +161,9 @@ for required in \
 done
 if rg -n -- '--clobber|--cleanup-tag|releases/delete' "${publisher}"; then
   fail "the publisher regained a destructive published-asset replacement path"
+fi
+if rg -Fq 'repos/${repository}/commits/${requested_tag}' "${publisher}"; then
+  fail "the publisher regained a branch-compatible tag identity lookup"
 fi
 rg -Fq 'actions: read' "${workflow}" ||
   fail "the release publisher cannot read exact main CI evidence"
@@ -228,6 +235,7 @@ printf '%s\n' "$*" >>"${state}/calls.log"
 if [[ "${1:-}" == api ]]; then
   shift
   method=GET
+  include=false
   input=""
   endpoint=""
   sha_field=""
@@ -235,6 +243,7 @@ if [[ "${1:-}" == api ]]; then
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
       --method) method="$2"; shift 2 ;;
+      --include) include=true; shift ;;
       --input) input="$2"; shift 2 ;;
       --jq) shift 2 ;;
       -f|-F)
@@ -260,10 +269,38 @@ if [[ "${1:-}" == api ]]; then
       release_tag="${endpoint##*/}"
       if [[ -f "${state}/tags/${release_tag}" ]]; then
         cat "${state}/tags/${release_tag}"
+      elif [[ -f "${state}/branches/${release_tag}" ]]; then
+        cat "${state}/branches/${release_tag}"
       else
-        [[ -f "${state}/${release_tag}/revision" ]] || exit 1
-        cat "${state}/${release_tag}/revision"
+        exit 1
       fi
+      ;;
+    GET:repos/Ares-X/Linnet/git/ref/tags/*)
+      release_tag="${endpoint##*/}"
+      if [[ -f "${state}/tag-ref-transport-error" ]]; then
+        printf '%s\n' 'gh: simulated tag-ref transport failure' >&2
+        exit 1
+      fi
+      if [[ -f "${state}/tags/${release_tag}" ]]; then
+        object_type=commit
+        object_sha="$(cat "${state}/tags/${release_tag}")"
+        if [[ -f "${state}/tag-types/${release_tag}" ]]; then
+          object_type="$(cat "${state}/tag-types/${release_tag}")"
+          object_sha="$(cat "${state}/tag-object-ids/${release_tag}")"
+        fi
+        [[ "${include}" == false ]] || printf 'HTTP/2.0 200 OK\n\n'
+        printf '{"ref":"refs/tags/%s","object":{"type":"%s","sha":"%s"}}\n' \
+          "${release_tag}" "${object_type}" "${object_sha}"
+      else
+        [[ "${include}" == false ]] || printf 'HTTP/2.0 404 Not Found\n\n'
+        printf '%s\n' '{"message":"Not Found","status":"404"}'
+        exit 1
+      fi
+      ;;
+    GET:repos/Ares-X/Linnet/git/tags/*)
+      object_sha="${endpoint##*/}"
+      [[ -f "${state}/tag-objects/${object_sha}" ]] || exit 1
+      cat "${state}/tag-objects/${object_sha}"
       ;;
     GET:repos/Ares-X/Linnet/git/ref/heads/data-channel)
       if [[ ! -f "${branch}/ref" ]]; then
@@ -345,11 +382,20 @@ tag="${3:-}"
 root="${state}/${tag}"
 case "${action}" in
   view)
-    [[ -f "${root}/status" ]] || exit 1
+    if [[ -f "${state}/release-view-transport-error" ]]; then
+      printf '%s\n' 'gh: simulated release-view transport failure' >&2
+      exit 1
+    fi
+    if [[ ! -f "${root}/status" ]]; then
+      printf '%s\n' 'release not found' >&2
+      exit 1
+    fi
     read -r draft prerelease <"${root}/status"
     joined=" $* "
     if [[ "${joined}" == *" --json assets "* ]]; then
       cat "${root}/assets"
+    elif [[ "${joined}" == *" --json targetCommitish "* ]]; then
+      cat "${root}/revision"
     elif [[ "${joined}" == *" --jq "* ]]; then
       printf '%s\n' "${draft}"
     else
@@ -368,6 +414,7 @@ case "${action}" in
     LC_ALL=C sort -o "${root}/assets" "${root}/assets"
     prerelease=false
     revision="${FAKE_CANDIDATE_REVISION:?}"
+    verify_tag=false
     [[ " $* " == *" --prerelease "* ]] && prerelease=true
     while [[ "$#" -gt 0 ]]; do
       case "$1" in
@@ -379,9 +426,17 @@ case "${action}" in
           revision="$2"
           shift 2
           ;;
+        --verify-tag)
+          verify_tag=true
+          shift
+          ;;
         *) shift ;;
       esac
     done
+    if [[ "${verify_tag}" == true ]]; then
+      [[ -f "${state}/tags/${tag}" ]] || exit 1
+      revision=main
+    fi
     printf '%s\n' "${revision}" >"${root}/revision"
     printf 'true %s\n' "${prerelease}" >"${root}/status"
     ;;
@@ -398,6 +453,11 @@ case "${action}" in
       esac
     done
     printf 'false %s\n' "${prerelease}" >"${root}/status"
+    mkdir -p "${state}/tags"
+    if [[ ! -f "${state}/tags/${tag}" ]]; then
+      grep -Eq '^[0-9a-f]{40}$' "${root}/revision"
+      cp "${root}/revision" "${state}/tags/${tag}"
+    fi
     ;;
   delete)
     rm -rf -- "${root}"
@@ -478,6 +538,9 @@ require_catalog_fixture_rejection() {
     fail "a rejected Catalog promotion changed stable pointer state"
 }
 
+mkdir -p "${fake_state}/branches"
+printf '%s\n' "${candidate_revision}" \
+  >"${fake_state}/branches/data-seed-${catalog_sequence}"
 if run_fixture data-seed >"${publication_fixture}/rejected-seed.log" 2>&1; then
   fail "data seed publication accepted a missing seed tag"
 fi
@@ -499,6 +562,32 @@ ruby -rjson -e '
 ' "${fake_state}/main-ci.json"
 main_checks_before_seed="$(awk '/git\/ref\/heads\/main|actions\/runs/ { count += 1 } END { print count + 0 }' \
   "${fake_state}/calls.log")"
+seed_creates_before="$(grep -c "^release create data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)"
+seed_deletes_before="$(grep -c "^release delete data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)"
+: >"${fake_state}/tag-ref-transport-error"
+if run_fixture data-seed >"${publication_fixture}/rejected-seed.log" 2>&1; then
+  fail "data seed publication treated an unavailable tag owner as absent"
+fi
+[[ "$(grep -c "^release create data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)" == "${seed_creates_before}" &&
+  "$(grep -c "^release delete data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)" == "${seed_deletes_before}" ]] ||
+  fail "an unavailable tag owner authorized a release mutation"
+rm "${fake_state}/tag-ref-transport-error"
+: >"${fake_state}/release-view-transport-error"
+if run_fixture data-seed >"${publication_fixture}/rejected-seed.log" 2>&1; then
+  fail "data seed publication treated an unavailable Release owner as absent"
+fi
+[[ "$(grep -c "^release create data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)" == "${seed_creates_before}" &&
+  "$(grep -c "^release delete data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)" == "${seed_deletes_before}" ]] ||
+  fail "an unavailable Release owner authorized a release mutation"
+rm "${fake_state}/release-view-transport-error"
+printf '%s\n' "${candidate_revision}" \
+  >"${fake_state}/branches/data-${catalog_sequence}"
 publish_fixture data-seed
 main_checks_after_seed="$(awk '/git\/ref\/heads\/main|actions\/runs/ { count += 1 } END { print count + 0 }' \
   "${fake_state}/calls.log")"
@@ -533,10 +622,42 @@ publish_fixture data
 [[ ! -e "${fake_state}/data-channel/ref" &&
   ! -e "${fake_state}/data-channel/commit-count" ]] ||
   fail "the data channel changed the stable Catalog pointer before promotion"
+cp "${fake_state}/data-${catalog_sequence}/assets" \
+  "${publication_fixture}/exact-data-draft-assets"
 rm -rf -- "${fake_state}/data-${catalog_sequence}"
+rm -f -- "${fake_state}/tags/data-${catalog_sequence}"
 mkdir -p "${fake_state}/data-${catalog_sequence}"
 printf 'true true\n' >"${fake_state}/data-${catalog_sequence}/status"
+printf '%040d\n' 0 >"${fake_state}/data-${catalog_sequence}/revision"
+sed -n '1p' "${publication_fixture}/exact-data-draft-assets" \
+  >"${fake_state}/data-${catalog_sequence}/assets"
+data_draft_deletes_before="$(grep -c "^release delete data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)"
+if run_fixture data >"${publication_fixture}/rejected-data-draft.log" 2>&1; then
+  fail "a data draft targeting another revision was replaced"
+fi
+[[ "$(grep -c "^release delete data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)" == "${data_draft_deletes_before}" ]] ||
+  fail "a foreign data draft was deleted"
+printf '%s\n' "${candidate_revision}" \
+  >"${fake_state}/data-${catalog_sequence}/revision"
+printf 'true false\n' >"${fake_state}/data-${catalog_sequence}/status"
+if run_fixture data >"${publication_fixture}/rejected-data-draft.log" 2>&1; then
+  fail "a data draft with the wrong release kind was replaced"
+fi
+[[ "$(grep -c "^release delete data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)" == "${data_draft_deletes_before}" ]] ||
+  fail "a wrong-kind data draft was deleted"
+printf 'true true\n' >"${fake_state}/data-${catalog_sequence}/status"
 printf 'stale\tsha256:%064d\n' 0 >"${fake_state}/data-${catalog_sequence}/assets"
+if run_fixture data >"${publication_fixture}/rejected-data-draft.log" 2>&1; then
+  fail "a data draft with foreign assets was replaced"
+fi
+[[ "$(grep -c "^release delete data-${catalog_sequence} " \
+  "${fake_state}/calls.log" || true)" == "${data_draft_deletes_before}" ]] ||
+  fail "a data draft with foreign assets was deleted"
+sed -n '1p' "${publication_fixture}/exact-data-draft-assets" \
+  >"${fake_state}/data-${catalog_sequence}/assets"
 publish_fixture data
 grep -Fq "release delete data-${catalog_sequence}" "${fake_state}/calls.log" ||
   fail "an interrupted data-channel draft did not enter the bounded retry path"
@@ -596,18 +717,39 @@ rg -Fq "release download core-v${version} --repo Ares-X/Linnet --pattern ${core_
   "${fake_state}/calls.log" ||
   fail "Catalog promotion did not verify the exact published Core asset"
 
-mkdir -p "${fake_state}/tags"
+printf '%s\n' "${candidate_revision}" >"${fake_state}/branches/v${version}"
+require_public_fixture_rejection
+mkdir -p "${fake_state}/tags" "${fake_state}/tag-types" \
+  "${fake_state}/tag-object-ids" "${fake_state}/tag-objects"
 printf '%s\n' "${candidate_revision}" >"${fake_state}/tags/v${version}"
+version_tag_object="$(printf 'tag:v%s:%s' "${version}" "${candidate_revision}" | \
+  shasum | awk '{print $1}')"
+printf '%s\n' tag >"${fake_state}/tag-types/v${version}"
+printf '%s\n' "${version_tag_object}" \
+  >"${fake_state}/tag-object-ids/v${version}"
+printf 'commit\t%s\n' "${candidate_revision}" \
+  >"${fake_state}/tag-objects/${version_tag_object}"
 git -C "${fixture_repo}" tag "v${version}" "${candidate_revision}"
+printf 'commit\t%040d\n' 0 >"${fake_state}/tag-objects/${version_tag_object}"
+require_public_fixture_rejection
+printf 'commit\t%s\n' "${candidate_revision}" \
+  >"${fake_state}/tag-objects/${version_tag_object}"
 
 for release_tag in "core-v${version}" "data-${catalog_sequence}"; do
-  revision="${fake_state}/${release_tag}/revision"
+  revision="${fake_state}/tags/${release_tag}"
   exact_revision="${publication_fixture}/${release_tag}-exact-revision"
   cp "${revision}" "${exact_revision}"
   printf '%040d\n' 0 >"${revision}"
   require_catalog_fixture_rejection
   require_public_fixture_rejection
   mv "${exact_revision}" "${revision}"
+  mv "${revision}" "${exact_revision}"
+  printf '%s\n' "${candidate_revision}" \
+    >"${fake_state}/branches/${release_tag}"
+  require_catalog_fixture_rejection
+  require_public_fixture_rejection
+  mv "${exact_revision}" "${revision}"
+  rm "${fake_state}/branches/${release_tag}"
 done
 
 ruby -rjson -e '
@@ -669,6 +811,9 @@ mv "${publication_fixture}/exact-data-assets" \
 pointer_ref_before_public="$(cat "${fake_state}/data-channel/ref")"
 pointer_commits_before_public="$(cat "${fake_state}/data-channel/commit-count")"
 publish_fixture public
+[[ "$(cat "${fake_state}/v${version}/revision")" == main &&
+  "$(cat "${fake_state}/tags/v${version}")" == "${candidate_revision}" ]] ||
+  fail "public publication conflated targetCommitish with the verified version tag"
 rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
   fail "the stable Release omitted the version change summary"
 rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
