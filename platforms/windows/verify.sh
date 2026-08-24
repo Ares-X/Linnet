@@ -354,6 +354,8 @@ if rg -n 'WeaselService' \
   echo "The unowned Windows service path is still compiled or referenced." >&2
   exit 1
 fi
+rg -Fq '#include "WeaselServerApp.h"' \
+  "${scratch}/WeaselServer/WeaselServer.cpp"
 if rg -n 'get_schemata_|IDC_GET_SCHEMATA' \
     "${scratch}/WeaselDeployer/SwitcherSettingsDialog.cpp" \
     "${scratch}/WeaselDeployer/SwitcherSettingsDialog.h" \

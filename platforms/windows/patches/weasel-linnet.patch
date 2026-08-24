@@ -419,15 +419,20 @@ index 7602792..0fa20df 100644
    void EndSession();
    void StartMaintenance();
 diff --git a/WeaselServer/WeaselServer.cpp b/WeaselServer/WeaselServer.cpp
-index b4cf8b2..df9b7ca 100644
+index b4cf8b2..a615ace 100644
 --- a/WeaselServer/WeaselServer.cpp
 +++ b/WeaselServer/WeaselServer.cpp
-@@ -4,12 +4,10 @@
+@@ -2,14 +2,13 @@
+ //
+ //	WTL MessageLoop 封装了消息循环. 实现了 getmessage/dispatchmessage....
  
- #include "stdafx.h"
- #include "resource.h"
+-#include "stdafx.h"
+-#include "resource.h"
 -#include "WeaselService.h"
 -#include <WeaselIPC.h>
++#include "stdafx.h"
++#include "resource.h"
++#include "WeaselServerApp.h"
 +#include <WeaselIPC.h>
  #include <WeaselUI.h>
  #include <RimeWithWeasel.h>
@@ -436,7 +441,7 @@ index b4cf8b2..df9b7ca 100644
  #include <functional>
  #include <ShellScalingApi.h>
  #include <WinUser.h>
-@@ -88,27 +86,16 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
+@@ -88,27 +87,16 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
    bool quit = !wcscmp(L"/q", lpstrCmdLine) || !wcscmp(L"/quit", lpstrCmdLine);
    // restart if already running
    {
