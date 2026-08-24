@@ -204,13 +204,14 @@ if ! ruby -ryaml -e '
 fi
 if ! ruby -e '
   controller = File.read("sources/SquirrelInputController.swift")
+  builder = File.read("sources/LinnetRimeCandidateSnapshotBuilder.swift")
   delegate = File.read("sources/SquirrelApplicationDelegate.swift")
   abort "controller does not consume the typed mode-transition label" unless
     controller.include?("inputModeTransitionLabel(") &&
       controller.include?("panel.updateStatus(long: modeLabel, short: modeLabel)")
   abort "idle Shift feedback no longer reaches the normal caret panel" unless
-    controller.include?("LinnetCandidatePresentation.candidateMenuPage(") &&
-      controller.include?("guard menuPage.pageSize > 0 else")
+    builder.include?("LinnetCandidatePresentation.candidateMenuPage(") &&
+      builder.include?("guard menuPage.pageSize > 0 else")
   schema = delegate[/if messageType == "schema".*?\n  \}/m]
   abort "generic schema notification still owns caret feedback" if
     schema&.include?("showStatusMessage")
@@ -324,11 +325,12 @@ rg -Fq 'candidateExpansionAllowed ?= config.getBool(' sources/SquirrelTheme.swif
 
 for iterator_contract in candidate_list_from_index candidate_list_next \
     candidate_list_end 'select_candidate(session'; do
-  rg -Fq "${iterator_contract}" sources/SquirrelInputController.swift ||
+  rg -Fq "${iterator_contract}" sources/SquirrelInputController.swift \
+    sources/LinnetRimeCandidateSnapshotBuilder.swift ||
     fail "expanded candidate iteration lost ${iterator_contract}"
 done
 rg -Fq 'LinnetCandidatePresentation.expandedCandidateRange(' \
-  sources/SquirrelInputController.swift ||
+  sources/LinnetRimeCandidateSnapshotBuilder.swift ||
   fail "expanded candidate iteration bypassed the three-page/27-item bound"
 if rg -Fq 'select_candidate_on_current_page(session' \
     sources/SquirrelInputController.swift sources/SquirrelPanel.swift \
@@ -1315,15 +1317,23 @@ if rg -n 'isRimeRunning|isRimeInputSuspended' sources/SquirrelInputController.sw
 fi
 ruby -e '
   controller = File.read("sources/SquirrelInputController.swift")
+  lease = File.read("sources/LinnetRimeSessionLease.swift")
   ensure_session = controller[/func ensureSession\(\) -> Bool \{.*?\n  \}/m]
+  current_session = controller[/func sessionIsCurrent\(\) -> Bool \{.*?\n  \}/m]
   handle = controller[/override func handle\(.*?\n  \}/m]
   activation = controller[/override func activateServer\(.*?\n  \}/m]
   commit = controller[/override func commitComposition\(.*?\n  \}/m]
   update = controller[/func rimeUpdate\(\) \{.*?\n  \}\n\n  func commit\(string:/m]
   abort "the canonical live-session recovery owner is missing" unless
-    ensure_session && handle && activation && commit && update
+    ensure_session && current_session && handle && activation && commit && update
+  abort "a recycled raw session identifier can cross controller ownership" unless
+    lease.include?("owners[identifier] = nextOwnership") &&
+      lease.include?("owners[lease.identifier] == lease.ownership") &&
+      current_session.include?("sessionLease.isCurrent(") &&
+      current_session.scan("rimeAPI.find_session").length == 1 &&
+      controller.scan("rimeAPI.find_session").length == 1
   abort "live-session recovery no longer validates and recreates one generation" unless
-    ensure_session.scan("rimeAPI.find_session(session)").length == 1 &&
+    ensure_session.scan("sessionIsCurrent()").length == 2 &&
       ensure_session.scan("createSession()").length == 1
   abort "key events bypass canonical live-session recovery" unless
     handle.include?("guard ensureSession() else { return false }")

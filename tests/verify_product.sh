@@ -157,4 +157,4 @@ esac
 [[ "${final_candidate_identity}" == "${candidate_identity}" ]] ||
   fail "finalized App identity changed during product acceptance"
 git diff --check
-echo "verify_product: PASS (frozen candidate App, owner tests, native Rime, zero new crashes)"
+echo "verify_product: PASS (C/E + candidate-App P evidence; V/I/R NOT_EXERCISED; zero new crashes)"

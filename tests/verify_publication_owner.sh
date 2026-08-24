@@ -50,6 +50,19 @@ then
   fail "CHANGELOG version notes contain maintainer-only repository work"
 fi
 
+policy_docs=(
+  "${repo_root}/docs/product-acceptance.md"
+  "${repo_root}/docs/development.md"
+  "${repo_root}/docs/release.md"
+)
+if rg -ni 'approval commit|publication=go|installation_uat=passed|machine-bound' \
+    "${policy_docs[@]}"; then
+  fail "retired publication approval state returned to the policy documents"
+fi
+if rg -n '\b[0-9]+\.[0-9]+\.[0-9]+\b' "${repo_root}/docs/release.md"; then
+  fail "the release guide hard-coded a product version"
+fi
+
 if printf '%s\n' config/LinnetProduct.xcconfig |
     "${repo_root}/package/data_release_metadata" check-source-change \
       >/dev/null 2>&1; then
@@ -77,6 +90,14 @@ finish = ((start + 1)...lines.size).find { |index| lines.fetch(index).start_with
 change = lines[(start + 1)...finish].find { |line| line.start_with?("- ") }
 abort unless change
 puts change
+RUBY
+)"
+adjacent_release_heading="$(ruby - "${repo_root}/CHANGELOG.md" "${version}" <<'RUBY'
+path, version = ARGV
+headings = File.readlines(path, chomp: true).grep(/^## \d+\.\d+\.\d+ — /)
+current = headings.index { |line| line.start_with?("## #{version} — ") }
+abort unless current && headings[current + 1]
+puts headings.fetch(current + 1).split(" — ", 2).first
 RUBY
 )"
 catalog_sequence="$("${repo_root}/package/data_release_metadata" get-catalog-sequence \
@@ -309,7 +330,8 @@ rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
   fail "the stable Release omitted the version change summary"
 rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
   fail "the stable Release did not consume the current CHANGELOG section"
-if rg -Fq '## 0.1.3' "${fake_state}/v${version}/notes"; then
+if rg -Fq -- "${adjacent_release_heading}" \
+    "${fake_state}/v${version}/notes"; then
   fail "the stable Release leaked an adjacent CHANGELOG version"
 fi
 printf 'stale release notes\n' >"${fake_state}/v${version}/notes"
@@ -401,6 +423,9 @@ ruby -e '
   public_release = workflow.index(%q{publish_github_release public}) or abort
   abort unless data < core && core < public_release
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
+  abort unless workflow.match?(/validate-source:\s*\n\s*if:\s*github\.event_name == ["\x27]workflow_dispatch["\x27]/)
+  abort unless workflow.match?(/publish-community:\s*\n\s*if:\s*startsWith\(github\.ref, ["\x27]refs\/tags\/["\x27]\)/)
+  abort unless workflow.match?(/^permissions:\s*\n\s*contents:\s*read\s*$/m)
   abort unless workflow.match?(/publish-community:.*?contents:\s*write/m)
   abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 2
   abort if workflow.match?(/LINNET_CODE_SIGN|notary|Developer ID|publication_plan/)

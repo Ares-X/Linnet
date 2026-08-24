@@ -125,6 +125,16 @@ cxx="$(xcrun --find clang++)"
   lib/librime.1.dylib lib/rime-plugins/librime-lua.dylib \
   lib/rime-plugins/librime-predict.dylib -o "${scratch}/rime-smoke"
 
+# Reuse the canonical Chinese learning probe only where the mixed-input matrix
+# consumes it. The learned phrase is written later to an isolated user root so
+# it cannot perturb the general candidate-ranking matrix above.
+if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
+  "${cxx}" -isysroot "${sdk}" -std=c++17 -O2 -Wall -Wextra -Werror \
+    -isystem librime/dist/include tests/auto_phrase_probe.cc \
+    lib/librime.1.dylib lib/rime-plugins/librime-lua.dylib \
+    -o "${scratch}/auto-phrase-probe"
+fi
+
 smoke_args=("${shared}" "${user}")
 if [[ -n "${runtime_probe}" ]]; then
   smoke_args+=("${runtime_probe}")
@@ -135,6 +145,33 @@ if ! DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   tail -n 160 "${scratch}/stdout" >&2 || true
   tail -n 160 "${scratch}/stderr" >&2 || true
   exit 1
+fi
+
+if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
+  mixed_learning_on_user="${scratch}/mixed-learning-on-user"
+  mkdir "${mixed_learning_on_user}"
+  cp -R "${user}/." "${mixed_learning_on_user}/"
+  printf 'learn 霜河栈 shuanghezhan 霜 河 栈\n' | \
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${scratch}/auto-phrase-probe" "${shared}" \
+        "${mixed_learning_on_user}" linnet_zh_pinyin >/dev/null
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${scratch}/rime-smoke" "${shared}" "${mixed_learning_on_user}" \
+      --mixed-learning-on-probe >/dev/null
+
+  mixed_learning_off_user="${scratch}/mixed-learning-off-user"
+  mkdir "${mixed_learning_off_user}"
+  cp -R "${mixed_learning_on_user}/." "${mixed_learning_off_user}/"
+  "${scratch}/projection-fixture" chinese-learning disabled \
+    "${mixed_learning_off_user}"
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    bin/rime_deployer --build "${mixed_learning_off_user}" "${shared}" \
+      "${mixed_learning_off_user}/build" >/dev/null
+  rg -Fq 'enable_user_dict: false' \
+    "${mixed_learning_off_user}/build/linnet_zh_pinyin.schema.yaml"
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${scratch}/rime-smoke" "${shared}" "${mixed_learning_off_user}" \
+      --mixed-learning-off-probe >/dev/null
 fi
 
 if [[ -n "${runtime_probe}" ]]; then

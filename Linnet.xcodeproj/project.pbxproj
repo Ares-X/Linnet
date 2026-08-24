@@ -20,6 +20,8 @@
 		B38E9B912BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */; };
 		FD2000000000000000000001 /* SquirrelApplicationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */; };
 		B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */; };
+		A11E55000000000000000002 /* LinnetRimeSessionLease.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55000000000000000001 /* LinnetRimeSessionLease.swift */; };
+		A11E55010000000000000002 /* LinnetRimeCandidateSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */; };
 		E90000000000000000000001 /* LinnetPreeditGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* LinnetPreeditGeometry.swift */; };
 		E90100000000000000000001 /* LinnetPanelGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90100000000000000000002 /* LinnetPanelGeometry.swift */; };
 		E90200000000000000000001 /* LinnetCandidatePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90200000000000000000002 /* LinnetCandidatePresentation.swift */; };
@@ -162,6 +164,8 @@
 		B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationDelegate.swift; path = sources/SquirrelApplicationDelegate.swift; sourceTree = "<group>"; };
 		FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationPresentation.swift; path = sources/SquirrelApplicationPresentation.swift; sourceTree = "<group>"; };
 		B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelInputController.swift; path = sources/SquirrelInputController.swift; sourceTree = "<group>"; };
+		A11E55000000000000000001 /* LinnetRimeSessionLease.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeSessionLease.swift; path = sources/LinnetRimeSessionLease.swift; sourceTree = "<group>"; };
+		A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeCandidateSnapshotBuilder.swift; path = sources/LinnetRimeCandidateSnapshotBuilder.swift; sourceTree = "<group>"; };
 		E90000000000000000000002 /* LinnetPreeditGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPreeditGeometry.swift; path = sources/LinnetPreeditGeometry.swift; sourceTree = "<group>"; };
 		E90100000000000000000002 /* LinnetPanelGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPanelGeometry.swift; path = sources/LinnetPanelGeometry.swift; sourceTree = "<group>"; };
 		E90200000000000000000002 /* LinnetCandidatePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCandidatePresentation.swift; path = sources/LinnetCandidatePresentation.swift; sourceTree = "<group>"; };
@@ -252,6 +256,8 @@
 				B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */,
 				FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */,
 				B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */,
+				A11E55000000000000000001 /* LinnetRimeSessionLease.swift */,
+				A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */,
 				E90000000000000000000002 /* LinnetPreeditGeometry.swift */,
 				E90100000000000000000002 /* LinnetPanelGeometry.swift */,
 				E90200000000000000000002 /* LinnetCandidatePresentation.swift */,
@@ -568,6 +574,8 @@
 				D40000000000000000000001 /* LinnetDataRegistry.swift in Linnet Sources */,
 				B39771292BEDAF4A0093A49B /* SquirrelView.swift in Sources */,
 				B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */,
+				A11E55000000000000000002 /* LinnetRimeSessionLease.swift in Sources */,
+				A11E55010000000000000002 /* LinnetRimeCandidateSnapshotBuilder.swift in Sources */,
 				E90000000000000000000001 /* LinnetPreeditGeometry.swift in Sources */,
 				E90100000000000000000001 /* LinnetPanelGeometry.swift in Sources */,
 				E90200000000000000000001 /* LinnetCandidatePresentation.swift in Sources */,

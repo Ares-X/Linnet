@@ -36,7 +36,8 @@ final class SquirrelInputController: IMKInputController {
   private var selRange: NSRange = .empty
   private var caretPos: Int = 0
   private var lastModifiers: NSEvent.ModifierFlags = .init()
-  private var session: RimeSessionId = 0
+  private var sessionLease: LinnetRimeSessionLease?
+  private var session: RimeSessionId { sessionLease?.identifier ?? 0 }
   private var schemaId: String = ""
   private var inlinePreedit = false
   private var inlineCandidate = false
@@ -149,7 +150,7 @@ final class SquirrelInputController: IMKInputController {
 
   func selectCandidate(absoluteIndex: Int) -> Bool {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
-      session != 0,
+      sessionIsCurrent(),
       absoluteIndex >= 0
     else { return false }
     let success = rimeAPI.select_candidate(session, absoluteIndex)
@@ -167,7 +168,7 @@ final class SquirrelInputController: IMKInputController {
 
   // swiftlint:disable:next identifier_name
   func page(up: Bool) -> Bool {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return false }
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else { return false }
     var handled = false
     handled = rimeAPI.change_page(session, up)
     if handled {
@@ -177,7 +178,7 @@ final class SquirrelInputController: IMKInputController {
   }
 
   func moveCaret(forward: Bool) -> Bool {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return false }
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else { return false }
     let currentCaretPos = rimeAPI.get_caret_pos(session)
     guard let input = rimeAPI.get_input(session) else { return false }
     if forward {
@@ -210,7 +211,7 @@ final class SquirrelInputController: IMKInputController {
   }
 
   var hasPendingRimeInput: Bool {
-    guard session != 0, rimeAPI.find_session(session), let input = rimeAPI.get_input(session)
+    guard sessionIsCurrent(), let input = rimeAPI.get_input(session)
     else { return false }
     return input.pointee != 0
   }
@@ -218,7 +219,7 @@ final class SquirrelInputController: IMKInputController {
   /// Rime's upstream synchronization owns session cleanup. Retire this
   /// controller's stale generation before that maintenance boundary.
   func prepareForRimeMaintenance() {
-    session = 0
+    retireSessionLease()
     preedit = ""
     clearChord()
     hidePalettes()
@@ -235,7 +236,7 @@ final class SquirrelInputController: IMKInputController {
     // reopens the input gate without another activation callback.
     resetModifierEpoch()
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
+      retireSessionLease()
       return
     }
     guard ensureSession() else { return }
@@ -275,7 +276,7 @@ final class SquirrelInputController: IMKInputController {
     }
     commitComposition(sender)
     if !NSApp.squirrelAppDelegate.canAcceptRimeInput {
-      session = 0
+      retireSessionLease()
       clearChord()
     }
     client = nil
@@ -298,13 +299,13 @@ final class SquirrelInputController: IMKInputController {
    */
   override func commitComposition(_ sender: Any!) {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
+      retireSessionLease()
       clearChord()
       return
     }
     self.client ?= sender as? IMKTextInput
     // print("[DEBUG] commitComposition: \(sender ?? "nil")")
-    if session != 0 {
+    if sessionIsCurrent() {
       if let input = rimeAPI.get_input(session) {
         let pendingInput = String(cString: input)
         if !pendingInput.isEmpty {
@@ -333,13 +334,18 @@ private extension SquirrelInputController {
 
   func onChordTimer(_: Timer) {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
+      retireSessionLease()
       clearChord()
       return
     }
     // chord release triggered by timer
     var processedKeys = false
-    if chordKeyCount > 0 && session != 0 {
+    guard sessionIsCurrent() else {
+      retireSessionLease()
+      clearChord()
+      return
+    }
+    if chordKeyCount > 0 {
       // simulate key-ups
       for i in 0..<chordKeyCount {
         let handled = rimeAPI.process_key(session, Int32(chordKeyCodes[i]), Int32(chordModifiers[i] | kReleaseMask.rawValue))
@@ -389,7 +395,7 @@ private extension SquirrelInputController {
 
   func createSession() {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
+      retireSessionLease()
       return
     }
     let app = client?.bundleIdentifier() ?? {
@@ -398,25 +404,39 @@ private extension SquirrelInputController {
     }()
     print("createSession: \(app)")
     currentApp = app
-    session = rimeAPI.create_session()
+    let identifier = rimeAPI.create_session()
+    sessionLease = LinnetRimeSessionLease.acquire(identifier: identifier)
     schemaId = ""
 
-    if session != 0 {
+    if sessionIsCurrent() {
       updateAppOptions()
     }
+  }
+
+  func sessionIsCurrent() -> Bool {
+    guard let sessionLease else { return false }
+    return sessionLease.isCurrent(
+      sessionExists: { rimeAPI.find_session($0) }
+    )
+  }
+
+  func retireSessionLease() {
+    sessionLease?.retire()
+    sessionLease = nil
   }
 
   /// Keeps one live librime generation behind every InputMethodKit callback.
   /// Configuration reload invalidates all engine sessions while controllers
   /// survive, so activation and the first key must share this recovery owner.
   func ensureSession() -> Bool {
-    if session != 0, rimeAPI.find_session(session) { return true }
+    if sessionIsCurrent() { return true }
+    retireSessionLease()
     createSession()
-    return session != 0
+    return sessionIsCurrent()
   }
 
   func updateAppOptions() {
-    guard session != 0, !currentApp.isEmpty else { return }
+    guard sessionIsCurrent(), !currentApp.isEmpty else { return }
     for (key, value) in NSApp.squirrelAppDelegate.config?.getAppOptions(currentApp) ?? [:] {
       print("set app option: \(key) = \(value)")
       rimeAPI.set_option(session, key, value)
@@ -426,18 +446,18 @@ private extension SquirrelInputController {
   func destroySession() {
     defer { clearChord() }
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
+      retireSessionLease()
       return
     }
     // print("[DEBUG] destroySession:")
-    if session != 0 {
+    if sessionIsCurrent() {
       _ = rimeAPI.destroy_session(session)
-      session = 0
     }
+    retireSessionLease()
   }
 
   func processKey(_ rimeKeycode: UInt32, modifiers rimeModifiers: UInt32) -> Bool {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return false }
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else { return false }
 
     if let shortcut = printablePagingKey(rimeKeycode),
       (rimeModifiers & ~kLockMask.rawValue) == 0,
@@ -519,7 +539,7 @@ private extension SquirrelInputController {
   }
 
   func rimeConsumeCommittedText() {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return }
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else { return }
     var commitText = RimeCommit.rimeStructInit()
     if rimeAPI.get_commit(session, &commitText) {
       if let text = commitText.text {
@@ -529,119 +549,10 @@ private extension SquirrelInputController {
     }
   }
 
-  func candidateSnapshot(
-    context: RimeContext_stdbool,
-    labels: [String],
-    expansionRequested: Bool
-  ) -> CandidateSnapshot? {
-    guard let menuPage = LinnetCandidatePresentation.candidateMenuPage(
-      currentPage: context.menu.page_no,
-      pageSize: context.menu.page_size,
-      candidateCount: context.menu.num_candidates,
-      highlighted: context.menu.highlighted_candidate_index)
-    else { return nil }
-    guard menuPage.pageSize > 0 else {
-      return CandidateSnapshot(
-        items: [],
-        currentPage: 0,
-        pageSize: 0,
-        highlightedItemIndex: 0,
-        isLastPage: true,
-        canExpand: false,
-        isExpanded: false)
-    }
-    let currentPage = menuPage.currentPage
-    let pageSize = menuPage.pageSize
-    let currentCount = menuPage.candidateCount
-    let highlightedOnPage = menuPage.highlighted
-    guard let expandedBounds = LinnetCandidatePresentation.expandedCandidateRange(
-      page: currentPage, pageSize: pageSize)
-    else { return nil }
-
-    let hasActiveInput = context.composition.length > 0
-    let pageStart = expandedBounds.lowerBound
-    var compactItems = [CandidateItem]()
-    compactItems.reserveCapacity(currentCount)
-    for indexOnPage in 0..<currentCount {
-      let candidate = context.menu.candidates[indexOnPage]
-      compactItems.append(CandidateItem(
-        absoluteIndex: pageStart + indexOnPage,
-        page: currentPage,
-        indexOnPage: indexOnPage,
-        text: candidate.text.map { String(cString: $0) } ?? "",
-        comment: candidate.comment.map { String(cString: $0) } ?? "",
-        selectionLabel: hasActiveInput
-          ? candidateSelectionLabel(at: indexOnPage, labels: labels) : nil
-      ))
-    }
-    let compactHighlighted = min(highlightedOnPage, max(0, compactItems.count - 1))
-    let compact = CandidateSnapshot(
-      items: compactItems,
-      currentPage: currentPage,
-      pageSize: pageSize,
-      highlightedItemIndex: compactHighlighted,
-      isLastPage: context.menu.is_last_page,
-      canExpand: !context.menu.is_last_page,
-      isExpanded: false)
-    guard expansionRequested,
-      let iteratorStart = Int32(exactly: expandedBounds.lowerBound)
-    else { return compact }
-
-    var iterator = RimeCandidateListIterator()
-    guard rimeAPI.candidate_list_from_index(session, &iterator, iteratorStart) else {
-      return compact
-    }
-    defer { rimeAPI.candidate_list_end(&iterator) }
-
-    var expandedItems = [CandidateItem]()
-    expandedItems.reserveCapacity(expandedBounds.count)
-    while expandedItems.count < expandedBounds.count,
-      rimeAPI.candidate_list_next(&iterator) {
-      let absoluteIndex = Int(iterator.index)
-      guard expandedBounds.contains(absoluteIndex) else { break }
-      let page = absoluteIndex / pageSize
-      let indexOnPage = absoluteIndex % pageSize
-      expandedItems.append(CandidateItem(
-        absoluteIndex: absoluteIndex,
-        page: page,
-        indexOnPage: indexOnPage,
-        text: iterator.candidate.text.map { String(cString: $0) } ?? "",
-        comment: iterator.candidate.comment.map { String(cString: $0) } ?? "",
-        selectionLabel: page == currentPage && hasActiveInput
-          ? candidateSelectionLabel(at: indexOnPage, labels: labels) : nil
-      ))
-    }
-    let highlightedAbsolute = pageStart + highlightedOnPage
-    guard !expandedItems.isEmpty,
-      let expandedHighlighted = expandedItems.firstIndex(where: {
-        $0.absoluteIndex == highlightedAbsolute
-      })
-    else { return compact }
-    return CandidateSnapshot(
-      items: expandedItems,
-      currentPage: currentPage,
-      pageSize: pageSize,
-      highlightedItemIndex: expandedHighlighted,
-      isLastPage: context.menu.is_last_page,
-      canExpand: !context.menu.is_last_page,
-      isExpanded: true)
-  }
-
-  func candidateSelectionLabel(at index: Int, labels: [String]) -> String {
-    if labels.count > 1, labels.indices.contains(index) {
-      return labels[index]
-    }
-    if let customLabels = labels.first, labels.count == 1,
-      index >= 0, index < customLabels.count {
-      return String(customLabels[customLabels.index(customLabels.startIndex, offsetBy: index)])
-    }
-    return String(index + 1)
-  }
-
   // swiftlint:disable:next cyclomatic_complexity
   func rimeUpdate() {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else {
-      session = 0
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else {
+      retireSessionLease()
       clearChord()
       hidePalettes()
       return
@@ -777,10 +688,12 @@ private extension SquirrelInputController {
       // swiftlint:enable identifier_name
       let expansionRequested =
         NSApp.squirrelAppDelegate.panel?.candidateExpansionRequested ?? false
-      guard let candidateSnapshot = candidateSnapshot(
+      guard let candidateSnapshot = LinnetRimeCandidateSnapshotBuilder.build(
         context: ctx,
         labels: labels,
-        expansionRequested: expansionRequested)
+        expansionRequested: expansionRequested,
+        session: session,
+        rimeAPI: rimeAPI)
       else {
         _ = rimeAPI.free_context(&ctx)
         hidePalettes()
@@ -810,7 +723,7 @@ private extension SquirrelInputController {
     guard let client = client else { return }
 
     let forceMarkedText =
-      session != 0 &&
+      sessionIsCurrent() &&
       rimeAPI.get_option(session, "force_marked_text_for_direct_commit")
 
     // Some NSTextInputClient implementations accept a direct Rime commit only

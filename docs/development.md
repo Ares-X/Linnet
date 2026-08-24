@@ -286,5 +286,5 @@ tests/verify_product.sh release
 
 - README 是唯一普通用户文档，拥有安装、操作、配置、故障排查、隐私和贡献入口，不保存研发事故档案。
 - 本文件唯一拥有贡献和维护方式；release guide 只保存 community artifact、package、安装验收与 publication 顺序。
-- `docs/product-acceptance.md` 是 machine-bound 的当前证据投影，路径不能随意移动。
+- `docs/product-acceptance.md` 拥有证据等级与验收要求；只有绑定精确 revision 和产物的运行报告才拥有当次证据。
 - 已被源码与测试替代的旧 ADR 通过 Git 历史查询，不在主分支保留第二份现行说明。

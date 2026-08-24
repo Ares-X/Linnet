@@ -38,9 +38,12 @@ ad-hoc 签名；`package/make_package` 只封装已验证字节，不重新签�
 最终 8 个候选产物使用独立 pack CLI 验证：
 
 ```bash
+release_version="$(sed -n \
+  's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+  config/LinnetProduct.xcconfig)"
 LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
   package/verify_publication_artifacts \
-  "$ARCHIVE_OUTPUT_DIR" 0.1.5 "$LINNET_CANDIDATE_REVISION"
+  "$ARCHIVE_OUTPUT_DIR" "$release_version" "$LINNET_CANDIDATE_REVISION"
 ```
 
 测试用 UAT CMS 身份仍可用于本地、非公开的安装回归；它不是公开发布前置，
@@ -49,8 +52,8 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 ## GitHub 发布
 
 版本标签是唯一发布授权。标签必须为 `v<MARKETING_VERSION>` 并直接指向要
-发布的源码 revision；不再使用额外 approval commit，因此单一根提交仓库不会
-产生第二条发布真相。
+发布的源码 revision；安装验收记录不授权发布，因此单一根提交仓库不会产生
+第二条发布真相。
 
 推送标签后，`.github/workflows/release-ci.yml` 会在无证书环境中：
 

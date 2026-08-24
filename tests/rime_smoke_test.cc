@@ -744,6 +744,51 @@ void ExpectModelessMixedInput(RimeApi_stdbool* api) {
   api->destroy_session(ambiguous);
 }
 
+void ExpectModelessMixedLearningEnabled(RimeApi_stdbool* api) {
+  constexpr char kInput[] = "shuanghezhancsjiting";
+  constexpr char kLearnedText[] = "霜河栈CS急停";
+  const RimeSessionId session =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, session, kInput);
+  const auto candidates = CandidateOrigins(session);
+  if (std::none_of(candidates.begin(), candidates.end(), [&](const auto& candidate) {
+        return candidate.type == "linnet_mixed" &&
+               BaseText(candidate.text) == kLearnedText;
+      })) {
+    Fail("enabled Chinese learning did not expose the seeded user phrase through mixed input");
+  }
+  api->destroy_session(session);
+}
+
+void ExpectModelessMixedLearningDisabled(RimeApi_stdbool* api) {
+  constexpr char kInput[] = "shuanghezhancsjiting";
+  constexpr char kLearnedText[] = "霜河栈CS急停";
+  const RimeSessionId session =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, session, kInput);
+  const auto candidates = CandidateOrigins(session);
+  if (std::any_of(candidates.begin(), candidates.end(), [&](const auto& candidate) {
+        return candidate.type == "linnet_mixed" &&
+               BaseText(candidate.text) == kLearnedText;
+      })) {
+    Fail("disabled Chinese learning still exposed a user phrase through mixed input");
+  }
+  api->destroy_session(session);
+
+  const RimeSessionId static_mixed =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, static_mixed, "xuexicsjiting");
+  const auto static_candidates = CandidateOrigins(static_mixed);
+  if (std::none_of(
+          static_candidates.begin(), static_candidates.end(), [](const auto& candidate) {
+            return candidate.type == "linnet_mixed" &&
+                   BaseText(candidate.text) == "学习CS急停";
+          })) {
+    Fail("disabling Chinese learning also disabled static mixed input");
+  }
+  api->destroy_session(static_mixed);
+}
+
 void ExpectCandidateAbsent(RimeApi_stdbool* api,
                            RimeSessionId session,
                            const std::string& input,
@@ -4360,6 +4405,12 @@ int main(int argc, char** argv) {
       std::strcmp(argv[3], "--single-key-ranking-probe") == 0;
   const bool mixed_input_probe =
       argc == 4 && std::strcmp(argv[3], "--mixed-input-probe") == 0;
+  const bool mixed_learning_on_probe =
+      argc == 4 &&
+      std::strcmp(argv[3], "--mixed-learning-on-probe") == 0;
+  const bool mixed_learning_off_probe =
+      argc == 4 &&
+      std::strcmp(argv[3], "--mixed-learning-off-probe") == 0;
   const bool mixed_latency_probe =
       argc == 4 && std::strcmp(argv[3], "--mixed-latency-probe") == 0;
   if (argc != 3 && !input_options_probe && !input_switches_probe &&
@@ -4367,6 +4418,8 @@ int main(int argc, char** argv) {
       !shift_probe && !page_size_probe && !english_profile_probe &&
       !fast_config_reload_probe && !prediction_punctuation_probe &&
       !single_key_ranking_probe && !mixed_input_probe &&
+      !mixed_learning_on_probe &&
+      !mixed_learning_off_probe &&
       !mixed_latency_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|--shift-probe|"
@@ -4374,6 +4427,8 @@ int main(int argc, char** argv) {
          "--english-profile-probe PROFILE CHINESE_SCHEMA CODE PREFIX|"
          "--fast-config-reload-probe|--prediction-punctuation-probe|"
          "--single-key-ranking-probe|--mixed-input-probe|"
+         "--mixed-learning-on-probe|"
+         "--mixed-learning-off-probe|"
          "--mixed-latency-probe]");
   }
   int expected_page_size = 0;
@@ -4461,6 +4516,20 @@ int main(int argc, char** argv) {
     BenchmarkSchema(api, "linnet_zh_pinyin", "xuexicsjiting");
     api->finalize();
     std::cout << "rime_smoke_test: modeless mixed input: PASS\n";
+    return 0;
+  }
+
+  if (mixed_learning_off_probe) {
+    ExpectModelessMixedLearningDisabled(api);
+    api->finalize();
+    std::cout << "rime_smoke_test: modeless mixed learning disabled: PASS\n";
+    return 0;
+  }
+
+  if (mixed_learning_on_probe) {
+    ExpectModelessMixedLearningEnabled(api);
+    api->finalize();
+    std::cout << "rime_smoke_test: modeless mixed learning enabled: PASS\n";
     return 0;
   }
 

@@ -93,6 +93,10 @@ compile_run macos-keycodes -target "${target}" -framework AppKit \
   -import-objc-header sources/Squirrel-Bridging-Header.h \
   -I librime/src -I librime/include -I librime/dist/include \
   sources/MacOSKeyCodes.swift tests/MacOSKeyCodesTests.swift
+compile_run rime-session-lease -target "${target}" \
+  -import-objc-header sources/Squirrel-Bridging-Header.h \
+  -I librime/src -I librime/include -I librime/dist/include \
+  sources/LinnetRimeSessionLease.swift tests/LinnetRimeSessionLeaseTests.swift
 compile_run input-source-lifecycle -parse-as-library -framework InputMethodKit -framework Carbon \
   sources/InputSource.swift tests/LinnetInputSourceLifecycleTests.swift
 "${swiftc}" -swift-version 5 -parse sources/Main.swift sources/InputSource.swift

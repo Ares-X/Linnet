@@ -13,12 +13,13 @@ project state. An ignored local `package/release/` directory may still retain
 those old bytes, but it is not a source, current candidate or publication
 evidence. Those bytes no longer match the current locked Wanxiang LTS asset,
 Settings copy or security owners and are not eligible for installation UAT.
-There is currently no eligible installable candidate. A new candidate must be rebuilt
-from one frozen revision after the current source, data, App and package gates
-pass. Valid real-window/VoiceOver evidence, controlled installed-product
-evidence, one committed revision, a canonical Catalog bound to deterministic packs,
-the versioned Core update channel, a published service and real Linnet large-pack transfer through
-GH-Proxy remain required.
+No local build is eligible by default. Each candidate must be rebuilt from one
+frozen revision after the current source, data, App and package gates pass.
+Valid real-window/VoiceOver evidence and controlled installed-product evidence
+remain required before making the corresponding V/I acceptance claims; they do
+not create a second publication authority. A canonical Catalog bound to
+deterministic packs, the versioned Core update channel and a published service
+remain requirements of the tagged community release.
 
 Retired UAT9 historical artifact identity (not a current candidate):
 
@@ -40,11 +41,11 @@ is no longer a candidate or a current product projection.
 `README.md` defines the user-visible product promise; this file records the
 evidence required before those promises may be reported as installed-product
 acceptance. The Git tag and embedded release metadata own publication identity;
-this document does not create a second approval commit or machine state.
+this document defines evidence levels but does not authorize publication.
 
 Passing source tests, engine smoke tests or package expansion is necessary but
-not sufficient. A release candidate is accepted only when the user journeys
-below have current evidence from the same candidate revision and artifact set.
+not sufficient for installed-product acceptance. Each V/I claim below requires
+current evidence from the same candidate revision and artifact set.
 
 ## Evidence levels
 
@@ -67,7 +68,10 @@ all non-install blockers are closed.
   all final evidence. Rebuilding invalidates downstream evidence.
 - Every failure is traced to the earliest owner. A downstream workaround does
   not close the finding.
-- P0 and P1 findings block the release. P2 findings require an explicit product
+- A P0 or P1 product defect blocks the release only when it is reproduced on
+  the exact current candidate and remains open. Missing V/I evidence,
+  `NOT_EXERCISED` and `ENVIRONMENT_INVALID` are evidence gaps: they block only
+  the corresponding V/I claim. P2 findings require an explicit product
   decision and must be listed in the release notes.
 - A published asset must come from the exact tagged revision and pass the
   community artifact verifier before upload. A later source revision requires
@@ -87,7 +91,7 @@ all non-install blockers are closed.
 | Settings/Registry verification interpretations | Settings container check + Registry pack check + Settings identity recheck (3) | Registry install call (1) |
 | local package dependencies on external data roots | 1 | 0 |
 | App-revision fields in language-data handoffs | 1 | 0 |
-| pre-install machine-approval states | `authorized` (1) | 0; only post-UAT `passed` result |
+| publication authorization owners | machine record + version tag (2) | exact version tag (1) |
 
 Retained checks protect distinct boundaries: direct canonical GitHub HTTPS owns
 Catalog origin; sequence floors prevent replay; Catalog byte count/SHA-256
@@ -171,17 +175,17 @@ locale. Localization completeness alone is not visual proof.
 | Status | Priority | Finding | Earliest owner | Required closure |
 | --- | --- | --- | --- | --- |
 | closed | P0 | An embedded hardened Settings process could pass static code-sign verification but crash while loading the ad-hoc parent `librime` because the nested signature lacked the library-validation entitlement. | Release App nested signing boundary | Release build now signs Settings inside-out and verifies its entitlement, dependency, RPATH and nested signature. Headless gates no longer launch the regular GUI merely to observe two seconds of liveness; real Settings launch remains one installed-product UAT row. |
-| UAT | P1 | Settings has an always-visible local candidate preview that consumes the canonical bundled Squirrel theme source. Component and projection tests pass, but the safe hidden-window attempt produced incomplete pixels and a root-only AX tree, so it is `ENVIRONMENT_INVALID` rather than accepted V evidence. | Settings appearance preview and visible accessibility presentation | inspect all theme/layout/font extremes, unavailable/error states, keyboard traversal and VoiceOver in the controlled App/installed UAT; compare the real candidate renderer with the preview |
-| open | P1 | The complete Settings state matrix has no valid current real-window screenshot or accessibility-tree evidence; the rejected offscreen harness rendered blank pixels and a root-only AX tree. | Settings presentation and accessibility contracts | inspect Appearance, Input, Dictionary, English and Data in English and Simplified Chinese from the next frozen candidate; include all three download sources and their disabled/error/privacy states, and record hierarchy, copy, focus and controls without counting the invalid offscreen evidence |
-| open | P1 | No installed-product evidence exists for input-source discovery, the required six-application focus behavior (Terminal, VS Code, Chrome, Apple Notes, Word and Teams), upgrade, rollback, uninstall or residue. | current-user Installer and InputMethodKit lifecycle | complete one controlled clean-install-to-purge UAT only after every non-install blocker is closed |
-| UAT | P0 | The installed Host is newer than the current Aqua/InputMethodKit session. Registration and System Settings can enumerate Linnet, but a native source-change trace proves Control-Option-Space rotates only through system Shuangpin, Unicode Hex Input and hallelujah. Exact `a27bb4d` placed `postinstall-action=logout` only in the Core component; macOS then reported `RestartAction=None` for the final product, proving that action was not the product conclusion owner. | product Distribution conclusion plus the installed Host lifecycle | Complete retains `onConclusion=RequireLogout` and accepts only clean first install/reinstall; its postinstall registers and requests enablement but never selects. Core has no logout conclusion: package preinstall cooperatively quiesces Host/Settings, then one new-executable transition owns final Host exit, public TIS registration and conditional restoration without enabling or overriding a newer non-Linnet choice. Remaining product closure is a real corrected Core upgrade in the same logged-in account, verifying new Host/Settings mappings plus retained enabled/disabled, selected and user-data state. |
+| evidence-gap | — | Settings has an always-visible local candidate preview that consumes the canonical bundled Squirrel theme source. Component and projection tests pass, but the safe hidden-window attempt produced incomplete pixels and a root-only AX tree, so it is `ENVIRONMENT_INVALID` rather than accepted V evidence. | Settings appearance preview and visible accessibility presentation | inspect all theme/layout/font extremes, unavailable/error states, keyboard traversal and VoiceOver in the controlled App/installed UAT; compare the real candidate renderer with the preview |
+| evidence-gap | — | The complete Settings state matrix has no valid current real-window screenshot or accessibility-tree evidence; the rejected offscreen harness rendered blank pixels and a root-only AX tree. | Settings presentation and accessibility contracts | inspect Appearance, Input, Dictionary, English and Data in English and Simplified Chinese from the next frozen candidate; include all three download sources and their disabled/error/privacy states, and record hierarchy, copy, focus and controls without counting the invalid offscreen evidence |
+| evidence-gap | — | No installed-product evidence exists for input-source discovery, the required six-application focus behavior (Terminal, VS Code, Chrome, Apple Notes, Word and Teams), upgrade, rollback, uninstall or residue. | current-user Installer and InputMethodKit lifecycle | complete one controlled clean-install-to-purge UAT only after every non-install blocker is closed |
+| evidence-gap | — | Historical UAT at exact `a27bb4d` found that the installed Host was newer than the Aqua/InputMethodKit session. Registration and System Settings could enumerate Linnet, but a native source-change trace proved Control-Option-Space rotated only through system Shuangpin, Unicode Hex Input and hallelujah. The package conclusion owner was subsequently repaired; its current installed behavior remains unexercised. | product Distribution conclusion plus the installed Host lifecycle | Complete retains `onConclusion=RequireLogout` and accepts only clean first install/reinstall; its postinstall registers and requests enablement but never selects. Core has no logout conclusion: package preinstall cooperatively quiesces Host/Settings, then one new-executable transition owns final Host exit, public TIS registration and conditional restoration without enabling or overriding a newer non-Linnet choice. Remaining evidence is a real corrected Core upgrade in the same logged-in account, verifying new Host/Settings mappings plus retained enabled/disabled, selected and user-data state. |
 | closed | P0 | At exact `94e7c6f`, Shift down/up on `linnet_zh` changed `ascii_mode` to true while `schema_id` remained `linnet_zh`; Smart English had instead been placed behind a Shift-plus-space binding. The wrong product transition was caused by treating a convenient standard key binding as the user contract. | direct Chinese/Smart-English transition after upstream gesture classification | `ascii_composer` still owns tap/chord/hold and composition commit; one native Rime processor maps only its accepted isolated-Shift result to the other schema. The focused engine probe covers all eight Chinese profiles, default round trip, Shift+letter, held Shift and Caps Lock raw ASCII, while source guards reject the retired chord shortcut and private Swift mode owners |
 | closed | P0 | Packaging exact `bb368e1` rejected the Chinese pack before emitting artifacts because the direct-Shift schemas and Glass `squirrel.yaml` changed pack bytes while the release manifest still named the preceding content digests. | `config/linnet-data-releases.json` language-pack identity | Chinese advances to `0.5.9` / sequence 17, English to `0.4.7` / sequence 12 and the Catalog to sequence 10, each bound to the source inventory digest computed by the existing pack owner; the same `make_package` rejection is the RED and must turn GREEN before installation |
 | closed | P1 | The Host lifecycle CLI discarded InputMethodKit failures and postinstall treated the Installer service as the user's Text Input UI session, so transient enable/selection results could be reported as success without adding Linnet to the user's persistent input-source list. | `SquirrelInstaller` TIS boundary and Host CLI exit projection | registration, explicit enablement, selection and disablement retain typed failures. Complete registers and requests enablement but never selects. Core accepts only its package-bound prior-state tuple and may conditionally restore Linnet within its single refresh transition; it cannot enable or accept an alternate target identifier. Uninstall leaves source retirement to the required fresh login session. |
 | closed | P0 | During exact `83e7adb` default-uninstall UAT, the old App and generated data were removed but the preserved `linnet_zh.userdb` rotated its LevelDB log and manifest after the uninstaller invoked `--disable-input-source`; the pre-action and post-action byte manifests differed while the already-quiesced Host had no pending user input. | default uninstaller lifecycle sequence | remove the TIS disable transition from uninstall, retain the exact Host/Settings quit as the only pre-delete product action, and let the already-required fresh login retire the absent source; the real default-uninstall row must repeat from restored pre-action bytes and prove UserData, Backups and Transactions byte-identical before installation can pass |
 | closed | P1 | Caps Lock lacked an automated key-event proof across Chinese and Smart English. | input-event engine acceptance | `rime_smoke_test` now proves Caps Lock down/type/up enters and leaves raw ASCII in both schemas; installed Terminal/password-field coverage remains in J05 |
-| open | P1 | Source, LTS identity and Settings bytes changed after the retired UAT9 projection, leaving no current local package projection. | language-data release identity and local package projection | after trust and IPC owners freeze, build one new revision-bound Core/complete/uninstaller identity and pass full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity |
-| open | P1 | The source service is enabled, but the candidate has no remote fast-forward Catalog or installed real-network evidence yet. | archive and remote publication owners | publish Core and the deterministic packs, then fast-forward the exact canonical Catalog to `data-channel`; verify remote sequence, Core/package binding and pack bytes before installed Settings UAT |
+| gate | P1 | Every tagged candidate requires a fresh revision-bound Core/complete/uninstaller projection after source, LTS identity or Settings bytes change. | language-data release identity and local package projection | before tagging, pass full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity |
+| evidence-gap | — | Remote fast-forward Catalog and real-network evidence can exist only after the tag workflow publishes the exact candidate. | archive and remote publication owners | publish Core and deterministic packs, fast-forward the exact canonical Catalog to `data-channel`, then verify remote sequence, Core/package binding and pack bytes before claiming R or installed-network acceptance |
 | closed | P2 | Candidate labels/opacity/radius, fuzzy-pinyin policy, restore defaults and reviewed advanced overrides are not Beta controls. The former design draft over-promised them; font and theme presets are implemented. | typed settings document and deterministic projection renderer | retired controls remain outside the Beta contract; any future addition requires its own typed owner and product evidence |
 | closed | P1 | Settings previously shipped partial Traditional-Chinese strings beside otherwise English fallback, and dynamic status classified any Chinese locale as Simplified Chinese. | Settings bundle string catalog and typed presentation locale | Beta now supports exactly English and Simplified Chinese; every entry has reviewed Simplified Chinese, unsupported Chinese scripts uniformly fall back to English, and structural/component gates reject a mixed third locale |
 | superseded | P1 | Earlier packaging added private LaunchServices unregister calls for scratch Apps. The later upstream-alignment audit found that mature Squirrel/Hallelujah package flows do not create this cleanup owner. | ordinary temporary work-root cleanup plus macOS registration lifecycle | private `lsregister` calls are retired; current package/source guards require build products never to become selectable input sources, while actual installed registration remains J02/J16 product evidence |
@@ -195,10 +199,9 @@ The first P0 was found only by executing Settings from the expanded PKG. This
 is why static package inspection is retained but is no longer considered a
 product acceptance result by itself.
 
-## Required acceptance record
+## Required installed-product acceptance record
 
-The eventual accepted v3 approval commit (`installation_uat=passed` and
-`publication=go`) and its machine record must name:
+Any future installed-product acceptance record must name:
 
 - Git revision and whether the worktree exactly matched it;
 - App, PKG and language-pack SHA-256 values;
@@ -211,16 +214,14 @@ The eventual accepted v3 approval commit (`installation_uat=passed` and
 
 The credential-free manual candidate job verifies source and locked inputs; it
 does not create a signing handoff or publish. Local package and installation
-UAT build deterministic data containers and Catalog bytes directly. After
-the installed workflow succeeds, a result commit records `installation_uat=passed`
-and the exact three candidate artifact digests; the canonical verifier checks
-that evidence after the fact. Formal archive assembly creates the remaining
-product assets from the accepted candidate, then revalidates the resulting
-digest-bound publication plan immediately before its first remote mutation. An
-existing data release must be a prerelease at the accepted revision; an
-existing product release must remain a draft at that revision. Any extra or
-differing asset is a hard failure, while a byte-identical planned subset is the
-only retry state.
+UAT may retain exact revision and artifact hashes as evidence, but an
+acceptance record does not authorize publication. Formal archive
+assembly creates all eight product assets from the tagged revision and the tag
+workflow revalidates their digest-bound manifest before its first remote
+mutation. An existing data or Core release must be a prerelease at the same
+revision; an existing stable product release must retain the exact verified
+asset set. Any extra or differing asset is a hard failure, while a byte-identical
+planned subset is the only retry state.
 
 Until the remaining rows are complete, lower-class component evidence must not
 be reported as installed-product acceptance.
