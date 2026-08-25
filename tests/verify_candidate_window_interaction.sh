@@ -19,10 +19,14 @@ trap cleanup EXIT INT TERM
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetCandidatePresentation.swift \
   sources/LinnetClientAppearance.swift \
+  sources/LinnetInputActivationRegistry.swift \
   sources/LinnetPanelGeometry.swift \
   sources/SquirrelView.swift \
+  sources/SquirrelView+CandidateDrawing.swift \
+  sources/LinnetCandidateInteractionState.swift \
   sources/LinnetCandidateAccessibility.swift \
   sources/SquirrelPanel.swift \
+  sources/SquirrelPanel+CandidatePresentation.swift \
   tests/LinnetCandidateWindowInteractionTests.swift \
   -o "${scratch}/candidate-interaction"
 "${scratch}/candidate-interaction" "$@"

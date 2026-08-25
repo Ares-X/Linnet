@@ -10,27 +10,111 @@ extension SquirrelApplicationDelegate {
 }
 
 extension SquirrelApplicationDelegate {
-  func showStatusMessage(msgTextLong: String?, msgTextShort: String?) {
-    if !(msgTextLong ?? "").isEmpty || !(msgTextShort ?? "").isEmpty {
-      panel?.updateStatus(long: msgTextLong ?? "", short: msgTextShort ?? "")
+  func beginInputActivation(
+    controller: SquirrelInputController,
+    client: IMKTextInput
+  ) -> LinnetInputActivationRegistry.Token? {
+    if SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier {
+      inputActivationRegistry.sourceDidTurnOn()
     }
+    return inputActivationRegistry.begin(controller: controller, client: client) { [weak self] closed in
+      self?.retireClosedInputActivation(closed)
+    }
+  }
+
+  @discardableResult
+  func finishInputActivation(
+    controller: SquirrelInputController,
+    client: IMKTextInput
+  ) -> Bool {
+    guard let closed = inputActivationRegistry.closeNative(
+      controller: controller, client: client)
+    else { return false }
+    retireClosedInputActivation(closed)
+    return true
+  }
+
+  @discardableResult
+  func finishInputActivation(
+    token: LinnetInputActivationRegistry.Token?
+  ) -> Bool {
+    guard let token, let closed = inputActivationRegistry.close(token) else {
+      return false
+    }
+    retireClosedInputActivation(closed)
+    return true
+  }
+
+  @discardableResult
+  func finishInputSourceActivations() -> Bool {
+    inputActivationRegistry.sourceDidTurnOff { [weak self] closed in
+      self?.retireClosedInputActivation(closed)
+    }
+  }
+
+  @discardableResult
+  func terminateInputActivations() -> Bool {
+    inputActivationRegistry.terminate { [weak self] closed in
+      self?.retireClosedInputActivation(closed)
+    }
+  }
+
+  private func retireClosedInputActivation(
+    _ closed: LinnetInputActivationRegistry.ClosedActivation
+  ) {
+    (closed.controller as? SquirrelInputController)?.activationDidClose(
+      closed.token,
+      client: closed.client as? IMKTextInput)
+  }
+
+  func showStatusMessage(
+    msgTextLong: String?,
+    msgTextShort: String?,
+    session: RimeSessionId
+  ) {
+    guard canAcceptRimeInput,
+      !(msgTextLong ?? "").isEmpty || !(msgTextShort ?? "").isEmpty,
+      let activationToken = inputActivationRegistry.currentToken,
+      let controller = inputActivationRegistry.currentController(
+        as: SquirrelInputController.self),
+      controller.currentSessionLease(
+        matching: session,
+        activationToken: activationToken) != nil
+    else { return }
+    panel?.updateStatus(
+      long: msgTextLong ?? "",
+      short: msgTextShort ?? "",
+      activationToken: activationToken)
   }
 
   func updateStatusIcon(session: RimeSessionId) {
-    guard canAcceptRimeInput, session != 0, rimeAPI.find_session(session) else { return }
-    let asciiMode = rimeAPI.get_option(session, "ascii_mode")
+    guard canAcceptRimeInput,
+      let activationToken = inputActivationRegistry.currentToken,
+      let controller = inputActivationRegistry.currentController(
+        as: SquirrelInputController.self),
+      let sessionLease = controller.currentSessionLease(
+        matching: session,
+        activationToken: activationToken)
+    else { return }
+    let asciiMode = rimeAPI.get_option(sessionLease.identifier, "ascii_mode")
     let schemaLabel = rimeAPI.get_state_label_abbreviated(
-      session, "ascii_mode", asciiMode, true).asString
-    DispatchQueue.main.async { [weak self] in
-      self?.applyStatusIcon(asciiMode: asciiMode, schemaLabel: schemaLabel)
+      sessionLease.identifier, "ascii_mode", asciiMode, true).asString
+    DispatchQueue.main.async { [weak self, weak controller] in
+      guard let self, let controller,
+        controller.ownsCurrentSession(
+          sessionLease, activationToken: activationToken)
+      else { return }
+      applyStatusIcon(asciiMode: asciiMode, schemaLabel: schemaLabel)
     }
   }
 
-  func inputSourceDidActivate(session: RimeSessionId) {
+  func inputSourceDidActivate(
+    activationToken: LinnetInputActivationRegistry.Token,
+    session: RimeSessionId
+  ) {
+    guard inputActivationRegistry.isCurrent(activationToken) else { return }
     updateStatusIcon(session: session)
-    DispatchQueue.main.async { [weak self] in
-      self?.setStatusItemVisibility(inputSourceIsActive: true)
-    }
+    setStatusItemVisibility(inputSourceIsActive: true)
   }
 
   func refreshStatusItem() {
@@ -80,22 +164,17 @@ extension SquirrelApplicationDelegate {
   }
 
   @objc func inputSourceChanged(_: Notification) {
-    DispatchQueue.main.async { [weak self] in
-      self?.updateStatusItemVisibility()
-      self?.finalizeStrandedComposition()
-    }
-  }
-
-  // macOS may omit deactivateServer when another process selects an input
-  // source through TIS. The selection notification is still delivered, so
-  // finish through the existing controller lifecycle exactly as upstream does.
-  private func finalizeStrandedComposition() {
-    guard SquirrelInstaller.currentInputSourceID() != SquirrelApp.bundleIdentifier else {
+    guard let currentInputSourceID = SquirrelInstaller.currentInputSourceID() else { return }
+    let inputSourceIsActive =
+      currentInputSourceID == SquirrelApp.bundleIdentifier
+    setStatusItemVisibility(inputSourceIsActive: inputSourceIsActive)
+    if inputSourceIsActive {
+      inputActivationRegistry.sourceDidTurnOn()
       return
     }
-    if let inputController = panel?.inputController {
-      inputController.deactivateServer(inputController.client())
-    }
+    // macOS may omit deactivateServer when another process selects an input
+    // source through TIS. The process-wide owner closes the exact activation.
+    finishInputSourceActivations()
   }
 
   // MARK: input menu
@@ -220,8 +299,11 @@ func notificationHandler(
         let longLabel = delegate.rimeAPI.get_state_label_abbreviated(
           sessionId, name, state, false).asString
         if optionName == "ascii_mode" { delegate.updateStatusIcon(session: sessionId) }
-        if delegate.enableNotifications {
-          delegate.showStatusMessage(msgTextLong: longLabel, msgTextShort: shortLabel)
+        if delegate.enableNotifications, optionName != "ascii_mode" {
+          delegate.showStatusMessage(
+            msgTextLong: longLabel,
+            msgTextShort: shortLabel,
+            session: sessionId)
         }
       }
     }

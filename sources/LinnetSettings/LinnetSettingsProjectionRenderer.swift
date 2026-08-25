@@ -191,7 +191,7 @@ enum LinnetSettingsProjectionRenderer {
     // before every Rime start, so this projection is the installed-product
     // owner for policies that must override an older Active pack immediately.
     var entries = [
-      ("ascii_composer/switch_key/Caps_Lock", "commit_text"),
+      ("ascii_composer/switch_key/Caps_Lock", "commit_code"), ("ascii_composer/switch_key/Shift_L", "commit_code"), ("ascii_composer/switch_key/Shift_R", "commit_code"),
       ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern))
     ]
     if pageSize != LinnetSettingsDocument.Appearance.defaultPageSize {

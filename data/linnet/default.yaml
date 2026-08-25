@@ -82,26 +82,17 @@ punctuator:
   half_shape:
     '!' : { commit: '！' }
     '"' : { pair: ['“', '”'] }
-    '#' : { commit: '#' }
     '$' : { commit: '¥' }
-    '%' : { commit: '%' }
-    '&' : { commit: '&' }
     '''' : { pair: ['‘', '’'] }
     '(' : { commit: '（' }
     ')' : { commit: '）' }
-    '*' : { commit: '*' }
-    '+' : { commit: '+' }
     ',' : { commit: '，' }
-    '-' : { commit: '-' }
     '.' : { commit: '。' }
-    '/' : { commit: '/' }
     ':' : { commit: '：' }
     ';' : { commit: '；' }
     '<' : { commit: '《' }
-    '=' : { commit: '=' }
     '>' : { commit: '》' }
     '?' : { commit: '？' }
-    '@' : { commit: '@' }
     '[' : { commit: '【' }
     '\' : { commit: '、' }
     ']' : { commit: '】' }
@@ -109,9 +100,7 @@ punctuator:
     '_' : { commit: '——' }
     '`' : { commit: '·' }
     '{' : { commit: '「' }
-    '|' : { commit: '|' }
     '}' : { commit: '」' }
-    '~' : { commit: '~' }
 
 # ── Shared product feature policy ───────────────────────────────────────────
 linnet:

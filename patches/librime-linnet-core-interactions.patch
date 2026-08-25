@@ -1,17 +1,76 @@
+diff --git a/src/rime/context.cc b/src/rime/context.cc
+index ec840a3..fb2633b 100644
+--- a/src/rime/context.cc
++++ b/src/rime/context.cc
+@@ -25,6 +25,29 @@ bool Context::Commit() {
+   return true;
+ }
+ 
++bool Context::CommitRawInput() {
++  if (input_.empty()) {
++    AbortComposition();
++    return false;
++  }
++  // The live composition may cover only the text before an edited caret.
++  // Lifecycle exit owns the complete raw buffer, while retaining any explicit
++  // selection that is still valid for its prefix.
++  composition_.Reset(input_);
++  ClearNonConfirmedComposition();
++  // Switcher uses `dumb` to suppress committing its own display context.
++  // Lifecycle exit targets this root context's raw buffer, so that display
++  // option must not silently erase it. Avoid option notifications and restore
++  // the caller-owned state after the synchronous commit.
++  const bool restore_dumb = get_option("dumb");
++  if (restore_dumb)
++    options_["dumb"] = false;
++  const bool committed = Commit();
++  if (restore_dumb)
++    options_["dumb"] = true;
++  return committed;
++}
++
+ string Context::GetCommitText() const {
+   if (get_option("dumb"))
+     return string();
+diff --git a/src/rime/context.h b/src/rime/context.h
+index d526130..55605cf 100644
+--- a/src/rime/context.h
++++ b/src/rime/context.h
+@@ -29,6 +29,7 @@ class RIME_DLL Context {
+   ~Context() = default;
+ 
+   bool Commit();
++  bool CommitRawInput();
+   string GetCommitText() const;
+   string GetScriptText() const;
+   Preedit GetPreedit() const;
 diff --git a/src/rime/gear/ascii_composer.cc b/src/rime/gear/ascii_composer.cc
-index e49dc38..a5f55f7 100644
+index e49dc38..2a8ece6 100644
 --- a/src/rime/gear/ascii_composer.cc
 +++ b/src/rime/gear/ascii_composer.cc
-@@ -51,18 +51,20 @@ static void load_bindings(const an<ConfigMap>& src,
+@@ -15,6 +15,9 @@
+ 
+ namespace rime {
+ 
++constexpr char kCapsLockAsciiModeProperty[] =
++    "_linnet_caps_lock_ascii_mode";
++
+ static struct AsciiModeSwitchStyleDefinition {
+   const char* repr;
+   AsciiModeSwitchStyle style;
+@@ -51,18 +54,23 @@ static void load_bindings(const an<ConfigMap>& src,
  
  AsciiComposer::AsciiComposer(const Ticket& ticket) : Processor(ticket) {
    LoadConfig(ticket.schema);
++  commit_connection_ = engine_->context()->commit_notifier().connect(
++      [this](Context*) { ResetModifierState(); });
 +  abort_connection_ = engine_->context()->abort_notifier().connect(
 +      [this](Context*) { ResetModifierState(); });
  }
  
  AsciiComposer::~AsciiComposer() {
    connection_.disconnect();
++  commit_connection_.disconnect();
 +  abort_connection_.disconnect();
  }
  
@@ -25,17 +84,69 @@ index e49dc38..a5f55f7 100644
      return kNoop;
    }
    if (caps_lock_switch_style_ != kAsciiModeSwitchNoop) {
-@@ -95,8 +97,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+@@ -73,7 +81,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+   int ch = key_event.keycode();
+   if (ch == XK_Eisu_toggle) {  // Alphanumeric toggle
+     if (!key_event.release()) {
+-      shift_key_pressed_ = ctrl_key_pressed_ = false;
++      ResetModifierState();
+       ToggleAsciiModeWithKey(ch);
+       return kAccepted;
+     } else {
+@@ -86,40 +94,38 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+   bool is_super = (ch == XK_Super_L || ch == XK_Super_R);
+   if (is_shift || is_ctrl || is_alt || is_super) {
+     if (key_event.release()) {
+-      if (shift_key_pressed_ || ctrl_key_pressed_ || alt_key_pressed_ ||
+-          super_key_pressed_) {
++      if (active_modifier_keycodes_.erase(ch)) {
+         auto now = std::chrono::steady_clock::now();
+-        if (((is_shift && shift_key_pressed_) ||
+-             (is_ctrl && ctrl_key_pressed_) || (is_alt && alt_key_pressed_) ||
+-             (is_super && super_key_pressed_)) &&
++        if (active_modifier_keycodes_.empty() &&
++            ch == modifier_keycode_ && !modifier_chorded_ &&
              now < toggle_expired_) {
            ToggleAsciiModeWithKey(ch);
          }
 -        shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
 -            super_key_pressed_ = false;
-+        ResetModifierState();
++        if (active_modifier_keycodes_.empty()) {
++          ResetModifierState();
++        } else {
++          modifier_chorded_ = true;
++        }
          return kNoop;
        }
-     } else if (!(shift_key_pressed_ || ctrl_key_pressed_ || alt_key_pressed_ ||
-@@ -118,8 +119,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+-    } else if (!(shift_key_pressed_ || ctrl_key_pressed_ || alt_key_pressed_ ||
+-                 super_key_pressed_)) {
+-      // first key down
+-      if (is_shift)
+-        shift_key_pressed_ = true;
+-      else if (is_ctrl)
+-        ctrl_key_pressed_ = true;
+-      else if (is_alt)
+-        alt_key_pressed_ = true;
+-      else if (is_super)
+-        super_key_pressed_ = true;
+-      // will not toggle unless the toggle key is released shortly
+-      const auto toggle_duration_limit = std::chrono::milliseconds(500);
+-      auto now = std::chrono::steady_clock::now();
+-      toggle_expired_ = now + toggle_duration_limit;
++    } else if (active_modifier_keycodes_.insert(ch).second) {
++      if (active_modifier_keycodes_.size() == 1) {
++        modifier_keycode_ = ch;
++        modifier_chorded_ = false;
++        const auto toggle_duration_limit = std::chrono::milliseconds(500);
++        toggle_expired_ =
++            std::chrono::steady_clock::now() + toggle_duration_limit;
++      } else {
++        // Every physical side remains active until its matching release. Once
++        // two sides overlap, re-pressing either side stays in the same chord
++        // epoch and can never become an isolated mode-switch tap.
++        modifier_chorded_ = true;
++      }
+     }
      return kNoop;
    }
    // other keys
@@ -45,17 +156,46 @@ index e49dc38..a5f55f7 100644
    // possible key binding: Control+x, Shift+space
    if (key_event.ctrl() || key_event.alt() || key_event.super() ||
        (key_event.shift() && ch == XK_space)) {
-@@ -144,8 +144,7 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
+@@ -144,23 +150,15 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
    int ch = key_event.keycode();
    if (ch == XK_Caps_Lock) {
      if (!key_event.release()) {
 -      shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
 -          super_key_pressed_ = false;
 +      ResetModifierState();
-       // temporarily disable good-old (uppercase) Caps Lock as mode switch key
-       // in case the user switched to ascii mode with other keys, eg. with Shift
-       if (good_old_caps_lock_ && !toggle_with_caps_) {
-@@ -255,7 +254,11 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+-      // temporarily disable good-old (uppercase) Caps Lock as mode switch key
+-      // in case the user switched to ascii mode with other keys, eg. with Shift
+-      if (good_old_caps_lock_ && !toggle_with_caps_) {
+-        Context* ctx = engine_->context();
+-        bool ascii_mode = ctx->get_option("ascii_mode");
+-        if (ascii_mode) {
+-          return kRejected;
+-        }
+-      }
+-      toggle_with_caps_ = !key_event.caps();
+       // NOTE: for Linux, Caps Lock modifier is clear when we are about to
+       // turn it on; for Windows it is the opposite:
+       // Caps Lock modifier has been set before we process VK_CAPITAL.
+       // here we assume IBus' behavior and invert caps with ! operation.
+-      SwitchAsciiMode(!key_event.caps(), caps_lock_switch_style_);
++      const bool caps_lock_active = !key_event.caps();
++      SwitchAsciiMode(caps_lock_active, caps_lock_switch_style_);
++      engine_->context()->set_property(
++          kCapsLockAsciiModeProperty, caps_lock_active ? "1" : "");
+       // When good_old_caps_lock is enabled, allow the key event to pass
+       // through the input method to toggle the Caps Lock state.
+       return good_old_caps_lock_ ? kRejected : kAccepted;
+@@ -236,7 +234,8 @@ bool AsciiComposer::ToggleAsciiModeWithKey(int key_code) {
+     return false;
+   }
+   SwitchAsciiMode(new_mode, style);
+-  toggle_with_caps_ = (key_code == XK_Caps_Lock);
++  if (key_code != XK_Caps_Lock)
++    ctx->set_property(kCapsLockAsciiModeProperty, "");
+   return true;
+ }
+ 
+@@ -255,10 +254,13 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
              [this](Context* ctx) { OnContextUpdate(ctx); });
        }
      } else if (style == kAsciiModeSwitchCommitText) {
@@ -66,25 +206,38 @@ index e49dc38..a5f55f7 100644
 +        ctx->ConfirmCurrentSelection();
 +      }
      } else if (style == kAsciiModeSwitchCommitCode) {
-       ctx->ClearNonConfirmedComposition();
-       ctx->Commit();
-@@ -268,6 +271,11 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+-      ctx->ClearNonConfirmedComposition();
+-      ctx->Commit();
++      ctx->CommitRawInput();
+     } else if (style == kAsciiModeSwitchClear || style == kAsciiModeSet ||
+                style == kAsciiModeUnset) {
+       ctx->Clear();
+@@ -268,6 +270,12 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
    ctx->set_option("ascii_mode", ascii_mode);
  }
  
 +void AsciiComposer::ResetModifierState() {
-+  shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
-+      super_key_pressed_ = false;
++  modifier_keycode_ = 0;
++  modifier_chorded_ = false;
++  active_modifier_keycodes_.clear();
 +}
 +
  void AsciiComposer::OnContextUpdate(Context* ctx) {
    if (!ctx->IsComposing()) {
      connection_.disconnect();
 diff --git a/src/rime/gear/ascii_composer.h b/src/rime/gear/ascii_composer.h
-index 756771f..a765490 100644
+index 756771f..15f1145 100644
 --- a/src/rime/gear/ascii_composer.h
 +++ b/src/rime/gear/ascii_composer.h
-@@ -42,6 +42,7 @@ class AsciiComposer : public Processor {
+@@ -8,6 +8,7 @@
+ #define RIME_ASCII_COMPOSER_H_
+ 
+ #include <chrono>
++#include <set>
+ #include <rime/common.h>
+ #include <rime/component.h>
+ #include <rime/processor.h>
+@@ -42,6 +43,7 @@ class AsciiComposer : public Processor {
    bool ToggleAsciiModeWithKey(int key_code);
    void SwitchAsciiMode(bool ascii_mode, AsciiModeSwitchStyle style);
    void OnContextUpdate(Context* ctx);
@@ -92,14 +245,53 @@ index 756771f..a765490 100644
  
    // config options
    AsciiModeSwitchKeyBindings bindings_;
-@@ -56,6 +57,7 @@ class AsciiComposer : public Processor {
+@@ -49,13 +51,13 @@ class AsciiComposer : public Processor {
+   bool good_old_caps_lock_ = false;
+   // state
+-  bool toggle_with_caps_ = false;
+-  bool shift_key_pressed_ = false;
+-  bool ctrl_key_pressed_ = false;
+-  bool alt_key_pressed_ = false;
+-  bool super_key_pressed_ = false;
++  int modifier_keycode_ = 0;
++  bool modifier_chorded_ = false;
++  std::set<int> active_modifier_keycodes_;
    using TimePoint = std::chrono::steady_clock::time_point;
    TimePoint toggle_expired_;
    connection connection_;
++  connection commit_connection_;
 +  connection abort_connection_;
  };
  
  }  // namespace rime
+diff --git a/src/rime/gear/chord_composer.cc b/src/rime/gear/chord_composer.cc
+index 789697b..165c42a 100644
+--- a/src/rime/gear/chord_composer.cc
++++ b/src/rime/gear/chord_composer.cc
+@@ -65,8 +65,7 @@ bool ChordComposer::CommitRawInput(Context* ctx) {
+   // then the sequence should not be used again
+   raw_sequence_.clear();
+   // discard composition and commit input
+-  ctx->ClearNonConfirmedComposition();
+-  ctx->Commit();
++  ctx->CommitRawInput();
+   return true;
+ }
+ 
+diff --git a/src/rime/gear/editor.cc b/src/rime/gear/editor.cc
+index 37b3dda..0e57a97 100644
+--- a/src/rime/gear/editor.cc
++++ b/src/rime/gear/editor.cc
+@@ -111,8 +111,7 @@ bool Editor::CommitScriptText(Context* ctx) {
+ }
+ 
+ bool Editor::CommitRawInput(Context* ctx) {
+-  ctx->ClearNonConfirmedComposition();
+-  ctx->Commit();
++  ctx->CommitRawInput();
+   return true;
+ }
+ 
 diff --git a/src/rime/gear/punctuator.cc b/src/rime/gear/punctuator.cc
 index 0c20b92..71d992a 100644
 --- a/src/rime/gear/punctuator.cc
@@ -130,3 +322,139 @@ index 0c20b92..71d992a 100644
  }
  
  inline static bool ends_with_digit(const string& text) {
+diff --git a/src/rime/service.cc b/src/rime/service.cc
+index d30f991..1c35a54 100644
+--- a/src/rime/service.cc
++++ b/src/rime/service.cc
+@@ -9,6 +9,7 @@
+ #include <rime/resource.h>
+ #include <rime/schema.h>
+ #include <rime/service.h>
++#include <rime/switcher.h>
+ 
+ using namespace std::placeholders;
+ 
+@@ -42,16 +43,46 @@ bool Session::CommitComposition() {
+   return !commit_text_.empty();
+ }
+ 
++bool Session::CommitRawInput() {
++  Context* ctx = PrepareCompositionExit();
++  return ctx && ctx->CommitRawInput();
++}
++
+ void Session::ClearComposition() {
+-  if (!engine_)
+-    return;
+-  engine_->context()->AbortComposition();
++  Context* ctx = PrepareCompositionExit();
++  if (ctx)
++    ctx->AbortComposition();
+ }
+ 
+ void Session::ApplySchema(Schema* schema) {
+   engine_->ApplySchema(schema);
+ }
+ 
++Context* Session::PrepareCompositionExit() {
++  if (!engine_)
++    return nullptr;
++  Engine* active_engine = engine_->active_engine();
++  if (active_engine != engine_.get()) {
++    auto* switcher = dynamic_cast<Switcher*>(active_engine);
++    if (!switcher)
++      return nullptr;
++    switcher->Deactivate();
++  }
++  return engine_->context();
++}
++
++bool Session::HasPendingClientState() const {
++  if (!commit_text_.empty())
++    return true;
++  if (!engine_)
++    return false;
++  if (!engine_->context()->input().empty())
++    return true;
++  Engine* active_engine = engine_->active_engine();
++  return active_engine != engine_.get() &&
++         !active_engine->context()->input().empty();
++}
++
+ void Session::OnCommit(const string& commit_text) {
+   commit_text_ += commit_text;
+ }
+@@ -130,7 +161,8 @@ void Service::CleanupStaleSessions() {
+   int count = 0;
+   for (auto it = sessions_.begin(); it != sessions_.end();) {
+     if (it->second &&
+-        it->second->last_active_time() < now - Session::kLifeSpan) {
++        it->second->last_active_time() < now - Session::kLifeSpan &&
++        !it->second->HasPendingClientState()) {
+       sessions_.erase(it++);
+       ++count;
+     } else {
+diff --git a/src/rime/service.h b/src/rime/service.h
+index a69ae74..7c7d1e1 100644
+--- a/src/rime/service.h
++++ b/src/rime/service.h
+@@ -37,8 +37,10 @@ class Session {
+   void Activate();
+   void ResetCommitText();
+   bool CommitComposition();
++  bool CommitRawInput();
+   void ClearComposition();
+   void ApplySchema(Schema* schema);
++  bool HasPendingClientState() const;
+ 
+   Context* context() const;
+   Schema* schema() const;
+@@ -46,6 +47,7 @@ class Session {
+   const string& commit_text() const { return commit_text_; }
+ 
+  private:
++  Context* PrepareCompositionExit();
+   void OnCommit(const string& commit_text);
+ 
+   the<Engine> engine_;
+diff --git a/src/rime_api.h b/src/rime_api.h
+index 2fccde0..4d69a23 100644
+--- a/src/rime_api.h
++++ b/src/rime_api.h
+@@ -505,6 +505,10 @@ typedef struct RIME_FLAVORED(rime_api_t) {
+                                               size_t index);
+ 
+   Bool (*change_page)(RimeSessionId session_id, Bool backward);
++
++  // End an external client lifecycle by preserving the exact raw input.
++  // Return True if this call committed raw input.
++  Bool (*commit_raw_input)(RimeSessionId session_id);
+ } RIME_FLAVORED(RimeApi);
+ 
+ //! API entry
+diff --git a/src/rime_api_impl.h b/src/rime_api_impl.h
+index 30f4514..4d2f797 100644
+--- a/src/rime_api_impl.h
++++ b/src/rime_api_impl.h
+@@ -184,6 +184,13 @@ RIME_DEPRECATED Bool RimeCommitComposition(RimeSessionId session_id) {
+   return Bool(session->CommitComposition());
+ }
+ 
++static Bool RimeCommitRawInput(RimeSessionId session_id) {
++  an<Session> session(Service::instance().GetSession(session_id));
++  if (!session)
++    return False;
++  return Bool(session->CommitRawInput());
++}
++
+ RIME_DEPRECATED void RimeClearComposition(RimeSessionId session_id) {
+   an<Session> session(Service::instance().GetSession(session_id));
+   if (!session)
+@@ -1232,6 +1239,7 @@ RIME_API RIME_FLAVORED(RimeApi) * RIME_FLAVORED(rime_get_api)() {
+     s_api.highlight_candidate_on_current_page =
+         &RimeHighlightCandidateOnCurrentPage;
+     s_api.change_page = &RimeChangePage;
++    s_api.commit_raw_input = &RimeCommitRawInput;
+   }
+   return &s_api;
+ }

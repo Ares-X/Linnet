@@ -44,12 +44,11 @@ enum LinnetRimeCandidateSnapshotBuilder {
           ? selectionLabel(at: indexOnPage, labels: labels) : nil
       ))
     }
-    let compactHighlighted = min(highlightedOnPage, max(0, compactItems.count - 1))
     let compact = SquirrelInputController.CandidateSnapshot(
       items: compactItems,
       currentPage: currentPage,
       pageSize: pageSize,
-      highlightedItemIndex: compactHighlighted,
+      highlightedItemIndex: highlightedOnPage,
       isLastPage: context.menu.is_last_page,
       canExpand: !context.menu.is_last_page,
       isExpanded: false)

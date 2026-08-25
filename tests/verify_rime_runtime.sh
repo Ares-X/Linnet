@@ -13,10 +13,14 @@ runtime_probe="${1:-}"
 if [[ "${1:-}" == --single-key-ranking-probe ||
       "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --mixed-latency-probe ||
-      "${1:-}" == --shift-probe ]]; then
+      "${1:-}" == --shift-probe ||
+      "${1:-}" == --core-shift-overlap-probe ||
+      "${1:-}" == --prediction-layout-probe ||
+      "${1:-}" == --partial-return-probe ||
+      "${1:-}" == --lifecycle-raw-exit-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--shift-probe]" >&2
+  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--shift-probe|--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe|--lifecycle-raw-exit-probe]" >&2
   exit 64
 fi
 
@@ -39,8 +43,22 @@ mkdir -p "${shared}/opencc" "${user}" "${logs}"
 cp -R data/plum/. "${shared}/"
 # The ignored data/plum directory is a generated cache and can legitimately
 # predate the current source checkout. Native acceptance must consume the
-# canonical default owner, just as packaging does when it stages a candidate.
+# canonical public schemas and default owner, just as packaging does when it
+# stages a candidate. No wrapper profile may be accepted from an old cache.
+for schema in data/linnet/*.schema.yaml; do
+  cp "${schema}" "${shared}/$(basename "${schema}")"
+done
 cp data/linnet/default.yaml "${shared}/default.yaml"
+if [[ "${runtime_probe}" == --lifecycle-raw-exit-probe ]]; then
+  ruby -e '
+    path = ARGV.fetch(0)
+    source = File.binread(path)
+    current = "  hotkeys: []\n"
+    fixture = "  hotkeys: [F4]\n"
+    abort "switcher hotkey owner is missing" unless source.scan(current).length == 1
+    File.binwrite(path, source.sub(current, fixture))
+  ' "${shared}/default.yaml"
+fi
 # Core-only updates deliberately keep the installed language pack. Reproduce
 # old Active owners so the native suite proves the Core projections, not a
 # coincidentally current pack, retire stale routing and schema defaults.
@@ -49,15 +67,21 @@ ruby -e '
   source = File.binread(path)
   placeholder = "    zz_code_token: \"^$\"\n"
   stale = "    zz_code_token: \"^(?:(?:/|~).*|(?:www[.]|https?:|ftp[.:]|mailto:|file:).*)$\"\n"
+  current_shift = "    Shift_L: commit_code\n    Shift_R: commit_code\n"
+  stale_shift = "    Shift_L: commit_text\n    Shift_R: commit_text\n"
   current_schemas = "  - schema: linnet_zh_pinyin\n  - schema: linnet_zh\n"
   stale_schemas = "  - schema: linnet_zh\n  - schema: linnet_zh_pinyin\n"
   abort "Core compile placeholder is missing" unless source.scan(placeholder).length == 1
+  abort "current Shift policy is missing" unless source.scan(current_shift).length == 1
   abort "current schema order is missing" unless source.scan(current_schemas).length == 1
-  File.binwrite(path, source.sub(placeholder, stale).sub(current_schemas, stale_schemas))
+  File.binwrite(
+    path,
+    source.sub(placeholder, stale)
+      .sub(current_shift, stale_shift)
+      .sub(current_schemas, stale_schemas)
+  )
 ' "${shared}/default.yaml"
-cp data/linnet/linnet_zh.schema.yaml "${shared}/linnet_zh.schema.yaml"
 cp data/linnet/linnet_algebra.yaml "${shared}/linnet_algebra.yaml"
-cp data/linnet/linnet_en.schema.yaml "${shared}/linnet_en.schema.yaml"
 ruby -e '
   path = ARGV.fetch(0)
   source = File.binread(path)
@@ -93,8 +117,11 @@ sdk="$(xcrun --show-sdk-path)"
   tests/LinnetSettingsProjectionFixture.swift \
   -o "${scratch}/projection-fixture"
 "${scratch}/projection-fixture" default "${user}"
-test "$(rg -F -c '"ascii_composer/switch_key/Caps_Lock": commit_text' \
-  "${user}/default.custom.yaml")" -eq 1
+for switch_key in Caps_Lock Shift_L Shift_R; do
+  test "$(rg -F -c \
+    "\"ascii_composer/switch_key/${switch_key}\": commit_code" \
+    "${user}/default.custom.yaml")" -eq 1
+done
 test "$(rg -F -c '"linnet/recognizer_patterns/zz_code_token"' \
   "${user}/default.custom.yaml")" -eq 1
 
@@ -183,6 +210,14 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime focused single-key ranking probe: PASS"
   elif [[ "${runtime_probe}" == --shift-probe ]]; then
     echo "Linnet native Rime focused Shift probe: PASS"
+  elif [[ "${runtime_probe}" == --core-shift-overlap-probe ]]; then
+    echo "Linnet native Rime focused overlapping Shift probe: PASS"
+  elif [[ "${runtime_probe}" == --prediction-layout-probe ]]; then
+    echo "Linnet native Rime focused prediction layout probe: PASS"
+  elif [[ "${runtime_probe}" == --partial-return-probe ]]; then
+    echo "Linnet native Rime focused partial-confirmed Return probe: PASS"
+  elif [[ "${runtime_probe}" == --lifecycle-raw-exit-probe ]]; then
+    echo "Linnet native Rime focused lifecycle raw-input exit probe: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi
@@ -262,28 +297,32 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     --fast-config-reload-probe
 
 profile_cases=(
-  'natural:linnet_zh:srfa:semicolon'
-  'full_pinyin:linnet_zh_pinyin:suanfa:semicolon'
-  'flypy:linnet_zh_flypy:srfa:semicolon'
-  'microsoft:linnet_zh_mspy:srfa:vertical_bar'
-  'sogou:linnet_zh_sogou:srfa:semicolon'
-  'abc:linnet_zh_abc:spfa:semicolon'
-  'ziguang:linnet_zh_ziguang:slfa:semicolon'
-  'jiajia:linnet_zh_jiajia:scfa:vertical_bar'
+  'natural:linnet_zh:srfa'
+  'full_pinyin:linnet_zh_pinyin:suanfa'
+  'flypy:linnet_zh_flypy:srfa'
+  'microsoft:linnet_zh_mspy:srfa'
+  'sogou:linnet_zh_sogou:srfa'
+  'abc:linnet_zh_abc:spfa'
+  'ziguang:linnet_zh_ziguang:slfa'
+  'jiajia:linnet_zh_jiajia:scfa'
 )
-for profile_case in "${profile_cases[@]}"; do
-  IFS=: read -r profile schema code trigger <<<"${profile_case}"
-  "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
-  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-    bin/rime_deployer --build "${user}" "${shared}" "${user}/build" >/dev/null
-  rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
-  rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
-  test -s "${user}/build/${schema}.prism.bin"
-  prefix=';'
-  [[ "${trigger}" == vertical_bar ]] && prefix='|'
-  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-    "${scratch}/rime-smoke" "${shared}" "${user}" \
-      --english-profile-probe "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
+for trigger in semicolon vertical_bar; do
+  for profile_case in "${profile_cases[@]}"; do
+    IFS=: read -r profile schema code <<<"${profile_case}"
+    "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      bin/rime_deployer --build "${user}" "${shared}" \
+        "${user}/build" >/dev/null
+    rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
+    rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
+    test -s "${user}/build/${schema}.prism.bin"
+    prefix=';'
+    [[ "${trigger}" == vertical_bar ]] && prefix='|'
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${scratch}/rime-smoke" "${shared}" "${user}" \
+        --english-profile-probe \
+          "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
+  done
 done
 
 for page_size in 3 5 7 9; do

@@ -45,8 +45,8 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     (fileName: "linnet_zh_jiajia.schema.yaml", versionKey: "schema/version"),
     (fileName: "squirrel.yaml", versionKey: "config_version")
   ]
-
   let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
+  let inputActivationRegistry = LinnetInputActivationRegistry()
   var config: SquirrelConfig?
   var panel: SquirrelPanel?
   var enableNotifications = false
@@ -97,7 +97,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     recordAttempt: { LinnetSettingsContract.setCloudSyncLastAttempt($0) },
     operation: { [weak self] in self?.performRimeUserDataSync() ?? .failed }
   )
-
   func applicationWillFinishLaunching(_ notification: Notification) {
     panel = SquirrelPanel(position: .zero)
     addObservers()
@@ -107,9 +106,9 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
   deinit {
     removeObservers()
   }
-
+}
+extension SquirrelApplicationDelegate {
   // MARK: Rime-owned status projection
-
   @discardableResult
   func setupRime(tentativeLanguageActivation: Bool = false) -> Bool {
     if !tentativeLanguageActivation {
@@ -152,7 +151,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     rimeAPI.setup(&rimeDuoTraits)
     return true
   }
-
   @discardableResult
   func startRime(fullCheck: Bool) -> Bool {
     print("Initializing la rime...")
@@ -199,23 +197,34 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     guard readinessSession != 0, rimeAPI.destroy_session(readinessSession) else {
       return failStart("Linnet runtime session readiness check failed.")
     }
-    isRimeInputSuspended = false
+    reopenRimeInput()
     isRimeRunning = true
     activeSettingsRevision = settingsSnapshot.revision
     startStaleSessionCleaner()
     return true
   }
-
+  /// Rebase physical modifiers before the single runtime gate is reopened.
+  /// Events that passed through while Rime was suspended must not become the
+  /// next Shift/Caps transition baseline.
+  private func reopenRimeInput() {
+    if let inputController = inputActivationRegistry.currentController(
+      as: SquirrelInputController.self) {
+      inputController.resetModifierEpoch()
+    }
+    isRimeInputSuspended = false
+  }
   private func startStaleSessionCleaner() {
     staleSessionCleaner?.invalidate()
     staleSessionCleaner = Timer.scheduledTimer(
       withTimeInterval: Self.staleSessionCleanupInterval, repeats: true
     ) { [weak self] _ in
       guard let self, canAcceptRimeInput else { return }
+      inputActivationRegistry.currentController(
+        as: SquirrelInputController.self
+      )?.refreshSessionLeaseForStaleCleanup()
       rimeAPI.cleanup_stale_sessions()
     }
   }
-
   /// The typed document is durable truth; every Rime custom YAML is a cache
   /// rebuilt before an engine can accept input.
   private func reconcileLiveSettings() throws -> LinnetSettingsDocumentStore.Snapshot {
@@ -229,13 +238,11 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     )
     return snapshot
   }
-
   @discardableResult
   func loadSettings() -> Bool {
     let loadedConfig = SquirrelConfig()
     guard loadedConfig.openBaseConfig() else { return false }
     config = loadedConfig
-
     enableNotifications = loadedConfig.getString("show_notifications_when") != "never"
     showStatusIcon = loadedConfig.getBool("status_icon/show") ?? true
     refreshStatusItem()
@@ -246,7 +253,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     }
     return true
   }
-
   /// Transaction recovery is complete only when both the engine and its
   /// presentation configuration are ready. A half-started runtime must not be
   /// reported as healthy or left accepting input.
@@ -259,7 +265,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     }
     return true
   }
-
   func loadSettings(for schemaID: String) {
     if schemaID.count == 0 || schemaID.first == "." {
       return
@@ -285,7 +290,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     }
     schema.close()
   }
-
   // add an awakeFromNib item so that we can set the action method.  Note that
   // any menuItems without an action will be disabled when displayed in the Text
   // Input Menu.
@@ -333,7 +337,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
       suspensionBehavior: .deliverImmediately
     )
   }
-
   private func removeObservers() {
     if let workspacePowerOffObserver {
       NSWorkspace.shared.notificationCenter.removeObserver(workspacePowerOffObserver)
@@ -358,15 +361,12 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
       object: nil
     )
   }
-
   @objc private func cloudSyncConfigurationChanged(_: Notification) {
     DispatchQueue.main.async { [weak self] in self?.rimeSyncController.reload() }
   }
-
   @objc private func cloudSyncNowRequested(_: Notification) {
     DispatchQueue.main.async { [weak self] in self?.rimeSyncController.synchronizeNow() }
   }
-
 }
 
 extension SquirrelApplicationDelegate {
@@ -375,6 +375,7 @@ extension SquirrelApplicationDelegate {
     removeObservers()
     transactionMonitor?.cancel()
     transactionMonitor = nil
+    terminateInputActivations()
     panel?.hide()
     shutdownRime()
     if let statusItem {
@@ -382,56 +383,56 @@ extension SquirrelApplicationDelegate {
       self.statusItem = nil
     }
   }
-
   private func performRimeUserDataSync() -> LinnetRimeSyncOutcome {
     guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
-    if panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true {
+    let activeController = inputActivationRegistry.currentController(
+      as: SquirrelInputController.self)
+    if panel?.isVisible == true || activeController?.hasPendingRimeInput == true {
       return .busy
     }
-
     isRimeInputSuspended = true
-    panel?.inputController?.prepareForRimeMaintenance()
+    activeController?.prepareForRimeMaintenance()
     panel?.hide()
     guard rimeAPI.sync_user_data() else {
-      isRimeInputSuspended = false
+      reopenRimeInput()
       return .failed
     }
     rimeAPI.join_maintenance_thread()
-    isRimeInputSuspended = false
+    reopenRimeInput()
     return .completed
   }
-
   // Finish the one current composition, close the input gate, then invalidate
   // every controller's Rime generation. Controllers recover on their next key.
   private func invalidateRimeSessions() {
-    if let inputController = panel?.inputController {
+    if let inputController = inputActivationRegistry.currentController(
+      as: SquirrelInputController.self) {
       if canAcceptRimeInput {
-        inputController.commitComposition(inputController.client())
+        inputController.commitCurrentComposition()
       }
-      inputController.resetModifierEpoch()
     }
     isRimeInputSuspended = true
     panel?.hide()
     rimeAPI.cleanup_all_sessions()
   }
-
   // Tear down the runtime in the order librime-lua requires: destroy every
   // session while the Lua state is open, then finalize Registry/lua state.
   func shutdownRime() {
-    config?.close()
-    guard isRimeRunning else { return }
+    guard isRimeRunning else {
+      config?.close()
+      return
+    }
     staleSessionCleaner?.invalidate()
     staleSessionCleaner = nil
     invalidateRimeSessions()
+    config?.close()
     rimeAPI.finalize()
     isRimeRunning = false
   }
-
   fileprivate func workspaceWillPowerOff(_: Notification) {
     print("Finalizing before logging out.")
+    terminateInputActivations()
     self.shutdownRime()
   }
-
   fileprivate func dataRequested(
     _ request: LinnetSettingsContract.DataRequest,
     transactionReply: @escaping LinnetSettingsTransactionIPC.Reply
@@ -466,7 +467,6 @@ extension SquirrelApplicationDelegate {
   private enum SettingsPublicationScope: Equatable {
     case appearance
     case configuration
-
     var failureCode: LinnetSettingsContract.RuntimeReplyCode {
       switch self {
       case .appearance: .appearanceDeployFailed
@@ -712,7 +712,7 @@ extension SquirrelApplicationDelegate {
 
       loadSettings(for: activeSchemaID)
       panel?.refreshAppearance()
-      isRimeInputSuspended = false
+      reopenRimeInput()
       applyStatusIcon(asciiMode: asciiMode, schemaLabel: schemaLabel)
       return true
     }

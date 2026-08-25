@@ -10,6 +10,7 @@
 #include <rime/dict/dictionary.h>
 #include <rime/engine.h>
 #include <rime/filter.h>
+#include <rime/gear/selector.h>
 #include <rime/gear/translator_commons.h>
 #include <rime/key_event.h>
 #include <rime/language.h>
@@ -231,14 +232,14 @@ bool ContinuesPredictionContext(int keycode) {
          keycode == XK_asciitilde;
 }
 
-// Linnet owns candidate, Tab, raw-caret, and passive-prediction key intent in
-// one processor before Rime Predictor/Selector/Navigator. A handled key must
-// either change visible state immediately or be returned to the client; the
-// downstream layout keymaps may never turn it into an accepted no-op.
+// Linnet owns selection validity, Tab, raw-caret, and passive-prediction state
+// before Rime Predictor/Selector/Navigator. Stock Selector/Navigator remain the
+// sole owners of ordinary candidate and spelling-arrow movement.
 class LinnetInteractionProcessor : public Processor {
  public:
   explicit LinnetInteractionProcessor(const Ticket& ticket)
       : Processor(ticket),
+        prediction_selector_(ticket),
         schema_id_(ticket.schema ? ticket.schema->schema_id() : string()),
         options_(InteractionOptions::Load(ticket.schema)),
         predict_engine_(
@@ -298,8 +299,6 @@ class LinnetInteractionProcessor : public Processor {
       } else {
         const ProcessResult selection = ProcessSelectionKey(context, key);
         if (selection != kNoop) return selection;
-        const ProcessResult arrow = ProcessCandidateArrow(context, key);
-        if (arrow != kNoop) return arrow;
       }
     }
 
@@ -382,12 +381,10 @@ class LinnetInteractionProcessor : public Processor {
       HardStop(context);
       return kRejected;
     }
-    const ProcessResult arrow = ProcessCandidateArrow(context, key);
-    if (arrow != kNoop) {
-      if (arrow == kAccepted && !focused) {
-        context->set_property(kPredictionNavigationProperty, "1");
-      }
-      return arrow;
+    if (IsPlainKey(key) &&
+        (key.keycode() == XK_Left || key.keycode() == XK_Right ||
+         key.keycode() == XK_Up || key.keycode() == XK_Down)) {
+      return ProcessPredictionArrow(context, key);
     }
     // ascii_composer precedes this owner and, on an isolated Shift release,
     // confirms any remaining composition before the schema switch runs. Drop
@@ -465,33 +462,17 @@ class LinnetInteractionProcessor : public Processor {
     return kAccepted;
   }
 
-  ProcessResult ProcessCandidateArrow(Context* context,
-                                      const KeyEvent& key) const {
-    if (!IsPlainKey(key)) return kNoop;
-    const bool previous =
-        key.keycode() == XK_Left || key.keycode() == XK_Up;
-    const bool next =
-        key.keycode() == XK_Right || key.keycode() == XK_Down;
-    if (!previous && !next) return kNoop;
-    if (!context || context->composition().empty()) return kNoop;
-
-    Segment& segment = context->composition().back();
-    const an<Menu> menu = segment.menu;
-    if (!menu || !menu->GetCandidateAt(segment.selected_index)) {
+  ProcessResult ProcessPredictionArrow(Context* context,
+                                       const KeyEvent& key) {
+    if (!context || context->composition().empty()) return kRejected;
+    const size_t selected = context->composition().back().selected_index;
+    const ProcessResult result = prediction_selector_.ProcessKeyEvent(key);
+    if (result != kAccepted || context->composition().empty() ||
+        context->composition().back().selected_index == selected) {
+      HardStop(context);
       return kRejected;
     }
-
-    const size_t selected = segment.selected_index;
-    if (previous) {
-      if (selected > 0) context->Highlight(selected - 1);
-      return kAccepted;
-    }
-    if (selected < static_cast<size_t>(std::numeric_limits<int>::max() - 1)) {
-      const size_t target = selected + 1;
-      if (menu->GetCandidateAt(target)) {
-        context->Highlight(target);
-      }
-    }
+    context->set_property(kPredictionNavigationProperty, "1");
     return kAccepted;
   }
 
@@ -681,6 +662,7 @@ class LinnetInteractionProcessor : public Processor {
             IsSentenceEndingPunctuation(punctuation));
   }
 
+  Selector prediction_selector_;
   const string schema_id_;
   const InteractionOptions options_;
   const an<PredictEngine> predict_engine_;

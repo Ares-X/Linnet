@@ -114,11 +114,77 @@ final class SquirrelInputController {
     let canExpand: Bool
   }
 
+  private(set) var selectedCandidateIndices: [Int] = []
+  private(set) var pageDirections: [Bool] = []
+  private(set) var refreshCount = 0
+  private let activationRegistry = LinnetInputActivationRegistry()
+  private let activationClient = NSObject()
+  private var activationToken: LinnetInputActivationRegistry.Token?
+
+  init() {
+    activationToken = beginActivation()
+  }
+
+  var activeInputToken: LinnetInputActivationRegistry.Token {
+    guard let activationToken else {
+      preconditionFailure("candidate harness controller has no active token")
+    }
+    return activationToken
+  }
+
+  @discardableResult
+  func beginActivation() -> LinnetInputActivationRegistry.Token {
+    guard let token = activationRegistry.begin(
+      controller: self,
+      client: activationClient,
+      retire: { _ in }
+    ) else {
+      preconditionFailure("candidate harness activation was rejected")
+    }
+    activationToken = token
+    return token
+  }
+
+  func inputActivationIsCurrent(
+    _ token: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    activationRegistry.isCurrent(
+      token,
+      controller: self,
+      client: activationClient)
+  }
+
   func client() -> Any? { nil }
-  func moveCaret(forward: Bool) -> Bool { true }
-  func page(up: Bool) -> Bool { true }
-  func refreshCandidatePresentation() {}
-  func selectCandidate(absoluteIndex: Int) -> Bool { true }
+  func page(
+    up: Bool,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard inputActivationIsCurrent(activationToken) else { return false }
+    pageDirections.append(up)
+    return true
+  }
+  func refreshCandidatePresentation(
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    guard inputActivationIsCurrent(activationToken) else { return }
+    refreshCount += 1
+  }
+  func selectCandidate(
+    absoluteIndex: Int,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard inputActivationIsCurrent(activationToken) else { return false }
+    selectedCandidateIndices.append(absoluteIndex)
+    return true
+  }
+
+  func resetSelectedCandidates() {
+    selectedCandidateIndices.removeAll()
+  }
+
+  func resetPageDirections() {
+    pageDirections.removeAll()
+  }
 }
 
 @main
@@ -128,7 +194,18 @@ struct LinnetCandidateWindowInteractionTests {
   static func main() {
     _ = NSApplication.shared
     testTrackingArea()
+    testExactCandidatePathHitTesting()
     testSyntheticHoverLifecycle()
+    testCandidateControlPointerFeedback()
+    testCandidatePressPublicationIdentity()
+    testAccessibilitySelectionKeepsElementIdentity()
+    testStaleAccessibilityDoesNotRetainController()
+    testAccessibilityRejectsInvalidGeometry()
+    testSameControllerReactivationInvalidatesOldPublication()
+    testInputControllerOwnerSwapInvalidatesCandidateInteraction()
+    testPreciseWheelPagingSemantics()
+    testCandidateScrollPublicationIdentity()
+    testPreeditPressDoesNotInferEngineCaret()
     testInputModeStatusNotice()
     let naturalShotPath = CommandLine.arguments.firstIndex(of: "--natural-default-shot")
       .flatMap { index in
@@ -145,6 +222,7 @@ struct LinnetCandidateWindowInteractionTests {
       middlePageOutputPath: pagingShotPath)
     testEnglishMetadataFooterNaturalSize()
     testSharedCandidateDetailSidecarGeometry()
+    testVerticalPanelDoesNotMemorizeWhenDisabled()
     for point in [CGFloat(12), 16, 32] {
       for linear in [true, false] {
         for style in [
@@ -198,14 +276,17 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testInputModeStatusNotice() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.inputController = controller
-    panel.updateStatus(long: "Smart English", short: "En")
-    panel.update(
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.updateStatus(
+      long: "Smart English", short: "En",
+      activationToken: controller.activeInputToken)
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: .init(
         items: [], pageSize: 0, currentPage: 0, isLastPage: true,
         isExpanded: false, canExpand: false),
-      highlighted: 0, update: true)
+      highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     let text = panel.contentView?.subviews.compactMap { $0 as? NSTextView }.first?
       .textContentStorage?.attributedString?.string
     require(panel.isVisible, "input-mode status was not presented beside the caret")
@@ -233,6 +314,49 @@ struct LinnetCandidateWindowInteractionTests {
     panel.hide()
   }
 
+  private static func testVerticalPanelDoesNotMemorizeWhenDisabled() {
+    guard let screen = NSScreen.main?.visibleFrame else { return }
+    let caret = NSRect(
+      x: screen.maxX - 2,
+      y: screen.midY,
+      width: 1,
+      height: 18)
+    let panel = SquirrelPanel(position: caret)
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first else {
+      failures.append("vertical resize fixture lost its candidate view")
+      return
+    }
+    candidateView.lightTheme.vertical = true
+    candidateView.lightTheme.linear = false
+    candidateView.lightTheme.memorizeSize = false
+    panel.updatePosition(caret)
+    let longText = String(repeating: "候选词", count: 18)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidatePublication([(text: longText, absoluteIndex: 1)]),
+      highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    let longHeight = panel.frame.height
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidatePublication([(text: "词", absoluteIndex: 2)]),
+      highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    let shortHeight = panel.frame.height
+    require(
+      shortHeight + 1 < longHeight,
+      "vertical candidates retained a prior long size with memorize-size disabled")
+    require(
+      panel.frame.width <= screen.width * 0.95 + 0.5 &&
+        panel.frame.height <= screen.height * 0.95 + 0.5,
+      "candidate frame plus paging strip exceeded the 95% screen cap")
+    panel.hide()
+  }
+
   private static func testTrackingArea() {
     let view = SquirrelView(frame: NSRect(x: 0, y: 0, width: 220, height: 60))
     view.updateTrackingAreas()
@@ -246,10 +370,31 @@ struct LinnetCandidateWindowInteractionTests {
     }
   }
 
+  private static func testExactCandidatePathHitTesting() {
+    let splitCandidate = CGMutablePath()
+    splitCandidate.addRect(NSRect(x: 0, y: 0, width: 10, height: 10))
+    splitCandidate.addRect(NSRect(x: 30, y: 0, width: 10, height: 10))
+    let middleCandidate = CGPath(
+      rect: NSRect(x: 15, y: 0, width: 10, height: 10),
+      transform: nil)
+    let paths: [CGPath?] = [splitCandidate, middleCandidate]
+
+    require(
+      SquirrelView.candidateIndex(
+        at: NSPoint(x: 20, y: 5),
+        paths: paths) == 1,
+      "a split candidate's bounding box stole another candidate's hit")
+    require(
+      SquirrelView.candidateIndex(
+        at: NSPoint(x: 12, y: 5),
+        paths: paths) == nil,
+      "empty space inside a multi-line bounding box selected a candidate")
+  }
+
   private static func testSyntheticHoverLifecycle() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.inputController = controller
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
     let candidates = SquirrelInputController.CandidateSnapshot(
       items: [
         .init(text: "输入", comment: "", page: 0, indexOnPage: 0,
@@ -262,9 +407,10 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: true,
       isExpanded: false,
       canExpand: false)
-    panel.update(
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
-      candidates: candidates, highlighted: 0, update: true)
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -310,7 +456,16 @@ struct LinnetCandidateWindowInteractionTests {
     {
       panel.sendEvent(moved)
     }
-    require(candidateView.hilightedIndex == 1, "mouse move did not hover the second candidate")
+    requireEngineHighlight(
+      0, in: candidateView,
+      "mouse move replaced the Rime-owned visual or accessibility selection")
+    require(
+      candidateView.pointerCandidateIndex == 1 &&
+        !candidateView.pointerCandidateIsPressed,
+      "mouse move did not publish hover feedback for the second candidate")
+    requirePointerFeedback(
+      in: candidateView, candidateIndex: 1, expectedAlpha: 0.08,
+      context: "second-candidate hover")
     if let exited = NSEvent.enterExitEvent(
       with: .mouseExited,
       location: secondPoint,
@@ -324,8 +479,888 @@ struct LinnetCandidateWindowInteractionTests {
     {
       panel.sendEvent(exited)
     }
-    require(candidateView.hilightedIndex == 0, "mouse exit did not restore engine highlight")
+    requireEngineHighlight(
+      0, in: candidateView,
+      "mouse exit replaced the Rime-owned visual or accessibility selection")
+    require(
+      candidateView.pointerCandidateIndex == nil &&
+        !candidateView.pointerCandidateIsPressed,
+      "mouse exit did not clear candidate pointer feedback")
+    requireNoPointerFeedback(in: candidateView, context: "mouse exit")
     panel.hide()
+  }
+
+  private static func testAccessibilitySelectionKeepsElementIdentity() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first else {
+      failures.append("accessibility identity fixture lost its candidate view")
+      return
+    }
+    candidateView.lightTheme.highlightedAttrs = candidateView.lightTheme.attrs
+    candidateView.lightTheme.labelHighlightedAttrs = candidateView.lightTheme.labelAttrs
+    candidateView.lightTheme.commentHighlightedAttrs = candidateView.lightTheme.commentAttrs
+    let candidates = candidatePublication([
+      (text: "甲", absoluteIndex: 101),
+      (text: "乙", absoluteIndex: 102),
+    ])
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    guard let firstChildren = candidateView.accessibilityChildren(),
+      firstChildren.count >= 2
+    else {
+      failures.append("accessibility identity fixture did not publish candidates")
+      panel.hide()
+      return
+    }
+
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 1, update: true,
+      activationToken: controller.activeInputToken)
+    let secondChildren = candidateView.accessibilityChildren() ?? []
+    let selected = candidateView.accessibilitySelectedChildren() ?? []
+    let firstElements = firstChildren.compactMap { $0 as? NSAccessibilityElement }
+    let secondElements = secondChildren.compactMap { $0 as? NSAccessibilityElement }
+    let selectedElements = selected.compactMap { $0 as? NSAccessibilityElement }
+    require(
+      firstElements.count >= 2 && secondElements.count >= 2 &&
+        firstElements[0] === secondElements[0] &&
+        firstElements[1] === secondElements[1],
+      "a selection-only update replaced VoiceOver candidate identities")
+    require(
+      selectedElements.count == 1 && selectedElements[0] === secondElements[1],
+      "a selection-only update did not publish the new VoiceOver selection")
+    panel.hide()
+  }
+
+  private static func testStaleAccessibilityDoesNotRetainController() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    weak var releasedController: SquirrelInputController?
+    var staleElement: LinnetCandidateAccessibilityElement?
+    do {
+      let controller = SquirrelInputController()
+      releasedController = controller
+      let token = controller.activeInputToken
+      panel.bind(controller: controller, activationToken: token)
+      _ = panel.update(
+        preedit: "", selRange: .empty, caretPos: 0,
+        candidates: candidatePublication([(text: "甲", absoluteIndex: 101)]),
+        highlighted: 0, update: true,
+        activationToken: token)
+      let candidateView = panel.contentView?.subviews.compactMap({
+        $0 as? SquirrelView
+      }).first
+      staleElement = candidateView?.accessibilityChildren()?.first
+        as? LinnetCandidateAccessibilityElement
+      panel.unbind(controller: controller, activationToken: token)
+    }
+    require(
+      releasedController == nil,
+      "a stale accessibility action retained its retired input controller")
+    require(
+      staleElement?.accessibilityPerformPress() == false,
+      "a stale accessibility action remained authoritative after unbind")
+  }
+
+  private static func testAccessibilityRejectsInvalidGeometry() {
+    let view = SquirrelView(frame: NSRect(x: 0, y: 0, width: 180, height: 40))
+    let accessibility = LinnetCandidateAccessibility()
+    accessibility.install(parent: view, rawTextView: view.textView)
+    accessibility.publish(
+      parent: view,
+      geometry: .init(
+        candidateFrames: [],
+        previousPageFrame: nil,
+        nextPageFrame: nil),
+      candidates: [
+        .init(
+          text: "甲", comment: "", page: 0, indexOnPage: 0,
+          absoluteIndex: 101, selectionLabel: "1"),
+      ],
+      highlightedIndex: 0,
+      controlMode: .paging(canPageUp: false, canPageDown: false),
+      shouldAnnounce: false,
+      selectCandidate: { _ in true },
+      performControl: { _ in true })
+    require(
+      (view.accessibilityChildren() ?? []).isEmpty,
+      "invalid candidate geometry was exposed as a whole-window AX button")
+
+    let validCandidateFrame = NSRect(x: 4, y: 4, width: 40, height: 20)
+    let validControlFrame = NSRect(x: 52, y: 4, width: 20, height: 20)
+    let invalidControlCases: [(
+      label: String,
+      mode: LinnetCandidatePresentation.CandidateControlMode,
+      previous: NSRect?,
+      next: NSRect?,
+      expectedActions: [LinnetCandidatePresentation.CandidateControlAction]
+    )] = [
+      (
+        label: "empty previous-page frame",
+        mode: .paging(canPageUp: true, canPageDown: true),
+        previous: .zero,
+        next: validControlFrame,
+        expectedActions: [.pageDown]
+      ),
+      (
+        label: "zero-width next-page frame",
+        mode: .paging(canPageUp: true, canPageDown: true),
+        previous: validControlFrame,
+        next: NSRect(x: 76, y: 4, width: 0, height: 20),
+        expectedActions: [.pageUp]
+      ),
+      (
+        label: "non-finite expand frame",
+        mode: .disclosure(expanded: false),
+        previous: nil,
+        next: NSRect(x: CGFloat.nan, y: 4, width: 20, height: 20),
+        expectedActions: []
+      ),
+      (
+        label: "non-finite collapse frame",
+        mode: .disclosure(expanded: true),
+        previous: NSRect(x: 52, y: 4, width: 20, height: CGFloat.infinity),
+        next: nil,
+        expectedActions: []
+      ),
+    ]
+    for invalidCase in invalidControlCases {
+      var performedActions: [LinnetCandidatePresentation.CandidateControlAction] = []
+      accessibility.publish(
+        parent: view,
+        geometry: .init(
+          candidateFrames: [validCandidateFrame],
+          previousPageFrame: invalidCase.previous,
+          nextPageFrame: invalidCase.next),
+        candidates: [
+          .init(
+            text: "甲", comment: "", page: 0, indexOnPage: 0,
+            absoluteIndex: 101, selectionLabel: "1"),
+        ],
+        highlightedIndex: 0,
+        controlMode: invalidCase.mode,
+        shouldAnnounce: false,
+        selectCandidate: { _ in true },
+        performControl: { action in
+          performedActions.append(action)
+          return true
+        })
+      let children = view.accessibilityChildren() ?? []
+      for control in children.dropFirst() {
+        _ = (control as? LinnetCandidateAccessibilityElement)?
+          .accessibilityPerformPress()
+      }
+      require(
+        children.count == invalidCase.expectedActions.count + 1 &&
+          performedActions == invalidCase.expectedActions,
+        "\(invalidCase.label) published an invalid AX control frame")
+    }
+  }
+
+  private static func testPreciseWheelPagingSemantics() {
+    let start = Date(timeIntervalSinceReferenceDate: 100)
+    func sample(
+      deltaY: CGFloat,
+      phase: NSEvent.Phase = [],
+      momentumPhase: NSEvent.Phase = [],
+      at timestamp: Date
+    ) -> LinnetCandidateInteractionState<Int>.ScrollSample {
+      return .init(
+        delta: CGVector(dx: 0, dy: deltaY),
+        hasPreciseScrollingDeltas: true,
+        phase: phase,
+        momentumPhase: momentumPhase,
+        timestamp: timestamp)
+    }
+
+    var accumulated = LinnetCandidateInteractionState<Int>()
+    let firstHalf = accumulated.processScroll(
+      sample(deltaY: 6, at: start), vertical: false)
+    let secondHalf = accumulated.processScroll(
+      sample(deltaY: 6, at: start.addingTimeInterval(0.1)),
+      vertical: false)
+    require(
+      firstHalf == nil && secondHalf == .previousPage,
+      "two precise 6-point wheel deltas did not page exactly once")
+
+    var reversed = LinnetCandidateInteractionState<Int>()
+    let forwardHalf = reversed.processScroll(
+      sample(deltaY: 6, at: start), vertical: false)
+    let firstReverseHalf = reversed.processScroll(
+      sample(deltaY: -6, at: start.addingTimeInterval(0.1)),
+      vertical: false)
+    let secondReverseHalf = reversed.processScroll(
+      sample(deltaY: -6, at: start.addingTimeInterval(0.2)),
+      vertical: false)
+    require(
+      forwardHalf == nil && firstReverseHalf == nil &&
+        secondReverseHalf == .nextPage,
+      "a precise direction change discarded its first reverse delta")
+
+    var momentum = LinnetCandidateInteractionState<Int>()
+    _ = momentum.processScroll(
+      sample(deltaY: 6, at: start), vertical: false)
+    let momentumIntent = momentum.processScroll(
+      sample(
+        deltaY: 12,
+        momentumPhase: .changed,
+        at: start.addingTimeInterval(0.1)),
+      vertical: false)
+    let afterMomentum = momentum.processScroll(
+      sample(deltaY: 6, at: start.addingTimeInterval(0.2)),
+      vertical: false)
+    require(
+      momentumIntent == nil && afterMomentum == nil,
+      "momentum paged or retained a precise wheel remainder")
+
+    var cancelled = LinnetCandidateInteractionState<Int>()
+    _ = cancelled.processScroll(
+      sample(deltaY: 0, phase: .began, at: start), vertical: false)
+    _ = cancelled.processScroll(
+      sample(
+        deltaY: 12,
+        phase: .changed,
+        at: start.addingTimeInterval(0.1)),
+      vertical: false)
+    let cancelledIntent = cancelled.processScroll(
+      sample(
+        deltaY: 0,
+        phase: .cancelled,
+        at: start.addingTimeInterval(0.2)),
+      vertical: false)
+    let staleEndIntent = cancelled.processScroll(
+      sample(
+        deltaY: 0,
+        phase: .ended,
+        at: start.addingTimeInterval(0.3)),
+      vertical: false)
+    require(
+      cancelledIntent == nil && staleEndIntent == nil,
+      "a cancelled precise gesture still paged")
+  }
+
+  private static func testCandidatePressPublicationIdentity() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    let firstPublication = candidatePublication([
+      (text: "甲", absoluteIndex: 101),
+      (text: "乙", absoluteIndex: 102),
+    ])
+    let secondPublication = candidatePublication([
+      (text: "丙", absoluteIndex: 201),
+      (text: "丁", absoluteIndex: 202),
+    ])
+
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first,
+      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+    else {
+      failures.append("candidate press fixture did not publish two candidate cells")
+      panel.hide()
+      return
+    }
+    let candidateFrames = candidateView.candidateAccessibilityGeometry().candidateFrames
+    let secondCandidatePoint = candidateView.convert(candidateFrames[1].center, to: nil)
+    let outsidePoint = candidateView.convert(
+      NSPoint(x: candidateView.bounds.minX - 10, y: candidateView.bounds.minY - 10),
+      to: nil)
+
+    sendCandidateMouse(.mouseMoved, at: secondCandidatePoint, to: panel, eventNumber: 20)
+    requireEngineHighlight(
+      0, in: candidateView,
+      "mouse move changed the engine-selected first candidate")
+    require(
+      candidateView.pointerCandidateIndex == 1 &&
+        !candidateView.pointerCandidateIsPressed,
+      "hovering the second candidate did not change the visual pointer index")
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    require(
+      candidateView.pointerCandidateIndex == nil &&
+        !candidateView.pointerCandidateIsPressed,
+      "a replacement publication retained stale hover feedback")
+    sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 21)
+    requireEngineHighlight(
+      0, in: candidateView,
+      "mouse press changed the engine-selected first candidate")
+    require(
+      candidateView.pointerCandidateIndex == 1 &&
+        candidateView.pointerCandidateIsPressed,
+      "mouse-down did not immediately publish pressed feedback")
+    requirePointerFeedback(
+      in: candidateView, candidateIndex: 1, expectedAlpha: 0.16,
+      context: "second-candidate press")
+    sendCandidateMouse(.leftMouseUp, at: secondCandidatePoint, to: panel, eventNumber: 22)
+    require(
+      controller.selectedCandidateIndices == [102],
+      "clicking the second candidate did not commit that candidate exactly once")
+    requireEngineHighlight(
+      0, in: candidateView,
+      "committing a clicked candidate replaced the engine-owned selection")
+    require(
+      candidateView.pointerCandidateIndex == 1 &&
+        !candidateView.pointerCandidateIsPressed,
+      "mouse-up did not return pressed feedback to hover feedback")
+
+    controller.resetSelectedCandidates()
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 23)
+    sendCandidateMouse(.mouseExited, at: outsidePoint, to: panel, eventNumber: 24)
+    sendCandidateMouse(.leftMouseUp, at: outsidePoint, to: panel, eventNumber: 25)
+    require(
+      controller.selectedCandidateIndices.isEmpty,
+      "dragging out of the second candidate committed it")
+    requireEngineHighlight(
+      0, in: candidateView,
+      "dragging out of a candidate replaced the engine-owned selection")
+
+    controller.resetSelectedCandidates()
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 26)
+    sendCandidateMouse(.mouseExited, at: outsidePoint, to: panel, eventNumber: 27)
+    sendCandidateMouse(.leftMouseDragged, at: secondCandidatePoint, to: panel, eventNumber: 28)
+    require(
+      candidateView.pointerCandidateIndex == 1 &&
+        candidateView.pointerCandidateIsPressed,
+      "dragging back to the pressed candidate did not restore pressed feedback")
+    sendCandidateMouse(.leftMouseUp, at: secondCandidatePoint, to: panel, eventNumber: 29)
+    require(
+      controller.selectedCandidateIndices == [102],
+      "dragging away and back did not preserve the original click target")
+
+    controller.resetSelectedCandidates()
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 30)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: secondPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    require(
+      candidateView.pointerCandidateIndex == nil &&
+        !candidateView.pointerCandidateIsPressed,
+      "a new publication retained the previous candidate's pressed feedback")
+    requireNoPointerFeedback(in: candidateView, context: "new publication")
+    sendCandidateMouse(.leftMouseUp, at: secondCandidatePoint, to: panel, eventNumber: 31)
+    require(
+      controller.selectedCandidateIndices.isEmpty,
+      "a candidate press crossed publications and committed replacement candidate 202")
+    requireEngineHighlight(
+      0, in: candidateView,
+      "a replacement publication did not restore its engine-owned selection")
+
+    controller.resetSelectedCandidates()
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 32)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: false,
+      activationToken: controller.activeInputToken)
+    sendCandidateMouse(.leftMouseUp, at: secondCandidatePoint, to: panel, eventNumber: 33)
+    require(
+      controller.selectedCandidateIndices == [102],
+      "a hover-only redraw cancelled a press within the same publication")
+    requireEngineHighlight(
+      0, in: candidateView,
+      "a hover-only redraw replaced the engine-owned selection")
+    sendCandidateMouse(.mouseMoved, at: secondCandidatePoint, to: panel, eventNumber: 34)
+    panel.hide()
+    require(
+      candidateView.pointerCandidateIndex == nil &&
+        !candidateView.pointerCandidateIsPressed,
+      "hiding the panel retained candidate pointer feedback")
+    requireNoPointerFeedback(in: candidateView, context: "panel hide")
+  }
+
+  private static func testCandidateControlPointerFeedback() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first else {
+      failures.append("candidate control feedback fixture lost its view")
+      return
+    }
+    candidateView.lightTheme.showPaging = true
+    let candidates = SquirrelInputController.CandidateSnapshot(
+      items: candidatePublication([
+        (text: "甲", absoluteIndex: 101),
+        (text: "乙", absoluteIndex: 102),
+      ]).items,
+      pageSize: 2,
+      currentPage: 1,
+      isLastPage: false,
+      isExpanded: false,
+      canExpand: false)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    panel.displayIfNeeded()
+    guard let nextPage = candidateView.pagingLayout.nextPage else {
+      failures.append("candidate control feedback fixture lost next-page geometry")
+      panel.hide()
+      return
+    }
+    let point = candidateView.convert(nextPage.visualCenter, to: nil)
+    sendCandidateMouse(.mouseMoved, at: point, to: panel, eventNumber: 60)
+    require(
+      candidateView.pointerControlAction == .pageDown &&
+        !candidateView.pointerControlIsPressed,
+      "paging hover did not publish control feedback")
+    requireControlFeedback(
+      in: candidateView,
+      expectedAlpha: 0.08,
+      context: "next-page hover")
+    sendCandidateMouse(.leftMouseDown, at: point, to: panel, eventNumber: 61)
+    require(
+      candidateView.pointerControlAction == .pageDown &&
+        candidateView.pointerControlIsPressed,
+      "paging press did not publish pressed feedback")
+    requireControlFeedback(
+      in: candidateView,
+      expectedAlpha: 0.16,
+      context: "next-page press")
+    sendCandidateMouse(.mouseExited, at: point, to: panel, eventNumber: 62)
+    require(
+      candidateView.pointerControlAction == nil &&
+        !candidateView.pointerControlIsPressed,
+      "paging pointer exit retained control feedback")
+    panel.hide()
+  }
+
+  private static func testPreeditPressDoesNotInferEngineCaret() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    let candidates = candidatePublication([(text: "测试", absoluteIndex: 0)])
+    _ = panel.update(
+      preedit: "ceshi", selRange: NSRange(location: 0, length: 5), caretPos: 5,
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first,
+      let preeditTextRange = candidateView.convert(range: NSRange(location: 0, length: 1))
+    else {
+      failures.append("preedit press fixture did not publish text geometry")
+      panel.hide()
+      return
+    }
+    candidateView.layoutSubtreeIfNeeded()
+    var preeditPoint = candidateView.contentRect(range: preeditTextRange).center
+    preeditPoint.x += candidateView.textView.frame.minX
+      + candidateView.textView.textContainerInset.width
+    preeditPoint.y += candidateView.textView.frame.minY
+      + candidateView.textView.textContainerInset.height
+    let windowPreeditPoint = candidateView.convert(preeditPoint, to: nil)
+    let candidateFrame = candidateView.candidateAccessibilityGeometry().candidateFrames.first
+    guard let candidateFrame else {
+      failures.append("preedit press fixture did not publish candidate geometry")
+      panel.hide()
+      return
+    }
+    let windowCandidatePoint = candidateView.convert(candidateFrame.center, to: nil)
+
+    sendCandidateMouse(.leftMouseDown, at: windowCandidatePoint, to: panel, eventNumber: 30)
+    sendCandidateMouse(.leftMouseUp, at: windowPreeditPoint, to: panel, eventNumber: 31)
+    require(
+      controller.selectedCandidateIndices.isEmpty &&
+        controller.pageDirections.isEmpty,
+      "dragging from a candidate onto preedit text mutated the engine")
+
+    sendCandidateMouse(.leftMouseDown, at: windowPreeditPoint, to: panel, eventNumber: 32)
+    sendCandidateMouse(.leftMouseUp, at: windowPreeditPoint, to: panel, eventNumber: 33)
+    require(
+      controller.selectedCandidateIndices.isEmpty &&
+        controller.pageDirections.isEmpty,
+      "displayed preedit coordinates were incorrectly applied to raw Rime input")
+    panel.hide()
+  }
+
+  private static func testSameControllerReactivationInvalidatesOldPublication() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    let firstToken = controller.activeInputToken
+    panel.bind(controller: controller, activationToken: firstToken)
+    let candidates = candidatePublication([
+      (text: "甲", absoluteIndex: 101),
+      (text: "乙", absoluteIndex: 102),
+    ])
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: firstToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first,
+      let staleAccessibilityAction = candidateView.accessibilityChildren()?.first
+        as? LinnetCandidateAccessibilityElement,
+      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+    else {
+      failures.append("same-controller reactivation fixture did not publish actions")
+      panel.hide()
+      return
+    }
+    let secondPoint = candidateView.convert(
+      candidateView.candidateAccessibilityGeometry().candidateFrames[1].center,
+      to: nil)
+    sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 34)
+
+    let replacementToken = controller.beginActivation()
+    require(
+      replacementToken != firstToken && !controller.inputActivationIsCurrent(firstToken),
+      "same-controller reactivation did not retire the previous token")
+    require(
+      !staleAccessibilityAction.accessibilityPerformPress(),
+      "an accessibility action crossed same-controller activation generations")
+    sendCandidateMouse(.leftMouseUp, at: secondPoint, to: panel, eventNumber: 35)
+    require(
+      controller.selectedCandidateIndices.isEmpty,
+      "a mouse press crossed same-controller activation generations")
+
+    panel.bind(controller: controller, activationToken: replacementToken)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: replacementToken)
+    guard let currentAccessibilityAction = candidateView.accessibilityChildren()?.first
+      as? LinnetCandidateAccessibilityElement
+    else {
+      failures.append("replacement activation did not publish accessibility actions")
+      panel.hide()
+      return
+    }
+    require(
+      currentAccessibilityAction.accessibilityPerformPress() &&
+        controller.selectedCandidateIndices == [101],
+      "the replacement activation did not accept its own exact action")
+    panel.hide()
+  }
+
+  private static func testInputControllerOwnerSwapInvalidatesCandidateInteraction() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let oldController = SquirrelInputController()
+    let newController = SquirrelInputController()
+    let finalController = SquirrelInputController()
+    let candidates = candidatePublication([
+      (text: "甲", absoluteIndex: 101),
+      (text: "乙", absoluteIndex: 102),
+    ])
+    panel.bind(controller: oldController, activationToken: oldController.activeInputToken)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: oldController.activeInputToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first,
+      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+    else {
+      failures.append("controller-swap fixture did not publish candidate geometry")
+      panel.hide()
+      return
+    }
+    let secondPoint = candidateView.convert(
+      candidateView.candidateAccessibilityGeometry().candidateFrames[1].center,
+      to: nil)
+    guard let staleAccessibilityAction = candidateView.accessibilityChildren()?.first
+      as? LinnetCandidateAccessibilityElement
+    else {
+      failures.append("controller-swap fixture did not publish accessibility actions")
+      panel.hide()
+      return
+    }
+    sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 35)
+    panel.bind(controller: newController, activationToken: newController.activeInputToken)
+    require(!panel.isVisible, "controller swap retained the previous candidate panel")
+    require(
+      candidateView.pointerCandidateIndex == nil &&
+        !candidateView.pointerCandidateIsPressed,
+      "controller swap retained the previous pointer interaction")
+    require(
+      candidateView.accessibilityChildren()?.isEmpty == true,
+      "controller swap retained the previous accessibility candidates")
+    sendCandidateMouse(.leftMouseUp, at: secondPoint, to: panel, eventNumber: 36)
+    require(
+      !staleAccessibilityAction.accessibilityPerformPress() &&
+        oldController.selectedCandidateIndices.isEmpty &&
+        newController.selectedCandidateIndices.isEmpty,
+      "an old mouse or accessibility action crossed controller ownership")
+
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: newController.activeInputToken)
+    sendCandidateScroll(deltaY: 6, phase: 0, to: panel)
+    panel.bind(controller: finalController, activationToken: finalController.activeInputToken)
+    sendCandidateScroll(deltaY: 6, phase: 0, to: panel)
+    require(
+      finalController.pageDirections.isEmpty,
+      "a wheel remainder crossed input-controller ownership")
+    panel.hide()
+  }
+
+  private static func testCandidateScrollPublicationIdentity() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    let firstPublication = candidatePublication([
+      (text: "甲", absoluteIndex: 101),
+      (text: "乙", absoluteIndex: 102),
+    ])
+    let secondPublication = candidatePublication([
+      (text: "丙", absoluteIndex: 201),
+      (text: "丁", absoluteIndex: 202),
+    ])
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    guard let candidateView = panel.contentView?.subviews.compactMap({
+      $0 as? SquirrelView
+    }).first,
+      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+    else {
+      failures.append("candidate scroll fixture did not publish two candidate cells")
+      panel.hide()
+      return
+    }
+    let secondPoint = candidateView.convert(
+      candidateView.candidateAccessibilityGeometry().candidateFrames[1].center,
+      to: nil)
+
+    sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 40)
+    sendCandidateScroll(deltaY: 2, phase: 0, to: panel)
+    sendCandidateMouse(.leftMouseUp, at: secondPoint, to: panel, eventNumber: 41)
+    require(
+      controller.selectedCandidateIndices.isEmpty,
+      "a candidate press survived an intervening scroll gesture")
+
+    controller.resetPageDirections()
+    sendCandidateScroll(deltaY: 0, phase: 1, to: panel)
+    sendCandidateScroll(deltaY: 8, phase: 2, to: panel)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: secondPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    sendCandidateScroll(deltaY: 8, phase: 2, to: panel)
+    sendCandidateScroll(deltaY: 0, phase: 4, to: panel)
+    require(
+      controller.pageDirections.isEmpty,
+      "a phased scroll gesture crossed candidate publications")
+
+    sendCandidateScroll(deltaY: 0, phase: 1, to: panel)
+    sendCandidateScroll(deltaY: 12, phase: 2, to: panel)
+    sendCandidateScroll(deltaY: 0, phase: 4, to: panel)
+    require(
+      controller.pageDirections == [true],
+      "a same-publication trackpad gesture did not page exactly once")
+
+    controller.resetPageDirections()
+    sendCandidateScroll(deltaY: 1, phase: 0, units: .line, to: panel)
+    sendCandidateScroll(deltaY: -1, phase: 0, units: .line, to: panel)
+    require(
+      controller.pageDirections == [true, false],
+      "ordinary wheel ticks did not page once in each direction")
+
+    controller.resetPageDirections()
+    sendCandidateScroll(deltaY: 6, phase: 0, to: panel)
+    panel.hide()
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: firstPublication, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
+    sendCandidateScroll(deltaY: 6, phase: 0, to: panel)
+    require(
+      controller.pageDirections.isEmpty,
+      "a mouse-wheel remainder survived hide and a new publication")
+    panel.hide()
+  }
+
+  private static func candidatePublication(
+    _ candidates: [(text: String, absoluteIndex: Int)]
+  ) -> SquirrelInputController.CandidateSnapshot {
+    .init(
+      items: candidates.enumerated().map { index, candidate in
+        .init(
+          text: candidate.text, comment: "", page: 0, indexOnPage: index,
+          absoluteIndex: candidate.absoluteIndex, selectionLabel: String(index + 1))
+      },
+      pageSize: candidates.count,
+      currentPage: 0,
+      isLastPage: true,
+      isExpanded: false,
+      canExpand: false)
+  }
+
+  private static func sendCandidateMouse(
+    _ type: NSEvent.EventType,
+    at point: NSPoint,
+    to panel: SquirrelPanel,
+    eventNumber: Int
+  ) {
+    let event: NSEvent?
+    if type == .mouseEntered || type == .mouseExited {
+      event = NSEvent.enterExitEvent(
+        with: type,
+        location: point,
+        modifierFlags: [],
+        timestamp: TimeInterval(eventNumber),
+        windowNumber: panel.windowNumber,
+        context: nil,
+        eventNumber: eventNumber,
+        trackingNumber: 1,
+        userData: nil)
+    } else {
+      event = NSEvent.mouseEvent(
+        with: type,
+        location: point,
+        modifierFlags: [],
+        timestamp: TimeInterval(eventNumber),
+        windowNumber: panel.windowNumber,
+        context: nil,
+        eventNumber: eventNumber,
+        clickCount: 1,
+        pressure: type == .leftMouseDown ? 1 : 0)
+    }
+    guard let event
+    else {
+      failures.append("candidate press fixture could not create mouse event \(eventNumber)")
+      return
+    }
+    panel.sendEvent(event)
+  }
+
+  private static func sendCandidateScroll(
+    deltaY: Int32,
+    phase: Int64,
+    units: CGScrollEventUnit = .pixel,
+    to panel: SquirrelPanel
+  ) {
+    guard let cgEvent = CGEvent(
+      scrollWheelEvent2Source: nil,
+      units: units,
+      wheelCount: 2,
+      wheel1: deltaY,
+      wheel2: 0,
+      wheel3: 0)
+    else {
+      failures.append("candidate scroll fixture could not create a CGEvent")
+      return
+    }
+    cgEvent.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+    guard let event = NSEvent(cgEvent: cgEvent) else {
+      failures.append("candidate scroll fixture could not bridge an NSEvent")
+      return
+    }
+    panel.sendEvent(event)
+  }
+
+  private static func requireEngineHighlight(
+    _ expectedIndex: Int,
+    in candidateView: SquirrelView,
+    _ context: String
+  ) {
+    let candidateElements = (candidateView.accessibilityChildren() ?? []).compactMap {
+      $0 as? NSAccessibilityElement
+    }
+    let selectedElements = (candidateView.accessibilitySelectedChildren() ?? []).compactMap {
+      $0 as? NSAccessibilityElement
+    }
+    require(
+      candidateView.hilightedIndex == expectedIndex,
+      "\(context): visual index was \(candidateView.hilightedIndex)")
+    require(
+      candidateElements.indices.contains(expectedIndex) &&
+        selectedElements.count == 1 &&
+        selectedElements[0] === candidateElements[expectedIndex],
+      "\(context): accessibility selection diverged from candidate \(expectedIndex)")
+  }
+
+  private static func requirePointerFeedback(
+    in candidateView: SquirrelView,
+    candidateIndex: Int,
+    expectedAlpha: CGFloat,
+    context: String
+  ) {
+    guard candidateView.candidateInteractionFrames.indices.contains(candidateIndex),
+      let panelLayer = candidateView.layer?.sublayers?.first as? CAShapeLayer,
+      let feedbackLayer = panelLayer.sublayers?.first(where: {
+        $0.name == LinnetCandidatePointerPresentation.feedbackLayerName
+      }) as? CAShapeLayer,
+      let path = feedbackLayer.path,
+      let alpha = feedbackLayer.fillColor?.alpha
+    else {
+      failures.append("\(context) did not render its visual feedback layer")
+      return
+    }
+    var transform = panelLayer.affineTransform()
+    let visualFrame = path.copy(using: &transform)?.boundingBox ?? .zero
+    require(
+      approximatelyEqual(
+        visualFrame,
+        candidateView.candidateInteractionFrames[candidateIndex],
+        tolerance: 0.5),
+      "\(context) feedback did not cover candidate \(candidateIndex)")
+    require(
+      abs(alpha - expectedAlpha) < 0.001,
+      "\(context) feedback alpha was \(alpha), expected \(expectedAlpha)")
+  }
+
+  private static func requireControlFeedback(
+    in candidateView: SquirrelView,
+    expectedAlpha: CGFloat,
+    context: String
+  ) {
+    guard let feedbackLayer = candidateView.layer?.sublayers?.first(where: {
+      $0.name == SquirrelView.controlPointerFeedbackLayerName
+    }) as? CAShapeLayer,
+      let alpha = feedbackLayer.fillColor?.alpha
+    else {
+      failures.append("\(context): missing control feedback layer")
+      return
+    }
+    require(
+      abs(alpha - expectedAlpha) <= 0.01,
+      "\(context): control feedback alpha was \(alpha)")
+  }
+
+  private static func requireNoPointerFeedback(
+    in candidateView: SquirrelView,
+    context: String
+  ) {
+    let feedbackLayer = (candidateView.layer?.sublayers?.first as? CAShapeLayer)?
+      .sublayers?.first(where: {
+        $0.name == LinnetCandidatePointerPresentation.feedbackLayerName
+      })
+    require(feedbackLayer == nil, "\(context) retained a visual feedback layer")
   }
 
   private static func testDefaultNineCandidateNaturalSize(
@@ -341,7 +1376,7 @@ struct LinnetCandidateWindowInteractionTests {
 
     let panel = SquirrelPanel(position: NSRect(x: 320, y: 420, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.inputController = controller
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -400,9 +1435,10 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: true,
       isExpanded: false,
       canExpand: true)
-    panel.update(
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
-      candidates: candidates, highlighted: 0, update: true)
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     render(candidateView)
 
@@ -471,9 +1507,10 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: false,
       isExpanded: false,
       canExpand: false)
-    panel.update(
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
-      candidates: middlePage, highlighted: 0, update: true)
+      candidates: middlePage, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     render(candidateView)
 
@@ -502,9 +1539,10 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: true,
       isExpanded: false,
       canExpand: false)
-    panel.update(
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
-      candidates: lastPage, highlighted: 0, update: true)
+      candidates: lastPage, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     render(candidateView)
     let lastPaging = candidateView.pagingLayout
@@ -532,9 +1570,10 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: false,
       isExpanded: true,
       canExpand: true)
-    panel.update(
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
-      candidates: expanded, highlighted: 0, update: true)
+      candidates: expanded, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     render(candidateView)
     let expandedNaturalHeight = ceil(candidateView.contentRect.height + inset.height * 2)
@@ -545,9 +1584,10 @@ struct LinnetCandidateWindowInteractionTests {
       candidateView.candidateAccessibilityGeometry().candidateFrames.count == 21,
       "expanded candidates lost or invented interaction geometry")
 
-    panel.update(
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
-      candidates: candidates, highlighted: 0, update: true)
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     render(candidateView)
     require(
@@ -569,7 +1609,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testEnglishMetadataFooterNaturalSize(candidatePoint: CGFloat) {
     let panel = SquirrelPanel(position: NSRect(x: 360, y: 460, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.inputController = controller
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -653,9 +1693,10 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: true,
       isExpanded: false,
       canExpand: false)
-    panel.update(
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
-      candidates: candidates, highlighted: 0, update: true)
+      candidates: candidates, highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     render(candidateView)
 
@@ -699,7 +1740,7 @@ struct LinnetCandidateWindowInteractionTests {
     for point in [CGFloat(12), 15, 16, 32] {
       let panel = SquirrelPanel(position: NSRect(x: 0, y: 0, width: 2, height: 20))
       let controller = SquirrelInputController()
-      panel.inputController = controller
+      panel.bind(controller: controller, activationToken: controller.activeInputToken)
       guard let candidateView = panel.contentView?.subviews.compactMap({
         $0 as? SquirrelView
       }).first else {
@@ -732,7 +1773,7 @@ struct LinnetCandidateWindowInteractionTests {
       theme.paragraphStyle = NSMutableParagraphStyle()
       let detailText = "/ef/ · n. 字母 F"
       let values = ["f", "far", "fast"]
-      panel.update(
+      _ = panel.update(
         preedit: "", selRange: .empty, caretPos: 0,
         candidates: SquirrelInputController.CandidateSnapshot(
           items: values.enumerated().map { index, value in
@@ -747,7 +1788,8 @@ struct LinnetCandidateWindowInteractionTests {
           isExpanded: false,
           canExpand: false),
         highlighted: 0,
-        update: true)
+        update: true,
+        activationToken: controller.activeInputToken)
       render(candidateView)
       guard let text = candidateView.textView.textContentStorage?.attributedString,
         candidateView.candidateRanges.count == values.count
@@ -848,8 +1890,9 @@ struct LinnetCandidateWindowInteractionTests {
     view.textView.textContentStorage?.attributedString = text
     view.textView.frame = bounds
     view.textView.textContainerInset = LinnetCandidatePresentation.candidateWindowInset
-    view.textContainer?.size = bounds.size
-    view.textLayoutManager?.ensureLayout(for: view.textLayoutManager!.documentRange)
+    view.textView.textContainer?.size = bounds.size
+    view.textView.textLayoutManager?.ensureLayout(
+      for: view.textView.textLayoutManager!.documentRange)
     view.applyPresentationMetrics(LinnetPanelGeometry.presentationMetrics(
       role: .candidate,
       candidateFontPoint: fontPoint,
@@ -1228,14 +2271,17 @@ struct LinnetCandidateWindowInteractionTests {
   private static func renderStatusNotice(_ label: String) -> NSBitmapImageRep? {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.inputController = controller
-    panel.updateStatus(long: label, short: label)
-    panel.update(
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.updateStatus(
+      long: label, short: label,
+      activationToken: controller.activeInputToken)
+    _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: .init(
         items: [], pageSize: 9, currentPage: 0, isLastPage: true,
         isExpanded: false, canExpand: false),
-      highlighted: 0, update: true)
+      highlighted: 0, update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     defer { panel.hide() }
     return bitmapSnapshot(of: panel.contentView)
@@ -1248,7 +2294,7 @@ struct LinnetCandidateWindowInteractionTests {
   ) -> NSBitmapImageRep? {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.inputController = controller
+    panel.bind(controller: controller, activationToken: controller.activeInputToken)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else { return nil }
@@ -1307,13 +2353,14 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: true,
       isExpanded: false,
       canExpand: false)
-    panel.update(
+    _ = panel.update(
       preedit: preedit,
       selRange: NSRange(location: 0, length: preedit.utf16.count),
       caretPos: preedit.utf16.count,
       candidates: snapshot,
       highlighted: 0,
-      update: true)
+      update: true,
+      activationToken: controller.activeInputToken)
     panel.displayIfNeeded()
     defer { panel.hide() }
     return bitmapSnapshot(of: panel.contentView)
@@ -1603,8 +2650,9 @@ struct LinnetCandidateWindowInteractionTests {
     view.textView.textContentStorage?.attributedString = text
     view.textView.frame = frame
     view.textView.textContainerInset = LinnetCandidatePresentation.candidateWindowInset
-    view.textContainer?.size = frame.size
-    view.textLayoutManager?.ensureLayout(for: view.textLayoutManager!.documentRange)
+    view.textView.textContainer?.size = frame.size
+    view.textView.textLayoutManager?.ensureLayout(
+      for: view.textView.textLayoutManager!.documentRange)
     view.separatorWidth = LinnetCandidatePresentation.inlineCandidateSeparatorWidth(font: font)
     view.applyPresentationMetrics(LinnetPanelGeometry.presentationMetrics(
       role: .candidate,
@@ -1702,9 +2750,9 @@ struct LinnetCandidateWindowInteractionTests {
   private static func interiorSamples(_ frame: NSRect) -> [NSPoint] {
     let inset = frame.insetBy(dx: min(1, frame.width / 4), dy: min(1, frame.height / 4))
     return [
-      NSPoint(x: inset.minX, y: inset.minY),
+      NSPoint(x: inset.midX, y: inset.minY),
       NSPoint(x: inset.midX, y: inset.midY),
-      NSPoint(x: inset.maxX, y: inset.maxY),
+      NSPoint(x: inset.midX, y: inset.maxY),
     ]
   }
 

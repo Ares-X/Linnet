@@ -134,14 +134,14 @@ struct LinnetSettingsProjectionRendererTests {
       if pageSize == LinnetSettingsDocument.Appearance.defaultPageSize {
         require(
           projection == coreInteractionProjection + defaultSchemaOrderProjection,
-          "the default document did not preserve unfinished text on Caps Lock"
+          "the default document did not preserve unfinished text on a mode switch"
         )
       } else {
         require(
           projection == coreInteractionProjection
             + "  \"menu/page_size\": \(pageSize)\n"
             + defaultSchemaOrderProjection,
-          "page size \(pageSize) displaced the canonical Caps Lock policy"
+          "page size \(pageSize) displaced the canonical mode-switch policy"
         )
       }
     }
@@ -984,7 +984,9 @@ struct LinnetSettingsProjectionRendererTests {
 
   private static let coreInteractionProjection = """
     patch:
-      "ascii_composer/switch_key/Caps_Lock": commit_text
+      "ascii_composer/switch_key/Caps_Lock": commit_code
+      "ascii_composer/switch_key/Shift_L": commit_code
+      "ascii_composer/switch_key/Shift_R": commit_code
       "linnet/recognizer_patterns/zz_code_token": "^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$"
 
     """

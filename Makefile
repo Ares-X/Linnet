@@ -27,6 +27,7 @@ SMART_ENGLISH_HEADERS = plugins/smart_english/smart_english_domain.h \
 	plugins/smart_english/smart_english_index.h \
 	plugins/smart_english/smart_english_mixed_decoder.h
 SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
+	librime/dist/include/rime/gear/selector.h \
 	librime/dist/include/glog/logging.h \
 	librime/dist/include/marisa.h \
 	librime/dist/include/marisa/stdio.h
@@ -117,6 +118,10 @@ copy-rime-binaries:
 
 verify-rime-binaries:
 	@set -e; \
+	cmp -s "$(RIME_LIB_DIR)/$(RIME_LIBRARY_FILE_NAME)" "$(RIME_LIBRARY)" || { echo "Staged librime is not the locked runtime build." >&2; exit 1; }; \
+	for plugin in librime-lua.dylib librime-octagram.dylib librime-predict.dylib; do \
+		cmp -s "$(RIME_LIB_DIR)/rime-plugins/$${plugin}" "lib/rime-plugins/$${plugin}" || { echo "Staged $${plugin} is not the locked runtime build." >&2; exit 1; }; \
+	done; \
 	expected_plugins="$$(mktemp)"; \
 	actual_plugins="$$(mktemp)"; \
 	trap 'rm -f "$${expected_plugins}" "$${actual_plugins}"' EXIT; \

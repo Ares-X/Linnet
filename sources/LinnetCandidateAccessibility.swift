@@ -33,7 +33,35 @@ final class LinnetCandidateAccessibilityElement: NSAccessibilityElement {
 }
 
 final class LinnetCandidateAccessibility {
+  private struct CandidateLayout: Equatable {
+    let absoluteIndex: Int
+    let text: String
+    let comment: String
+    let page: Int
+    let indexOnPage: Int
+  }
+
+  private struct LayoutSignature: Equatable {
+    let candidates: [CandidateLayout]
+    let candidateFrames: [NSRect]
+    let previousPageFrame: NSRect?
+    let nextPageFrame: NSRect?
+    let controlMode: LinnetCandidatePresentation.CandidateControlMode
+  }
+
+  private struct ControlPublication {
+    let action: LinnetCandidatePresentation.CandidateControlAction
+    let label: String
+    let frame: NSRect
+  }
+
   private var elements: [NSAccessibilityElement] = []
+  private var candidateElements: [Int: LinnetCandidateAccessibilityElement] = [:]
+  private var controlElements:
+    [LinnetCandidatePresentation.CandidateControlAction:
+      LinnetCandidateAccessibilityElement] = [:]
+  private var layoutSignature: LayoutSignature?
+  private var selectedAbsoluteIndex: Int?
   private var publicationGeneration: UInt64 = 0
   private var lastAnnouncement: String?
 
@@ -53,10 +81,42 @@ final class LinnetCandidateAccessibility {
     selectCandidate: @escaping (Int) -> Bool,
     performControl: @escaping (LinnetCandidatePresentation.CandidateControlAction) -> Bool
   ) {
+    guard geometry.candidateFrames.count == candidates.count,
+      geometry.candidateFrames.allSatisfy(validFrame),
+      Set(candidates.map(\.absoluteIndex)).count == candidates.count
+    else {
+      clear(parent: parent)
+      return
+    }
+    let previousPageFrame = geometry.previousPageFrame.flatMap {
+      validFrame($0) ? $0 : nil
+    }
+    let nextPageFrame = geometry.nextPageFrame.flatMap {
+      validFrame($0) ? $0 : nil
+    }
     let generation = nextGeneration()
     configure(parent: parent, surface: .candidates)
+    let signature = LayoutSignature(
+      candidates: candidates.map {
+        CandidateLayout(
+          absoluteIndex: $0.absoluteIndex,
+          text: $0.text,
+          comment: $0.comment,
+          page: $0.page,
+          indexOnPage: $0.indexOnPage)
+      },
+      candidateFrames: geometry.candidateFrames,
+      previousPageFrame: previousPageFrame,
+      nextPageFrame: nextPageFrame,
+      controlMode: controlMode)
+    let reusesLayout = layoutSignature == signature
+    if !reusesLayout {
+      candidateElements.removeAll(keepingCapacity: true)
+      controlElements.removeAll(keepingCapacity: true)
+    }
     var newElements: [NSAccessibilityElement] = []
     var selectedElement: NSAccessibilityElement?
+    var nextCandidateElements: [Int: LinnetCandidateAccessibilityElement] = [:]
 
     for index in candidates.indices {
       let candidate = candidates[index]
@@ -66,64 +126,57 @@ final class LinnetCandidateAccessibility {
         page: candidate.page,
         indexOnPage: candidate.indexOnPage
       ) else { continue }
-      let element = LinnetCandidateAccessibilityElement()
+      let element = candidateElements[candidate.absoluteIndex] ??
+        LinnetCandidateAccessibilityElement()
       element.setAccessibilityParent(parent)
       element.setAccessibilityRole(.button)
       element.setAccessibilityLabel(label)
       element.setAccessibilityHelp(
         NSLocalizedString("Commit current candidate", comment: "Candidate accessibility action"))
       element.setAccessibilitySelected(index == highlightedIndex)
-      element.setAccessibilityFrameInParentSpace(
-        index < geometry.candidateFrames.count ? geometry.candidateFrames[index] : parent.bounds)
+      element.setAccessibilityFrameInParentSpace(geometry.candidateFrames[index])
       element.performPress = { [weak self] in
         guard self?.publicationGeneration == generation else { return false }
         return selectCandidate(candidate.absoluteIndex)
       }
       newElements.append(element)
+      nextCandidateElements[candidate.absoluteIndex] = element
       if index == highlightedIndex {
         selectedElement = element
       }
     }
 
-    switch controlMode {
-    case .paging(let canPageUp, let canPageDown):
-      if canPageUp, let frame = geometry.previousPageFrame {
-        newElements.append(controlElement(
-          parent: parent,
-          label: NSLocalizedString("Previous candidate page", comment: "Candidate page action"),
-          frame: frame,
-          generation: generation,
-          action: { performControl(.pageUp) }
-        ))
-      }
-      if canPageDown, let frame = geometry.nextPageFrame {
-        newElements.append(controlElement(
-          parent: parent,
-          label: NSLocalizedString("Next candidate page", comment: "Candidate page action"),
-          frame: frame,
-          generation: generation,
-          action: { performControl(.pageDown) }
-        ))
-      }
-    case .disclosure(let expanded):
-      let frame = expanded ? geometry.previousPageFrame : geometry.nextPageFrame
-      if let frame {
-        newElements.append(controlElement(
-          parent: parent,
-          label: NSLocalizedString(
-            expanded ? "Show fewer candidates" : "Show more candidates",
-            comment: "Candidate disclosure action"),
-          frame: frame,
-          generation: generation,
-          action: { performControl(expanded ? .collapse : .expand) }
-        ))
-      }
+    for publication in controlPublications(
+      mode: controlMode,
+      previousPageFrame: previousPageFrame,
+      nextPageFrame: nextPageFrame
+    ) {
+      newElements.append(controlElement(
+        existing: controlElements[publication.action],
+        publication: publication,
+        parent: parent,
+        generation: generation,
+        performControl: performControl
+      ))
     }
 
+    candidateElements = nextCandidateElements
+    controlElements = controlElements.filter { _, element in
+      newElements.contains { ($0 as AnyObject) === element }
+    }
     elements = newElements
     parent.setAccessibilityChildren(newElements)
     parent.setAccessibilitySelectedChildren(selectedElement.map { [$0] } ?? [])
-    NSAccessibility.post(element: parent, notification: .layoutChanged)
+    let nextSelectedAbsoluteIndex = candidates.indices.contains(highlightedIndex)
+      ? candidates[highlightedIndex].absoluteIndex : nil
+    postAccessibilityChange(
+      parent: parent,
+      elements: newElements,
+      reusesLayout: reusesLayout,
+      selectionChanged: selectedAbsoluteIndex != nextSelectedAbsoluteIndex)
+    layoutSignature = signature
+    selectedAbsoluteIndex = nextSelectedAbsoluteIndex
+    guard publicationGeneration == generation else { return }
 
     if shouldAnnounce,
        let announcement = LinnetCandidatePresentation.accessibilityAnnouncement(
@@ -142,26 +195,30 @@ final class LinnetCandidateAccessibility {
   }
 
   func publishStatus(parent: NSView, message: String) {
-    _ = nextGeneration()
+    let generation = nextGeneration()
     configure(parent: parent, surface: .inputModeStatus)
     let element = NSAccessibilityElement()
     element.setAccessibilityParent(parent)
     element.setAccessibilityRole(.staticText)
     element.setAccessibilityLabel(message)
     element.setAccessibilityFrameInParentSpace(parent.bounds)
+    resetCandidateElements()
     elements = [element]
     parent.setAccessibilityChildren([element])
     parent.setAccessibilitySelectedChildren([])
     NSAccessibility.post(element: parent, notification: .layoutChanged)
+    guard publicationGeneration == generation else { return }
     announce(message)
   }
 
   func clear(parent: NSView) {
     _ = nextGeneration()
+    resetCandidateElements()
     elements = []
     lastAnnouncement = nil
     parent.setAccessibilityChildren([])
     parent.setAccessibilitySelectedChildren([])
+    NSAccessibility.post(element: parent, notification: .layoutChanged)
   }
 
   private func nextGeneration() -> UInt64 {
@@ -181,22 +238,92 @@ final class LinnetCandidateAccessibility {
   }
 
   private func controlElement(
+    existing: LinnetCandidateAccessibilityElement?,
+    publication: ControlPublication,
     parent: NSView,
-    label: String,
-    frame: NSRect,
     generation: UInt64,
-    action: @escaping () -> Bool
+    performControl: @escaping (LinnetCandidatePresentation.CandidateControlAction) -> Bool
   ) -> NSAccessibilityElement {
-    let element = LinnetCandidateAccessibilityElement()
+    let element = existing ?? LinnetCandidateAccessibilityElement()
     element.setAccessibilityParent(parent)
     element.setAccessibilityRole(.button)
-    element.setAccessibilityLabel(label)
-    element.setAccessibilityFrameInParentSpace(frame)
+    element.setAccessibilityLabel(publication.label)
+    element.setAccessibilityFrameInParentSpace(publication.frame)
     element.performPress = { [weak self] in
       guard self?.publicationGeneration == generation else { return false }
-      return action()
+      return performControl(publication.action)
     }
+    controlElements[publication.action] = element
     return element
+  }
+
+  private func controlPublications(
+    mode: LinnetCandidatePresentation.CandidateControlMode,
+    previousPageFrame: NSRect?,
+    nextPageFrame: NSRect?
+  ) -> [ControlPublication] {
+    switch mode {
+    case .paging(let canPageUp, let canPageDown):
+      var publications: [ControlPublication] = []
+      if canPageUp, let previousPageFrame {
+        publications.append(ControlPublication(
+          action: .pageUp,
+          label: NSLocalizedString(
+            "Previous candidate page",
+            comment: "Candidate page action"),
+          frame: previousPageFrame))
+      }
+      if canPageDown, let nextPageFrame {
+        publications.append(ControlPublication(
+          action: .pageDown,
+          label: NSLocalizedString(
+            "Next candidate page",
+            comment: "Candidate page action"),
+          frame: nextPageFrame))
+      }
+      return publications
+    case .disclosure(let expanded):
+      guard let frame = expanded ? previousPageFrame : nextPageFrame
+      else { return [] }
+      return [ControlPublication(
+        action: expanded ? .collapse : .expand,
+        label: NSLocalizedString(
+          expanded ? "Show fewer candidates" : "Show more candidates",
+          comment: "Candidate disclosure action"),
+        frame: frame)]
+    }
+  }
+
+  private func resetCandidateElements() {
+    candidateElements.removeAll(keepingCapacity: true)
+    controlElements.removeAll(keepingCapacity: true)
+    layoutSignature = nil
+    selectedAbsoluteIndex = nil
+  }
+
+  private func postAccessibilityChange(
+    parent: NSView,
+    elements: [NSAccessibilityElement],
+    reusesLayout: Bool,
+    selectionChanged: Bool
+  ) {
+    if reusesLayout {
+      guard selectionChanged else { return }
+      NSAccessibility.post(
+        element: parent,
+        notification: .selectedChildrenChanged)
+      return
+    }
+    NSAccessibility.post(
+      element: parent,
+      notification: .layoutChanged,
+      userInfo: [.uiElements: elements])
+  }
+
+  private func validFrame(_ frame: NSRect) -> Bool {
+    frame.width > 0 && frame.height > 0 &&
+      frame.origin.x.isFinite && frame.origin.y.isFinite &&
+      frame.width.isFinite && frame.height.isFinite
   }
 
   private func announce(_ message: String) {
