@@ -113,8 +113,8 @@ printf '0.1.0\n' >"${scripts_root}/candidate-core-version"
 
 candidate_fixture="${test_root}/fixed-community-cms/Linnet.app"
 candidate_fixture_available=true
-candidate_version=0.1.12
-candidate_build=29
+candidate_version=0.1.13
+candidate_build=30
 candidate_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 candidate_leaf=553fb445ae10b48c395ee01aad3630f03c05d3da40f84db89b97d91039e72aff
 wrong_candidate_leaf=bb696adf3a500641c2b5fef7af6436a10ed7a4552302d5d77066fd44099d48f0
@@ -1218,7 +1218,7 @@ fi
 
 # Every shipped macOS candidate has one new build identity, and the expanded
 # package verifier mirrors (rather than contradicts) each product conclusion.
-grep -Fqx 'CURRENT_PROJECT_VERSION = 29' config/LinnetProduct.xcconfig
+grep -Fqx 'CURRENT_PROJECT_VERSION = 30' config/LinnetProduct.xcconfig
 rg -Fq 'if edition == "complete" && kind == "core"' package/verify_package
 
 # The user-owned support root is a deletion trust boundary. A replaced root

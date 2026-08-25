@@ -35,7 +35,7 @@ settings_executable="${settings_app}/Contents/MacOS/Settings"
   io.github.ares-x.inputmethod.Linnet.settings ]] || fail "unexpected Settings bundle identity"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :InputMethodConnectionName' \
   "${host_app}/Contents/Info.plist")" == \
-  io.github.ares-x.inputmethod.Linnet_Connection ]] || fail "unexpected embedded Host bundle"
+  io.github.ares-x.inputmethod.Linnet.Connection ]] || fail "unexpected embedded Host bundle"
 
 newest_input_epoch="$({
   find sources resources Linnet.xcodeproj -type f \
