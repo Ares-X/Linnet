@@ -4,7 +4,8 @@ project(rime-smart-english)
 add_library(rime-smart-english-objs OBJECT
   smart_english.cc
   smart_english_filter.cc
-  smart_english_index.cc)
+  smart_english_index.cc
+  smart_english_mixed_decoder.cc)
 
 if(BUILD_SHARED_LIBS)
   set_target_properties(rime-smart-english-objs

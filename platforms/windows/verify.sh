@@ -371,6 +371,8 @@ fi
 
 rg -Fq 'set(plugin_modules "smart_english" PARENT_SCOPE)' \
   plugins/smart_english/CMakeLists.txt
+rg -Fq '  smart_english_mixed_decoder.cc' \
+  plugins/smart_english/CMakeLists.txt
 rg -Fq '$env:RIME_PLUGINS = "lua octagram predict smart_english"' \
   platforms/windows/build.ps1
 rg -Fq 'Copy-DataTree (Join-Path $DataRoot "plum")' \
