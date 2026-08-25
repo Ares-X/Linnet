@@ -145,6 +145,10 @@ struct LinnetSettingsAppearancePreviewTests {
       candidateSurface.contains("LinnetCandidateDetailSurfaceLayout(geometry: detailGeometry)"),
       "Settings candidate detail bypassed the shared geometry at the SwiftUI boundary")
     require(
+      !previewLayout.contains("precondition(") &&
+        previewLayout.contains("guard subviews.count == 3 else { return nil }"),
+      "a transient SwiftUI child-count mismatch can still terminate Settings")
+    require(
       !candidateSurface.contains("HStack(alignment: .top, spacing: 10)") &&
         !candidateSurface.contains("minWidth: 110") &&
         !candidateSurface.contains("idealWidth: 130") &&

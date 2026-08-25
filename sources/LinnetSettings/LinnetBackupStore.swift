@@ -255,7 +255,7 @@ enum LinnetBackupStore {
           .init(value: $0.value, code: $0.key ?? "")
         }
       case .disabledWords:
-        personal.disabledWords = artifact.rows.map(\.value)
+        personal.disabledWords = artifact.rows.map { .init(value: $0.value) }
       case .textExpander:
         personal.expansions = artifact.rows.map {
           .init(value: $0.value, trigger: $0.key ?? "")
@@ -864,7 +864,7 @@ extension LinnetBackupStore {
     case .customWords:
       rows = data.customWords.map { .init(value: $0.value, key: $0.code) }
     case .disabledWords:
-      rows = data.disabledWords.map { .init(value: $0, key: nil) }
+      rows = data.disabledWords.map { .init(value: $0.value, key: nil) }
     case .textExpander:
       rows = data.expansions.map { .init(value: $0.value, key: $0.trigger) }
     case .chineseLearning, .englishLearning:
@@ -953,7 +953,7 @@ extension LinnetBackupStore {
           .init(value: $0.value, code: $0.key ?? "")
         }
       case .disabledWords:
-        candidate.disabledWords = artifact.rows.map(\.value)
+        candidate.disabledWords = artifact.rows.map { .init(value: $0.value) }
       case .textExpander:
         candidate.expansions = artifact.rows.map {
           .init(value: $0.value, trigger: $0.key ?? "")

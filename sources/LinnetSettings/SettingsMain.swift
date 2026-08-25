@@ -29,7 +29,7 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var activeOperation: SettingsActiveOperation?
   @Published private(set) var backupHistory: SettingsBackupHistoryState
   @Published private(set) var legacyImportState: SettingsLegacyImportState
-  @Published private(set) var personalValidation: LinnetPersonalDataStore.Validation
+  @Published private(set) var personalValidation: LinnetPersonalDataValidation
   @Published private(set) var personalValidationPending = false
   @Published private(set) var portableInspectionActive = false
   @Published private(set) var diagnostics: SettingsDataCoordinator.Diagnostics?

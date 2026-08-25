@@ -530,7 +530,7 @@ private struct LinnetCandidateDetailSurfaceLayout: Layout {
     subviews: Subviews,
     cache: inout ()
   ) -> CGSize {
-    frames(subviews: subviews).size
+    frames(subviews: subviews)?.size ?? .zero
   }
 
   func placeSubviews(
@@ -539,8 +539,7 @@ private struct LinnetCandidateDetailSurfaceLayout: Layout {
     subviews: Subviews,
     cache: inout ()
   ) {
-    precondition(subviews.count == 3, "candidate detail layout requires three roles")
-    let frames = frames(subviews: subviews)
+    guard let frames = frames(subviews: subviews) else { return }
     place(subviews[0], in: frames.candidate, relativeTo: bounds)
     if let divider = frames.divider {
       place(subviews[1], in: divider, relativeTo: bounds)
@@ -555,8 +554,9 @@ private struct LinnetCandidateDetailSurfaceLayout: Layout {
 
   private func frames(
     subviews: Subviews
-  ) -> LinnetCandidatePresentation.CandidateDetailFrames {
-    precondition(subviews.count == 3, "candidate detail layout requires three roles")
+  ) -> LinnetCandidatePresentation.CandidateDetailFrames? {
+    // A transient SwiftUI tree mismatch is a rendering failure, not a process invariant.
+    guard subviews.count == 3 else { return nil }
     return geometry.frames(
       candidateSize: subviews[0].sizeThatFits(.unspecified),
       detailSize: subviews[2].sizeThatFits(.unspecified),

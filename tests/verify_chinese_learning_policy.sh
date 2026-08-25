@@ -96,6 +96,7 @@ projection_fixture="${work_root}/projection-fixture"
   sources/LinnetDataRegistry.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
   sources/LinnetSettings/LinnetSettingsDocument.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionFixture.swift \

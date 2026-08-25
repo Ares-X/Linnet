@@ -377,20 +377,27 @@ struct SettingsSessionStateTests {
       .init(customWords: [.init(value: value, code: value.lowercased())], disabledWords: [], expansions: [])
     }
     executor.submit(draft("First")) { validation in
-      completed.append(validation.normalized?.customWords.first?.value ?? "")
+      completed.append(validatedCustomWord(validation))
     }
     await waitUntil { recorder.started > 0 }
     executor.submit(draft("Second")) { validation in
-      completed.append(validation.normalized?.customWords.first?.value ?? "")
+      completed.append(validatedCustomWord(validation))
     }
     executor.submit(draft("Latest")) { validation in
-      completed.append(validation.normalized?.customWords.first?.value ?? "")
+      completed.append(validatedCustomWord(validation))
     }
     await waitUntil { completed.count == 1 }
     guard completed == ["Latest"], recorder.maximumActive == 1,
       recorder.cancelledWorkObserved
     else { fail("personal validation was not latest-only and serial") }
     executor.cancel()
+  }
+
+  private static func validatedCustomWord(
+    _ validation: LinnetPersonalDataValidation
+  ) -> String {
+    guard case .valid(let data) = validation else { return "" }
+    return data.customWords.first?.value ?? ""
   }
 
   @MainActor

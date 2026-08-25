@@ -60,6 +60,7 @@ verify_inputs_predate "${host_executable}" < <(
       sources/LinnetSettings/SettingsContract.swift \
       sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
       sources/LinnetSettings/PersonalDataStore.swift \
+      sources/LinnetSettings/PersonalDataValidation.swift \
       sources/LinnetSettings/LinnetSettingsDocument.swift \
       sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift
     find data/plum data/opencc lib -type f -print

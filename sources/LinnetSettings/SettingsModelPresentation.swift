@@ -126,23 +126,76 @@ extension SettingsModel {
     configuration.personalDraft.customWords.append(.init(value: "", code: ""))
   }
 
+  func customWordValueBinding(_ row: LinnetPersonalData.CustomWord) -> Binding<String> {
+    LinnetStableRowTextBinding.make(
+      draft: personalDraftBinding,
+      rowIdentifier: row.id,
+      fallback: row.value,
+      field: .init(rows: \.customWords, identifier: \.id, value: \.value)
+    )
+  }
+
+  func customWordCodeBinding(_ row: LinnetPersonalData.CustomWord) -> Binding<String> {
+    LinnetStableRowTextBinding.make(
+      draft: personalDraftBinding,
+      rowIdentifier: row.id,
+      fallback: row.code,
+      field: .init(rows: \.customWords, identifier: \.id, value: \.code)
+    )
+  }
+
   func removeCustomWord(id wordID: UUID) {
     configuration.personalDraft.customWords.removeAll { $0.id == wordID }
   }
 
-  func addDisabledWord() { configuration.personalDraft.disabledWords.append("") }
+  func addDisabledWord() {
+    configuration.personalDraft.disabledWords.append(.init(value: ""))
+  }
 
-  func removeDisabledWord(at index: Int) {
-    guard configuration.personalDraft.disabledWords.indices.contains(index) else { return }
-    configuration.personalDraft.disabledWords.remove(at: index)
+  func disabledWordBinding(_ row: LinnetPersonalData.DisabledWord) -> Binding<String> {
+    LinnetStableRowTextBinding.make(
+      draft: personalDraftBinding,
+      rowIdentifier: row.identifier,
+      fallback: row.value,
+      field: .init(rows: \.disabledWords, identifier: \.identifier, value: \.value)
+    )
+  }
+
+  func removeDisabledWord(id wordID: UUID) {
+    configuration.personalDraft.disabledWords.removeAll { $0.identifier == wordID }
   }
 
   func addExpansion() {
     configuration.personalDraft.expansions.append(.init(value: "", trigger: "x;"))
   }
 
+  func expansionValueBinding(_ row: LinnetPersonalData.Expansion) -> Binding<String> {
+    LinnetStableRowTextBinding.make(
+      draft: personalDraftBinding,
+      rowIdentifier: row.id,
+      fallback: row.value,
+      field: .init(rows: \.expansions, identifier: \.id, value: \.value)
+    )
+  }
+
+  func expansionTriggerBinding(_ row: LinnetPersonalData.Expansion) -> Binding<String> {
+    LinnetStableRowTextBinding.make(
+      draft: personalDraftBinding,
+      rowIdentifier: row.id,
+      fallback: row.trigger,
+      field: .init(rows: \.expansions, identifier: \.id, value: \.trigger)
+    )
+  }
+
   func removeExpansion(id expansionID: UUID) {
     configuration.personalDraft.expansions.removeAll { $0.id == expansionID }
+  }
+
+  private var personalDraftBinding: Binding<LinnetPersonalData> {
+    Binding(
+      get: { self.configuration.personalDraft },
+      set: { self.configuration.personalDraft = $0 }
+    )
   }
 
   func reloadExternalChanges() {
@@ -170,14 +223,17 @@ extension SettingsModel {
   }
 
   private func personalValidationLocation(
-    _ issue: LinnetPersonalDataStore.Validation.Location,
+    _ issue: LinnetPersonalDataValidation.Location,
     chinese: Bool
   ) -> String {
     switch issue {
     case .customWord(let wordID, let field):
       return customWordLocation(wordID: wordID, field: field, chinese: chinese)
-    case .disabledWord(let index):
-      return chinese ? "禁用词第 \(index + 1) 行" : "Disabled word row \(index + 1)"
+    case .disabledWord(let wordID):
+      let row = configuration.personalDraft.disabledWords.firstIndex {
+        $0.identifier == wordID
+      }.map { $0 + 1 }
+      return chinese ? "禁用词第 \(row ?? 0) 行" : "Disabled word row \(row ?? 0)"
     case .expansion(let expansionID, let field):
       return expansionLocation(expansionID: expansionID, field: field, chinese: chinese)
     case .collection(let collection):
@@ -187,7 +243,7 @@ extension SettingsModel {
 
   private func customWordLocation(
     wordID: UUID,
-    field: LinnetPersonalDataStore.Validation.CustomField,
+    field: LinnetPersonalDataValidation.CustomField,
     chinese: Bool
   ) -> String {
     let row = configuration.personalDraft.customWords.firstIndex {
@@ -204,7 +260,7 @@ extension SettingsModel {
 
   private func expansionLocation(
     expansionID: UUID,
-    field: LinnetPersonalDataStore.Validation.ExpansionField,
+    field: LinnetPersonalDataValidation.ExpansionField,
     chinese: Bool
   ) -> String {
     let row = configuration.personalDraft.expansions.firstIndex {
@@ -220,7 +276,7 @@ extension SettingsModel {
   }
 
   private func collectionLocation(
-    _ collection: LinnetPersonalDataStore.Validation.Collection,
+    _ collection: LinnetPersonalDataValidation.Collection,
     chinese: Bool
   ) -> String {
     switch collection {

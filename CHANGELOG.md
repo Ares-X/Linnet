@@ -4,11 +4,16 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
-## 0.1.13 — 2026-08-25
+## 0.1.13 — 2026-08-26
 
 ### 输入源稳定性
 
 - 恢复与 macOS InputMethodKit 已注册 endpoint 一致的 `BundleID_Connection` 连接名，修复点击状态栏中的 Linnet 后无法切换输入源的问题。
+
+### 设置稳定性
+
+- 修复在 Settings 的自定义词、停用词和 Text Expander 中编辑或删除行时偶发闪退、删除错行的问题；编辑中的文本框现在按稳定行身份收尾，切页和连续增删也不会访问已删除的行。
+- 候选外观预览遇到瞬时布局不完整时不再终止 Settings。
 
 ## 0.1.12 — 2026-08-25
 

@@ -428,10 +428,10 @@ struct DictionaryTabView: View {
             sectionHeader(
               "Custom words", help: "Value and lowercase Rime code", add: model.addCustomWord)
             LazyVStack(alignment: .leading, spacing: 8) {
-              ForEach($model.configuration.personalDraft.customWords) { $row in
+              ForEach(model.configuration.personalDraft.customWords) { row in
                 HStack {
-                  TextField("Value", text: $row.value)
-                  TextField("code", text: $row.code).frame(width: 170)
+                  TextField("Value", text: model.customWordValueBinding(row))
+                  TextField("code", text: model.customWordCodeBinding(row)).frame(width: 170)
                   removeButton("Remove custom word") { model.removeCustomWord(id: row.id) }
                 }
               }
@@ -442,16 +442,12 @@ struct DictionaryTabView: View {
               add: model.addDisabledWord
             )
             LazyVStack(alignment: .leading, spacing: 8) {
-              ForEach(Array(model.configuration.personalDraft.disabledWords.indices), id: \.self) { index in
+              ForEach(model.configuration.personalDraft.disabledWords, id: \.identifier) { row in
                 HStack {
-                  TextField(
-                    "word",
-                    text: Binding(
-                      get: { model.configuration.personalDraft.disabledWords[index] },
-                      set: { model.configuration.personalDraft.disabledWords[index] = $0 }
-                    )
-                  )
-                  removeButton("Remove disabled word") { model.removeDisabledWord(at: index) }
+                  TextField("word", text: model.disabledWordBinding(row))
+                  removeButton("Remove disabled word") {
+                    model.removeDisabledWord(id: row.identifier)
+                  }
                 }
               }
             }
@@ -459,10 +455,10 @@ struct DictionaryTabView: View {
             sectionHeader(
               "Text Expander", help: "Explicit triggers begin with x;", add: model.addExpansion)
             LazyVStack(alignment: .leading, spacing: 8) {
-              ForEach($model.configuration.personalDraft.expansions) { $row in
+              ForEach(model.configuration.personalDraft.expansions) { row in
                 HStack {
-                  TextField("Expansion", text: $row.value)
-                  TextField("x;trigger", text: $row.trigger).frame(width: 170)
+                  TextField("Expansion", text: model.expansionValueBinding(row))
+                  TextField("x;trigger", text: model.expansionTriggerBinding(row)).frame(width: 170)
                   removeButton("Remove text expansion") { model.removeExpansion(id: row.id) }
                 }
               }

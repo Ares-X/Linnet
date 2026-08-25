@@ -97,7 +97,7 @@ struct LinnetBackupStoreTests {
       archive: archive
     )
     guard replacement.personalData.customWords.map(\.value) == ["Linnet"],
-      replacement.personalData.disabledWords == ["keep-disabled"],
+      replacement.personalData.disabledWords.map(\.value) == ["keep-disabled"],
       replacement.personalData.expansions.map(\.trigger) == ["x;keep"],
       replacement.learning["linnet_zh"] == currentLearning["linnet_zh"],
       replacement.learning["linnet_en"] == learning["linnet_en"]
@@ -132,7 +132,7 @@ struct LinnetBackupStoreTests {
     )
     guard cleared.personalData.expansions.isEmpty,
       cleared.personalData.customWords.map(\.value) == ["Old"],
-      cleared.personalData.disabledWords == ["keep-disabled"]
+      cleared.personalData.disabledWords.map(\.value) == ["keep-disabled"]
     else {
       fail("an explicitly selected empty category did not replace current data")
     }
@@ -347,7 +347,7 @@ struct LinnetBackupStoreTests {
       encoding: .utf8
     )
     guard restoredPersonal.customWords.map(\.value) == ["Legacy Cloud"],
-      restoredPersonal.disabledWords == ["legacy-disabled"],
+      restoredPersonal.disabledWords.map(\.value) == ["legacy-disabled"],
       restoredPersonal.expansions.map(\.trigger) == ["x;legacy"],
       restoredDocument.english.sentenceCapitalization,
       restoredDocument.english.tabBehavior == .pass,

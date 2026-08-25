@@ -30,13 +30,20 @@ compile_run hallelujah-importer \
   tests/HallelujahSubstitutionImporterTests.swift
 compile_run personal-data \
   sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
   tests/PersonalDataStoreTests.swift
+compile_run stable-row-binding -framework SwiftUI \
+  sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
+  sources/LinnetSettings/LinnetStableRowTextBinding.swift \
+  tests/LinnetStableRowTextBindingTests.swift
 compile_run projection-renderer \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
   sources/LinnetSettings/LinnetSettingsDocument.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionRendererTests.swift
@@ -46,6 +53,7 @@ compile_run appearance-preview -framework SwiftUI \
   sources/LinnetDataRegistry.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
   sources/LinnetSettings/LinnetSettingsDocument.swift \
   sources/LinnetCandidatePresentation.swift \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
@@ -68,6 +76,7 @@ compile_run settings-session \
   sources/LinnetDataRegistry.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
   sources/LinnetSettings/LinnetSettingsDocument.swift \
   sources/LinnetSettings/LinnetPortableJSONBudget.swift \
   sources/LinnetSettings/LinnetBackupStore.swift \
@@ -79,6 +88,7 @@ compile_run backup-store \
   sources/LinnetDataRegistry.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
   sources/LinnetSettings/LinnetSettingsDocument.swift \
   sources/LinnetSettings/LinnetPortableJSONBudget.swift \
   sources/LinnetSettings/LinnetBackupStore.swift \
@@ -150,6 +160,7 @@ common_settings_sources=(
   sources/LinnetDataRegistry.swift
   sources/LinnetSettings/SettingsContract.swift
   sources/LinnetSettings/PersonalDataStore.swift
+  sources/LinnetSettings/PersonalDataValidation.swift
   sources/LinnetSettings/LinnetSettingsDocument.swift
   sources/LinnetSettings/LinnetPortableJSONBudget.swift
   sources/LinnetSettings/LinnetBackupStore.swift

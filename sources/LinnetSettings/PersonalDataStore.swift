@@ -27,8 +27,18 @@ struct LinnetPersonalData: Equatable, Sendable {
     }
   }
 
+  struct DisabledWord: Equatable, Sendable {
+    let identifier: UUID
+    var value: String
+
+    init(identifier: UUID = UUID(), value: String) {
+      self.identifier = identifier
+      self.value = value
+    }
+  }
+
   var customWords: [CustomWord]
-  var disabledWords: [String]
+  var disabledWords: [DisabledWord]
   var expansions: [Expansion]
 
   init(
@@ -37,7 +47,17 @@ struct LinnetPersonalData: Equatable, Sendable {
     expansions: [Expansion]
   ) {
     self.customWords = customWords
-    self.disabledWords = disabledWords
+    self.disabledWords = disabledWords.map { .init(value: $0) }
+    self.expansions = expansions
+  }
+
+  init(
+    customWords: [CustomWord],
+    disabledWordRows: [DisabledWord],
+    expansions: [Expansion]
+  ) {
+    self.customWords = customWords
+    disabledWords = disabledWordRows
     self.expansions = expansions
   }
 
@@ -56,75 +76,8 @@ enum LinnetPersonalDataStore {
 
   typealias CancellationCheck = @Sendable () throws -> Void
 
-  struct Snapshot: Equatable, Sendable {
-    let data: LinnetPersonalData
-    let revision: String
-  }
-
-  /// Decoded identity of the immutable backup-v2 personal-data boundary.
-  /// Only restore/import code may consume this retired physical format.
-  struct LegacyV2Snapshot: Equatable, Sendable {
-    let data: LinnetPersonalData
-    let sentenceCapitalization: Bool
-    let tabBehavior: String
-    let revision: String
-  }
-
-  enum Validation: Equatable, Sendable {
-    enum Collection: Equatable, Sendable {
-      case customWords
-      case disabledWords
-      case expansions
-    }
-
-    enum CustomField: Equatable, Sendable {
-      case value
-      case code
-    }
-
-    enum ExpansionField: Equatable, Sendable {
-      case value
-      case trigger
-    }
-
-    enum Location: Equatable, Sendable {
-      case customWord(UUID, CustomField)
-      case disabledWord(Int)
-      case expansion(UUID, ExpansionField)
-      case collection(Collection)
-    }
-
-    enum Reason: Equatable, Sendable {
-      case missing
-      case invalid
-      case tooLarge
-      case duplicate
-      case tooMany
-    }
-
-    struct Issue: Equatable, Sendable {
-      let location: Location
-      let reason: Reason
-    }
-
-    case valid(LinnetPersonalData)
-    case invalid(Issue)
-
-    var normalized: LinnetPersonalData? {
-      guard case .valid(let data) = self else { return nil }
-      return data
-    }
-
-    var firstIssue: Issue? {
-      guard case .invalid(let issue) = self else { return nil }
-      return issue
-    }
-
-    var isValid: Bool { if case .valid = self { true } else { false } }
-  }
-
   enum Failure: LocalizedError, Equatable {
-    case invalidData(Validation.Issue)
+    case invalidData(LinnetPersonalDataValidation.Issue)
     case invalidFile(String)
     case unsafeFile(String)
     case fileTooLarge(String)
@@ -272,16 +225,19 @@ enum LinnetPersonalDataStore {
     }
   }
 
-  static func validate(_ data: LinnetPersonalData) -> Validation {
+  static func validate(_ data: LinnetPersonalData) -> LinnetPersonalDataValidation {
     validate(data, checkCancellation: {})
   }
 
   static func validate(
     _ data: LinnetPersonalData,
     checkCancellation: CancellationCheck
-  ) rethrows -> Validation {
+  ) rethrows -> LinnetPersonalDataValidation {
     try checkCancellation()
-    func failed(_ location: Validation.Location, _ reason: Validation.Reason) -> Validation {
+    func failed(
+      _ location: LinnetPersonalDataValidation.Location,
+      _ reason: LinnetPersonalDataValidation.Reason
+    ) -> LinnetPersonalDataValidation {
       .invalid(.init(location: location, reason: reason))
     }
     func addRenderedBytes(_ bytes: Int, to total: inout Int) -> Bool {
@@ -374,26 +330,27 @@ enum LinnetPersonalDataStore {
       expansions.append(LinnetPersonalData.Expansion(id: row.id, value: value, trigger: trigger))
     }
 
-    var disabledWords: [String] = []
-    for (index, word) in data.disabledWords.enumerated() {
+    var disabledWords: [LinnetPersonalData.DisabledWord] = []
+    for row in data.disabledWords {
       try checkCancellation()
-      let normalized = word.trimmingCharacters(in: .whitespaces).lowercased()
+      let normalized = row.value.trimmingCharacters(in: .whitespaces).lowercased()
       if normalized.isEmpty { continue }
       guard fieldIsBounded(normalized) else {
-        return failed(.disabledWord(index), .tooLarge)
+        return failed(.disabledWord(row.identifier), .tooLarge)
       }
       guard validValue(normalized) else {
-        return failed(.disabledWord(index), .invalid)
+        return failed(.disabledWord(row.identifier), .invalid)
       }
-      disabledWords.append(normalized)
+      disabledWords.append(.init(identifier: row.identifier, value: normalized))
     }
     try checkCancellation()
-    let uniqueDisabledWords = Array(Set(disabledWords)).sorted()
+    let uniqueDisabledWords = Dictionary(grouping: disabledWords, by: \.value).values
+      .compactMap(\.first).sorted { $0.value < $1.value }
     if !uniqueDisabledWords.isEmpty {
       var userSettingsBytes = 128
-      for (index, word) in uniqueDisabledWords.enumerated() {
+      for (index, row) in uniqueDisabledWords.enumerated() {
         try checkCancellation()
-        guard let json = try? JSONEncoder().encode(word) else {
+        guard let json = try? JSONEncoder().encode(row.value) else {
           return failed(.collection(.disabledWords), .invalid)
         }
         let lineBytes = 4 + json.count
@@ -408,7 +365,7 @@ enum LinnetPersonalDataStore {
     return .valid(
       .init(
         customWords: customWords,
-        disabledWords: uniqueDisabledWords,
+        disabledWordRows: uniqueDisabledWords,
         expansions: expansions
       )
     )
@@ -470,7 +427,7 @@ extension LinnetPersonalDataStore {
     for data: LinnetPersonalData
   ) throws -> (name: String, contents: String) {
     let normalized = try normalized(data)
-    let contents = try userSettingsYAML(normalized.disabledWords)
+    let contents = try userSettingsYAML(normalized.disabledWords.map(\.value))
     try validateRenderedFiles([userSettingsFile: contents])
     return (userSettingsFile, contents)
   }
@@ -492,8 +449,8 @@ extension LinnetPersonalDataStore {
     for data: LinnetPersonalData
   ) throws -> [String: String] {
     let normalized = try normalized(data)
-    let disabledWords = try normalized.disabledWords.map { word -> String in
-      let data = try JSONEncoder().encode(word)
+    let disabledWords = try normalized.disabledWords.map { row -> String in
+      let data = try JSONEncoder().encode(row.value)
       guard let json = String(data: data, encoding: .utf8) else {
         throw Failure.invalidFile("disabled-words-revision")
       }
@@ -528,7 +485,7 @@ extension LinnetPersonalDataStore {
         rows: normalized.expansions.map { ($0.value, $0.trigger) }
       ),
       legacyUserSettingsFile: try legacyV2UserSettingsYAML(
-        normalized.disabledWords,
+        normalized.disabledWords.map(\.value),
         sentenceCapitalization: sentenceCapitalization,
         tabBehavior: tabBehavior
       )

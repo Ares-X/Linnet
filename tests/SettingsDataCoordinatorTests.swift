@@ -884,7 +884,7 @@ struct SettingsDataCoordinatorTests {
       let beforeRejectedSnapshot = try LinnetPersonalDataStore.snapshot(from: live)
       let beforeRejectedDocumentSnapshot = try LinnetSettingsDocumentStore.snapshot(from: live)
       var beforeRejectedPersonal = beforeRejectedSnapshot.data
-      beforeRejectedPersonal.disabledWords.append("force-full-backup")
+      beforeRejectedPersonal.disabledWords.append(.init(value: "force-full-backup"))
       var beforeRejectedDocument = beforeRejectedDocumentSnapshot.document
       beforeRejectedDocument.appearance.pageSize =
         beforeRejectedDocument.appearance.pageSize == 7 ? 5 : 7
@@ -1006,7 +1006,7 @@ struct SettingsDataCoordinatorTests {
         encoding: .utf8
       )
       guard applied.customWords.map(\.value) == ["Cloud Team"],
-        applied.disabledWords == ["forbiddenword"],
+        applied.disabledWords.map(\.value) == ["forbiddenword"],
         applied.expansions.map(\.trigger) == ["x;brb"],
         !appliedRuntimeSettings.contains("sentence_capitalization"),
         !appliedRuntimeSettings.contains("tab_behavior"),
@@ -1993,7 +1993,7 @@ struct SettingsDataCoordinatorTests {
       encoding: .utf8
     )
     guard personal.customWords.map(\.value) == ["Portable Word"],
-      personal.disabledWords == ["forbiddenword"],
+      personal.disabledWords.map(\.value) == ["forbiddenword"],
       personal.expansions.map(\.trigger) == ["x;brb"],
       !runtimeSettings.contains("sentence_capitalization"),
       !runtimeSettings.contains("tab_behavior"),

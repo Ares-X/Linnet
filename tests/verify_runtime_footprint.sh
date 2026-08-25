@@ -1903,9 +1903,18 @@ ruby -e '
   page = File.read("sources/LinnetSettings/LinnetSettingsPage.swift")
   views = File.read("sources/LinnetSettings/SettingsViews.swift")
   input = views[/struct InputTabView: View \{.*?\n\}\n\n\/\/ MARK: - Dictionary/m]
+  dictionary = views[/struct DictionaryTabView: View \{.*?\n\}\n\n\/\/ MARK: - English/m]
   english = views[/struct EnglishTabView: View \{.*?\n\}\n\n\/\/ MARK: - Data/m]
   appearance = views[/struct AppearanceTabView: View \{.*?\n\}\n\n\/\/ MARK: - Input/m]
-  abort "Settings page sections are missing" unless input && english && appearance
+  abort "Settings page sections are missing" unless input && dictionary && english && appearance
+  abort "an editable Settings collection regained mutable-index identity" if
+    dictionary.include?("disabledWords.indices") ||
+      dictionary.include?("disabledWords[index]") ||
+      dictionary.include?("removeDisabledWord(at:") ||
+      dictionary.include?("ForEach($model.configuration.personalDraft")
+  abort "editable Settings rows no longer resolve through stable model bindings" unless
+    %w[customWordValueBinding customWordCodeBinding disabledWordBinding
+       expansionValueBinding expansionTriggerBinding].all? { |owner| dictionary.include?(owner) }
   abort "the responsive two-column Settings owner count changed" unless
     page.scan("struct LinnetSettingsTwoColumnLayout").length == 1
   layout = page[/struct LinnetSettingsTwoColumnLayout.*?\n\}/m]
