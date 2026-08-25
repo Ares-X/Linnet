@@ -57,13 +57,24 @@ trap cleanup EXIT INT TERM
 
 snapshot_reports() {
   local output="$1"
+  local report
+  local report_name
+  : >"${output}"
   if [[ -d "${reports}" ]]; then
-    find "${reports}" -maxdepth 1 -type f \
-      \( -iname '*Linnet*' -o -iname '*Squirrel*' -o -iname '*rime*' \) \
-      -print | LC_ALL=C sort >"${output}"
-  else
-    : >"${output}"
+    while IFS= read -r -d '' report; do
+      report_name="${report##*/}"
+      case "${report_name}" in
+      *Linnet* | *Squirrel* | *rime*)
+        printf '%s\n' "${report}" >>"${output}"
+        ;;
+      Settings-*.ips)
+        grep -Fq '"bundleID":"io.github.ares-x.inputmethod.Linnet.settings"' \
+          "${report}" && printf '%s\n' "${report}" >>"${output}"
+        ;;
+      esac
+    done < <(find "${reports}" -maxdepth 1 -type f -print0)
   fi
+  LC_ALL=C sort -o "${output}" "${output}"
 }
 snapshot_reports "${scratch}/reports.before"
 
