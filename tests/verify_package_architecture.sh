@@ -19,6 +19,15 @@ for script in package/build_data_pack package/build_activation_profile \
   bash -n "${script}"
 done
 
+if rg -n -i 'installation-uat|\buat\b' \
+    package/make_package package/verify_package; then
+  fail "the installable package path retained the retired UAT identity"
+fi
+rg -Fq 'verification_scope=publication' package/make_package ||
+  fail "package assembly has no single public community verification scope"
+rg -Fq 'case "${verification_scope}" in publication)' package/verify_package ||
+  fail "package verification accepts a non-public identity scope"
+
 tests/verify_lean_data_trust.sh
 
 if rg -n -i 'python|\.py([[:space:]"]|$)' \

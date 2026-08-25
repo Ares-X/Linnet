@@ -18,9 +18,9 @@ fail_verification() {
 }
 
 [[ "$#" -eq 4 ]] ||
-  fail_verification "usage: PKG SOURCE_CORE_APP EDITION [installation-uat|publication]"
+  fail_verification "usage: PKG SOURCE_CORE_APP EDITION publication"
 case "${edition}" in core|complete) ;; *) fail_verification "invalid edition" ;; esac
-case "${verification_scope}" in installation-uat|publication) ;; *)
+case "${verification_scope}" in publication) ;; *)
   fail_verification "invalid verification scope" ;;
 esac
 [[ "${package_path}" == /* && -f "${package_path}" && ! -L "${package_path}" ]] ||
@@ -81,7 +81,8 @@ core_version="$(plutil -extract CFBundleShortVersionString raw -o - \
 core_build="$(plutil -extract CFBundleVersion raw -o - \
   "${source_core_app}/Contents/Info.plist")"
 ruby -rjson -rrexml/document -e '
-  expanded, edition, core_version, product_build, project, source_app = ARGV
+  expanded, edition, core_version, product_build, project, source_app,
+    verification_scope = ARGV
   components = edition == "core" ? %w[core] : %w[core chinese english lts extended profile]
   names = {"core" => "Core", "chinese" => "Chinese", "english" => "English",
     "lts" => "LTS", "extended" => "Extended", "profile" => "Profile"}
@@ -280,17 +281,21 @@ ruby -rjson -rrexml/document -e '
     "build" => product_build,
     "candidate_revision" => version_document.fetch("source").fetch("candidate_revision"),
   }
-  case signature.fetch("profile")
-  when "uat"
-    candidate_identity["format"] = 1
+  case [verification_scope, signature.fetch("profile")]
+  when ["publication", "community-cms"]
+    abort "community trust mismatch" unless
+      signature.fetch("kind") == "external-cms" &&
+      signature.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/) &&
+      signature.fetch("hardened_runtime") == true &&
+      signature.fetch("host_settings_same_leaf") == true &&
+      distribution.fetch("artifact_scope") == "public-community" &&
+      distribution.fetch("notarized") == false &&
+      distribution.fetch("publication_eligible") == true &&
+      distribution.fetch("trust_model") == "manual-user-approval"
+    candidate_identity["format"] = 3
+    candidate_identity["profile"] = "community-cms"
     candidate_identity["leaf_certificate_sha256"] =
       signature.fetch("leaf_certificate_sha256")
-  when "community-adhoc"
-    abort "community trust mismatch" unless
-      signature.fetch("kind") == "adhoc" &&
-      distribution.fetch("trust_model") == "manual-user-approval"
-    candidate_identity["format"] = 2
-    candidate_identity["trust_model"] = "unsigned-community"
   else
     abort "unsupported candidate identity"
   end
@@ -334,7 +339,7 @@ ruby -rjson -rrexml/document -e '
     end
   end
 ' "${expanded}" "${edition}" "${core_version}" "${core_build}" "${project_root}" \
-  "${source_core_app}" ||
+  "${source_core_app}" "${verification_scope}" ||
   fail_verification "canonical Installer metadata contract failed"
 
 expected_restart_action=None
@@ -402,34 +407,27 @@ ruby -rdigest -e '
   abort "Core payload differs from staged Core" unless manifest(ARGV.fetch(0)) == manifest(ARGV.fetch(1))
 ' "${source_core_app}" "${core_component}/Payload/Linnet.app" ||
   fail_verification "expanded Core differs from accepted Core"
-identity_command=(verify-product)
-identity_arguments=()
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
   fail_verification "verification requires LINNET_CANDIDATE_REVISION"
-if [[ "${verification_scope}" == publication ]]; then
-  identity_command=(verify-publication-product)
-  identity_arguments=("${candidate_revision}")
-fi
 source_code_identity="$("${project_root}/scripts/linnet-code-identity" \
-  "${identity_command[@]}" "${source_core_app}" ${identity_arguments[@]+"${identity_arguments[@]}"})" ||
+  verify-product "${source_core_app}")" ||
   fail_verification "source Core App code identity or release metadata is invalid"
 payload_code_identity="$("${project_root}/scripts/linnet-code-identity" \
-  "${identity_command[@]}" "${core_component}/Payload/Linnet.app" ${identity_arguments[@]+"${identity_arguments[@]}"})" ||
+  verify-product "${core_component}/Payload/Linnet.app")" ||
   fail_verification "packaged Core App code identity or release metadata is invalid"
 [[ "${payload_code_identity}" == "${source_code_identity}" ]] ||
   fail_verification "packaged Core identity differs from its accepted source"
-if [[ "${verification_scope}" == installation-uat ]]; then
-  ruby -rjson -e '
-    identity = JSON.parse(ARGV.fetch(0))
-    abort unless identity.keys.sort ==
-      %w[candidate_revision format leaf_certificate_sha256 profile] &&
-      identity.fetch("format") == 2 && identity.fetch("profile") == "uat" &&
-      identity.fetch("candidate_revision") == ARGV.fetch(1) &&
-      identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
-  ' "${source_code_identity}" "${candidate_revision}" ||
-    fail_verification "installation-UAT code identity projection is invalid"
-fi
+ruby -rjson -e '
+  identity = JSON.parse(ARGV.fetch(0))
+  abort unless identity.keys.sort ==
+    %w[candidate_revision format leaf_certificate_sha256 profile] &&
+    identity.fetch("format") == 4 &&
+    identity.fetch("profile") == "community-cms" &&
+    identity.fetch("candidate_revision") == ARGV.fetch(1) &&
+    identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
+' "${source_code_identity}" "${candidate_revision}" ||
+  fail_verification "publication code identity projection is invalid"
 cmp -s "${expanded}/Resources/NOTICE.md" \
   "${core_component}/Payload/Linnet.app/Contents/Resources/LinnetRelease/NOTICE.md" ||
   fail_verification "Installer notice differs from the finalized App release metadata"

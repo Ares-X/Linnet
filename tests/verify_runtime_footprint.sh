@@ -2030,34 +2030,55 @@ ruby -rjson -e '
 ruby -e '
   source = File.read("sources/InputSource.swift")
   register = source[/func register\(\) throws \{.*?\n  \}/m]
+  registration_owner = source[/private func register\(intent: RegistrationIntent\) throws \{.*?\n  \}/m]
   registration_required = source[/static func registrationRequired\(.*?\n  \}/m]
   enable = source[/func enable\(\) throws \{.*?\n  \}/m]
   select = source[/func select\(\) throws \{.*?\n  \}/m]
   refresh = source[/func refreshAfterCoreUpdate\(.*?\n  \}/m]
+  core_plan = source[/static func coreUpdatePlan\(.*?\n  \}/m]
   desired = source[/static func desiredInputSourceAfterCoreUpdate\(.*?\n  \}/m]
   restoration = source[/static func inputSourceToRestoreAfterRegistration\(.*?\n  \}/m]
   select_source = source[/private func selectSource\(.*?\n  \}/m]
-  enable_source = source[/private func enableSource\(identifier: String\) throws \{.*?\n  \}/m]
+  enable_source = source[/private func enableSource\(.*?\n  \}/m]
   abort "input-source lifecycle owners are missing" unless
-    register && registration_required && enable && select && refresh && desired && restoration &&
-      select_source && enable_source
-  abort "existing Core input sources must not be re-registered" unless
-    register.include?("let existingSources = inputSources(identifier:") &&
-      register.match?(/guard try Self\.registrationRequired\(\s*inputSourceCount: existingSources\.count,\s*identifier: identifier\)\s*else \{.*?\breturn\b.*?\}/m) &&
-      register.index("Self.registrationRequired(") < register.index("TISRegisterInputSource") &&
-      registration_required.include?("case 0: true") &&
-      registration_required.include?("case 1: false") &&
+    register && registration_owner && registration_required && enable && select && refresh &&
+      core_plan &&
+      desired && restoration && select_source && enable_source
+  abort "manual and Complete registration stopped using the ensure-present owner" unless
+    register.include?("register(intent: .ensurePresent)")
+  abort "Core registration stopped consuming its typed transition intent" unless
+    registration_owner.include?("let existingSources = inputSources(identifier:") &&
+      registration_owner.match?(/guard try Self\.registrationRequired\(\s*inputSourceCount: existingSources\.count,\s*intent: intent,\s*identifier: identifier\)\s*else \{.*?\breturn\b.*?\}/m) &&
+      registration_owner.index("Self.registrationRequired(") <
+        registration_owner.index("TISRegisterInputSource") &&
+      registration_required.include?("(.ensurePresent, 0): return true") &&
+      registration_required.include?("(.preservePresent, 1)") &&
+      registration_required.include?("(.preserveAbsent, 0)") &&
+      registration_required.include?("registrationStateMismatch") &&
       registration_required.include?("inputSourceCountMismatch")
   abort "the missing-source repair must only register the input source" unless
-    register.include?("TISRegisterInputSource") && !register.include?("TISEnableInputSource") &&
-      !register.include?("TISSelectInputSource")
+    registration_owner.include?("TISRegisterInputSource") &&
+      !registration_owner.include?("TISEnableInputSource") &&
+      !registration_owner.include?("TISSelectInputSource")
   abort "register must fail closed unless the refreshed identity resolves exactly once" unless
-    register.include?("try inputSource(identifier: identifier)")
+    registration_owner.include?("try inputSource(identifier: identifier)")
   abort "enable must delegate only to the enable owner" unless
     enable.include?("enableSource(identifier:") && !enable.include?("select()") &&
       !enable.include?("TISSelectInputSource")
   abort "enableSource must not select the input source" unless
-    enable_source.include?("TISEnableInputSource") && !enable_source.include?("TISSelectInputSource")
+    enable_source.include?("TISEnableInputSource") &&
+      enable_source.include?("enabled && intent == .preserve") &&
+      !enable_source.include?("TISSelectInputSource")
+  abort "Core identity migration plan is incomplete or gained a second owner" unless
+    core_plan.include?("(.missingAppInstall, .unregistered)") &&
+      core_plan.include?("registrationIntent: .ensurePresent") &&
+      core_plan.include?("(.legacyCommunityAdhocToCMS, .enabled)") &&
+      core_plan.include?("registrationIntent: .preservePresent, enableIntent: .reassert") &&
+      core_plan.include?("(.sameCommunityCMSLeaf, .unregistered)") &&
+      core_plan.include?("registrationIntent: .preserveAbsent, enableIntent: .preserve") &&
+      refresh.include?("coreUpdatePlan(") &&
+      refresh.include?("try register(intent: plan.registrationIntent)") &&
+      refresh.include?("if plan.enableIntent == .reassert")
   abort "manual selection stopped delegating to the sole mutation owner" unless
     select.include?("selectSource(identifier:")
   abort "Core selection continuity is not one post-payload transition owner" unless
@@ -2073,7 +2094,7 @@ ruby -e '
       refresh.include?("quiesceHost()") &&
       refresh.include?("currentAfterQuiescence") &&
       refresh.include?("currentAfterRegister") &&
-      refresh.include?("try register()") &&
+      refresh.include?("try register(intent: plan.registrationIntent)") &&
       refresh.include?("try selectSource(") &&
       refresh.include?("expectedCurrentInputSourceID: currentAfterRegister")
   abort "the retired split Core selection owner returned" if
@@ -2087,6 +2108,22 @@ ruby -e '
       source.scan("TISEnableInputSource").length == 1 &&
       source.scan("TISSelectInputSource").length == 1
 ' || fail "input-source register/enable/no-select ownership regressed"
+if rg -n 'community-adhoc|sign_adhoc_code|verify_community_code|inspect-community-contract|sign-community-product|verify-publication-product|unsigned-community' \
+    scripts/linnet-code-identity scripts/generate-release-metadata \
+    Makefile action-build.sh package/make_archive package/make_package \
+    package/verify_package package/verify_publication_artifacts \
+    .github/workflows/release-ci.yml; then
+  fail "the retired public ad-hoc signing path returned"
+fi
+ruby -rjson -e '
+  identity = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort unless identity.keys.sort ==
+    %w[certificate_sha1 certificate_sha256 format profile] &&
+    identity.fetch("format") == 1 && identity.fetch("profile") == "community-cms" &&
+    identity.fetch("certificate_sha1").match?(/\A[0-9A-F]{40}\z/) &&
+    identity.fetch("certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
+' config/linnet-community-signing.json ||
+  fail "the fixed community CMS leaf owner is invalid"
 ruby -e '
   delegate = File.read("sources/SquirrelApplicationDelegate.swift") +
     File.read("sources/SquirrelApplicationPresentation.swift")

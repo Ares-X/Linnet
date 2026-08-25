@@ -4,6 +4,8 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 generator="${project_root}/scripts/generate-release-metadata"
+signer="${project_root}/scripts/linnet-code-identity"
+provisioner="${project_root}/scripts/provision-community-signing"
 lock="${project_root}/upstreams.lock.json"
 leaf_sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 revision='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -18,9 +20,100 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if rg -Fq -- '-quiet $(BUILD_SETTINGS) build' "${project_root}/Makefile"; then
+  echo 'The App build still hides xcodebuild progress.' >&2
+  exit 1
+fi
+rg -Fq -- '-showBuildTimingSummary $(BUILD_SETTINGS) build' \
+  "${project_root}/Makefile" || {
+  echo 'The App build lost its visible timing summary.' >&2
+  exit 1
+}
+
+retired_identity_owner_paths=(
+  "${project_root}/scripts/linnet-code-identity"
+  "${project_root}/Makefile"
+  "${project_root}/action-build.sh"
+  "${project_root}/scripts/generate-release-metadata"
+  "${project_root}/tests/verify_product.sh"
+)
+if rg -ni 'uat|LINNET_CODE_SIGN_(IDENTITY|PROFILE)|candidate-verified|^candidate[[:space:]]*:' \
+    "${retired_identity_owner_paths[@]}"; then
+  echo 'The retired installable UAT identity path returned.' >&2
+  exit 1
+fi
+
+if rg -n '(linnet-code-identity|CODE_IDENTITY_TOOL).*preflight' \
+    "${project_root}/Makefile" "${project_root}/action-build.sh"; then
+  echo 'A build entrypoint regained the retired standalone signing preflight.' >&2
+  exit 1
+fi
+if rg -Fn 'Library/Application Support/Linnet/Signing' \
+    "${signer}" "${provisioner}" \
+    "${project_root}/docs/development.md" "${project_root}/docs/release.md"; then
+  echo 'Maintainer signing material returned to purgeable product user data.' >&2
+  exit 1
+fi
+[[ -x "${provisioner}" ]] || {
+  echo 'The one-time community signing provisioner is not executable.' >&2
+  exit 1
+}
+bash -n "${provisioner}"
+set +e
+provisioning_usage="$(bash "${provisioner}" unexpected 2>&1)"
+provisioning_status=$?
+set -e
+[[ "${provisioning_status}" -eq 2 &&
+  "${provisioning_usage}" == 'usage: scripts/provision-community-signing' ]] || {
+  echo 'The provisioner negative CLI did not fail before Keychain access.' >&2
+  exit 1
+}
+
+ruby -e '
+  provisioner, signer = ARGV.map { |path| File.binread(path) }
+  required = [
+    "Library/Application Support/Linnet Maintainer/Signing/community-cms",
+    "Library/Keychains/Linnet-Community-CMS.keychain-db",
+    "require_owned_mode \"${p12_path}\" 600",
+    "require_owned_mode \"${p12_password_path}\" 600",
+    "/usr/bin/security create-keychain -p",
+    "/usr/bin/security import \"${p12_path}\" -k \"${keychain_path}\"",
+    "-P \"${p12_password}\" -T /usr/bin/codesign",
+    "/usr/bin/security set-key-partition-list -S apple-tool:,apple:,codesign:",
+    "/usr/bin/security list-keychains -d user -s",
+    "/usr/bin/codesign --force --sign \"${expected_sha1}\"",
+    "/usr/bin/codesign --verify --strict",
+    "probe_sha256",
+    "/usr/bin/security lock-keychain \"${keychain_path}\"",
+    "/bin/ln \"${temporary_keychain_password}\" \"${keychain_password_path}\"",
+  ]
+  missing = required.reject { |fragment| provisioner.include?(fragment) }
+  abort "provisioner contract is incomplete: #{missing.join(", ")}" unless missing.empty?
+  abort "provisioner accepts an identity or path override" if
+    provisioner.match?(/LINNET_[A-Z0-9_]+|getopts|case[[:space:]].*\$\{1/)
+  abort "provisioner gained a replace/delete CLI" if
+    provisioner.match?(/--(replace|delete|repair)/)
+  abort "cleanup no longer owns the sole Keychain deletion" unless
+    provisioner.scan("/usr/bin/security delete-keychain").length == 1 &&
+      provisioner.index("original_keychains[@]") <
+        provisioner.index("/usr/bin/security delete-keychain")
+  abort "daily signer took over Keychain provisioning" if
+    signer.match?(/security (create-keychain|import|set-key-partition-list)/)
+  abort "daily signer and provisioner disagree on their fixed local paths" unless
+    signer.include?("Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password")
+  abort "daily signer can report success while leaving its Keychain unlocked" unless
+    signer.include?("local original_status=$?") &&
+      signer.include?("if [[ \"${final_status}\" -eq 0 ]]; then final_status=1; fi") &&
+      signer.include?("trap lock_prepared_keychain EXIT") &&
+      signer.include?("trap - EXIT INT TERM HUP") &&
+      !signer.match?(/lock-keychain[^\n]*\|\|[[:space:]]*true/)
+  abort "daily signer lost explicit signal exits" unless
+    %w[130 143 129].all? { |status| signer.include?("trap \x27exit #{status}\x27") }
+' "${provisioner}" "${signer}"
+
 [[ "$(rg -Fc '$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path})' \
-  "${project_root}/Makefile")" == 3 ]] || {
-  echo 'Development, UAT and community builds do not share the local-residue cleanup owner.' >&2
+  "${project_root}/Makefile")" == 2 ]] || {
+  echo 'Development and the community finalizer do not share the residue owner.' >&2
   exit 1
 }
 rg -Fq 'release_metadata_root="$${app_path}/Contents/Resources/LinnetRelease";' \
@@ -30,85 +123,70 @@ rg -Fq 'release_metadata_root="$${app_path}/Contents/Resources/LinnetRelease";' 
 }
 if rg -n '^[[:space:]]*security find-identity' \
   "${project_root}/scripts/linnet-code-identity"; then
-  echo 'The UAT preflight regained a persistent trust-settings dependency.' >&2
+  echo 'The community preflight regained a persistent trust-settings dependency.' >&2
   exit 1
 fi
 rg -Fq 'verify_signing_key "${identity}" "${canonical_keychain}"' \
   "${project_root}/scripts/linnet-code-identity" || {
-  echo 'The UAT preflight stopped proving the external key at the codesign boundary.' >&2
+  echo 'The community preflight stopped proving the external key at the codesign boundary.' >&2
   exit 1
 }
 rg -Fq 'actual_identity="$(shasum "${certificate}0"' \
   "${project_root}/scripts/linnet-code-identity" || {
-  echo 'The UAT signing probe stopped binding its certificate to the requested SHA-1.' >&2
+  echo 'The community signing probe stopped binding its certificate to the pinned SHA-1.' >&2
   exit 1
 }
 
 generate() {
   local destination="$1"
-  local profile="$2"
   local projection
   projection="$(printf \
-    '{"format":2,"profile":"%s","leaf_certificate_sha256":"%s","candidate_revision":"%s"}' \
-    "${profile}" "${leaf_sha256}" "${revision}")"
+    '{"format":4,"profile":"community-cms","leaf_certificate_sha256":"%s","candidate_revision":"%s"}' \
+    "${leaf_sha256}" "${revision}")"
   "${generator}" "${lock}" "${destination}" 0.1.1 1 1704067200 \
     "${projection}"
 }
 
-generate "${scratch}/first" uat
-generate "${scratch}/second" uat
+generate "${scratch}/first"
+generate "${scratch}/second"
 diff -qr "${scratch}/first" "${scratch}/second" >/dev/null
 
-community_projection="$(printf \
-  '{"format":3,"profile":"community-adhoc","candidate_revision":"%s"}' \
-  "${revision}")"
-"${generator}" "${lock}" "${scratch}/community" 0.1.1 1 1704067200 \
-  "${community_projection}"
 ruby -rjson -e '
   document = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort "release metadata format is stale" unless document.fetch("format") == 2
   distribution = document.fetch("distribution")
   abort "community distribution shape is invalid" unless distribution == {
     "application_code_signature" => {
-      "profile" => "community-adhoc",
-      "kind" => "adhoc",
+      "profile" => "community-cms",
+      "kind" => "external-cms",
+      "leaf_certificate_sha256" => ARGV.fetch(1),
       "hardened_runtime" => true,
-      "host_settings_same_kind" => true,
+      "host_settings_same_leaf" => true,
     },
     "artifact_scope" => "public-community",
     "notarized" => false,
     "publication_eligible" => true,
     "trust_model" => "manual-user-approval",
   }
-' "${scratch}/community/VERSION.json"
-rg -Fq 'public community build uses hardened-runtime ad-hoc signatures' \
-  "${scratch}/community/PRIVACY.md"
-rg -Fq 'SHA-256 files and approve the package' \
-  "${scratch}/community/PRIVACY.md"
-
-ruby -rjson -e '
-  document = JSON.parse(File.read(ARGV.fetch(0)))
-  abort "release metadata format is stale" unless document.fetch("format") == 2
-  distribution = document.fetch("distribution")
-  signature = distribution.fetch("application_code_signature")
-  abort "unexpected signing profile" unless signature.fetch("profile") == "uat"
-  abort "unexpected signing kind" unless signature.fetch("kind") == "external-cms"
-  abort "unexpected certificate identity" unless
-    signature.fetch("leaf_certificate_sha256") == ARGV.fetch(1)
-  abort "hardened runtime fact is missing" unless signature.fetch("hardened_runtime") == true
-  abort "Host/Settings identity fact is missing" unless
-    signature.fetch("host_settings_same_leaf") == true
-  abort "installer signature fact is wrong" unless
-    distribution.fetch("artifact_scope") == "installation-uat"
-  abort "UAT metadata claims notarization" unless distribution.fetch("notarized") == false
-  abort "UAT metadata claims publication eligibility" unless
-    distribution.fetch("publication_eligible") == false
   %w[developer_id_signed notarized bundle_integrity_signature].each do |retired|
     abort "retired signing field returned: #{retired}" if document.key?(retired)
   end
-  source = document.fetch("source")
   abort "unexpected source projection" unless
-    source == {"candidate_revision" => ARGV.fetch(2)}
+    document.fetch("source") == {"candidate_revision" => ARGV.fetch(2)}
 ' "${scratch}/first/VERSION.json" "${leaf_sha256}" "${revision}"
+rg -Fq 'public community build uses an explicit external CMS identity' \
+  "${scratch}/first/PRIVACY.md"
+rg -Fq 'SHA-256 files and approve the package' \
+  "${scratch}/first/PRIVACY.md"
+
+if "${generator}" "${lock}" "${scratch}/retired-community-identity" \
+    0.1.1 1 1704067200 \
+    "$(printf \
+      '{"format":3,"profile":"community-adhoc","candidate_revision":"%s"}' \
+      "${revision}")" >/dev/null 2>&1; then
+  echo 'The retired community ad-hoc identity was accepted for publication.' >&2
+  exit 1
+fi
 
 ruby -rjson -rdigest -ropen3 -e '
   sbom_path, version_path, licenses_path, lock_path, librime_root = ARGV
@@ -265,7 +343,8 @@ ruby -rjson -rdigest -ropen3 -e '
   "${scratch}/first/LICENSES" "${lock}" "${project_root}/librime" "${revision}"
 
 rg -Fq 'explicit external CMS identity' "${scratch}/first/PRIVACY.md"
-rg -Fq 'or eligible for publication.' "${scratch}/first/PRIVACY.md"
+rg -Fq 'Apple Developer ID and is not notarized.' \
+  "${scratch}/first/PRIVACY.md"
 rg -Fq 'canonical GitHub HTTPS Catalog' "${scratch}/first/PRIVACY.md"
 rg -Fq 'container byte count and SHA-256' "${scratch}/first/PRIVACY.md"
 rg -Fq 'manifest and every file hash' "${scratch}/first/PRIVACY.md"
@@ -294,20 +373,30 @@ if "${generator}" "${lock}" "${scratch}/old-shape" 0.1.1 1 1704067200 \
   exit 1
 fi
 if "${generator}" "${lock}" "${scratch}/invalid-leaf" 0.1.1 1 1704067200 \
-    '{"format":2,"profile":"uat","leaf_certificate_sha256":"bad","candidate_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
+    '{"format":4,"profile":"community-cms","leaf_certificate_sha256":"bad","candidate_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
     >/dev/null 2>&1; then
   echo 'An invalid code-signing leaf digest was accepted.' >&2
   exit 1
 fi
-if generate "${scratch}/retired-test-profile" test >/dev/null 2>&1; then
+if "${generator}" "${lock}" "${scratch}/retired-test-profile" 0.1.1 1 1704067200 \
+    "$(printf \
+      '{"format":4,"profile":"test","leaf_certificate_sha256":"%s","candidate_revision":"%s"}' \
+      "${leaf_sha256}" "${revision}")" >/dev/null 2>&1; then
   echo 'The retired component-test signing profile was accepted.' >&2
   exit 1
 fi
+if "${generator}" "${lock}" "${scratch}/retired-uat-profile" 0.1.1 1 1704067200 \
+    "$(printf \
+      '{"format":2,"profile":"uat","leaf_certificate_sha256":"%s","candidate_revision":"%s"}' \
+      "${leaf_sha256}" "${revision}")" >/dev/null 2>&1; then
+  echo 'The retired installation-UAT signing profile was accepted.' >&2
+  exit 1
+fi
 if "${generator}" "${lock}" "${scratch}/old-identity-shape" 0.1.1 1 1704067200 \
-    '{"format":1,"profile":"uat","leaf_certificate_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
+    '{"format":4,"profile":"community-cms","leaf_certificate_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
     >/dev/null 2>&1; then
   echo 'The retired code-identity source shape was accepted.' >&2
   exit 1
 fi
 
-echo 'Release metadata: PASS (external UAT identity, deterministic projection)'
+echo 'Release metadata: PASS (one stable community CMS projection)'

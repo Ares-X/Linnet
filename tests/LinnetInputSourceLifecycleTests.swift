@@ -46,11 +46,13 @@ private func expectRestore(
 private func expectRegistrationRequirement(
   _ expected: Bool,
   inputSourceCount: Int,
+  intent: SquirrelInstaller.RegistrationIntent,
   _ label: String
 ) {
   do {
     let actual = try SquirrelInstaller.registrationRequired(
       inputSourceCount: inputSourceCount,
+      intent: intent,
       identifier: SquirrelApp.bundleIdentifier)
     guard actual == expected else {
       fputs("LinnetInputSourceLifecycleTests: \(label); got \(actual)\n", stderr)
@@ -66,6 +68,7 @@ private func expectDuplicateRegistrationRejected() {
   do {
     _ = try SquirrelInstaller.registrationRequired(
       inputSourceCount: 2,
+      intent: .ensurePresent,
       identifier: SquirrelApp.bundleIdentifier)
     fputs("LinnetInputSourceLifecycleTests: duplicate registration was accepted\n", stderr)
     exit(1)
@@ -80,17 +83,150 @@ private func expectDuplicateRegistrationRejected() {
   }
 }
 
+private func expectRegistrationStateRejected(
+  inputSourceCount: Int,
+  intent: SquirrelInstaller.RegistrationIntent,
+  _ label: String
+) {
+  do {
+    _ = try SquirrelInstaller.registrationRequired(
+      inputSourceCount: inputSourceCount,
+      intent: intent,
+      identifier: SquirrelApp.bundleIdentifier)
+    fputs("LinnetInputSourceLifecycleTests: \(label) was accepted\n", stderr)
+    exit(1)
+  } catch SquirrelInstaller.Failure.registrationStateMismatch(
+    let identifier, let actualIntent, let count
+  ) {
+    guard identifier == SquirrelApp.bundleIdentifier,
+      actualIntent == intent, count == inputSourceCount
+    else {
+      fputs("LinnetInputSourceLifecycleTests: wrong registration-state failure\n", stderr)
+      exit(1)
+    }
+  } catch {
+    fputs("LinnetInputSourceLifecycleTests: \(label); wrong \(error)\n", stderr)
+    exit(1)
+  }
+}
+
+private func expectCoreUpdatePlanMatrix() {
+  typealias Transition = CoreIdentityTransition
+  typealias Registration = SquirrelInstaller.RegistrationIntent
+  typealias Enable = SquirrelInstaller.CoreUpdateEnableIntent
+
+  let rows: [(Transition, PriorEnablement, Registration?, Enable?, String)] = [
+    (.sameCommunityCMSLeaf, .enabled, .preservePresent, .preserve,
+      "re-enabled an unchanged community CMS identity"),
+    (.sameCommunityCMSLeaf, .disabled, .preservePresent, .preserve,
+      "enabled an unchanged source that the user disabled"),
+    (.sameCommunityCMSLeaf, .unregistered, .preserveAbsent, .preserve,
+      "registered an unchanged identity that the user had removed"),
+    (.legacyCommunityAdhocToCMS, .enabled, .preservePresent, .reassert,
+      "did not reassert a previously enabled source across the ad-hoc to CMS transition"),
+    (.legacyCommunityAdhocToCMS, .disabled, .preservePresent, .preserve,
+      "enabled a transitioned source that the user disabled"),
+    (.legacyCommunityAdhocToCMS, .unregistered, .preserveAbsent, .preserve,
+      "registered a transitioned identity that the user had removed"),
+    (.missingAppInstall, .enabled, nil, nil,
+      "accepted a missing App with stale enabled registration"),
+    (.missingAppInstall, .disabled, nil, nil,
+      "accepted a missing App with stale disabled registration"),
+    (.missingAppInstall, .unregistered, .ensurePresent, .preserve,
+      "enabled a repaired source without prior user intent"),
+  ]
+
+  var registrationCount = 0
+  var reassertionCount = 0
+  for (transition, priorEnablement, expectedRegistration, expectedEnable, label) in rows {
+    let actual = SquirrelInstaller.coreUpdatePlan(
+      identityTransition: transition,
+      priorEnablement: priorEnablement,
+      wasCurrent: priorEnablement == .enabled)
+    guard actual?.registrationIntent == expectedRegistration,
+      actual?.enableIntent == expectedEnable
+    else {
+      fputs(
+        "LinnetInputSourceLifecycleTests: \(label); got \(String(describing: actual))\n",
+        stderr)
+      exit(1)
+    }
+    if actual?.registrationIntent == .ensurePresent { registrationCount += 1 }
+    if actual?.enableIntent == .reassert {
+      reassertionCount += 1
+    }
+  }
+
+  guard registrationCount == 1 else {
+    fputs(
+      "LinnetInputSourceLifecycleTests: Core update has \(registrationCount) registration paths\n",
+      stderr)
+    exit(1)
+  }
+  // The pre-update observation owns user intent. A post-replacement TIS cache
+  // may still report enabled, so this single reassert intent must reach the one
+  // enable mutation owner instead of being suppressed by cached state.
+  guard reassertionCount == 1 else {
+    fputs(
+      "LinnetInputSourceLifecycleTests: Core update has \(reassertionCount) enable reassertion paths\n",
+      stderr)
+    exit(1)
+  }
+
+  guard SquirrelInstaller.coreUpdatePlan(
+    identityTransition: .sameCommunityCMSLeaf,
+    priorEnablement: .unregistered,
+    wasCurrent: true) == nil
+  else {
+    fputs(
+      "LinnetInputSourceLifecycleTests: accepted an unregistered current input source\n",
+      stderr)
+    exit(1)
+  }
+}
+
+private func expectCoreUpdateRawValueClosure() {
+  typealias Transition = CoreIdentityTransition
+  let transitionValues = [
+    "legacy-community-adhoc-to-cms", "missing-app-install", "same-community-cms-leaf",
+  ]
+  let priorValues = ["disabled", "enabled", "unregistered"]
+  let parsedTransitions = transitionValues.compactMap(Transition.init(rawValue:))
+  let parsedPrior = priorValues.compactMap(PriorEnablement.init(rawValue:))
+  guard parsedTransitions.map(\.rawValue).sorted() == transitionValues.sorted(),
+    parsedPrior.map(\.rawValue).sorted() == priorValues.sorted(),
+    Transition(rawValue: "unknown-transition") == nil,
+    PriorEnablement(rawValue: "unknown-enablement") == nil
+  else {
+    fputs("LinnetInputSourceLifecycleTests: typed Core wire values are not closed\n", stderr)
+    exit(1)
+  }
+}
+
 @main
 struct LinnetInputSourceLifecycleTests {
   static func main() {
     let fallback = "com.apple.keylayout.ABC"
     let unicodeHex = "com.apple.keylayout.UnicodeHexInput"
     let hallelujah = "github.dongyuwei.inputmethod.hallelujahInputMethod"
-    expectRegistrationRequirement(true, inputSourceCount: 0,
+    expectRegistrationRequirement(true, inputSourceCount: 0, intent: .ensurePresent,
       "did not register a genuinely missing input source")
-    expectRegistrationRequirement(false, inputSourceCount: 1,
-      "re-registered an existing Core input source")
+    // After a missing App payload is restored, macOS may already enumerate it
+    // before the explicit registration boundary runs. Ensure-present is
+    // intentionally idempotent for that legal post-payload state.
+    expectRegistrationRequirement(false, inputSourceCount: 1, intent: .ensurePresent,
+      "re-registered an input source already discovered after payload activation")
+    expectRegistrationRequirement(false, inputSourceCount: 1, intent: .preservePresent,
+      "re-registered a preserved input source")
+    expectRegistrationRequirement(false, inputSourceCount: 0, intent: .preserveAbsent,
+      "registered a source whose absent state must be preserved")
+    expectRegistrationStateRejected(inputSourceCount: 0, intent: .preservePresent,
+      "a registered source disappeared during Core replacement")
+    expectRegistrationStateRejected(inputSourceCount: 1, intent: .preserveAbsent,
+      "an unregistered source appeared during Core replacement")
     expectDuplicateRegistrationRejected()
+    expectCoreUpdateRawValueClosure()
+    expectCoreUpdatePlanMatrix()
     expectDesired(SquirrelApp.bundleIdentifier,
       wasCurrent: true, fallback: fallback,
       currentBefore: fallback, currentAfter: fallback,

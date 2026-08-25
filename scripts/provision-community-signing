@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# One-time local provisioning boundary for Linnet's fixed community CMS leaf.
+# This command never replaces or deletes an existing signing installation.
+
+set -euo pipefail
+umask 077
+
+if [[ "$#" -ne 0 ]]; then
+  echo "usage: scripts/provision-community-signing" >&2
+  exit 2
+fi
+
+fail_provisioning() {
+  echo "provision-community-signing: $1" >&2
+  exit 1
+}
+
+project_root="$(cd "$(/usr/bin/dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" ||
+  fail_provisioning "the project root is unavailable"
+user_home="$(/usr/bin/ruby -retc -e '
+  home = Etc.getpwuid(Process.uid).dir
+  abort unless home.start_with?("/")
+  print home
+')" || fail_provisioning "the current user home is unavailable"
+readonly project_root user_home
+readonly signing_config="${project_root}/config/linnet-community-signing.json"
+readonly signing_root="${user_home}/Library/Application Support/Linnet Maintainer/Signing/community-cms"
+readonly p12_path="${signing_root}/community-cms.p12"
+readonly p12_password_path="${signing_root}/p12-password"
+readonly keychain_password_path="${signing_root}/keychain-password"
+readonly keychain_path="${user_home}/Library/Keychains/Linnet-Community-CMS.keychain-db"
+readonly provision_lock="${signing_root}/.provision-community-signing.lock"
+
+canonical_directory() {
+  local path="$1"
+  [[ "${path}" == /* && -d "${path}" && ! -L "${path}" ]] || return 1
+  [[ "$(cd "${path}" && pwd -P)" == "${path}" ]]
+}
+
+canonical_regular_file() {
+  local path="$1"
+  local parent
+  [[ "${path}" == /* && -f "${path}" && ! -L "${path}" ]] || return 1
+  parent="$(cd "$(dirname "${path}")" && pwd -P)" || return 1
+  [[ "${parent}/$(basename "${path}")" == "${path}" ]]
+}
+
+require_owned_mode() {
+  local path="$1"
+  local expected_mode="$2"
+  local owner
+  local mode
+  read -r owner mode < <(/usr/bin/stat -f '%u %Lp' "${path}") || return 1
+  [[ "${owner}" == "$(/usr/bin/id -u)" && "${mode}" == "${expected_mode}" ]]
+}
+
+contract="$('/usr/bin/ruby' -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort unless document.keys.sort ==
+    %w[certificate_sha1 certificate_sha256 format profile]
+  abort unless document.fetch("format") == 1 &&
+    document.fetch("profile") == "community-cms"
+  sha1 = document.fetch("certificate_sha1")
+  sha256 = document.fetch("certificate_sha256")
+  abort unless sha1.match?(/\A[0-9A-F]{40}\z/) &&
+    sha256.match?(/\A[0-9a-f]{64}\z/)
+  puts sha1, sha256
+' "${signing_config}" 2>/dev/null)" ||
+  fail_provisioning "the pinned community CMS identity is invalid"
+readonly expected_sha1="$(/usr/bin/sed -n '1p' <<<"${contract}")"
+readonly expected_sha256="$(/usr/bin/sed -n '2p' <<<"${contract}")"
+
+[[ "${user_home}" == /* ]] && canonical_directory "${user_home}" ||
+  fail_provisioning "the current user home is unavailable"
+canonical_directory "${user_home}/Library/Keychains" ||
+  fail_provisioning "the current user Keychains directory is unavailable"
+canonical_directory "${signing_root}" ||
+  fail_provisioning "the fixed community signing directory is unavailable"
+require_owned_mode "${p12_path}" 600 &&
+  canonical_regular_file "${p12_path}" ||
+  fail_provisioning "community-cms.p12 must be a current-user-owned mode 0600 regular file"
+require_owned_mode "${p12_password_path}" 600 &&
+  canonical_regular_file "${p12_password_path}" ||
+  fail_provisioning "p12-password must be a current-user-owned mode 0600 regular file"
+
+# Existing output of any shape belongs to an earlier/manual operation. Refuse
+# it before creating a lock or invoking Keychain services; this command has no
+# replace, repair or delete mode.
+[[ ! -e "${keychain_path}" && ! -L "${keychain_path}" ]] ||
+  fail_provisioning "the fixed community Keychain already exists"
+[[ ! -e "${keychain_password_path}" && ! -L "${keychain_password_path}" ]] ||
+  fail_provisioning "the fixed community Keychain password already exists"
+
+scratch_root=""
+scratch=""
+temporary_keychain_password=""
+original_search_captured=false
+search_list_may_have_changed=false
+keychain_created_this_run=false
+final_password_created_this_run=false
+provision_lock_created_this_run=false
+provisioning_complete=false
+original_keychains=()
+
+cleanup_provisioning() {
+  local exit_code_value=$?
+  local cleanup_failed=false
+  trap - EXIT INT TERM HUP
+  set +e
+
+  if [[ "${provisioning_complete}" != true ]]; then
+    if [[ "${search_list_may_have_changed}" == true &&
+      "${original_search_captured}" == true ]]; then
+      /usr/bin/security list-keychains -d user -s \
+        "${original_keychains[@]}" >/dev/null 2>&1 || cleanup_failed=true
+    fi
+    if [[ "${keychain_created_this_run}" == true &&
+      "${keychain_path}" == "${user_home}/Library/Keychains/Linnet-Community-CMS.keychain-db" &&
+      ( -e "${keychain_path}" || -L "${keychain_path}" ) ]]; then
+      /usr/bin/security lock-keychain "${keychain_path}" >/dev/null 2>&1 || true
+      /usr/bin/security delete-keychain "${keychain_path}" >/dev/null 2>&1 ||
+        cleanup_failed=true
+    fi
+    if [[ "${final_password_created_this_run}" == true &&
+      "${keychain_password_path}" == "${signing_root}/keychain-password" &&
+      -f "${keychain_password_path}" && ! -L "${keychain_password_path}" ]]; then
+      /bin/rm -f -- "${keychain_password_path}" || cleanup_failed=true
+    fi
+  fi
+
+  if [[ -n "${temporary_keychain_password:-}" &&
+    "${temporary_keychain_password%/*}" == "${signing_root}" &&
+    "${temporary_keychain_password##*/}" == .keychain-password.* ]]; then
+    /bin/rm -f -- "${temporary_keychain_password}" || cleanup_failed=true
+  fi
+  if [[ -n "${scratch:-}" && "${scratch%/*}" == "${scratch_root}" &&
+    "${scratch##*/}" == linnet-community-provision.* ]]; then
+    /bin/rm -rf -- "${scratch}" || cleanup_failed=true
+  fi
+  if [[ "${provision_lock_created_this_run}" == true &&
+    "${provision_lock}" == "${signing_root}/.provision-community-signing.lock" &&
+    -d "${provision_lock}" && ! -L "${provision_lock}" ]]; then
+    /bin/rmdir "${provision_lock}" || cleanup_failed=true
+  fi
+
+  if [[ "${cleanup_failed}" == true && "${exit_code_value}" -eq 0 ]]; then
+    exit_code_value=1
+  fi
+  exit "${exit_code_value}"
+}
+trap cleanup_provisioning EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+/bin/mkdir "${provision_lock}" 2>/dev/null ||
+  fail_provisioning "community signing provisioning is already active or incomplete"
+provision_lock_created_this_run=true
+scratch_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)" ||
+  fail_provisioning "the canonical temporary root is unavailable"
+scratch="$(/usr/bin/mktemp -d "${scratch_root}/linnet-community-provision.XXXXXX")" ||
+  fail_provisioning "the provisioning scratch directory cannot be created"
+temporary_keychain_password="$(/usr/bin/mktemp \
+  "${signing_root}/.keychain-password.XXXXXX")" ||
+  fail_provisioning "the temporary Keychain password cannot be created"
+
+# Fail before Keychain creation if the fixed P12 does not contain exactly the
+# pinned public leaf. The password is read only from its fixed file.
+p12_password="$('/usr/bin/ruby' -e '
+  value = File.binread(ARGV.fetch(0))
+  value = value.delete_suffix("\n")
+  abort if value.empty? || value.include?("\n") || value.include?("\0")
+  STDOUT.binmode
+  print value
+' "${p12_password_path}" 2>/dev/null)" ||
+  fail_provisioning "p12-password must contain one non-empty line"
+certificate_pem="${scratch}/leaf.pem"
+certificate_der="${scratch}/leaf.der"
+/usr/bin/openssl pkcs12 -in "${p12_path}" -clcerts -nokeys \
+  -passin "file:${p12_password_path}" -out "${certificate_pem}" \
+  >/dev/null 2>&1 || fail_provisioning "the fixed P12 cannot be opened"
+[[ "$(/usr/bin/grep -c '^-----BEGIN CERTIFICATE-----$' \
+  "${certificate_pem}")" == 1 ]] ||
+  fail_provisioning "the fixed P12 must contain one leaf certificate"
+/usr/bin/openssl x509 -in "${certificate_pem}" -outform DER \
+  -out "${certificate_der}" >/dev/null 2>&1 ||
+  fail_provisioning "the P12 leaf certificate is invalid"
+actual_sha1="$(/usr/bin/shasum -a 1 "${certificate_der}" | \
+  /usr/bin/awk '{ print toupper($1) }')"
+actual_sha256="$(/usr/bin/shasum -a 256 "${certificate_der}" | \
+  /usr/bin/awk '{ print tolower($1) }')"
+[[ "${actual_sha1}" == "${expected_sha1}" &&
+  "${actual_sha256}" == "${expected_sha256}" ]] ||
+  fail_provisioning "the P12 leaf differs from the pinned community CMS identity"
+
+/usr/bin/openssl rand -hex 32 >"${temporary_keychain_password}" ||
+  fail_provisioning "the dedicated Keychain password cannot be generated"
+/bin/chmod 0600 "${temporary_keychain_password}" ||
+  fail_provisioning "the dedicated Keychain password permissions cannot be fixed"
+keychain_password="$(/usr/bin/tr -d '\n' <"${temporary_keychain_password}")"
+[[ "${keychain_password}" =~ ^[0-9a-f]{64}$ ]] ||
+  fail_provisioning "the dedicated Keychain password is invalid"
+
+original_search="${scratch}/original-keychains"
+expected_search="${scratch}/expected-keychains"
+actual_search="${scratch}/actual-keychains"
+/usr/bin/security list-keychains -d user | \
+  /usr/bin/sed -E 's/^[[:space:]]*"([^"].*)"[[:space:]]*$/\1/' \
+  >"${original_search}" || fail_provisioning "the user Keychain search list is unavailable"
+[[ -s "${original_search}" ]] ||
+  fail_provisioning "the user Keychain search list is empty"
+while IFS= read -r existing_keychain; do
+  [[ "${existing_keychain}" == /* && "${existing_keychain}" != "${keychain_path}" ]] ||
+    fail_provisioning "the fixed community Keychain is already registered"
+  original_keychains+=("${existing_keychain}")
+done <"${original_search}"
+[[ "${#original_keychains[@]}" -gt 0 ]] ||
+  fail_provisioning "the user Keychain search list is invalid"
+original_search_captured=true
+
+/usr/bin/security create-keychain -p "${keychain_password}" "${keychain_path}" \
+  >/dev/null || fail_provisioning "the dedicated Keychain cannot be created"
+keychain_created_this_run=true
+[[ -f "${keychain_path}" && ! -L "${keychain_path}" ]] ||
+  fail_provisioning "the dedicated Keychain was not created at the fixed path"
+/bin/chmod 0600 "${keychain_path}" ||
+  fail_provisioning "the dedicated Keychain permissions cannot be fixed"
+/usr/bin/security set-keychain-settings -lut 21600 "${keychain_path}" >/dev/null ||
+  fail_provisioning "the dedicated Keychain settings cannot be fixed"
+/usr/bin/security unlock-keychain -p "${keychain_password}" "${keychain_path}" \
+  >/dev/null || fail_provisioning "the dedicated Keychain cannot be unlocked"
+/usr/bin/security import "${p12_path}" -k "${keychain_path}" \
+  -P "${p12_password}" -T /usr/bin/codesign >/dev/null ||
+  fail_provisioning "the pinned community identity cannot be imported"
+/usr/bin/security set-key-partition-list -S apple-tool:,apple:,codesign: \
+  -s -k "${keychain_password}" "${keychain_path}" >/dev/null ||
+  fail_provisioning "the codesign Keychain partition cannot be fixed"
+
+search_list_may_have_changed=true
+/usr/bin/security list-keychains -d user -s \
+  "${original_keychains[@]}" "${keychain_path}" >/dev/null ||
+  fail_provisioning "the dedicated Keychain cannot be added to the exact search list"
+{
+  /bin/cat "${original_search}"
+  printf '%s\n' "${keychain_path}"
+} >"${expected_search}"
+/usr/bin/security list-keychains -d user | \
+  /usr/bin/sed -E 's/^[[:space:]]*"([^"].*)"[[:space:]]*$/\1/' \
+  >"${actual_search}" || fail_provisioning "the updated Keychain search list is unavailable"
+/usr/bin/cmp -s "${expected_search}" "${actual_search}" ||
+  fail_provisioning "the updated Keychain search list differs from its exact contract"
+
+# The same sealed codesign boundary used by the daily signer must complete
+# after its ACL/partition is configured. It also proves the emitted leaf bytes.
+probe="${scratch}/probe"
+probe_certificate="${scratch}/probe-certificate"
+/bin/cp /usr/bin/true "${probe}" || fail_provisioning "the signing probe cannot be staged"
+/usr/bin/codesign --force --sign "${expected_sha1}" --keychain "${keychain_path}" \
+  --options runtime --timestamp=none "${probe}" >/dev/null 2>&1 ||
+  fail_provisioning "the dedicated Keychain cannot sign non-interactively"
+/usr/bin/codesign --verify --strict "${probe}" >/dev/null 2>&1 ||
+  fail_provisioning "the dedicated Keychain signing probe is invalid"
+/usr/bin/codesign -d --extract-certificates="${probe_certificate}" "${probe}" \
+  >/dev/null 2>&1 || fail_provisioning "the signing probe leaf cannot be extracted"
+[[ -s "${probe_certificate}0" && ! -L "${probe_certificate}0" ]] ||
+  fail_provisioning "the signing probe leaf is missing"
+probe_sha1="$(/usr/bin/shasum -a 1 "${probe_certificate}0" | \
+  /usr/bin/awk '{ print toupper($1) }')"
+probe_sha256="$(/usr/bin/shasum -a 256 "${probe_certificate}0" | \
+  /usr/bin/awk '{ print tolower($1) }')"
+[[ "${probe_sha1}" == "${expected_sha1}" &&
+  "${probe_sha256}" == "${expected_sha256}" ]] ||
+  fail_provisioning "the signing probe differs from the pinned community identity"
+/usr/bin/security lock-keychain "${keychain_path}" >/dev/null ||
+  fail_provisioning "the provisioned Keychain cannot be locked"
+
+/bin/ln "${temporary_keychain_password}" "${keychain_password_path}" ||
+  fail_provisioning "the dedicated Keychain password cannot be published"
+final_password_created_this_run=true
+/bin/rm -f -- "${temporary_keychain_password}" ||
+  fail_provisioning "the temporary Keychain password cannot be removed"
+temporary_keychain_password=""
+/bin/rm -rf -- "${scratch}" || fail_provisioning "the provisioning scratch cannot be removed"
+scratch=""
+/bin/rmdir "${provision_lock}" || fail_provisioning "the provisioning lock cannot be removed"
+provision_lock_created_this_run=false
+provisioning_complete=true
+printf '%s\n' \
+  "Linnet community signing: PROVISIONED (fixed CMS leaf, locked, codesign ACL ready)"

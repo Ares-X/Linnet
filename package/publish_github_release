@@ -172,16 +172,6 @@ verify_release_revision() {
     fail_publish "${requested_tag} resolves to a different source revision"
 }
 
-verify_draft_target() {
-  local requested_tag="$1"
-  local target_revision
-  target_revision="$(gh release view "${requested_tag}" --repo "${repository}" \
-    --json targetCommitish --jq '.targetCommitish')" ||
-    fail_publish "${requested_tag} draft target is unavailable"
-  [[ "${target_revision}" == "${candidate_revision}" ]] ||
-    fail_publish "${requested_tag} draft targets a different source revision"
-}
-
 verify_candidate_archive() {
   LINNET_RELEASE_TOOL="${LINNET_RELEASE_TOOL:-}" \
     "${project_root}/package/verify_publication_artifacts" \
@@ -204,15 +194,24 @@ verify_candidate_source() {
   if [[ "${channel}" == catalog ]]; then
     [[ "${main_revision}" == "${candidate_revision}" ]] ||
       fail_publish "Catalog candidate is not the current remote main revision"
+  elif [[ "${channel}" == public ]]; then
+    inspect_exact_tag "v${version}"
+    if [[ "${exact_tag_status}" == present ]]; then
+      [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
+        fail_publish "v${version} resolves to a different source revision"
+    elif [[ "${exact_tag_status}" == absent ]]; then
+      [[ "${main_revision}" == "${candidate_revision}" ]] ||
+        fail_publish "an untagged Public candidate is not current remote main"
+    else
+      fail_publish "v${version} tag identity is invalid"
+    fi
   elif [[ "${main_revision}" != "${candidate_revision}" ]]; then
-    verify_release_revision "v${version}"
-  fi
-  if [[ "${channel}" == public ]]; then
     verify_release_revision "v${version}"
   fi
 
   local runs="${work_root}/main-ci-runs.json"
-  gh api --method GET "repos/${repository}/actions/runs" \
+  gh api --method GET \
+    "repos/${repository}/actions/workflows/commit-ci.yml/runs" \
     -f head_sha="${candidate_revision}" -f branch=main -f event=push \
     -F per_page=100 >"${runs}" ||
     fail_publish "main CI evidence is unavailable"
@@ -221,6 +220,7 @@ verify_candidate_source() {
     revision = ARGV.fetch(1)
     accepted = document.fetch("workflow_runs").any? do |run|
       run.fetch("name") == "Linnet commit CI" &&
+        run.fetch("path") == ".github/workflows/commit-ci.yml" &&
         run.fetch("head_sha") == revision &&
         run.fetch("head_branch") == "main" &&
         run.fetch("event") == "push" &&
@@ -332,7 +332,8 @@ esac
 
 # Every remote mutation revalidates the final eight-file candidate itself.
 # Catalog additionally requires the candidate to remain the current remote
-# main revision; the version tag is the only later authority for Public. The
+# main revision. Public may create its absent version tag only from that exact
+# main revision after Core, data and Catalog bytes are already verified. The
 # data-seed bootstrap is isolated to one exact seed tag and the data prerelease.
 verify_candidate_archive
 verify_candidate_source
@@ -518,9 +519,6 @@ verify_assets() {
 
 verify_draft_assets() {
   local actual="${work_root}/actual-draft-assets.tsv"
-  if [[ "${release_tag_preexisting}" == false ]]; then
-    verify_draft_target "${tag}"
-  fi
   actual_assets >"${actual}"
   cmp -s "${expected_assets}" "${actual}" ||
     fail_publish "${tag} draft assets differ from the verified ${channel} channel"
@@ -528,9 +526,7 @@ verify_draft_assets() {
 
 verify_retryable_draft_assets() {
   local actual="${work_root}/actual-retry-draft-assets.tsv"
-  if [[ "${release_tag_preexisting}" == false ]]; then
-    verify_draft_target "${tag}"
-  fi
+  verify_release_revision "${tag}"
   actual_assets >"${actual}"
   if LC_ALL=C comm -23 "${actual}" "${expected_assets}" | grep -q .; then
     fail_publish "${tag} draft contains assets outside the verified ${channel} channel"
@@ -586,6 +582,7 @@ else
   create_args+=(--target "${candidate_revision}")
 fi
 gh "${create_args[@]}"
+verify_release_revision "${tag}"
 verify_draft_assets
 
 edit_args=(release edit "${tag}" --repo "${repository}" --draft=false)

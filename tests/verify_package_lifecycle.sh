@@ -34,6 +34,56 @@ cp package/installer-scripts/candidate-app-identity.sh \
   "${scripts_root}/candidate-app-identity.sh"
 cp package/installer-scripts/quit-applications-clean.jxa \
   "${scripts_root}/quit-applications-clean.jxa"
+fake_codesign="${scripts_root}/fake-codesign"
+cat >"${fake_codesign}" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+target=
+certificate_prefix=
+for argument in "$@"; do
+  target="${argument}"
+  case "${argument}" in
+    --extract-certificates=*) certificate_prefix="${argument#*=}" ;;
+  esac
+done
+fixture="${target}/Contents/Resources/LinnetLifecycleFixture"
+kind="$(cat "${fixture}/signature-kind")"
+case " $* " in
+  *' --verify '*)
+    [[ "${kind}" != invalid ]]
+    ;;
+  *' -dvvv '*)
+    case "${kind}" in
+      legacy-community-adhoc) printf '%s\n' 'Signature=adhoc' ;;
+      community-cms|wrong-community-cms|unknown-cms)
+        printf '%s\n' 'Authority=Linnet Community CMS fixture' \
+          'Signature=size=384' 'TeamIdentifier=not set'
+        ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *)
+    if [[ -n "${certificate_prefix}" ]]; then
+      case "${kind}" in
+        community-cms|unknown-cms)
+          cp "${fixture}/certificate" "${certificate_prefix}0"
+          ;;
+        wrong-community-cms)
+          cp "${fixture}/wrong-certificate" "${certificate_prefix}0"
+          ;;
+        *) exit 1 ;;
+      esac
+    else
+      exit 1
+    fi
+    ;;
+esac
+SH
+chmod 755 "${fake_codesign}"
+# Production has no codesign override. This isolated helper copy supplies exact
+# deterministic CMS/ad-hoc identities without importing a test Keychain.
+sed -i '' "s#/usr/bin/codesign#${fake_codesign}#g" \
+  "${scripts_root}/candidate-app-identity.sh"
 # The production script has no executable override. This isolated test copy
 # redirects only the final Host CLI calls after the real finalized App has passed
 # the package-owned identity gate.
@@ -49,7 +99,7 @@ if [[ "${LINNET_FAKE_QUIESCER_RESULT:-success}" == success ]]; then
     printf '%s\n' "${LINNET_FAKE_SELECTION_DOCUMENT}"
   else
     printf '%s\n' \
-      '{"format":1,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":true,"post_quiescence_input_source_id":"com.apple.keylayout.ABC"}'
+      '{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":true,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"enabled"}'
   fi
 else
   exit 1
@@ -61,41 +111,52 @@ chmod 755 "${fake_osascript}"
 sed -i '' "s#/usr/bin/osascript#${fake_osascript}#" "${scripts_root}/preinstall"
 printf '0.1.0\n' >"${scripts_root}/candidate-core-version"
 
-candidate_fixture="${LINNET_LIFECYCLE_CANDIDATE_APP:-${HOME}/Library/Input Methods/Linnet.app}"
-candidate_fixture_available=false
-candidate_version=0.1.0
-candidate_build=1
-candidate_revision=0000000000000000000000000000000000000000
-candidate_leaf=0000000000000000000000000000000000000000000000000000000000000000
-candidate_identity_format=1
+candidate_fixture="${test_root}/fixed-community-cms/Linnet.app"
+candidate_fixture_available=true
+candidate_version=0.1.12
+candidate_build=29
+candidate_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+candidate_leaf=553fb445ae10b48c395ee01aad3630f03c05d3da40f84db89b97d91039e72aff
+wrong_candidate_leaf=bb696adf3a500641c2b5fef7af6436a10ed7a4552302d5d77066fd44099d48f0
+candidate_identity_format=3
+candidate_profile=community-cms
 candidate_trust_model=
 candidate_version_file="${candidate_fixture}/Contents/Resources/LinnetRelease/VERSION.json"
-if [[ -d "${candidate_fixture}" && ! -L "${candidate_fixture}" ]] && \
-    /usr/bin/codesign --verify --deep --strict "${candidate_fixture}" >/dev/null 2>&1; then
-  candidate_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - \
-    "${candidate_fixture}/Contents/Info.plist")"
-  candidate_build="$(/usr/bin/plutil -extract CFBundleVersion raw -o - \
-    "${candidate_fixture}/Contents/Info.plist")"
-  candidate_revision="$(/usr/bin/plutil -extract source.candidate_revision raw -o - \
-    "${candidate_version_file}")"
-  candidate_profile="$(/usr/bin/plutil -extract \
-    distribution.application_code_signature.profile raw -o - \
-    "${candidate_version_file}")"
-  case "${candidate_profile}" in
-    uat)
-      candidate_leaf="$(/usr/bin/plutil -extract \
-        distribution.application_code_signature.leaf_certificate_sha256 raw -o - \
-        "${candidate_version_file}")"
-      candidate_fixture_available=true
-      ;;
-    community-adhoc)
-      candidate_identity_format=2
-      candidate_leaf=
-      candidate_trust_model=unsigned-community
-      candidate_fixture_available=true
-      ;;
-  esac
-fi
+mkdir -p "${candidate_fixture}/Contents/MacOS" \
+  "${candidate_fixture}/Contents/Resources/LinnetRelease" \
+  "${candidate_fixture}/Contents/Resources/LinnetLifecycleFixture"
+cat >"${candidate_fixture}/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>Linnet</string>
+<key>CFBundleIdentifier</key><string>io.github.ares-x.inputmethod.Linnet</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>${candidate_version}</string>
+<key>CFBundleVersion</key><string>${candidate_build}</string>
+<key>LinnetCodeSigningProfile</key><string>${candidate_profile}</string>
+</dict></plist>
+PLIST
+cat >"${candidate_fixture}/Contents/Resources/LinnetRelease/VERSION.json" <<JSON
+{"format":2,"product":"Linnet","version":"${candidate_version}","build":"${candidate_build}","source":{"candidate_revision":"${candidate_revision}"},"distribution":{"application_code_signature":{"profile":"community-cms","kind":"external-cms","leaf_certificate_sha256":"${candidate_leaf}","hardened_runtime":true,"host_settings_same_leaf":true},"artifact_scope":"public-community","notarized":false,"publication_eligible":true,"trust_model":"manual-user-approval"}}
+JSON
+cat >"${candidate_fixture}/Contents/MacOS/Linnet" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod 755 "${candidate_fixture}/Contents/MacOS/Linnet"
+printf 'community-cms\n' \
+  >"${candidate_fixture}/Contents/Resources/LinnetLifecycleFixture/signature-kind"
+printf 'linnet-community-cms-test-leaf-v1\n' \
+  >"${candidate_fixture}/Contents/Resources/LinnetLifecycleFixture/certificate"
+printf 'linnet-community-cms-wrong-leaf-v1\n' \
+  >"${candidate_fixture}/Contents/Resources/LinnetLifecycleFixture/wrong-certificate"
+[[ "$(/usr/bin/shasum -a 256 \
+  "${candidate_fixture}/Contents/Resources/LinnetLifecycleFixture/certificate" | \
+  /usr/bin/awk '{print $1}')" == "${candidate_leaf}" ]]
+[[ "$(/usr/bin/shasum -a 256 \
+  "${candidate_fixture}/Contents/Resources/LinnetLifecycleFixture/wrong-certificate" | \
+  /usr/bin/awk '{print $1}')" == "${wrong_candidate_leaf}" ]]
 
 write_candidate_identity() {
   local version="$1"
@@ -104,6 +165,7 @@ write_candidate_identity() {
   local leaf="$4"
   local format="${5:-${candidate_identity_format}}"
   local trust_model="${6:-${candidate_trust_model}}"
+  local profile="${7:-${candidate_profile}}"
   ruby -rjson -e '
     document = {
       "format" => Integer(ARGV.fetch(0), 10),
@@ -115,11 +177,14 @@ write_candidate_identity() {
     case document.fetch("format")
     when 1 then document["leaf_certificate_sha256"] = ARGV.fetch(4)
     when 2 then document["trust_model"] = ARGV.fetch(5)
+    when 3
+      document["profile"] = ARGV.fetch(6)
+      document["leaf_certificate_sha256"] = ARGV.fetch(4)
     else abort
     end
-    File.binwrite(ARGV.fetch(6), JSON.generate(document) + "\n")
+    File.binwrite(ARGV.fetch(7), JSON.generate(document) + "\n")
   ' "${format}" "${version}" "${build}" "${revision}" "${leaf}" \
-    "${trust_model}" \
+    "${trust_model}" "${profile}" \
     "${scripts_root}/candidate-app-identity.json"
   chmod 0644 "${scripts_root}/candidate-app-identity.json"
 }
@@ -139,6 +204,66 @@ rg -Fq 'verification_scope="${4:-}"' package/verify_package
 rg -Fq '"${verification_scope}"' package/make_package
 rg -Fq '"${identity_helper}" existing' package/core-installer-scripts/preinstall
 rg -Fq '"${identity_helper}" installed' package/installer-scripts/postinstall
+for field in identity_transition prior_enablement candidate_leaf_sha256; do
+  rg -Fq "${field}" package/core-installer-scripts/preinstall \
+    package/installer-scripts/postinstall
+done
+# Candidate identity and the quiescer are the package producers. Swift consumes
+# their string wire values through RawRepresentable enums. Keep both languages
+# closed over one exact set so a producer or consumer cannot drift silently.
+ruby -e '
+  def enum_raw_values(source, name)
+    body = source[/enum\s+#{Regexp.escape(name)}:\s*String\s*\{(.*?)^\s*\}/m, 1]
+    abort "Swift enum #{name} is unavailable" unless body
+    body.scan(/^\s*case\s+([A-Za-z][A-Za-z0-9]*)(?:\s*=\s*"([^"]+)")?\s*$/)
+      .map { |case_name, raw_value| raw_value || case_name }
+      .uniq.sort
+  end
+
+  def assert_exact(label, actual, expected)
+    actual = actual.uniq.sort
+    expected = expected.sort
+    abort "#{label} drifted: #{actual.inspect}" unless actual == expected
+  end
+
+  helper = File.binread(ARGV.fetch(0))
+  quiescer = File.binread(ARGV.fetch(1))
+  swift = File.binread(ARGV.fetch(2))
+  package_transitions = helper.scan(
+    /^\s*identity_transition=([a-z][a-z0-9-]*)\s*$/).flatten
+  package_transitions.concat(helper.scan(
+    /^\s*printf\s+\x27%s\\n\x27\s+([a-z][a-z0-9-]*)\s*$/).flatten)
+  prior_body = quiescer[
+    /function\s+priorEnablement\([^)]*\)\s*\{(.*?)^\}/m, 1]
+  abort "package prior-enablement producer is unavailable" unless prior_body
+  package_prior = prior_body.scan(/return\s+"([^"]+)"/).flatten
+  package_prior.concat(prior_body.scan(
+    /return\s+\w+\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"/).flatten)
+
+  expected_transitions = %w[
+    legacy-community-adhoc-to-cms missing-app-install same-community-cms-leaf
+  ]
+  expected_prior = %w[disabled enabled unregistered]
+  swift_transitions = enum_raw_values(swift, "CoreIdentityTransition")
+  swift_prior = enum_raw_values(swift, "PriorEnablement")
+  assert_exact("package transition producer", package_transitions,
+    expected_transitions)
+  assert_exact("Swift transition consumer", swift_transitions,
+    expected_transitions)
+  assert_exact("cross-language transition set", package_transitions,
+    swift_transitions)
+  assert_exact("package prior-enablement producer", package_prior,
+    expected_prior)
+  assert_exact("Swift prior-enablement consumer", swift_prior, expected_prior)
+  assert_exact("cross-language prior-enablement set", package_prior, swift_prior)
+' package/installer-scripts/candidate-app-identity.sh \
+  package/installer-scripts/quit-applications-clean.jxa sources/InputSource.swift
+rg -Fq 'prior_enablement' package/installer-scripts/quit-applications-clean.jxa
+rg -Fq 'format: 2' package/installer-scripts/quit-applications-clean.jxa
+rg -Fq 'community-cms' package/make_package package/verify_package \
+  package/installer-scripts/candidate-app-identity.sh
+rg -Fq 'document["format"] = 3' package/make_package
+rg -Fq 'candidate_identity["format"] = 3' package/verify_package
 rg -Fq 'quit-applications-clean.jxa' package/core-installer-scripts/preinstall \
   package/make_package package/verify_package
 rg -Fq 'core-update-selection-v1.plist' \
@@ -152,7 +277,8 @@ fi
 
 # The package-owned helper uses exact LaunchServices identities and cooperative
 # AppKit termination only. A refused request remains observable until timeout;
-# there is no signal, force-quit, activation, enablement, or selection path.
+# there is no signal, force-quit, activation, enable/disable, or selection
+# mutation path; reading the public TIS enablement property is allowed.
 quiescer=package/installer-scripts/quit-applications-clean.jxa
 rg -Fq 'runningApplicationsWithBundleIdentifier' "${quiescer}"
 rg -Fq 'Boolean(application.terminate)' "${quiescer}"
@@ -171,7 +297,8 @@ rg -Fq 'quiesceApplication(bundleIdentifier, timeoutSeconds);' "${quiescer}" || 
 }
 rg -Fq 'TISCopyCurrentKeyboardInputSource' "${quiescer}"
 rg -Fq 'post_quiescence_input_source_id' "${quiescer}"
-if rg -n 'forceTerminate|kill|pkill|killall|activate|enable|select' "${quiescer}"; then
+if rg -n 'forceTerminate|kill|pkill|killall|\.activate|TISEnableInputSource|TISDisableInputSource|TISSelectInputSource' \
+    "${quiescer}"; then
   echo "Core application quiescence gained a forcing or input-state mutation path." >&2
   exit 1
 fi
@@ -199,13 +326,161 @@ copy_candidate_app() {
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${candidate_fixture}" "${destination}"
 }
 
+configure_installed_identity() {
+  local home="$1"
+  local scenario="$2"
+  local requested_version="${3:-}"
+  local requested_build="${4:-}"
+  local app="${home}/Library/Input Methods/Linnet.app"
+  local info="${app}/Contents/Info.plist"
+  local version_file="${app}/Contents/Resources/LinnetRelease/VERSION.json"
+  local marker="${app}/Contents/Resources/LinnetLifecycleFixture/signature-kind"
+  local profile kind leaf same_field marker_value version build revision
+  version=0.1.0
+  build=1
+  revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  case "${scenario}" in
+    exact-community-cms)
+      profile=community-cms
+      kind=external-cms
+      leaf="${candidate_leaf}"
+      same_field=host_settings_same_leaf
+      marker_value=community-cms
+      version="${candidate_version}"
+      build="${candidate_build}"
+      revision="${candidate_revision}"
+      ;;
+    same-community-cms-leaf)
+      profile=community-cms
+      kind=external-cms
+      leaf="${candidate_leaf}"
+      same_field=host_settings_same_leaf
+      marker_value=community-cms
+      ;;
+    legacy-community-adhoc)
+      profile=community-adhoc
+      kind=adhoc
+      leaf=
+      same_field=host_settings_same_kind
+      marker_value=legacy-community-adhoc
+      ;;
+    wrong-community-cms-leaf)
+      profile=community-cms
+      kind=external-cms
+      leaf="${wrong_candidate_leaf}"
+      same_field=host_settings_same_leaf
+      marker_value=wrong-community-cms
+      ;;
+    uat)
+      profile=uat
+      kind=external-cms
+      leaf="${candidate_leaf}"
+      same_field=host_settings_same_leaf
+      marker_value=community-cms
+      ;;
+    unknown)
+      profile=unknown-community
+      kind=external-cms
+      leaf="${candidate_leaf}"
+      same_field=host_settings_same_leaf
+      marker_value=unknown-cms
+      ;;
+    *) return 1 ;;
+  esac
+  [[ -z "${requested_version}" ]] || version="${requested_version}"
+  [[ -z "${requested_build}" ]] || build="${requested_build}"
+  /usr/bin/plutil -replace CFBundleShortVersionString -string "${version}" "${info}"
+  /usr/bin/plutil -replace CFBundleVersion -string "${build}" "${info}"
+  /usr/bin/plutil -replace LinnetCodeSigningProfile -string "${profile}" "${info}"
+  ruby -rjson -e '
+    version, build, revision, profile, kind, leaf, same_field, destination = ARGV
+    signature = {
+      "profile" => profile,
+      "kind" => kind,
+      "hardened_runtime" => true,
+      same_field => true,
+    }
+    signature["leaf_certificate_sha256"] = leaf unless leaf.empty?
+    document = {
+      "format" => 2,
+      "product" => "Linnet",
+      "version" => version,
+      "build" => build,
+      "source" => {"candidate_revision" => revision},
+      "distribution" => {
+        "application_code_signature" => signature,
+        "artifact_scope" => "public-community",
+        "notarized" => false,
+        "publication_eligible" => true,
+        "trust_model" => "manual-user-approval",
+      },
+    }
+    File.binwrite(destination, JSON.generate(document) + "\n")
+  ' "${version}" "${build}" "${revision}" "${profile}" "${kind}" \
+    "${leaf}" "${same_field}" "${version_file}"
+  printf '%s\n' "${marker_value}" >"${marker}"
+}
+
+# The new package identity is one fixed community CMS leaf. An older public
+# ad-hoc build has one explicit migration edge; subsequent releases require the
+# same CMS leaf. Every other signing history fails before payload mutation.
+for accepted_transition in \
+    legacy-community-adhoc:legacy-community-adhoc-to-cms \
+    same-community-cms-leaf:same-community-cms-leaf; do
+  scenario="${accepted_transition%%:*}"
+  expected_transition="${accepted_transition#*:}"
+  transition_home="${test_root}/identity-transition-${scenario}/home"
+  copy_candidate_app "${transition_home}"
+  configure_installed_identity "${transition_home}" "${scenario}"
+  actual_transition="$(HOME="${transition_home}" \
+    "${scripts_root}/candidate-app-identity.sh" existing)"
+  [[ "${actual_transition}" == "${expected_transition}" ]] || {
+    echo "Candidate identity owner lost transition ${expected_transition}." >&2
+    exit 1
+  }
+done
+
+legacy_boundary_home="${test_root}/identity-transition-legacy-boundary/home"
+copy_candidate_app "${legacy_boundary_home}"
+configure_installed_identity "${legacy_boundary_home}" \
+  legacy-community-adhoc 0.1.11 28
+[[ "$(HOME="${legacy_boundary_home}" \
+  "${scripts_root}/candidate-app-identity.sh" existing)" == \
+  legacy-community-adhoc-to-cms ]] || {
+  echo "Candidate identity owner rejected the final admitted legacy build." >&2
+  exit 1
+}
+for rejected_legacy_boundary in 0.1.12:28 0.1.11:29; do
+  rejected_legacy_version="${rejected_legacy_boundary%%:*}"
+  rejected_legacy_build="${rejected_legacy_boundary#*:}"
+  configure_installed_identity "${legacy_boundary_home}" \
+    legacy-community-adhoc "${rejected_legacy_version}" \
+    "${rejected_legacy_build}"
+  if HOME="${legacy_boundary_home}" \
+      "${scripts_root}/candidate-app-identity.sh" existing >/dev/null 2>&1; then
+    echo "Candidate identity owner accepted legacy ${rejected_legacy_version} build ${rejected_legacy_build} beyond the migration boundary." >&2
+    exit 1
+  fi
+done
+for rejected_identity in wrong-community-cms-leaf uat unknown; do
+  rejected_home="${test_root}/identity-transition-${rejected_identity}/home"
+  copy_candidate_app "${rejected_home}"
+  configure_installed_identity "${rejected_home}" "${rejected_identity}"
+  if HOME="${rejected_home}" "${scripts_root}/candidate-app-identity.sh" existing \
+      >/dev/null 2>&1; then
+    echo "Candidate identity owner accepted ${rejected_identity}." >&2
+    exit 1
+  fi
+done
+
 if [[ "${candidate_fixture_available}" == true ]]; then
   identity_home="${test_root}/candidate-identity/home"
   copy_candidate_app "${identity_home}"
-  HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" existing
+  HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" existing \
+    >/dev/null
   HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" installed
 
-  if [[ "${candidate_identity_format}" == 1 ]]; then
+  if [[ "${candidate_identity_format}" == 1 || "${candidate_identity_format}" == 3 ]]; then
     wrong_leaf="1${candidate_leaf:1}"
     [[ "${wrong_leaf}" != "${candidate_leaf}" ]] || wrong_leaf="2${candidate_leaf:1}"
     write_candidate_identity "${candidate_version}" "${candidate_build}" \
@@ -245,7 +520,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   candidate_next_build="$((10#${candidate_build} + 1))"
   write_candidate_identity 999.0.0 "${candidate_next_build}" \
     "${wrong_revision}" "${candidate_leaf}"
-  HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" existing
+  HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" existing \
+    >/dev/null
   if HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" installed \
       >/dev/null 2>&1; then
     echo "Installed identity gate accepted an older App candidate." >&2
@@ -385,11 +661,14 @@ write_core_selection_token() {
   local home="$1"
   local was_current="$2"
   local post_quiescence_id="$3"
+  local identity_transition="${4:-same-community-cms-leaf}"
+  local prior_enablement="${5:-enabled}"
   local state="${home}/Library/Application Support/Linnet/State"
   mkdir -p "${state}"
-  printf '{"format":1,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":%s,"post_quiescence_input_source_id":"%s","candidate_revision":"%s","candidate_build":"%s"}\n' \
-    "${was_current}" "${post_quiescence_id}" "${candidate_revision}" \
-    "${candidate_build}" |
+  printf '{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":%s,"post_quiescence_input_source_id":"%s","identity_transition":"%s","prior_enablement":"%s","candidate_revision":"%s","candidate_build":"%s","candidate_leaf_sha256":"%s"}\n' \
+    "${was_current}" "${post_quiescence_id}" "${identity_transition}" \
+    "${prior_enablement}" "${candidate_revision}" "${candidate_build}" \
+    "${candidate_leaf}" |
     /usr/bin/plutil -convert binary1 -o \
       "${state}/core-update-selection-v1.plist" -
   chmod 0600 "${state}/core-update-selection-v1.plist"
@@ -491,7 +770,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     LINNET_TEST_EXECUTABLE="${core_postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
   [[ "$(cat "${core_postinstall_log}")" == \
-    '--refresh-core-input-source true com.apple.keylayout.ABC' ]] || {
+    '--refresh-core-input-source true com.apple.keylayout.ABC same-community-cms-leaf enabled' ]] || {
     echo "Core postinstall split quiescence, registration and selection continuity across multiple Host processes." >&2
     exit 1
   }
@@ -504,16 +783,94 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   unselected_postinstall_log="${test_root}/postinstall-core-unselected/host-invocations"
   prepare_signed_postinstall_home "${unselected_postinstall_home}"
   write_core_selection_token "${unselected_postinstall_home}" false \
-    github.dongyuwei.inputmethod.hallelujahInputMethod
+    github.dongyuwei.inputmethod.hallelujahInputMethod \
+    same-community-cms-leaf disabled
   HOME="${unselected_postinstall_home}" \
     LINNET_FAKE_HOST_LOG="${unselected_postinstall_log}" \
     LINNET_TEST_EXECUTABLE="${unselected_postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
   [[ "$(cat "${unselected_postinstall_log}")" == \
-    '--refresh-core-input-source false github.dongyuwei.inputmethod.hallelujahInputMethod' ]] || {
+    '--refresh-core-input-source false github.dongyuwei.inputmethod.hallelujahInputMethod same-community-cms-leaf disabled' ]] || {
     echo "Core postinstall selected Linnet even though it was not current before update." >&2
     exit 1
   }
+
+  legacy_postinstall_home="${test_root}/postinstall-core-legacy/home"
+  legacy_postinstall_log="${test_root}/postinstall-core-legacy/host-invocations"
+  prepare_signed_postinstall_home "${legacy_postinstall_home}"
+  write_core_selection_token "${legacy_postinstall_home}" true \
+    com.apple.keylayout.ABC legacy-community-adhoc-to-cms enabled
+  HOME="${legacy_postinstall_home}" \
+    LINNET_FAKE_HOST_LOG="${legacy_postinstall_log}" \
+    LINNET_TEST_EXECUTABLE="${legacy_postinstall_home}/fake-Linnet" \
+    "${scripts_root}/postinstall"
+  [[ "$(cat "${legacy_postinstall_log}")" == \
+    '--refresh-core-input-source true com.apple.keylayout.ABC legacy-community-adhoc-to-cms enabled' ]] || {
+    echo "Core postinstall lost the one-time legacy ad-hoc to CMS transition." >&2
+    exit 1
+  }
+
+  unregistered_postinstall_home="${test_root}/postinstall-core-unregistered/home"
+  unregistered_postinstall_log="${test_root}/postinstall-core-unregistered/host-invocations"
+  prepare_signed_postinstall_home "${unregistered_postinstall_home}"
+  write_core_selection_token "${unregistered_postinstall_home}" false \
+    com.apple.keylayout.ABC missing-app-install unregistered
+  HOME="${unregistered_postinstall_home}" \
+    LINNET_FAKE_HOST_LOG="${unregistered_postinstall_log}" \
+    LINNET_TEST_EXECUTABLE="${unregistered_postinstall_home}/fake-Linnet" \
+    "${scripts_root}/postinstall"
+  [[ "$(cat "${unregistered_postinstall_log}")" == \
+    '--refresh-core-input-source false com.apple.keylayout.ABC missing-app-install unregistered' ]] || {
+    echo "Core postinstall lost the typed unregistered state." >&2
+    exit 1
+  }
+
+  for invalid_transaction in identity-transition prior-enablement candidate-leaf \
+      missing-app-prior missing-app-current unregistered-current; do
+    invalid_transaction_home="${test_root}/postinstall-core-invalid-${invalid_transaction}/home"
+    invalid_transaction_log="${test_root}/postinstall-core-invalid-${invalid_transaction}/host-invocations"
+    prepare_signed_postinstall_home "${invalid_transaction_home}"
+    case "${invalid_transaction}" in
+      identity-transition)
+        write_core_selection_token "${invalid_transaction_home}" true \
+          com.apple.keylayout.ABC unknown-transition enabled
+        ;;
+      prior-enablement)
+        write_core_selection_token "${invalid_transaction_home}" true \
+          com.apple.keylayout.ABC same-community-cms-leaf unknown-enablement
+        ;;
+      candidate-leaf)
+        write_core_selection_token "${invalid_transaction_home}" true \
+          com.apple.keylayout.ABC same-community-cms-leaf enabled
+        /usr/bin/plutil -replace candidate_leaf_sha256 -string \
+          "${wrong_candidate_leaf}" \
+          "${invalid_transaction_home}/Library/Application Support/Linnet/State/core-update-selection-v1.plist"
+        ;;
+      missing-app-prior)
+        write_core_selection_token "${invalid_transaction_home}" false \
+          com.apple.keylayout.ABC missing-app-install enabled
+        ;;
+      missing-app-current)
+        write_core_selection_token "${invalid_transaction_home}" true \
+          com.apple.keylayout.ABC missing-app-install unregistered
+        ;;
+      unregistered-current)
+        write_core_selection_token "${invalid_transaction_home}" true \
+          com.apple.keylayout.ABC same-community-cms-leaf unregistered
+        ;;
+    esac
+    if HOME="${invalid_transaction_home}" \
+        LINNET_FAKE_HOST_LOG="${invalid_transaction_log}" \
+        LINNET_TEST_EXECUTABLE="${invalid_transaction_home}/fake-Linnet" \
+        "${scripts_root}/postinstall" >/dev/null 2>&1; then
+      echo "Core postinstall accepted an invalid typed ${invalid_transaction}." >&2
+      exit 1
+    fi
+    [[ ! -e "${invalid_transaction_log}" || ! -s "${invalid_transaction_log}" ]] || {
+      echo "Core postinstall invoked Host before rejecting ${invalid_transaction}." >&2
+      exit 1
+    }
+  done
 
   rejected_postinstall_home="${test_root}/postinstall-rejected-identity/home"
   rejected_postinstall_log="${test_root}/postinstall-rejected-identity/host-invocations"
@@ -669,9 +1026,43 @@ cat >"${support_root}/Runtime/Active/activation.json" <<'JSON'
 JSON
 ln -s ../Runtime/Active/activation.json "${support_root}/State/active.json"
 quit_log="${test_root}/core-update-quit.log"
+missing_selection_document='{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":false,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"unregistered"}'
+for stale_missing_enablement in enabled disabled; do
+  stale_missing_selection_document="{\"format\":2,\"target_input_source_id\":\"io.github.ares-x.inputmethod.Linnet\",\"was_current\":false,\"post_quiescence_input_source_id\":\"com.apple.keylayout.ABC\",\"prior_enablement\":\"${stale_missing_enablement}\"}"
+  if LINNET_FAKE_SELECTION_DOCUMENT="${stale_missing_selection_document}" \
+      LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
+      "${scripts_root}/preinstall" >/dev/null 2>&1; then
+    echo "Core update accepted a missing App with stale ${stale_missing_enablement} registration." >&2
+    exit 1
+  fi
+  [[ ! -e "${support_root}/State/core-update-selection-v1.plist" ]] || {
+    echo "Core update persisted a transaction for stale missing-App registration." >&2
+    exit 1
+  }
+done
+LINNET_FAKE_SELECTION_DOCUMENT="${missing_selection_document}" \
+  LINNET_FAKE_QUIESCER_LOG="${quit_log}" \
+  HOME="${user_home}" "${scripts_root}/preinstall"
+selection_state="${support_root}/State/core-update-selection-v1.plist"
+[[ "$(/usr/bin/plutil -extract identity_transition raw -o - \
+    "${selection_state}")" == missing-app-install &&
+  "$(/usr/bin/plutil -extract prior_enablement raw -o - \
+    "${selection_state}")" == unregistered ]] || {
+  echo "Core update did not preserve missing-App repair intent." >&2
+  exit 1
+}
 if [[ "${candidate_fixture_available}" == true ]]; then
   copy_candidate_app "${user_home}"
 fi
+: >"${quit_log}"
+unregistered_current_document='{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":true,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"unregistered"}'
+if LINNET_FAKE_SELECTION_DOCUMENT="${unregistered_current_document}" \
+    LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
+    "${scripts_root}/preinstall" >/dev/null 2>&1; then
+  echo "Core update accepted an unregistered source as previously current." >&2
+  exit 1
+fi
+: >"${quit_log}"
 LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" "${scripts_root}/preinstall"
 expected_quiescence="-l JavaScript ${scripts_root}/quit-applications-clean.jxa 30 io.github.ares-x.inputmethod.Linnet io.github.ares-x.inputmethod.Linnet.settings io.github.ares-x.inputmethod.Linnet"
 [[ "$(cat "${quit_log}")" == "${expected_quiescence}" ]] || {
@@ -691,6 +1082,35 @@ selection_state="${support_root}/State/core-update-selection-v1.plist"
   echo "Core preinstall lost the pre-update selected state." >&2
   exit 1
 }
+[[ "$(/usr/bin/plutil -extract format raw -o - "${selection_state}")" == 2 &&
+  "$(/usr/bin/plutil -extract identity_transition raw -o - \
+    "${selection_state}")" == same-community-cms-leaf &&
+  "$(/usr/bin/plutil -extract prior_enablement raw -o - \
+    "${selection_state}")" == enabled &&
+  "$(/usr/bin/plutil -extract candidate_leaf_sha256 raw -o - \
+    "${selection_state}")" == "${candidate_leaf}" ]] || {
+  echo "Core preinstall did not persist the typed CMS selection transaction." >&2
+  exit 1
+}
+
+# The only admitted identity migration and each TIS state are captured before
+# payload mutation. Prove the legacy edge is typed rather than reconstructed by
+# postinstall from the new App.
+if [[ "${candidate_fixture_available}" == true ]]; then
+  configure_installed_identity "${user_home}" legacy-community-adhoc
+  legacy_selection_document='{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":false,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"disabled"}'
+  LINNET_FAKE_SELECTION_DOCUMENT="${legacy_selection_document}" \
+    LINNET_FAKE_QUIESCER_LOG="${quit_log}" \
+    HOME="${user_home}" "${scripts_root}/preinstall"
+  [[ "$(/usr/bin/plutil -extract identity_transition raw -o - \
+      "${selection_state}")" == legacy-community-adhoc-to-cms &&
+    "$(/usr/bin/plutil -extract prior_enablement raw -o - \
+      "${selection_state}")" == disabled ]] || {
+    echo "Core preinstall lost the legacy CMS migration transaction." >&2
+    exit 1
+  }
+  configure_installed_identity "${user_home}" exact-community-cms
+fi
 
 : >"${quit_log}"
 if LINNET_FAKE_QUIESCER_LOG="${quit_log}" LINNET_FAKE_QUIESCER_RESULT=refuse \
@@ -705,7 +1125,7 @@ fi
 : >"${quit_log}"
 
 if [[ "${candidate_fixture_available}" == true ]]; then
-  if [[ "${candidate_identity_format}" == 1 ]]; then
+  if [[ "${candidate_identity_format}" == 1 || "${candidate_identity_format}" == 3 ]]; then
     write_candidate_identity "${candidate_version}" "${candidate_build}" \
       "${candidate_revision}" "${wrong_leaf}"
   else
@@ -798,7 +1218,7 @@ fi
 
 # Every shipped macOS candidate has one new build identity, and the expanded
 # package verifier mirrors (rather than contradicts) each product conclusion.
-grep -Fqx 'CURRENT_PROJECT_VERSION = 28' config/LinnetProduct.xcconfig
+grep -Fqx 'CURRENT_PROJECT_VERSION = 29' config/LinnetProduct.xcconfig
 rg -Fq 'if edition == "complete" && kind == "core"' package/verify_package
 
 # The user-owned support root is a deletion trust boundary. A replaced root

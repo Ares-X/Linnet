@@ -176,7 +176,15 @@ Settings 每次打开时会从同一 GitHub 仓库读取一个经过校验的小
 
 ## 升级与卸载
 
-Linnet 0.1 系列不在后台静默安装未签名 Core/App。Settings 会检查并提醒新版本；点击 **View Core Update / 查看核心更新** 会打开同仓库对应的 Core 页面，由用户核对 SHA-256 并按 macOS 提示确认安装。正式版本页只保留完整安装包；`core-v<version>` 预发布页服务已有用户免注销更新，`data-<sequence>` 预发布页服务 Settings 的语言数据频道。两者都不会成为 Latest Release，也不会干扰首次安装下载。
+Linnet 0.1 系列不在后台静默安装未经过 Apple Developer ID 签名和公证的
+Core/App。Settings 会检查并提醒新版本；点击 **View Core Update / 查看核心更新**
+会打开同仓库对应的 Core 页面，由用户核对 SHA-256 并按 macOS 提示确认安装。
+App 内部使用长期固定的免费 CMS 身份；旧 ad-hoc 版完成一次迁移后，后续同一
+身份的 Core 更新无需再次注销或重新添加输入法。安装与更新永远不会要求发布
+Keychain 密码；若看到此类提示，应取消并向项目报告。正式
+版本页只保留完整安装包；`core-v<version>` 预发布页服务已有用户免注销更新，
+`data-<sequence>` 预发布页服务 Settings 的语言数据频道。两者都不会成为
+Latest Release，也不会干扰首次安装下载。
 
 已经完成首次安装和一次注销的用户，打开同版本 `core-v<version>` 页面，只下载：
 
@@ -263,7 +271,7 @@ no_download=1 ./action-build.sh release
 
 ## 版本、来源与许可证
 
-当前版本是 **0.1.11**（2026-08-25）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前版本是 **0.1.12**（2026-08-25）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 

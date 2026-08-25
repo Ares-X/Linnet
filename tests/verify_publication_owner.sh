@@ -139,7 +139,8 @@ fi
 for required in \
     '"${project_root}/package/verify_publication_artifacts"' \
     'git/ref/heads/main' \
-    'actions/runs' \
+    'actions/workflows/commit-ci.yml/runs' \
+    'run.fetch("path") == ".github/workflows/commit-ci.yml"' \
     'data-seed-${catalog_sequence}' \
     'release create "${tag}" "${assets[@]}"' \
     'release delete "${tag}"' \
@@ -162,16 +163,78 @@ done
 if rg -n -- '--clobber|--cleanup-tag|releases/delete' "${publisher}"; then
   fail "the publisher regained a destructive published-asset replacement path"
 fi
+if rg -n 'verify_draft_target|targetCommitish' "${publisher}"; then
+  fail "draft metadata regained authority over the exact tag ref"
+fi
+if rg -Fq 'actions/runs' "${publisher}" "${workflow}"; then
+  fail "publication regained a repository-wide same-name CI lookup"
+fi
 if rg -Fq 'repos/${repository}/commits/${requested_tag}' "${publisher}"; then
   fail "the publisher regained a branch-compatible tag identity lookup"
 fi
 rg -Fq 'actions: read' "${workflow}" ||
   fail "the release publisher cannot read exact main CI evidence"
-rg -Fq 'LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack' "${workflow}" ||
+rg -Fq 'LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack' \
+    "${workflow}" ||
   fail "the release publisher did not retain the verified pack CLI"
 if rg -Fq 'package/publish_github_release data-seed' "${workflow}"; then
   fail "the product release workflow regained the cold-build seed path"
 fi
+
+ruby -e '
+  workflow = File.read(ARGV.fetch(0))
+  publisher = File.read(ARGV.fetch(1))
+  abort if workflow.match?(/^\s*push:\s*$/)
+  abort unless workflow.scan(/^\s*make --no-print-directory archive\s*$/).size == 1
+  abort unless workflow.scan(%r{^\s*uses:\s*actions/upload-artifact@[0-9a-f]{40}(?:\s+#.*)?$}).size == 1
+  abort unless workflow.scan(%r{^\s*uses:\s*actions/download-artifact@[0-9a-f]{40}(?:\s+#.*)?$}).size == 2
+  release_path = %q{path: ${{ runner.temp }}/linnet-candidate/release}
+  abort unless workflow.scan(/^\s*#{Regexp.escape(release_path)}\s*$/).size == 3
+  abort if workflow.match?(%r{^\s*path:\s*\$\{\{ runner\.temp \}\}/linnet-candidate(?:/tools)?\s*$})
+  abort unless workflow.scan(/package\/verify_publication_artifacts/).size == 3
+  abort unless workflow.include?("build-candidate:") &&
+    workflow.include?("stage-update-channels:") &&
+    workflow.include?("publish-stable:")
+  abort unless workflow.include?("environment: community-publication")
+  abort unless workflow.scan(/artifact-ids:\s*\$\{\{ needs\.build-candidate\.outputs\.artifact_id \}\}/).size == 2
+  build = workflow[/^  build-candidate:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
+  stage = workflow[/^  stage-update-channels:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
+  public_job = workflow[/^  publish-stable:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
+  abort unless build && stage && public_job
+  ci_contract = [
+    %q{actions/workflows/commit-ci.yml/runs},
+    %q{run.fetch("name") == "Linnet commit CI"},
+    %q{run.fetch("path") == ".github/workflows/commit-ci.yml"},
+    %q{run.fetch("head_sha") == revision},
+    %q{run.fetch("head_branch") == "main"},
+    %q{run.fetch("event") == "push"},
+    %q{run.fetch("status") == "completed"},
+    %q{run.fetch("conclusion") == "success"},
+  ]
+  [build, publisher].each do |boundary|
+    abort unless ci_contract.all? { |predicate| boundary.include?(predicate) }
+  end
+  abort unless build.index("git/ref/heads/main") <
+    build.index("LINNET_COMMUNITY_CMS_P12_BASE64")
+  abort unless build.index("actions/workflows/commit-ci.yml/runs") <
+    build.index("LINNET_COMMUNITY_CMS_P12_BASE64")
+  abort unless build.include?(%q{run.fetch("path") == ".github/workflows/commit-ci.yml"})
+  abort unless build.include?(%q{rm -rf -- "${signing_root}"})
+  abort unless build.index("package/verify_publication_artifacts") <
+    build.index("actions/upload-artifact")
+  abort unless stage.include?("package/publish_github_release core") &&
+    stage.include?("package/publish_github_release data") &&
+    stage.include?("package/publish_github_release catalog")
+  abort unless public_job.include?("package/publish_github_release public")
+  [stage, public_job].each do |job|
+    abort if job.match?(/make --no-print-directory archive|LINNET_COMMUNITY_CMS|LINNET_CODE_SIGN|security import/)
+    abort unless job.scan(/xcrun swiftc/).size == 1
+    abort unless job.scan(/package\/verify_publication_artifacts/).size == 1
+    abort unless job.index("actions/download-artifact") <
+      job.index("package/verify_publication_artifacts")
+  end
+' "${workflow}" "${publisher}" ||
+  fail "the release workflow can rebuild or replace the installation candidate bytes"
 
 publication_fixture="$(mktemp -d "${TMPDIR:-/tmp}/linnet-publication-owner.XXXXXX")"
 cleanup() {
@@ -214,6 +277,7 @@ printf '%s\n' "${candidate_revision}" >"${fake_state}/main-ref"
 ruby -rjson -e '
   puts JSON.generate({"workflow_runs" => [{
     "name" => "Linnet commit CI",
+    "path" => ".github/workflows/commit-ci.yml",
     "head_sha" => ARGV.fetch(0),
     "head_branch" => "main",
     "event" => "push",
@@ -262,7 +326,7 @@ if [[ "${1:-}" == api ]]; then
     GET:repos/Ares-X/Linnet/git/ref/heads/main)
       cat "${state}/main-ref"
       ;;
-    GET:repos/Ares-X/Linnet/actions/runs)
+    GET:repos/Ares-X/Linnet/actions/workflows/commit-ci.yml/runs)
       cat "${state}/main-ci.json"
       ;;
     GET:repos/Ares-X/Linnet/commits/*)
@@ -394,8 +458,6 @@ case "${action}" in
     joined=" $* "
     if [[ "${joined}" == *" --json assets "* ]]; then
       cat "${root}/assets"
-    elif [[ "${joined}" == *" --json targetCommitish "* ]]; then
-      cat "${root}/revision"
     elif [[ "${joined}" == *" --jq "* ]]; then
       printf '%s\n' "${draft}"
     else
@@ -435,7 +497,16 @@ case "${action}" in
     done
     if [[ "${verify_tag}" == true ]]; then
       [[ -f "${state}/tags/${tag}" ]] || exit 1
-      revision=main
+      revision="$(cat "${state}/tags/${tag}")"
+    else
+      mkdir -p "${state}/tags"
+      if [[ -f "${state}/tag-create-races/${tag}" ]]; then
+        mv "${state}/tag-create-races/${tag}" "${state}/tags/${tag}"
+      fi
+      if [[ ! -f "${state}/tags/${tag}" ]]; then
+        grep -Eq '^[0-9a-f]{40}$' <<<"${revision}"
+        printf '%s\n' "${revision}" >"${state}/tags/${tag}"
+      fi
     fi
     printf '%s\n' "${revision}" >"${root}/revision"
     printf 'true %s\n' "${prerelease}" >"${root}/status"
@@ -453,11 +524,6 @@ case "${action}" in
       esac
     done
     printf 'false %s\n' "${prerelease}" >"${root}/status"
-    mkdir -p "${state}/tags"
-    if [[ ! -f "${state}/tags/${tag}" ]]; then
-      grep -Eq '^[0-9a-f]{40}$' "${root}/revision"
-      cp "${root}/revision" "${state}/tags/${tag}"
-    fi
     ;;
   delete)
     rm -rf -- "${root}"
@@ -560,7 +626,7 @@ ruby -rjson -e '
   document.fetch("workflow_runs").fetch(0)["conclusion"] = "failure"
   File.binwrite(ARGV.fetch(0), JSON.generate(document))
 ' "${fake_state}/main-ci.json"
-main_checks_before_seed="$(awk '/git\/ref\/heads\/main|actions\/runs/ { count += 1 } END { print count + 0 }' \
+main_checks_before_seed="$(awk '/git\/ref\/heads\/main|actions\/workflows\/commit-ci.yml\/runs/ { count += 1 } END { print count + 0 }' \
   "${fake_state}/calls.log")"
 seed_creates_before="$(grep -c "^release create data-${catalog_sequence} " \
   "${fake_state}/calls.log" || true)"
@@ -589,7 +655,7 @@ rm "${fake_state}/release-view-transport-error"
 printf '%s\n' "${candidate_revision}" \
   >"${fake_state}/branches/data-${catalog_sequence}"
 publish_fixture data-seed
-main_checks_after_seed="$(awk '/git\/ref\/heads\/main|actions\/runs/ { count += 1 } END { print count + 0 }' \
+main_checks_after_seed="$(awk '/git\/ref\/heads\/main|actions\/workflows\/commit-ci.yml\/runs/ { count += 1 } END { print count + 0 }' \
   "${fake_state}/calls.log")"
 [[ "${main_checks_after_seed}" == "${main_checks_before_seed}" ]] ||
   fail "the isolated data seed incorrectly depended on main publication state"
@@ -600,6 +666,25 @@ printf '%s\n' "${candidate_revision}" >"${fake_state}/main-ref"
 ruby -rjson -e '
   document = JSON.parse(File.binread(ARGV.fetch(0)))
   document.fetch("workflow_runs").fetch(0)["conclusion"] = "success"
+  File.binwrite(ARGV.fetch(0), JSON.generate(document))
+' "${fake_state}/main-ci.json"
+
+core_creates_before="$(grep -c "^release create core-v${version} " \
+  "${fake_state}/calls.log" || true)"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document.fetch("workflow_runs").fetch(0)["path"] = ".github/workflows/lookalike-ci.yml"
+  File.binwrite(ARGV.fetch(0), JSON.generate(document))
+' "${fake_state}/main-ci.json"
+if run_fixture core >"${publication_fixture}/rejected-ci-owner.log" 2>&1; then
+  fail "the publisher accepted a same-name run from another workflow"
+fi
+[[ "$(grep -c "^release create core-v${version} " \
+  "${fake_state}/calls.log" || true)" == "${core_creates_before}" ]] ||
+  fail "a foreign CI workflow authorized a Release mutation"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document.fetch("workflow_runs").fetch(0)["path"] = ".github/workflows/commit-ci.yml"
   File.binwrite(ARGV.fetch(0), JSON.generate(document))
 ' "${fake_state}/main-ci.json"
 
@@ -625,22 +710,22 @@ publish_fixture data
 cp "${fake_state}/data-${catalog_sequence}/assets" \
   "${publication_fixture}/exact-data-draft-assets"
 rm -rf -- "${fake_state}/data-${catalog_sequence}"
-rm -f -- "${fake_state}/tags/data-${catalog_sequence}"
 mkdir -p "${fake_state}/data-${catalog_sequence}"
 printf 'true true\n' >"${fake_state}/data-${catalog_sequence}/status"
-printf '%040d\n' 0 >"${fake_state}/data-${catalog_sequence}/revision"
+printf '%s\n' "${candidate_revision}" >"${fake_state}/data-${catalog_sequence}/revision"
+printf '%040d\n' 0 >"${fake_state}/tags/data-${catalog_sequence}"
 sed -n '1p' "${publication_fixture}/exact-data-draft-assets" \
   >"${fake_state}/data-${catalog_sequence}/assets"
 data_draft_deletes_before="$(grep -c "^release delete data-${catalog_sequence} " \
   "${fake_state}/calls.log" || true)"
 if run_fixture data >"${publication_fixture}/rejected-data-draft.log" 2>&1; then
-  fail "a data draft targeting another revision was replaced"
+  fail "a data draft whose tag resolves to another revision was replaced"
 fi
 [[ "$(grep -c "^release delete data-${catalog_sequence} " \
   "${fake_state}/calls.log" || true)" == "${data_draft_deletes_before}" ]] ||
   fail "a foreign data draft was deleted"
 printf '%s\n' "${candidate_revision}" \
-  >"${fake_state}/data-${catalog_sequence}/revision"
+  >"${fake_state}/tags/data-${catalog_sequence}"
 printf 'true false\n' >"${fake_state}/data-${catalog_sequence}/status"
 if run_fixture data >"${publication_fixture}/rejected-data-draft.log" 2>&1; then
   fail "a data draft with the wrong release kind was replaced"
@@ -718,22 +803,35 @@ rg -Fq "release download core-v${version} --repo Ares-X/Linnet --pattern ${core_
   fail "Catalog promotion did not verify the exact published Core asset"
 
 printf '%s\n' "${candidate_revision}" >"${fake_state}/branches/v${version}"
-require_public_fixture_rejection
 mkdir -p "${fake_state}/tags" "${fake_state}/tag-types" \
   "${fake_state}/tag-object-ids" "${fake_state}/tag-objects"
-printf '%s\n' "${candidate_revision}" >"${fake_state}/tags/v${version}"
+printf '%040d\n' 0 >"${fake_state}/tags/v${version}"
 version_tag_object="$(printf 'tag:v%s:%s' "${version}" "${candidate_revision}" | \
   shasum | awk '{print $1}')"
 printf '%s\n' tag >"${fake_state}/tag-types/v${version}"
 printf '%s\n' "${version_tag_object}" \
   >"${fake_state}/tag-object-ids/v${version}"
-printf 'commit\t%s\n' "${candidate_revision}" \
+printf 'commit\t%040d\n' 0 \
   >"${fake_state}/tag-objects/${version_tag_object}"
-git -C "${fixture_repo}" tag "v${version}" "${candidate_revision}"
-printf 'commit\t%040d\n' 0 >"${fake_state}/tag-objects/${version_tag_object}"
 require_public_fixture_rejection
-printf 'commit\t%s\n' "${candidate_revision}" \
-  >"${fake_state}/tag-objects/${version_tag_object}"
+rm "${fake_state}/tags/v${version}" \
+  "${fake_state}/tag-types/v${version}" \
+  "${fake_state}/tag-object-ids/v${version}" \
+  "${fake_state}/tag-objects/${version_tag_object}"
+printf '%040d\n' 0 >"${fake_state}/main-ref"
+require_public_fixture_rejection
+printf '%s\n' "${candidate_revision}" >"${fake_state}/main-ref"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document.fetch("workflow_runs").fetch(0)["conclusion"] = "failure"
+  File.binwrite(ARGV.fetch(0), JSON.generate(document))
+' "${fake_state}/main-ci.json"
+require_public_fixture_rejection
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document.fetch("workflow_runs").fetch(0)["conclusion"] = "success"
+  File.binwrite(ARGV.fetch(0), JSON.generate(document))
+' "${fake_state}/main-ci.json"
 
 for release_tag in "core-v${version}" "data-${catalog_sequence}"; do
   revision="${fake_state}/tags/${release_tag}"
@@ -810,10 +908,35 @@ mv "${publication_fixture}/exact-data-assets" \
 
 pointer_ref_before_public="$(cat "${fake_state}/data-channel/ref")"
 pointer_commits_before_public="$(cat "${fake_state}/data-channel/commit-count")"
+mkdir -p "${fake_state}/tag-create-races"
+wrong_public_tag_revision="$(printf 'd%.0s' {1..40})"
+printf '%s\n' "${wrong_public_tag_revision}" \
+  >"${fake_state}/tag-create-races/v${version}"
+public_edits_before_race="$(grep -c "^release edit v${version} " \
+  "${fake_state}/calls.log" || true)"
+if run_fixture public >"${publication_fixture}/rejected-public-tag-race.log" 2>&1; then
+  fail "tagless public publication accepted a concurrently created foreign tag"
+fi
+[[ -f "${fake_state}/v${version}/status" &&
+  "$(cut -d' ' -f1 "${fake_state}/v${version}/status")" == true ]] ||
+  fail "tagless public publication exposed a draft before rejecting its foreign tag"
+[[ "$(grep -c "^release edit v${version} " \
+  "${fake_state}/calls.log" || true)" == "${public_edits_before_race}" ]] ||
+  fail "tagless public publication invoked draft=false before verifying its tag"
+[[ "$(cat "${fake_state}/tags/v${version}")" == "${wrong_public_tag_revision}" ]] ||
+  fail "the tag race fixture did not retain the competing tag owner"
+rm -rf -- "${fake_state}/v${version}"
+rm -f -- "${fake_state}/tags/v${version}"
+
 publish_fixture public
-[[ "$(cat "${fake_state}/v${version}/revision")" == main &&
+[[ "$(cat "${fake_state}/v${version}/revision")" == "${candidate_revision}" &&
   "$(cat "${fake_state}/tags/v${version}")" == "${candidate_revision}" ]] ||
-  fail "public publication conflated targetCommitish with the verified version tag"
+  fail "tagless public publication did not bind its draft and tag to exact main"
+rg -Fq "release create v${version} ${fixture_assets}/Linnet.pkg" \
+    "${fake_state}/calls.log" ||
+  fail "tagless public publication did not create the verified Installer draft"
+rg -Fq -- "--target ${candidate_revision}" "${fake_state}/calls.log" ||
+  fail "tagless public publication did not create its tag from exact main"
 rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
   fail "the stable Release omitted the version change summary"
 rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
@@ -823,6 +946,8 @@ if rg -Fq -- "${adjacent_release_heading}" \
   fail "the stable Release leaked an adjacent CHANGELOG version"
 fi
 printf 'stale release notes\n' >"${fake_state}/v${version}/notes"
+public_creates_before_rerun="$(grep -c "^release create v${version} " \
+  "${fake_state}/calls.log" || true)"
 latest_edits_before="$(awk -v tag="v${version}" '
   $1 == "release" && $2 == "edit" && $3 == tag && $0 ~ / --latest( |$)/ {
     count += 1
@@ -840,7 +965,8 @@ latest_edits_after="$(awk -v tag="v${version}" '
   fail "an exact published stable Release rerun did not retain Latest"
 rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
   fail "an exact published Release did not repair stale notes"
-[[ "$(grep -c "^release create v${version} " "${fake_state}/calls.log")" == 1 ]] ||
+[[ "$(grep -c "^release create v${version} " \
+  "${fake_state}/calls.log")" == "${public_creates_before_rerun}" ]] ||
   fail "an exact published stable Release was recreated"
 [[ "$(cut -f1 "${fake_state}/v${version}/assets")" == Linnet.pkg ]] ||
   fail "the stable Release published more than the complete installer"
@@ -869,6 +995,8 @@ rg -Fq 'Status: no signature' "${verifier}" ||
   fail "the public artifact owner does not require an unsigned Installer"
 rg -Fq 'manual-user-approval' "${verifier}" ||
   fail "the public artifact owner lost the manual-trust contract"
+rg -Fq 'community CMS App' "${verifier}" ||
+  fail "the public artifact owner lost the stable App identity contract"
 
 manual_trust_docs=(
   "${repo_root}/README.md"
@@ -900,19 +1028,20 @@ ruby -e '
   abort unless all_uses.all? { |value|
     value == local_cache || value.match?(/@[0-9a-f]{40}\z/)
   }
-  abort unless workflow_uses.count(local_cache) == 2
+  abort unless workflow_uses.count(local_cache) == 1
   abort unless commit_uses.count(local_cache) == 1
   abort unless pull_request_uses.count(local_cache) == 1
   abort unless cache_uses == [pinned_cache, pinned_restore]
   abort if workflow.include?("actions/cache") || commit.include?("actions/cache") ||
     pull_request.include?("actions/cache")
   save_policy = "save: ${{ github.ref == \x27refs/heads/main\x27 }}"
-  abort unless workflow.scan(save_policy).size == 2 && commit.scan(save_policy).size == 1
+  abort unless workflow.scan(/^\s*save:\s*true\s*$/).size == 1
+  abort unless commit.scan(save_policy).size == 1
   abort unless pull_request.scan(/^\s*save:\s*false\s*$/).size == 1
   abort unless cache.include?("if: inputs.save == \x27true\x27") &&
     cache.include?("if: inputs.save == \x27false\x27")
   abort unless cache.match?(/inputs:\s*\n\s*save:.*?required:\s*true/m)
-  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
+  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 3
   abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 1
   abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 1
   abort unless workflow.scan(/^\s*group:\s*linnet-release-publication\s*$/).size == 1
@@ -931,19 +1060,18 @@ ruby -e '
     cache.include?("config/linnet-data-releases.json")
   abort if cache.match?(%r{^\s*(?:librime|plum|upstreams/[^/]+)\s*$})
   abort unless cache.include?("Restored bytes are acceleration only")
-  abort unless workflow.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 2
-  abort unless workflow.include?("make --no-print-directory archive")
+  abort unless workflow.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 1
+  abort unless workflow.scan(/^\s*make --no-print-directory archive\s*$/).size == 1
   abort if workflow.include?("./action-build.sh archive")
   abort unless workflow.include?("package/verify_publication_artifacts")
   abort unless workflow.include?("package/publish_github_release")
   abort if workflow.include?(%q{"${ARCHIVE_OUTPUT_DIR}"/*})
-  release_positions = %w[core data public].map do |channel|
+  release_positions = %w[core data catalog public].map do |channel|
     needle = "package/publish_github_release #{channel}"
     abort unless workflow.scan(needle).size == 1
     workflow.index(needle)
   end
   abort unless release_positions.each_cons(2).all? { |left, right| left < right }
-  abort if workflow.include?("package/publish_github_release catalog")
   catalog_gate = <<~'BASH'
     if [[ "${channel}" == catalog ]]; then
       ensure_catalog_pointer true
@@ -958,16 +1086,31 @@ ruby -e '
   abort unless publisher.scan(catalog_gate).size == 1
   abort unless publisher.scan(public_gate).size == 1
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
-  abort unless workflow.match?(/validate-source:\s*\n\s*if:\s*github\.event_name == ["\x27]workflow_dispatch["\x27]/)
-  abort unless workflow.match?(/publish-community:\s*\n\s*if:\s*startsWith\(github\.ref, ["\x27]refs\/tags\/["\x27]\)/)
+  abort unless workflow.match?(/build-candidate:\s*\n\s*if:\s*github\.event_name == ["\x27]workflow_dispatch["\x27] && github\.ref == ["\x27]refs\/heads\/main["\x27]/)
+  abort unless workflow.include?("environment: community-signing")
+  abort unless workflow.include?("environment: community-publication")
+  abort if workflow.match?(/^\s*push:\s*$/)
   abort unless workflow.match?(/^permissions:\s*\n\s*contents:\s*read\s*$/m)
-  abort unless workflow.match?(/publish-community:.*?contents:\s*write/m)
-  abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 2
+  abort unless workflow.match?(/stage-update-channels:.*?contents:\s*write/m)
+  abort unless workflow.match?(/publish-stable:.*?contents:\s*write/m)
+  abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 1
   abort unless commit.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort unless pull_request.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
-  abort if workflow.match?(/LINNET_CODE_SIGN|notary|Developer ID|publication_plan/)
+  %w[
+    LINNET_COMMUNITY_CMS_P12_BASE64
+    LINNET_COMMUNITY_CMS_P12_PASSWORD
+    LINNET_CODE_SIGN_KEYCHAIN
+    LINNET_CODE_SIGN_PASSWORD_FILE
+    security\ set-key-partition-list
+    security\ delete-keychain
+  ].each { |marker| abort unless workflow.include?(marker.gsub("\\ ", " ")) }
+  abort if workflow.include?("LINNET_CODE_SIGN_PROFILE")
+  abort unless workflow.include?("if: always()") &&
+    workflow.include?(%q{rm -rf -- "${signing_root}"})
+  abort if workflow.match?(/security\s+import.*(?:^|\s)-A(?:\s|$)/) ||
+    workflow.match?(/notary|Developer ID|publication_plan|community-adhoc/)
 ' "${workflow}" "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" \
     "${publisher}" ||
-  fail "tag-authorized community workflow is incomplete"
+  fail "immutable-candidate community workflow is incomplete"
 
-echo "Linnet unsigned community publication owner: PASS"
+echo "Linnet unsigned PKG / stable CMS App publication owner: PASS"

@@ -80,8 +80,8 @@ while IFS= read -r app; do archive_apps+=("${app}"); done < <(
   find "${archive_root}" -type d -name Linnet.app ! -type l)
 [[ "${#archive_apps[@]}" -eq 1 ]] ||
   fail_publication "Core package does not contain exactly one Linnet App"
-archive_identity="$("${project_root}/scripts/linnet-code-identity" verify-publication-product \
-  "${archive_apps[0]}" "${candidate_revision}")" ||
+archive_identity="$("${project_root}/scripts/linnet-code-identity" verify-product \
+  "${archive_apps[0]}")" ||
   fail_publication "Core package publication identity is invalid"
 
 for spec in "core:${core_pkg}" "complete:${complete_pkg}"; do
@@ -94,12 +94,13 @@ done
 
 ruby -rjson -e '
   identity = JSON.parse(ARGV.fetch(0))
-  abort unless identity == {
-    "format" => 2,
-    "candidate_revision" => ARGV.fetch(1),
-    "trust_model" => "unsigned-community",
-  }
+  abort unless identity.keys.sort ==
+    %w[candidate_revision format leaf_certificate_sha256 profile] &&
+    identity.fetch("format") == 4 &&
+    identity.fetch("profile") == "community-cms" &&
+    identity.fetch("candidate_revision") == ARGV.fetch(1) &&
+    identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
 ' "${archive_identity}" "${candidate_revision}" ||
   fail_publication "public artifact identity projection is invalid"
 
-echo "Linnet unsigned community channel assets: PASS (manual-user-approval)"
+echo "Linnet unsigned PKGs with community CMS App: PASS (manual-user-approval)"
