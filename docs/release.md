@@ -81,9 +81,11 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
    在临时 Keychain 中只编译、CMS 签名一次；
 2. 最终 verifier 接受精确 8 个文件后，workflow 将这 8 个文件上传为不可覆盖的
    GitHub Actions artifact，并记录 artifact ID、digest、逐文件 SHA-256 和下载链接；
-3. 维护者下载同一个 artifact，在真实账号完成旧 ad-hoc → 固定 CMS 升级和第二次
-   同 leaf Core 升级，验证不注销、输入菜单、个人数据、Shift、全拼/双拼与 Smart
-   English；此时尚未创建 Release、标签或推进 Catalog；
+3. 维护者下载同一个 artifact，在真实账号完成“两轮同 leaf Core”：先用前一已验收
+   的固定 CMS 版（首次公开后即前一公开版）升级到候选，再把同一候选的原字节重装
+   一次。两轮都须验证无注销、无
+   Keychain 密码提示、登录会话不变，并保留 enabled/selected、UserData、输入菜单、
+   Settings 和真实输入；此时尚未创建 Release、标签或推进 Catalog；
 4. 验收通过后，维护者只批准一次受保护的 `community-publication` Environment。
    `stage-update-channels` 才按该 artifact ID 下载并重验，不接触证书、不重编或重签
    产品；唯一 publisher 依次发布 Core、data，并在核对远端字节后推进 Catalog；
@@ -95,6 +97,13 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 sequence，再生成新的 artifact，不能替换旧 artifact 或已公开资产。重复执行只接受
 字节完全相同的远端状态。签名任务无论成功或失败都会恢复原 Keychain 搜索列表，
 删除临时 Keychain、P12、密码文件和目录。
+
+旧 ad-hoc → 固定 CMS 只是一条一次性的历史 Core lifecycle 验收边；唯一记录在
+`config/linnet-community-signing.json`。其中固定 leaf、bundle ID、macOS major 和
+“迁移契约指纹”共同决定该历史证据能否继续复用：任一项与当前候选失配，才必须在
+隔离的 legacy-seeded 账号或虚拟机中重做迁移；全部匹配时不得要求每个候选重复该
+迁移。该记录只闭合 legacy lifecycle edge，不能冒充当前候选的菜单、Settings、
+输入交互或完整安装 UAT；当前候选仍以步骤 3 的“两轮同 leaf Core”为发布前证据。
 
 Settings 只读取 `data-channel` 的一个稳定指针，不读取可变 Release 别名，也不
 维护第二份 Core 版本清单。仓库没有候选 Catalog 地址或自动回退路径。
@@ -109,12 +118,16 @@ Secrets 中。它们不是 Apple 开发者凭据，也不会被打包、写入�
 代码、静态产物和安装产品必须分别报告。首次 Complete 安装需验证一次注销
 后输入源可用；同一 bundle ID/path 的后续 Core 更新必须验证：Installer 返回
 `RestartAction=None`、登录会话不变、个人数据不变、输入源 enabled/selected
-意图不被覆盖，并由新 build 提供输入。旧 ad-hoc 公开版迁移到固定 CMS 身份时，
-只有原本 enabled 的用户会触发一次系统 enable 重申；同 leaf 后续更新不会重复
-enable。只有 App 与系统登记都明确缺失时才走未注册修复；App 缺失但系统仍残留
-enabled/disabled 身份会在 payload 前失败，不能猜测或覆盖用户状态。发布 Keychain
-密码永远不属于用户安装流程；首次身份迁移若由 macOS 显示输入源安全确认，它是一次
-系统授权，不是 Keychain 密码，后续同 leaf 更新不得重复触发。
+意图不被覆盖，并由新 build 提供输入。每个精确候选的“两轮同 leaf Core”必须使用
+同一不可变 artifact：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
+升级，第二轮重装候选原字节；两轮均
+不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、
+输入菜单、Settings 和真实输入。旧 ad-hoc 身份迁移的复用与失效条件只由
+`config/linnet-community-signing.json` 中的固定 leaf、bundle ID、macOS major 和
+“迁移契约指纹”决定，不是逐候选步骤。只有 App 与系统登记都明确缺失时才走未注册
+修复；App 缺失但系统仍残留 enabled/disabled 身份会在 payload 前失败，不能猜测或
+覆盖用户状态。发布 Keychain 密码永远不属于用户安装流程；历史首次身份迁移若由
+macOS 显示输入源安全确认，它是一次系统授权，不是 Keychain 密码。
 
 任何校验和、产物清单、App metadata 或安装状态不一致都应停止发布；不得用
 重新签名、手工复制 App、清缓存或降低验证门来制造通过结果。

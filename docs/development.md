@@ -264,17 +264,28 @@ PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修
 
 随后在自己的测试账户完成 clean Complete 首装：它注册并请求 enable，随后完成
 唯一一次真正的注销/登录、系统输入源添加与允许、从 macOS 输入菜单选择 Linnet
-和真实输入。旧 ad-hoc 版升级到固定 CMS 身份时，仅当来源原本 enabled 才重申
-一次 enable，以修复系统属性仍为 enabled 但菜单缺项的状态；不得 disable、重复
-register、修改私有偏好或重启系统输入服务。之后同 leaf Core 重装与升级不调用
-enable，只有来源确实缺失时才 register，并且始终不注销；preinstall 必须在
-payload 前以正常 AppKit 退出请求确认 Host/Settings 均已停止，Settings 拒绝退出、
-未保存草稿或进行中操作必须让安装 fail closed，不能强杀。还要分别证明
-enabled/disabled、selected、missing-App+unregistered repair 与用户数据均保留；
-missing App 仍有 enabled/disabled 系统身份必须在 payload 前失败。默认卸载和显式
-purge 仍需要独立验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入
-菜单的 **Settings** 打开设置；它是 `Linnet.app` 内嵌的 accessory App，不作为
-独立产品安装、不常驻 Dock，并在最后一个窗口关闭后退出。
+和真实输入。
+
+旧 ad-hoc → 固定 CMS 是一次性的历史 Core lifecycle 验收，唯一记录在
+`config/linnet-community-signing.json`。其固定 leaf、bundle ID、macOS major 和
+“迁移契约指纹”是完整失效键：任一项与当前候选失配，才在隔离的 legacy-seeded
+账号或虚拟机中重做；四项全部匹配时不得为每个候选重复迁移。该历史记录只闭合
+legacy lifecycle edge，不是当前候选菜单、Settings、真实输入或完整安装 UAT。
+
+每个精确候选仍须在同一真实账号使用 workflow 的不可变 artifact 完成
+“两轮同 leaf Core”：先从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级
+到候选，再把同一候选的原字节重装一次。两轮都要
+证明 Installer 无注销、无 Keychain 密码提示、登录会话不变，并保留
+enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移仅当
+来源原本 enabled 时重申过一次 enable；同 leaf Core 重装与升级不调用 enable，只有
+来源确实缺失时才 register。preinstall 必须在 payload 前以正常 AppKit 退出请求确认
+Host/Settings 均已停止，Settings 拒绝退出、未保存草稿或进行中操作必须让安装 fail
+closed，不能强杀。还要分别证明 enabled/disabled、selected、
+missing-App+unregistered repair 与用户数据均保留；missing App 仍有
+enabled/disabled 系统身份必须在 payload 前失败。默认卸载和显式 purge 仍需要独立
+验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**
+打开设置；它是 `Linnet.app` 内嵌的 accessory App，不作为独立产品安装、不常驻
+Dock，并在最后一个窗口关闭后退出。
 
 安装器、系统设置、授权提示、输入菜单、菜单栏状态、真实候选和 Settings 的教程截图都必须来自同一冻结候选完成的这次安装 UAT。可以保留品牌图，但不能用 mock、其他 revision、局部测试窗口或另一台机器的提示冒充当前步骤；未实际出现的提示不写成已观察事实。
 

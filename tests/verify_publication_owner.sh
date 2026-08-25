@@ -66,6 +66,137 @@ if rg -n '\b[0-9]+\.[0-9]+\.[0-9]+\b' "${repo_root}/docs/release.md"; then
   fail "the release guide hard-coded a product version"
 fi
 
+signing_contract="${repo_root}/config/linnet-community-signing.json"
+product_contract="${repo_root}/config/LinnetProduct.xcconfig"
+if ! ruby -rjson -rdigest -ropen3 -rtime - "${repo_root}" "${signing_contract}" \
+    "${product_contract}" "${policy_docs[@]}" <<'RUBY'
+root, signing_path, product_path, *policy_paths = ARGV
+document = JSON.parse(File.binread(signing_path))
+abort unless document.keys.sort ==
+  %w[certificate_sha1 certificate_sha256 format legacy_migration_acceptance profile]
+abort unless document.fetch("format") == 2 &&
+  document.fetch("profile") == "community-cms"
+sha1 = document.fetch("certificate_sha1")
+sha256 = document.fetch("certificate_sha256")
+abort unless sha1.match?(/\A[0-9A-F]{40}\z/) && sha256.match?(/\A[0-9a-f]{64}\z/)
+
+acceptance = document.fetch("legacy_migration_acceptance")
+abort unless acceptance.keys.sort ==
+  %w[contract core_package format runtime scope source_revision target]
+source_revision = acceptance.fetch("source_revision")
+abort unless acceptance.fetch("format") == 1 &&
+  acceptance.fetch("scope") == "core-installer-lifecycle" &&
+  source_revision.match?(/\A[0-9a-f]{40}\z/)
+_, object_status = Open3.capture2e(
+  "git", "-C", root, "cat-file", "-e", "#{source_revision}^{commit}")
+_, ancestor_status = Open3.capture2e(
+  "git", "-C", root, "merge-base", "--is-ancestor", source_revision, "HEAD")
+abort unless object_status.success? && ancestor_status.success?
+
+artifact = acceptance.fetch("core_package")
+abort unless artifact.keys.sort == %w[build name sha256 size version]
+abort unless artifact.fetch("version").match?(/\A\d+\.\d+\.\d+\z/) &&
+  artifact.fetch("build").match?(/\A[1-9]\d*\z/) &&
+  artifact.fetch("name") ==
+    "Linnet-#{artifact.fetch("version")}-arm64-Core-community-beta.pkg" &&
+  artifact.fetch("sha256").match?(/\A[0-9a-f]{64}\z/) &&
+  artifact.fetch("size").is_a?(Integer) && artifact.fetch("size").positive?
+historical_product, historical_product_status = Open3.capture2(
+  "git", "-C", root, "show", "#{source_revision}:config/LinnetProduct.xcconfig")
+abort unless historical_product_status.success? &&
+  historical_product[/^MARKETING_VERSION = (\S+)$/, 1] == artifact.fetch("version") &&
+  historical_product[/^CURRENT_PROJECT_VERSION = (\S+)$/, 1] == artifact.fetch("build") &&
+  historical_product[/^LINNET_BUNDLE_IDENTIFIER = (\S+)$/, 1] ==
+    acceptance.fetch("target").fetch("bundle_identifier")
+
+target = acceptance.fetch("target")
+abort unless target.keys.sort == %w[bundle_identifier certificate_sha256]
+product = File.read(product_path)
+bundle_identifier = product[/^LINNET_BUNDLE_IDENTIFIER = (\S+)$/, 1]
+abort unless target.fetch("bundle_identifier") == bundle_identifier &&
+  target.fetch("certificate_sha256") == sha256
+historical_signing_text, historical_signing_status = Open3.capture2(
+  "git", "-C", root, "show", "#{source_revision}:config/linnet-community-signing.json")
+abort unless historical_signing_status.success?
+historical_signing = JSON.parse(historical_signing_text)
+abort unless historical_signing.fetch("certificate_sha256") ==
+  target.fetch("certificate_sha256")
+
+contract = acceptance.fetch("contract")
+abort unless contract.keys.sort == %w[algorithm paths sha256]
+abort unless contract.fetch("algorithm") == "sha256-git-mode-content-path-v1"
+expected_paths = %w[
+  package/Distribution-Core.xml
+  package/core-installer-scripts/preinstall
+  package/installer-scripts/candidate-app-identity.sh
+  package/installer-scripts/postinstall
+  package/installer-scripts/quit-applications-clean.jxa
+  sources/InputSource.swift
+  sources/Main.swift
+]
+paths = contract.fetch("paths")
+abort unless paths == expected_paths && paths == paths.sort && paths.uniq == paths
+entries = paths.map do |path|
+  absolute = File.join(root, path)
+  abort unless File.file?(absolute) && !File.symlink?(absolute)
+  index, status = Open3.capture2("git", "-C", root, "ls-files", "-s", "--", path)
+  abort unless status.success?
+  match = index.match(/\A(\d{6}) [0-9a-f]{40,64} 0\t/)
+  abort unless match
+  "#{match[1]}\t#{Digest::SHA256.file(absolute).hexdigest}\t#{path}\n"
+end
+historical_entries = paths.map do |path|
+  tree, tree_status = Open3.capture2(
+    "git", "-C", root, "ls-tree", source_revision, "--", path)
+  match = tree.match(/\A(\d{6}) blob [0-9a-f]{40,64}\t/)
+  content, content_status = Open3.capture2(
+    "git", "-C", root, "show", "#{source_revision}:#{path}")
+  abort unless tree_status.success? && content_status.success? && match
+  "#{match[1]}\t#{Digest::SHA256.hexdigest(content)}\t#{path}\n"
+end
+contract_sha256 = contract.fetch("sha256")
+abort unless contract_sha256.match?(/\A[0-9a-f]{64}\z/) &&
+  Digest::SHA256.hexdigest(entries.join) == contract_sha256 &&
+  Digest::SHA256.hexdigest(historical_entries.join) == contract_sha256
+
+runtime = acceptance.fetch("runtime")
+abort unless runtime.keys.sort == %w[
+  architecture initial_enable_reassertions initial_install_time
+  initial_transition installer_authorization login_session_preserved macos_major
+  same_artifact_reinstall_enable_reassertions same_artifact_reinstall_time
+]
+abort unless runtime.fetch("architecture") == "arm64" &&
+  runtime.fetch("macos_major").is_a?(Integer) && runtime.fetch("macos_major").positive? &&
+  runtime.fetch("installer_authorization") == "none" &&
+  runtime.fetch("login_session_preserved") == true &&
+  runtime.fetch("initial_transition") == "legacy-community-adhoc-to-cms" &&
+  runtime.fetch("initial_enable_reassertions") == 1 &&
+  runtime.fetch("same_artifact_reinstall_enable_reassertions") == 0
+%w[initial_install_time same_artifact_reinstall_time].each do |field|
+  abort unless runtime.fetch(field).match?(/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\z/)
+end
+abort unless Time.iso8601(runtime.fetch("same_artifact_reinstall_time")) >
+  Time.iso8601(runtime.fetch("initial_install_time"))
+
+policy_paths.each do |path|
+  text = File.read(path)
+  abort unless text.include?("config/linnet-community-signing.json") &&
+    text.include?("迁移契约指纹") && text.include?("两轮同 leaf Core")
+end
+release = File.read(policy_paths.find { |path| path.end_with?("release.md") })
+abort if release.include?("完成旧 ad-hoc → 固定 CMS 升级和第二次同 leaf Core 升级")
+abort unless release.include?("首次公开后即前一公开版")
+product_acceptance = File.read(
+  policy_paths.find { |path| path.end_with?("product-acceptance.md") })
+abort unless product_acceptance.match?(
+  /previous public build after the first\s+publication/)
+development = File.read(policy_paths.find { |path| path.end_with?("development.md") })
+abort unless development.include?("首次公开后即前一公开版")
+RUBY
+then
+  fail "the durable legacy-to-CMS migration acceptance contract is invalid"
+fi
+
 if printf '%s\n' config/LinnetProduct.xcconfig |
     "${repo_root}/package/data_release_metadata" check-source-change \
       >/dev/null 2>&1; then

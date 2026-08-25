@@ -2118,12 +2118,13 @@ fi
 ruby -rjson -e '
   identity = JSON.parse(File.binread(ARGV.fetch(0)))
   abort unless identity.keys.sort ==
-    %w[certificate_sha1 certificate_sha256 format profile] &&
-    identity.fetch("format") == 1 && identity.fetch("profile") == "community-cms" &&
+    %w[certificate_sha1 certificate_sha256 format legacy_migration_acceptance profile] &&
+    identity.fetch("format") == 2 && identity.fetch("profile") == "community-cms" &&
     identity.fetch("certificate_sha1").match?(/\A[0-9A-F]{40}\z/) &&
-    identity.fetch("certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
+    identity.fetch("certificate_sha256").match?(/\A[0-9a-f]{64}\z/) &&
+    identity.fetch("legacy_migration_acceptance").is_a?(Hash)
 ' config/linnet-community-signing.json ||
-  fail "the fixed community CMS leaf owner is invalid"
+  fail "the fixed community CMS leaf and migration-acceptance owner is invalid"
 ruby -e '
   delegate = File.read("sources/SquirrelApplicationDelegate.swift") +
     File.read("sources/SquirrelApplicationPresentation.swift")

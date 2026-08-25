@@ -1,6 +1,46 @@
 {
-  "format": 1,
+  "format": 2,
   "profile": "community-cms",
   "certificate_sha1": "4C02E173F033E384C5F99DC78F75DCB68C585E32",
-  "certificate_sha256": "8e5e1668860c8f3ebc659cce091a96bc67359f2b09946af80f8c97c9cb542a71"
+  "certificate_sha256": "8e5e1668860c8f3ebc659cce091a96bc67359f2b09946af80f8c97c9cb542a71",
+  "legacy_migration_acceptance": {
+    "format": 1,
+    "scope": "core-installer-lifecycle",
+    "source_revision": "ab12f20cefd6aa5b372fe22ba5f1c705778c8890",
+    "core_package": {
+      "name": "Linnet-0.1.12-arm64-Core-community-beta.pkg",
+      "version": "0.1.12",
+      "build": "29",
+      "size": 2628497,
+      "sha256": "5392993fb6a70152aa5996c3f894853ed539d816e65a28278433c1c391a21ec1"
+    },
+    "target": {
+      "bundle_identifier": "io.github.ares-x.inputmethod.Linnet",
+      "certificate_sha256": "8e5e1668860c8f3ebc659cce091a96bc67359f2b09946af80f8c97c9cb542a71"
+    },
+    "contract": {
+      "algorithm": "sha256-git-mode-content-path-v1",
+      "paths": [
+        "package/Distribution-Core.xml",
+        "package/core-installer-scripts/preinstall",
+        "package/installer-scripts/candidate-app-identity.sh",
+        "package/installer-scripts/postinstall",
+        "package/installer-scripts/quit-applications-clean.jxa",
+        "sources/InputSource.swift",
+        "sources/Main.swift"
+      ],
+      "sha256": "3b8e56b334295c65e5bf9d0316b9ef619dcc9ef817e6514c8141f5d2b873c916"
+    },
+    "runtime": {
+      "architecture": "arm64",
+      "macos_major": 26,
+      "installer_authorization": "none",
+      "login_session_preserved": true,
+      "initial_transition": "legacy-community-adhoc-to-cms",
+      "initial_enable_reassertions": 1,
+      "initial_install_time": "2026-08-25T17:58:04+08:00",
+      "same_artifact_reinstall_enable_reassertions": 0,
+      "same_artifact_reinstall_time": "2026-08-25T18:15:52+08:00"
+    }
+  }
 }

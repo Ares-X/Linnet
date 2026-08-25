@@ -73,9 +73,10 @@ community_certificate_contract() {
   ruby -rjson -e '
     document = JSON.parse(File.binread(ARGV.fetch(0)))
     abort unless document.keys.sort ==
-      %w[certificate_sha1 certificate_sha256 format profile]
-    abort unless document.fetch("format") == 1 &&
-      document.fetch("profile") == "community-cms"
+      %w[certificate_sha1 certificate_sha256 format legacy_migration_acceptance profile]
+    abort unless document.fetch("format") == 2 &&
+      document.fetch("profile") == "community-cms" &&
+      document.fetch("legacy_migration_acceptance").is_a?(Hash)
     sha1 = document.fetch("certificate_sha1")
     sha256 = document.fetch("certificate_sha256")
     abort unless sha1.match?(/\A[0-9A-F]{40}\z/) &&
