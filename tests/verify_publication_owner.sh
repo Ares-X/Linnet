@@ -1170,8 +1170,8 @@ ruby -e '
   abort unless commit_uses.count(local_cache) == 1
   abort unless pull_request_uses.count(local_cache) == 1
   abort unless commit_uses.count(local_windows) == 1
-  abort if workflow_uses.include?(local_windows) ||
-    pull_request_uses.include?(local_windows) || windows_uses.include?(local_windows)
+  abort unless pull_request_uses.count(local_windows) == 1
+  abort if workflow_uses.include?(local_windows) || windows_uses.include?(local_windows)
   abort unless cache_uses == [pinned_cache, pinned_restore]
   abort if workflow.include?("actions/cache") || commit.include?("actions/cache") ||
     pull_request.include?("actions/cache")
@@ -1237,6 +1237,7 @@ ruby -e '
   abort unless workflow.include?("actions/workflows/commit-ci.yml/runs") &&
     workflow.include?(%q{run.fetch("path") == ".github/workflows/commit-ci.yml"})
   abort unless commit.match?(/^  windows:\n    needs: build\n    uses: \.\/\.github\/workflows\/windows-build\.yml$/m)
+  abort unless pull_request.match?(/^  windows:\n    needs: build\n    uses: \.\/\.github\/workflows\/windows-build\.yml$/m)
   abort unless windows.match?(/^permissions:\n  contents: read$/m)
   abort unless windows.include?("Upload private Windows engineering candidate")
   abort unless windows.include?(%q{name: Linnet-Windows-${{ github.sha }}})
