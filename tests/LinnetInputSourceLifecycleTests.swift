@@ -43,12 +43,54 @@ private func expectRestore(
   }
 }
 
+private func expectRegistrationRequirement(
+  _ expected: Bool,
+  inputSourceCount: Int,
+  _ label: String
+) {
+  do {
+    let actual = try SquirrelInstaller.registrationRequired(
+      inputSourceCount: inputSourceCount,
+      identifier: SquirrelApp.bundleIdentifier)
+    guard actual == expected else {
+      fputs("LinnetInputSourceLifecycleTests: \(label); got \(actual)\n", stderr)
+      exit(1)
+    }
+  } catch {
+    fputs("LinnetInputSourceLifecycleTests: \(label); unexpected \(error)\n", stderr)
+    exit(1)
+  }
+}
+
+private func expectDuplicateRegistrationRejected() {
+  do {
+    _ = try SquirrelInstaller.registrationRequired(
+      inputSourceCount: 2,
+      identifier: SquirrelApp.bundleIdentifier)
+    fputs("LinnetInputSourceLifecycleTests: duplicate registration was accepted\n", stderr)
+    exit(1)
+  } catch SquirrelInstaller.Failure.inputSourceCountMismatch(let identifier, let count) {
+    guard identifier == SquirrelApp.bundleIdentifier, count == 2 else {
+      fputs("LinnetInputSourceLifecycleTests: wrong duplicate registration failure\n", stderr)
+      exit(1)
+    }
+  } catch {
+    fputs("LinnetInputSourceLifecycleTests: wrong duplicate registration error\n", stderr)
+    exit(1)
+  }
+}
+
 @main
 struct LinnetInputSourceLifecycleTests {
   static func main() {
     let fallback = "com.apple.keylayout.ABC"
     let unicodeHex = "com.apple.keylayout.UnicodeHexInput"
     let hallelujah = "github.dongyuwei.inputmethod.hallelujahInputMethod"
+    expectRegistrationRequirement(true, inputSourceCount: 0,
+      "did not register a genuinely missing input source")
+    expectRegistrationRequirement(false, inputSourceCount: 1,
+      "re-registered an existing Core input source")
+    expectDuplicateRegistrationRejected()
     expectDesired(SquirrelApp.bundleIdentifier,
       wasCurrent: true, fallback: fallback,
       currentBefore: fallback, currentAfter: fallback,

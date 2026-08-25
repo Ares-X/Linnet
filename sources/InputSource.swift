@@ -54,15 +54,34 @@ final class SquirrelInstaller {
   }
 
   func register() throws {
+    let identifier = SquirrelApp.bundleIdentifier
+    let existingSources = inputSources(identifier: identifier)
+    guard try Self.registrationRequired(
+      inputSourceCount: existingSources.count,
+      identifier: identifier)
+    else {
+      print("Input source is already registered: \(identifier)")
+      return
+    }
     let status = TISRegisterInputSource(SquirrelApp.appDir as CFURL)
     guard status == noErr else { throw Failure.registrationFailed(status) }
-    // Registration mutates a macOS-owned cache.  Its OSStatus alone does not
-    // prove that the product identity is now usable or unique, so close this
-    // external boundary with the same exact-one owner used by every later
-    // lifecycle action.  This is validation only; Core updates still preserve
-    // both enabled and selected state.
-    _ = try inputSource(identifier: SquirrelApp.bundleIdentifier)
+    // Registration mutates macOS-owned input-menu state. Existing Core updates
+    // preserve the exact TIS identity above; only a genuinely missing source
+    // crosses this repair boundary. Its OSStatus alone does not prove that the
+    // identity is now usable or unique, so resolve it exactly once afterward.
+    _ = try inputSource(identifier: identifier)
     print("Registered input source from \(SquirrelApp.appDir)")
+  }
+
+  static func registrationRequired(
+    inputSourceCount: Int,
+    identifier: String
+  ) throws -> Bool {
+    switch inputSourceCount {
+    case 0: true
+    case 1: false
+    default: throw Failure.inputSourceCountMismatch(identifier, inputSourceCount)
+    }
   }
 
   func enable() throws {
@@ -185,16 +204,20 @@ final class SquirrelInstaller {
   }
 
   private func inputSource(identifier: String) throws -> TISInputSource {
-    let sourceList = TISCreateInputSourceList(nil, true).takeRetainedValue()
-      as! [TISInputSource]
-    let matches = sourceList.filter { source in
-      let sourceIDRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceID)
-      return unsafeBitCast(sourceIDRef, to: CFString?.self) as String? == identifier
-    }
+    let matches = inputSources(identifier: identifier)
     guard matches.count == 1, let source = matches.first else {
       throw Failure.inputSourceCountMismatch(identifier, matches.count)
     }
     return source
+  }
+
+  private func inputSources(identifier: String) -> [TISInputSource] {
+    let sourceList = TISCreateInputSourceList(nil, true).takeRetainedValue()
+      as! [TISInputSource]
+    return sourceList.filter { source in
+      let sourceIDRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceID)
+      return unsafeBitCast(sourceIDRef, to: CFString?.self) as String? == identifier
+    }
   }
 
   private func enableSource(identifier: String) throws {
