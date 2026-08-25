@@ -26,10 +26,11 @@
         "package/installer-scripts/candidate-app-identity.sh",
         "package/installer-scripts/postinstall",
         "package/installer-scripts/quit-applications-clean.jxa",
+        "resources/Info.plist",
         "sources/InputSource.swift",
         "sources/Main.swift"
       ],
-      "sha256": "3b8e56b334295c65e5bf9d0316b9ef619dcc9ef817e6514c8141f5d2b873c916"
+      "sha256": "4777a2105398c20e7671153abc2bb275f59fe6eae45afc3eb71d4ca7305a53e7"
     },
     "runtime": {
       "architecture": "arm64",

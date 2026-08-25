@@ -94,8 +94,8 @@ for repertoire_info in resources/Info.plist "${info}"; do
 done
 [[ "$(plutil -extract tsInputMethodIconFileKey raw -o - "${info}")" == linnet.pdf ]]
 connection_name="$(plutil -extract InputMethodConnectionName raw -o - "${info}")"
-[[ "${connection_name}" == "${bundle_identifier}.Connection" ]] || {
-  echo "verify_product: IMK connection must match the system bundle connection" >&2
+[[ "${connection_name}" == "${bundle_identifier}_Connection" ]] || {
+  echo "verify_product: IMK connection must match the registered bundle endpoint" >&2
   exit 1
 }
 for retired in ComponentInputModeDict PrimaryInputModeIdentifier; do

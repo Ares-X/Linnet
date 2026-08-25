@@ -131,6 +131,7 @@ expected_paths = %w[
   package/installer-scripts/candidate-app-identity.sh
   package/installer-scripts/postinstall
   package/installer-scripts/quit-applications-clean.jxa
+  resources/Info.plist
   sources/InputSource.swift
   sources/Main.swift
 ]

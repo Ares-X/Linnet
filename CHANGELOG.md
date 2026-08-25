@@ -8,7 +8,7 @@ README、文档、CI、构建及发布脚本调整不属于版本更新。继承
 
 ### 输入源稳定性
 
-- 统一 Linnet Host 与 macOS InputMethodKit 使用的连接名，消除同一输入源的连接身份分歧。
+- 恢复与 macOS InputMethodKit 已注册 endpoint 一致的 `BundleID_Connection` 连接名，修复点击状态栏中的 Linnet 后无法切换输入源的问题。
 
 ## 0.1.12 — 2026-08-25
 
