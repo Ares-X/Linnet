@@ -45,6 +45,7 @@ Linnet 复用 Squirrel、librime、万象、RIME-LMDG、rime-ice 与 Hallelujah 
 | 原始 ASCII | `A` | 代码、密码、终端和任何不希望被转换的文本 |
 
 独立轻按左 Shift 或右 Shift，在中文与 Smart English 之间切换；Caps Lock 进入或退出原始 ASCII。组合键、Shift 加字母以及长按 Shift 都不会误触发模式切换。
+若切换前仍有未上位的拼音或英文，Linnet 会先原样提交这些字母，不会替用户选择中文候选或英文补全。
 
 ![Linnet 中文、Smart English 与原始 ASCII 三种输入状态的真实光标提示](resources/readme/input-modes.png)
 
@@ -54,7 +55,7 @@ _由当前 `SquirrelPanel` / `SquirrelView` 生成的真实光标旁状态提示
 
 Linnet 首次使用默认全拼，也可以在 Settings 中选择自然码、小鹤、微软、搜狗、智能 ABC、紫光或拼音加加。八种方案共享中文词库与学习数据，切换方案不需要重新建立个人词频。
 
-中文候选支持横排或竖排、每页 3/5/7/9 项以及滚动或临时展开浏览。数字键、鼠标、方向键和 `[` / `]`、`-` / `=` 翻页遵循候选窗口的实际状态；没有可翻页面时，符号仍按原样输入。
+中文候选支持横排或竖排、每页 3/5/7/9 项以及滚动或临时展开浏览。数字键可直接选择候选，鼠标、方向键、Page Up / Page Down 与候选窗按钮负责浏览；逗号、句号等遵循中英文标点状态，`/`、`+`、`=` 等普通运算符直接交给当前应用。
 
 常用辅助入口包括：
 
@@ -175,7 +176,15 @@ Settings 每次打开时会从同一 GitHub 仓库读取一个经过校验的小
 
 ## 升级与卸载
 
-Linnet 0.1 系列不在后台静默安装未签名 Core/App。Settings 会检查并提醒新版本；点击 **View Core Update / 查看核心更新** 会打开同仓库对应的 Core 页面，由用户核对 SHA-256 并按 macOS 提示确认安装。正式版本页只保留完整安装包；`core-v<version>` 预发布页服务已有用户免注销更新，`data-<sequence>` 预发布页服务 Settings 的语言数据频道。两者都不会成为 Latest Release，也不会干扰首次安装下载。
+Linnet 0.1 系列不在后台静默安装未经过 Apple Developer ID 签名和公证的
+Core/App。Settings 会检查并提醒新版本；点击 **View Core Update / 查看核心更新**
+会打开同仓库对应的 Core 页面，由用户核对 SHA-256 并按 macOS 提示确认安装。
+App 内部使用长期固定的免费 CMS 身份；旧 ad-hoc 版完成一次迁移后，后续同一
+身份的 Core 更新无需再次注销或重新添加输入法。安装与更新永远不会要求发布
+Keychain 密码；若看到此类提示，应取消并向项目报告。正式
+版本页只保留完整安装包；`core-v<version>` 预发布页服务已有用户免注销更新，
+`data-<sequence>` 预发布页服务 Settings 的语言数据频道。两者都不会成为
+Latest Release，也不会干扰首次安装下载。
 
 已经完成首次安装和一次注销的用户，打开同版本 `core-v<version>` 页面，只下载：
 
@@ -262,7 +271,7 @@ no_download=1 ./action-build.sh release
 
 ## 版本、来源与许可证
 
-当前版本是 **0.1.7**（2026-08-23）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前版本是 **0.1.13**（2026-08-25）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 

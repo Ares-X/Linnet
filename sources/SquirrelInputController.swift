@@ -8,116 +8,85 @@
 import InputMethodKit
 
 final class SquirrelInputController: IMKInputController {
-  private static let keyRollOver = 50
-  private static var unknownAppCount: UInt = 0
+  static let keyRollOver = 50
+  static var unknownAppCount: UInt = 0
 
-  struct CandidateItem: Equatable {
-    let absoluteIndex: Int
-    let page: Int
-    let indexOnPage: Int
-    let text: String
-    let comment: String
-    let selectionLabel: String?
-  }
-
-  struct CandidateSnapshot: Equatable {
-    let items: [CandidateItem]
-    let currentPage: Int
-    let pageSize: Int
-    let highlightedItemIndex: Int
-    let isLastPage: Bool
-    let canExpand: Bool
-    let isExpanded: Bool
-  }
-
-  private weak var client: IMKTextInput?
-  private let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
+  weak var client: IMKTextInput?
+  let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
   private var preedit: String = ""
   private var selRange: NSRange = .empty
   private var caretPos: Int = 0
-  private var lastModifiers: NSEvent.ModifierFlags = .init()
-  private var session: RimeSessionId = 0
-  private var schemaId: String = ""
+  private var modifierTransitions = SquirrelModifierTransitionState(hardwareFlags: [])
+  private var activationToken: LinnetInputActivationRegistry.Token?
+  var readyActivationToken: LinnetInputActivationRegistry.Token?
+  var sessionLease: LinnetRimeSessionLease?
+  var session: RimeSessionId { sessionLease?.identifier ?? 0 }
+  private var inputModeIdentity: LinnetCandidatePresentation.InputModeIdentity?
   private var inlinePreedit = false
   private var inlineCandidate = false
   // for chord-typing
-  private var chordKeyCodes: [UInt32] = .init(repeating: 0, count: SquirrelInputController.keyRollOver)
-  private var chordModifiers: [UInt32] = .init(repeating: 0, count: SquirrelInputController.keyRollOver)
-  private var chordKeyCount: Int = 0
-  private var chordTimer: Timer?
-  private var chordDuration: TimeInterval = 0
-  private var currentApp: String = ""
+  var chordKeyCodes: [UInt32] = .init(repeating: 0, count: SquirrelInputController.keyRollOver)
+  var chordModifiers: [UInt32] = .init(repeating: 0, count: SquirrelInputController.keyRollOver)
+  var chordKeyCount: Int = 0
+  var chordTimer: Timer?
+  var chordDuration: TimeInterval = 0
+  var currentApp: String = ""
 
-  // swiftlint:disable:next cyclomatic_complexity
+  // InputMethodKit ingress; stateful decisions remain in their typed owners.
   override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
-    guard let event = event else { return false }
+    guard let event,
+      let senderClient = sender as? IMKTextInput,
+      let inputToken = activeInputToken,
+      inputActivationIsCurrent(inputToken, client: senderClient)
+    else { return false }
     // A Settings data transaction can keep this controller alive after
     // cleanup_all_sessions + finalize. Pass input through until Host has
     // initialized a fresh runtime; a stale session ID is never queried.
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else { return false }
     let modifiers = event.modifierFlags
-    let changes = lastModifiers.symmetricDifference(modifiers)
 
-    // Return true to indicate the the key input was received and dealt with.
-    // Key processing will not continue in that case.  In other words the
-    // system will not deliver a key down event to the application.
-    // Returning false means the original key down will be passed on to the client.
-    var handled = false
+    if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
+      handleCompositionMouseDown(
+        event: event,
+        client: senderClient,
+        activationToken: inputToken)
+      return false
+    }
 
-    self.client ?= sender as? IMKTextInput
-    guard ensureSession() else { return false }
+    guard ensureReadySession(for: inputToken),
+      inputActivationIsCurrent(inputToken, client: senderClient)
+    else { return false }
 
     if let app = client?.bundleIdentifier(), currentApp != app {
       currentApp = app
       updateAppOptions()
     }
+    return dispatchReadyEvent(
+      event,
+      modifiers: modifiers,
+      activationToken: inputToken)
+  }
+
+  /// Dispatches an event only after the active client and Rime lease have been
+  /// validated by `handle`. It owns no activation or recovery fallback.
+  private func dispatchReadyEvent(
+    _ event: NSEvent,
+    modifiers: NSEvent.ModifierFlags,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
     switch event.type {
     case .flagsChanged:
-      if lastModifiers == modifiers {
-        handled = true
-        break
+      for transition in modifierTransitions.transitions(
+        keyCode: event.keyCode,
+        modifiers: modifiers
+      ) {
+        _ = processKey(
+          transition.keycode,
+          modifiers: transition.modifiers,
+          activationToken: activationToken)
       }
-      // print("[DEBUG] FLAGSCHANGED client: \(sender ?? "nil"), modifiers: \(modifiers)")
-      var rimeModifiers: UInt32 = SquirrelKeycode.osxModifiersToRime(modifiers: modifiers)
-      // Match current Squirrel: some remote tools publish flagsChanged with a
-      // non-modifier keyCode, so derive the changed modifier at this boundary.
-      var keyCode = event.keyCode
-      if !SquirrelKeycode.modifierKeycodes.contains(keyCode) {
-        guard let inferred = SquirrelKeycode.inferModifierKeycode(from: changes) else {
-          lastModifiers = modifiers
-          rimeUpdate()
-          handled = true
-          break
-        }
-        keyCode = inferred
-      }
-      let rimeKeycode: UInt32 = SquirrelKeycode.osxKeycodeToRime(
-        keycode: keyCode, keychar: nil, shift: false, caps: false)
-
-      if changes.contains(.capsLock) {
-        // NOTE: rime assumes XK_Caps_Lock to be sent before modifier changes,
-        // while NSFlagsChanged event has the flag changed already.
-        // so it is necessary to revert kLockMask.
-        rimeModifiers ^= kLockMask.rawValue
-        _ = processKey(rimeKeycode, modifiers: rimeModifiers)
-      }
-
-      // Need to process release before modifier down. Because
-      // sometimes release event is delayed to next modifier keydown.
-      var buffer = [(keycode: UInt32, modifier: UInt32)]()
-      for flag in [NSEvent.ModifierFlags.shift, .control, .option, .command] where changes.contains(flag) {
-        if modifiers.contains(flag) { // New modifier
-          buffer.append((keycode: rimeKeycode, modifier: rimeModifiers))
-        } else { // Release
-          buffer.insert((keycode: rimeKeycode, modifier: rimeModifiers | kReleaseMask.rawValue), at: 0)
-        }
-      }
-      for (keycode, modifier) in buffer {
-        _ = processKey(keycode, modifiers: modifier)
-      }
-
-      lastModifiers = modifiers
       rimeUpdate()
+      return false
 
     case .keyDown:
       let keyCode = event.keyCode
@@ -127,8 +96,6 @@ final class SquirrelInputController: IMKInputController {
          (capitalModifiers && !code.isLetter) || (!capitalModifiers && !code.isASCII) {
         keyChars = event.characters
       }
-      // print("[DEBUG] KEYDOWN client: \(sender ?? "nil"), modifiers: \(modifiers), keyCode: \(keyCode), keyChars: [\(keyChars ?? "empty")]")
-
       // translate osx keyevents to rime keyevents; special physical keys do
       // not require a client-provided character payload.
       let rimeKeycode = SquirrelKeycode.osxKeycodeToRime(
@@ -136,153 +103,122 @@ final class SquirrelInputController: IMKInputController {
         shift: modifiers.contains(.shift), caps: modifiers.contains(.capsLock))
       if rimeKeycode != UInt32(XK_VoidSymbol) {
         let rimeModifiers = SquirrelKeycode.osxModifiersToRime(modifiers: modifiers)
-        handled = processKey(rimeKeycode, modifiers: rimeModifiers)
+        let handled = processKey(
+          rimeKeycode,
+          modifiers: rimeModifiers,
+          activationToken: activationToken)
         rimeUpdate()
+        return handled
       }
+      return false
 
     default:
-      break
+      return false
     }
-
-    return handled
-  }
-
-  func selectCandidate(absoluteIndex: Int) -> Bool {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
-      session != 0,
-      absoluteIndex >= 0
-    else { return false }
-    let success = rimeAPI.select_candidate(session, absoluteIndex)
-    if success {
-      rimeUpdate()
-    }
-    return success
-  }
-
-  /// Rebuilds the current candidate snapshot after a panel-only interaction,
-  /// such as expanding or collapsing disclosure. It never edits Rime input.
-  func refreshCandidatePresentation() {
-    rimeUpdate()
-  }
-
-  // swiftlint:disable:next identifier_name
-  func page(up: Bool) -> Bool {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return false }
-    var handled = false
-    handled = rimeAPI.change_page(session, up)
-    if handled {
-      rimeUpdate()
-    }
-    return handled
-  }
-
-  func moveCaret(forward: Bool) -> Bool {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return false }
-    let currentCaretPos = rimeAPI.get_caret_pos(session)
-    guard let input = rimeAPI.get_input(session) else { return false }
-    if forward {
-      if currentCaretPos <= 0 {
-        return false
-      }
-      rimeAPI.set_caret_pos(session, currentCaretPos - 1)
-    } else {
-      let inputStr = String(cString: input)
-      if currentCaretPos >= inputStr.utf8.count {
-        return false
-      }
-      rimeAPI.set_caret_pos(session, currentCaretPos + 1)
-    }
-    rimeUpdate()
-    return true
   }
 
   override func recognizedEvents(_ sender: Any!) -> Int {
-    // print("[DEBUG] recognizedEvents:")
-    return Int(NSEvent.EventTypeMask.Element(arrayLiteral: .keyDown, .flagsChanged).rawValue)
+    return Int(NSEvent.EventTypeMask.Element(
+      arrayLiteral: .keyDown, .flagsChanged,
+      .leftMouseDown, .rightMouseDown, .otherMouseDown).rawValue)
   }
 
-  /// Starts a controller modifier epoch from persistent hardware state.
-  /// Momentary flags belong to the prior activation or Rime session generation
-  /// and must not suppress the first real transition in the new epoch.
-  func resetModifierEpoch() {
-    lastModifiers = SquirrelKeycode.activationModifierBaseline(
-      from: CGEventSource.flagsState(.combinedSessionState))
-  }
-
-  var hasPendingRimeInput: Bool {
-    guard session != 0, rimeAPI.find_session(session), let input = rimeAPI.get_input(session)
+  override func mouseDown(
+    onCharacterIndex index: Int,
+    coordinate point: NSPoint,
+    withModifier flags: Int,
+    continueTracking keepTracking: UnsafeMutablePointer<ObjCBool>!,
+    client sender: Any!
+  ) -> Bool {
+    keepTracking?.pointee = false
+    guard let inputToken = activeInputToken,
+      let targetClient = sender as? IMKTextInput,
+      inputActivationIsCurrent(inputToken, client: targetClient)
     else { return false }
-    return input.pointee != 0
-  }
-
-  /// Rime's upstream synchronization owns session cleanup. Retire this
-  /// controller's stale generation before that maintenance boundary.
-  func prepareForRimeMaintenance() {
-    session = 0
-    preedit = ""
-    clearChord()
-    hidePalettes()
+    commitCompositionIfClickIsOutside(
+      characterIndex: index,
+      client: targetClient,
+      activationToken: inputToken)
+    // The click still belongs to the host application; committing composition
+    // must never swallow its caret/selection action.
+    return false
   }
 
   override func activateServer(_ sender: Any!) {
-    self.client ?= sender as? IMKTextInput
+    guard let activatingClient = sender as? IMKTextInput,
+      let activationToken = NSApp.squirrelAppDelegate.beginInputActivation(
+        controller: self, client: activatingClient)
+    else { return }
+    self.activationToken = activationToken
+    readyActivationToken = nil
+    inputModeIdentity = nil
+    client = activatingClient
+    // This callback precedes the first event even when Rime is temporarily
+    // suspended. Rebasing during recovery from the first flagsChanged event
+    // would sample post-event hardware and swallow that Shift/Caps gesture.
+    resetModifierEpoch()
     if let panel = NSApp.squirrelAppDelegate.panel {
-      panel.inputController = self
+      panel.bind(controller: self, activationToken: activationToken)
       panel.updateAppearance(client: client as? NSObjectProtocol)
     }
-    // Activation itself has no flagsChanged event. Reset even while the Host
-    // is suspended: this controller can remain active when runtime recovery
-    // reopens the input gate without another activation callback.
-    resetModifierEpoch()
+    guard inputActivationIsCurrent(activationToken) else { return }
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
+      retireSessionLease()
       return
     }
-    guard ensureSession() else { return }
-    // print("[DEBUG] activateServer:")
-    var keyboardLayout = NSApp.squirrelAppDelegate.config?.getString("keyboard_layout") ?? ""
-    if keyboardLayout == "last" || keyboardLayout == "" {
-      keyboardLayout = ""
-    } else if keyboardLayout == "default" {
-      keyboardLayout = "com.apple.keylayout.ABC"
-    } else if !keyboardLayout.hasPrefix("com.apple.keylayout.") {
-      keyboardLayout = "com.apple.keylayout.\(keyboardLayout)"
+    guard ensureReadySession(for: activationToken) else { return }
+    let configuredLayout = NSApp.squirrelAppDelegate.config?.getString("keyboard_layout")
+    if let keyboardLayout = LinnetInputActivationPolicy.keyboardLayoutName(
+      configured: configuredLayout) {
+      activatingClient.overrideKeyboard(withKeyboardNamed: keyboardLayout)
     }
-    if keyboardLayout != "" {
-      client?.overrideKeyboard(withKeyboardNamed: keyboardLayout)
-    }
+    guard inputActivationIsCurrent(activationToken) else { return }
     preedit = ""
     // Establish the silent activation baseline before any user gesture. The
     // next schema change is then real interaction feedback, not discovery.
     rimeUpdate()
-    NSApp.squirrelAppDelegate.inputSourceDidActivate(session: session)
+    guard inputActivationIsCurrent(activationToken) else { return }
+    NSApp.squirrelAppDelegate.inputSourceDidActivate(
+      activationToken: activationToken,
+      session: session)
   }
 
   override init!(server: IMKServer!, delegate: Any!, client: Any!) {
     self.client = client as? IMKTextInput
-    // print("[DEBUG] initWithServer: \(server ?? .init()) delegate: \(delegate ?? "nil") client:\(client ?? "nil")")
     super.init(server: server, delegate: delegate, client: client)
     createSession()
   }
 
   override func deactivateServer(_ sender: Any!) {
-    // print("[DEBUG] deactivateServer: \(sender ?? "nil")")
-    hidePalettes()
-    let panel = NSApp.squirrelAppDelegate.panel
-    if panel?.inputController === self {
-      panel?.inputController = nil
-      panel?.updateAppearance(client: nil)
+    guard let deactivatingClient = sender as? IMKTextInput else { return }
+    NSApp.squirrelAppDelegate.finishInputActivation(
+      controller: self, client: deactivatingClient)
+  }
+
+  func activationDidClose(
+    _ token: LinnetInputActivationRegistry.Token,
+    client closingClient: IMKTextInput?
+  ) {
+    guard activationToken == token else { return }
+    activationToken = nil
+    readyActivationToken = nil
+    inputModeIdentity = nil
+    clearChord()
+    NSApp.squirrelAppDelegate.panel?.unbind(
+      controller: self, activationToken: token)
+    commitRawComposition(to: closingClient)
+    // insertText can synchronously re-enter activateServer for a new client.
+    // The retiring generation must not clear that replacement client.
+    if activationToken == nil {
+      client = nil
     }
-    commitComposition(sender)
-    if !NSApp.squirrelAppDelegate.canAcceptRimeInput {
-      session = 0
-      clearChord()
-    }
-    client = nil
   }
 
   override func hidePalettes() {
-    NSApp.squirrelAppDelegate.panel?.hide()
+    if let activationToken {
+      NSApp.squirrelAppDelegate.panel?.hide(
+        controller: self, activationToken: activationToken)
+    }
     super.hidePalettes()
   }
 
@@ -297,22 +233,23 @@ final class SquirrelInputController: IMKInputController {
    to clean up if that is necessary.
    */
   override func commitComposition(_ sender: Any!) {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
-      clearChord()
-      return
-    }
-    self.client ?= sender as? IMKTextInput
-    // print("[DEBUG] commitComposition: \(sender ?? "nil")")
-    if session != 0 {
-      if let input = rimeAPI.get_input(session) {
-        let pendingInput = String(cString: input)
-        if !pendingInput.isEmpty {
-          commit(string: pendingInput)
-        }
-        rimeAPI.clear_composition(session)
-      }
-    }
+    guard let inputToken = activeInputToken,
+      let targetClient = sender as? IMKTextInput,
+      inputActivationIsCurrent(inputToken, client: targetClient)
+    else { return }
+    commitActiveComposition(
+      to: targetClient,
+      activationToken: inputToken)
+  }
+
+  func commitCurrentComposition() {
+    guard let inputToken = activeInputToken,
+      let targetClient = client,
+      inputActivationIsCurrent(inputToken, client: targetClient)
+    else { return }
+    commitActiveComposition(
+      to: targetClient,
+      activationToken: inputToken)
   }
 
   override func menu() -> NSMenu! {
@@ -325,352 +262,282 @@ final class SquirrelInputController: IMKInputController {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    NSApp.squirrelAppDelegate.finishInputActivation(token: activationToken)
     destroySession()
   }
 }
 
-private extension SquirrelInputController {
-
-  func onChordTimer(_: Timer) {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
-      clearChord()
-      return
-    }
-    // chord release triggered by timer
-    var processedKeys = false
-    if chordKeyCount > 0 && session != 0 {
-      // simulate key-ups
-      for i in 0..<chordKeyCount {
-        let handled = rimeAPI.process_key(session, Int32(chordKeyCodes[i]), Int32(chordModifiers[i] | kReleaseMask.rawValue))
-        if handled {
-          processedKeys = true
-        }
-      }
-    }
-    clearChord()
-    if processedKeys {
-      rimeUpdate()
-    }
-  }
-
-  func updateChord(keycode: UInt32, modifiers: UInt32) {
-    // print("[DEBUG] update chord: {\(chordKeyCodes)} << \(keycode)")
-    for i in 0..<chordKeyCount where chordKeyCodes[i] == keycode {
-      return
-    }
-    if chordKeyCount >= Self.keyRollOver {
-      // you are cheating. only one human typist (fingers <= 10) is supported.
-      return
-    }
-    chordKeyCodes[chordKeyCount] = keycode
-    chordModifiers[chordKeyCount] = modifiers
-    chordKeyCount += 1
-    // reset timer
-    if let timer = chordTimer, timer.isValid {
-      timer.invalidate()
-    }
-    chordDuration = 0.1
-    if let duration = NSApp.squirrelAppDelegate.config?.getDouble("chord_duration"), duration > 0 {
-      chordDuration = duration
-    }
-    chordTimer = Timer.scheduledTimer(withTimeInterval: chordDuration, repeats: false, block: onChordTimer)
-  }
-
-  func clearChord() {
-    chordKeyCount = 0
-    if let timer = chordTimer {
-      if timer.isValid {
-        timer.invalidate()
-      }
-      chordTimer = nil
-    }
-  }
-
-  func createSession() {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
-      return
-    }
-    let app = client?.bundleIdentifier() ?? {
-      Self.unknownAppCount &+= 1
-      return "UnknownApp\(Self.unknownAppCount)"
-    }()
-    print("createSession: \(app)")
-    currentApp = app
-    session = rimeAPI.create_session()
-    schemaId = ""
-
-    if session != 0 {
-      updateAppOptions()
-    }
-  }
-
-  /// Keeps one live librime generation behind every InputMethodKit callback.
-  /// Configuration reload invalidates all engine sessions while controllers
-  /// survive, so activation and the first key must share this recovery owner.
-  func ensureSession() -> Bool {
-    if session != 0, rimeAPI.find_session(session) { return true }
-    createSession()
-    return session != 0
-  }
-
-  func updateAppOptions() {
-    guard session != 0, !currentApp.isEmpty else { return }
-    for (key, value) in NSApp.squirrelAppDelegate.config?.getAppOptions(currentApp) ?? [:] {
-      print("set app option: \(key) = \(value)")
-      rimeAPI.set_option(session, key, value)
-    }
-  }
-
-  func destroySession() {
-    defer { clearChord() }
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      session = 0
-      return
-    }
-    // print("[DEBUG] destroySession:")
-    if session != 0 {
-      _ = rimeAPI.destroy_session(session)
-      session = 0
-    }
-  }
-
-  func processKey(_ rimeKeycode: UInt32, modifiers rimeModifiers: UInt32) -> Bool {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return false }
-
-    if let shortcut = printablePagingKey(rimeKeycode),
-      (rimeModifiers & ~kLockMask.rawValue) == 0,
-      let action = printablePagingAction(shortcut) {
-      return rimeAPI.change_page(
-        session,
-        action == .pageUp)
-    }
-
-    // with linear candidate list, arrow keys may behave differently.
-    if let panel = NSApp.squirrelAppDelegate.panel {
-      if panel.linear != rimeAPI.get_option(session, "_linear") {
-        rimeAPI.set_option(session, "_linear", panel.linear)
-      }
-      // with vertical text, arrow keys may behave differently.
-      if panel.vertical != rimeAPI.get_option(session, "_vertical") {
-        rimeAPI.set_option(session, "_vertical", panel.vertical)
-      }
-    }
-
-    let handled = rimeAPI.process_key(session, Int32(rimeKeycode), Int32(rimeModifiers))
-    // print("[DEBUG] rime_keycode: \(rimeKeycode), rime_modifiers: \(rimeModifiers), handled = \(handled)")
-
-    // TODO add special key event postprocessing here
-
-    if !handled {
-      let isVimBackInCommandMode = rimeKeycode == XK_Escape || ((rimeModifiers & kControlMask.rawValue != 0) && (rimeKeycode == XK_c || rimeKeycode == XK_C || rimeKeycode == XK_bracketleft))
-      if isVimBackInCommandMode && rimeAPI.get_option(session, "vim_mode") &&
-          !rimeAPI.get_option(session, "ascii_mode") {
-        rimeAPI.set_option(session, "ascii_mode", true)
-        // print("[DEBUG] turned Chinese mode off in vim-like editor's command mode")
-      }
-    } else {
-      let isChordingKey = switch Int32(rimeKeycode) {
-      case XK_space...XK_asciitilde, XK_Control_L, XK_Control_R, XK_Alt_L, XK_Alt_R, XK_Shift_L, XK_Shift_R:
-        true
-      default:
-        false
-      }
-      if isChordingKey && rimeAPI.get_option(session, "_chord_typing") {
-        updateChord(keycode: rimeKeycode, modifiers: rimeModifiers)
-      } else if (rimeModifiers & kReleaseMask.rawValue) == 0 {
-        // non-chording key pressed
-        clearChord()
-      }
-    }
-
-    return handled
-  }
-
-  private func printablePagingKey(
-    _ rimeKeycode: UInt32
-  ) -> LinnetCandidatePresentation.PrintablePagingKey? {
-    switch Int32(rimeKeycode) {
-    case XK_minus: .minus
-    case XK_equal: .equal
-    case XK_bracketleft: .leftBracket
-    case XK_bracketright: .rightBracket
-    default: nil
-    }
-  }
-
-  private func printablePagingAction(
-    _ shortcut: LinnetCandidatePresentation.PrintablePagingKey
-  ) -> LinnetCandidatePresentation.CandidateControlAction? {
-    var context = RimeContext_stdbool.rimeStructInit()
-    guard rimeAPI.get_context(session, &context) else { return nil }
-    defer { _ = rimeAPI.free_context(&context) }
-    guard let page = Int(exactly: context.menu.page_no),
-      let candidateCount = Int(exactly: context.menu.num_candidates)
+extension SquirrelInputController {
+  var activeInputToken: LinnetInputActivationRegistry.Token? {
+    guard let activationToken, inputActivationIsCurrent(activationToken)
     else { return nil }
-    return LinnetCandidatePresentation.printablePagingAction(
-      key: shortcut,
-      hasModifiers: false,
-      hasActiveInput: context.composition.length > 0,
-      currentPage: page,
-      isLastPage: context.menu.is_last_page,
-      candidateCount: candidateCount)
+    return activationToken
   }
 
-  func rimeConsumeCommittedText() {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else { return }
+  func inputActivationIsCurrent(
+    _ token: LinnetInputActivationRegistry.Token,
+    client expectedClient: IMKTextInput? = nil
+  ) -> Bool {
+    let registry = NSApp.squirrelAppDelegate.inputActivationRegistry
+    if let expectedClient {
+      return registry.isCurrent(
+        token, controller: self, client: expectedClient)
+    }
+    return registry.isCurrent(token, controller: self)
+  }
+
+  func currentSessionLease(
+    matching expectedSession: RimeSessionId,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> LinnetRimeSessionLease? {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
+      inputActivationIsCurrent(activationToken),
+      let sessionLease,
+      sessionLease.identifier == expectedSession,
+      sessionLease.isCurrent(sessionExists: { rimeAPI.find_session($0) })
+    else { return nil }
+    return sessionLease
+  }
+
+  func ownsCurrentSession(
+    _ expectedLease: LinnetRimeSessionLease,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    NSApp.squirrelAppDelegate.canAcceptRimeInput &&
+      inputActivationIsCurrent(activationToken) &&
+      sessionLease == expectedLease &&
+      expectedLease.isCurrent(sessionExists: { rimeAPI.find_session($0) })
+  }
+
+  private func handleCompositionMouseDown(
+    event: NSEvent,
+    client targetClient: IMKTextInput,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    let screenPoint = event.window?.convertPoint(
+      toScreen: event.locationInWindow) ?? event.locationInWindow
+    var insideMarkedRange = ObjCBool(false)
+    let index = targetClient.characterIndex(
+      for: screenPoint,
+      tracking: kIMKNearestBoundaryMode,
+      inMarkedRange: &insideMarkedRange)
+    guard inputActivationIsCurrent(activationToken, client: targetClient)
+    else { return }
+    commitCompositionIfClickIsOutside(
+      characterIndex: index,
+      spatiallyInsideMarkedRange: insideMarkedRange.boolValue,
+      client: targetClient,
+      activationToken: activationToken)
+  }
+
+  private func commitCompositionIfClickIsOutside(
+    characterIndex: Int,
+    spatiallyInsideMarkedRange: Bool? = nil,
+    client targetClient: IMKTextInput,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    let markedRange = targetClient.markedRange()
+    guard inputActivationIsCurrent(activationToken, client: targetClient),
+      LinnetInputActivationPolicy.shouldCommitCompositionForClick(
+        characterIndex: characterIndex,
+        markedRange: markedRange,
+        spatiallyInsideMarkedRange: spatiallyInsideMarkedRange)
+    else { return }
+    commitActiveComposition(
+      to: targetClient,
+      activationToken: activationToken)
+  }
+
+  /// Starts a controller modifier epoch from persistent hardware state.
+  /// Momentary flags belong to the prior activation or Rime session generation
+  /// and must not suppress the first real transition in the new epoch.
+  func resetModifierEpoch() {
+    modifierTransitions.reset(
+      from: CGEventSource.flagsState(.combinedSessionState))
+  }
+
+  /// Reconciles only the ASCII mode previously owned by physical Caps Lock.
+  /// App-specific or schema-specific ASCII choices remain authoritative when
+  /// Caps Lock is off.
+  func synchronizeCapsLockBaseline() {
+    guard sessionIsCurrent() else { return }
+    let property = LinnetInputActivationPolicy.capsLockOwnershipProperty
+    var ownershipValue = [CChar](repeating: 0, count: 2)
+    let previouslyOwned = property.withCString { propertyName in
+      ownershipValue.withUnsafeMutableBufferPointer { buffer in
+        rimeAPI.get_property(
+          session, propertyName, buffer.baseAddress, buffer.count)
+      }
+    }
+    let hardwareFlags = CGEventSource.flagsState(.combinedSessionState)
+    let baseline = LinnetInputActivationPolicy.capsLockBaseline(
+      capsLockActive: hardwareFlags.contains(.maskAlphaShift),
+      previouslyOwnedAsciiMode: previouslyOwned)
+    if let asciiMode = baseline.asciiMode,
+      rimeAPI.get_option(session, "ascii_mode") != asciiMode {
+      rimeAPI.set_option(session, "ascii_mode", asciiMode)
+    }
+    guard previouslyOwned || baseline.ownsAsciiMode else { return }
+    property.withCString { propertyName in
+      (baseline.ownsAsciiMode ? "1" : "").withCString { value in
+        rimeAPI.set_property(session, propertyName, value)
+      }
+    }
+  }
+
+  /// Applies the recovered session's schema-dependent presentation before the
+  /// triggering event, without reporting recovery itself as a mode switch.
+  func synchronizeRecoveredInputMode(
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard sessionIsCurrent() else { return false }
+    var status = RimeStatus_stdbool.rimeStructInit()
+    guard rimeAPI.get_status(session, &status) else { return false }
+    defer { _ = rimeAPI.free_status(&status) }
+    guard let schemaID = status.schema_id.map({ String(cString: $0) }),
+      !schemaID.isEmpty
+    else { return false }
+    let currentIdentity = LinnetCandidatePresentation.InputModeIdentity(
+      schemaID: schemaID,
+      asciiMode: status.is_ascii_mode)
+    return applyInputModeIdentity(
+      currentIdentity,
+      activationToken: activationToken,
+      announcesTransition: false) != nil
+  }
+
+  /// Owns both the live mode identity and every schema-dependent presentation
+  /// projection. Callers choose only whether this real state transition should
+  /// be announced; they never reimplement schema setup.
+  func applyInputModeIdentity(
+    _ currentIdentity: LinnetCandidatePresentation.InputModeIdentity,
+    activationToken: LinnetInputActivationRegistry.Token,
+    announcesTransition: Bool
+  ) -> Bool? {
+    let previousIdentity = inputModeIdentity
+    let modeLabel = announcesTransition
+      ? LinnetCandidatePresentation.inputModeTransitionLabel(
+        previous: previousIdentity,
+        current: currentIdentity)
+      : nil
+    let schemaChanged = previousIdentity?.schemaID != currentIdentity.schemaID
+    inputModeIdentity = currentIdentity
+    if schemaChanged {
+      NSApp.squirrelAppDelegate.loadSettings(for: currentIdentity.schemaID)
+      guard inputActivationIsCurrent(activationToken) else { return nil }
+      if let panel = NSApp.squirrelAppDelegate.panel {
+        inlinePreedit =
+          (panel.inlinePreedit && !rimeAPI.get_option(session, "no_inline")) ||
+          rimeAPI.get_option(session, "inline")
+        inlineCandidate =
+          panel.inlineCandidate && !rimeAPI.get_option(session, "no_inline")
+        rimeAPI.set_option(session, "soft_cursor", !inlinePreedit)
+      }
+    }
+    if let modeLabel, let panel = NSApp.squirrelAppDelegate.panel {
+      panel.updateStatus(
+        long: modeLabel,
+        short: modeLabel,
+        activationToken: activationToken)
+    }
+    return modeLabel != nil
+  }
+
+  var hasPendingRimeInput: Bool {
+    guard activeInputToken != nil,
+      sessionIsCurrent(), let input = rimeAPI.get_input(session)
+    else { return false }
+    return input.pointee != 0
+  }
+
+  /// Touches only the current lease immediately before librime reaps orphaned
+  /// sessions. It never creates a session or changes composition state.
+  func refreshSessionLeaseForStaleCleanup() {
+    guard activeInputToken != nil else { return }
+    _ = sessionIsCurrent()
+  }
+
+  /// Rime's upstream synchronization owns session cleanup. Retire this
+  /// controller's stale generation before that maintenance boundary.
+  func prepareForRimeMaintenance() {
+    retireSessionLease()
+    preedit = ""
+    clearChord()
+    hidePalettes()
+  }
+}
+
+extension SquirrelInputController {
+
+  private func rimeConsumeCommittedText(to targetClient: IMKTextInput?) {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else { return }
     var commitText = RimeCommit.rimeStructInit()
     if rimeAPI.get_commit(session, &commitText) {
       if let text = commitText.text {
-        commit(string: String(cString: text))
+        commit(string: String(cString: text), to: targetClient)
       }
       _ = rimeAPI.free_commit(&commitText)
     }
   }
 
-  func candidateSnapshot(
-    context: RimeContext_stdbool,
-    labels: [String],
-    expansionRequested: Bool
-  ) -> CandidateSnapshot? {
-    guard let menuPage = LinnetCandidatePresentation.candidateMenuPage(
-      currentPage: context.menu.page_no,
-      pageSize: context.menu.page_size,
-      candidateCount: context.menu.num_candidates,
-      highlighted: context.menu.highlighted_candidate_index)
-    else { return nil }
-    guard menuPage.pageSize > 0 else {
-      return CandidateSnapshot(
-        items: [],
-        currentPage: 0,
-        pageSize: 0,
-        highlightedItemIndex: 0,
-        isLastPage: true,
-        canExpand: false,
-        isExpanded: false)
+  private func commitRawComposition(to targetClient: IMKTextInput?) {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
+      retireSessionLease()
+      clearChord()
+      return
     }
-    let currentPage = menuPage.currentPage
-    let pageSize = menuPage.pageSize
-    let currentCount = menuPage.candidateCount
-    let highlightedOnPage = menuPage.highlighted
-    guard let expandedBounds = LinnetCandidatePresentation.expandedCandidateRange(
-      page: currentPage, pageSize: pageSize)
-    else { return nil }
-
-    let hasActiveInput = context.composition.length > 0
-    let pageStart = expandedBounds.lowerBound
-    var compactItems = [CandidateItem]()
-    compactItems.reserveCapacity(currentCount)
-    for indexOnPage in 0..<currentCount {
-      let candidate = context.menu.candidates[indexOnPage]
-      compactItems.append(CandidateItem(
-        absoluteIndex: pageStart + indexOnPage,
-        page: currentPage,
-        indexOnPage: indexOnPage,
-        text: candidate.text.map { String(cString: $0) } ?? "",
-        comment: candidate.comment.map { String(cString: $0) } ?? "",
-        selectionLabel: hasActiveInput
-          ? candidateSelectionLabel(at: indexOnPage, labels: labels) : nil
-      ))
-    }
-    let compactHighlighted = min(highlightedOnPage, max(0, compactItems.count - 1))
-    let compact = CandidateSnapshot(
-      items: compactItems,
-      currentPage: currentPage,
-      pageSize: pageSize,
-      highlightedItemIndex: compactHighlighted,
-      isLastPage: context.menu.is_last_page,
-      canExpand: !context.menu.is_last_page,
-      isExpanded: false)
-    guard expansionRequested,
-      let iteratorStart = Int32(exactly: expandedBounds.lowerBound)
-    else { return compact }
-
-    var iterator = RimeCandidateListIterator()
-    guard rimeAPI.candidate_list_from_index(session, &iterator, iteratorStart) else {
-      return compact
-    }
-    defer { rimeAPI.candidate_list_end(&iterator) }
-
-    var expandedItems = [CandidateItem]()
-    expandedItems.reserveCapacity(expandedBounds.count)
-    while expandedItems.count < expandedBounds.count,
-      rimeAPI.candidate_list_next(&iterator) {
-      let absoluteIndex = Int(iterator.index)
-      guard expandedBounds.contains(absoluteIndex) else { break }
-      let page = absoluteIndex / pageSize
-      let indexOnPage = absoluteIndex % pageSize
-      expandedItems.append(CandidateItem(
-        absoluteIndex: absoluteIndex,
-        page: page,
-        indexOnPage: indexOnPage,
-        text: iterator.candidate.text.map { String(cString: $0) } ?? "",
-        comment: iterator.candidate.comment.map { String(cString: $0) } ?? "",
-        selectionLabel: page == currentPage && hasActiveInput
-          ? candidateSelectionLabel(at: indexOnPage, labels: labels) : nil
-      ))
-    }
-    let highlightedAbsolute = pageStart + highlightedOnPage
-    guard !expandedItems.isEmpty,
-      let expandedHighlighted = expandedItems.firstIndex(where: {
-        $0.absoluteIndex == highlightedAbsolute
-      })
-    else { return compact }
-    return CandidateSnapshot(
-      items: expandedItems,
-      currentPage: currentPage,
-      pageSize: pageSize,
-      highlightedItemIndex: expandedHighlighted,
-      isLastPage: context.menu.is_last_page,
-      canExpand: !context.menu.is_last_page,
-      isExpanded: true)
+    guard sessionIsCurrent() else { return }
+    _ = rimeAPI.commit_raw_input(session)
+    rimeConsumeCommittedText(to: targetClient)
   }
 
-  func candidateSelectionLabel(at index: Int, labels: [String]) -> String {
-    if labels.count > 1, labels.indices.contains(index) {
-      return labels[index]
-    }
-    if let customLabels = labels.first, labels.count == 1,
-      index >= 0, index < customLabels.count {
-      return String(customLabels[customLabels.index(customLabels.startIndex, offsetBy: index)])
-    }
-    return String(index + 1)
+  /// The single active-session exit. Rime owns raw-input semantics; after a
+  /// client callback, the originating activation must still be current before
+  /// its candidate or passive prediction panel may be hidden.
+  private func commitActiveComposition(
+    to targetClient: IMKTextInput,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    guard inputActivationIsCurrent(activationToken, client: targetClient)
+    else { return }
+    clearChord()
+    commitRawComposition(to: targetClient)
+    guard inputActivationIsCurrent(activationToken, client: targetClient)
+    else { return }
+    NSApp.squirrelAppDelegate.panel?.hide(
+      controller: self,
+      activationToken: activationToken)
   }
 
   // swiftlint:disable:next cyclomatic_complexity
   func rimeUpdate() {
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, session != 0 else {
-      session = 0
+    guard let updateToken = activeInputToken else { return }
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else {
+      retireSessionLease()
       clearChord()
       hidePalettes()
       return
     }
-    // print("[DEBUG] rimeUpdate")
-    rimeConsumeCommittedText()
+    rimeConsumeCommittedText(to: client)
+    guard inputActivationIsCurrent(updateToken) else { return }
 
     var presentsModeTransition = false
     var status = RimeStatus_stdbool.rimeStructInit()
     if rimeAPI.get_status(session, &status) {
       let liveSchemaID = status.schema_id.map { String(cString: $0) }
-      // enable schema specific ui style
-      if let liveSchemaID, schemaId == "" || schemaId != liveSchemaID {
-        let modeLabel = LinnetCandidatePresentation.inputModeTransitionLabel(
-          previousSchemaID: schemaId.isEmpty ? nil : schemaId,
-          currentSchemaID: liveSchemaID)
-        schemaId = liveSchemaID
-        NSApp.squirrelAppDelegate.loadSettings(for: schemaId)
-        // inline preedit
-        if let panel = NSApp.squirrelAppDelegate.panel {
-          inlinePreedit = (panel.inlinePreedit && !rimeAPI.get_option(session, "no_inline")) || rimeAPI.get_option(session, "inline")
-          inlineCandidate = panel.inlineCandidate && !rimeAPI.get_option(session, "no_inline")
-          // if not inline, embed soft cursor in preedit string
-          rimeAPI.set_option(session, "soft_cursor", !inlinePreedit)
+      if let liveSchemaID {
+        let currentIdentity = LinnetCandidatePresentation.InputModeIdentity(
+          schemaID: liveSchemaID,
+          asciiMode: status.is_ascii_mode)
+        guard let transition = applyInputModeIdentity(
+          currentIdentity,
+          activationToken: updateToken,
+          announcesTransition: true)
+        else {
+          _ = rimeAPI.free_status(&status)
+          return
         }
-        if let modeLabel, let panel = NSApp.squirrelAppDelegate.panel {
-          presentsModeTransition = true
-          panel.updateStatus(long: modeLabel, short: modeLabel)
-        }
+        presentsModeTransition = transition
       }
       _ = rimeAPI.free_status(&status)
     }
@@ -700,35 +567,12 @@ private extension SquirrelInputController {
         var candidatePreview = ctx.commit_text_preview.map { String(cString: $0) } ?? ""
         let committedPreviewEndUTF8Offset = candidatePreview.utf8.count
         if inlinePreedit {
-          // 左移光標後的情形：
-          // preedit:             ^已選某些字[xiang zuo yi dong]|guangbiao$
-          // commit_text_preview: ^已選某些字向左移動$
-          // candidate_preview:   ^已選某些字[向左移動]|guangbiao$
-          // 繼續翻頁至指定更短字詞的情形：
-          // preedit:             ^已選某些字[xiang zuo]yidong|guangbiao$
-          // commit_text_preview: ^已選某些字向左yidong$
-          // candidate_preview:   ^已選某些字[向左]yidong|guangbiao$
-          // 光標移至當前段落最左端的情形：
-          // preedit:             ^已選某些字|[xiang zuo yi dong guang biao]$
-          // commit_text_preview: ^已選某些字向左移動光標$
-          // candidate_preview:   ^已選某些字|[向左移動光標]$
-          // 討論：
-          // preedit 與 commit_text_preview 中“已選某些字”部分一致
-          // 因此，選中範圍即正在翻譯的碼段“向左移動”中，兩者的 start 值一致
-          // 光標位置的範圍是 start ..= endOfCandidatePreview
+          // The selected prefix is shared by preedit and commit preview; keep
+          // the untranslated suffix that follows a caret moved into the code.
           if caretPos >= end && caretPos < preedit.endIndex {
-            // 從 preedit 截取光標後未翻譯的編碼“guangbiao”
             candidatePreview += preedit[caretPos...]
           }
         } else {
-          // 翻頁至指定更短字詞的情形：
-          // preedit:             ^已選某些字[xiang zuo]yidong|guangbiao$
-          // commit_text_preview: ^已選某些字向左yidongguangbiao$
-          // candidate_preview:   ^已選某些字[向左???]|$
-          // 光標移至當前段落最左端，繼續翻頁至指定更短字詞的情形：
-          // preedit:             ^已選某些字|[xiang zuo]yidongguangbiao$
-          // commit_text_preview: ^已選某些字向左yidongguangbiao$
-          // candidate_preview:   ^已選某些字|[向左]???$
           // FIXME: add librime APIs to support preview candidate without remaining code.
         }
         guard let previewGeometry = LinnetPreeditGeometry.resolveCandidatePreview(
@@ -746,19 +590,45 @@ private extension SquirrelInputController {
         // prefix and resolves fresh indices in the final preview string.
         let start = previewGeometry.selectionStart
         let caretPos = previewGeometry.cursor
-        show(preedit: candidatePreview,
-             selRange: NSRange(location: start.utf16Offset(in: candidatePreview),
-                               length: candidatePreview.utf16.distance(from: start, to: candidatePreview.endIndex)),
-             caretPos: caretPos.utf16Offset(in: candidatePreview))
+        guard show(
+          preedit: candidatePreview,
+          selRange: NSRange(
+            location: start.utf16Offset(in: candidatePreview),
+            length: candidatePreview.utf16.distance(
+              from: start, to: candidatePreview.endIndex)),
+          caretPos: caretPos.utf16Offset(in: candidatePreview),
+          activationToken: updateToken)
+        else {
+          _ = rimeAPI.free_context(&ctx)
+          return
+        }
       } else {
         if inlinePreedit {
-          show(preedit: preedit, selRange: NSRange(location: start.utf16Offset(in: preedit), length: preedit.utf16.distance(from: start, to: end)), caretPos: caretPos.utf16Offset(in: preedit))
+          guard show(
+            preedit: preedit,
+            selRange: NSRange(
+              location: start.utf16Offset(in: preedit),
+              length: preedit.utf16.distance(from: start, to: end)),
+            caretPos: caretPos.utf16Offset(in: preedit),
+            activationToken: updateToken)
+          else {
+            _ = rimeAPI.free_context(&ctx)
+            return
+          }
         } else {
           // TRICKY: display a non-empty string to prevent iTerm2 from echoing
           // each character in preedit. note this is a full-shape space U+3000;
           // using half shape characters like "..." will result in an unstable
           // baseline when composing Chinese characters.
-          show(preedit: preedit.isEmpty ? "" : "　", selRange: NSRange(location: 0, length: 0), caretPos: 0)
+          guard show(
+            preedit: preedit.isEmpty ? "" : "　",
+            selRange: NSRange(location: 0, length: 0),
+            caretPos: 0,
+            activationToken: updateToken)
+          else {
+            _ = rimeAPI.free_context(&ctx)
+            return
+          }
         }
       }
 
@@ -777,10 +647,12 @@ private extension SquirrelInputController {
       // swiftlint:enable identifier_name
       let expansionRequested =
         NSApp.squirrelAppDelegate.panel?.candidateExpansionRequested ?? false
-      guard let candidateSnapshot = candidateSnapshot(
+      guard let candidateSnapshot = LinnetRimeCandidateSnapshotBuilder.build(
         context: ctx,
         labels: labels,
-        expansionRequested: expansionRequested)
+        expansionRequested: expansionRequested,
+        session: session,
+        rimeAPI: rimeAPI)
       else {
         _ = rimeAPI.free_context(&ctx)
         hidePalettes()
@@ -795,54 +667,64 @@ private extension SquirrelInputController {
       }
 
       let selRange = NSRange(location: start.utf16Offset(in: preedit), length: preedit.utf16.distance(from: start, to: end))
-      showPanel(
+      guard showPanel(
         preedit: inlinePreedit ? "" : preedit,
         selRange: selRange,
         caretPos: caretPos.utf16Offset(in: preedit),
-        candidates: candidateSnapshot)
+        candidates: candidateSnapshot,
+        activationToken: updateToken)
+      else {
+        _ = rimeAPI.free_context(&ctx)
+        return
+      }
       _ = rimeAPI.free_context(&ctx)
     } else {
       hidePalettes()
     }
   }
 
-  func commit(string: String) {
-    guard let client = client else { return }
-
+  private func commit(string: String, to targetClient: IMKTextInput?) {
+    guard let targetClient else { return }
     let forceMarkedText =
-      session != 0 &&
+      sessionIsCurrent() &&
       rimeAPI.get_option(session, "force_marked_text_for_direct_commit")
+    let beginsMarkedText = forceMarkedText && preedit.isEmpty && !string.isEmpty
+    preedit = ""
 
     // Some NSTextInputClient implementations accept a direct Rime commit only
     // after a marked-text phase. This is the upstream Squirrel opt-in path;
     // ordinary clients keep the standard direct insert.
-    if forceMarkedText && preedit.isEmpty && !string.isEmpty {
+    if beginsMarkedText {
       let markedText = NSMutableAttributedString(string: string)
-      client.setMarkedText(
+      targetClient.setMarkedText(
         markedText,
         selectionRange: NSRange(location: markedText.length, length: 0),
         replacementRange: .empty
       )
     }
 
-    // print("[DEBUG] commitString: \(string)")
-    client.insertText(string, replacementRange: .empty)
-    preedit = ""
-    hidePalettes()
+    targetClient.insertText(string, replacementRange: .empty)
   }
 
-  func show(preedit: String, selRange: NSRange, caretPos: Int) {
-    guard let client = client else { return }
-    // print("[DEBUG] showPreeditString: '\(preedit)'")
+  private func show(
+    preedit: String,
+    selRange: NSRange,
+    caretPos: Int,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard let client,
+      inputActivationIsCurrent(activationToken, client: client)
+    else {
+      return false
+    }
     if self.preedit == preedit && self.caretPos == caretPos && self.selRange == selRange {
-      return
+      return true
     }
 
     self.preedit = preedit
     self.caretPos = caretPos
     self.selRange = selRange
 
-    // print("[DEBUG] selRange.location = \(selRange.location), selRange.length = \(selRange.length); caretPos = \(caretPos)")
     let start = selRange.location
     let attrString = NSMutableAttributedString(string: preedit)
     if start > 0 {
@@ -859,29 +741,49 @@ private extension SquirrelInputController {
     ) as? [NSAttributedString.Key: Any] ?? [:]
     attrString.setAttributes(attrs, range: remainingRange)
     client.setMarkedText(attrString, selectionRange: NSRange(location: caretPos, length: 0), replacementRange: .empty)
+    guard inputActivationIsCurrent(activationToken, client: client) else {
+      return false
+    }
+    return true
   }
 
-  func showPanel(
+  private func showPanel(
     preedit: String,
     selRange: NSRange,
     caretPos: Int,
-    candidates: CandidateSnapshot
-  ) {
-    // print("[DEBUG] showPanelWithPreedit:...:")
-    guard let client = client else { return }
+    candidates: CandidateSnapshot,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard let client,
+      inputActivationIsCurrent(activationToken, client: client)
+    else {
+      return false
+    }
     var inputPos = NSRect()
     client.attributes(forCharacterIndex: 0, lineHeightRectangle: &inputPos)
+    guard inputActivationIsCurrent(activationToken, client: client) else {
+      return false
+    }
     if let panel = NSApp.squirrelAppDelegate.panel {
+      panel.bind(controller: self, activationToken: activationToken)
       panel.updateAppearance(client: client as? NSObjectProtocol)
+      guard inputActivationIsCurrent(activationToken, client: client) else {
+        return false
+      }
       panel.updatePosition(inputPos)
-      panel.inputController = self
-      panel.update(
+      guard panel.update(
         preedit: preedit,
         selRange: selRange,
         caretPos: caretPos,
         candidates: candidates,
         highlighted: candidates.highlightedItemIndex,
-        update: true)
+        update: true,
+        activationToken: activationToken)
+      else { return false }
     }
+    guard inputActivationIsCurrent(activationToken, client: client) else {
+      return false
+    }
+    return true
   }
 }

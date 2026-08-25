@@ -71,19 +71,15 @@ begin
 rescue JSON::ParserError
   fail_release("code identity projection is not valid JSON")
 end
-uat_identity =
+community_identity =
   code_identity.keys.sort == %w[candidate_revision format leaf_certificate_sha256 profile] &&
-  code_identity["format"] == 2 && code_identity["profile"] == "uat" &&
+  code_identity["format"] == 4 && code_identity["profile"] == "community-cms" &&
   code_identity["leaf_certificate_sha256"].is_a?(String) &&
   code_identity["leaf_certificate_sha256"].match?(/\A[0-9a-f]{64}\z/)
-community_identity =
-  code_identity.keys.sort == %w[candidate_revision format profile] &&
-  code_identity["format"] == 3 && code_identity["profile"] == "community-adhoc"
 fail_release("code identity projection shape is invalid") unless
-  (uat_identity || community_identity) &&
+  community_identity &&
   code_identity["candidate_revision"].is_a?(String) &&
   code_identity["candidate_revision"].match?(/\A[0-9a-f]{40}\z/)
-code_signing_profile = code_identity.fetch("profile")
 candidate_revision = code_identity.fetch("candidate_revision")
 
 lock = JSON.parse(File.read(lock_path))
@@ -305,23 +301,13 @@ notice = <<~NOTICE
   `LICENSES/`.
 NOTICE
 
-identity_statement = if community_identity
-  <<~TEXT
-    This public community build uses hardened-runtime ad-hoc signatures for the
-    Host, embedded Settings app and executable code. It is not signed with an
-    Apple Developer ID and is not notarized. Users must verify the release
-    SHA-256 files and approve the package through the standard macOS Finder or
-    Privacy & Security interface.
-  TEXT
-else
-  <<~TEXT
-    This installation-UAT build uses one explicit external CMS identity to sign
-    the Host, embedded Settings app and executable code. The identity is supplied
-    outside the source checkout and is recorded in the release manifest; it does
-    not by itself imply Apple Developer ID validation. This build is not notarized
-    or eligible for publication.
-  TEXT
-end
+identity_statement = <<~TEXT
+  This public community build uses an explicit external CMS identity for the
+  Host, embedded Settings app and executable code. It is not signed with an
+  Apple Developer ID and is not notarized. Users must verify the release
+  SHA-256 files and approve the package through the standard macOS Finder or
+  Privacy & Security interface.
+TEXT
 
 privacy = <<~PRIVACY
   # Linnet privacy statement
@@ -590,33 +576,19 @@ sbom = {
 sbom_json = JSON.pretty_generate(sbom) + "\n"
 sbom_sha256 = Digest::SHA256.hexdigest(sbom_json)
 
-distribution = if community_identity
-  {
-    "application_code_signature" => {
-      "profile" => "community-adhoc",
-      "kind" => "adhoc",
-      "hardened_runtime" => true,
-      "host_settings_same_kind" => true
-    },
-    "artifact_scope" => "public-community",
-    "notarized" => false,
-    "publication_eligible" => true,
-    "trust_model" => "manual-user-approval"
-  }
-else
-  {
-    "application_code_signature" => {
-      "profile" => code_signing_profile,
-      "kind" => "external-cms",
-      "leaf_certificate_sha256" => code_identity.fetch("leaf_certificate_sha256"),
-      "hardened_runtime" => true,
-      "host_settings_same_leaf" => true
-    },
-    "artifact_scope" => "installation-uat",
-    "notarized" => false,
-    "publication_eligible" => false
-  }
-end
+distribution = {
+  "application_code_signature" => {
+    "profile" => "community-cms",
+    "kind" => "external-cms",
+    "leaf_certificate_sha256" => code_identity.fetch("leaf_certificate_sha256"),
+    "hardened_runtime" => true,
+    "host_settings_same_leaf" => true
+  },
+  "artifact_scope" => "public-community",
+  "notarized" => false,
+  "publication_eligible" => true,
+  "trust_model" => "manual-user-approval"
+}
 
 version_manifest = {
   "format" => 2,

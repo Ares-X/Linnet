@@ -20,6 +20,12 @@
 		B38E9B912BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */; };
 		FD2000000000000000000001 /* SquirrelApplicationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */; };
 		B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */; };
+		A11E55050000000000000002 /* SquirrelInputController+RimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */; };
+		A11E55000000000000000002 /* LinnetRimeSessionLease.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55000000000000000001 /* LinnetRimeSessionLease.swift */; };
+		A11E55020000000000000002 /* LinnetInputActivationRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55020000000000000001 /* LinnetInputActivationRegistry.swift */; };
+		A11E55040000000000000002 /* LinnetInputActivationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55040000000000000001 /* LinnetInputActivationPolicy.swift */; };
+		A11E55030000000000000002 /* LinnetCandidateInteractionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55030000000000000001 /* LinnetCandidateInteractionState.swift */; };
+		A11E55010000000000000002 /* LinnetRimeCandidateSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */; };
 		E90000000000000000000001 /* LinnetPreeditGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* LinnetPreeditGeometry.swift */; };
 		E90100000000000000000001 /* LinnetPanelGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90100000000000000000002 /* LinnetPanelGeometry.swift */; };
 		E90200000000000000000001 /* LinnetCandidatePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90200000000000000000002 /* LinnetCandidatePresentation.swift */; };
@@ -30,7 +36,9 @@
 		B39771252BED899F0093A49B /* SquirrelConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39771242BED899F0093A49B /* SquirrelConfig.swift */; };
 		B39771272BED9B250093A49B /* SquirrelTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39771262BED9B250093A49B /* SquirrelTheme.swift */; };
 		B39771292BEDAF4A0093A49B /* SquirrelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39771282BEDAF4A0093A49B /* SquirrelView.swift */; };
+		A11E55060000000000000002 /* SquirrelView+CandidateDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55060000000000000001 /* SquirrelView+CandidateDrawing.swift */; };
 		B397712B2BEE4C160093A49B /* SquirrelPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B397712A2BEE4C160093A49B /* SquirrelPanel.swift */; };
+		A11E55070000000000000002 /* SquirrelPanel+CandidatePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55070000000000000001 /* SquirrelPanel+CandidatePresentation.swift */; };
 		B397712D2BEEB39D0093A49B /* InputSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B397712C2BEEB39D0093A49B /* InputSource.swift */; };
 		B397712F2BEECBED0093A49B /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B397712E2BEECBED0093A49B /* Main.swift */; };
 		B39771332BEEE4540093A49B /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B39771322BEEE4540093A49B /* Localizable.xcstrings */; };
@@ -162,6 +170,12 @@
 		B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationDelegate.swift; path = sources/SquirrelApplicationDelegate.swift; sourceTree = "<group>"; };
 		FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationPresentation.swift; path = sources/SquirrelApplicationPresentation.swift; sourceTree = "<group>"; };
 		B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelInputController.swift; path = sources/SquirrelInputController.swift; sourceTree = "<group>"; };
+		A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SquirrelInputController+RimeSession.swift"; path = "sources/SquirrelInputController+RimeSession.swift"; sourceTree = "<group>"; };
+		A11E55000000000000000001 /* LinnetRimeSessionLease.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeSessionLease.swift; path = sources/LinnetRimeSessionLease.swift; sourceTree = "<group>"; };
+		A11E55020000000000000001 /* LinnetInputActivationRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetInputActivationRegistry.swift; path = sources/LinnetInputActivationRegistry.swift; sourceTree = "<group>"; };
+		A11E55040000000000000001 /* LinnetInputActivationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetInputActivationPolicy.swift; path = sources/LinnetInputActivationPolicy.swift; sourceTree = "<group>"; };
+		A11E55030000000000000001 /* LinnetCandidateInteractionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCandidateInteractionState.swift; path = sources/LinnetCandidateInteractionState.swift; sourceTree = "<group>"; };
+		A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeCandidateSnapshotBuilder.swift; path = sources/LinnetRimeCandidateSnapshotBuilder.swift; sourceTree = "<group>"; };
 		E90000000000000000000002 /* LinnetPreeditGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPreeditGeometry.swift; path = sources/LinnetPreeditGeometry.swift; sourceTree = "<group>"; };
 		E90100000000000000000002 /* LinnetPanelGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPanelGeometry.swift; path = sources/LinnetPanelGeometry.swift; sourceTree = "<group>"; };
 		E90200000000000000000002 /* LinnetCandidatePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCandidatePresentation.swift; path = sources/LinnetCandidatePresentation.swift; sourceTree = "<group>"; };
@@ -173,7 +187,9 @@
 		B39771242BED899F0093A49B /* SquirrelConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelConfig.swift; path = sources/SquirrelConfig.swift; sourceTree = "<group>"; };
 		B39771262BED9B250093A49B /* SquirrelTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelTheme.swift; path = sources/SquirrelTheme.swift; sourceTree = "<group>"; };
 		B39771282BEDAF4A0093A49B /* SquirrelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelView.swift; path = sources/SquirrelView.swift; sourceTree = "<group>"; };
+		A11E55060000000000000001 /* SquirrelView+CandidateDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SquirrelView+CandidateDrawing.swift"; path = "sources/SquirrelView+CandidateDrawing.swift"; sourceTree = "<group>"; };
 		B397712A2BEE4C160093A49B /* SquirrelPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelPanel.swift; path = sources/SquirrelPanel.swift; sourceTree = "<group>"; };
+		A11E55070000000000000001 /* SquirrelPanel+CandidatePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SquirrelPanel+CandidatePresentation.swift"; path = "sources/SquirrelPanel+CandidatePresentation.swift"; sourceTree = "<group>"; };
 		B397712C2BEEB39D0093A49B /* InputSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InputSource.swift; path = sources/InputSource.swift; sourceTree = "<group>"; };
 		B397712E2BEECBED0093A49B /* Main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Main.swift; path = sources/Main.swift; sourceTree = "<group>"; };
 		B39771322BEEE4540093A49B /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; name = Localizable.xcstrings; path = resources/Localizable.xcstrings; sourceTree = "<group>"; };
@@ -252,6 +268,12 @@
 				B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */,
 				FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */,
 				B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */,
+				A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */,
+				A11E55000000000000000001 /* LinnetRimeSessionLease.swift */,
+				A11E55020000000000000001 /* LinnetInputActivationRegistry.swift */,
+				A11E55040000000000000001 /* LinnetInputActivationPolicy.swift */,
+				A11E55030000000000000001 /* LinnetCandidateInteractionState.swift */,
+				A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */,
 				E90000000000000000000002 /* LinnetPreeditGeometry.swift */,
 				E90100000000000000000002 /* LinnetPanelGeometry.swift */,
 				E90200000000000000000002 /* LinnetCandidatePresentation.swift */,
@@ -262,7 +284,9 @@
 				B397712E2BEECBED0093A49B /* Main.swift */,
 				B39771262BED9B250093A49B /* SquirrelTheme.swift */,
 				B397712A2BEE4C160093A49B /* SquirrelPanel.swift */,
+				A11E55070000000000000001 /* SquirrelPanel+CandidatePresentation.swift */,
 				B39771282BEDAF4A0093A49B /* SquirrelView.swift */,
+				A11E55060000000000000001 /* SquirrelView+CandidateDrawing.swift */,
 				B39771242BED899F0093A49B /* SquirrelConfig.swift */,
 				B35D2FE72BF00839009D156B /* BridgingFunctions.swift */,
 				B38E9B8F2BE9AE1E0036ABEF /* Squirrel-Bridging-Header.h */,
@@ -567,7 +591,14 @@
 				D60000000000000000000001 /* LinnetDataChannel.swift in Linnet Sources */,
 				D40000000000000000000001 /* LinnetDataRegistry.swift in Linnet Sources */,
 				B39771292BEDAF4A0093A49B /* SquirrelView.swift in Sources */,
+				A11E55060000000000000002 /* SquirrelView+CandidateDrawing.swift in Sources */,
 				B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */,
+				A11E55050000000000000002 /* SquirrelInputController+RimeSession.swift in Sources */,
+				A11E55000000000000000002 /* LinnetRimeSessionLease.swift in Sources */,
+				A11E55020000000000000002 /* LinnetInputActivationRegistry.swift in Sources */,
+				A11E55040000000000000002 /* LinnetInputActivationPolicy.swift in Sources */,
+				A11E55030000000000000002 /* LinnetCandidateInteractionState.swift in Sources */,
+				A11E55010000000000000002 /* LinnetRimeCandidateSnapshotBuilder.swift in Sources */,
 				E90000000000000000000001 /* LinnetPreeditGeometry.swift in Sources */,
 				E90100000000000000000001 /* LinnetPanelGeometry.swift in Sources */,
 				E90200000000000000000001 /* LinnetCandidatePresentation.swift in Sources */,
@@ -584,6 +615,7 @@
 				B397712F2BEECBED0093A49B /* Main.swift in Sources */,
 				B397712D2BEEB39D0093A49B /* InputSource.swift in Sources */,
 				B397712B2BEE4C160093A49B /* SquirrelPanel.swift in Sources */,
+				A11E55070000000000000002 /* SquirrelPanel+CandidatePresentation.swift in Sources */,
 				B38E9B912BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift in Sources */,
 				FD2000000000000000000001 /* SquirrelApplicationPresentation.swift in Sources */,
 				B39771272BED9B250093A49B /* SquirrelTheme.swift in Sources */,
@@ -758,12 +790,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1)",
-					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2)",
-				);
-				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1 = "\"$(SRCROOT)/librime/src\"";
-				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2 = "\"$(SRCROOT)/librime/include\"";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/librime/dist/include";
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/lib";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
@@ -810,12 +837,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1)",
-					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2)",
-				);
-				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1 = "\"$(SRCROOT)/librime/src\"";
-				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2 = "\"$(SRCROOT)/librime/include\"";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/librime/dist/include";
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/lib";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;

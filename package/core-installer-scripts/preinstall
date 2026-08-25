@@ -22,6 +22,7 @@ identity_metadata="${script_root}/candidate-app-identity.json"
 application_quiescer="${script_root}/quit-applications-clean.jxa"
 current_uid="$(/usr/bin/id -u)"
 selection_state_tmp=""
+identity_transition=""
 
 cleanup_selection_state_tmp() {
   if [[ -n "${selection_state_tmp}" && -f "${selection_state_tmp}" &&
@@ -181,13 +182,10 @@ for payload_directory in "${payload_directories[@]}"; do
 done
 
 # The package-owned candidate identity is the only authority for deciding
-# whether an existing integrity-checked App can be replaced. It validates
-# without running any installed executable: an older candidate is accepted
-# under the package trust model, while a newer or conflicting identity fails
-# before payload mutation.
-if [[ -e "${app_path}" || -L "${app_path}" ]]; then
-  "${identity_helper}" existing
-fi
+# whether an existing integrity-checked App can be replaced or a missing App
+# can be restored without inferring prior enablement. It validates without
+# running installed code and returns one typed transition before mutation.
+identity_transition="$("${identity_helper}" existing)" || exit 1
 
 # Complete is only a clean first install or a reinstall after the official
 # uninstaller removed App, Active, and state. Preserved UserData, Backups,
@@ -204,8 +202,18 @@ if [[ "${install_mode}" == complete ]]; then
   exit 0
 fi
 
-# Core is the only in-place App update/repair product. It may restore a missing
-# App, but it cannot install without the complete product's authoritative Active
+# Core is the only in-place App update or repair product. A missing App carries
+# no prior enablement intent: it may restore the accepted candidate, but it is
+# registered without being enabled or selected on the user's behalf.
+case "${identity_transition}" in
+  legacy-community-adhoc-to-cms|same-community-cms-leaf|missing-app-install) ;;
+  *)
+    echo "Linnet Core preinstall: App identity transition is invalid" >&2
+    exit 1
+    ;;
+esac
+
+# Core cannot install without the complete product's authoritative Active
 # language state.
 if [[ ! -e "${active_state}" && ! -L "${active_state}" && \
   ! -e "${state_link}" && ! -L "${state_link}" ]]; then
@@ -281,22 +289,41 @@ selection_was_current="$(/usr/bin/plutil -extract was_current raw -o - \
   "${selection_state_tmp}")" || exit 1
 selection_post_quiescence="$(/usr/bin/plutil -extract \
   post_quiescence_input_source_id raw -o - "${selection_state_tmp}")" || exit 1
-[[ "${selection_format}" == 1 &&
+selection_prior_enablement="$(/usr/bin/plutil -extract prior_enablement raw -o - \
+  "${selection_state_tmp}")" || exit 1
+[[ "${selection_format}" == 2 &&
   "${selection_target}" == "${target_input_source_id}" &&
   ( "${selection_was_current}" == true || "${selection_was_current}" == false ) &&
+  ( "${selection_prior_enablement}" == enabled ||
+    "${selection_prior_enablement}" == disabled ||
+    "${selection_prior_enablement}" == unregistered ) &&
+  ( "${selection_prior_enablement}" != unregistered ||
+    "${selection_was_current}" == false ) &&
   -n "${selection_post_quiescence}" &&
   "${selection_post_quiescence}" != *$'\n'* &&
   "${selection_post_quiescence}" != *$'\r'* ]] || {
   echo "Linnet Core preinstall: selection transaction fields are invalid" >&2
   exit 1
 }
+if [[ "${identity_transition}" == missing-app-install &&
+  "${selection_prior_enablement}" != unregistered ]]; then
+  echo "Linnet Core preinstall: a missing App still has a registered input-source identity" >&2
+  exit 1
+fi
 candidate_revision="$(/usr/bin/plutil -extract candidate_revision raw -o - \
   "${identity_metadata}")" || exit 1
 candidate_build="$(/usr/bin/plutil -extract build raw -o - \
   "${identity_metadata}")" || exit 1
+candidate_leaf="$(/usr/bin/plutil -extract leaf_certificate_sha256 raw -o - \
+  "${identity_metadata}")" || exit 1
+[[ "${candidate_leaf}" =~ ^[0-9a-f]{64}$ ]] || exit 1
+/usr/bin/plutil -insert identity_transition -string "${identity_transition}" \
+  "${selection_state_tmp}"
 /usr/bin/plutil -insert candidate_revision -string "${candidate_revision}" \
   "${selection_state_tmp}"
 /usr/bin/plutil -insert candidate_build -string "${candidate_build}" \
+  "${selection_state_tmp}"
+/usr/bin/plutil -insert candidate_leaf_sha256 -string "${candidate_leaf}" \
   "${selection_state_tmp}"
 /bin/mv -f -- "${selection_state_tmp}" "${selection_state}"
 selection_state_tmp=""

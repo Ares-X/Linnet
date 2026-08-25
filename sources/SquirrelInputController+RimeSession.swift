@@ -1,0 +1,319 @@
+//
+//  SquirrelInputController+RimeSession.swift
+//  Squirrel
+//
+//  Rime session-scoped input and candidate operations.
+//
+
+import InputMethodKit
+
+extension SquirrelInputController {
+  struct CandidateItem: Equatable {
+    let absoluteIndex: Int
+    let page: Int
+    let indexOnPage: Int
+    let text: String
+    let comment: String
+    let selectionLabel: String?
+  }
+
+  struct CandidateSnapshot: Equatable {
+    let items: [CandidateItem]
+    let currentPage: Int
+    let pageSize: Int
+    let highlightedItemIndex: Int
+    let isLastPage: Bool
+    let canExpand: Bool
+    let isExpanded: Bool
+  }
+
+  func selectCandidate(
+    absoluteIndex: Int,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
+      inputActivationIsCurrent(activationToken),
+      sessionIsCurrent(),
+      absoluteIndex >= 0
+    else { return false }
+    let success = rimeAPI.select_candidate(session, absoluteIndex)
+    if success {
+      rimeUpdate()
+    }
+    return success
+  }
+
+  /// Rebuilds the current candidate snapshot after a panel-only interaction,
+  /// such as expanding or collapsing disclosure. It never edits Rime input.
+  func refreshCandidatePresentation(
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    guard inputActivationIsCurrent(activationToken) else { return }
+    rimeUpdate()
+  }
+
+  func page(
+    up towardPreviousPage: Bool,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
+      inputActivationIsCurrent(activationToken), sessionIsCurrent()
+    else { return false }
+    let handled = rimeAPI.change_page(session, towardPreviousPage)
+    if handled {
+      rimeUpdate()
+    }
+    return handled
+  }
+
+  private func onChordTimer(
+    _: Timer,
+    activationToken: LinnetInputActivationRegistry.Token,
+    sessionLease: LinnetRimeSessionLease
+  ) {
+    guard inputActivationIsCurrent(activationToken),
+      self.sessionLease == sessionLease
+    else { return }
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
+      retireSessionLease()
+      clearChord()
+      return
+    }
+    var processedKeys = false
+    guard ownsCurrentSession(
+      sessionLease,
+      activationToken: activationToken)
+    else {
+      retireSessionLease()
+      clearChord()
+      return
+    }
+    if chordKeyCount > 0 {
+      for index in 0..<chordKeyCount {
+        let handled = rimeAPI.process_key(
+          sessionLease.identifier,
+          Int32(chordKeyCodes[index]),
+          Int32(chordModifiers[index] | kReleaseMask.rawValue))
+        if handled {
+          processedKeys = true
+        }
+      }
+    }
+    clearChord()
+    if processedKeys {
+      rimeUpdate()
+    }
+  }
+
+  private func updateChord(
+    keycode: UInt32,
+    modifiers: UInt32,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    for index in 0..<chordKeyCount where chordKeyCodes[index] == keycode {
+      return
+    }
+    if chordKeyCount >= Self.keyRollOver {
+      return
+    }
+    chordKeyCodes[chordKeyCount] = keycode
+    chordModifiers[chordKeyCount] = modifiers
+    chordKeyCount += 1
+    if let timer = chordTimer, timer.isValid {
+      timer.invalidate()
+    }
+    chordDuration = 0.1
+    if let duration = NSApp.squirrelAppDelegate.config?.getDouble(
+      "chord_duration"
+    ), duration > 0 {
+      chordDuration = duration
+    }
+    guard let sessionLease,
+      ownsCurrentSession(sessionLease, activationToken: activationToken)
+    else { return }
+    chordTimer = Timer.scheduledTimer(
+      withTimeInterval: chordDuration, repeats: false
+    ) { [weak self] timer in
+      self?.onChordTimer(
+        timer,
+        activationToken: activationToken,
+        sessionLease: sessionLease)
+    }
+  }
+
+  func clearChord() {
+    chordKeyCount = 0
+    if let timer = chordTimer {
+      if timer.isValid {
+        timer.invalidate()
+      }
+      chordTimer = nil
+    }
+  }
+
+  func createSession() {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
+      retireSessionLease()
+      return
+    }
+    let app = client?.bundleIdentifier() ?? {
+      Self.unknownAppCount &+= 1
+      return "UnknownApp\(Self.unknownAppCount)"
+    }()
+    print("createSession: \(app)")
+    currentApp = app
+    let identifier = rimeAPI.create_session()
+    sessionLease = LinnetRimeSessionLease.acquire(identifier: identifier)
+
+    if sessionIsCurrent() {
+      updateAppOptions()
+    }
+  }
+
+  func sessionIsCurrent() -> Bool {
+    guard let sessionLease else { return false }
+    return sessionLease.isCurrent(
+      sessionExists: { rimeAPI.find_session($0) }
+    )
+  }
+
+  func retireSessionLease() {
+    sessionLease?.retire()
+    sessionLease = nil
+  }
+
+  /// Establishes the one modifier/Caps baseline for an activation and repeats
+  /// it only when runtime recovery creates a replacement Rime session.
+  func ensureReadySession(
+    for activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard inputActivationIsCurrent(activationToken) else { return false }
+    let recoveredSession = !sessionIsCurrent()
+    if recoveredSession {
+      clearChord()
+      retireSessionLease()
+      createSession()
+    }
+    guard sessionIsCurrent(), inputActivationIsCurrent(activationToken) else {
+      return false
+    }
+    if recoveredSession || readyActivationToken != activationToken {
+      synchronizeCapsLockBaseline()
+      if recoveredSession,
+        !synchronizeRecoveredInputMode(activationToken: activationToken) {
+        return false
+      }
+      readyActivationToken = activationToken
+    }
+    return true
+  }
+
+  func updateAppOptions() {
+    guard sessionIsCurrent(), !currentApp.isEmpty else { return }
+    let appOptions = NSApp.squirrelAppDelegate.config?.getAppOptions(currentApp)
+    for (key, value) in appOptions ?? [:] {
+      print("set app option: \(key) = \(value)")
+      rimeAPI.set_option(session, key, value)
+    }
+  }
+
+  func destroySession() {
+    defer { clearChord() }
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
+      retireSessionLease()
+      return
+    }
+    if sessionIsCurrent() {
+      _ = rimeAPI.destroy_session(session)
+    }
+    retireSessionLease()
+  }
+
+  func processKey(
+    _ rimeKeycode: UInt32,
+    modifiers rimeModifiers: UInt32,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) -> Bool {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
+      inputActivationIsCurrent(activationToken), sessionIsCurrent()
+    else { return false }
+
+    synchronizeCandidateLayoutOptions()
+    let effectiveKeycode = effectiveRimeKeycode(for: rimeKeycode)
+    let handled = rimeAPI.process_key(
+      session,
+      Int32(effectiveKeycode),
+      Int32(rimeModifiers))
+    if handled {
+      updateChordState(
+        keycode: effectiveKeycode,
+        modifiers: rimeModifiers,
+        activationToken: activationToken)
+    } else {
+      enterVimCommandModeIfNeeded(
+        keycode: effectiveKeycode,
+        modifiers: rimeModifiers)
+    }
+    return handled
+  }
+
+  private func synchronizeCandidateLayoutOptions() {
+    guard let panel = NSApp.squirrelAppDelegate.panel else { return }
+    if panel.linear != rimeAPI.get_option(session, "_linear") {
+      rimeAPI.set_option(session, "_linear", panel.linear)
+    }
+    if panel.vertical != rimeAPI.get_option(session, "_vertical") {
+      rimeAPI.set_option(session, "_vertical", panel.vertical)
+    }
+  }
+
+  private func effectiveRimeKeycode(for keycode: UInt32) -> UInt32 {
+    guard let keypadEquivalent =
+      SquirrelKeycode.composingKeypadEquivalent(keycode),
+      hasPendingRimeInput
+    else { return keycode }
+    return keypadEquivalent
+  }
+
+  private func enterVimCommandModeIfNeeded(
+    keycode: UInt32,
+    modifiers: UInt32
+  ) {
+    let isEscape = keycode == XK_Escape
+    let rimeKeycode = Int32(keycode)
+    let isControlCommand = modifiers & kControlMask.rawValue != 0 &&
+      [XK_c, XK_C, XK_bracketleft].contains(rimeKeycode)
+    guard isEscape || isControlCommand,
+      rimeAPI.get_option(session, "vim_mode"),
+      !rimeAPI.get_option(session, "ascii_mode")
+    else { return }
+    rimeAPI.set_option(session, "ascii_mode", true)
+  }
+
+  private func updateChordState(
+    keycode: UInt32,
+    modifiers: UInt32,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    if isChordingKey(keycode) && rimeAPI.get_option(session, "_chord_typing") {
+      updateChord(
+        keycode: keycode,
+        modifiers: modifiers,
+        activationToken: activationToken)
+    } else if modifiers & kReleaseMask.rawValue == 0 {
+      clearChord()
+    }
+  }
+
+  private func isChordingKey(_ keycode: UInt32) -> Bool {
+    switch Int32(keycode) {
+    case XK_space...XK_asciitilde,
+         XK_Control_L, XK_Control_R,
+         XK_Alt_L, XK_Alt_R,
+         XK_Shift_L, XK_Shift_R:
+      return true
+    default:
+      return false
+    }
+  }
+}

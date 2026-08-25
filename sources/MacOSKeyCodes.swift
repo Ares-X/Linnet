@@ -8,16 +8,164 @@
 import Carbon
 import AppKit
 
-struct SquirrelKeycode {
-
-  /// Starts each InputMethodKit activation with a fresh modifier event epoch.
-  /// Caps Lock is persistent hardware state; momentary keys that were pressed
-  /// while another input source was active must not become duplicate events.
-  static func activationModifierBaseline(
-    from hardwareFlags: CGEventFlags
-  ) -> NSEvent.ModifierFlags {
-    hardwareFlags.contains(.maskAlphaShift) ? [.capsLock] : []
+/// Converts InputMethodKit's aggregate flags into side-aware physical events.
+/// Aggregate flags cannot distinguish a second Shift down from the first Shift
+/// up while its counterpart remains held, so the physical key code owns that
+/// transition. Rime remains responsible for tap/hold/chord interpretation.
+struct SquirrelModifierTransitionState {
+  struct Event {
+    let keycode: UInt32
+    let modifiers: UInt32
   }
+
+  private static let trackedFlags: NSEvent.ModifierFlags = [
+    .capsLock, .shift, .control, .option, .command
+  ]
+
+  private var aggregateModifiers: NSEvent.ModifierFlags
+  private var pressedKeyCodes: Set<UInt16> = []
+  private var suppressedActivationModifiers: NSEvent.ModifierFlags
+
+  init(hardwareFlags: CGEventFlags) {
+    aggregateModifiers = Self.modifiers(from: hardwareFlags)
+    suppressedActivationModifiers = aggregateModifiers.subtracting(.capsLock)
+  }
+
+  mutating func reset(from hardwareFlags: CGEventFlags) {
+    aggregateModifiers = Self.modifiers(from: hardwareFlags)
+    suppressedActivationModifiers = aggregateModifiers.subtracting(.capsLock)
+    pressedKeyCodes.removeAll(keepingCapacity: true)
+  }
+
+  mutating func transitions(
+    keyCode: UInt16,
+    modifiers: NSEvent.ModifierFlags
+  ) -> [Event] {
+    let current = modifiers.intersection(Self.trackedFlags)
+    suppressedActivationModifiers.formIntersection(current)
+    var physicalKeyCode = keyCode
+    if Self.descriptor(for: physicalKeyCode) == nil {
+      let changes = aggregateModifiers.symmetricDifference(current)
+      if changes.isEmpty {
+        aggregateModifiers = current
+        return []
+      }
+      let changedDescriptors = Self.leftDescriptors.filter { changes.contains($0.flag) }
+      guard changedDescriptors.count == 1 else {
+        // Preserve every already transported edge. A remote multi-flag
+        // snapshot is not enough evidence to manufacture transitions or to
+        // forget a down event that Rime is still waiting to see released.
+        return []
+      }
+      let descriptor = changedDescriptors[0]
+      if !current.contains(descriptor.flag) {
+        let tracked = pressedKeyCodes.filter {
+          Self.descriptor(for: $0)?.flag == descriptor.flag
+        }
+        guard tracked.count == 1, let trackedKeyCode = tracked.first else {
+          aggregateModifiers = current
+          return []
+        }
+        physicalKeyCode = trackedKeyCode
+      } else {
+        physicalKeyCode = descriptor.keyCode
+      }
+    }
+
+    guard let descriptor = Self.descriptor(for: physicalKeyCode) else {
+      aggregateModifiers = current
+      return []
+    }
+    defer { aggregateModifiers = current }
+
+    if descriptor.flag != .capsLock,
+      suppressedActivationModifiers.contains(descriptor.flag) {
+      return []
+    }
+
+    if descriptor.flag == .capsLock {
+      return capsLockTransition(descriptor: descriptor, current: current)
+    }
+    return momentaryTransition(
+      descriptor: descriptor,
+      physicalKeyCode: physicalKeyCode,
+      current: current
+    )
+  }
+
+  private func capsLockTransition(
+    descriptor: Descriptor,
+    current: NSEvent.ModifierFlags
+  ) -> [Event] {
+    guard aggregateModifiers.contains(.capsLock) != current.contains(.capsLock) else {
+      return []
+    }
+    let modifiers = SquirrelKeycode.osxModifiersToRime(modifiers: current)
+      ^ kLockMask.rawValue
+    return [Event(keycode: descriptor.rimeKeyCode, modifiers: modifiers)]
+  }
+
+  private mutating func momentaryTransition(
+    descriptor: Descriptor,
+    physicalKeyCode: UInt16,
+    current: NSEvent.ModifierFlags
+  ) -> [Event] {
+    let matchingPressedKeyCodes = pressedKeyCodes.filter {
+      Self.descriptor(for: $0)?.flag == descriptor.flag
+    }
+    let rimeModifiers = SquirrelKeycode.osxModifiersToRime(modifiers: current)
+    if pressedKeyCodes.contains(physicalKeyCode) {
+      guard !current.contains(descriptor.flag) || matchingPressedKeyCodes.count > 1 else {
+        return []
+      }
+      pressedKeyCodes.remove(physicalKeyCode)
+      return [Event(
+        keycode: descriptor.rimeKeyCode,
+        modifiers: rimeModifiers | kReleaseMask.rawValue
+      )]
+    }
+    guard current.contains(descriptor.flag) else { return [] }
+    pressedKeyCodes.insert(physicalKeyCode)
+    return [Event(keycode: descriptor.rimeKeyCode, modifiers: rimeModifiers)]
+  }
+
+  private struct Descriptor {
+    let keyCode: UInt16
+    let flag: NSEvent.ModifierFlags
+    let rimeKeyCode: UInt32
+  }
+
+  private static let leftDescriptors = [
+    Descriptor(keyCode: UInt16(kVK_CapsLock), flag: .capsLock, rimeKeyCode: UInt32(XK_Caps_Lock)),
+    Descriptor(keyCode: UInt16(kVK_Shift), flag: .shift, rimeKeyCode: UInt32(XK_Shift_L)),
+    Descriptor(keyCode: UInt16(kVK_Control), flag: .control, rimeKeyCode: UInt32(XK_Control_L)),
+    Descriptor(keyCode: UInt16(kVK_Option), flag: .option, rimeKeyCode: UInt32(XK_Alt_L)),
+    Descriptor(keyCode: UInt16(kVK_Command), flag: .command, rimeKeyCode: UInt32(XK_Super_L))
+  ]
+
+  private static let rightDescriptors = [
+    Descriptor(keyCode: UInt16(kVK_RightShift), flag: .shift, rimeKeyCode: UInt32(XK_Shift_R)),
+    Descriptor(keyCode: UInt16(kVK_RightControl), flag: .control, rimeKeyCode: UInt32(XK_Control_R)),
+    Descriptor(keyCode: UInt16(kVK_RightOption), flag: .option, rimeKeyCode: UInt32(XK_Alt_R)),
+    Descriptor(keyCode: UInt16(kVK_RightCommand), flag: .command, rimeKeyCode: UInt32(XK_Super_R))
+  ]
+
+  private static func descriptor(for keyCode: UInt16) -> Descriptor? {
+    (leftDescriptors + rightDescriptors).first { $0.keyCode == keyCode }
+  }
+
+  private static func modifiers(from hardwareFlags: CGEventFlags) -> NSEvent.ModifierFlags {
+    var modifiers: NSEvent.ModifierFlags = []
+    if hardwareFlags.contains(.maskAlphaShift) { modifiers.insert(.capsLock) }
+    if hardwareFlags.contains(.maskShift) { modifiers.insert(.shift) }
+    if hardwareFlags.contains(.maskControl) { modifiers.insert(.control) }
+    if hardwareFlags.contains(.maskAlternate) { modifiers.insert(.option) }
+    if hardwareFlags.contains(.maskCommand) { modifiers.insert(.command) }
+    return modifiers
+  }
+}
+
+struct SquirrelKeycode {
 
   static func osxModifiersToRime(modifiers: NSEvent.ModifierFlags) -> UInt32 {
     var ret: UInt32 = 0
@@ -78,28 +226,18 @@ struct SquirrelKeycode {
     return UInt32(XK_VoidSymbol)
   }
 
-  static let modifierKeycodes: Set<UInt16> = [
-    UInt16(kVK_Shift), UInt16(kVK_RightShift),
-    UInt16(kVK_CapsLock),
-    UInt16(kVK_Control), UInt16(kVK_RightControl),
-    UInt16(kVK_Option), UInt16(kVK_RightOption),
-    UInt16(kVK_Command), UInt16(kVK_RightCommand),
-    UInt16(kVK_Function)
-  ]
-
-  static func inferModifierKeycode(from changes: NSEvent.ModifierFlags) -> UInt16? {
-    if changes.contains(.capsLock) {
-      return UInt16(kVK_CapsLock)
-    } else if changes.contains(.shift) {
-      return UInt16(kVK_Shift)
-    } else if changes.contains(.control) {
-      return UInt16(kVK_Control)
-    } else if changes.contains(.option) {
-      return UInt16(kVK_Option)
-    } else if changes.contains(.command) {
-      return UInt16(kVK_Command)
+  static func composingKeypadEquivalent(_ keycode: UInt32) -> UInt32? {
+    switch Int32(keycode) {
+    case XK_KP_0...XK_KP_9:
+      UInt32(XK_0 + Int32(keycode) - XK_KP_0)
+    case XK_KP_Decimal: UInt32(XK_period)
+    case XK_KP_Equal: UInt32(XK_equal)
+    case XK_KP_Add: UInt32(XK_plus)
+    case XK_KP_Subtract: UInt32(XK_minus)
+    case XK_KP_Multiply: UInt32(XK_asterisk)
+    case XK_KP_Divide: UInt32(XK_slash)
+    default: nil
     }
-    return nil
   }
 
   private static let keycodeMappings: [Int: Int32] = [

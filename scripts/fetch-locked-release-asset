@@ -9,10 +9,11 @@ fail_asset() {
 
 [[ "$#" -eq 3 ]] || fail_asset "usage: LOCK SOURCE OUTPUT"
 lock_file="$1"
-source_name="$2"
+source_path="$2"
 output="$3"
 [[ -f "${lock_file}" && ! -L "${lock_file}" ]] || fail_asset "lock is missing or unsafe"
-[[ "${source_name}" =~ ^[a-z0-9_]+$ ]] || fail_asset "source name is invalid"
+[[ "${source_path}" =~ ^[a-z0-9_]+(\.[a-z0-9_]+)*$ ]] ||
+  fail_asset "source path is invalid"
 [[ "${output}" == /* && ! -e "${output}" && ! -L "${output}" ]] ||
   fail_asset "output must be one new absolute path"
 output_parent="$(cd "$(dirname "${output}")" && pwd -P)"
@@ -20,7 +21,7 @@ output_parent="$(cd "$(dirname "${output}")" && pwd -P)"
   fail_asset "output is not canonical"
 
 lock_value() {
-  plutil -extract "sources.${source_name}.$1" raw -o - "${lock_file}" 2>/dev/null ||
+  plutil -extract "sources.${source_path}.$1" raw -o - "${lock_file}" 2>/dev/null ||
     fail_asset "missing lock value: $1"
 }
 

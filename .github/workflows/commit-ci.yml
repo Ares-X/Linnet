@@ -19,6 +19,11 @@ jobs:
           # historical gitlinks from upstream tags.
           submodules: false
 
+      - name: Restore locked build cache
+        uses: ./.github/actions/restore-locked-build-cache
+        with:
+          save: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Install build tools
         run: scripts/install_ci_build_tools.sh quality
 

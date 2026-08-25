@@ -37,17 +37,10 @@ assert_clean_checkout
 tests/verify_candidate_native_idle.sh
 signing_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app}/Contents/Info.plist")"
-case "${signing_profile}" in
-  uat)
-    candidate_identity="$(scripts/linnet-code-identity verify-product \
-      "${app}" "${settings}")"
-    ;;
-  community-adhoc)
-    candidate_identity="$(scripts/linnet-code-identity verify-publication-product \
-      "${app}" "${frozen_revision}")"
-    ;;
-  *) fail "candidate signing profile is invalid" ;;
-esac
+[[ "${signing_profile}" == community-cms ]] ||
+  fail "candidate signing profile is invalid"
+candidate_identity="$(scripts/linnet-code-identity verify-product \
+  "${app}" "${settings}")"
 candidate_revision="$(ruby -rjson -e '
   identity = JSON.parse(ARGV.fetch(0))
   print identity.fetch("candidate_revision")
@@ -101,8 +94,8 @@ for repertoire_info in resources/Info.plist "${info}"; do
 done
 [[ "$(plutil -extract tsInputMethodIconFileKey raw -o - "${info}")" == linnet.pdf ]]
 connection_name="$(plutil -extract InputMethodConnectionName raw -o - "${info}")"
-[[ "${connection_name}" == "${bundle_identifier}_Connection" ]] || {
-  echo "verify_product: IMK connection must derive from the bundle identifier" >&2
+[[ "${connection_name}" == "${bundle_identifier}.Connection" ]] || {
+  echo "verify_product: IMK connection must match the system bundle connection" >&2
   exit 1
 }
 for retired in ComponentInputModeDict PrimaryInputModeIdentifier; do
@@ -144,17 +137,9 @@ comm -13 "${scratch}/reports.before" "${scratch}/reports.after" \
 [[ "$(git rev-parse --verify HEAD^{commit})" == "${frozen_revision}" ]] ||
   fail "checkout revision changed during product acceptance"
 assert_clean_checkout
-case "${signing_profile}" in
-  uat)
-    final_candidate_identity="$(scripts/linnet-code-identity verify-product \
-      "${app}" "${settings}")"
-    ;;
-  community-adhoc)
-    final_candidate_identity="$(scripts/linnet-code-identity verify-publication-product \
-      "${app}" "${frozen_revision}")"
-    ;;
-esac
+final_candidate_identity="$(scripts/linnet-code-identity verify-product \
+  "${app}" "${settings}")"
 [[ "${final_candidate_identity}" == "${candidate_identity}" ]] ||
   fail "finalized App identity changed during product acceptance"
 git diff --check
-echo "verify_product: PASS (frozen candidate App, owner tests, native Rime, zero new crashes)"
+echo "verify_product: PASS (C/E + candidate-App P evidence; V/I/R NOT_EXERCISED; zero new crashes)"

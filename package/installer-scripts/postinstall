@@ -97,6 +97,8 @@ secure_owned_path "${active_state}" file && \
 
 selection_was_current=""
 selection_post_quiescence=""
+selection_identity_transition=""
+selection_prior_enablement=""
 if [[ "${install_mode}" == core-update ]]; then
   secure_owned_path "${selection_state}" file || {
     echo "Linnet postinstall: selection transaction is missing or unsafe" >&2
@@ -110,9 +112,15 @@ if [[ "${install_mode}" == core-update ]]; then
     "${selection_state}")" || exit 1
   selection_post_quiescence="$(/usr/bin/plutil -extract \
     post_quiescence_input_source_id raw -o - "${selection_state}")" || exit 1
+  selection_identity_transition="$(/usr/bin/plutil -extract \
+    identity_transition raw -o - "${selection_state}")" || exit 1
+  selection_prior_enablement="$(/usr/bin/plutil -extract \
+    prior_enablement raw -o - "${selection_state}")" || exit 1
   selection_revision="$(/usr/bin/plutil -extract candidate_revision raw -o - \
     "${selection_state}")" || exit 1
   selection_build="$(/usr/bin/plutil -extract candidate_build raw -o - \
+    "${selection_state}")" || exit 1
+  selection_leaf="$(/usr/bin/plutil -extract candidate_leaf_sha256 raw -o - \
     "${selection_state}")" || exit 1
   candidate_target="$(/usr/bin/plutil -extract bundle_identifier raw -o - \
     "${identity_metadata}")" || exit 1
@@ -120,11 +128,25 @@ if [[ "${install_mode}" == core-update ]]; then
     "${identity_metadata}")" || exit 1
   candidate_build="$(/usr/bin/plutil -extract build raw -o - \
     "${identity_metadata}")" || exit 1
-  [[ "${selection_format}" == 1 &&
+  candidate_leaf="$(/usr/bin/plutil -extract leaf_certificate_sha256 raw -o - \
+    "${identity_metadata}")" || exit 1
+  [[ "${selection_format}" == 2 &&
     "${selection_target}" == "${candidate_target}" &&
     "${selection_revision}" == "${candidate_revision}" &&
     "${selection_build}" == "${candidate_build}" &&
+    "${selection_leaf}" == "${candidate_leaf}" &&
+    "${selection_leaf}" =~ ^[0-9a-f]{64}$ &&
     ( "${selection_was_current}" == true || "${selection_was_current}" == false ) &&
+    ( "${selection_identity_transition}" == legacy-community-adhoc-to-cms ||
+      "${selection_identity_transition}" == same-community-cms-leaf ||
+      "${selection_identity_transition}" == missing-app-install ) &&
+    ( "${selection_prior_enablement}" == enabled ||
+      "${selection_prior_enablement}" == disabled ||
+      "${selection_prior_enablement}" == unregistered ) &&
+    ( "${selection_prior_enablement}" != unregistered ||
+      "${selection_was_current}" == false ) &&
+    ( "${selection_identity_transition}" != missing-app-install ||
+      "${selection_prior_enablement}" == unregistered ) &&
     -n "${selection_post_quiescence}" &&
     "${selection_post_quiescence}" != *$'\n'* &&
     "${selection_post_quiescence}" != *$'\r'* ]] || {
@@ -144,7 +166,8 @@ if [[ "${install_mode}" == complete ]]; then
   "${executable}" --enable-input-source
 else
   "${executable}" --refresh-core-input-source \
-    "${selection_was_current}" "${selection_post_quiescence}"
+    "${selection_was_current}" "${selection_post_quiescence}" \
+    "${selection_identity_transition}" "${selection_prior_enablement}"
   /bin/rm -f -- "${selection_state}"
 fi
 # Complete enables the newly registered source. Core never enables or selects

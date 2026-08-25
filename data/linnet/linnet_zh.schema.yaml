@@ -147,8 +147,9 @@ engine:
     - lua_translator@*uuid
     - table_translator@linnet_custom_words
     - table_translator@linnet_english_words
-    # The native translator owns only the explicit ;pinyin -> English flow in
-    # Chinese schemas. Ordinary mixed English remains the standard table above.
+    # The native translator owns explicit ;pinyin lookup and one bounded
+    # modeless Chinese-English sentence graph. Whole-word English rows remain
+    # owned by the standard table above.
     - linnet_english_translator
     - table_translator@linnet_text_expander
     - table_translator@radical_lookup

@@ -1,27 +1,27 @@
 {
-  "catalog_sequence": 27,
+  "catalog_sequence": 35,
   "format": "io.github.ares-x.linnet.data-releases.v1",
   "packs": {
     "chinese": {
-      "version": "0.5.20",
-      "sequence": 28,
+      "version": "0.5.23",
+      "sequence": 31,
       "data_abi": 2,
       "min_core": "0.1.1",
-      "content_sha256": "941e2c7ed76d2540725cff5eafaed8276d187ec1be1f3d7312f8c5d14a680621"
+      "content_sha256": "b945d5607d6fb5378f1c98d48cfad6e4849dc25081948d13c1ccb6839156ca97"
     },
     "english": {
-      "version": "0.4.14",
-      "sequence": 19,
+      "version": "0.4.15",
+      "sequence": 20,
       "data_abi": 1,
       "min_core": "0.1.1",
-      "content_sha256": "3749dbafc7886e0d6f3ac82a6fc31178d00829435846188495b29b6a20b0f3b3"
+      "content_sha256": "4960fdfa7f980876c71cfc7d06215f53be94b568d98252b374df6d17f307301e"
     },
     "lts": {
-      "version": "01ffe37f2260",
-      "sequence": 6,
+      "version": "c5fca7cf43af",
+      "sequence": 5,
       "data_abi": 2,
       "min_core": "0.1.0",
-      "content_sha256": "01ffe37f22607bf8a5cd5d82a3349f6df97744369464aee4577585112d85469d"
+      "content_sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
     },
     "extended": {
       "version": "0.2.2",

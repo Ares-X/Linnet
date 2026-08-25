@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: all install deps release debug candidate candidate-verified community community-verified
+.PHONY: all install deps release debug community community-verified
 
 all: release
 install: install-release
@@ -20,11 +20,14 @@ RIME_TOOLS = bin/rime_deployer bin/rime_dict_manager
 SMART_ENGLISH_PLUGIN = lib/rime-plugins/librime-smart-english.dylib
 SMART_ENGLISH_SOURCES = plugins/smart_english/smart_english.cc \
 	plugins/smart_english/smart_english_filter.cc \
-	plugins/smart_english/smart_english_index.cc
+	plugins/smart_english/smart_english_index.cc \
+	plugins/smart_english/smart_english_mixed_decoder.cc
 SMART_ENGLISH_HEADERS = plugins/smart_english/smart_english_domain.h \
 	plugins/smart_english/smart_english_filter.h \
-	plugins/smart_english/smart_english_index.h
+	plugins/smart_english/smart_english_index.h \
+	plugins/smart_english/smart_english_mixed_decoder.h
 SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
+	librime/dist/include/rime/gear/selector.h \
 	librime/dist/include/glog/logging.h \
 	librime/dist/include/marisa.h \
 	librime/dist/include/marisa/stdio.h
@@ -115,6 +118,10 @@ copy-rime-binaries:
 
 verify-rime-binaries:
 	@set -e; \
+	cmp -s "$(RIME_LIB_DIR)/$(RIME_LIBRARY_FILE_NAME)" "$(RIME_LIBRARY)" || { echo "Staged librime is not the locked runtime build." >&2; exit 1; }; \
+	for plugin in librime-lua.dylib librime-octagram.dylib librime-predict.dylib; do \
+		cmp -s "$(RIME_LIB_DIR)/rime-plugins/$${plugin}" "lib/rime-plugins/$${plugin}" || { echo "Staged $${plugin} is not the locked runtime build." >&2; exit 1; }; \
+	done; \
 	expected_plugins="$$(mktemp)"; \
 	actual_plugins="$$(mktemp)"; \
 	trap 'rm -f "$${expected_plugins}" "$${actual_plugins}"' EXIT; \
@@ -197,9 +204,9 @@ define build-linnet-app
 	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Linnet.app)"; \
 	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app)"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
-	xcodebuild -project Linnet.xcodeproj -configuration $(1) -scheme Linnet \
-		-destination '$(XCODE_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) \
-		-quiet $(BUILD_SETTINGS) build; \
+		xcodebuild -project Linnet.xcodeproj -configuration $(1) -scheme Linnet \
+			-destination '$(XCODE_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) \
+			-showBuildTimingSummary $(BUILD_SETTINGS) build; \
 	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
 	scripts/build-privacy sanitize-localizations \
 		"$${app_path}" "$${embedded_settings_app_path}" "$${settings_app_path}"; \
@@ -222,27 +229,7 @@ define finalize-linnet-candidate
 	scripts/linnet-code-identity sign-product "$${app_path}" "$${settings_app_path}"; \
 	scripts/build-privacy scan "$${app_path}"; \
 	scripts/linnet-code-identity verify-product "$${app_path}" "$${settings_app_path}" >/dev/null; \
-	echo "Linnet Release Candidate: PASS (UAT signed, metadata bound, privacy scanned)"
-endef
-
-define finalize-linnet-community
-	@set -e; \
-	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)"; \
-	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Settings.app)"; \
-	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
-	release_metadata_root="$${app_path}/Contents/Resources/LinnetRelease"; \
-	code_identity_projection="$$(scripts/linnet-code-identity inspect-community-contract)"; \
-	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
-	product_version="$$(plutil -extract CFBundleShortVersionString raw -o - "$${app_path}/Contents/Info.plist")"; \
-	product_build="$$(plutil -extract CFBundleVersion raw -o - "$${app_path}/Contents/Info.plist")"; \
-	scripts/generate-release-metadata "$(abspath upstreams.lock.json)" \
-		"$${release_metadata_root}" "$${product_version}" "$${product_build}" \
-		1704067200 "$${code_identity_projection}"; \
-	scripts/linnet-code-identity sign-community-product "$${app_path}" "$${settings_app_path}"; \
-	scripts/build-privacy scan "$${app_path}"; \
-	scripts/linnet-code-identity verify-publication-product "$${app_path}" \
-		"$${LINNET_CANDIDATE_REVISION}" >/dev/null; \
-	echo "Linnet Community Candidate: PASS (ad-hoc signed, metadata bound, manual trust required)"
+	echo "Linnet Release Candidate: PASS (community-cms signed, metadata bound, privacy scanned)"
 endef
 
 release: $(DEPS_CHECK) verify-rime-binaries
@@ -253,24 +240,15 @@ debug: $(DEPS_CHECK) verify-rime-binaries
 	mkdir -p $(DERIVED_DATA_PATH)
 	$(call build-linnet-app,Debug)
 
-candidate: release
-	@test "$(LINNET_CODE_SIGN_PROFILE)" = uat || { \
-		echo "candidate requires LINNET_CODE_SIGN_PROFILE=uat" >&2; exit 2; }
-	@scripts/linnet-code-identity preflight
-	$(call finalize-linnet-candidate)
-
-candidate-verified: candidate
-	./tests/verify_product.sh release
-
 community: release
-	$(call finalize-linnet-community)
+	$(call finalize-linnet-candidate)
 
 community-verified: community
 	./tests/verify_product.sh release
 
 .PHONY: package archive install install-debug install-release
 
-# The UAT PKG follows Squirrel's pkgbuild/component route, then
+# The stable community PKG follows Squirrel's pkgbuild/component route, then
 # wraps the component with visible license, upstream notice and privacy pages.
 # Creation and static expansion do not install, launch or register the App.
 package: community-verified

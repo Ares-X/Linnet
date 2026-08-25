@@ -2,7 +2,7 @@
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Final GitHub mutation boundary for one verified release channel. A failed
+# Final GitHub mutation boundary for one verified release stage. A failed
 # upload remains a draft owned by its exact tag; one later workflow invocation
 # may discard that draft and retry once. Published bytes are never replaced.
 
@@ -50,19 +50,36 @@ case "${channel}" in
     title="Linnet automatic data channel ${catalog_sequence}"
     prerelease=true
     ;;
+  data-seed)
+    tag="data-${catalog_sequence}"
+    title="Linnet automatic data channel ${catalog_sequence}"
+    prerelease=true
+    ;;
+  catalog)
+    tag=""
+    title=""
+    prerelease=false
+    ;;
   *) fail_publish "unknown release channel: ${channel}" ;;
 esac
 
+asset_channel="${channel}"
+if [[ "${channel}" == data-seed ]]; then
+  asset_channel=data
+fi
+
 assets=()
-while IFS= read -r name; do
-  [[ -n "${name}" ]] || continue
-  path="${release_dir}/${name}"
-  [[ -f "${path}" && ! -L "${path}" ]] ||
-    fail_publish "verified release asset is missing: ${name}"
-  assets+=("${path}")
-done < <("${project_root}/package/release_asset_manifest" \
-  "${channel}" "${version}" "${catalog_sequence}")
-[[ "${#assets[@]}" -gt 0 ]] || fail_publish "release channel is empty"
+if [[ "${channel}" != catalog ]]; then
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    path="${release_dir}/${name}"
+    [[ -f "${path}" && ! -L "${path}" ]] ||
+      fail_publish "verified release asset is missing: ${name}"
+    assets+=("${path}")
+  done < <("${project_root}/package/release_asset_manifest" \
+    "${asset_channel}" "${version}" "${catalog_sequence}")
+  [[ "${#assets[@]}" -gt 0 ]] || fail_publish "release channel is empty"
+fi
 
 work_root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/linnet-github-release.XXXXXX")"
 cleanup() {
@@ -74,11 +91,172 @@ trap cleanup EXIT
 
 expected_assets="${work_root}/expected-assets.tsv"
 notes="${work_root}/notes.md"
-for asset in "${assets[@]}"; do
-  digest="$(shasum -a 256 "${asset}" | awk '{print $1}')"
-  printf '%s\tsha256:%s\n' "${asset##*/}" "${digest}" >>"${expected_assets}"
-done
-LC_ALL=C sort -o "${expected_assets}" "${expected_assets}"
+: >"${expected_assets}"
+if [[ "${channel}" != catalog ]]; then
+  for asset in "${assets[@]}"; do
+    digest="$(shasum -a 256 "${asset}" | awk '{print $1}')"
+    printf '%s\tsha256:%s\n' "${asset##*/}" "${digest}" >>"${expected_assets}"
+  done
+  LC_ALL=C sort -o "${expected_assets}" "${expected_assets}"
+fi
+
+write_expected_channel_assets() {
+  local requested_channel="$1"
+  local output="$2"
+  : >"${output}"
+  local count=0
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    local path="${release_dir}/${name}"
+    [[ -f "${path}" && ! -L "${path}" ]] ||
+      fail_publish "verified ${requested_channel} asset is missing: ${name}"
+    local digest
+    digest="$(shasum -a 256 "${path}" | awk '{print $1}')"
+    printf '%s\tsha256:%s\n' "${name}" "${digest}" >>"${output}"
+    count=$((count + 1))
+  done < <("${project_root}/package/release_asset_manifest" \
+    "${requested_channel}" "${version}" "${catalog_sequence}")
+  [[ "${count}" -gt 0 ]] || fail_publish "${requested_channel} channel is empty"
+  LC_ALL=C sort -o "${output}" "${output}"
+}
+
+tag_lookup_sequence=0
+inspect_exact_tag() {
+  local requested_tag="$1"
+  tag_lookup_sequence=$((tag_lookup_sequence + 1))
+  local response="${work_root}/tag-ref-${tag_lookup_sequence}-response"
+  local error="${work_root}/tag-ref-${tag_lookup_sequence}-error"
+  exact_tag_status=""
+  exact_tag_revision=""
+
+  if gh api --include "repos/${repository}/git/ref/tags/${requested_tag}" \
+      >"${response}" 2>"${error}"; then
+    grep -Eq '^HTTP/[0-9.]+ 200([[:space:]]|$)' "${response}" ||
+      fail_publish "${requested_tag} tag lookup returned an invalid success response"
+    local object_record object_type object_sha depth=0
+    object_record="$(ruby -rjson -e '
+      lines = File.binread(ARGV.fetch(0)).lines
+      body = lines.drop_while { |line| !line.start_with?("{") }.join
+      object = JSON.parse(body).fetch("object")
+      puts [object.fetch("type"), object.fetch("sha")].join("\t")
+    ' "${response}")" || fail_publish "${requested_tag} tag response is invalid"
+    IFS=$'\t' read -r object_type object_sha <<<"${object_record}"
+    while [[ "${object_type}" == tag ]]; do
+      depth=$((depth + 1))
+      [[ "${depth}" -le 8 ]] ||
+        fail_publish "${requested_tag} annotated tag chain is too deep"
+      object_record="$(gh api \
+        "repos/${repository}/git/tags/${object_sha}" \
+        --jq '[.object.type, .object.sha] | @tsv')" ||
+        fail_publish "${requested_tag} annotated tag is unavailable"
+      IFS=$'\t' read -r object_type object_sha <<<"${object_record}"
+    done
+    [[ "${object_type}" == commit && "${object_sha}" =~ ^[0-9a-f]{40}$ ]] ||
+      fail_publish "${requested_tag} does not resolve to a commit"
+    exact_tag_status=present
+    exact_tag_revision="${object_sha}"
+  elif grep -Eq '^HTTP/[0-9.]+ 404([[:space:]]|$)' "${response}"; then
+    exact_tag_status=absent
+  else
+    [[ ! -s "${error}" ]] || cat "${error}" >&2
+    fail_publish "${requested_tag} tag identity is unavailable"
+  fi
+}
+
+verify_release_revision() {
+  local requested_tag="$1"
+  inspect_exact_tag "${requested_tag}"
+  [[ "${exact_tag_status}" == present ]] ||
+    fail_publish "${requested_tag} tag does not exist"
+  [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
+    fail_publish "${requested_tag} resolves to a different source revision"
+}
+
+verify_candidate_archive() {
+  LINNET_RELEASE_TOOL="${LINNET_RELEASE_TOOL:-}" \
+    "${project_root}/package/verify_publication_artifacts" \
+      "${release_dir}" "${version}" "${candidate_revision}" >/dev/null ||
+    fail_publish "candidate archive failed final artifact verification"
+}
+
+verify_candidate_source() {
+  if [[ "${channel}" == data-seed ]]; then
+    verify_release_revision "data-seed-${catalog_sequence}"
+    return
+  fi
+
+  local main_revision
+  main_revision="$(gh api "repos/${repository}/git/ref/heads/main" \
+    --jq '.object.sha')" || fail_publish "remote main identity is unavailable"
+  [[ "${main_revision}" =~ ^[0-9a-f]{40}$ ]] ||
+    fail_publish "remote main identity is invalid"
+
+  if [[ "${channel}" == catalog ]]; then
+    [[ "${main_revision}" == "${candidate_revision}" ]] ||
+      fail_publish "Catalog candidate is not the current remote main revision"
+  elif [[ "${channel}" == public ]]; then
+    inspect_exact_tag "v${version}"
+    if [[ "${exact_tag_status}" == present ]]; then
+      [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
+        fail_publish "v${version} resolves to a different source revision"
+    elif [[ "${exact_tag_status}" == absent ]]; then
+      [[ "${main_revision}" == "${candidate_revision}" ]] ||
+        fail_publish "an untagged Public candidate is not current remote main"
+    else
+      fail_publish "v${version} tag identity is invalid"
+    fi
+  elif [[ "${main_revision}" != "${candidate_revision}" ]]; then
+    verify_release_revision "v${version}"
+  fi
+
+  local runs="${work_root}/main-ci-runs.json"
+  gh api --method GET \
+    "repos/${repository}/actions/workflows/commit-ci.yml/runs" \
+    -f head_sha="${candidate_revision}" -f branch=main -f event=push \
+    -F per_page=100 >"${runs}" ||
+    fail_publish "main CI evidence is unavailable"
+  ruby -rjson -e '
+    document = JSON.parse(File.binread(ARGV.fetch(0)))
+    revision = ARGV.fetch(1)
+    accepted = document.fetch("workflow_runs").any? do |run|
+      run.fetch("name") == "Linnet commit CI" &&
+        run.fetch("path") == ".github/workflows/commit-ci.yml" &&
+        run.fetch("head_sha") == revision &&
+        run.fetch("head_branch") == "main" &&
+        run.fetch("event") == "push" &&
+        run.fetch("status") == "completed" &&
+        run.fetch("conclusion") == "success"
+    end
+    abort unless accepted
+  ' "${runs}" "${candidate_revision}" ||
+    fail_publish "candidate has no successful exact main CI run"
+}
+
+verify_published_channel() {
+  local requested_channel="$1"
+  local requested_tag="$2"
+  local expected_prerelease="$3"
+  local release_json
+  release_json="$(gh release view "${requested_tag}" --repo "${repository}" \
+    --json isDraft,isPrerelease)" ||
+    fail_publish "${requested_tag} is not published"
+  ruby -rjson -e '
+    document = JSON.parse(STDIN.read)
+    expected = ARGV.fetch(0) == "true"
+    abort unless document.fetch("isDraft") == false
+    abort unless document.fetch("isPrerelease") == expected
+  ' "${expected_prerelease}" <<<"${release_json}" ||
+    fail_publish "${requested_tag} release state is invalid"
+  verify_release_revision "${requested_tag}"
+
+  local expected="${work_root}/expected-${requested_channel}-assets.tsv"
+  local actual="${work_root}/actual-${requested_channel}-assets.tsv"
+  write_expected_channel_assets "${requested_channel}" "${expected}"
+  gh release view "${requested_tag}" --repo "${repository}" --json assets \
+    --jq '.assets[] | [.name, .digest] | @tsv' | LC_ALL=C sort >"${actual}"
+  cmp -s "${expected}" "${actual}" ||
+    fail_publish "${requested_tag} assets differ from the verified candidate"
+}
 
 append_version_changes() {
   ruby - "${project_root}/CHANGELOG.md" "${version}" <<'RUBY'
@@ -136,7 +314,7 @@ EOF
       done <"${expected_assets}"
     } >"${notes}"
     ;;
-  data)
+  data|data-seed)
     {
       echo "Linnet Settings 使用的同仓库自动数据频道。普通用户无需手动下载这些文件。"
       echo "Catalog 绑定每个语言包的字节数和 SHA-256。"
@@ -147,18 +325,55 @@ EOF
       done <"${expected_assets}"
     } >"${notes}"
     ;;
+  catalog)
+    : >"${notes}"
+    ;;
 esac
 
-publish_catalog_pointer() {
+# Every remote mutation revalidates the final eight-file candidate itself.
+# Catalog additionally requires the candidate to remain the current remote
+# main revision. Public may create its absent version tag only from that exact
+# main revision after Core, data and Catalog bytes are already verified. The
+# data-seed bootstrap is isolated to one exact seed tag and the data prerelease.
+verify_candidate_archive
+verify_candidate_source
+
+ensure_catalog_pointer() {
+  local allow_promotion="$1"
+  [[ "${allow_promotion}" == true || "${allow_promotion}" == false ]] ||
+    fail_publish "Catalog promotion policy is invalid"
   local catalog="${release_dir}/Linnet-Data-Channel.json"
   [[ -f "${catalog}" && ! -L "${catalog}" ]] ||
     fail_publish "verified data Catalog is missing"
+  local candidate_sequence
+  candidate_sequence="$(ruby -rjson -e '
+    document = JSON.parse(File.binread(ARGV.fetch(0)))
+    sequence = document.fetch("sequence")
+    expected = Integer(ARGV.fetch(1), 10)
+    abort unless sequence.is_a?(Integer) && sequence.positive? && sequence == expected
+    puts sequence
+  ' "${catalog}" "${catalog_sequence}")" ||
+    fail_publish "verified Catalog sequence differs from release identity"
+  verify_published_channel core "core-v${version}" true
+  verify_published_channel data "data-${catalog_sequence}" true
   local downloaded="${work_root}/published-data"
   mkdir "${downloaded}"
   gh release download "data-${catalog_sequence}" --repo "${repository}" \
     --pattern Linnet-Data-Channel.json --dir "${downloaded}"
   cmp -s "${catalog}" "${downloaded}/Linnet-Data-Channel.json" ||
     fail_publish "stable Catalog pointer differs from the published data channel"
+
+  local core_name
+  core_name="$("${project_root}/package/release_asset_manifest" \
+    core "${version}" "${catalog_sequence}" | awk '/-Core-community-beta\.pkg$/')"
+  [[ -n "${core_name}" && "${core_name}" != *$'\n'* ]] ||
+    fail_publish "Core channel must contain one update package"
+  local downloaded_core="${work_root}/published-core"
+  mkdir "${downloaded_core}"
+  gh release download "core-v${version}" --repo "${repository}" \
+    --pattern "${core_name}" --dir "${downloaded_core}"
+  cmp -s "${release_dir}/${core_name}" "${downloaded_core}/${core_name}" ||
+    fail_publish "stable Catalog Core differs from the published Core channel"
 
   local api="repos/${repository}/git"
   local old_commit=""
@@ -172,13 +387,27 @@ publish_catalog_pointer() {
     old_tree="$(gh api "${api}/commits/${old_commit}" --jq '.tree.sha')"
     old_blob="$(gh api "${api}/trees/${old_tree}" --jq \
       '.tree | select(length == 1 and .[0].path == "Linnet-Data-Channel.json" and .[0].mode == "100644" and .[0].type == "blob") | .[0].sha')"
-    if [[ -n "${old_blob}" ]]; then
-      gh api "${api}/blobs/${old_blob}" --jq '.content' | tr -d '\n' | base64 -D \
-        >"${work_root}/current-catalog"
-      if cmp -s "${catalog}" "${work_root}/current-catalog"; then
-        echo "Linnet data-channel branch already names the exact Catalog"
-        return
-      fi
+    [[ -n "${old_blob}" ]] ||
+      fail_publish "data-channel tree is not canonical"
+    gh api "${api}/blobs/${old_blob}" --jq '.content' | tr -d '\n' | base64 -D \
+      >"${work_root}/current-catalog"
+    if cmp -s "${catalog}" "${work_root}/current-catalog"; then
+      echo "Linnet data-channel branch already names the exact Catalog"
+      return
+    fi
+    local current_sequence
+    current_sequence="$(ruby -rjson -e '
+      document = JSON.parse(File.binread(ARGV.fetch(0)))
+      sequence = document.fetch("sequence")
+      abort unless sequence.is_a?(Integer) && sequence.positive?
+      puts sequence
+    ' "${work_root}/current-catalog")" ||
+      fail_publish "current data-channel Catalog is invalid"
+    if (( current_sequence > candidate_sequence )); then
+      fail_publish "Catalog sequence would regress from ${current_sequence} to ${candidate_sequence}"
+    fi
+    if (( current_sequence == candidate_sequence )); then
+      fail_publish "Catalog sequence ${candidate_sequence} already names different bytes"
     fi
   else
     ruby -rjson -e '
@@ -187,6 +416,9 @@ publish_catalog_pointer() {
     ' <<<"${ref_result}" ||
       fail_publish "data-channel branch lookup failed"
   fi
+
+  [[ "${allow_promotion}" == true ]] ||
+    fail_publish "stable Catalog was not promoted before public authorization"
 
   ruby -rjson -rbase64 -e '
     File.write(ARGV.fetch(1), JSON.generate({
@@ -232,13 +464,44 @@ publish_catalog_pointer() {
     fail_publish "data-channel bytes differ after publication"
 }
 
+if [[ "${channel}" == catalog ]]; then
+  ensure_catalog_pointer true
+  echo "Linnet Catalog channel: PROMOTED (data-${catalog_sequence})"
+  exit 0
+fi
+
+if [[ "${channel}" == public ]]; then
+  ensure_catalog_pointer false
+fi
+
+release_tag_preexisting=false
+inspect_exact_tag "${tag}"
+if [[ "${exact_tag_status}" == present ]]; then
+  [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
+    fail_publish "${tag} already resolves to a different source revision"
+  release_tag_preexisting=true
+elif [[ "${exact_tag_status}" == absent ]]; then
+  release_tag_preexisting=false
+else
+  fail_publish "${tag} tag identity is invalid"
+fi
+
 release_exists=false
 release_is_draft=false
-if release_json="$(gh release view "${tag}" --repo "${repository}" \
-    --json isDraft,isPrerelease 2>/dev/null)"; then
+release_view_output="${work_root}/release-view-output"
+release_view_error="${work_root}/release-view-error"
+if gh release view "${tag}" --repo "${repository}" \
+    --json isDraft,isPrerelease >"${release_view_output}" \
+    2>"${release_view_error}"; then
+  release_json="$(cat "${release_view_output}")"
   release_exists=true
   release_is_draft="$(ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("isDraft")' \
     <<<"${release_json}")"
+elif [[ "$(tr -d '\r\n' <"${release_view_error}")" == "release not found" ]]; then
+  release_exists=false
+else
+  [[ ! -s "${release_view_error}" ]] || cat "${release_view_error}" >&2
+  fail_publish "${tag} release identity is unavailable"
 fi
 
 actual_assets() {
@@ -248,28 +511,63 @@ actual_assets() {
 
 verify_assets() {
   local actual="${work_root}/actual-assets.tsv"
+  verify_release_revision "${tag}"
   actual_assets >"${actual}"
   cmp -s "${expected_assets}" "${actual}" ||
     fail_publish "${tag} assets differ from the verified ${channel} channel"
 }
 
-if [[ "${release_exists}" == true && "${release_is_draft}" == false ]]; then
-  actual_prerelease="$(ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("isPrerelease")' \
-    <<<"${release_json}")"
-  [[ "${actual_prerelease}" == "${prerelease}" ]] ||
-    fail_publish "${tag} release kind differs from the channel contract"
-  verify_assets
-  gh release edit "${tag}" --repo "${repository}" --notes-file "${notes}"
-  if [[ "${channel}" == public ]]; then
-    publish_catalog_pointer
+verify_draft_assets() {
+  local actual="${work_root}/actual-draft-assets.tsv"
+  actual_assets >"${actual}"
+  cmp -s "${expected_assets}" "${actual}" ||
+    fail_publish "${tag} draft assets differ from the verified ${channel} channel"
+}
+
+verify_retryable_draft_assets() {
+  local actual="${work_root}/actual-retry-draft-assets.tsv"
+  verify_release_revision "${tag}"
+  actual_assets >"${actual}"
+  if LC_ALL=C comm -23 "${actual}" "${expected_assets}" | grep -q .; then
+    fail_publish "${tag} draft contains assets outside the verified ${channel} channel"
   fi
+}
+
+verify_release_state() {
+  local state_json
+  state_json="$(gh release view "${tag}" --repo "${repository}" \
+    --json isDraft,isPrerelease)" ||
+    fail_publish "${tag} release state is unavailable"
+  ruby -rjson -e '
+    document = JSON.parse(STDIN.read)
+    expected_prerelease = ARGV.fetch(0) == "true"
+    abort unless document.fetch("isDraft") == false
+    abort unless document.fetch("isPrerelease") == expected_prerelease
+  ' "${prerelease}" <<<"${state_json}" ||
+    fail_publish "${tag} release state differs from the ${channel} contract"
+}
+
+if [[ "${release_exists}" == true && "${release_is_draft}" == false ]]; then
+  verify_release_state
+  verify_assets
+  existing_edit_args=(release edit "${tag}" --repo "${repository}" --notes-file "${notes}")
+  if [[ "${channel}" == public ]]; then
+    existing_edit_args+=(--latest)
+  fi
+  gh "${existing_edit_args[@]}"
   echo "Linnet ${channel} release already published with exact bytes: ${tag}"
   exit 0
 fi
 
 if [[ "${release_is_draft}" == true ]]; then
   # One retry owns only the unpublished draft with this exact channel tag.
-  # The tag is retained so a rerun cannot silently move an existing identity.
+  # Existing assets may be incomplete, but every uploaded byte and the source
+  # identity must still belong to this exact candidate before deletion.
+  actual_prerelease="$(ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("isPrerelease")' \
+    <<<"${release_json}")"
+  [[ "${actual_prerelease}" == "${prerelease}" ]] ||
+    fail_publish "${tag} draft kind differs from the channel contract"
+  verify_retryable_draft_assets
   gh release delete "${tag}" --repo "${repository}" --yes
 fi
 
@@ -278,14 +576,14 @@ create_args=(release create "${tag}" "${assets[@]}" --repo "${repository}"
 if [[ "${prerelease}" == true ]]; then
   create_args+=(--prerelease)
 fi
-if git -C "${project_root}" rev-parse --verify --quiet "refs/tags/${tag}^{commit}" \
-    >/dev/null; then
+if [[ "${release_tag_preexisting}" == true ]]; then
   create_args+=(--verify-tag)
 else
   create_args+=(--target "${candidate_revision}")
 fi
 gh "${create_args[@]}"
-verify_assets
+verify_release_revision "${tag}"
+verify_draft_assets
 
 edit_args=(release edit "${tag}" --repo "${repository}" --draft=false)
 if [[ "${channel}" == public ]]; then
@@ -293,11 +591,6 @@ if [[ "${channel}" == public ]]; then
 fi
 gh "${edit_args[@]}"
 
-final_draft="$(gh release view "${tag}" --repo "${repository}" --json isDraft \
-  --jq '.isDraft')"
-[[ "${final_draft}" == false ]] || fail_publish "${tag} remained a draft"
+verify_release_state
 verify_assets
-if [[ "${channel}" == public ]]; then
-  publish_catalog_pointer
-fi
 echo "Linnet ${channel} release: PUBLISHED (${tag})"

@@ -46,6 +46,7 @@ raise "local header duplicated a mutable commit" if
 full = local.fetch("full_pinyin")
 selector_marker = /\Axform\/[ⅠⅡⅢⅣⅤⅥⅦⅧ]+\//
 generic_single_tone = %q{derive/^(.).+(\d)$/$1$2/}
+natural_single_key_a = %q{derive/^aa(\d)$/a/}
 full_broad_tail_start = %q{derive/([qtpdjlxbnm])iao$/$1ioa/}
 full_individual_omissions = [
   %q{abbrev/^ng(\d)$/ng/},
@@ -88,7 +89,12 @@ profiles.each do |local_name, source_name|
   raise "#{local_name} lost an upstream layout rule" unless
     required.all? { |rule| local_rules.include?(rule) }
   raise "#{local_name} gained an undeclared rule" unless
-    local_rules.all? { |rule| source_rules.include?(rule) || full.include?(rule) }
+    local_rules.all? do |rule|
+      source_rules.include?(rule) || full.include?(rule) ||
+        (local_name == "ziranma" && rule == natural_single_key_a)
+    end
+  raise "Natural Code lost its reviewed single-key a shortcut" unless
+    (local_name == "ziranma") == local_rules.include?(natural_single_key_a)
   raise "#{local_name} restored a broad single-character path" if
     local_rules.include?(generic_single_tone) ||
       single_abbreviations.any? { |rule| local_rules.include?(rule) }

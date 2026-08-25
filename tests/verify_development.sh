@@ -88,5 +88,6 @@ tests/verify_swift_units.sh
 tests/verify_chinese_source_projection.sh
 tests/verify_english_data_projection.sh
 tests/verify_rime_runtime.sh
+tests/verify_rime_runtime.sh --lifecycle-raw-exit-probe
 
 echo "Linnet development gate: PASS (no signing or installation)"

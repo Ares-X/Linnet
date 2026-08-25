@@ -6,7 +6,6 @@ struct LinnetCandidatePresentationTests {
   static func main() {
     testExpandedCandidateBounds()
     testCandidateRows()
-    testPrintablePagingShortcuts()
 
     require(
       LinnetCandidatePresentation.candidateWindowInset == CGSize(width: 7, height: 6) &&
@@ -27,6 +26,7 @@ struct LinnetCandidatePresentationTests {
     testCandidateDetailGeometry()
     testInputModeTransitions()
     testIdleMenuPresentationState()
+    testHighlightedCandidateBounds()
 
     var accessibilitySurface =
       LinnetCandidatePresentation.AccessibilitySurface.candidates
@@ -139,30 +139,82 @@ struct LinnetCandidatePresentationTests {
   }
 
   private static func testInputModeTransitions() {
+    typealias Identity = LinnetCandidatePresentation.InputModeIdentity
+    let pinyin = Identity(schemaID: "linnet_zh_pinyin", asciiMode: false)
+    let flypy = Identity(schemaID: "linnet_zh_flypy", asciiMode: false)
+    let english = Identity(schemaID: "linnet_en", asciiMode: false)
+    let pinyinASCII = Identity(schemaID: "linnet_zh_pinyin", asciiMode: true)
+    let flypyASCII = Identity(schemaID: "linnet_zh_flypy", asciiMode: true)
+    let englishASCII = Identity(schemaID: "linnet_en", asciiMode: true)
+
     require(
       LinnetCandidatePresentation.inputModeTransitionLabel(
-        previousSchemaID: nil, currentSchemaID: "linnet_zh_pinyin") == nil,
+        previous: nil, current: pinyin) == nil,
       "initial activation was mistaken for a user mode switch"
     )
     require(
       LinnetCandidatePresentation.inputModeTransitionLabel(
-        previousSchemaID: "linnet_zh_pinyin", currentSchemaID: "linnet_en") == "En",
+        previous: nil, current: pinyinASCII) == nil,
+      "initial ASCII-mode sampling emitted a false switch notice"
+    )
+
+    for transition in [
+      (pinyin, pinyinASCII),
+      (english, englishASCII),
+      (english, pinyinASCII),
+      (pinyinASCII, flypyASCII),
+    ] {
+      require(
+        LinnetCandidatePresentation.inputModeTransitionLabel(
+          previous: transition.0, current: transition.1) == "A",
+        "a transition into ASCII mode lost its compact caret label"
+      )
+    }
+
+    require(
+      LinnetCandidatePresentation.inputModeTransitionLabel(
+        previous: pinyin, current: english) == "En",
       "Chinese to Smart English lost its compact caret label"
     )
     require(
       LinnetCandidatePresentation.inputModeTransitionLabel(
-        previousSchemaID: "linnet_en", currentSchemaID: "linnet_zh_flypy") == "中",
+        previous: english, current: flypy) == "中",
       "Smart English to Chinese lost its compact caret label"
     )
     require(
       LinnetCandidatePresentation.inputModeTransitionLabel(
-        previousSchemaID: "linnet_zh_pinyin", currentSchemaID: "linnet_zh_flypy") == nil,
+        previous: pinyinASCII, current: english) == "En",
+      "leaving ASCII mode for Smart English lost its compact caret label"
+    )
+    require(
+      LinnetCandidatePresentation.inputModeTransitionLabel(
+        previous: englishASCII, current: english) == "En",
+      "leaving same-schema ASCII mode for Smart English lost its compact caret label"
+    )
+    require(
+      LinnetCandidatePresentation.inputModeTransitionLabel(
+        previous: englishASCII, current: flypy) == "中",
+      "leaving ASCII mode for Chinese lost its compact caret label"
+    )
+    require(
+      LinnetCandidatePresentation.inputModeTransitionLabel(
+        previous: pinyinASCII, current: pinyin) == "中",
+      "leaving same-schema ASCII mode for Chinese lost its compact caret label"
+    )
+    require(
+      LinnetCandidatePresentation.inputModeTransitionLabel(
+        previous: pinyin, current: flypy) == nil,
       "changing Chinese profiles was mistaken for a Shift language switch"
     )
     require(
       LinnetCandidatePresentation.inputModeTransitionLabel(
-        previousSchemaID: "linnet_en", currentSchemaID: "linnet_en") == nil,
+        previous: english, current: english) == nil,
       "an unchanged Smart English schema emitted duplicate feedback"
+    )
+    require(
+      LinnetCandidatePresentation.inputModeTransitionLabel(
+        previous: pinyinASCII, current: pinyinASCII) == nil,
+      "an unchanged ASCII identity emitted duplicate feedback"
     )
   }
 
@@ -187,6 +239,40 @@ struct LinnetCandidatePresentationTests {
     )
   }
 
+  private static func testHighlightedCandidateBounds() {
+    require(
+      LinnetCandidatePresentation.candidateMenuPage(
+        currentPage: 0, pageSize: 9, candidateCount: 2, highlighted: 1
+      ) == .init(currentPage: 0, pageSize: 9, candidateCount: 2, highlighted: 1),
+      "the last valid highlighted candidate was rejected"
+    )
+    require(
+      LinnetCandidatePresentation.candidateMenuPage(
+        currentPage: 0, pageSize: 9, candidateCount: 2, highlighted: 2
+      ) == nil,
+      "a nonempty candidate page accepted an out-of-bounds highlight"
+    )
+    require(
+      LinnetCandidatePresentation.candidateMenuPage(
+        currentPage: 0, pageSize: 9, candidateCount: 0, highlighted: 1
+      ) == nil,
+      "an empty candidate page accepted a nonzero highlight"
+    )
+
+    guard let builder = try? String(
+      contentsOfFile: "sources/LinnetRimeCandidateSnapshotBuilder.swift",
+      encoding: .utf8)
+    else { fail("candidate snapshot builder source could not be read") }
+    require(
+      !builder.contains("let compactHighlighted = min("),
+      "candidate snapshot builder still clamps an invalid Rime highlight"
+    )
+    require(
+      builder.contains("highlightedItemIndex: highlightedOnPage"),
+      "candidate snapshot builder does not consume the validated highlight directly"
+    )
+  }
+
   private static func testCanonicalTypography() {
     for point in [CGFloat(12), 16, 32] {
       let system = LinnetCandidatePresentation.platformFont(fontNames: [], size: point)
@@ -208,83 +294,6 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.platformFont(
         fontNames: ["Avenir Next-Demi Bold"], size: 16).familyName == "Avenir Next",
       "legacy family-face candidate font names stopped resolving")
-  }
-
-  private static func testPrintablePagingShortcuts() {
-    typealias Key = LinnetCandidatePresentation.PrintablePagingKey
-    typealias Action = LinnetCandidatePresentation.CandidateControlAction
-    let previousKeys: [Key] = [.minus, .leftBracket]
-    let nextKeys: [Key] = [.equal, .rightBracket]
-
-    for key in previousKeys {
-      require(
-        LinnetCandidatePresentation.printablePagingAction(
-          key: key,
-          hasModifiers: false,
-          hasActiveInput: true,
-          currentPage: 1,
-          isLastPage: false,
-          candidateCount: 9) == Action.pageUp,
-        "\(key) did not page backward when a previous page exists")
-      require(
-        LinnetCandidatePresentation.printablePagingAction(
-          key: key,
-          hasModifiers: false,
-          hasActiveInput: true,
-          currentPage: 0,
-          isLastPage: false,
-          candidateCount: 9) == nil,
-        "\(key) was captured on the first candidate page")
-    }
-    for key in nextKeys {
-      require(
-        LinnetCandidatePresentation.printablePagingAction(
-          key: key,
-          hasModifiers: false,
-          hasActiveInput: true,
-          currentPage: 0,
-          isLastPage: false,
-          candidateCount: 9) == Action.pageDown,
-        "\(key) did not page forward when a next page exists")
-      require(
-        LinnetCandidatePresentation.printablePagingAction(
-          key: key,
-          hasModifiers: false,
-          hasActiveInput: true,
-          currentPage: 0,
-          isLastPage: true,
-          candidateCount: 9) == nil,
-        "\(key) was captured on the last candidate page")
-    }
-    for key in previousKeys + nextKeys {
-      require(
-        LinnetCandidatePresentation.printablePagingAction(
-          key: key,
-          hasModifiers: true,
-          hasActiveInput: true,
-          currentPage: 1,
-          isLastPage: false,
-          candidateCount: 9) == nil,
-        "modified \(key) was mistaken for a printable paging shortcut")
-      require(
-        LinnetCandidatePresentation.printablePagingAction(
-          key: key,
-          hasModifiers: false,
-          hasActiveInput: true,
-          currentPage: 1,
-          isLastPage: false,
-          candidateCount: 0) == nil,
-        "\(key) was captured without a candidate menu")
-      require(
-        LinnetCandidatePresentation.printablePagingAction(
-          key: key,
-          hasModifiers: false,
-          hasActiveInput: false,
-          currentPage: 1,
-          isLastPage: false,
-          candidateCount: 9) == nil,
-        "\(key) captured a passive zero-prefix prediction")
-    }
   }
 
   private static func testCandidateLineTypographyOwner() {

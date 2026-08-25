@@ -3,9 +3,10 @@
 # Derived from the pinned Rime Wanxiang `wanxiang_algebra.yaml:/base` input;
 # `upstreams.lock.json` is the sole owner of its exact tag and commit.
 # Linnet flattens eight layouts into self-contained arrays, omits upstream
-# selector markers and broad single-character double-pinyin derivations, uses
-# a reviewed shared compatibility/typo suffix, and narrows full-pinyin typo
-# transforms while adding j/q/x/y v/u compatibility.
+# selector markers and broad single-character double-pinyin derivations, keeps
+# Natural Code's reviewed `a` syllable shortcut, uses a shared compatibility/
+# typo suffix, and narrows full-pinyin typo transforms while adding j/q/x/y
+# v/u compatibility.
 # Each section is a complete, self-contained algebra pipeline.
 # Sections: /full_pinyin, /ziranma (DEFAULT), /flypy, /sogou, /mspy, /abc, /ziguang, /jiajia
 # DO NOT EDIT — owned by Linnet.
@@ -111,6 +112,7 @@ ziranma:
     - xform/^m(\d)/me$1/
     - derive/^([aoe])([ioun])(\d)$/$1$1$2$3/
     - xform/^([aoe])(ng)?(\d)$/$1$1$2$3/
+    - derive/^aa(\d)$/a/
     - xform/iu(\d)$/Ⓠ$1/
     - xform/[iu]a(\d)$/Ⓦ$1/
     - xform/[uv]an(\d)$/Ⓡ$1/

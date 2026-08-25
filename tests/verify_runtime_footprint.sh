@@ -107,10 +107,13 @@ ruby -e '
 ' sources/SquirrelApplicationDelegate.swift ||
   fail "a transaction path can report runtime success after Settings failed to load"
 if ! ruby -e '
-  panel, view, controller, config = ARGV.map { |path| File.read(path) }
-  show = panel[/  func show\(\) \{.*?\n  \}\n\n  func show\(status message:/m]
-  draw = view[/  override func draw\(_ dirtyRect: NSRect\) \{.*?\n  \}\n\n  func click/m]
-  commit = controller[/  func commit\(string: String\) \{.*?\n  \}\n\n  func show\(preedit:/m]
+  panel = File.read(ARGV[0]) + File.read(ARGV[1])
+  view = File.read(ARGV[2])
+  controller = File.read(ARGV[3]) + File.read(ARGV[4])
+  config = File.read(ARGV[5])
+  show = panel[/  func show\(publication:.*?\n  \}\n\n  func show\(status message:/m]
+  draw = view[/  override func draw\(_ dirtyRect: NSRect\) \{.*?\n  \}\n\n\}\n\nextension SquirrelView/m]
+  commit = controller[/  private func commit\(string: String, to targetClient: IMKTextInput\?\) \{.*?\n  \}\n\n  private func show\(/m]
   abort "candidate panel owners are missing" unless show && draw && commit
   size = show.index("textContainer.size =")
   layout = show.index("ensureLayout(for:")
@@ -126,14 +129,15 @@ if ! ruby -e '
     draw.include?("let contentFrame = LinnetPanelGeometry.pagingLayout(") &&
       draw.include?("var containingRect = NSRect(origin: .zero, size: contentFrame.size)") &&
       !draw.include?("dirtyRect.height")
-  marked = commit.index("client.setMarkedText(")
-  inserted = commit.index("client.insertText(")
+  marked = commit.index("targetClient.setMarkedText(")
+  inserted = commit.index("targetClient.insertText(")
   abort "direct commits lack the upstream marked-text client opt-in" unless
     commit.include?(%q{get_option(session, "force_marked_text_for_direct_commit")}) &&
       marked && inserted && marked < inserted &&
       config.match?(/org\.alacritty:\s*\n\s+force_marked_text_for_direct_commit: true/)
-' sources/SquirrelPanel.swift sources/SquirrelView.swift \
-    sources/SquirrelInputController.swift data/squirrel.yaml; then
+' sources/SquirrelPanel.swift sources/SquirrelPanel+CandidatePresentation.swift \
+    sources/SquirrelView.swift sources/SquirrelInputController.swift \
+    sources/SquirrelInputController+RimeSession.swift data/squirrel.yaml; then
   fail "mature upstream candidate layout or direct-commit fixes are missing"
 fi
 test "$(rg -n '^ascii_composer:' data/linnet --glob '*.yaml' | wc -l | tr -d ' ')" -eq 1 ||
@@ -148,6 +152,22 @@ fi
 rg -Fq 'class ModeSwitchProcessor : public Processor' \
   plugins/smart_english/smart_english.cc ||
   fail "the native direct-Shift mapping owner is missing"
+ruby -e '
+  source = File.read("plugins/smart_english/smart_english.cc")
+  first = source.index("ProcessResult ProcessPredictionArrow")
+  last = source.index("ProcessResult ProcessTab", first || 0)
+  abort "the passive-prediction arrow boundary is missing" unless first && last
+  owner = source[first...last]
+  abort "prediction arrows no longer delegate movement to stock Selector" unless
+    source.include?("prediction_selector_(ticket)") &&
+      source.include?("Selector prediction_selector_") &&
+      owner.include?("prediction_selector_.ProcessKeyEvent(key)")
+  abort "prediction arrows regained a second layout or target inference owner" if
+    ["_linear", "_horizontal", "_vertical", "page_size", "GetCandidateAt",
+     "numeric_limits", "previous_candidate", "next_candidate"].any? do |token|
+      owner.include?(token)
+    end
+' || fail "passive-prediction arrow ownership regressed"
 rg -Fq 'context->get_option("ascii_mode")' \
   plugins/smart_english/smart_english.cc ||
   fail "direct Shift no longer consumes ascii_composer classification"
@@ -155,13 +175,10 @@ ruby -e '
   source = File.read("plugins/smart_english/smart_english.cc")
   owner = source[/class ModeSwitchProcessor : public Processor \{.*?\n\};/m]
   abort "the direct Shift transition owner is missing" unless owner
-  commit = owner.index("if (context->IsComposing())")
-  close = owner.index("context->Commit()")
   apply = owner.index("engine_->ApplySchema")
-  abort "direct Shift can clear an untranslated suffix at schema change" unless
-    commit && close && apply && commit < close && close < apply &&
-      owner.scan("context->Commit()").length == 1
-' || fail "direct Shift partial-composition preservation regressed"
+  abort "direct Shift regained a second composition-commit owner" unless
+    apply && !owner.include?("context->Commit()")
+' || fail "direct Shift raw-code ownership regressed"
 rg -Fq 'kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1"' \
   plugins/smart_english/smart_english.cc ||
   fail "direct Shift lost its session-owned Chinese return identity"
@@ -184,10 +201,18 @@ if ! ruby -ryaml -e '
   default = YAML.load_file("data/linnet/default.yaml")
   abort "the bundled pack regained the product Caps policy" unless
     default.dig("ascii_composer", "switch_key", "Caps_Lock") == "clear"
+  abort "pending letters can again select a translated candidate on Shift" unless
+    default.dig("ascii_composer", "switch_key", "Shift_L") == "commit_code" &&
+      default.dig("ascii_composer", "switch_key", "Shift_R") == "commit_code"
   renderer = File.read("sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift")
-  abort "the Core renderer does not own the effective Caps policy" unless
-    renderer.scan(%q{"ascii_composer/switch_key/Caps_Lock"}).length == 1 &&
-      renderer.scan(%q{"commit_text"}).length == 1
+  %w[Caps_Lock Shift_L Shift_R].each do |key|
+    abort "the Core renderer does not own effective #{key} raw-code preservation" unless
+      renderer.scan(%Q{"ascii_composer/switch_key/#{key}"}).length == 1
+  end
+  abort "a projected mode-switch key can still select translated text" if
+    renderer.include?(%q{"commit_text"})
+  abort "the Core renderer does not project all mode-switch keys as raw code" unless
+    renderer.scan(%q{"commit_code"}).length == 3
   schemas = default.fetch("schema_list").map { |entry| entry.fetch("schema") }
   abort "full pinyin is not first" unless schemas.first == "linnet_zh_pinyin"
   abort "profile inventory changed" unless schemas == %w[
@@ -204,13 +229,16 @@ if ! ruby -ryaml -e '
 fi
 if ! ruby -e '
   controller = File.read("sources/SquirrelInputController.swift")
+  builder = File.read("sources/LinnetRimeCandidateSnapshotBuilder.swift")
   delegate = File.read("sources/SquirrelApplicationDelegate.swift")
   abort "controller does not consume the typed mode-transition label" unless
     controller.include?("inputModeTransitionLabel(") &&
-      controller.include?("panel.updateStatus(long: modeLabel, short: modeLabel)")
+      controller.include?("InputModeIdentity(") &&
+      controller.include?("panel.updateStatus(") &&
+      controller.include?("activationToken: updateToken")
   abort "idle Shift feedback no longer reaches the normal caret panel" unless
-    controller.include?("LinnetCandidatePresentation.candidateMenuPage(") &&
-      controller.include?("guard menuPage.pageSize > 0 else")
+    builder.include?("LinnetCandidatePresentation.candidateMenuPage(") &&
+      builder.include?("guard menuPage.pageSize > 0 else")
   schema = delegate[/if messageType == "schema".*?\n  \}/m]
   abort "generic schema notification still owns caret feedback" if
     schema&.include?("showStatusMessage")
@@ -266,6 +294,12 @@ if rg -n 'candidate_list_layout|text_orientation' \
     data/linnet/linnet_en.schema.yaml; then
   fail "the English schema regained a private candidate-layout default"
 fi
+rg -Fq "  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA'" \
+  data/linnet/linnet_en.schema.yaml ||
+  fail "Smart English lost word-internal apostrophe spelling"
+rg -Fq '  initials: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA' \
+  data/linnet/linnet_en.schema.yaml ||
+  fail "Smart English again allows punctuation to start hidden spelling"
 ruby -e '
   document, renderer, views, preview = ARGV.map { |path| File.read(path) }
   layout = document[/enum CandidateLayout:.*?\n  \}/m]
@@ -324,19 +358,24 @@ rg -Fq 'candidateExpansionAllowed ?= config.getBool(' sources/SquirrelTheme.swif
 
 for iterator_contract in candidate_list_from_index candidate_list_next \
     candidate_list_end 'select_candidate(session'; do
-  rg -Fq "${iterator_contract}" sources/SquirrelInputController.swift ||
+  rg -Fq "${iterator_contract}" sources/SquirrelInputController.swift \
+    sources/SquirrelInputController+RimeSession.swift \
+    sources/LinnetRimeCandidateSnapshotBuilder.swift ||
     fail "expanded candidate iteration lost ${iterator_contract}"
 done
 rg -Fq 'LinnetCandidatePresentation.expandedCandidateRange(' \
-  sources/SquirrelInputController.swift ||
+  sources/LinnetRimeCandidateSnapshotBuilder.swift ||
   fail "expanded candidate iteration bypassed the three-page/27-item bound"
 if rg -Fq 'select_candidate_on_current_page(session' \
-    sources/SquirrelInputController.swift sources/SquirrelPanel.swift \
+    sources/SquirrelInputController.swift sources/SquirrelInputController+RimeSession.swift \
+    sources/SquirrelPanel.swift sources/SquirrelPanel+CandidatePresentation.swift \
     sources/LinnetCandidateAccessibility.swift; then
   fail "candidate-window clicks regained a second page-local selection owner"
 fi
-test "$(rg -F -o 'selectCandidate(absoluteIndex:' \
-  sources/SquirrelInputController.swift sources/SquirrelPanel.swift | wc -l | tr -d ' ')" -ge 2 ||
+test "$(rg -F -o 'selectCandidate(' \
+  sources/SquirrelInputController.swift sources/SquirrelInputController+RimeSession.swift \
+  sources/SquirrelPanel.swift sources/SquirrelPanel+CandidatePresentation.swift | \
+  wc -l | tr -d ' ')" -ge 2 ||
   fail "expanded candidate clicks do not retain an absolute selection path"
 ruby -e '
   panel = File.read(ARGV.fetch(0))
@@ -345,16 +384,16 @@ ruby -e '
     panel.include?("private(set) var #{state} = false")
   hide = panel[/  func hide\(\) \{.*?\n  \}/m]
   update = panel[/  func update\(\n.*?\n  \}/m]
-  controller = panel[/weak var inputController:.*?\n  \}/m]
+  binding = panel[/  func bind\(.*?\n  \}/m]
   controls = panel[/  func performControl\(.*?\n  \}/m]
   abort "Panel hide does not reset disclosure" unless hide&.include?("#{state} = false")
   abort "new composition does not start collapsed" unless
     update&.include?("#{state} = candidates.isExpanded") &&
-      controller&.include?("#{state} = false")
+      binding&.include?("hide()")
   abort "candidate disclosure actions do not own both transient transitions" unless
     controls&.include?("case .expand") && controls.include?("#{state} = true") &&
       controls.include?("case .collapse") && controls.include?("#{state} = false") &&
-      controls.scan("refreshCandidatePresentation()").length == 2
+      controls.scan("refreshCandidatePresentation(").length == 2
 ' sources/SquirrelPanel.swift ||
   fail "candidate disclosure is not Panel-transient"
 rg -Fq 'candidateRanges[itemIndex] =' sources/SquirrelPanel.swift ||
@@ -369,16 +408,10 @@ if rg -n 'accept: Control\+Shift\+[34], toggle: (ascii_punct|traditionalization)
     data/linnet/default.yaml; then
   fail "Settings-owned punctuation or traditional-output defaults regained hidden session shortcuts"
 fi
-for shortcut in XK_minus XK_equal XK_bracketleft XK_bracketright; do
-  rg -Fq "${shortcut}" sources/SquirrelInputController.swift ||
-    fail "the conditional printable paging owner lost ${shortcut}"
-done
-rg -Fq 'LinnetCandidatePresentation.printablePagingAction(' \
-  sources/SquirrelInputController.swift ||
-  fail "printable paging stopped consuming the typed candidate-state decision"
-rg -Fq 'hasActiveInput: context.composition.length > 0' \
-  sources/SquirrelInputController.swift ||
-  fail "passive zero-prefix prediction regained printable paging shortcuts"
+if rg -n 'PrintablePagingKey|printablePagingAction|printablePagingKey\(' \
+    sources/SquirrelInputController.swift sources/LinnetCandidatePresentation.swift; then
+  fail "printable punctuation regained a second candidate-paging owner"
+fi
 rg -Fq "alternative_select_keys: '123456789'" data/linnet/default.yaml ||
   fail "nine-candidate pages stopped excluding the unusable zero selection key"
 ruby -e '
@@ -397,7 +430,7 @@ ruby -e '
       translator.include?("OnUnhandledKey") ||
       translator.include?("key.keycode()") ||
       translator.include?("key.modifier()")
-  abort "candidate arrows no longer clamp both directions" unless
+  abort "normal candidates still bypass librime layout and caret semantics" if
     owner.include?("key.keycode() == XK_Left || key.keycode() == XK_Up") &&
       owner.include?("key.keycode() == XK_Right || key.keycode() == XK_Down")
   abort "the unified key owner stopped terminating raw-like fallback" unless
@@ -498,6 +531,16 @@ git -C librime apply --check \
   ../patches/librime-linnet-core-interactions.patch ||
   fail "the locked core interaction patch no longer applies exactly to pinned librime"
 ruby -e '
+  project = File.read("Linnet.xcodeproj/project.pbxproj")
+  units = File.read("tests/verify_swift_units.sh")
+  abort "application targets do not share the staged Rime API header owner" unless
+    project.scan(%q{HEADER_SEARCH_PATHS = "$(SRCROOT)/librime/dist/include";}).length == 2 &&
+      units.scan("-I librime/dist/include").length == 4
+  abort "an unpatched source header can shadow the staged Rime API" if
+    project.include?("librime/src") || project.include?("librime/include") ||
+      units.match?(/-I librime\/(?:src|include)(?:\s|$)/)
+' || fail "staged Rime API header ownership regressed"
+ruby -e '
   patch = File.read("patches/librime-linnet-core-interactions.patch")
   added = patch.lines.reject { |line| line.start_with?("+++") }
                .select { |line| line.start_with?("+") }.join
@@ -512,13 +555,50 @@ ruby -e '
     deleted.include?(%q{cand && cand->type() == "punct"})
   abort "AsciiComposer no longer cancels modifier gestures on composition abort" unless
     added.include?("engine_->context()->abort_notifier().connect") &&
+      added.include?("engine_->context()->commit_notifier().connect") &&
+      added.include?("connection commit_connection_") &&
       added.include?("connection abort_connection_") &&
-      added.scan("ResetModifierState();").length == 6
+      added.scan("ResetModifierState();").length == 8
   abort "zero-input prediction can again be accepted by a mode switch" unless
     added.include?("ctx->input().empty()") &&
       added.include?("ctx->AbortComposition()") &&
       added.include?("ctx->ConfirmCurrentSelection()")
+  abort "lifecycle raw input has no versioned Rime API owner" unless
+    added.include?("Bool (*commit_raw_input)(RimeSessionId session_id)") &&
+      added.include?("bool Session::CommitRawInput()") &&
+      added.include?("static Bool RimeCommitRawInput") &&
+      added.include?("s_api.commit_raw_input = &RimeCommitRawInput")
+  abort "raw commit semantics remain duplicated across Rime processors" unless
+    added.include?("bool Context::CommitRawInput()") &&
+      added.scan("ctx->CommitRawInput();").length == 4 &&
+      deleted.scan("ctx->ClearNonConfirmedComposition();").length == 3
+  abort "active switcher exit bypasses the Session lifecycle owner" unless
+    added.include?("Context* Session::PrepareCompositionExit()") &&
+      added.include?("dynamic_cast<Switcher*>(active_engine)") &&
+      added.include?("switcher->Deactivate();") &&
+      added.include?("Context* ctx = PrepareCompositionExit();")
+  abort "stale cleanup can erase a pending root or alternate-engine composition" unless
+    added.include?("bool Session::HasPendingClientState() const") &&
+      added.include?("!commit_text_.empty()") &&
+      added.include?("!engine_->context()->input().empty()") &&
+      added.include?("!active_engine->context()->input().empty()") &&
+      added.include?("!it->second->HasPendingClientState()")
+  abort "the lifecycle API changed librime C++ virtual ABI" if
+    added.include?("virtual bool CommitRawInput") ||
+      added.include?("virtual void ClearComposition")
 ' || fail "the pinned core input-interaction repair regressed"
+ruby -e '
+  callers = []
+  Dir["librime/src/rime/**/*.{cc,h}"].each do |path|
+    File.readlines(path).each_with_index do |line, index|
+      next unless line.include?("set_active_engine(")
+      next if path.end_with?("engine.h")
+      callers << "#{path}:#{index + 1}"
+    end
+  end
+  abort "an unreviewed alternate engine can bypass lifecycle exit: #{callers.join(", ")}" unless
+    callers.length == 3 && callers.all? { |entry| entry.include?("/switcher.cc:") }
+' || fail "pinned librime gained an alternate-engine owner without exit semantics"
 ruby -e '
   mapping = File.read("sources/MacOSKeyCodes.swift")
   controller = File.read("sources/SquirrelInputController.swift")
@@ -536,8 +616,31 @@ ruby -e '
   abort "Command shortcuts can still bypass passive-prediction cleanup" if
     controller.match?(/if modifiers\.contains\(\.command\) \{\s*break\s*\}/m)
 ' || fail "physical special-key ingress regressed"
-test "$(rg -F -c 'inputController?.page(up:' sources/SquirrelPanel.swift)" -ge 3 ||
+test "$(rg -F -c 'inputController.page' sources/SquirrelPanel.swift \
+  sources/SquirrelPanel+CandidatePresentation.swift | \
+  awk -F: '{ total += $NF } END { print total + 0 }')" -ge 3 ||
   fail "wheel or paging controls stopped changing Rime pages"
+ruby -e '
+  panel = File.read("sources/SquirrelPanel.swift") +
+    File.read("sources/SquirrelPanel+CandidatePresentation.swift")
+  state = File.read("sources/LinnetCandidateInteractionState.swift")
+  abort "candidate scroll no longer cancels an armed mouse press" unless
+    state.match?(/func processScroll\(.*?cancelPress\(\)/m)
+  abort "candidate publications do not retire pointer and wheel state" unless
+    panel.scan("candidateInteraction.advancePublication()").length == 2 &&
+      state.include?("publicationGeneration &+= 1") &&
+      state.include?("pressedHit = nil") &&
+      state.include?("scrollTime = .distantPast")
+  abort "phased scroll gestures lost publication identity" unless
+    state.include?("scrollPublicationGeneration = publicationGeneration") &&
+      state.scan("scrollPublicationGeneration == publicationGeneration").length == 2
+  abort "SquirrelPanel regained a competing pointer or scroll state owner" if
+    %w[pressedHit scrollDirection scrollTime scrollPublicationGeneration
+       publicationGeneration].any? { |token| panel.include?(token) }
+  abort "the interaction owner no longer projects one paging intent to Rime" unless
+    panel.include?("candidateInteraction.processScroll") &&
+      panel.include?("pagingIntent == .previousPage")
+' || fail "candidate pointer/scroll publication ownership regressed"
 test "$(rg -F -c '.livePanelProjection' \
   sources/LinnetSettings/SettingsMain.swift)" -eq 3 &&
   test "$(rg -F -c '.livePanelProjection' \
@@ -558,12 +661,40 @@ test "$(rg -F -c 'LinnetCandidatePresentation.usesInlineComments(' \
   sources/SquirrelPanel.swift)" -eq 1 &&
   rg -Fq 'candidateFormat: theme.candidateFormat' sources/SquirrelPanel.swift ||
   fail "the candidate panel stopped preserving standard inline comments"
-for profile in flypy mspy sogou abc ziguang jiajia; do
-  wrapper="data/linnet/linnet_zh_${profile}.schema.yaml"
-  if rg -n '^(recognizer|punctuator):' "${wrapper}"; then
-    fail "a Chinese profile duplicated the root symbol owner: ${wrapper}"
-  fi
-done
+ruby -ryaml -e '
+  expected = %w[
+    linnet_zh_pinyin linnet_zh linnet_zh_flypy linnet_zh_mspy
+    linnet_zh_sogou linnet_zh_abc linnet_zh_ziguang linnet_zh_jiajia linnet_en
+  ]
+  default = YAML.load_file("data/linnet/default.yaml")
+  declared = default.fetch("schema_list").map { |entry| entry.fetch("schema") }
+  abort "the product schema inventory is not the canonical nine" unless declared == expected
+  schema_paths = Dir["data/linnet/linnet_*.schema.yaml"].sort
+  actual = schema_paths.map { |path| File.basename(path, ".schema.yaml") }
+  abort "the staged schema source set is not exactly the canonical nine" unless
+    actual == expected.sort
+  runtime = File.read("tests/verify_rime_runtime.sh")
+  staging = runtime[/for schema in data\/linnet\/\*\.schema\.yaml; do.*?\ndone/m]
+  abort "native runtime acceptance no longer stages every canonical schema" unless
+    staging && staging.include?(%q{cp "${schema}" "${shared}/$(basename "${schema}")"})
+
+  wrappers = expected.grep(/\Alinnet_zh_/)
+  abort "the Chinese wrapper inventory changed" unless wrappers.length == 7
+  wrappers.each do |schema_id|
+    path = "data/linnet/#{schema_id}.schema.yaml"
+    source = File.read(path)
+    abort "#{path} stopped inheriting the shared Chinese root" unless
+      source.scan("__include: linnet_zh.schema.yaml:/").length >= 1
+    duplicated = source.scan(/^(engine|ascii_composer|punctuator|recognizer):/).flatten
+    abort "#{path} duplicated shared pipeline owners: #{duplicated.join(", ")}" unless
+      duplicated.empty?
+  end
+  chord_owners = schema_paths.select do |path|
+    File.read(path).match?(/^\s*(?:-\s*)?chord_composer(?:@|:|\s|$)/)
+  end
+  abort "a product schema regained chord_composer: #{chord_owners.join(", ")}" unless
+    chord_owners.empty?
+' || fail "schema staging or shared wrapper ownership regressed"
 test "$(rg -l '^date_translator:' data/linnet/linnet_zh*.schema.yaml | wc -l | tr -d ' ')" -eq 2 ||
   fail "the product must have one double-pinyin date-command owner and one full-pinyin override"
 for mapping in 'date: date' 'time: time' 'week: week' 'datetime: datetime' \
@@ -608,12 +739,16 @@ smart_english_main=plugins/smart_english/smart_english.cc
 smart_english_domain=plugins/smart_english/smart_english_domain.h
 smart_english_filter_header=plugins/smart_english/smart_english_filter.h
 smart_english_filter=plugins/smart_english/smart_english_filter.cc
+smart_english_mixed_header=plugins/smart_english/smart_english_mixed_decoder.h
+smart_english_mixed_decoder=plugins/smart_english/smart_english_mixed_decoder.cc
 test "$(wc -l < "${smart_english_main}" | tr -d ' ')" -lt 1500 ||
   fail "the Smart English module owner again exceeds 1500 lines"
 for extracted_owner in \
   "${smart_english_domain}" \
   "${smart_english_filter_header}" \
-  "${smart_english_filter}"; do
+  "${smart_english_filter}" \
+  "${smart_english_mixed_header}" \
+  "${smart_english_mixed_decoder}"; do
   test -f "${extracted_owner}" ||
     fail "the Smart English candidate owner extraction is missing ${extracted_owner}"
   test "$(wc -l < "${extracted_owner}" | tr -d ' ')" -lt 500 ||
@@ -621,10 +756,60 @@ for extracted_owner in \
 done
 rg -Fq 'plugins/smart_english/smart_english_filter.cc' Makefile ||
   fail "the extracted Smart English filter is absent from the plugin build"
-for extracted_header in smart_english_domain.h smart_english_filter.h; do
+rg -Fq 'plugins/smart_english/smart_english_mixed_decoder.cc' Makefile ||
+  fail "the modeless mixed decoder is absent from the plugin build"
+for extracted_header in smart_english_domain.h smart_english_filter.h \
+  smart_english_mixed_decoder.h; do
   rg -Fq "plugins/smart_english/${extracted_header}" Makefile ||
     fail "the extracted Smart English contract is absent from build dependencies: ${extracted_header}"
 done
+test "$(rg -l '^class ModelessMixedDecoder' plugins/smart_english | wc -l | tr -d ' ')" -eq 1 ||
+  fail "modeless mixed generation no longer has one typed owner"
+test "$(rg -F --no-filename 'mixed_decoder_.Query(' plugins/smart_english | wc -l | tr -d ' ')" -eq 1 ||
+  fail "modeless mixed generation gained a second runtime entrypoint"
+for mixed_contract in \
+  'entry->IsExactMatch() && entry->text == uppercase' \
+  'if (start == 0 && length == input.size()) continue;' \
+  'for (const auto& range : ChineseRanges(entities, input.size()))' \
+  'target_ends.count(end.first)' \
+  'user_dictionary->Lookup(syllable_graph, range.first,' \
+  'dictionary->Lookup(syllable_graph, range.first, &blacklist)' \
+  'poet_->MakeSentences(' \
+  'input.size() > kMaximumInputLength' \
+  'result.size() == kMaximumMixedCandidates'; do
+  rg -Fq "${mixed_contract}" "${smart_english_mixed_decoder}" ||
+    fail "modeless mixed generation lost its bounded canonical contract: ${mixed_contract}"
+done
+test "$(rg -F -c 'BuildSyllableGraph(' "${smart_english_mixed_decoder}")" -eq 1 ||
+  fail "modeless mixed generation no longer builds exactly one Chinese SyllableGraph"
+if rg -Fq 'const string suffix = input.substr(start);' \
+    "${smart_english_mixed_decoder}"; then
+  fail "modeless mixed generation regained per-start suffix graph rebuilding"
+fi
+if rg -Fq 'for (const auto& vertex : syllable_graph.edges)' \
+    "${smart_english_mixed_decoder}"; then
+  fail "modeless mixed generation regained duplicate all-vertex dictionary lookup"
+fi
+rg -Fq 'mixed->model_weight() - best_chinese_sentence_weight' \
+  "${smart_english_filter}" ||
+  fail "mixed and canonical Chinese sentences no longer share one model comparison owner"
+rg -Fq 'return has_exact ? !item.mixed : item.preferred_mixed;' \
+  "${smart_english_filter}" ||
+  fail "whole exact English no longer closes before contextual mixed ranking"
+if rg -n 'process_key|ProcessKey|keycode|XK_[0-9]|SelectionIndex|select_keys' \
+    "${smart_english_mixed_header}" "${smart_english_mixed_decoder}"; then
+  fail "modeless mixed generation attempted to own digit or key interaction"
+fi
+for retired_mixed_owner in \
+  plugins/smart_english/smart_english_mixed_projection.h \
+  plugins/smart_english/smart_english_mixed_projection.cc; do
+  [[ ! -e "${retired_mixed_owner}" ]] ||
+    fail "the retired lossy mixed projection returned: ${retired_mixed_owner}"
+done
+if rg -n 'xuexicsjiting|liaojieaijishu|shiyongcpuxingneng|学习CS急停|了解AI技术|使用CPU性能' \
+    plugins/smart_english; then
+  fail "a mixed-input acceptance fixture leaked into production code"
+fi
 if rg -n \
   'ProjectSmartEnglishCandidate|class SmartEnglishTailTranslation|class SmartEnglishFilter' \
   "${smart_english_main}"; then
@@ -804,7 +989,8 @@ if rg -n 'NSFont\.userFont|LinnetSettingsFontProjection' \
     sources/LinnetSettings/SettingsViews.swift; then
   fail "candidate typography regained a competing live or preview owner"
 fi
-test "$(rg -F -c 'candidateFormat: "[comment]"' sources/SquirrelPanel.swift)" -eq 1 &&
+test "$(rg -F -c 'candidateFormat: "[comment]"' \
+  sources/SquirrelPanel+CandidatePresentation.swift)" -eq 1 &&
   test "$(rg -F -c 'candidateFormat: "[comment]"' \
     sources/LinnetSettings/LinnetSettingsAppearancePreview.swift)" -eq 1 ||
   fail "live and preview detail stopped sharing the candidate-line compositor"
@@ -813,7 +999,7 @@ rg -Fq 'placement: .standaloneDetail' sources/SquirrelTheme.swift &&
     sources/LinnetSettings/LinnetSettingsAppearancePreview.swift ||
   fail "standalone candidate detail regained the inline optical baseline"
 if rg -n 'NSAttributedString\(string: comment, attributes: theme\.commentAttrs\)|\.italic\(\)' \
-    sources/SquirrelPanel.swift \
+    sources/SquirrelPanel.swift sources/SquirrelPanel+CandidatePresentation.swift \
     sources/LinnetSettings/LinnetSettingsAppearancePreview.swift; then
   fail "candidate detail regained a live or preview-only text owner"
 fi
@@ -824,31 +1010,89 @@ rg -Uq 'LinnetCandidatePresentation\.inlineCandidateSeparatorWidth\(\s*font: can
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift ||
   fail "the Settings preview stopped consuming the shared separator metric"
 test "$(rg -F -c 'NSTrackingArea(' sources/SquirrelView.swift)" -eq 1 ||
-  fail "candidate hover tracking no longer has exactly one AppKit owner"
+  fail "candidate press tracking no longer has exactly one AppKit owner"
 for option in '.inVisibleRect' '.mouseEnteredAndExited' '.mouseMoved' '.activeAlways'; do
   rg -Fq "${option}" sources/SquirrelView.swift ||
-    fail "candidate hover tracking lost ${option}"
+    fail "candidate press tracking lost ${option}"
 done
+rg -Fq 'self.acceptsMouseMovedEvents = true' sources/SquirrelPanel.swift ||
+  fail "candidate hover stopped requesting event-local mouse movement"
 if rg -n 'acceptsMouseMovedEvents = false|NSEvent\.mouseLocation' \
-    sources/SquirrelPanel.swift sources/SquirrelView.swift; then
-  fail "candidate hover regained a disabled or global-pointer inference path"
+    sources/SquirrelPanel.swift sources/SquirrelPanel+CandidatePresentation.swift \
+    sources/SquirrelView.swift sources/SquirrelView+CandidateDrawing.swift; then
+  fail "candidate press regained a disabled or global-pointer inference path"
 fi
-rg -Fq 'view.convert(event.locationInWindow, from: nil)' sources/SquirrelPanel.swift ||
-  fail "candidate hover stopped consuming the event-local pointer position"
-rg -Fq 'candidateInteractionFrames.firstIndex(where:' sources/SquirrelView.swift ||
-  fail "candidate hit-testing stopped consuming the canonical drawn cell frames"
+ruby -e '
+  panel = File.read(ARGV.fetch(0))
+  hover = panel[/func moveCandidatePointer\(.*?\n  \}/m]
+  abort "candidate hover presentation owner is missing" unless hover
+  abort "candidate hover can mutate Rime selection" if
+    hover.include?("inputController") || hover.include?("selectCandidate") ||
+      hover.include?("page(")
+' sources/SquirrelPanel+CandidatePresentation.swift ||
+  fail "candidate hover regained an engine mutation path"
+rg -Fq 'view.convert(event.locationInWindow, from: nil)' \
+  sources/SquirrelPanel+CandidatePresentation.swift ||
+  fail "candidate press stopped consuming the event-local pointer position"
+ruby -e '
+  view = File.read("sources/SquirrelView.swift")
+  panel = File.read("sources/SquirrelPanel.swift") +
+    File.read("sources/SquirrelPanel+CandidatePresentation.swift")
+  hit = view[/enum CandidateHit: Equatable \{.*?\n  \}/m]
+  click = view[/func click\(at clickPoint: NSPoint\).*?\n  \}/m]
+  path_owner = view[/static func candidateIndex\(.*?\n  \}/m]
+  press = panel[/func finishCandidatePress\(.*?\n  \}/m]
+  abort "candidate pointer owners are missing" unless hit && click && path_owner && press
+  abort "preedit regained a candidate-window mouse action" if
+    hit.include?("case preedit") || press.include?(".preedit") ||
+      panel.include?("moveCaret(") || view.include?("moveCaret(")
+  abort "candidate hit-testing no longer uses the exact path drawn for the cell" unless
+    click.include?("paths: candidateInteractionPaths") &&
+      path_owner.include?("paths.firstIndex { $0?.contains(point) == true }")
+  abort "candidate hit-testing regained a rectangular or text-position fallback" if
+    click.include?("candidateInteractionFrames") ||
+      click.include?("characterIndex") || path_owner.include?("boundingBox")
+' || fail "candidate hit-testing regained a preedit/caret or inexact fallback path"
 rg -Fq 'candidateFrames: candidateInteractionFrames' \
   sources/LinnetCandidateAccessibility.swift ||
   fail "candidate accessibility stopped consuming the canonical drawn cell frames"
 if rg -n 'contentRect\(' sources/LinnetCandidateAccessibility.swift; then
   fail "candidate accessibility regained an independent text-geometry owner"
 fi
+ruby -e '
+  panel = File.read("sources/SquirrelPanel.swift") +
+    File.read("sources/SquirrelPanel+CandidatePresentation.swift")
+  accessibility = File.read("sources/LinnetCandidateAccessibility.swift")
+  update = panel[/func update\(.*?\n  \}\n\n  func updateStatus/m]
+  show = panel[/func show\(publication: Publication\).*?\n  \}/m]
+  status = panel[/func show\(status message: String, publication: Publication\).*?\n  \}/m]
+  abort "candidate publication owners are missing" unless update && show && status
+  shown = update.index("guard show(publication: currentPublication)")
+  published = update.index("candidateAccessibility.publish(")
+  frame = show.index("self.setFrame(panelRect, display: false)")
+  front = show.index("orderFrontRegardless()")
+  abort "candidate accessibility can publish before final window geometry" unless
+    shown && published && shown < published && frame && front && frame < front
+  abort "status accessibility can publish before final window geometry" unless
+    status.index("guard show(publication: publication)") <
+      status.index("candidateAccessibility.publishStatus(")
+  abort "candidate AX actions strongly retain the controller" unless
+    update.include?("[weak self, weak publishedController]")
+  abort "AX element actions lost their weak publication owner" unless
+    accessibility.scan("element.performPress = { [weak self]").length == 2
+  abort "AX layout changes stopped identifying the replaced elements" unless
+    accessibility.include?("elements: newElements,") &&
+      accessibility.include?("userInfo: [.uiElements: elements]")
+  abort "AX selection changes stopped notifying assistive clients" unless
+    accessibility.include?("notification: .selectedChildrenChanged") &&
+      accessibility.include?("selectedAbsoluteIndex != nextSelectedAbsoluteIndex")
+' || fail "candidate geometry or accessibility publication ownership regressed"
 rg -Fq '"style/linnet_material_appearance"' \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift ||
   fail "fixed candidate appearance no longer projects its native material mode"
 rg -Fq 'style/linnet_material_appearance' sources/SquirrelTheme.swift ||
   fail "the Host theme no longer consumes the fixed native material mode"
-rg -Fq 'resolveMaterial(' sources/SquirrelPanel.swift ||
+rg -Fq 'resolveMaterial(' sources/SquirrelPanel+CandidatePresentation.swift ||
   fail "the live panel material stopped consuming the resolved appearance mode"
 rg -Fq 'LinnetCandidatePresentation.windowInset(verticalText: vertical)' \
   sources/SquirrelTheme.swift ||
@@ -924,9 +1168,10 @@ ruby -ryaml -e '
 test "$(rg -F -c '.environment(\.colorScheme, isDark ? .dark : .light)' \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift)" -eq 1 ||
   fail "the shared material surface stopped owning fixed Light/Dark mode"
-rg -Fq 'role: presentationRole' sources/SquirrelPanel.swift ||
+rg -Fq 'role: presentationRole' sources/SquirrelPanel+CandidatePresentation.swift ||
   fail "candidate and status geometry lost their shared typed presentation owner"
-rg -Fq 'view.applyPresentationMetrics(metrics)' sources/SquirrelPanel.swift ||
+rg -Fq 'view.applyPresentationMetrics(metrics)' \
+  sources/SquirrelPanel+CandidatePresentation.swift ||
   fail "the drawing surface stopped consuming the panel presentation metrics"
 rg -Fq 'guard let presentationMetrics else { return }' sources/SquirrelView.swift ||
   fail "the drawing surface regained an implicit candidate-geometry fallback"
@@ -934,14 +1179,18 @@ rg -Fq 'presentationMetrics.role == .candidate' sources/SquirrelView.swift ||
   fail "the status notice regained candidate highlight drawing"
 rg -Fq 'presentationMetrics.cornerRadius' sources/SquirrelView.swift ||
   fail "the status notice regained candidate corner geometry"
-if rg -n '(theme|currentTheme)\.pagingOffset' sources/SquirrelView.swift; then
+if rg -n '(theme|currentTheme)\.pagingOffset' \
+    sources/SquirrelView.swift sources/SquirrelView+CandidateDrawing.swift; then
   fail "the drawing surface bypassed the shared presentation paging offset"
 fi
-rg -Fq 'attributes: theme.statusAttrs' sources/SquirrelPanel.swift ||
+rg -Fq 'attributes: theme.statusAttrs' \
+  sources/SquirrelPanel+CandidatePresentation.swift ||
   fail "the status notice regained candidate typography"
-rg -Fq 'value: theme.statusParagraphStyle' sources/SquirrelPanel.swift ||
+rg -Fq 'value: theme.statusParagraphStyle' \
+  sources/SquirrelPanel+CandidatePresentation.swift ||
   fail "the status notice regained candidate paragraph spacing"
-rg -Fq 'view.textView.setLayoutOrientation(.horizontal)' sources/SquirrelPanel.swift ||
+rg -Fq 'view.textView.setLayoutOrientation(.horizontal)' \
+  sources/SquirrelPanel+CandidatePresentation.swift ||
   fail "the status notice regained candidate text orientation"
 test "$(rg -F -c 'NSPanel' sources/SquirrelPanel.swift)" -eq 1 ||
   fail "the status notice added a second panel"
@@ -993,8 +1242,8 @@ test "$(rg -F -c 'NSSelectorFromString("windowEffectiveAppearance")' \
 test "$(rg -F -c 'panel.updateAppearance(client: client as? NSObjectProtocol)' \
   sources/SquirrelInputController.swift)" -eq 2 ||
   fail "the candidate panel stopped resolving appearance from the active text client"
-test "$(rg -F -c 'panel?.updateAppearance(client: nil)' \
-  sources/SquirrelInputController.swift)" -eq 1 ||
+test "$(rg -F -c 'updateAppearance(client: nil)' \
+  sources/SquirrelPanel.swift)" -eq 1 ||
   fail "the candidate panel stopped clearing a deactivated client's appearance"
 test "$(rg -F -c 'updateAppearance(client: inputController?.client() as? NSObjectProtocol)' \
   sources/SquirrelPanel.swift)" -eq 1 ||
@@ -1189,7 +1438,7 @@ test "$(rg -c 'to: \\.log_dir' sources/SquirrelApplicationDelegate.swift)" -eq 1
 # and prove one session can be created before publishing running exactly once.
 ruby -e '
   source = File.read(ARGV.fetch(0))
-  method = source[/func startRime\(fullCheck: Bool\) -> Bool \{.*?\n  \}\n\n  private func startStaleSessionCleaner/m]
+  method = source[/func startRime\(fullCheck: Bool\) -> Bool \{.*?\n  \}\n  private func startStaleSessionCleaner/m]
   abort "startRime owner is missing" unless method
   maintenance = method.index("rimeAPI.start_maintenance(fullCheck)")
   join = method.index("rimeAPI.join_maintenance_thread()")
@@ -1247,7 +1496,7 @@ ruby -e '
   shutdown = host[/func shutdownRime\(\) \{.*?\n  \}/m]
   abort "the canonical session invalidation owner is missing" unless
     invalidate && shutdown
-  commit = invalidate.index("commitComposition")
+  commit = invalidate.index("commitCurrentComposition()")
   suspend = invalidate.index("isRimeInputSuspended = true")
   hide = invalidate.index("panel?.hide()")
   cleanup = invalidate.index("rimeAPI.cleanup_all_sessions()")
@@ -1255,45 +1504,104 @@ ruby -e '
     commit && suspend && hide && cleanup &&
       commit < suspend && suspend < hide && hide < cleanup
   abort "active-composition commit gained a second runtime-invalidation owner" unless
-    host.scan("commitComposition(inputController.client())").length == 1
+    host.scan("commitCurrentComposition()").length == 1
   abort "shutdown can suspend input before canonical invalidation commits it" if
     (early_suspend = shutdown.index("isRimeInputSuspended = true")) &&
       early_suspend < shutdown.index("invalidateRimeSessions()")
 ' || fail "Host runtime invalidation can discard an active composition"
-if rg -n 'isRimeRunning|isRimeInputSuspended' sources/SquirrelInputController.swift; then
+if rg -n 'isRimeRunning|isRimeInputSuspended' \
+    sources/SquirrelInputController.swift \
+    sources/SquirrelInputController+RimeSession.swift; then
   fail "the input controller bypasses the Host runtime-availability owner"
 fi
 ruby -e '
-  controller = File.read("sources/SquirrelInputController.swift")
-  ensure_session = controller[/func ensureSession\(\) -> Bool \{.*?\n  \}/m]
+  controller = File.read("sources/SquirrelInputController.swift") +
+    File.read("sources/SquirrelInputController+RimeSession.swift")
+  lease = File.read("sources/LinnetRimeSessionLease.swift")
+  presentation = File.read("sources/SquirrelApplicationPresentation.swift")
+  ensure_session = controller[/func ensureReadySession\(.*?\n  \}/m]
+  current_session = controller[/func sessionIsCurrent\(\) -> Bool \{.*?\n  \}/m]
+  current_lease = controller[/func currentSessionLease\(.*?\n  \}/m]
+  owns_lease = controller[/func ownsCurrentSession\(.*?\n  \}/m]
+  create_session = controller[/func createSession\(\) \{.*?\n  \}/m]
+  chord_timer = controller[/func onChordTimer\(.*?\n  \}/m]
+  recovered_mode = controller[/func synchronizeRecoveredInputMode\(.*?\n  \}/m]
   handle = controller[/override func handle\(.*?\n  \}/m]
   activation = controller[/override func activateServer\(.*?\n  \}/m]
   commit = controller[/override func commitComposition\(.*?\n  \}/m]
-  update = controller[/func rimeUpdate\(\) \{.*?\n  \}\n\n  func commit\(string:/m]
+  active_commit_owner = controller[/func commitActiveComposition\(.*?\n  \}/m]
+  raw_commit_owner = controller[/func commitRawComposition\(.*?\n  \}/m]
+  update = controller[/func rimeUpdate\(\) \{.*?\n  \}\n\n  private func commit\(string:/m]
+  status = presentation[/func updateStatusIcon\(session: RimeSessionId\).*?\n  \}/m]
   abort "the canonical live-session recovery owner is missing" unless
-    ensure_session && handle && activation && commit && update
+    ensure_session && current_session && handle && activation && commit &&
+      active_commit_owner && raw_commit_owner && update && current_lease && owns_lease &&
+      create_session && chord_timer && recovered_mode && status
+  abort "a recycled raw session identifier can cross controller ownership" unless
+    lease.include?("struct LinnetRimeSessionLease: Equatable") &&
+      lease.include?("fileprivate let ownership: UInt64") &&
+      lease.include?("private static let lock = NSLock()") &&
+    lease.include?("owners[identifier] = nextOwnership") &&
+      lease.include?("owners[lease.identifier] == lease.ownership") &&
+      controller.scan(/^  var sessionLease: LinnetRimeSessionLease\?$/).length == 1 &&
+      create_session.include?("LinnetRimeSessionLease.acquire(identifier: identifier)") &&
+      current_session.include?("sessionLease.isCurrent(") &&
+      current_lease.include?("sessionLease.isCurrent(") &&
+      owns_lease.include?("expectedLease.isCurrent(") &&
+      [current_session, current_lease, owns_lease].all? {
+        |owner| owner.scan("rimeAPI.find_session").length == 1
+      } && controller.scan("rimeAPI.find_session").length == 3
+  abort "delayed callbacks no longer carry and revalidate the typed lease" unless
+    chord_timer.include?("sessionLease: LinnetRimeSessionLease") &&
+      chord_timer.include?("ownsCurrentSession(") &&
+      status.include?("let sessionLease = controller.currentSessionLease(") &&
+      status.include?("controller.ownsCurrentSession(") &&
+      status.include?("sessionLease.identifier")
   abort "live-session recovery no longer validates and recreates one generation" unless
-    ensure_session.scan("rimeAPI.find_session(session)").length == 1 &&
+    ensure_session.scan("sessionIsCurrent()").length == 2 &&
       ensure_session.scan("createSession()").length == 1
   abort "key events bypass canonical live-session recovery" unless
-    handle.include?("guard ensureSession() else { return false }")
-  recover = activation.index("guard ensureSession() else { return }")
+    handle.include?("guard ensureReadySession(for: inputToken)")
+  recover = activation.index("guard ensureReadySession(for: activationToken)")
   baseline = activation.index("rimeUpdate()")
-  publish = activation.index("inputSourceDidActivate(session: session)")
+  publish = activation.index("inputSourceDidActivate(")
   abort "activation can publish a stale session before the first key" unless
     recover && publish && recover < publish
   abort "activation can mistake the first user mode switch for initial schema discovery" unless
     baseline && recover < baseline && baseline < publish
   abort "activation retained raw nonzero-session inference" if
     activation.include?("if session != 0")
-  pending = commit.index("let pendingInput = String(cString: input)")
-  nonempty = commit.index("if !pendingInput.isEmpty")
-  insert = commit.index("commit(string: pendingInput)")
-  clear = commit.index("rimeAPI.clear_composition(session)")
-  abort "an empty composition can still cross the synchronous InputMethodKit insert boundary" unless
-    pending && nonempty && insert && clear &&
-      pending < nonempty && nonempty < insert && insert < clear &&
-      !commit.include?("commit(string: String(cString: input))")
+  token = activation.index("self.activationToken = activationToken")
+  modifier_epoch = activation.index("resetModifierEpoch()")
+  abort "activation can sample its modifier epoch after session recovery" unless
+    token && modifier_epoch && recover && token < modifier_epoch && modifier_epoch < recover
+  recovered = ensure_session.index("let recoveredSession = !sessionIsCurrent()")
+  recreate = ensure_session.index("createSession()")
+  caps = ensure_session.index("synchronizeCapsLockBaseline()")
+  mode = ensure_session.index("synchronizeRecoveredInputMode(")
+  ready = ensure_session.index("readyActivationToken = activationToken")
+  abort "session recovery no longer restores Caps and mode before readiness" unless
+    recovered && recreate && caps && mode && ready &&
+      recovered < recreate && recreate < caps && caps < mode && mode < ready
+  abort "session recovery can swallow the triggering modifier event" if
+    ensure_session.include?("resetModifierEpoch()") ||
+      ensure_session.include?("CGEventSource.flagsState")
+  abort "recovered input mode bypasses the canonical identity owner" unless
+    recovered_mode.include?("rimeAPI.get_status(session, &status)") &&
+      recovered_mode.include?("applyInputModeIdentity(") &&
+      recovered_mode.include?("announcesTransition: false")
+  raw_commit = raw_commit_owner.index("rimeAPI.commit_raw_input(session)")
+  consume = raw_commit_owner.index("rimeConsumeCommittedText(to: targetClient)")
+  abort "InputMethodKit exit no longer reuses Rime commit_raw_input semantics" unless
+    commit.scan("commitActiveComposition(").length == 1 &&
+      active_commit_owner.scan("commitRawComposition(to: targetClient)").length == 1 &&
+      raw_commit && consume && raw_commit < consume
+  abort "InputMethodKit exit regained user-key or duplicate-clear semantics" if
+    (commit + active_commit_owner + raw_commit_owner).include?("process_key") ||
+      (commit + active_commit_owner + raw_commit_owner).include?("clear_composition")
+  abort "InputMethodKit exit regained a second raw-input reconstruction owner" if
+    (commit + active_commit_owner).include?("get_input") ||
+      (commit + active_commit_owner).include?("commit(string:")
   idle = update.index("if preedit.isEmpty,")
   geometry = update.index("showPanel(")
   abort "idle activation can still request synchronous client geometry without visible feedback" unless
@@ -1304,22 +1612,71 @@ for boundary in \
   'override func handle' \
   'func selectCandidate' \
   'func page' \
-  'func moveCaret' \
-  'override func commitComposition' \
   'func onChordTimer' \
   'func createSession' \
   'func destroySession' \
   'func rimeUpdate'; do
-  line="$(rg -n -m1 -F "${boundary}" sources/SquirrelInputController.swift | cut -d: -f1)"
-  [[ -n "${line}" ]] || fail "runtime callback boundary is missing: ${boundary}"
-  sed -n "${line},$((line + 7))p" sources/SquirrelInputController.swift |
+  location="$(rg -n -m1 -F "${boundary}" \
+    sources/SquirrelInputController.swift \
+    sources/SquirrelInputController+RimeSession.swift | head -1)"
+  [[ -n "${location}" ]] || fail "runtime callback boundary is missing: ${boundary}"
+  source_path="${location%%:*}"
+  line_and_text="${location#*:}"
+  line="${line_and_text%%:*}"
+  sed -n "${line},$((line + 12))p" "${source_path}" |
     rg -Fq 'canAcceptRimeInput' ||
     fail "runtime callback bypasses availability: ${boundary}"
 done
+ruby -e '
+  source = File.read(ARGV.fetch(0))
+  callback = source[/override func commitComposition\(.*?\n  \}/m]
+  active_owner = source[/func commitActiveComposition\(.*?\n  \}/m]
+  raw_owner = source[/func commitRawComposition\(.*?\n  \}/m]
+  abort "composition exit owners are missing" unless
+    callback && active_owner && raw_owner
+  abort "InputMethodKit commit bypasses the runtime-availability owner" unless
+    callback.scan("commitActiveComposition(").length == 1 &&
+      active_owner.scan("commitRawComposition(to: targetClient)").length == 1 &&
+      raw_owner.include?("canAcceptRimeInput")
+' sources/SquirrelInputController.swift ||
+  fail "InputMethodKit composition exit bypasses runtime availability"
+ruby -e '
+  source = File.read(ARGV.fetch(0))
+  recognized = source[/override func recognizedEvents\(.*?\n  \}/m]
+  handle = source[/override func handle\(.*?\n  \}/m]
+  sdk_mouse = source[/override func mouseDown\(.*?\n  \}/m]
+  raw_mouse = source[/private func handleCompositionMouseDown\(.*?\n  \}/m]
+  exit_owner = source[/private func commitCompositionIfClickIsOutside\(.*?\n  \}/m]
+  abort "InputMethodKit mouse-exit owners are missing" unless
+    recognized && handle && sdk_mouse && raw_mouse && exit_owner
+  %w[.keyDown .flagsChanged .leftMouseDown .rightMouseDown .otherMouseDown].each do |event|
+    abort "recognizedEvents lost #{event}" unless recognized.include?(event)
+  end
+  mouse_ingress = handle.index("if [.leftMouseDown, .rightMouseDown, .otherMouseDown]")
+  session_recovery = handle.index("guard ensureReadySession(for: inputToken)")
+  abort "raw mouse exit can touch or recreate Rime before click classification" unless
+    mouse_ingress && session_recovery && mouse_ingress < session_recovery &&
+      handle.include?("handleCompositionMouseDown(") &&
+      handle.include?("return false")
+  abort "raw mouse coordinates no longer use the client screen-space contract" unless
+    raw_mouse.include?("event.window?.convertPoint(") &&
+      raw_mouse.include?("toScreen: event.locationInWindow") &&
+      raw_mouse.include?("targetClient.characterIndex(") &&
+      raw_mouse.include?("tracking: kIMKNearestBoundaryMode") &&
+      raw_mouse.include?("inMarkedRange: &insideMarkedRange") &&
+      raw_mouse.include?("spatiallyInsideMarkedRange: insideMarkedRange.boolValue")
+  abort "SDK mouse tracking can swallow the host click or bypass the shared exit" unless
+    sdk_mouse.include?("keepTracking?.pointee = false") &&
+      sdk_mouse.include?("commitCompositionIfClickIsOutside(") &&
+      sdk_mouse.match?(/return false\s*\n  \}\z/)
+  abort "mouse exit bypasses the typed click policy or activation identity" unless
+    exit_owner.include?("inputActivationIsCurrent(activationToken, client: targetClient)") &&
+      exit_owner.include?("LinnetInputActivationPolicy.shouldCommitCompositionForClick(") &&
+      exit_owner.include?("commitActiveComposition(")
+' sources/SquirrelInputController.swift ||
+  fail "raw InputMethodKit mouse composition exit regressed"
 rg -Fq 'weak var inputController: SquirrelInputController?' sources/SquirrelPanel.swift ||
   fail "the candidate panel strongly retains an inactive input controller"
-rg -Fq 'if panel?.inputController === self {' sources/SquirrelInputController.swift ||
-  fail "input-controller deactivation no longer releases its panel callback"
 test "$(rg -c 'private var .*Observer: NSObjectProtocol\?' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
   fail "the Host observer-token owner count changed"
 for observer_owner in workspacePowerOffObserver; do
@@ -1344,6 +1701,142 @@ ruby -e '
 test "$(rg -F -c 'kTISNotifySelectedKeyboardInputSourceChanged as String' \
   sources/SquirrelApplicationDelegate.swift)" -eq 2 ||
   fail "the input-source selector registration/removal pair changed"
+ruby -e '
+  source = File.read(ARGV.fetch(0))
+  controller = File.read(ARGV.fetch(1))
+  registry = File.read(ARGV.fetch(2))
+  delegate = File.read(ARGV.fetch(3))
+  begin_projection = source[/func beginInputActivation\(.*?\n  \}/m]
+  native_finish = source[/func finishInputActivation\(\n    controller:.*?\n  \}/m]
+  source_finish = source[/func finishInputSourceActivations\(\).*?\n  \}/m]
+  termination_finish = source[/func terminateInputActivations\(\).*?\n  \}/m]
+  activation = source[/func inputSourceDidActivate\(.*?\n  \}/m]
+  selection = source[/@objc func inputSourceChanged\(_:\s*Notification\) \{.*?\n  \}/m]
+  abort "input-source presentation lifecycle owners are missing" unless
+    begin_projection && native_finish && source_finish && termination_finish &&
+      activation && selection
+  abort "activation can publish stale visibility from a deferred callback" if
+    activation.include?("DispatchQueue.main.async")
+  status = activation.index("updateStatusIcon(")
+  visibility = activation.index("setStatusItemVisibility(inputSourceIsActive: true)")
+  abort "activation no longer synchronously publishes the active source" unless
+    status && visibility && status < visibility
+  abort "selection notification can reorder lifecycle transitions on the main queue" if
+    selection.include?("DispatchQueue.main.async")
+  abort "selection notification must sample the current input source exactly once" unless
+    selection.scan("SquirrelInstaller.currentInputSourceID()").length == 1 &&
+      selection.include?("guard let currentInputSourceID =") &&
+      selection.include?("else { return }")
+  sampled = selection.index("guard let currentInputSourceID =")
+  published = selection.index("setStatusItemVisibility(inputSourceIsActive: inputSourceIsActive)")
+  admitted = selection.index("inputActivationRegistry.sourceDidTurnOn()")
+  deactivated = selection.index("finishInputSourceActivations()")
+  abort "one sampled selection no longer owns synchronous source admission/retirement" unless
+    sampled && published && admitted && deactivated &&
+      sampled < published && published < admitted && admitted < deactivated
+  abort "retired second-read composition finalizer returned" if
+    source.include?("finalizeStrandedComposition")
+  abort "the process-wide activation registry is not owned exactly once" unless
+    delegate.scan("let inputActivationRegistry = LinnetInputActivationRegistry()").length == 1 &&
+      !controller.include?("activationEpoch")
+  admission = registry[/private enum Admission \{.*?\n  \}/m]
+  begin_owner = registry[/func begin\(.*?\n  \}/m]
+  native_owner = registry[/func closeNative\(.*?\n  \}/m]
+  source_off = registry[/func sourceDidTurnOff\(.*?\n  \}/m]
+  source_on = registry[/func sourceDidTurnOn\(\).*?\n  \}/m]
+  terminate = registry[/func terminate\(.*?\n  \}/m]
+  retire = registry[/private func retireCurrentAndNativeActivations\(.*?\n  \}/m]
+  abort "activation registry owners are missing" unless
+    admission && begin_owner && native_owner && source_off && source_on &&
+      terminate && retire
+  abort "source-off or termination can still admit a new activation" unless
+    %w[accepting sourceInactive terminating].all? { |state| admission.include?("case #{state}") } &&
+      begin_owner.scan("admission == .accepting").length == 2 &&
+      begin_owner.scan("!retiresActivation").length == 2 &&
+      source_off.index("admission = .sourceInactive") <
+        source_off.index("retireCurrentAndNativeActivations") &&
+      source_on.include?("admission != .terminating, !retiresActivation") &&
+      terminate.index("admission = .terminating") <
+        terminate.index("retireCurrentAndNativeActivations")
+  abort "native deactivation lost FIFO generation correlation" unless
+    registry.include?("private var nativeActivations: [Activation] = []") &&
+      begin_owner.include?("nativeActivations.append(opened)") &&
+      native_owner.include?("nativeActivations.firstIndex(where:") &&
+      native_owner.include?("$0.controller === controller && $0.client === client") &&
+      native_owner.index("nativeActivations.remove(at: index)") <
+        native_owner.index("activation?.token == nativeActivation.token")
+  abort "global retirement lost its synchronous reentry barrier" unless
+    retire.include?("guard !retiresActivation else { return false }") &&
+      retire.include?("retiresActivation = true") &&
+      retire.include?("defer { retiresActivation = false }") &&
+      retire.index("takeCurrent()") < retire.index("retire(closed)")
+  abort "retired activation owners returned" if
+    registry.include?("func closeCurrent") || registry.include?("nativeCloseOrder") ||
+      registry.include?("consumeNextNativeClose")
+  abort "presentation bypasses the source-admission owner" unless
+    begin_projection.include?("inputActivationRegistry.sourceDidTurnOn()") &&
+      begin_projection.include?("inputActivationRegistry.begin(") &&
+      native_finish.include?("inputActivationRegistry.closeNative(") &&
+      source_finish.include?("inputActivationRegistry.sourceDidTurnOff") &&
+      termination_finish.include?("inputActivationRegistry.terminate")
+  will_terminate = delegate[/func applicationWillTerminate\(.*?\n  \}/m]
+  power_off = delegate[/func workspaceWillPowerOff\(.*?\n  \}/m]
+  abort "application termination can finalize before closing admission" unless
+    will_terminate && power_off &&
+      will_terminate.index("terminateInputActivations()") <
+        will_terminate.index("shutdownRime()") &&
+      power_off.index("terminateInputActivations()") < power_off.index("shutdownRime()")
+  activate = controller[/override func activateServer\(.*?\n  \}/m]
+  deactivate = controller[/override func deactivateServer\(.*?\n  \}/m]
+  abort "controller activation projections are missing" unless activate && deactivate
+  abort "controller activation bypasses the application owner" unless
+    activate.include?("beginInputActivation(") &&
+      activate.include?("controller: self") &&
+      deactivate.include?("finishInputActivation(") &&
+      deactivate.include?("controller: self")
+  abort "native deactivation still infers input-source state locally" if
+    deactivate.include?("SquirrelInstaller.currentInputSourceID()")
+  teardown = controller[/deinit \{.*?\n  \}/m]
+  abort "controller teardown can destroy an open application activation" unless
+    teardown &&
+      teardown.scan("finishInputActivation(token:").length == 1 &&
+      teardown.scan("destroySession()").length == 1 &&
+      teardown.index("finishInputActivation(token:") <
+        teardown.index("destroySession()")
+' sources/SquirrelApplicationPresentation.swift \
+  sources/SquirrelInputController.swift sources/LinnetInputActivationRegistry.swift \
+  sources/SquirrelApplicationDelegate.swift ||
+  fail "input-source presentation lifecycle can reorder away/back transitions"
+ruby -e '
+  controller = File.read(ARGV.fetch(0))
+  update = controller[/func rimeUpdate\(\) \{.*?\n  \}\n\n  private func commit\(string:/m]
+  commit = controller[/private func commit\(string: String, to targetClient: IMKTextInput\?\) \{.*?\n  \}\n\n  private func show\(/m]
+  show = controller[/private func show\(\n.*?\n  \}\n\n  private func showPanel/m]
+  panel = controller[/private func showPanel\(.*?\n  \}\n\}/m]
+  abort "client-publication lifecycle owners are missing" unless
+    update && commit && show && panel
+  token = update.index("guard let updateToken = activeInputToken")
+  consume = update.index("rimeConsumeCommittedText(to: client)")
+  post_consume = update.index(
+    "guard inputActivationIsCurrent(updateToken) else { return }", consume || 0)
+  abort "an old Rime update can continue after a commit reactivates the controller" unless
+    token && consume && post_consume && token < consume && consume < post_consume
+  abort "marked-text callbacks are not guarded by the originating activation" unless
+    update.include?("activationToken: updateToken") &&
+      show.include?("activationToken: LinnetInputActivationRegistry.Token") &&
+      show.include?("inputActivationIsCurrent(activationToken, client: client)")
+  abort "client geometry can publish a panel for a replacement activation" unless
+    panel.include?("activationToken: LinnetInputActivationRegistry.Token") &&
+      panel.include?("inputActivationIsCurrent(activationToken, client: client)") &&
+      panel.include?("panel.bind(controller: self, activationToken: activationToken)")
+  reset = commit.index(%q{preedit = ""})
+  marked = commit.index("targetClient.setMarkedText(")
+  inserted = commit.index("targetClient.insertText(")
+  abort "an old commit stack can clear or hide a replacement activation" unless
+    reset && inserted && reset < inserted &&
+      (!marked || reset < marked) && !commit.include?("hidePalettes()")
+' sources/SquirrelInputController.swift ||
+  fail "InputMethodKit client callback reentrancy can publish stale UI"
 test "$(rg -F -c 'private var settingsTransactionHost: LinnetSettingsTransactionIPC.Host?' \
   sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
   fail "the authenticated Settings transaction Host owner count changed"
@@ -1391,8 +1884,10 @@ ruby -e '
       menu.include?("button.title = label") &&
       menu.include?("private func setStatusItemVisibility(inputSourceIsActive: Bool)") &&
       menu.include?("statusItem?.isVisible = showStatusIcon && inputSourceIsActive") &&
-      menu.include?("func inputSourceDidActivate(session: RimeSessionId)") &&
-      controller.include?("inputSourceDidActivate(session: session)")
+      menu.include?("func inputSourceDidActivate(") &&
+      menu.include?("activationToken: LinnetInputActivationRegistry.Token") &&
+      controller.include?("inputSourceDidActivate(") &&
+      controller.include?("activationToken: activationToken")
 ' Linnet.xcodeproj/project.pbxproj sources/LinnetSettings/SettingsApplication.swift \
   sources/LinnetSettings/SettingsRootView.swift \
   sources/SquirrelApplicationDelegate.swift \
@@ -1539,26 +2034,55 @@ ruby -rjson -e '
 ruby -e '
   source = File.read("sources/InputSource.swift")
   register = source[/func register\(\) throws \{.*?\n  \}/m]
+  registration_owner = source[/private func register\(intent: RegistrationIntent\) throws \{.*?\n  \}/m]
+  registration_required = source[/static func registrationRequired\(.*?\n  \}/m]
   enable = source[/func enable\(\) throws \{.*?\n  \}/m]
   select = source[/func select\(\) throws \{.*?\n  \}/m]
   refresh = source[/func refreshAfterCoreUpdate\(.*?\n  \}/m]
+  core_plan = source[/static func coreUpdatePlan\(.*?\n  \}/m]
   desired = source[/static func desiredInputSourceAfterCoreUpdate\(.*?\n  \}/m]
   restoration = source[/static func inputSourceToRestoreAfterRegistration\(.*?\n  \}/m]
   select_source = source[/private func selectSource\(.*?\n  \}/m]
-  enable_source = source[/private func enableSource\(identifier: String\) throws \{.*?\n  \}/m]
+  enable_source = source[/private func enableSource\(.*?\n  \}/m]
   abort "input-source lifecycle owners are missing" unless
-    register && enable && select && refresh && desired && restoration &&
-      select_source && enable_source
-  abort "register must only register the input source" unless
-    register.include?("TISRegisterInputSource") && !register.include?("TISEnableInputSource") &&
-      !register.include?("TISSelectInputSource")
+    register && registration_owner && registration_required && enable && select && refresh &&
+      core_plan &&
+      desired && restoration && select_source && enable_source
+  abort "manual and Complete registration stopped using the ensure-present owner" unless
+    register.include?("register(intent: .ensurePresent)")
+  abort "Core registration stopped consuming its typed transition intent" unless
+    registration_owner.include?("let existingSources = inputSources(identifier:") &&
+      registration_owner.match?(/guard try Self\.registrationRequired\(\s*inputSourceCount: existingSources\.count,\s*intent: intent,\s*identifier: identifier\)\s*else \{.*?\breturn\b.*?\}/m) &&
+      registration_owner.index("Self.registrationRequired(") <
+        registration_owner.index("TISRegisterInputSource") &&
+      registration_required.include?("(.ensurePresent, 0): return true") &&
+      registration_required.include?("(.preservePresent, 1)") &&
+      registration_required.include?("(.preserveAbsent, 0)") &&
+      registration_required.include?("registrationStateMismatch") &&
+      registration_required.include?("inputSourceCountMismatch")
+  abort "the missing-source repair must only register the input source" unless
+    registration_owner.include?("TISRegisterInputSource") &&
+      !registration_owner.include?("TISEnableInputSource") &&
+      !registration_owner.include?("TISSelectInputSource")
   abort "register must fail closed unless the refreshed identity resolves exactly once" unless
-    register.include?("try inputSource(identifier: SquirrelApp.bundleIdentifier)")
+    registration_owner.include?("try inputSource(identifier: identifier)")
   abort "enable must delegate only to the enable owner" unless
     enable.include?("enableSource(identifier:") && !enable.include?("select()") &&
       !enable.include?("TISSelectInputSource")
   abort "enableSource must not select the input source" unless
-    enable_source.include?("TISEnableInputSource") && !enable_source.include?("TISSelectInputSource")
+    enable_source.include?("TISEnableInputSource") &&
+      enable_source.include?("enabled && intent == .preserve") &&
+      !enable_source.include?("TISSelectInputSource")
+  abort "Core identity migration plan is incomplete or gained a second owner" unless
+    core_plan.include?("(.missingAppInstall, .unregistered)") &&
+      core_plan.include?("registrationIntent: .ensurePresent") &&
+      core_plan.include?("(.legacyCommunityAdhocToCMS, .enabled)") &&
+      core_plan.include?("registrationIntent: .preservePresent, enableIntent: .reassert") &&
+      core_plan.include?("(.sameCommunityCMSLeaf, .unregistered)") &&
+      core_plan.include?("registrationIntent: .preserveAbsent, enableIntent: .preserve") &&
+      refresh.include?("coreUpdatePlan(") &&
+      refresh.include?("try register(intent: plan.registrationIntent)") &&
+      refresh.include?("if plan.enableIntent == .reassert")
   abort "manual selection stopped delegating to the sole mutation owner" unless
     select.include?("selectSource(identifier:")
   abort "Core selection continuity is not one post-payload transition owner" unless
@@ -1574,7 +2098,7 @@ ruby -e '
       refresh.include?("quiesceHost()") &&
       refresh.include?("currentAfterQuiescence") &&
       refresh.include?("currentAfterRegister") &&
-      refresh.include?("try register()") &&
+      refresh.include?("try register(intent: plan.registrationIntent)") &&
       refresh.include?("try selectSource(") &&
       refresh.include?("expectedCurrentInputSourceID: currentAfterRegister")
   abort "the retired split Core selection owner returned" if
@@ -1588,6 +2112,23 @@ ruby -e '
       source.scan("TISEnableInputSource").length == 1 &&
       source.scan("TISSelectInputSource").length == 1
 ' || fail "input-source register/enable/no-select ownership regressed"
+if rg -n 'community-adhoc|sign_adhoc_code|verify_community_code|inspect-community-contract|sign-community-product|verify-publication-product|unsigned-community' \
+    scripts/linnet-code-identity scripts/generate-release-metadata \
+    Makefile action-build.sh package/make_archive package/make_package \
+    package/verify_package package/verify_publication_artifacts \
+    .github/workflows/release-ci.yml; then
+  fail "the retired public ad-hoc signing path returned"
+fi
+ruby -rjson -e '
+  identity = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort unless identity.keys.sort ==
+    %w[certificate_sha1 certificate_sha256 format legacy_migration_acceptance profile] &&
+    identity.fetch("format") == 2 && identity.fetch("profile") == "community-cms" &&
+    identity.fetch("certificate_sha1").match?(/\A[0-9A-F]{40}\z/) &&
+    identity.fetch("certificate_sha256").match?(/\A[0-9a-f]{64}\z/) &&
+    identity.fetch("legacy_migration_acceptance").is_a?(Hash)
+' config/linnet-community-signing.json ||
+  fail "the fixed community CMS leaf and migration-acceptance owner is invalid"
 ruby -e '
   delegate = File.read("sources/SquirrelApplicationDelegate.swift") +
     File.read("sources/SquirrelApplicationPresentation.swift")
@@ -1599,15 +2140,20 @@ ruby -e '
   abort "live status owner is missing" unless
     update && option_notification && schema_notification && activation
   abort "live status must query the current session option and abbreviated label" unless
-    update.include?(%q{get_option(session, "ascii_mode")}) &&
+    update.include?("inputActivationRegistry.currentToken") &&
+      update.scan("currentSessionLease(").length == 1 &&
+      update.scan("ownsCurrentSession(").length == 1 &&
+    update.include?(%q{get_option(sessionLease.identifier, "ascii_mode")}) &&
       update.include?("get_state_label_abbreviated(") &&
-      update.include?(%q{session, "ascii_mode", asciiMode, true})
+      update.include?(%q{sessionLease.identifier, "ascii_mode", asciiMode, true})
   abort "ascii-mode option changes must refresh the live status" unless
     option_notification.include?(%q{if optionName == "ascii_mode" { delegate.updateStatusIcon(session: sessionId) }})
   abort "schema changes must refresh the live status" unless
     schema_notification.include?("delegate.updateStatusIcon(session: sessionId)")
   abort "client activation must seed the live status" unless
-    activation.include?("inputSourceDidActivate(session: session)")
+    activation.include?("inputSourceDidActivate(") &&
+      activation.include?("activationToken: activationToken") &&
+      activation.include?("session: session")
 ' || fail "live input-mode status projection regressed"
 ruby -e '
   host = File.read("sources/SquirrelApplicationDelegate.swift")
@@ -1671,9 +2217,13 @@ ruby -e '
     activation.include?("commitComposition") ||
       activation.include?("isRimeInputSuspended = true")
   abort "configuration reload can publish success before fresh-schema validation" unless
-    activation.include?("ChineseProfile(schemaID:") &&
+    activation.include?("LinnetSettingsDocumentStore.snapshot(from: live)") &&
+      activation.include?("settingsSnapshot.document.input.chineseProfile") &&
       activation.include?("rimeAPI.get_current_schema") &&
       activation.include?("activeSchemaID == selectedProfile.schemaID")
+  abort "configuration reload inferred intent from its own compiled output" if
+    activation.include?("ChineseProfile(schemaID:") ||
+      activation.include?("linnet_mode_switch/chinese_schema")
 
   coordinator = File.read("sources/LinnetSettings/SettingsDataCoordinator.swift")
   apply = coordinator[/private func applyConfiguration\(.*?\n  \}\n\n  \/\/\/ Lightweight appearance apply/m]
@@ -1848,23 +2398,28 @@ rg -Fq 'Ticket(engine_, "linnet_pinyin")' plugins/smart_english/smart_english.cc
 if rg -n 'F4|Control\+grave|Control\+Shift\+grave' data/linnet/default.yaml; then
   fail "the product switcher regained global system-key hotkeys"
 fi
-rg -Fq 'commit(string: pendingInput)' \
+rg -Fq 'rimeAPI.commit_raw_input(session)' \
   sources/SquirrelInputController.swift ||
-  fail "the standard Squirrel IMK composition exit is missing"
-if rg -n 'rimeCommitCompositionThroughReturn|process_key\(session, XK_Return, 0\)' \
+  fail "the Rime-owned raw composition exit is missing"
+if rg -n 'commit\(string: pendingInput\)|commit\(string: String\(cString: input\)\)' \
     sources/SquirrelInputController.swift; then
-  fail "a private Return simulation remains in the IMK composition exit"
+  fail "the InputMethodKit boundary regained a second raw reconstruction owner"
 fi
 
 # Per-application Rime options remain in Squirrel's canonical session owner.
 # Do not defer or reinterpret that lifecycle through a Linnet transition layer.
-test "$(rg -F -c 'func updateAppOptions()' \
-  sources/SquirrelInputController.swift)" -eq 1 ||
+test "$(rg -F -o 'func updateAppOptions()' \
+  sources/SquirrelInputController.swift \
+  sources/SquirrelInputController+RimeSession.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "upstream Squirrel app-option owner is missing"
-if rg -n 'transitionApplication|replacingSession' sources/SquirrelInputController.swift; then
+if rg -n 'transitionApplication|replacingSession' \
+    sources/SquirrelInputController.swift \
+    sources/SquirrelInputController+RimeSession.swift; then
   fail "a private application-transition policy returned"
 fi
-test "$(rg -F -c 'updateAppOptions()' sources/SquirrelInputController.swift)" -eq 3 ||
+test "$(rg -F -o 'updateAppOptions()' \
+  sources/SquirrelInputController.swift \
+  sources/SquirrelInputController+RimeSession.swift | wc -l | tr -d ' ')" -eq 3 ||
   fail "Squirrel app options no longer flow through create-session and app-change events"
 
 if rg -n 'JSON\.parse\(File\.read' scripts/build-rime-runtime; then

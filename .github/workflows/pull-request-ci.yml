@@ -14,6 +14,11 @@ jobs:
           # Keep source submodules on their lock-owning build paths.
           submodules: false
 
+      - name: Restore locked build cache
+        uses: ./.github/actions/restore-locked-build-cache
+        with:
+          save: false
+
       - name: Install build tools
         run: scripts/install_ci_build_tools.sh quality
 

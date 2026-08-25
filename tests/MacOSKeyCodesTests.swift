@@ -4,31 +4,17 @@ import Foundation
 
 @main
 struct MacOSKeyCodesTests {
+  private struct ExpectedModifierEvent {
+    let keycode: UInt32
+    let modifiers: UInt32
+  }
+
   static func main() {
-    for (name, hardwareFlag) in [
-      ("Shift", CGEventFlags.maskShift),
-      ("Control", .maskControl),
-      ("Option", .maskAlternate),
-      ("Command", .maskCommand),
-      ("Fn", .maskSecondaryFn),
-    ] {
-      require(
-        SquirrelKeycode.activationModifierBaseline(from: hardwareFlag).isEmpty,
-        "activation retained stale \(name) state from the previous input epoch"
-      )
-    }
-    require(
-      SquirrelKeycode.activationModifierBaseline(from: .maskAlphaShift) == [.capsLock],
-      "activation did not seed persistent Caps Lock hardware state"
-    )
-    require(
-      SquirrelKeycode.activationModifierBaseline(
-        from: [.maskAlphaShift, .maskShift, .maskControl, .maskAlternate, .maskCommand,
-               .maskSecondaryFn]
-      ) == [.capsLock],
-      "activation baseline retained transient modifiers alongside Caps Lock"
-    )
+    verifyModifierTransitionState()
+    verifyComposingKeypadEquivalents()
+    verifyInputDispatchAuthority()
     verifyModifierEpochLifecycle()
+    verifyDelayedCallbackSessionOwnership()
     require(
       SquirrelKeycode.osxKeycodeToRime(
         keycode: UInt16(kVK_LeftArrow), keychar: nil, shift: false, caps: false)
@@ -61,14 +47,328 @@ struct MacOSKeyCodesTests {
     )
     print("MacOSKeyCodesTests: PASS")
   }
+}
+
+private extension MacOSKeyCodesTests {
+  private static func verifyModifierTransitionState() {
+    verifySingleShiftTransport(
+      physicalKeycode: UInt16(kVK_Shift), rimeKeycode: UInt32(XK_Shift_L), name: "left")
+    verifySingleShiftTransport(
+      physicalKeycode: UInt16(kVK_RightShift), rimeKeycode: UInt32(XK_Shift_R), name: "right")
+    verifyOverlappingShiftReleaseOrders()
+    verifyCapsLockTransitions()
+    verifyAmbiguousFlagsChangedFailsClosed()
+    verifyAmbiguousSnapshotPreservesArmedShift()
+    verifyActivationHeldShiftSuppressesOppositeTap()
+    verifyActivationResetDropsUntrackedRelease()
+  }
+
+  private static func verifySingleShiftTransport(
+    physicalKeycode: UInt16,
+    rimeKeycode: UInt32,
+    name: String
+  ) {
+    var tap = SquirrelModifierTransitionState(hardwareFlags: [])
+    requireEvents(
+      tap.transitions(keyCode: physicalKeycode, modifiers: [.shift]),
+      [ExpectedModifierEvent(keycode: rimeKeycode, modifiers: kShiftMask.rawValue)],
+      "\(name) Shift down was not transported exactly once"
+    )
+    requireEvents(
+      tap.transitions(keyCode: physicalKeycode, modifiers: []),
+      [ExpectedModifierEvent(keycode: rimeKeycode, modifiers: kReleaseMask.rawValue)],
+      "\(name) Shift up was not transported exactly once"
+    )
+
+    // Duration and chord classification belong downstream. The transition owner
+    // transports the same physical pair and ignores duplicate flags snapshots.
+    var heldOrChorded = SquirrelModifierTransitionState(hardwareFlags: [])
+    requireEvents(
+      heldOrChorded.transitions(keyCode: physicalKeycode, modifiers: [.shift]),
+      [ExpectedModifierEvent(keycode: rimeKeycode, modifiers: kShiftMask.rawValue)],
+      "\(name) held/chorded Shift down was lost"
+    )
+    requireEvents(
+      heldOrChorded.transitions(keyCode: physicalKeycode, modifiers: [.shift]),
+      [],
+      "a repeated physical \(name) Shift down snapshot was misclassified as release"
+    )
+    requireEvents(
+      heldOrChorded.transitions(keyCode: UInt16(kVK_ANSI_A), modifiers: [.shift]),
+      [],
+      "an unchanged non-modifier flags snapshot duplicated \(name) Shift down"
+    )
+    requireEvents(
+      heldOrChorded.transitions(keyCode: physicalKeycode, modifiers: []),
+      [ExpectedModifierEvent(keycode: rimeKeycode, modifiers: kReleaseMask.rawValue)],
+      "\(name) held/chorded Shift up was lost"
+    )
+  }
+
+  private static func verifyOverlappingShiftReleaseOrders() {
+    verifyOverlappingShifts(
+      releases: [
+        (UInt16(kVK_Shift), UInt32(XK_Shift_L)),
+        (UInt16(kVK_RightShift), UInt32(XK_Shift_R))
+      ],
+      name: "left-then-right"
+    )
+    verifyOverlappingShifts(
+      releases: [
+        (UInt16(kVK_RightShift), UInt32(XK_Shift_R)),
+        (UInt16(kVK_Shift), UInt32(XK_Shift_L))
+      ],
+      name: "right-then-left"
+    )
+  }
+
+  private static func verifyOverlappingShifts(
+    releases: [(physical: UInt16, rime: UInt32)],
+    name: String
+  ) {
+    var state = SquirrelModifierTransitionState(hardwareFlags: [])
+    var actual = state.transitions(keyCode: UInt16(kVK_Shift), modifiers: [.shift])
+    actual += state.transitions(keyCode: UInt16(kVK_RightShift), modifiers: [.shift])
+    actual += state.transitions(keyCode: releases[0].physical, modifiers: [.shift])
+    actual += state.transitions(keyCode: releases[1].physical, modifiers: [])
+
+    requireEvents(
+      actual,
+      [
+        ExpectedModifierEvent(keycode: UInt32(XK_Shift_L), modifiers: kShiftMask.rawValue),
+        ExpectedModifierEvent(keycode: UInt32(XK_Shift_R), modifiers: kShiftMask.rawValue),
+        ExpectedModifierEvent(
+          keycode: releases[0].rime,
+          modifiers: kShiftMask.rawValue | kReleaseMask.rawValue),
+        ExpectedModifierEvent(keycode: releases[1].rime, modifiers: kReleaseMask.rawValue)
+      ],
+      "overlapping Shift \(name) collapsed side identity or degraded to one tap"
+    )
+  }
+
+  private static func verifyCapsLockTransitions() {
+    var state = SquirrelModifierTransitionState(hardwareFlags: [])
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_CapsLock), modifiers: [.capsLock]),
+      [ExpectedModifierEvent(keycode: UInt32(XK_Caps_Lock), modifiers: 0)],
+      "Caps Lock on did not expose the pre-toggle modifier state"
+    )
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_CapsLock), modifiers: [.capsLock]),
+      [],
+      "an unchanged Caps Lock snapshot emitted a duplicate toggle"
+    )
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_CapsLock), modifiers: []),
+      [ExpectedModifierEvent(keycode: UInt32(XK_Caps_Lock), modifiers: kLockMask.rawValue)],
+      "Caps Lock off did not expose the pre-toggle modifier state"
+    )
+  }
+
+  private static func verifyAmbiguousFlagsChangedFailsClosed() {
+    var state = SquirrelModifierTransitionState(hardwareFlags: [])
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_ANSI_A), modifiers: [.shift, .control]),
+      [],
+      "an ambiguous non-modifier flags event fabricated duplicate modifier transitions"
+    )
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_Shift), modifiers: [.control]),
+      [],
+      "an ambiguous event fabricated an unmatched Shift release"
+    )
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_Control), modifiers: []),
+      [],
+      "an ambiguous event fabricated an unmatched Control release"
+    )
+  }
+
+  private static func verifyAmbiguousSnapshotPreservesArmedShift() {
+    for shift in [
+      (name: "left", physical: UInt16(kVK_Shift), rime: UInt32(XK_Shift_L)),
+      (name: "right", physical: UInt16(kVK_RightShift), rime: UInt32(XK_Shift_R))
+    ] {
+      var state = SquirrelModifierTransitionState(hardwareFlags: [])
+      requireEvents(
+        state.transitions(keyCode: shift.physical, modifiers: [.shift]),
+        [ExpectedModifierEvent(keycode: shift.rime, modifiers: kShiftMask.rawValue)],
+        "\(shift.name) Shift was not armed before an ambiguous snapshot"
+      )
+      requireEvents(
+        state.transitions(
+          keyCode: UInt16(kVK_ANSI_A),
+          modifiers: [.shift, .control, .option]),
+        [],
+        "an ambiguous multi-flag snapshot fabricated modifier transitions"
+      )
+      requireEvents(
+        state.transitions(keyCode: shift.physical, modifiers: [.control, .option]),
+        [ExpectedModifierEvent(
+          keycode: shift.rime,
+          modifiers: kControlMask.rawValue | kAltMask.rawValue | kReleaseMask.rawValue
+        )],
+        "an ambiguous multi-flag snapshot forgot the armed \(shift.name) Shift release"
+      )
+    }
+  }
+
+  private static func verifyActivationHeldShiftSuppressesOppositeTap() {
+    for scenario in [
+      (
+        heldName: "left",
+        heldPhysical: UInt16(kVK_Shift),
+        tappedName: "right",
+        tappedPhysical: UInt16(kVK_RightShift),
+        tappedRime: UInt32(XK_Shift_R)
+      ),
+      (
+        heldName: "right",
+        heldPhysical: UInt16(kVK_RightShift),
+        tappedName: "left",
+        tappedPhysical: UInt16(kVK_Shift),
+        tappedRime: UInt32(XK_Shift_L)
+      )
+    ] {
+      var state = SquirrelModifierTransitionState(hardwareFlags: [.maskShift])
+      requireEvents(
+        state.transitions(keyCode: scenario.tappedPhysical, modifiers: [.shift]),
+        [],
+        "activation-held \(scenario.heldName) Shift leaked the opposite down"
+      )
+      requireEvents(
+        state.transitions(keyCode: scenario.tappedPhysical, modifiers: [.shift]),
+        [],
+        "activation-held \(scenario.heldName) Shift leaked the opposite up"
+      )
+      requireEvents(
+        state.transitions(keyCode: scenario.heldPhysical, modifiers: []),
+        [],
+        "activation-held \(scenario.heldName) Shift leaked its epoch-ending release"
+      )
+      requireEvents(
+        state.transitions(keyCode: scenario.tappedPhysical, modifiers: [.shift]),
+        [ExpectedModifierEvent(
+          keycode: scenario.tappedRime,
+          modifiers: kShiftMask.rawValue
+        )],
+        "\(scenario.tappedName) Shift remained suppressed after aggregate Shift cleared"
+      )
+      requireEvents(
+        state.transitions(keyCode: scenario.tappedPhysical, modifiers: []),
+        [ExpectedModifierEvent(
+          keycode: scenario.tappedRime,
+          modifiers: kReleaseMask.rawValue
+        )],
+        "\(scenario.tappedName) Shift release was lost after aggregate Shift cleared"
+      )
+    }
+  }
+
+  private static func verifyActivationResetDropsUntrackedRelease() {
+    var state = SquirrelModifierTransitionState(hardwareFlags: [])
+    _ = state.transitions(keyCode: UInt16(kVK_Shift), modifiers: [.shift])
+    state.reset(from: [.maskShift, .maskControl, .maskAlternate, .maskCommand,
+                       .maskSecondaryFn])
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_Shift), modifiers: []),
+      [],
+      "activation reset leaked an untracked Shift release into the new epoch"
+    )
+
+    state.reset(from: [.maskAlphaShift, .maskShift, .maskControl, .maskAlternate,
+                       .maskCommand, .maskSecondaryFn])
+    requireEvents(
+      state.transitions(keyCode: UInt16(kVK_CapsLock), modifiers: []),
+      [ExpectedModifierEvent(keycode: UInt32(XK_Caps_Lock), modifiers: kLockMask.rawValue)],
+      "activation reset did not retain the persistent Caps Lock baseline"
+    )
+  }
+
+  private static func verifyComposingKeypadEquivalents() {
+    let mappings: [(keypad: UInt32, composing: UInt32)] = [
+      (UInt32(XK_KP_0), UInt32(XK_0)),
+      (UInt32(XK_KP_1), UInt32(XK_1)),
+      (UInt32(XK_KP_2), UInt32(XK_2)),
+      (UInt32(XK_KP_3), UInt32(XK_3)),
+      (UInt32(XK_KP_4), UInt32(XK_4)),
+      (UInt32(XK_KP_5), UInt32(XK_5)),
+      (UInt32(XK_KP_6), UInt32(XK_6)),
+      (UInt32(XK_KP_7), UInt32(XK_7)),
+      (UInt32(XK_KP_8), UInt32(XK_8)),
+      (UInt32(XK_KP_9), UInt32(XK_9)),
+      (UInt32(XK_KP_Decimal), UInt32(XK_period)),
+      (UInt32(XK_KP_Equal), UInt32(XK_equal)),
+      (UInt32(XK_KP_Add), UInt32(XK_plus)),
+      (UInt32(XK_KP_Subtract), UInt32(XK_minus)),
+      (UInt32(XK_KP_Multiply), UInt32(XK_asterisk)),
+      (UInt32(XK_KP_Divide), UInt32(XK_slash))
+    ]
+    for mapping in mappings {
+      require(
+        SquirrelKeycode.composingKeypadEquivalent(mapping.keypad) == mapping.composing,
+        "keypad keys no longer share their composing ASCII contract"
+      )
+    }
+    require(
+      SquirrelKeycode.composingKeypadEquivalent(UInt32(XK_Return)) == nil,
+      "a non-keypad key acquired a composing-only alias"
+    )
+  }
+}
+
+private extension MacOSKeyCodesTests {
+  private static func verifyInputDispatchAuthority() {
+    let controller = controllerSource()
+    let processKey = section(
+      in: controller,
+      startingAt: "func processKey(",
+      endingAt: "private func synchronizeCandidateLayoutOptions()"
+    )
+    let effectiveKeycode = section(
+      in: controller,
+      startingAt: "private func effectiveRimeKeycode(for keycode:",
+      endingAt: "private func enterVimCommandModeIfNeeded("
+    )
+    let keypadLookup = effectiveKeycode.range(
+      of: "SquirrelKeycode.composingKeypadEquivalent(keycode)")
+    let pendingLookup = effectiveKeycode.range(of: "hasPendingRimeInput")
+    require(
+      keypadLookup != nil && pendingLookup != nil
+        && keypadLookup!.lowerBound < pendingLookup!.lowerBound
+        && occurrences(
+          of: "SquirrelKeycode.composingKeypadEquivalent(keycode)",
+          in: effectiveKeycode) == 1
+        && occurrences(of: "hasPendingRimeInput", in: effectiveKeycode) == 1
+        && occurrences(
+          of: "effectiveRimeKeycode(for: rimeKeycode)",
+          in: processKey) == 1,
+      "ordinary processKey hot path queries pending Rime input before proving a keypad key"
+    )
+    require(
+      !controller.contains("printablePaging"),
+      "the controller retained printable paging ownership"
+    )
+  }
 
   private static func verifyModifierEpochLifecycle() {
-    let controller = readSource("sources/SquirrelInputController.swift")
+    let controller = controllerSource()
     let host = readSource("sources/SquirrelApplicationDelegate.swift")
+    let keycodes = readSource("sources/MacOSKeyCodes.swift")
+    let flagsChanged = section(
+      in: controller,
+      startingAt: "case .flagsChanged:",
+      endingAt: "case .keyDown:"
+    )
     let reset = section(
       in: controller,
       startingAt: "func resetModifierEpoch()",
-      endingAt: "override func activateServer"
+      endingAt: "var hasPendingRimeInput"
+    )
+    let readiness = section(
+      in: controller,
+      startingAt: "func ensureReadySession(",
+      endingAt: "func updateAppOptions()"
     )
     let activation = section(
       in: controller,
@@ -80,41 +380,183 @@ struct MacOSKeyCodesTests {
       startingAt: "private func invalidateRimeSessions()",
       endingAt: "func shutdownRime()"
     )
+    let shutdown = section(
+      in: host,
+      startingAt: "func shutdownRime()",
+      endingAt: "fileprivate func workspaceWillPowerOff"
+    )
+    let reopen = section(
+      in: host,
+      startingAt: "private func reopenRimeInput()",
+      endingAt: "private func startStaleSessionCleaner()"
+    )
+    let createSession = section(
+      in: controller,
+      startingAt: "func createSession()",
+      endingAt: "func sessionIsCurrent()"
+    )
+    let modeBaseline = section(
+      in: controller,
+      startingAt: "func synchronizeRecoveredInputMode(",
+      endingAt: "func applyInputModeIdentity("
+    )
+    let modeOwner = section(
+      in: controller,
+      startingAt: "func applyInputModeIdentity(",
+      endingAt: "var hasPendingRimeInput"
+    )
+    let activeCommit = section(
+      in: controller,
+      startingAt: "func commitActiveComposition(",
+      endingAt: "func rimeUpdate()"
+    )
 
     require(
       occurrences(of: "resetModifierEpoch()", in: controller) == 2,
-      "modifier epoch reset is not owned once and consumed once by activation"
+      "modifier epoch reset is not defined once and consumed once by activation"
     )
     require(
-      occurrences(of: "inputController.resetModifierEpoch()", in: host) == 1,
-      "runtime invalidation does not consume the controller modifier epoch owner exactly once"
+      occurrences(of: "isRimeInputSuspended = false", in: host) == 2
+        && occurrences(of: "inputController.resetModifierEpoch()", in: host) == 1,
+      "runtime input admission regained a second ungated reopen path"
+    )
+    let rebase = reopen.range(of: "inputController.resetModifierEpoch()")?.lowerBound
+    let reopenGate = reopen.range(of: "isRimeInputSuspended = false")?.lowerBound
+    require(
+      rebase != nil && reopenGate != nil && rebase! < reopenGate!,
+      "runtime resume can expose a stale modifier baseline to the next event"
     )
     require(
-      reset.contains("lastModifiers = SquirrelKeycode.activationModifierBaseline(")
-        && reset.contains("CGEventSource.flagsState(.combinedSessionState)"),
-      "modifier epoch owner no longer preserves only the live Caps Lock baseline"
+      reset.contains(".reset(")
+        && reset.contains("from: CGEventSource.flagsState(.combinedSessionState)"),
+      "modifier epoch owner no longer resets the typed transition state from hardware"
     )
     require(
-      activation.contains("resetModifierEpoch()") && !activation.contains("lastModifiers ="),
-      "activation retained a competing inline modifier baseline"
+      activation.contains("ensureReadySession(for: activationToken)")
+        && activation.contains("resetModifierEpoch()")
+        && !activation.contains("SquirrelModifierTransitionState"),
+      "activation no longer establishes the modifier epoch before user events"
     )
-    let activationReset = activation.range(of: "resetModifierEpoch()")?.lowerBound
+    require(
+      readiness.contains("recoveredSession || readyActivationToken != activationToken")
+        && !readiness.contains("resetModifierEpoch()")
+        && readiness.contains("synchronizeCapsLockBaseline()")
+        && readiness.contains("if recoveredSession")
+        && readiness.contains("synchronizeRecoveredInputMode("),
+      "session recovery can swallow its first modifier event by rebasing from post-event hardware"
+    )
+    require(
+      !createSession.contains("inputModeIdentity = nil")
+        && modeBaseline.contains("rimeAPI.get_status(")
+        && modeBaseline.contains("announcesTransition: false")
+        && !modeBaseline.contains("panel.updateStatus(")
+        && modeOwner.contains("loadSettings(for:")
+        && modeOwner.contains("inlinePreedit")
+        && modeOwner.contains("panel.updateStatus("),
+      "session recovery does not establish a silent pre-event input-mode baseline"
+    )
+    require(
+      readiness.contains("if recoveredSession {")
+        && readiness.contains("clearChord()")
+        && activeCommit.contains("clearChord()"),
+      "a session replacement or active composition exit retained delayed chord state"
+    )
+    require(
+      !controller.contains("lastModifiers")
+        && !controller.contains("symmetricDifference")
+        && !controller.contains("inferModifierKeycode"),
+      "the controller retained a second untyped modifier transition owner"
+    )
+    require(
+      occurrences(of: "SquirrelModifierTransitionState", in: controller) == 1
+        && flagsChanged.contains(".transitions("),
+      "the controller does not consume the unique typed modifier transition owner"
+    )
+    require(
+      !keycodes.contains("activationModifierBaseline")
+        && !keycodes.contains("inferModifierKeycode"),
+      "retired modifier inference helpers remain as competing truth paths"
+    )
     let availabilityGuard =
       activation.range(of: "guard NSApp.squirrelAppDelegate.canAcceptRimeInput")?.lowerBound
+    let modifierReset = activation.range(of: "resetModifierEpoch()")?.lowerBound
+    let readinessCall =
+      activation.range(of: "ensureReadySession(for: activationToken)")?.lowerBound
     require(
-      activationReset != nil && availabilityGuard != nil
-        && activationReset! < availabilityGuard!,
-      "an activation during runtime suspension can retain the prior modifier epoch"
+      modifierReset != nil && availabilityGuard != nil && readinessCall != nil
+        && modifierReset! < availabilityGuard! && availabilityGuard! < readinessCall!,
+      "a suspended activation can defer its modifier baseline until the first event"
     )
 
-    let commit = invalidation.range(of: "commitComposition")?.lowerBound
-    let epoch = invalidation.range(of: "inputController.resetModifierEpoch()")?.lowerBound
+    let commit = invalidation.range(of: "commitCurrentComposition()")?.lowerBound
     let suspend = invalidation.range(of: "isRimeInputSuspended = true")?.lowerBound
     let cleanup = invalidation.range(of: "rimeAPI.cleanup_all_sessions()")?.lowerBound
     require(
-      commit != nil && epoch != nil && suspend != nil && cleanup != nil
-        && commit! < epoch! && epoch! < suspend! && suspend! < cleanup!,
-      "runtime invalidation does not commit, reset the modifier epoch, suspend, then clean up"
+      commit != nil && suspend != nil && cleanup != nil
+        && commit! < suspend! && suspend! < cleanup!,
+      "runtime invalidation does not commit, suspend, then clean up"
+    )
+    let shutdownInvalidation = shutdown.range(of: "invalidateRimeSessions()")?.lowerBound
+    let closeConfiguration = shutdownInvalidation.flatMap {
+      shutdown.range(of: "config?.close()", range: $0..<shutdown.endIndex)?.lowerBound
+    }
+    require(
+      shutdownInvalidation != nil && closeConfiguration != nil &&
+        shutdownInvalidation! < closeConfiguration!,
+      "shutdown closes configuration before a committing client can finish reentry"
+    )
+  }
+
+  private static func verifyDelayedCallbackSessionOwnership() {
+    let controller = controllerSource()
+    let presentation = readSource("sources/SquirrelApplicationPresentation.swift")
+    let chordTimer = section(
+      in: controller,
+      startingAt: "func onChordTimer(",
+      endingAt: "func updateChord("
+    )
+    let chordSchedule = section(
+      in: controller,
+      startingAt: "func updateChord(",
+      endingAt: "func clearChord()"
+    )
+    let status = section(
+      in: presentation,
+      startingAt: "func updateStatusIcon(session:",
+      endingAt: "func inputSourceDidActivate("
+    )
+    let message = section(
+      in: presentation,
+      startingAt: "func showStatusMessage(",
+      endingAt: "func updateStatusIcon(session:"
+    )
+    let leaseValidation = section(
+      in: controller,
+      startingAt: "func ownsCurrentSession(",
+      endingAt: "private func handleCompositionMouseDown("
+    )
+
+    require(
+      chordTimer.contains("sessionLease: LinnetRimeSessionLease")
+        && chordSchedule.contains("sessionLease: sessionLease")
+        && !chordTimer.contains("sessionID")
+        && !chordSchedule.contains("let sessionID = session"),
+      "a delayed chord callback still authorizes a recycled raw session identifier"
+    )
+    require(
+      status.contains("let sessionLease = controller.currentSessionLease(")
+        && status.contains("matching: session,")
+        && status.contains("ownsCurrentSession(")
+        && status.contains("sessionLease")
+        && message.contains("controller.currentSessionLease(")
+        && message.contains("matching: session,"),
+      "status callbacks do not retain and revalidate the exact session lease"
+    )
+    let availability = leaseValidation.range(of: "canAcceptRimeInput")?.lowerBound
+    let sessionLookup = leaseValidation.range(of: "expectedLease.isCurrent")?.lowerBound
+    require(
+      availability != nil && sessionLookup != nil && availability! < sessionLookup!,
+      "an async lease revalidation can query a suspended or finalized runtime"
     )
   }
 
@@ -126,6 +568,11 @@ struct MacOSKeyCodesTests {
         Data("MacOSKeyCodesTests: FAIL: could not read \(path): \(error)\n".utf8))
       exit(EXIT_FAILURE)
     }
+  }
+
+  private static func controllerSource() -> String {
+    readSource("sources/SquirrelInputController.swift") +
+      readSource("sources/SquirrelInputController+RimeSession.swift")
   }
 
   private static func section(
@@ -145,6 +592,18 @@ struct MacOSKeyCodesTests {
 
   private static func occurrences(of needle: String, in source: String) -> Int {
     source.components(separatedBy: needle).count - 1
+  }
+
+  private static func requireEvents(
+    _ actual: [SquirrelModifierTransitionState.Event],
+    _ expected: [ExpectedModifierEvent],
+    _ message: String
+  ) {
+    require(actual.count == expected.count, "\(message): event count")
+    for (index, pair) in zip(actual, expected).enumerated() {
+      require(pair.0.keycode == pair.1.keycode, "\(message): event \(index) keycode")
+      require(pair.0.modifiers == pair.1.modifiers, "\(message): event \(index) modifiers")
+    }
   }
 
   private static func require(

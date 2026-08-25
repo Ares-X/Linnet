@@ -162,32 +162,22 @@ verify_candidate_app() {
       ! -L "${candidate_app}/Contents/SharedSupport" &&
       "$(stat -f '%Lp' "${candidate_app}/Contents/SharedSupport")" == 755 &&
       -z "$(find "${candidate_app}/Contents/SharedSupport" -mindepth 1 -print -quit)" ]] ||
-      fail_package "candidate UAT App SharedSupport must be absent or empty"
+      fail_package "candidate App SharedSupport must be absent or empty"
   fi
   profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
     "${candidate_app}/Contents/Info.plist" 2>/dev/null || true)"
   [[ "${profile}" == "${candidate_profile}" ]] ||
     fail_package "copied App code-signing profile differs from its candidate source"
-  case "${candidate_profile}" in
-    uat)
-      "${project_root}/scripts/linnet-code-identity" verify-product \
-        "${candidate_app}" || fail_package "candidate UAT App code identity is invalid"
-      ;;
-    community-adhoc)
-      "${project_root}/scripts/linnet-code-identity" verify-publication-product \
-        "${candidate_app}" "${candidate_revision}" ||
-        fail_package "community App code identity is invalid"
-      ;;
-    *) fail_package "candidate code-signing profile is invalid" ;;
-  esac
+  [[ "${candidate_profile}" == community-cms ]] ||
+    fail_package "candidate code-signing profile is invalid"
+  "${project_root}/scripts/linnet-code-identity" verify-product \
+    "${candidate_app}" || fail_package "community App code identity is invalid"
 }
 candidate_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app_path}/Contents/Info.plist" 2>/dev/null || true)"
-case "${candidate_profile}" in
-  uat) verification_scope=installation-uat ;;
-  community-adhoc) verification_scope=publication ;;
-  *) fail_package "candidate code-signing profile is invalid" ;;
-esac
+[[ "${candidate_profile}" == community-cms ]] ||
+  fail_package "candidate code-signing profile is invalid"
+verification_scope=publication
 source_code_identity="$(verify_candidate_app "${app_path}")"
 mkdir -p "${core_app}/Contents/SharedSupport"
 chmod 0755 "${core_app}/Contents/SharedSupport"
@@ -206,18 +196,15 @@ ruby -rjson -e '
     "build" => ARGV.fetch(4),
     "candidate_revision" => revision,
   }
-  if identity["profile"] == "uat"
-    abort unless identity.fetch("format") == 2 &&
-      identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
-    document["leaf_certificate_sha256"] = identity.fetch("leaf_certificate_sha256")
-  else
-    abort unless identity == {
-      "format" => 2, "candidate_revision" => revision,
-      "trust_model" => "unsigned-community",
-    }
-    document["format"] = 2
-    document["trust_model"] = "unsigned-community"
-  end
+  abort unless identity.keys.sort ==
+    %w[candidate_revision format leaf_certificate_sha256 profile] &&
+    identity.fetch("format") == 4 &&
+    identity.fetch("profile") == "community-cms" &&
+    identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
+  document["format"] = 3
+  document["profile"] = "community-cms"
+  document["leaf_certificate_sha256"] =
+    identity.fetch("leaf_certificate_sha256")
   File.binwrite(ARGV.fetch(5), JSON.generate(document) + "\n")
 ' "${source_code_identity}" "${candidate_revision}" "${bundle_id}" \
   "${version}" "${build}" "${work_root}/candidate-app-identity.json" ||

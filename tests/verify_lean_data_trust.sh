@@ -110,7 +110,19 @@ ruby -e '
     method.scan("trap cleanup_grammar_download EXIT INT TERM").length == 1 &&
       method.include?(%q{trap - EXIT INT TERM}) &&
       method.include?(%q{linnet-grammar."??????}) &&
+      method.include?(%q{chmod -R u+w "${download_dir}"}) &&
       method.include?(%q{find "${download_dir}" -depth -delete})
+  abort "grammar cold hydration does not use the verified Linnet LTS pack" unless
+    method.include?(%q{rime_lmdg_grammar.linnet_pack}) &&
+      method.include?(%q{"${pack_tool}" extract}) &&
+      method.include?(%q{find . -mindepth 1 -print}) &&
+      method.include?(%q{scripts/verify-linnet-grammar-model "${extracted_model}"}) &&
+      method.include?(%q{mv -f "${extracted_model}" "${target}"})
+  abort "grammar cold hydration still fetches the mutable upstream release URL" if
+    method.include?(%q{rime_lmdg_grammar "${pack_file}"})
+  abort "a stale regular grammar cache cannot be replaced atomically" unless
+    source.include?(%q{if ! scripts/verify-linnet-grammar-model "${grammar_model}"}) &&
+      source.include?(%q{fetch_grammar_model "${grammar_model}"})
 ' action-install.sh || {
   echo "Grammar download can leave its large temporary directory behind." >&2
   exit 1

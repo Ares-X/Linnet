@@ -121,6 +121,7 @@ struct LinnetSettingsAppearancePreviewTests {
     let owner = source("sources/LinnetCandidatePresentation.swift")
     let liveTheme = source("sources/SquirrelTheme.swift")
     let livePanel = source("sources/SquirrelPanel.swift")
+      + source("sources/SquirrelPanel+CandidatePresentation.swift")
     let preview = source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
     let candidateSurface = sourceSlice(
       preview,

@@ -505,12 +505,18 @@ if rg -n 'publish-windows:|Attach Windows installer|gh release upload.*[Ww]indow
   echo "An unsigned Windows candidate can still reach the public release." >&2
   exit 1
 fi
-rg -Fq 'needs: [prepare-community, build-windows]' \
-  .github/workflows/release-ci.yml
-if rg -Fq 'needs: publish-community' .github/workflows/release-ci.yml; then
-  echo "Public release still precedes the Windows candidate gate." >&2
-  exit 1
-fi
+ruby -e '
+  commit = File.binread(ARGV.fetch(0))
+  release = File.binread(ARGV.fetch(1))
+  windows_job = /^  windows:\n    needs: build\n    uses: \.\/\.github\/workflows\/windows-build\.yml$/m
+  abort "commit CI does not require the private Windows build" unless
+    commit.match?(windows_job)
+  abort "release publication does not require exact commit CI" unless
+    release.include?("actions/workflows/commit-ci.yml/runs") &&
+      release.include?(%q{run.fetch("path") == ".github/workflows/commit-ci.yml"})
+  abort "release workflow duplicates the Windows build owner" if
+    release.include?("./.github/workflows/windows-build.yml")
+' .github/workflows/commit-ci.yml .github/workflows/release-ci.yml
 rg -Fq 'ExpectComment(api, english, "cloud", "cloud", "klaʊd", "云")' \
   platforms/windows/runtime_smoke.cc
 rg -Fq 'ExpectCandidate(api, reverse, "U4e2d", "中")' \
@@ -573,13 +579,14 @@ rg -Fq -- '-Arguments @("/S") -Description "Uninstall candidate" -TimeoutSeconds
   platforms/windows/preflight.ps1
 
 test "$(rg -l 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' \
-  .github/workflows/*.yml | wc -l | tr -d ' ')" -eq 4
+  .github/workflows/*.yml | wc -l | tr -d ' ')" -eq 3
 test "$(rg -l 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' \
-  .github/workflows/*.yml | wc -l | tr -d ' ')" -eq 2
+  .github/workflows/*.yml | wc -l | tr -d ' ')" -eq 1
 rg -Fq 'microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57' \
   .github/workflows/windows-build.yml
 if rg -n 'actions/(upload|download)-artifact@(ea165f8|d3f86a)|setup-msbuild@6fb022' \
-    .github/workflows; then
+    .github/workflows/windows-build.yml .github/workflows/commit-ci.yml \
+    .github/workflows/pull-request-ci.yml; then
   echo "A Node 20 Windows CI action pin returned." >&2
   exit 1
 fi

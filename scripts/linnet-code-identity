@@ -7,6 +7,9 @@ set -euo pipefail
 readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly host_bundle_id='io.github.ares-x.inputmethod.Linnet'
 readonly settings_bundle_id='io.github.ares-x.inputmethod.Linnet.settings'
+readonly community_signing_config="${project_root}/config/linnet-community-signing.json"
+readonly community_keychain_relative='Library/Keychains/Linnet-Community-CMS.keychain-db'
+readonly community_password_relative='Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password'
 
 fail_identity() {
   echo "linnet-code-identity: $1" >&2
@@ -66,22 +69,93 @@ canonical_regular_file() {
   printf '%s\n' "${canonical}"
 }
 
-signing_contract() {
-  local identity="${LINNET_CODE_SIGN_IDENTITY:-}"
+community_certificate_contract() {
+  ruby -rjson -e '
+    document = JSON.parse(File.binread(ARGV.fetch(0)))
+    abort unless document.keys.sort ==
+      %w[certificate_sha1 certificate_sha256 format legacy_migration_acceptance profile]
+    abort unless document.fetch("format") == 2 &&
+      document.fetch("profile") == "community-cms" &&
+      document.fetch("legacy_migration_acceptance").is_a?(Hash)
+    sha1 = document.fetch("certificate_sha1")
+    sha256 = document.fetch("certificate_sha256")
+    abort unless sha1.match?(/\A[0-9A-F]{40}\z/) &&
+      sha256.match?(/\A[0-9a-f]{64}\z/)
+    puts sha1, sha256
+  ' "${community_signing_config}" 2>/dev/null ||
+    fail_identity "the pinned community CMS identity is invalid"
+}
+
+lock_prepared_keychain() {
+  local original_status=$?
+  local final_status="${original_status}"
+  trap - EXIT INT TERM HUP
+  if [[ -n "${prepared_keychain:-}" ]]; then
+    if ! security lock-keychain "${prepared_keychain}" >/dev/null 2>&1; then
+      echo "linnet-code-identity: the signing Keychain could not be locked" >&2
+      if [[ "${final_status}" -eq 0 ]]; then final_status=1; fi
+    fi
+  fi
+  exit "${final_status}"
+}
+
+prepare_signing_keychain() {
   local keychain="${LINNET_CODE_SIGN_KEYCHAIN:-}"
-  local profile="${LINNET_CODE_SIGN_PROFILE:-}"
+  local password_file="${LINNET_CODE_SIGN_PASSWORD_FILE:-}"
+  local expected_identity
+  local community_contract
+  local user_root
+  local canonical_password
+  local owner
+  local mode
+  local password
+
+  community_contract="$(community_certificate_contract)"
+  expected_identity="$(sed -n '1p' <<<"${community_contract}")"
+  user_root="${HOME:-}"
+  [[ "${user_root}" == /* && -d "${user_root}" && ! -L "${user_root}" ]] ||
+    fail_identity "the current user home is unavailable"
+  keychain="${keychain:-${user_root}/${community_keychain_relative}}"
+  password_file="${password_file:-${user_root}/${community_password_relative}}"
+  prepared_identity="${expected_identity}"
+  export LINNET_CODE_SIGN_KEYCHAIN="${keychain}"
+
+  canonical_password="$(canonical_regular_file "${password_file}")" ||
+    fail_identity "LINNET_CODE_SIGN_PASSWORD_FILE must be an absolute, canonical, non-symlink file"
+  read -r owner mode < <(stat -f '%u %Lp' "${canonical_password}")
+  [[ "${owner}" == "$(id -u)" && "${mode}" == 600 ]] ||
+    fail_identity "LINNET_CODE_SIGN_PASSWORD_FILE must be current-user-owned mode 0600"
+  password="$(tr -d '\n' <"${canonical_password}")"
+  [[ "${password}" =~ ^[0-9A-Fa-f]{32,128}$ ]] ||
+    fail_identity "LINNET_CODE_SIGN_PASSWORD_FILE has an invalid secret shape"
+  prepared_keychain="$(canonical_regular_file "${keychain}")" ||
+    fail_identity "LINNET_CODE_SIGN_KEYCHAIN must be an absolute, canonical, non-symlink file"
+  security unlock-keychain -p "${password}" "${prepared_keychain}" >/dev/null 2>&1 ||
+    fail_identity "the signing Keychain cannot be unlocked non-interactively"
+  trap lock_prepared_keychain EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+}
+
+signing_contract() {
+  local identity="${prepared_identity:-}"
+  local keychain="${LINNET_CODE_SIGN_KEYCHAIN:-}"
+  local profile='community-cms'
   local canonical_keychain
   local owner
   local mode
   local leaf
   local revision
 
+  local expected_identity
+  local expected_leaf
+  local community_contract
+
   [[ "${identity}" =~ ^[0-9A-Fa-f]{40}$ ]] ||
-    fail_identity "LINNET_CODE_SIGN_IDENTITY must be one exact 40-hex certificate SHA-1"
+    fail_identity "the pinned community CMS identity is unavailable"
   [[ "${identity}" != 0000000000000000000000000000000000000000 ]] ||
     fail_identity "the zero signing identity is invalid"
-  [[ "${profile}" == uat ]] ||
-    fail_identity "LINNET_CODE_SIGN_PROFILE must be uat"
   identity="$(tr '[:lower:]' '[:upper:]' <<<"${identity}")"
   canonical_keychain="$(canonical_regular_file "${keychain}")" ||
     fail_identity "LINNET_CODE_SIGN_KEYCHAIN must be an absolute, canonical, non-symlink file"
@@ -104,15 +178,18 @@ signing_contract() {
       }
       END { if (matches != 1) exit 1 }
     ')" || fail_identity "the exact signing certificate leaf is ambiguous"
+  community_contract="$(community_certificate_contract)"
+  expected_identity="$(sed -n '1p' <<<"${community_contract}")"
+  expected_leaf="$(sed -n '2p' <<<"${community_contract}")"
+  [[ "${identity}" == "${expected_identity}" && "${leaf}" == "${expected_leaf}" ]] ||
+    fail_identity "community CMS certificate differs from the pinned public leaf"
   revision="$(git -C "${project_root}" rev-parse --verify HEAD^{commit})" ||
     fail_identity "the source revision is unavailable"
   [[ "${revision}" =~ ^[0-9a-f]{40}$ ]] || fail_identity "the source revision is invalid"
-  if [[ "${profile}" == uat ]]; then
-    [[ "${LINNET_CANDIDATE_REVISION:-}" == "${revision}" ]] ||
-      fail_identity "uat signing requires LINNET_CANDIDATE_REVISION to equal HEAD"
-    [[ -z "$(git -C "${project_root}" status --porcelain)" ]] ||
-      fail_identity "uat signing requires a clean candidate revision"
-  fi
+  [[ "${LINNET_CANDIDATE_REVISION:-}" == "${revision}" ]] ||
+    fail_identity "candidate signing requires LINNET_CANDIDATE_REVISION to equal HEAD"
+  [[ -z "$(git -C "${project_root}" status --porcelain)" ]] ||
+    fail_identity "candidate signing requires a clean candidate revision"
   printf '%s\n%s\n%s\n%s\n%s\n' \
     "${identity}" "${canonical_keychain}" "${profile}" "${leaf}" \
     "${revision}"
@@ -126,8 +203,10 @@ projection_from_contract() {
   profile="$(sed -n '3p' <<<"${contract}")"
   leaf="$(sed -n '4p' <<<"${contract}")"
   revision="$(sed -n '5p' <<<"${contract}")"
-  printf '{"format":2,"profile":"%s","leaf_certificate_sha256":"%s","candidate_revision":"%s"}\n' \
-    "${profile}" "${leaf}" "${revision}"
+  [[ "${profile}" == community-cms ]] ||
+    fail_identity "code-signing profile cannot be projected"
+  printf '{"format":4,"profile":"community-cms","leaf_certificate_sha256":"%s","candidate_revision":"%s"}\n' \
+    "${leaf}" "${revision}"
 }
 
 inspect_contract() {
@@ -190,49 +269,6 @@ sign_code() {
     fail_identity "external code signing failed"
 }
 
-sign_adhoc_code() {
-  local path="$1"
-  local entitlements="${2:-}"
-  local arguments=(--force --sign - --options runtime --timestamp=none)
-  if [[ -n "${entitlements}" ]]; then
-    arguments+=(--entitlements "${entitlements}")
-  fi
-  codesign "${arguments[@]}" "${path}" >/dev/null 2>&1 ||
-    fail_identity "community ad-hoc code signing failed"
-}
-
-community_projection() {
-  local revision
-  revision="$(git -C "${project_root}" rev-parse --verify HEAD^{commit})" ||
-    fail_identity "the source revision is unavailable"
-  [[ "${revision}" =~ ^[0-9a-f]{40}$ &&
-    "${LINNET_CANDIDATE_REVISION:-}" == "${revision}" ]] ||
-    fail_identity "community publication requires LINNET_CANDIDATE_REVISION to equal HEAD"
-  [[ -z "$(git -C "${project_root}" status --porcelain)" ]] ||
-    fail_identity "community publication requires a clean candidate revision"
-  printf '{"format":3,"profile":"community-adhoc","candidate_revision":"%s"}\n' \
-    "${revision}"
-}
-
-verify_community_code() {
-  local path="$1"
-  local label="$2"
-  local expected_identifier="${3:-}"
-  local details
-  codesign --verify --strict "${path}" >/dev/null 2>&1 ||
-    fail_identity "invalid community code signature: ${label}"
-  details="$(codesign -dvvv "${path}" 2>&1)" ||
-    fail_identity "missing community code-signing details: ${label}"
-  grep -q '^CodeDirectory .*flags=.*runtime' <<<"${details}" ||
-    fail_identity "hardened runtime is missing: ${label}"
-  grep -Fxq 'Signature=adhoc' <<<"${details}" ||
-    fail_identity "community code is not ad-hoc signed: ${label}"
-  if [[ -n "${expected_identifier}" ]]; then
-    grep -Fxq "Identifier=${expected_identifier}" <<<"${details}" ||
-      fail_identity "community code-signing identifier mismatch: ${label}"
-  fi
-}
-
 leaf_sha256() {
   local path="$1"
   local certificate_prefix="$2"
@@ -273,7 +309,8 @@ verify_code() {
   printf '%s\n' "${actual_leaf}"
 }
 
-verify_product() {
+verify_product() (
+  set -euo pipefail
   local host_app="$1"
   local standalone_settings_app="${2:-}"
   local embedded_settings_app
@@ -299,7 +336,7 @@ verify_product() {
     "${host_app}/Contents/Info.plist" 2>/dev/null || true)"
   product_build="$(plutil -extract CFBundleVersion raw -o - \
     "${host_app}/Contents/Info.plist" 2>/dev/null || true)"
-  [[ "${signing_profile}" == uat ]] ||
+  [[ "${signing_profile}" == community-cms ]] ||
     fail_identity "Host code-signing profile is missing or invalid"
   [[ "$(plutil -extract LinnetCodeSigningProfile raw -o - \
     "${embedded_settings_app}/Contents/Info.plist" 2>/dev/null || true)" == \
@@ -324,11 +361,11 @@ verify_product() {
       /bin/rm -rf -- "${scratch}"
     fi
   }
-  # RETURN covers the successful function path. EXIT also owns rejected
-  # products and interrupted callers: fail_identity exits the verifier before
-  # the function can return, and every negative identity fixture must still
-  # remove its exported-certificate scratch directory.
-  trap cleanup_verification RETURN EXIT
+  # Verification owns one isolated shell so its cleanup and strict failure
+  # semantics cannot replace the caller's Keychain-lock trap. EXIT covers both
+  # accepted and rejected products, including failures inside command
+  # substitutions on the macOS system Bash.
+  trap cleanup_verification EXIT
 
   expected_leaf="$(verify_code "${host_app}/Contents/Frameworks/librime.1.dylib" \
     '' "${scratch}" host-runtime)"
@@ -360,6 +397,10 @@ verify_product() {
   actual_leaf="$(verify_code "${host_app}" "${expected_leaf}" \
     "${scratch}" host-bundle "${host_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "Host leaf mismatch"
+  if [[ "${signing_profile}" == community-cms ]]; then
+    [[ "${expected_leaf}" == "$(community_certificate_contract | sed -n '2p')" ]] ||
+      fail_identity "public product does not use the pinned community CMS leaf"
+  fi
   metadata_projection="$(ruby -rjson -rdigest -e '
     path, profile, leaf, product_version, product_build = ARGV
     root = File.dirname(path)
@@ -394,8 +435,11 @@ verify_product() {
     revision = source.fetch("candidate_revision")
     abort "release candidate revision mismatch" unless revision.match?(/\A[0-9a-f]{40}\z/)
     distribution = document.fetch("distribution")
-    abort "release distribution shape mismatch" unless distribution.keys.sort ==
-      %w[application_code_signature artifact_scope notarized publication_eligible]
+    expected_distribution_keys = %w[
+      application_code_signature artifact_scope notarized publication_eligible trust_model
+    ]
+    abort "release distribution shape mismatch" unless
+      distribution.keys.sort == expected_distribution_keys.sort
     signature = distribution.fetch("application_code_signature")
     abort "release signature shape mismatch" unless signature.keys.sort ==
       %w[hardened_runtime host_settings_same_leaf kind leaf_certificate_sha256 profile]
@@ -406,12 +450,13 @@ verify_product() {
       "hardened_runtime" => true,
       "host_settings_same_leaf" => true,
     }
-    abort "release scope mismatch" unless
-      distribution.fetch("artifact_scope") == "installation-uat" &&
+    abort "release scope mismatch" unless profile == "community-cms" &&
+      distribution.fetch("artifact_scope") == "public-community" &&
       distribution.fetch("notarized") == false &&
-      distribution.fetch("publication_eligible") == false
+      distribution.fetch("publication_eligible") == true &&
+      distribution.fetch("trust_model") == "manual-user-approval"
     print JSON.generate({
-      "format" => 2,
+      "format" => 4,
       "profile" => profile,
       "leaf_certificate_sha256" => leaf,
       "candidate_revision" => revision,
@@ -427,89 +472,8 @@ verify_product() {
   diff -qr "${scratch}/expected-release-metadata" \
     "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||
     fail_identity "signed release metadata differs from the canonical projection"
-  trap - RETURN EXIT
-  cleanup_verification
   printf '%s\n' "${metadata_projection}"
-}
-
-verify_publication_product() {
-  local host_app="$1"
-  local candidate_revision="$2"
-  local embedded_settings_app
-  [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
-    fail_identity "publication candidate revision is invalid"
-  require_bundle "${host_app}" Linnet.app
-  embedded_settings_app="${host_app}/Contents/Applications/Settings.app"
-  require_bundle "${embedded_settings_app}" Settings.app
-  require_inventory "${host_app}" "${host_inventory}"
-  while IFS= read -r relative; do
-    [[ -n "${relative}" ]] || continue
-    verify_community_code "${host_app}/${relative}" \
-      "community-$(tr '/.' '--' <<<"${relative}")"
-  done <<<"${host_inventory}"
-  codesign --verify --deep --strict "${host_app}" >/dev/null 2>&1 ||
-    fail_identity "community Host nested-code verification failed"
-  verify_community_code "${embedded_settings_app}" embedded-settings-bundle \
-    "${settings_bundle_id}"
-  verify_community_code "${host_app}" host-bundle "${host_bundle_id}"
-  [[ "$(bundle_identifier "${host_app}")" == "${host_bundle_id}" &&
-    "$(bundle_identifier "${embedded_settings_app}")" == "${settings_bundle_id}" ]] ||
-    fail_identity "publication bundle identifiers differ from the product contract"
-  ruby -rjson -e '
-    path, revision = ARGV
-    document = JSON.parse(File.binread(path))
-    abort unless document.fetch("source") == {"candidate_revision" => revision}
-    distribution = document.fetch("distribution")
-    abort unless distribution.fetch("application_code_signature") == {
-      "profile" => "community-adhoc", "kind" => "adhoc",
-      "hardened_runtime" => true, "host_settings_same_kind" => true,
-    } && distribution.fetch("artifact_scope") == "public-community" &&
-      distribution.fetch("notarized") == false &&
-      distribution.fetch("publication_eligible") == true &&
-      distribution.fetch("trust_model") == "manual-user-approval"
-  ' "${host_app}/Contents/Resources/LinnetRelease/VERSION.json" \
-    "${candidate_revision}" ||
-    fail_identity "publication release metadata is invalid"
-  printf '{"format":2,"candidate_revision":"%s","trust_model":"unsigned-community"}\n' \
-    "${candidate_revision}"
-}
-
-sign_community_product() {
-  local host_app="$1"
-  local standalone_settings_app="$2"
-  local embedded_settings_app="${host_app}/Contents/Applications/Settings.app"
-  local entitlements="${project_root}/resources/Squirrel.entitlements"
-  local expected_projection actual_projection
-  require_bundle "${host_app}" Linnet.app
-  require_bundle "${standalone_settings_app}" Settings.app
-  require_bundle "${embedded_settings_app}" Settings.app
-  require_inventory "${host_app}" "${host_inventory}"
-  require_inventory "${standalone_settings_app}" "${standalone_settings_inventory}"
-  expected_projection="$(community_projection)"
-  for app in "${host_app}" "${standalone_settings_app}" "${embedded_settings_app}"; do
-    plutil -replace LinnetCodeSigningProfile -string community-adhoc \
-      "${app}/Contents/Info.plist" ||
-      fail_identity "failed to project the community code-signing profile"
-  done
-  sign_adhoc_code "${standalone_settings_app}/Contents/Frameworks/librime.1.dylib"
-  sign_adhoc_code "${standalone_settings_app}" "${entitlements}"
-  sign_adhoc_code "${embedded_settings_app}/Contents/Frameworks/librime.1.dylib"
-  sign_adhoc_code "${embedded_settings_app}" "${entitlements}"
-  sign_adhoc_code "${host_app}/Contents/Frameworks/librime.1.dylib"
-  for plugin in librime-lua.dylib librime-octagram.dylib librime-predict.dylib \
-    librime-smart-english.dylib; do
-    sign_adhoc_code "${host_app}/Contents/Frameworks/rime-plugins/${plugin}"
-  done
-  sign_adhoc_code "${host_app}" "${entitlements}"
-  actual_projection="$(verify_publication_product "${host_app}" \
-    "$(ruby -rjson -e 'puts JSON.parse(ARGV.fetch(0)).fetch("candidate_revision")' \
-      "${expected_projection}")")"
-  [[ "$(ruby -rjson -e 'puts JSON.parse(ARGV.fetch(0)).fetch("candidate_revision")' \
-      "${actual_projection}")" == \
-    "$(ruby -rjson -e 'puts JSON.parse(ARGV.fetch(0)).fetch("candidate_revision")' \
-      "${expected_projection}")" ]] ||
-    fail_identity "community product differs from its source contract"
-}
+)
 
 sign_product() {
   local host_app="$1"
@@ -572,14 +536,17 @@ command="${1:-}"
 case "${command}" in
   preflight)
     [[ "$#" -eq 1 ]] || fail_identity "usage: preflight"
+    prepare_signing_keychain
     inspect_contract >/dev/null
     ;;
   inspect-contract)
     [[ "$#" -eq 1 ]] || fail_identity "usage: inspect-contract"
+    prepare_signing_keychain
     inspect_contract
     ;;
   sign-product)
     [[ "$#" -eq 3 ]] || fail_identity "usage: sign-product HOST_APP STANDALONE_SETTINGS_APP"
+    prepare_signing_keychain
     sign_product "$2" "$3"
     ;;
   verify-product)
@@ -587,21 +554,7 @@ case "${command}" in
       fail_identity "usage: verify-product HOST_APP [STANDALONE_SETTINGS_APP]"
     verify_product "$2" "${3:-}"
     ;;
-  verify-publication-product)
-    [[ "$#" -eq 3 ]] ||
-      fail_identity "usage: verify-publication-product HOST_APP CANDIDATE_REVISION"
-    verify_publication_product "$2" "$3"
-    ;;
-  inspect-community-contract)
-    [[ "$#" -eq 1 ]] || fail_identity "usage: inspect-community-contract"
-    community_projection
-    ;;
-  sign-community-product)
-    [[ "$#" -eq 3 ]] ||
-      fail_identity "usage: sign-community-product HOST_APP STANDALONE_SETTINGS_APP"
-    sign_community_product "$2" "$3"
-    ;;
   *)
-    fail_identity "usage: preflight | inspect-contract | inspect-community-contract | sign-product HOST_APP STANDALONE_SETTINGS_APP | sign-community-product HOST_APP STANDALONE_SETTINGS_APP | verify-product HOST_APP [STANDALONE_SETTINGS_APP] | verify-publication-product HOST_APP CANDIDATE_REVISION"
+    fail_identity "usage: preflight | inspect-contract | sign-product HOST_APP STANDALONE_SETTINGS_APP | verify-product HOST_APP [STANDALONE_SETTINGS_APP]"
     ;;
 esac

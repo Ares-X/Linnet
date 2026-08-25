@@ -4,7 +4,7 @@
 # Linnet owns its default configuration. Upstream default files
 # are NOT included at runtime.
 
-config_version: "2026.08.07"
+config_version: "2026.08.25"
 
 schema_list:
   - schema: linnet_zh_pinyin
@@ -36,8 +36,8 @@ ascii_composer:
   good_old_caps_lock: true
   switch_key:
     Caps_Lock: clear
-    Shift_L: commit_text
-    Shift_R: commit_text
+    Shift_L: commit_code
+    Shift_R: commit_code
     Control_L: noop
     Control_R: noop
 
@@ -82,26 +82,17 @@ punctuator:
   half_shape:
     '!' : { commit: '！' }
     '"' : { pair: ['“', '”'] }
-    '#' : { commit: '#' }
     '$' : { commit: '¥' }
-    '%' : { commit: '%' }
-    '&' : { commit: '&' }
     '''' : { pair: ['‘', '’'] }
     '(' : { commit: '（' }
     ')' : { commit: '）' }
-    '*' : { commit: '*' }
-    '+' : { commit: '+' }
     ',' : { commit: '，' }
-    '-' : { commit: '-' }
     '.' : { commit: '。' }
-    '/' : { commit: '/' }
     ':' : { commit: '：' }
     ';' : { commit: '；' }
     '<' : { commit: '《' }
-    '=' : { commit: '=' }
     '>' : { commit: '》' }
     '?' : { commit: '？' }
-    '@' : { commit: '@' }
     '[' : { commit: '【' }
     '\' : { commit: '、' }
     ']' : { commit: '】' }
@@ -109,9 +100,7 @@ punctuator:
     '_' : { commit: '——' }
     '`' : { commit: '·' }
     '{' : { commit: '「' }
-    '|' : { commit: '|' }
     '}' : { commit: '」' }
-    '~' : { commit: '~' }
 
 # ── Shared product feature policy ───────────────────────────────────────────
 linnet:

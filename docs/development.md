@@ -51,7 +51,7 @@
 
 macOS 只看到一个 Linnet 输入源。Rime 内部包含八个中文 profile 和一个 `linnet_en`：
 
-- `ascii_composer` 负责独立 Shift、组合键、长按、组词提交和 Caps Lock；
+- `ascii_composer` 负责独立 Shift、组合键、长按、未上位编码的原样提交和 Caps Lock；
 - 紧随其后的 `linnet_mode_switch_processor` 只把已确认的 Shift 转换映射为中文/Smart English schema 切换；
 - 当前 `Context` 保存直接 Shift 的来源中文 schema，返回后清空；
 - Settings typed document 唯一拥有中文方案选择；fresh document 默认全拼，已有 document 的显式选择保持不变。renderer 将同一选择投影为 `default.custom.yaml` 的首个中文 schema、Smart English 反查 Prism 和直接 Shift 返回目标；
@@ -124,10 +124,53 @@ scripts/upstream-sync verify
 patch 是否仍精确适用，以及 Linnet 自己的词典和交互优化是否被保留；然后运行
 focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有这些结果都
 通过后，才在同一个提交中更新 gitlink、`upstreams.lock.json`、必要 patch 和数据
-release identity，再由标签触发发布。定时 GitHub workflow 只报告候选更新，不得
-自动修改仓库、合并上游或发布。
+release identity。进入发布时，只有精确 main revision、该 revision 的成功 CI 和最终
+八件产物 `package/verify_publication_artifacts` 验证才能让手动发布 workflow 生成
+不可变候选。真实安装验收必须使用该 workflow 同一次签名产生的 artifact；通过后
+由唯一一次 `community-publication` Environment approval 依次授权 `core`、`data`、
+`catalog` 与 `public` / Latest。批准前不得创建 Release、标签或推进稳定 Catalog。
+定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并上游或发布。
 
-GitHub Actions 会缓存锁定下载、runtime 构建依赖、英文生成数据和 Rime 预编译产物。
+RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此上游 URL 只用于
+发现和本地审查候选；被 Linnet 接纳的原始模型字节数与摘要仍记录在
+`rime_lmdg_grammar`，冷构建只从 lock 指定的同仓库固定 `data-N` LTS 包获取，再由
+PackTool 验证容器、解包并复核内部原始模型。接受新模型时，维护者须先在隔离
+checkout 中预计算未来 LTS 包摘要，并在同一个最终提交里写入未来 `data-N` URL、
+容器摘要、原始模型摘要和数据 release identity。本地已验证的原始模型允许这个最终
+提交在远端包尚未存在时生成并验证完整八件归档。随后先把该精确提交推到一个临时、
+不匹配 `v*.*.*` 的 seed tag，再由唯一 mutation owner 发布同一提交的五件数据资产：
+
+```bash
+git tag "data-seed-${sequence}" "${candidate_revision}"
+git push origin "refs/tags/data-seed-${sequence}"
+GH_TOKEN=... GITHUB_REPOSITORY=Ares-X/Linnet \
+  LINNET_RELEASE_TOOL=/absolute/path/to/verified/linnet-pack \
+  package/publish_github_release data-seed "${archive_dir}" \
+  "${version}" "${sequence}" "${candidate_revision}"
+git push origin ":refs/tags/data-seed-${sequence}"
+git tag -d "data-seed-${sequence}"
+```
+
+这个 `data-seed` 步骤是正常 main/CI 发布门之外唯一的冷构建启动边界：它仍须由最终
+八件产物 verifier 接受，并且远端 `data-seed-N` 必须精确指向 candidate revision；
+它只允许发布五件 `data` 预发布资产，不得调用 `catalog`，也不得推进 `data-channel`，
+因此尚未验收的未来模型不会被已安装用户看到。发布后必须从 clean checkout 走一次
+固定包冷构建，确认外层容器和内部原始模型都与 lock 一致；只有同一个
+`candidate_revision` 才能快进到 `main`。临时 seed tag 不触发产品发布 workflow，
+发布成功后立即删除；正式 `data-N` tag 继续绑定该提交。普通构建没有回退到可变
+上游资产的路径。
+
+进入正常产品发布时，候选必须是当前精确 main revision，该 revision 的 main CI 已
+成功。手动 `release-ci` 只构建并 CMS 签名一次，最终独立 verifier 接受精确八文件后
+上传不可覆盖的 artifact，并在所有远端发布动作之前等待。真实安装态 Settings 激活和
+InputMethodKit 验收使用这些字节；通过后只批准一次 `community-publication`，后续
+job 才按 artifact ID 下载并重验，依次执行 `core`、`data`（此时只接受既有 seed 的
+相同字节）、`catalog` 和 `public` / Latest，并创建版本标签。标签只标识版本，不再
+拥有发布授权或触发重建。稳定 Catalog 仍只有一个 owner 和一个 URL。
+
+GitHub Actions 会缓存锁定下载、runtime 构建依赖和英文生成数据。只有默认 `main`
+可以在成功任务结束后写入缓存；功能分支只读取当前 ref 或默认分支缓存，避免每个
+候选保存一份无法被后续候选复用的大型副本。
 缓存不是版本或发布权威：每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、
 内部 fingerprint 与产物形状；不匹配时只重建受影响部分。缓存命中也不会跳过
 archive 和 publication 验证。发布 workflow 把“准备锁定依赖”和“构建并验证归档”
@@ -152,18 +195,48 @@ no_download=1 ./action-build.sh release
 - 从锁定源码构建 arm64 librime 与 plugin；
 - 构建 Smart English 原生 plugin 和确定性数据；
 - staging 当前 schema、字典、Lua、OpenCC 和 grammar；
-- 构建本地 unsigned/ad-hoc development App；
+- 构建本地 unsigned development App；
 - 不安装、注册、启用或选择输入源；
 - 不创建公开 PKG，也不授权发布。
 
-贡献者可以直接运行 `archive` lane 生成与公开版本相同的未签名社区产物；该路径不需要证书或 Keychain。显式 `candidate` lane 仍保留给确有自有 CMS 测试身份的维护者，但不是贡献或发布前置。
+普通贡献者运行到 `release` 即可，不需要证书或 Keychain。官方 `archive` lane
+必须使用仓库钉住的固定 community CMS leaf，因此只对持有仓库外发布身份的维护者
+开放；缺少精确身份时会在打包前失败，不会回退到 ad-hoc。旧 `candidate` lane 与
+自定义 UAT 签名 profile 已删除；任何可安装候选只认固定 production CMS identity。
 
 ## 社区版打包
 
-贡献者可以在自己的 Mac 上完成打包和真实输入法工作流。前提是：
+### 一次性配置本机签名身份
+
+本地发布身份属于维护者工具，不属于 Linnet 产品数据，也不会被卸载器清理。先把固定
+P12 和它的一行密码分别放到以下仓库外路径，两者都必须是当前用户拥有、权限为
+`0600` 的普通文件：
+
+- `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/community-cms.p12`
+- `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/p12-password`
+
+只在这台 Mac 从未配置过该身份时运行一次：
+
+```bash
+scripts/provision-community-signing
+```
+
+这个唯一 provisioning owner 会核对仓库钉住的 SHA-1/SHA-256，随机生成 Linnet
+专用 Keychain 密码，配置 `/usr/bin/codesign` 的访问分区，完成一次非交互签名探针，
+再把 Keychain 锁回。输出固定为
+`~/Library/Keychains/Linnet-Community-CMS.keychain-db` 和权限 `0600` 的
+`~/Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password`。
+任一输出已经存在都会直接停止；命令没有 replace、repair 或 delete 模式。失败时只
+清理本次创建的精确目标并恢复原 Keychain 搜索列表。P12 密码和随机 Keychain 密码都
+不是 macOS 登录密码；如果配置或之后的 `archive` 弹出密码框，应取消并排查，不要
+输入登录密码、删除既有目标或重复运行配置命令。日常 signer 只消费这两个固定输出。
+
+发布维护者可以在自己的 Mac 上预检固定 production CMS 打包。前提是：
 
 - 工作树已经形成一个干净的本地 commit，`LINNET_CANDIDATE_REVISION` 精确等于 HEAD；
 - focused、`tests/verify_development.sh` 和普通 `./action-build.sh release` 已通过；
+- 固定生产 Keychain 已一次性配置，且脚本能从权限 `0600` 的仓库外密码文件
+  非交互解锁；
 - 输出目录是贡献者新建的空绝对目录。
 
 ```bash
@@ -173,7 +246,10 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 ./action-build.sh archive
 ```
 
-`archive` 会沿同一链生成并验证 ad-hoc App、未签名的 Complete/Core PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修补输出。
+`archive` 会沿同一链生成并验证固定 CMS leaf 的 App、未签名的 Complete/Core
+PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修补输出。由于 CMS
+签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载手动
+`release-ci` 记录的同一不可变八文件 artifact。
 
 ### 本地安装验收与 macOS 安全检查
 
@@ -186,11 +262,37 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 
 不得用 `xattr` 清除隔离属性、关闭 Gatekeeper 或修改系统安全策略。公开用户流程使用同一套 Finder / 隐私与安全性确认，不提供绕过系统保护的命令。
 
-随后在自己的测试账户完成 clean Complete 首装：它注册并请求 enable，随后完成唯一一次真正的注销/登录、系统输入源添加与允许、从 macOS 输入菜单选择 Linnet 和真实输入。之后的 Core 同版本重装与升级只能刷新注册，不调用 enable/select，必须不注销；preinstall 必须在 payload 前以正常 AppKit 退出请求确认 Host/Settings 均已停止，Settings 拒绝退出、未保存草稿或进行中操作必须让安装 fail closed，不能强杀。还要分别证明 enabled/disabled、selected 状态与用户数据均保留。默认卸载和显式 purge 仍需要独立验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings** 打开设置；它是 `Linnet.app` 内嵌的 accessory App，不作为独立产品安装、不常驻 Dock，并在最后一个窗口关闭后退出。
+随后在自己的测试账户完成 clean Complete 首装：它注册并请求 enable，随后完成
+唯一一次真正的注销/登录、系统输入源添加与允许、从 macOS 输入菜单选择 Linnet
+和真实输入。
+
+旧 ad-hoc → 固定 CMS 是一次性的历史 Core lifecycle 验收，唯一记录在
+`config/linnet-community-signing.json`。其固定 leaf、bundle ID、macOS major 和
+“迁移契约指纹”是完整失效键：任一项与当前候选失配，才在隔离的 legacy-seeded
+账号或虚拟机中重做；四项全部匹配时不得为每个候选重复迁移。该历史记录只闭合
+legacy lifecycle edge，不是当前候选菜单、Settings、真实输入或完整安装 UAT。
+
+每个精确候选仍须在同一真实账号使用 workflow 的不可变 artifact 完成
+“两轮同 leaf Core”：先从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级
+到候选，再把同一候选的原字节重装一次。两轮都要
+证明 Installer 无注销、无 Keychain 密码提示、登录会话不变，并保留
+enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移仅当
+来源原本 enabled 时重申过一次 enable；同 leaf Core 重装与升级不调用 enable，只有
+来源确实缺失时才 register。preinstall 必须在 payload 前以正常 AppKit 退出请求确认
+Host/Settings 均已停止，Settings 拒绝退出、未保存草稿或进行中操作必须让安装 fail
+closed，不能强杀。还要分别证明 enabled/disabled、selected、
+missing-App+unregistered repair 与用户数据均保留；missing App 仍有
+enabled/disabled 系统身份必须在 payload 前失败。默认卸载和显式 purge 仍需要独立
+验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**
+打开设置；它是 `Linnet.app` 内嵌的 accessory App，不作为独立产品安装、不常驻
+Dock，并在最后一个窗口关闭后退出。
 
 安装器、系统设置、授权提示、输入菜单、菜单栏状态、真实候选和 Settings 的教程截图都必须来自同一冻结候选完成的这次安装 UAT。可以保留品牌图，但不能用 mock、其他 revision、局部测试窗口或另一台机器的提示冒充当前步骤；未实际出现的提示不写成已观察事实。
 
-PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出精确 commit、artifact SHA-256、实际通过的工作流和未执行项。本地验收不会自动创建 tag、Release 或上传资产。
+PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出
+精确 commit、artifact ID/digest、逐文件 SHA-256、实际通过的工作流和未执行项。
+安装验收不会自行创建 tag 或稳定 Release；只有批准 `community-publication` 后的
+workflow job 可以复用同一 artifact 完成发布。
 
 ## 数据维护
 
@@ -271,7 +373,9 @@ tests/verify_package_architecture.sh
 tests/verify_product.sh release
 ```
 
-该命令用于已经冻结、具有准确 release metadata 且完成 ad-hoc 结构签名的 Release App。结果仍需与可见 Settings、真实输入源、Terminal/VS Code/Chrome/Apple Notes/Word/Teams 六应用、安装/升级/卸载和远程发布证据分开报告。
+该命令用于已经冻结、具有准确 release metadata 且由固定 community CMS leaf 完成
+签名的 Release App。结果仍需与可见 Settings、真实输入源、Terminal/VS Code/
+Chrome/Apple Notes/Word/Teams 六应用、安装/升级/卸载和远程发布证据分开报告。
 
 ## 调试与临时目录
 
@@ -286,5 +390,5 @@ tests/verify_product.sh release
 
 - README 是唯一普通用户文档，拥有安装、操作、配置、故障排查、隐私和贡献入口，不保存研发事故档案。
 - 本文件唯一拥有贡献和维护方式；release guide 只保存 community artifact、package、安装验收与 publication 顺序。
-- `docs/product-acceptance.md` 是 machine-bound 的当前证据投影，路径不能随意移动。
+- `docs/product-acceptance.md` 拥有证据等级与验收要求；只有绑定精确 revision 和产物的运行报告才拥有当次证据。
 - 已被源码与测试替代的旧 ADR 通过 Git 历史查询，不在主分支保留第二份现行说明。

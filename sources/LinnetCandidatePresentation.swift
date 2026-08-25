@@ -33,25 +33,41 @@ enum LinnetCandidatePresentation {
   static let inlineCandidateSeparator = "  "
   static let candidateMaterial = NSVisualEffectView.Material.popover
 
-  /// A transient notice is only a language-boundary projection. Initial
-  /// activation, Settings reloads, and switches between Chinese profiles do
-  /// not claim that the user tapped Shift. Rime's live schema remains the
-  /// state owner; this function only chooses the compact caret label.
+  struct InputModeIdentity: Equatable {
+    let schemaID: String
+    let asciiMode: Bool
+  }
+
+  /// A transient notice is only a live input-mode transition projection.
+  /// Initial sampling, Settings reloads, and switches between Chinese profiles
+  /// stay quiet. Rime's schema and ascii_mode remain the state owners; this
+  /// function only chooses the compact caret label.
   static func inputModeTransitionLabel(
-    previousSchemaID: String?,
-    currentSchemaID: String
+    previous: InputModeIdentity?,
+    current: InputModeIdentity
   ) -> String? {
-    guard let previousSchemaID, previousSchemaID != currentSchemaID else {
+    guard let previous, previous != current else {
       return nil
     }
+    if current.asciiMode {
+      return "A"
+    }
+
     let previousIsChinese =
-      LinnetSettingsContract.ChineseProfile(schemaID: previousSchemaID) != nil
+      LinnetSettingsContract.ChineseProfile(schemaID: previous.schemaID) != nil
     let currentIsChinese =
-      LinnetSettingsContract.ChineseProfile(schemaID: currentSchemaID) != nil
-    if previousIsChinese && currentSchemaID == LinnetSettingsContract.englishSchemaID {
+      LinnetSettingsContract.ChineseProfile(schemaID: current.schemaID) != nil
+    let previousIsEnglish = previous.schemaID == LinnetSettingsContract.englishSchemaID
+    let currentIsEnglish = current.schemaID == LinnetSettingsContract.englishSchemaID
+    if previous.asciiMode {
+      if currentIsEnglish { return "En" }
+      if currentIsChinese { return "中" }
+      return nil
+    }
+    if previousIsChinese && currentIsEnglish {
       return "En"
     }
-    if previousSchemaID == LinnetSettingsContract.englishSchemaID && currentIsChinese {
+    if previousIsEnglish && currentIsChinese {
       return "中"
     }
     return nil
@@ -88,6 +104,9 @@ enum LinnetCandidatePresentation {
         ? CandidateMenuPage(
           currentPage: 0, pageSize: 0, candidateCount: 0, highlighted: 0)
         : nil
+    }
+    guard candidateCount == 0 ? highlighted == 0 : highlighted < candidateCount else {
+      return nil
     }
     return CandidateMenuPage(
       currentPage: currentPage,
@@ -285,34 +304,8 @@ extension LinnetCandidatePresentation {
     case disclosure(expanded: Bool)
   }
 
-  enum CandidateControlAction: Equatable {
+  enum CandidateControlAction: Equatable, Hashable {
     case pageUp, pageDown, expand, collapse
-  }
-
-  enum PrintablePagingKey: Equatable {
-    case minus, equal, leftBracket, rightBracket
-  }
-
-  /// Printable punctuation becomes a paging shortcut only while the requested
-  /// destination page actually exists. At every boundary it remains available
-  /// to the schema's recognizer/punctuator or, if unhandled, the client app.
-  static func printablePagingAction(
-    key: PrintablePagingKey,
-    hasModifiers: Bool,
-    hasActiveInput: Bool,
-    currentPage: Int,
-    isLastPage: Bool,
-    candidateCount: Int
-  ) -> CandidateControlAction? {
-    guard !hasModifiers, hasActiveInput, currentPage >= 0, candidateCount > 0 else {
-      return nil
-    }
-    switch key {
-    case .minus, .leftBracket:
-      return currentPage > 0 ? .pageUp : nil
-    case .equal, .rightBracket:
-      return isLastPage ? nil : .pageDown
-    }
   }
 
   /// Absolute candidate bounds requested from librime when the disclosure is

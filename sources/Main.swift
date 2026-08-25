@@ -192,9 +192,9 @@ struct SquirrelApp {
             try installer.select()
             return true
           case "--refresh-core-input-source":
-            guard args.count == 4, !args[3].isEmpty else {
+            guard args.count == 6, !args[3].isEmpty else {
               configurationFailure(
-                "Core refresh requires a prior-current flag and post-quiescence input source")
+                "Core refresh requires current, fallback, identity, and enablement state")
             }
             let wasCurrent: Bool
             switch args[2] {
@@ -202,11 +202,20 @@ struct SquirrelApp {
             case "false": wasCurrent = false
             default:
               configurationFailure(
-                "Core refresh requires a prior-current flag and post-quiescence input source")
+                "Core refresh requires current to be true or false")
+            }
+            guard let identityTransition = CoreIdentityTransition(rawValue: args[4])
+            else {
+              configurationFailure("Core refresh received an unknown identity transition")
+            }
+            guard let priorEnablement = PriorEnablement(rawValue: args[5]) else {
+              configurationFailure("Core refresh received an unknown prior enablement state")
             }
             try installer.refreshAfterCoreUpdate(
               wasCurrent: wasCurrent,
               postQuiescenceInputSourceID: args[3],
+              identityTransition: identityTransition,
+              priorEnablement: priorEnablement,
               quiesceHost: { quitProductProcesses(.hostClean) })
             return true
           case "--help":
