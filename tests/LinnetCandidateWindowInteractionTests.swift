@@ -460,8 +460,8 @@ struct LinnetCandidateWindowInteractionTests {
       0, in: candidateView,
       "mouse move replaced the Rime-owned visual or accessibility selection")
     require(
-      candidateView.pointerCandidateIndex == 1 &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == 1 &&
+        !candidateView.shape.isPressed,
       "mouse move did not publish hover feedback for the second candidate")
     requirePointerFeedback(
       in: candidateView, candidateIndex: 1, expectedAlpha: 0.08,
@@ -483,8 +483,8 @@ struct LinnetCandidateWindowInteractionTests {
       0, in: candidateView,
       "mouse exit replaced the Rime-owned visual or accessibility selection")
     require(
-      candidateView.pointerCandidateIndex == nil &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == nil &&
+        !candidateView.shape.isPressed,
       "mouse exit did not clear candidate pointer feedback")
     requireNoPointerFeedback(in: candidateView, context: "mouse exit")
     panel.hide()
@@ -782,24 +782,24 @@ struct LinnetCandidateWindowInteractionTests {
       0, in: candidateView,
       "mouse move changed the engine-selected first candidate")
     require(
-      candidateView.pointerCandidateIndex == 1 &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == 1 &&
+        !candidateView.shape.isPressed,
       "hovering the second candidate did not change the visual pointer index")
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
       activationToken: controller.activeInputToken)
     require(
-      candidateView.pointerCandidateIndex == nil &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == nil &&
+        !candidateView.shape.isPressed,
       "a replacement publication retained stale hover feedback")
     sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 21)
     requireEngineHighlight(
       0, in: candidateView,
       "mouse press changed the engine-selected first candidate")
     require(
-      candidateView.pointerCandidateIndex == 1 &&
-        candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == 1 &&
+        candidateView.shape.isPressed,
       "mouse-down did not immediately publish pressed feedback")
     requirePointerFeedback(
       in: candidateView, candidateIndex: 1, expectedAlpha: 0.16,
@@ -812,8 +812,8 @@ struct LinnetCandidateWindowInteractionTests {
       0, in: candidateView,
       "committing a clicked candidate replaced the engine-owned selection")
     require(
-      candidateView.pointerCandidateIndex == 1 &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == 1 &&
+        !candidateView.shape.isPressed,
       "mouse-up did not return pressed feedback to hover feedback")
 
     controller.resetSelectedCandidates()
@@ -840,8 +840,8 @@ struct LinnetCandidateWindowInteractionTests {
     sendCandidateMouse(.mouseExited, at: outsidePoint, to: panel, eventNumber: 27)
     sendCandidateMouse(.leftMouseDragged, at: secondCandidatePoint, to: panel, eventNumber: 28)
     require(
-      candidateView.pointerCandidateIndex == 1 &&
-        candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == 1 &&
+        candidateView.shape.isPressed,
       "dragging back to the pressed candidate did not restore pressed feedback")
     sendCandidateMouse(.leftMouseUp, at: secondCandidatePoint, to: panel, eventNumber: 29)
     require(
@@ -859,8 +859,8 @@ struct LinnetCandidateWindowInteractionTests {
       candidates: secondPublication, highlighted: 0, update: true,
       activationToken: controller.activeInputToken)
     require(
-      candidateView.pointerCandidateIndex == nil &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == nil &&
+        !candidateView.shape.isPressed,
       "a new publication retained the previous candidate's pressed feedback")
     requireNoPointerFeedback(in: candidateView, context: "new publication")
     sendCandidateMouse(.leftMouseUp, at: secondCandidatePoint, to: panel, eventNumber: 31)
@@ -891,8 +891,8 @@ struct LinnetCandidateWindowInteractionTests {
     sendCandidateMouse(.mouseMoved, at: secondCandidatePoint, to: panel, eventNumber: 34)
     panel.hide()
     require(
-      candidateView.pointerCandidateIndex == nil &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == nil &&
+        !candidateView.shape.isPressed,
       "hiding the panel retained candidate pointer feedback")
     requireNoPointerFeedback(in: candidateView, context: "panel hide")
   }
@@ -1101,8 +1101,8 @@ struct LinnetCandidateWindowInteractionTests {
     panel.bind(controller: newController, activationToken: newController.activeInputToken)
     require(!panel.isVisible, "controller swap retained the previous candidate panel")
     require(
-      candidateView.pointerCandidateIndex == nil &&
-        !candidateView.pointerCandidateIsPressed,
+      candidateView.shape.candidateIndex == nil &&
+        !candidateView.shape.isPressed,
       "controller swap retained the previous pointer interaction")
     require(
       candidateView.accessibilityChildren()?.isEmpty == true,

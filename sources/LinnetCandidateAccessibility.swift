@@ -39,6 +39,14 @@ final class LinnetCandidateAccessibility {
     let comment: String
     let page: Int
     let indexOnPage: Int
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+      lhs.absoluteIndex == rhs.absoluteIndex &&
+        lhs.text == rhs.text &&
+        lhs.comment == rhs.comment &&
+        lhs.page == rhs.page &&
+        lhs.indexOnPage == rhs.indexOnPage
+    }
   }
 
   private struct LayoutSignature: Equatable {
@@ -47,6 +55,14 @@ final class LinnetCandidateAccessibility {
     let previousPageFrame: NSRect?
     let nextPageFrame: NSRect?
     let controlMode: LinnetCandidatePresentation.CandidateControlMode
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+      lhs.candidates == rhs.candidates &&
+        lhs.candidateFrames == rhs.candidateFrames &&
+        lhs.previousPageFrame == rhs.previousPageFrame &&
+        lhs.nextPageFrame == rhs.nextPageFrame &&
+        lhs.controlMode == rhs.controlMode
+    }
   }
 
   private struct ControlPublication {
@@ -165,7 +181,7 @@ final class LinnetCandidateAccessibility {
       newElements.contains { ($0 as AnyObject) === element }
     }
     elements = newElements
-    parent.setAccessibilityChildren(newElements)
+    parent.setAccessibilityChildren(elements)
     parent.setAccessibilitySelectedChildren(selectedElement.map { [$0] } ?? [])
     let nextSelectedAbsoluteIndex = candidates.indices.contains(highlightedIndex)
       ? candidates[highlightedIndex].absoluteIndex : nil
@@ -204,7 +220,7 @@ final class LinnetCandidateAccessibility {
     element.setAccessibilityFrameInParentSpace(parent.bounds)
     resetCandidateElements()
     elements = [element]
-    parent.setAccessibilityChildren([element])
+    parent.setAccessibilityChildren(elements)
     parent.setAccessibilitySelectedChildren([])
     NSAccessibility.post(element: parent, notification: .layoutChanged)
     guard publicationGeneration == generation else { return }
@@ -216,7 +232,7 @@ final class LinnetCandidateAccessibility {
     resetCandidateElements()
     elements = []
     lastAnnouncement = nil
-    parent.setAccessibilityChildren([])
+    parent.setAccessibilityChildren(elements)
     parent.setAccessibilitySelectedChildren([])
     NSAccessibility.post(element: parent, notification: .layoutChanged)
   }

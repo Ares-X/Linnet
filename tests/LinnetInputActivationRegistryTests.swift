@@ -45,7 +45,7 @@ struct LinnetInputActivationRegistryTests {
     require(!registry.isCurrent(first), "the old controller remained authoritative")
     require(
       registry.currentController(as: NSObject.self) === secondController &&
-        registry.currentClient(as: NSObject.self) === secondClient,
+        registry.isCurrent(second, controller: secondController, client: secondClient),
       "the registry projected a controller/client other than its current token")
   }
 

@@ -12,6 +12,12 @@ final class LinnetInputActivationRegistry {
     fileprivate let generation: UInt64
     fileprivate let controller: ObjectIdentifier
     fileprivate let client: ObjectIdentifier
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+      lhs.generation == rhs.generation &&
+        lhs.controller == rhs.controller &&
+        lhs.client == rhs.client
+    }
   }
 
   struct ClosedActivation {
@@ -156,10 +162,6 @@ final class LinnetInputActivationRegistry {
 
   func currentController<Controller: AnyObject>(as _: Controller.Type) -> Controller? {
     activation?.controller as? Controller
-  }
-
-  func currentClient<Client: AnyObject>(as _: Client.Type) -> Client? {
-    activation?.client as? Client
   }
 
   private func takeCurrent() -> ClosedActivation? {

@@ -11,6 +11,11 @@ final class SquirrelPanel: NSPanel {
   struct Publication: Equatable {
     let generation: UInt64
     let activationToken: LinnetInputActivationRegistry.Token
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+      lhs.generation == rhs.generation &&
+        lhs.activationToken == rhs.activationToken
+    }
   }
 
   let view: SquirrelView

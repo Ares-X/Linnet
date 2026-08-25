@@ -45,8 +45,6 @@ final class SquirrelView: NSView {
   var highlightedPreeditRange: NSRange = .empty
   var separatorWidth: CGFloat = 0
   var shape = LinnetCandidatePointerPresentation()
-  var pointerCandidateIndex: Int? { shape.candidateIndex }
-  var pointerCandidateIsPressed: Bool { shape.isPressed }
   var pointerControlAction: LinnetCandidatePresentation.CandidateControlAction?
   var pointerControlIsPressed = false
   private(set) var pagingLayout = LinnetPanelGeometry.PagingLayout.none
