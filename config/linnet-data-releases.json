@@ -1,5 +1,5 @@
 {
-  "catalog_sequence": 35,
+  "catalog_sequence": 36,
   "format": "io.github.ares-x.linnet.data-releases.v1",
   "packs": {
     "chinese": {
@@ -18,7 +18,7 @@
     },
     "lts": {
       "version": "c5fca7cf43af",
-      "sequence": 5,
+      "sequence": 7,
       "data_abi": 2,
       "min_core": "0.1.0",
       "content_sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
