@@ -125,11 +125,11 @@ patch 是否仍精确适用，以及 Linnet 自己的词典和交互优化是否
 focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有这些结果都
 通过后，才在同一个提交中更新 gitlink、`upstreams.lock.json`、必要 patch 和数据
 release identity。进入发布时，只有精确 main revision、该 revision 的成功 CI 和最终
-八件产物 `package/verify_publication_artifacts` 验证才能让手动发布 workflow 暂存
-`core` / `data` / `catalog`。真实安装验收必须使用该 workflow 同一次签名产生的
-不可变 artifact；通过后由 `community-publication` Environment approval 授权
-`public` / Latest。定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并
-上游或发布。
+八件产物 `package/verify_publication_artifacts` 验证才能让手动发布 workflow 生成
+不可变候选。真实安装验收必须使用该 workflow 同一次签名产生的 artifact；通过后
+由唯一一次 `community-publication` Environment approval 依次授权 `core`、`data`、
+`catalog` 与 `public` / Latest。批准前不得创建 Release、标签或推进稳定 Catalog。
+定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并上游或发布。
 
 RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此上游 URL 只用于
 发现和本地审查候选；被 Linnet 接纳的原始模型字节数与摘要仍记录在
@@ -162,11 +162,11 @@ git tag -d "data-seed-${sequence}"
 
 进入正常产品发布时，候选必须是当前精确 main revision，该 revision 的 main CI 已
 成功。手动 `release-ci` 只构建并 CMS 签名一次，最终独立 verifier 接受精确八文件后
-上传不可覆盖的 artifact；后续 job 只按 artifact ID 下载并重验，再依次执行 `core`、
-`data`（此时只接受既有 seed 的相同字节）、`catalog`。真实安装态 Settings 激活和
-InputMethodKit 验收也使用这些字节；通过后批准 `community-publication`，最终 job
-复用相同 artifact 发布 `public` / Latest 并创建版本标签。标签只标识版本，不再拥有
-发布授权或触发重建。稳定 Catalog 仍只有一个 owner 和一个 URL。
+上传不可覆盖的 artifact，并在所有远端发布动作之前等待。真实安装态 Settings 激活和
+InputMethodKit 验收使用这些字节；通过后只批准一次 `community-publication`，后续
+job 才按 artifact ID 下载并重验，依次执行 `core`、`data`（此时只接受既有 seed 的
+相同字节）、`catalog` 和 `public` / Latest，并创建版本标签。标签只标识版本，不再
+拥有发布授权或触发重建。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖和英文生成数据。只有默认 `main`
 可以在成功任务结束后写入缓存；功能分支只读取当前 ref 或默认分支缓存，避免每个

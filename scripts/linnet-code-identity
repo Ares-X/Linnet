@@ -308,7 +308,8 @@ verify_code() {
   printf '%s\n' "${actual_leaf}"
 }
 
-verify_product() {
+verify_product() (
+  set -euo pipefail
   local host_app="$1"
   local standalone_settings_app="${2:-}"
   local embedded_settings_app
@@ -359,11 +360,11 @@ verify_product() {
       /bin/rm -rf -- "${scratch}"
     fi
   }
-  # RETURN covers the successful function path. EXIT also owns rejected
-  # products and interrupted callers: fail_identity exits the verifier before
-  # the function can return, and every negative identity fixture must still
-  # remove its exported-certificate scratch directory.
-  trap cleanup_verification RETURN EXIT
+  # Verification owns one isolated shell so its cleanup and strict failure
+  # semantics cannot replace the caller's Keychain-lock trap. EXIT covers both
+  # accepted and rejected products, including failures inside command
+  # substitutions on the macOS system Bash.
+  trap cleanup_verification EXIT
 
   expected_leaf="$(verify_code "${host_app}/Contents/Frameworks/librime.1.dylib" \
     '' "${scratch}" host-runtime)"
@@ -470,10 +471,8 @@ verify_product() {
   diff -qr "${scratch}/expected-release-metadata" \
     "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||
     fail_identity "signed release metadata differs from the canonical projection"
-  trap - RETURN EXIT
-  cleanup_verification
   printf '%s\n' "${metadata_projection}"
-}
+)
 
 sign_product() {
   local host_app="$1"

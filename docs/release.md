@@ -81,17 +81,17 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
    在临时 Keychain 中只编译、CMS 签名一次；
 2. 最终 verifier 接受精确 8 个文件后，workflow 将这 8 个文件上传为不可覆盖的
    GitHub Actions artifact，并记录 artifact ID、digest、逐文件 SHA-256 和下载链接；
-3. `stage-update-channels` 只按该 artifact ID 下载并重验，不接触证书、不重编或重签
+3. 维护者下载同一个 artifact，在真实账号完成旧 ad-hoc → 固定 CMS 升级和第二次
+   同 leaf Core 升级，验证不注销、输入菜单、个人数据、Shift、全拼/双拼与 Smart
+   English；此时尚未创建 Release、标签或推进 Catalog；
+4. 验收通过后，维护者只批准一次受保护的 `community-publication` Environment。
+   `stage-update-channels` 才按该 artifact ID 下载并重验，不接触证书、不重编或重签
    产品；唯一 publisher 依次发布 Core、data，并在核对远端字节后推进 Catalog；
-4. 维护者下载同一个 artifact，在真实账号完成旧 ad-hoc → 固定 CMS 升级和第二次
-   同 leaf Core 升级，验证不注销、输入菜单、个人数据、Shift、全拼/双拼、Smart
-   English 与 Settings 在线更新；
-5. 验收通过后，维护者批准受保护的 `community-publication` Environment。
-   `publish-stable` 再按同一 artifact ID 下载并重验，只上传 `Linnet.pkg`，由唯一
-   publisher 创建指向该 revision 的 `v<version>` 标签并设为 Latest。标签只是版本
-   身份，不是重建触发器或第二个发布授权 owner。
+5. `publish-stable` 依赖上述受保护阶段，再按同一 artifact ID 下载并重验，只上传
+   `Linnet.pkg`，由同一 publisher 创建指向该 revision 的 `v<version>` 标签并设为
+   Latest。标签只是版本身份，不是重建触发器或第二个发布授权 owner。
 
-任一项失败都不批准稳定发布；修复必须形成新的 revision、build 和必要的数据
+任一项失败都不批准任何公开频道；修复必须形成新的 revision、build 和必要的数据
 sequence，再生成新的 artifact，不能替换旧 artifact 或已公开资产。重复执行只接受
 字节完全相同的远端状态。签名任务无论成功或失败都会恢复原 Keychain 搜索列表，
 删除临时 Keychain、P12、密码文件和目录。

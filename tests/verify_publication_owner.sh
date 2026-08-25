@@ -195,12 +195,14 @@ ruby -e '
   abort unless workflow.include?("build-candidate:") &&
     workflow.include?("stage-update-channels:") &&
     workflow.include?("publish-stable:")
-  abort unless workflow.include?("environment: community-publication")
+  abort unless workflow.scan(/^    environment: community-publication$/).size == 1
   abort unless workflow.scan(/artifact-ids:\s*\$\{\{ needs\.build-candidate\.outputs\.artifact_id \}\}/).size == 2
   build = workflow[/^  build-candidate:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
   stage = workflow[/^  stage-update-channels:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
   public_job = workflow[/^  publish-stable:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
   abort unless build && stage && public_job
+  abort unless stage.include?("environment: community-publication")
+  abort if public_job.include?("environment: community-publication")
   ci_contract = [
     %q{actions/workflows/commit-ci.yml/runs},
     %q{run.fetch("name") == "Linnet commit CI"},
@@ -1088,7 +1090,7 @@ ruby -e '
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
   abort unless workflow.match?(/build-candidate:\s*\n\s*if:\s*github\.event_name == ["\x27]workflow_dispatch["\x27] && github\.ref == ["\x27]refs\/heads\/main["\x27]/)
   abort unless workflow.include?("environment: community-signing")
-  abort unless workflow.include?("environment: community-publication")
+  abort unless workflow.scan(/^    environment: community-publication$/).size == 1
   abort if workflow.match?(/^\s*push:\s*$/)
   abort unless workflow.match?(/^permissions:\s*\n\s*contents:\s*read\s*$/m)
   abort unless workflow.match?(/stage-update-channels:.*?contents:\s*write/m)

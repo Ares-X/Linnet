@@ -223,6 +223,7 @@ jobs:
 
   stage-update-channels:
     needs: build-candidate
+    environment: community-publication
     permissions:
       actions: read
       contents: write
@@ -275,7 +276,6 @@ jobs:
     needs:
       - build-candidate
       - stage-update-channels
-    environment: community-publication
     permissions:
       actions: read
       contents: write

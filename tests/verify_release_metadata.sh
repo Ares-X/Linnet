@@ -109,6 +109,14 @@ ruby -e '
       !signer.match?(/lock-keychain[^\n]*\|\|[[:space:]]*true/)
   abort "daily signer lost explicit signal exits" unless
     %w[130 143 129].all? { |status| signer.include?("trap \x27exit #{status}\x27") }
+  verifier = signer[/^verify_product\(\) \(\n(?<body>.*?)(?=^\)\n)/m, :body]
+  abort "product verification is not isolated from the caller shell" unless verifier
+  abort "product verification does not restore strict failure inside command substitution" unless
+    verifier.start_with?("  set -euo pipefail\n")
+  abort "product verification scratch cleanup has multiple owners" unless
+    verifier.scan(/^  trap cleanup_verification EXIT$/).size == 1 &&
+      !verifier.include?("RETURN") &&
+      !verifier.include?("trap -")
 ' "${provisioner}" "${signer}"
 
 [[ "$(rg -Fc '$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path})' \
