@@ -115,6 +115,16 @@ product = File.read(product_path)
 bundle_identifier = product[/^LINNET_BUNDLE_IDENTIFIER = (\S+)$/, 1]
 abort unless target.fetch("bundle_identifier") == bundle_identifier &&
   target.fetch("certificate_sha256") == sha256
+periphery = File.read(File.join(root, "scripts/run_periphery.sh"))
+analysis_identity =
+  'readonly analysis_bundle_identifier="${product_bundle_identifier}.periphery"'
+build_identity = '-- LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}"'
+abort unless periphery.include?(
+  'product_bundle_identifier="$(read_product_bundle_identifier)"') &&
+  periphery.include?(analysis_identity) &&
+  periphery.scan(build_identity).size == 1 &&
+  periphery.index(analysis_identity) < periphery.index(build_identity) &&
+  !periphery.include?(bundle_identifier)
 historical_signing_text, historical_signing_status = Open3.capture2(
   "git", "-C", root, "show", "#{source_revision}:config/linnet-community-signing.json")
 abort unless historical_signing_status.success?
