@@ -75,11 +75,6 @@ final class SquirrelInputController: IMKInputController {
     modifiers: NSEvent.ModifierFlags,
     activationToken: LinnetInputActivationRegistry.Token
   ) -> Bool {
-    // Reconcile a Caps edge that macOS consumed before ordinary input, while
-    // leaving other ASCII-mode owners unchanged when Caps ownership is absent.
-    if event.type != .flagsChanged || event.keyCode != UInt16(kVK_CapsLock) {
-      synchronizeCapsLockBaseline()
-    }
     switch event.type {
     case .flagsChanged:
       for transition in modifierTransitions.transitions(
@@ -90,9 +85,6 @@ final class SquirrelInputController: IMKInputController {
           transition.keycode,
           modifiers: transition.modifiers,
           activationToken: activationToken)
-      }
-      if event.keyCode == UInt16(kVK_CapsLock) {
-        synchronizeCapsLockBaseline()
       }
       rimeUpdate()
       return false

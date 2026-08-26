@@ -3,6 +3,6 @@
 #include "LinnetPrivacy.xcconfig"
 
 MARKETING_VERSION = 0.1.13
-CURRENT_PROJECT_VERSION = 36
+CURRENT_PROJECT_VERSION = 37
 LINNET_PRODUCT_NAME = Linnet
 LINNET_BUNDLE_IDENTIFIER = io.github.ares-x.inputmethod.Linnet
