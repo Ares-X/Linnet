@@ -234,17 +234,29 @@ final class SettingsUITests: XCTestCase {
       in: app)
 
     let mirror = app.textFields["Custom mirror base URL"]
-    try reveal(mirror, named: "Custom mirror base URL", in: app)
-    try replaceText(in: mirror, with: "http://mirror.example.com/")
+    try replaceText(
+      in: mirror,
+      named: "Custom mirror base URL",
+      with: "http://mirror.example.com/",
+      in: app)
+    XCTAssertEqual(mirror.value as? String, "http://mirror.example.com/")
     let useCustomMirror = app.buttons["Use Custom Mirror"]
     XCTAssertTrue(useCustomMirror.exists)
     XCTAssertFalse(useCustomMirror.isEnabled)
-    try replaceText(in: mirror, with: "https://mirror.example.com/")
+    try replaceText(
+      in: mirror,
+      named: "Custom mirror base URL",
+      with: "https://mirror.example.com/",
+      in: app)
     XCTAssertEqual(mirror.value as? String, "https://mirror.example.com/")
     try waitUntilEnabled(useCustomMirror, timeout: 3)
     useCustomMirror.click()
     XCTAssertNotEqual(app.state, .notRunning)
-    try replaceText(in: mirror, with: "https://second-mirror.example.com/")
+    try replaceText(
+      in: mirror,
+      named: "Custom mirror base URL",
+      with: "https://second-mirror.example.com/",
+      in: app)
     XCTAssertEqual(mirror.value as? String, "https://second-mirror.example.com/")
     try waitUntilEnabled(useCustomMirror, timeout: 3)
     try selectEachPopUpOption(
@@ -393,8 +405,11 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   private func replaceText(
     in field: XCUIElement,
-    with value: String
+    named name: String,
+    with value: String,
+    in app: XCUIApplication
   ) throws {
+    try reveal(field, named: name, in: app)
     field.click()
     field.typeKey("a", modifierFlags: [.command])
     field.typeKey(.delete, modifierFlags: [])
@@ -613,8 +628,13 @@ final class SettingsUITests: XCTestCase {
     let scrollView = app.scrollViews["settings.page.scroll"]
     for deltaY in [-600.0, 600.0] {
       for _ in 0..<12 {
-        if element.exists, element.isHittable { return }
-        if scrollView.exists {
+        if element.exists, scrollView.exists {
+          let viewport = scrollView.frame.insetBy(dx: 0, dy: 12)
+          if element.isHittable, viewport.contains(element.frame) { return }
+          scrollView.scroll(
+            byDeltaX: 0,
+            deltaY: element.frame.midY > viewport.midY ? 300 : -300)
+        } else if scrollView.exists {
           scrollView.scroll(byDeltaX: 0, deltaY: deltaY)
         }
       }

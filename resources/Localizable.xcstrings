@@ -144,7 +144,6 @@
     "Use Custom Mirror" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"使用自定义镜像"}}}},
     "Enter a compatible HTTPS mirror root address." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"请输入兼容的 HTTPS 镜像根地址。"}}}},
     "Use Custom Mirror to make this address active before downloading." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"下载前，请点按“使用自定义镜像”以启用该地址。"}}}},
-    "Custom mirror is active." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"自定义镜像已启用。"}}}},
     "GH-Proxy is an independent third-party service and is not operated by Linnet or GitHub." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"GH-Proxy 是独立的第三方服务，不由 Linnet 或 GitHub 运营。"}}}},
     "Mirrors are third-party services that can see your IP address, request time, and requested public file URLs. Linnet never sends them your dictionaries, learning data, credentials, or other personal data." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"镜像是第三方服务，可以看到你的 IP 地址、请求时间和所请求的公开文件地址。Linnet 不会向其发送你的词典、学习数据、凭据或其他个人数据。"}}}},
     "Open GH-Proxy Service Information" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"打开 GH-Proxy 服务说明"}}}},

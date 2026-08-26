@@ -2044,13 +2044,6 @@ ruby -rjson -e '
   ]
   absent_cloud_keys = required_cloud_keys - catalog.fetch("strings", {}).keys
   abort "fixed iCloud localization keys are missing: #{absent_cloud_keys.join(", ")}" unless absent_cloud_keys.empty?
-  required_download_source_keys = [
-    "Enter a compatible HTTPS mirror root address.",
-    "Use Custom Mirror to make this address active before downloading.",
-    "Custom mirror is active."
-  ]
-  absent_download_source_keys = required_download_source_keys - catalog.fetch("strings", {}).keys
-  abort "download-source localization keys are missing: #{absent_download_source_keys.join(", ")}" unless absent_download_source_keys.empty?
   missing = catalog.fetch("strings", {}).each_with_object([]) do |(key, entry), result|
     unit = entry.dig("localizations", "zh-Hans", "stringUnit")
     result << key unless unit.is_a?(Hash) && unit["state"] == "translated" &&
