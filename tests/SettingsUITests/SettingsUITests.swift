@@ -94,7 +94,7 @@ final class SettingsUITests: XCTestCase {
       XCTAssertNotEqual(app.state, .notRunning)
     }
 
-    try selectEachPopUpOption([
+    selectEachPopUpOption([
       "System Default",
       "Avenir Next + Hiragino Sans GB",
       "Helvetica Neue + Heiti SC",
@@ -137,7 +137,7 @@ final class SettingsUITests: XCTestCase {
     defer { app.terminate() }
 
     clickTab("Input", in: app)
-    try selectEachPopUpOption([
+    selectEachPopUpOption([
       "Natural Code",
       "Full Pinyin",
       "Flypy Double Pinyin",
@@ -147,12 +147,12 @@ final class SettingsUITests: XCTestCase {
       "Ziguang Double Pinyin",
       "Jiajia Pinyin",
     ], in: app)
-    try selectEachPopUpOption([
+    selectEachPopUpOption([
       "Enhanced learning (Recommended)",
       "Standard learning",
       "Turn off learning",
     ], in: app)
-    try selectEachPopUpOption(["Semicolon (;)", "Vertical bar (|)"], in: app)
+    selectEachPopUpOption(["Semicolon (;)", "Vertical bar (|)"], in: app)
     for label in [
       "Suggest emoji candidates",
       "Output traditional Chinese by default",
@@ -176,7 +176,7 @@ final class SettingsUITests: XCTestCase {
     ] {
       try clickCheckBox(label, in: app)
     }
-    try selectEachPopUpOption([
+    selectEachPopUpOption([
       "Smart complete",
       "Navigate candidates",
       "Pass to application",
@@ -223,12 +223,12 @@ final class SettingsUITests: XCTestCase {
     checkAgain.click()
     try waitUntilEnabled(checkAgain, timeout: 30)
 
-    try selectEachPopUpOption([
+    selectEachPopUpOption([
       "GitHub (Direct)",
       "GH-Proxy Public Mirror (Third-party)",
     ], identifier: "settings.data.downloadSource", in: app)
     XCTAssertTrue(app.links["Open GH-Proxy Service Information"].exists)
-    try selectEachPopUpOption(
+    selectEachPopUpOption(
       ["Custom Mirror…"],
       identifier: "settings.data.downloadSource",
       in: app)
@@ -259,12 +259,12 @@ final class SettingsUITests: XCTestCase {
       in: app)
     XCTAssertEqual(mirror.value as? String, "https://second-mirror.example.com/")
     try waitUntilEnabled(useCustomMirror, timeout: 3)
-    try selectEachPopUpOption(
+    selectEachPopUpOption(
       ["GitHub (Direct)"],
       identifier: "settings.data.downloadSource",
       in: app)
 
-    try selectEachPopUpOption([
+    selectEachPopUpOption([
       "Keep latest 10 verified backups",
       "Keep latest 30 verified backups",
       "Keep latest 100 verified backups",
@@ -320,7 +320,7 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(app.buttons["Open Data Folder"].exists)
     XCTAssertTrue(app.buttons["Copy Report"].exists)
 
-    try selectEachPopUpOption([
+    selectEachPopUpOption([
       "Follow System",
       "简体中文",
       "English",
@@ -553,12 +553,11 @@ final class SettingsUITests: XCTestCase {
     _ options: [String],
     identifier: String? = nil,
     in app: XCUIApplication
-  ) throws {
+  ) {
     let predicate = NSPredicate(format: "value IN %@", options)
     for option in options {
       let popUp = identifier.map { app.popUpButtons[$0] }
         ?? app.popUpButtons.matching(predicate).firstMatch
-      try reveal(popUp, named: options.first ?? option, in: app)
       popUp.click()
       let menuItem = app.menuItems[option]
       XCTAssertTrue(menuItem.waitForExistence(timeout: 3), "Missing menu item: \(option)")
@@ -633,7 +632,7 @@ final class SettingsUITests: XCTestCase {
           if element.isHittable, viewport.contains(element.frame) { return }
           scrollView.scroll(
             byDeltaX: 0,
-            deltaY: element.frame.midY > viewport.midY ? 300 : -300)
+            deltaY: element.frame.midY > viewport.midY ? -300 : 300)
         } else if scrollView.exists {
           scrollView.scroll(byDeltaX: 0, deltaY: deltaY)
         }
