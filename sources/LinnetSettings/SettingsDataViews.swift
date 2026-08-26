@@ -257,17 +257,19 @@ extension DataTabView {
         }
         .disabled(model.downloadSourceEditorDisabled)
 
-        if model.downloadSourceFailure != nil || !model.downloadMirrorIsValid {
-          Label(
-            "Enter a compatible HTTPS mirror root address.",
-            systemImage: "exclamationmark.triangle.fill"
-          )
+        let mirrorInvalid = model.downloadSourceFailure != nil || !model.downloadMirrorIsValid
+        if mirrorInvalid || model.downloadSourceNeedsSave {
+          Label {
+            if mirrorInvalid {
+              Text("Enter a compatible HTTPS mirror root address.")
+            } else {
+              Text("Use Custom Mirror to make this address active before downloading.")
+            }
+          } icon: {
+            Image(systemName: mirrorInvalid ? "exclamationmark.triangle.fill" : "info.circle")
+          }
           .font(.caption)
-          .foregroundStyle(.red)
-        } else if model.downloadSourceNeedsSave {
-          Text("Use Custom Mirror to make this address active before downloading.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          .foregroundStyle(mirrorInvalid ? Color.red : Color.secondary)
         }
       }
 

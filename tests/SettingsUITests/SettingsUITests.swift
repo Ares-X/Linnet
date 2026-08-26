@@ -240,6 +240,7 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(useCustomMirror.exists)
     XCTAssertFalse(useCustomMirror.isEnabled)
     try replaceText(in: mirror, with: "https://mirror.example.com/")
+    XCTAssertEqual(mirror.value as? String, "https://mirror.example.com/")
     try waitUntilEnabled(useCustomMirror, timeout: 3)
     useCustomMirror.click()
     XCTAssertNotEqual(app.state, .notRunning)
