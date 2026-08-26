@@ -21,7 +21,7 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    for name in ["Appearance", "Input", "Dictionary", "English", "Data"] {
+    for name in ["Appearance", "Chinese Input", "Smart English", "Dictionary", "Data"] {
       clickTab(name, in: app)
       XCTAssertNotEqual(app.state, .notRunning, "Settings exited after opening \(name)")
     }
@@ -143,7 +143,7 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    clickTab("Input", in: app)
+    clickTab("Chinese Input", in: app)
     selectEachPopUpOption([
       "Natural Code",
       "Full Pinyin",
@@ -171,7 +171,7 @@ final class SettingsUITests: XCTestCase {
       "Prefer single characters in auxiliary-code lookup by default",
       in: app)
 
-    clickTab("English", in: app)
+    clickTab("Smart English", in: app)
     for label in [
       "Show IPA pronunciation",
       "Show Chinese definitions",
@@ -196,7 +196,7 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    clickTab("Input", in: app)
+    clickTab("Chinese Input", in: app)
     try clickCheckBox("Suggest emoji candidates", in: app)
 
     let close = app.buttons["_XCUI:CloseWindow"]
@@ -386,12 +386,14 @@ final class SettingsUITests: XCTestCase {
     ]
     app.launch()
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 15))
+    XCTAssertEqual(app.state, .runningForeground, "Settings did not activate in front")
+    XCTAssertTrue(app.windows.firstMatch.isHittable, "Settings window is hidden behind another app")
     return app
   }
 
   @MainActor
   private func clickTab(_ name: String, in app: XCUIApplication) {
-    let tabLabel = name == "English" ? "ABC" : name
+    let tabLabel = name == "Smart English" ? "ABC" : name
     let candidates = [
       app.tabBars.buttons[tabLabel],
       app.radioButtons[tabLabel],

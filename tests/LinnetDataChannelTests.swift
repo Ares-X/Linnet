@@ -44,8 +44,37 @@ struct LinnetDataChannelTests {
     require(
       verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
-        installedPacks: []) == .languageData,
-      "missing language data was not reported")
+        installedPacks: []) == .languageData([
+          .init(
+            kind: .chinese, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .english, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .lts, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+        ]),
+      "missing language-data releases were not identified")
+    let installedStandard = installedPacks(from: catalog.activationSets[0].packs)
+    let staleEnglish = LinnetDataRegistry.ActivePack(
+      packID: installedStandard[1].packID, kind: installedStandard[1].kind,
+      version: "2026.08.09", sequence: 4, dataABI: installedStandard[1].dataABI,
+      contentSHA256: String(repeating: "c", count: 64),
+      minCore: installedStandard[1].minCore, requirements: [],
+      relativePath: installedStandard[1].relativePath,
+      manifestSHA256: installedStandard[1].manifestSHA256)
+    require(
+      verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        installedPacks: [installedStandard[0], staleEnglish, installedStandard[2]])
+        == .languageData([
+          .init(
+            kind: .english,
+            installedVersion: "2026.08.09", installedSequence: 4,
+            availableVersion: "2026.08.10", availableSequence: 5),
+        ]),
+      "an outdated language-data release did not report both versions")
     require(
       verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8, edition: .standard,

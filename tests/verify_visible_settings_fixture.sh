@@ -82,6 +82,8 @@ fi
 rg -Fq 'override func record(_ issue: XCTIssue)' "${settings_ui_source}" &&
   rg -Fq 'try XCTSkipIf(Self.suiteHasFailed' "${settings_ui_source}" ||
   fail "SettingsUITests lost suite-level fail-fast behavior"
+rg -Fq 'terminate_fixture_settings' "$0" ||
+  fail "Settings UI cleanup no longer terminates its exact fixture process"
 
 if [[ "${run_ui_tests}" == true ]] &&
   { [[ -e "${uat_home}" ]] || [[ -L "${uat_home}" ]]; }; then
@@ -141,6 +143,24 @@ real_user_home=""
 before_fingerprint=""
 before_content_fingerprint=""
 uat_home_created=false
+fixture_settings_stopped=true
+
+terminate_fixture_settings() {
+  local executable process_id remaining=0
+  executable="${fixture}/DerivedData/Build/Products/Debug/Linnet.app/Contents/Applications/Settings.app/Contents/MacOS/Settings"
+  while read -r process_id; do
+    [[ -n "${process_id}" ]] || continue
+    /bin/kill -TERM "${process_id}" 2>/dev/null || true
+  done < <(/bin/ps -axo pid=,command= | /usr/bin/awk -v executable="${executable}" \
+    '$2 == executable { print $1 }')
+  for _ in {1..50}; do
+    remaining="$(/bin/ps -axo command= | /usr/bin/awk -v executable="${executable}" \
+      '$1 == executable { count += 1 } END { print count + 0 }')"
+    [[ "${remaining}" -eq 0 ]] && return 0
+    /bin/sleep 0.1
+  done
+  return 1
+}
 
 cleanup_uat_preference_domains() {
   local domain preference_file
@@ -173,6 +193,11 @@ cleanup() {
   exit_code=$?
   trap - EXIT INT TERM HUP
   if [[ "${run_ui_tests}" == true ]]; then
+    if ! terminate_fixture_settings; then
+      echo "verify_visible_settings_fixture: exact fixture Settings process did not stop" >&2
+      fixture_settings_stopped=false
+      exit_code=1
+    fi
     if ! cleanup_uat_preference_domains; then
       echo "verify_visible_settings_fixture: failed to remove an exact UAT preference domain" >&2
       exit_code=1
@@ -215,7 +240,8 @@ cleanup() {
       "${repo_root}/Linnet.xcodeproj/xcuserdata" \
       -depth -type d -empty -delete 2>/dev/null || true
   fi
-  if [[ ("${fixture}" == /tmp/linnet-visible-settings.* || \
+  if [[ "${fixture_settings_stopped}" == true && \
+      ("${fixture}" == /tmp/linnet-visible-settings.* || \
       "${fixture}" == /private/tmp/linnet-visible-settings.*) && -f "${marker}" ]]; then
     chmod -R u+w "${fixture}" 2>/dev/null || true
     find "${fixture}" -depth -delete 2>/dev/null || true

@@ -171,7 +171,7 @@ struct InputTabView: View {
 
   var body: some View {
     LinnetSettingsPage(
-      "Input",
+      "Chinese Input",
       summary: "Configure input behavior. Choose your Chinese scheme and reverse-lookup preferences here.",
       systemImage: "keyboard"
     ) {
@@ -484,7 +484,7 @@ struct EnglishTabView: View {
 
   var body: some View {
     LinnetSettingsPage(
-      "English",
+      "Smart English",
       summary: "Tune completion, pronunciation, translation, and correction together.",
       mark: .latinABC
     ) {
