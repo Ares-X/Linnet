@@ -244,6 +244,9 @@ final class SettingsUITests: XCTestCase {
     try waitUntilEnabled(useCustomMirror, timeout: 3)
     useCustomMirror.click()
     XCTAssertNotEqual(app.state, .notRunning)
+    try replaceText(in: mirror, with: "https://second-mirror.example.com/")
+    XCTAssertEqual(mirror.value as? String, "https://second-mirror.example.com/")
+    try waitUntilEnabled(useCustomMirror, timeout: 3)
     try selectEachPopUpOption(
       ["GitHub (Direct)"],
       identifier: "settings.data.downloadSource",

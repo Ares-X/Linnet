@@ -258,19 +258,22 @@ extension DataTabView {
         .disabled(model.downloadSourceEditorDisabled)
 
         let mirrorInvalid = model.downloadSourceFailure != nil || !model.downloadMirrorIsValid
-        if mirrorInvalid || model.downloadSourceNeedsSave {
-          Label {
-            if mirrorInvalid {
-              Text("Enter a compatible HTTPS mirror root address.")
-            } else {
-              Text("Use Custom Mirror to make this address active before downloading.")
-            }
-          } icon: {
-            Image(systemName: mirrorInvalid ? "exclamationmark.triangle.fill" : "info.circle")
+        Label {
+          if mirrorInvalid {
+            Text("Enter a compatible HTTPS mirror root address.")
+          } else if model.downloadSourceNeedsSave {
+            Text("Use Custom Mirror to make this address active before downloading.")
+          } else {
+            Text("Custom mirror is active.")
           }
-          .font(.caption)
-          .foregroundStyle(mirrorInvalid ? Color.red : Color.secondary)
+        } icon: {
+          Image(
+            systemName: mirrorInvalid
+              ? "exclamationmark.triangle.fill"
+              : model.downloadSourceNeedsSave ? "info.circle" : "checkmark.circle")
         }
+        .font(.caption)
+        .foregroundStyle(mirrorInvalid ? Color.red : Color.secondary)
       }
 
       Text("GitHub Direct is the default. Choose a mirror only when direct downloads are unreliable.")
