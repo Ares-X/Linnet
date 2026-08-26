@@ -263,6 +263,7 @@ struct SettingsRootView: View {
         Label("Language", systemImage: "globe")
       }
       .pickerStyle(.menu)
+      .accessibilityIdentifier("settings.interfaceLanguage")
       .fixedSize()
       Button("Apply Changes") { model.applyConfiguration() }
         .buttonStyle(.borderedProminent)

@@ -57,6 +57,7 @@ compile_run appearance-preview -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsDocument.swift \
   sources/LinnetCandidatePresentation.swift \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
+  sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift \
   tests/LinnetSettingsAppearancePreviewTests.swift
 compile_run settings-page-layout -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsPage.swift \
@@ -82,6 +83,9 @@ compile_run settings-session \
   sources/LinnetSettings/LinnetBackupStore.swift \
   sources/LinnetSettings/SettingsSessionState.swift \
   tests/SettingsSessionStateTests.swift
+compile_run settings-window-close -framework AppKit -framework SwiftUI \
+  sources/LinnetSettings/SettingsWindowCloseGuard.swift \
+  tests/SettingsWindowCloseCoordinatorTests.swift
 compile_run backup-store \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \

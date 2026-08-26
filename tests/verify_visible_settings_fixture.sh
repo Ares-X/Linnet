@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
 
-# Builds a small, canonical four-pack Runtime fixture below CFFIXED_USER_HOME
-# and verifies the real embedded Settings bundle resolves only that isolated
-# Runtime. Visible UI acceptance remains an installed-product UAT boundary.
+# Builds one canonical four-pack Runtime fixture below CFFIXED_USER_HOME.
+# --verify checks the real embedded Settings bundle against a disposable home;
+# --ui-test runs SettingsUITests with a separate UAT bundle identity and the
+# one fixed home required by the UI-test contract. Installed-product UAT is a
+# later artifact boundary and is not claimed by either mode.
 
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
+[[ "$#" -le 1 ]] || {
+  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test]" >&2
+  exit 2
+}
 mode="${1:---verify}"
+run_ui_tests=false
 case "${mode}" in
   --verify) ;;
+  --ui-test) run_ui_tests=true ;;
   *)
-    echo "usage: tests/verify_visible_settings_fixture.sh [--verify]" >&2
+    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test]" >&2
     exit 2
     ;;
 esac
@@ -22,6 +30,33 @@ fail() {
   echo "verify_visible_settings_fixture: $1" >&2
   exit 1
 }
+
+uat_host_identifier="io.github.ares-x.inputmethod.Linnet.settings-ui-uat"
+uat_settings_identifier="${uat_host_identifier}.settings"
+uat_test_identifier="${uat_host_identifier}.SettingsUITests"
+uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
+uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
+xcode_user_name="$(id -un)"
+xcode_generated_paths=(
+  "${repo_root}/Linnet.xcodeproj/project.xcworkspace/xcuserdata/${xcode_user_name}.xcuserdatad/UserInterfaceState.xcuserstate"
+  "${repo_root}/Linnet.xcodeproj/xcuserdata/${xcode_user_name}.xcuserdatad/xcschemes/xcschememanagement.plist"
+)
+
+if [[ "${run_ui_tests}" == true ]] &&
+  { [[ -e "${uat_home}" ]] || [[ -L "${uat_home}" ]]; }; then
+  fail "Settings UI fixed home already exists: ${uat_home}"
+fi
+if [[ "${run_ui_tests}" == true ]] &&
+  ! /usr/bin/grep -Fq "\"${uat_settings_identifier}\"" \
+    tests/SettingsUITests/SettingsUITests.swift; then
+  fail "SettingsUITests does not require the isolated UAT preference domain"
+fi
+if [[ "${run_ui_tests}" == true ]]; then
+  for generated_path in "${xcode_generated_paths[@]}"; do
+    [[ ! -e "${generated_path}" && ! -L "${generated_path}" ]] ||
+      fail "refusing to overwrite pre-existing Xcode user state: ${generated_path}"
+  done
+fi
 
 host_app="${repo_root}/build/Build/Products/Release/Linnet.app"
 settings_app="${host_app}/Contents/Applications/Settings.app"
@@ -61,9 +96,84 @@ fixture="$(cd "${fixture}" && pwd -P)"
 marker="${fixture}/.linnet-visible-settings-fixture"
 : >"${marker}"
 
+real_user_home=""
+before_fingerprint=""
+before_content_fingerprint=""
+uat_home_created=false
+
+cleanup_uat_preference_domains() {
+  local domain preference_file
+  for domain in "${uat_host_identifier}" "${uat_settings_identifier}" \
+    "${uat_test_identifier}"; do
+    case "${domain}" in
+      "${uat_host_identifier}"|"${uat_settings_identifier}"|"${uat_test_identifier}") ;;
+      *) return 1 ;;
+    esac
+    /usr/bin/defaults delete "${domain}" >/dev/null 2>&1 || true
+    if /usr/bin/defaults read "${domain}" >/dev/null 2>&1; then
+      return 1
+    fi
+    if [[ -n "${real_user_home}" ]]; then
+      preference_file="${real_user_home}/Library/Preferences/${domain}.plist"
+      if [[ -L "${preference_file}" || \
+          (-e "${preference_file}" && ! -f "${preference_file}") ]]; then
+        return 1
+      fi
+      if [[ -f "${preference_file}" ]]; then
+        [[ "$(stat -f '%u:%l' "${preference_file}")" == "$(id -u):1" ]] || return 1
+        /bin/rm -f "${preference_file}" || return 1
+      fi
+      [[ ! -e "${preference_file}" && ! -L "${preference_file}" ]] || return 1
+    fi
+  done
+}
+
 cleanup() {
   exit_code=$?
   trap - EXIT INT TERM HUP
+  if [[ "${run_ui_tests}" == true ]]; then
+    if ! cleanup_uat_preference_domains; then
+      echo "verify_visible_settings_fixture: failed to remove an exact UAT preference domain" >&2
+      exit_code=1
+    fi
+    if [[ -n "${before_fingerprint}" && -n "${before_content_fingerprint}" ]]; then
+      if [[ "$(metadata_fingerprint)" != "${before_fingerprint}" || \
+          "$(content_fingerprint)" != "${before_content_fingerprint}" ]]; then
+        echo "verify_visible_settings_fixture: UI test changed a protected real-user path" >&2
+        exit_code=1
+      fi
+    fi
+    if [[ "${uat_home_created}" == true ]]; then
+      if [[ "${uat_home}" == "/private/tmp/linnet-settings-ui-uat-active-$(id -u)" && \
+          -d "${uat_home}" && ! -L "${uat_home}" && \
+          -f "${uat_home_marker}" && ! -L "${uat_home_marker}" && \
+          "$(stat -f '%u' "${uat_home}")" == "$(id -u)" ]]; then
+        chmod -R u+w "${uat_home}" 2>/dev/null || true
+        find "${uat_home}" -depth -delete 2>/dev/null || true
+        if [[ -e "${uat_home}" || -L "${uat_home}" ]]; then
+          echo "verify_visible_settings_fixture: Settings UI fixed home cleanup was incomplete" >&2
+          exit_code=1
+        fi
+      else
+        echo "verify_visible_settings_fixture: refusing unsafe UI fixture cleanup" >&2
+        exit_code=1
+      fi
+    fi
+    for generated_path in "${xcode_generated_paths[@]}"; do
+      if [[ -e "${generated_path}" || -L "${generated_path}" ]]; then
+        if [[ -f "${generated_path}" && ! -L "${generated_path}" &&
+            "$(stat -f '%u' "${generated_path}")" == "$(id -u)" ]]; then
+          find "${generated_path}" -type f -delete 2>/dev/null || exit_code=1
+        else
+          echo "verify_visible_settings_fixture: refusing unsafe Xcode user-state cleanup" >&2
+          exit_code=1
+        fi
+      fi
+    done
+    find "${repo_root}/Linnet.xcodeproj/project.xcworkspace/xcuserdata" \
+      "${repo_root}/Linnet.xcodeproj/xcuserdata" \
+      -depth -type d -empty -delete 2>/dev/null || true
+  fi
   if [[ ("${fixture}" == /tmp/linnet-visible-settings.* || \
       "${fixture}" == /private/tmp/linnet-visible-settings.*) && -f "${marker}" ]]; then
     chmod -R u+w "${fixture}" 2>/dev/null || true
@@ -76,17 +186,34 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-isolated_home="${fixture}/home"
+if [[ "${run_ui_tests}" == true ]]; then
+  mkdir -m 0700 "${uat_home}" || fail "could not create the Settings UI fixed home"
+  uat_home_created=true
+  : >"${uat_home_marker}"
+  chmod 0600 "${uat_home_marker}"
+  [[ "$(cd "${uat_home}" && pwd -P)" == "${uat_home}" ]] ||
+    fail "Settings UI fixed home did not resolve to its exact path"
+  isolated_home="${uat_home}"
+else
+  isolated_home="${fixture}/home"
+fi
 isolated_support="${isolated_home}/Library/Application Support"
 runtime_root="${isolated_support}/Linnet"
 isolated_tmp="${fixture}/tmp"
 mkdir -p "${isolated_home}/Library/Preferences" \
   "${isolated_home}/Library/Caches" "${isolated_home}/Library/Logs" \
-  "${runtime_root}/Data/Packs" "${fixture}/sources" "${isolated_tmp}"
+  "${runtime_root}/Data/Packs" "${runtime_root}/UserData" \
+  "${fixture}/sources" "${isolated_tmp}"
 chmod 0700 "${isolated_home}" "${isolated_home}/Library" \
   "${isolated_home}/Library/Preferences" "${isolated_home}/Library/Caches" \
   "${isolated_home}/Library/Logs" "${isolated_support}" "${runtime_root}" \
   "${isolated_tmp}"
+if [[ "${run_ui_tests}" == true ]]; then
+  # The document decoder owns every default; an empty object is its minimal
+  # valid persisted form and avoids a second copy of the schema in this runner.
+  printf '{}\n' >"${runtime_root}/UserData/linnet_settings.json"
+  chmod 0600 "${runtime_root}/UserData/linnet_settings.json"
+fi
 
 account_name="$(id -un)"
 real_user_home="$(/usr/bin/dscl . -read "/Users/${account_name}" NFSHomeDirectory |
@@ -103,6 +230,28 @@ protected_paths=(
   "${real_user_home}/Library/Preferences/io.github.ares-x.inputmethod.Linnet.plist"
   "${real_user_home}/Library/Preferences/io.github.ares-x.inputmethod.Linnet.settings.plist"
 )
+protected_content_paths=(
+  "${real_user_home}/Library/Preferences/io.github.ares-x.inputmethod.Linnet.plist"
+  "${real_user_home}/Library/Preferences/io.github.ares-x.inputmethod.Linnet.settings.plist"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_settings.json"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_custom_words.txt"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_text_expander.txt"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_user.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_user.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/default.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/squirrel.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_en.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_pinyin.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_flypy.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_mspy.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_sogou.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_abc.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_ziguang.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_jiajia.custom.yaml"
+  "${real_user_home}/Library/Application Support/Linnet/State/active.json"
+  "${real_user_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
+)
 metadata_fingerprint() {
   local path
   for path in "${protected_paths[@]}"; do
@@ -113,7 +262,39 @@ metadata_fingerprint() {
     fi
   done
 }
+content_fingerprint() {
+  local path target
+  {
+    for path in "${protected_content_paths[@]}"; do
+      printf '%s\0' "${path}"
+      if [[ -L "${path}" ]]; then
+        target="$(readlink "${path}")" || return 1
+        printf 'SYMLINK\0%s\0' "${target}"
+        if [[ -f "${path}" ]]; then
+          /usr/bin/shasum -a 256 "${path}" || return 1
+        elif [[ -e "${path}" ]]; then
+          stat -f 'TARGET:%HT' "${path}" || return 1
+        else
+          printf 'DANGLING\0'
+        fi
+      elif [[ -f "${path}" ]]; then
+        printf 'FILE\0'
+        /usr/bin/shasum -a 256 "${path}" || return 1
+      elif [[ -e "${path}" ]]; then
+        stat -f 'OTHER:%HT' "${path}" || return 1
+      else
+        printf 'ABSENT\0'
+      fi
+    done
+  } | /usr/bin/shasum -a 256 | awk '{print $1}'
+}
+if [[ "${run_ui_tests}" == true ]] && ! cleanup_uat_preference_domains; then
+  fail "could not clear the exact UAT preference domains"
+fi
 before_fingerprint="$(metadata_fingerprint)"
+if ! before_content_fingerprint="$(content_fingerprint)"; then
+  fail "could not hash the protected real-user Settings state"
+fi
 
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
 release_tool="${fixture}/linnet-pack"
@@ -178,6 +359,25 @@ HOME="${isolated_home}" CFFIXED_USER_HOME="${isolated_home}" TMPDIR="${isolated_
     "${canonical_settings_identifier}" "${canonical_host_identifier}"
 [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||
   fail "fixed-home probe changed a protected real-user path"
+[[ "$(content_fingerprint)" == "${before_content_fingerprint}" ]] ||
+  fail "fixed-home probe changed protected real-user Settings content"
+
+if [[ "${run_ui_tests}" == true ]]; then
+  xcodebuild -project Linnet.xcodeproj -scheme SettingsUITests \
+    -configuration Debug -destination 'platform=macOS' \
+    -derivedDataPath "${fixture}/DerivedData" \
+    -resultBundlePath "${fixture}/SettingsUITests.xcresult" \
+    LINNET_BUNDLE_IDENTIFIER="${uat_host_identifier}" \
+    CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+    test
+  [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||
+    fail "Settings UI tests changed a protected real-user path"
+  [[ "$(content_fingerprint)" == "${before_content_fingerprint}" ]] ||
+    fail "Settings UI tests changed protected real-user Settings content"
+  echo "Visible Settings isolated UI suite: PASS"
+  echo "uat_bundle_identifier=${uat_settings_identifier}"
+  exit 0
+fi
 
 echo "Visible Settings isolated fixture dry-run: PASS"
 echo "embedded_settings_uuid=${embedded_uuid}"

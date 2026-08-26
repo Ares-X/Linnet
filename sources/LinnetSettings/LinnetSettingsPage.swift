@@ -111,6 +111,7 @@ struct LinnetSettingsPage<Content: View>: View {
       .padding(.top, 24)
       .padding(.bottom, 32)
     }
+    .accessibilityIdentifier("settings.page.scroll")
   }
 
   private var header: some View {

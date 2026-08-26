@@ -48,6 +48,7 @@ struct AppearanceTabView: View {
           step: LinnetSettingsDocument.Appearance.fontPointStep
         )
         .accessibilityLabel("Candidate font size")
+        .accessibilityIdentifier("settings.appearance.fontSize")
         .accessibilityValue(fontPointLabel(model.configuration.documentDraft.appearance.fontPoint))
         Text(
           "12–32 pt. The local visual preview updates immediately; the live candidate window follows the appearance setting."
@@ -66,6 +67,7 @@ struct AppearanceTabView: View {
             }
           }
         }
+        .accessibilityIdentifier("settings.appearance.typeface")
         HStack(spacing: 10) {
           Text("双韵 Linnet")
             .font(Font(LinnetCandidatePresentation.platformFont(
@@ -95,6 +97,7 @@ struct AppearanceTabView: View {
           }
         }
         .pickerStyle(.segmented)
+        .accessibilityIdentifier("settings.appearance.pageSize")
         Text("Candidate count is applied with the schema after you press Apply Changes.")
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -106,11 +109,13 @@ struct AppearanceTabView: View {
           Text("Vertical").tag(LinnetSettingsDocument.CandidateLayout.vertical)
         }
         .pickerStyle(.segmented)
+        .accessibilityIdentifier("settings.appearance.chineseLayout")
         Picker("English candidates", selection: $model.configuration.documentDraft.appearance.englishCandidateLayout) {
           Text("Horizontal").tag(LinnetSettingsDocument.CandidateLayout.horizontal)
           Text("Vertical").tag(LinnetSettingsDocument.CandidateLayout.vertical)
         }
         .pickerStyle(.segmented)
+        .accessibilityIdentifier("settings.appearance.englishLayout")
 
         Picker(
           "Candidate browsing",
@@ -122,6 +127,7 @@ struct AppearanceTabView: View {
             LinnetSettingsDocument.CandidateBrowsingMode.expandable)
         }
         .pickerStyle(.segmented)
+        .accessibilityIdentifier("settings.appearance.browsing")
         Text(
           // Keep the complete localization key intact for String Catalog lookup.
           // swiftlint:disable:next line_length
@@ -317,13 +323,10 @@ struct InputTabView: View {
           "Use English punctuation by default",
           isOn: $model.configuration.documentDraft.input.asciiPunctuationDefault
         )
-        DisclosureGroup("Advanced") {
-          Toggle(
-            "Prefer single characters in auxiliary-code lookup by default",
-            isOn: $model.configuration.documentDraft.input.singleCharacterSearchDefault
-          )
-          .padding(.top, 6)
-        }
+        Toggle(
+          "Prefer single characters in auxiliary-code lookup by default",
+          isOn: $model.configuration.documentDraft.input.singleCharacterSearchDefault
+        )
         Text(
           "These options are applied from Settings to each new input session; no keyboard shortcut changes them."
         )

@@ -123,7 +123,7 @@ tests/verify_chinese_source_projection.sh
 tests/verify_locked_release_asset.sh
 tests/verify_english_data_projection.sh
 ruby tests/generate_m2_fixtures.rb --check
-tests/verify_visible_settings_fixture.sh --verify
+tests/verify_visible_settings_fixture.sh --ui-test
 tests/verify_swift_units.sh
 tests/verify_package_architecture.sh
 LINNET_LIFECYCLE_CANDIDATE_APP="${app}" tests/verify_package_lifecycle.sh

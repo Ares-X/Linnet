@@ -222,7 +222,6 @@
     "Use English punctuation by default" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"默认使用英文标点"}}}},
     "Clear selected learning data?" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"清除所选学习数据？"}}}},
     "Add" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"添加"}}}},
-    "Advanced" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"高级"}}}},
     "Apply Changes is revision-checked and creates an automatic backup." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"应用更改时会校验版本并自动创建备份。"}}}},
     "Chinese learning" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"中文学习数据"}}}},
     "Chinese sentence model" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"中文语法模型"}}}},

@@ -216,6 +216,7 @@ extension DataTabView {
         Text("Custom Mirror…").tag(LinnetSettingsDownloadSource.Mode.customMirror)
       }
       .pickerStyle(.menu)
+      .accessibilityIdentifier("settings.data.downloadSource")
       .disabled(model.downloadSourceEditorDisabled)
 
       if model.downloadSourceMode == .publicMirror {
@@ -333,6 +334,7 @@ extension DataTabView {
             Text(backupRetentionName($0)).tag($0)
           }
         }
+        .accessibilityIdentifier("settings.data.retention")
         .disabled(model.operationActive)
         .onChange(of: model.backupRetentionPolicy) { _ in
           model.saveBackupRetentionPolicy()

@@ -25,7 +25,7 @@ struct LinnetSettingsAppearancePreviewTests {
 
   private static func testVisualThemeSelectorSourceContract() {
     let settingsViews = source("sources/LinnetSettings/SettingsViews.swift")
-    let preview = source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
+    let preview = appearancePreviewSource()
 
     require(!settingsViews.contains("Picker(\"Theme\""),
             "the retired Theme menu returned to the leading Settings column")
@@ -43,7 +43,7 @@ struct LinnetSettingsAppearancePreviewTests {
   }
 
   private static func testExactTypographyOverflowSourceContract() {
-    let preview = source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
+    let preview = appearancePreviewSource()
     let liveTheme = source("sources/SquirrelTheme.swift")
     let livePanel = source("sources/SquirrelPanel.swift")
     require(!preview.contains(".minimumScaleFactor("),
@@ -84,8 +84,8 @@ struct LinnetSettingsAppearancePreviewTests {
       "the live theme retained a private secondary-baseline formula")
     let detailBlock = sourceSlice(
       preview,
-      from: "private func candidateDetail(",
-      through: "private func candidateCell<Content: View>(")
+      from: "func candidateDetail(",
+      through: "func candidateCell<Content: View>(")
     require(
       detailBlock.contains("LinnetCandidatePresentation.candidateLine("),
       "Settings detail retained a second attributed-text compositor")
@@ -122,11 +122,11 @@ struct LinnetSettingsAppearancePreviewTests {
     let liveTheme = source("sources/SquirrelTheme.swift")
     let livePanel = source("sources/SquirrelPanel.swift")
       + source("sources/SquirrelPanel+CandidatePresentation.swift")
-    let preview = source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
+    let preview = appearancePreviewSource()
     let candidateSurface = sourceSlice(
       preview,
       from: "  private func candidateSurface(",
-      through: "  private func candidateList(")
+      through: "  func candidateList(")
     let previewLayout = sourceSlice(
       preview,
       from: "private struct LinnetCandidateDetailSurfaceLayout: Layout",
@@ -509,6 +509,11 @@ struct LinnetSettingsAppearancePreviewTests {
 
   private static func canonicalSource() -> String {
     source("data/squirrel.yaml")
+  }
+
+  private static func appearancePreviewSource() -> String {
+    source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
+      + source("sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift")
   }
 
   private static func source(_ path: String) -> String {

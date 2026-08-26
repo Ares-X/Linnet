@@ -972,7 +972,9 @@ test "$(rg -F -c 'view.material = LinnetCandidatePresentation.candidateMaterial'
 rg -Fq 'static let candidateMaterial = NSVisualEffectView.Material.popover' \
   sources/LinnetCandidatePresentation.swift ||
   fail "candidate-window material is not the shared native popover material"
-if rg -n '\.thinMaterial' sources/LinnetSettings/LinnetSettingsAppearancePreview.swift; then
+if rg -n '\.thinMaterial' \
+    sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
+    sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift; then
   fail "the candidate preview regained a competing SwiftUI material owner"
 fi
 test "$(rg -F -c 'static func platformFont(' \
@@ -986,6 +988,7 @@ rg -Fq 'LinnetCandidatePresentation.platformFont(' \
 if rg -n 'NSFont\.userFont|LinnetSettingsFontProjection' \
     sources/SquirrelTheme.swift \
     sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
+    sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift \
     sources/LinnetSettings/SettingsViews.swift; then
   fail "candidate typography regained a competing live or preview owner"
 fi
@@ -1213,7 +1216,8 @@ test "$(rg -F -c 'INFOPLIST_KEY_CFBundleDisplayName = "$(LINNET_PRODUCT_NAME)";'
   Linnet.xcodeproj/project.pbxproj)" -eq 2 ||
   fail "the Settings bundle display name must use the single language-neutral product identity"
 if rg -n 'linnet_settings_tint_color' data/squirrel.yaml \
-    sources/LinnetSettings/LinnetSettingsAppearancePreview.swift; then
+    sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
+    sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift; then
   fail "a retired Settings-only tint remained in the candidate theme owner"
 fi
 rg -Fq 'LinnetSettingsAppearancePreviewView(appearance:' \
@@ -1222,8 +1226,9 @@ rg -Fq 'LinnetSettingsAppearancePreviewView(appearance:' \
 test "$(rg -F -c 'if isTranslucent' \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift)" -eq 1 ||
   fail "the candidate preview regained a second material projection owner"
-test "$(rg -F -c 'LinnetSettingsThemeSurface(' \
-  sources/LinnetSettings/LinnetSettingsAppearancePreview.swift)" -eq 2 ||
+test "$(rg -F -o 'LinnetSettingsThemeSurface(' \
+  sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
+  sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "the theme cards and candidate preview stopped sharing one material surface"
 if rg -n 'textformat\.abc' sources/LinnetSettings/SettingsMain.swift \
     sources/LinnetSettings/SettingsRootView.swift \
@@ -1915,6 +1920,8 @@ ruby -e '
   abort "editable Settings rows no longer resolve through stable model bindings" unless
     %w[customWordValueBinding customWordCodeBinding disabledWordBinding
        expansionValueBinding expansionTriggerBinding].all? { |owner| dictionary.include?(owner) }
+  abort "the retired single-item Advanced disclosure returned" if
+    input.include?(%q{DisclosureGroup("Advanced")})
   abort "the responsive two-column Settings owner count changed" unless
     page.scan("struct LinnetSettingsTwoColumnLayout").length == 1
   layout = page[/struct LinnetSettingsTwoColumnLayout.*?\n\}/m]
@@ -1987,6 +1994,14 @@ ruby -e '
       root.include?("delegate.interfaceLocale = interfaceLanguage.locale")
   abort "pending drafts gained a second persistence owner" if
     guard.include?("linnet_settings.json") || guard.include?("UserDefaults")
+  abort "the retired re-entrant close path returned" if
+    guard.include?("allowCloseOnce") || guard.include?("performClose(")
+  apply_completion = guard[/func completeApply\(.*?\n  \}/m]
+  abort "the asynchronous Apply result lost its single terminal close transition" unless
+    apply_completion &&
+      apply_completion.include?("guard accepted, let sender else { return }") &&
+      apply_completion.include?("updateDocumentEditedState()") &&
+      apply_completion.scan("sender.close()").length == 1
   abort "the canonical in-memory discard transition is missing" unless
     session.include?("mutating func discardPendingChanges()")
   publish = model[/func publishAppearance\(.*?\n  \}/m]
@@ -2014,7 +2029,7 @@ ruby -e '
 ruby -rjson -e '
   catalog = JSON.parse(File.read("resources/Localizable.xcstrings"))
   retired_keys = [
-    "Deploy", "Logs...", "Change Folder…",
+    "Deploy", "Logs...", "Advanced", "Change Folder…",
     "Choose a folder inside iCloud Drive to connect this Mac.", "Choose Folder…",
     "Disconnect", "No sync folder selected",
     "This replaces Linnet-Full-Backup.linnet-data in the selected folder. Local data is not changed."
