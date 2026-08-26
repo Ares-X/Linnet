@@ -9,6 +9,7 @@ README、文档、CI、构建及发布脚本调整不属于版本更新。继承
 ### 输入源稳定性
 
 - 恢复与 macOS InputMethodKit 已注册 endpoint 一致的 `BundleID_Connection` 连接名，修复点击状态栏中的 Linnet 后无法切换输入源的问题。
+- 修复 Caps Lock 退出后偶发停留在原始 ASCII、无法恢复中文或 Smart English 候选的问题；Caps 事件结束时现在会按硬件最终状态立即收口，不再等待下一次普通按键。
 
 ### 设置稳定性
 
