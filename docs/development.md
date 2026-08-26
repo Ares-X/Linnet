@@ -125,10 +125,11 @@ patch 是否仍精确适用，以及 Linnet 自己的词典和交互优化是否
 focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有这些结果都
 通过后，才在同一个提交中更新 gitlink、`upstreams.lock.json`、必要 patch 和数据
 release identity。进入发布时，只有精确 main revision、该 revision 的成功 CI 和最终
-八件产物 `package/verify_publication_artifacts` 验证才能让手动发布 workflow 生成
-不可变候选。真实安装验收必须使用该 workflow 同一次签名产生的 artifact；通过后
-由唯一一次 `community-publication` Environment approval 依次授权 `core`、`data`、
-`catalog` 与 `public` / Latest。批准前不得创建 Release、标签或推进稳定 Catalog。
+八件产物 `package/verify_publication_artifacts` 验证才能让一次 SSH candidate intent
+生成不可变 artifact；普通 main 提交不会额外构建或签名候选。真实安装验收必须使用
+该 workflow 同一次签名产生的 artifact；
+通过后，唯一的 revision + artifact ID SSH 控制标签依次授权 `core`、`data`、
+`catalog` 与 `public` / Latest。控制标签推送前不得创建 Release 或推进稳定 Catalog。
 定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并上游或发布。
 
 RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此上游 URL 只用于
@@ -161,20 +162,31 @@ git tag -d "data-seed-${sequence}"
 上游资产的路径。
 
 进入正常产品发布时，候选必须是当前精确 main revision，该 revision 的 main CI 已
-成功。手动 `release-ci` 只构建并 CMS 签名一次，最终独立 verifier 接受精确八文件后
-上传不可覆盖的 artifact，并在所有远端发布动作之前等待。真实安装态 Settings 激活和
-InputMethodKit 验收使用这些字节；通过后只批准一次 `community-publication`，后续
-job 才按 artifact ID 下载并重验，依次执行 `core`、`data`（此时只接受既有 seed 的
-相同字节）、`catalog` 和 `public` / Latest，并创建版本标签。标签只标识版本，不再
-拥有发布授权或触发重建。稳定 Catalog 仍只有一个 owner 和一个 URL。
+成功。`scripts/release-control request` 以非 force SSH tag 显式启动 `release-ci`；
+workflow 只构建并 CMS 签名一次，最终独立 verifier 接受精确八文件、上传 artifact，
+并对 Actions archive digest 和解包字节做硬比较。维护者以
+`scripts/release-control fetch /absolute/new/root` 精确发现并下载唯一 artifact，真实安装态
+Settings 激活和 InputMethodKit 验收只使用其中 `release/` 的字节；通过后执行
+`scripts/release-control approve /absolute/root`，以第二个非 force SSH tag 创建绑定
+版本、完整 revision 和 artifact ID 的唯一控制标签。候选上传后，其 tag、artifact
+ID/digest、producer run 和八件原字节成为冻结 owner；UAT 期间 `main` 前进不会使其
+失效，也不会成为 approve 的第二个授权条件。发布 job 再按该 artifact ID
+下载一次并核对 archive digest，依次执行 `core`、
+`data`（此时只接受既有 seed 的相同字节）、`catalog` 和 `public` / Latest。正式
+`v<version>` 标签只标识版本，`linnet-publication/*` 控制标签只授权已验收的同一
+artifact；二者都不触发重建。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
-GitHub Actions 会缓存锁定下载、runtime 构建依赖和英文生成数据。只有默认 `main`
-可以在成功任务结束后写入缓存；功能分支只读取当前 ref 或默认分支缓存，避免每个
+GitHub Actions 会缓存锁定下载、runtime 构建依赖、经 fingerprint 和 inventory digest
+验证的原生 Rime 编译 transport，以及英文生成数据。只有默认 `main`
+的 native Rime profile 可以在成功任务结束后写入缓存；功能分支和候选只读取当前
+ref 或默认分支缓存，避免每个
 候选保存一份无法被后续候选复用的大型副本。
 缓存不是版本或发布权威：每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、
 内部 fingerprint 与产物形状；不匹配时只重建受影响部分。缓存命中也不会跳过
-archive 和 publication 验证。发布 workflow 把“准备锁定依赖”和“构建并验证归档”
-显示为独立步骤，便于直接看到下载、生成、编译和打包进度。
+archive 和 publication 验证。commit/PR CI 先串行执行快速 lint、release owner 和数据
+identity 门，通过后把 App、Swift owner tests 与 native Rime 三个完整 profile 放到
+隔离 runner 并行执行；任一 profile 失败仍使精确 revision 的整体 CI 失败。branch push
+不再与同 revision 的 PR workflow 重复运行完整门，连续更新也只保留最新一次。
 
 ## 构建
 
@@ -248,7 +260,7 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 
 `archive` 会沿同一链生成并验证固定 CMS leaf 的 App、未签名的 Complete/Core
 PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修补输出。由于 CMS
-签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载手动
+签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载自动
 `release-ci` 记录的同一不可变八文件 artifact。
 
 ### 本地安装验收与 macOS 安全检查
@@ -291,8 +303,9 @@ Dock，并在最后一个窗口关闭后退出。
 
 PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出
 精确 commit、artifact ID/digest、逐文件 SHA-256、实际通过的工作流和未执行项。
-安装验收不会自行创建 tag 或稳定 Release；只有批准 `community-publication` 后的
-workflow job 可以复用同一 artifact 完成发布。
+安装验收不会自行创建公开版本 tag 或稳定 Release；只有验收人显式运行
+`scripts/release-control approve` 后，workflow 才能复用该控制标签绑定的同一
+artifact 完成发布。该操作只使用 Git SSH，不依赖 GitHub 网页控制。
 
 ## 数据维护
 

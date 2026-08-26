@@ -2449,4 +2449,16 @@ test "$(rg -F -c 'force_encoding(Encoding::UTF_8)' \
   scripts/build-rime-runtime)" -eq 4 ||
   fail "runtime lock readers do not own an explicit UTF-8 boundary"
 
+ruby -e '
+  source = File.read(ARGV.fetch(0))
+  owner = source[/^materialize_git\(\) \{.*?^\}/m]
+  abort "locked Git cache owner is missing" unless owner
+  probe = owner.index(%q{git -C "${directory}" cat-file -e "${commit}^{commit}"})
+  fetch = owner.index(%q{run git -C "${directory}" fetch --no-tags --depth=1})
+  abort "a verified locked commit still triggers an upstream fetch" unless
+    probe && fetch && probe < fetch &&
+      owner.include?(%q{if ! git -C "${directory}" cat-file -e})
+' scripts/build-rime-runtime ||
+  fail "locked Git sources are not cache-first"
+
 echo "Linnet runtime footprint: PASS (one registry, immutable Active data, separate mutable roots)"

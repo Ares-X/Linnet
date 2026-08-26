@@ -14,6 +14,7 @@ release_dir="${2:-}"
 version="${3:-}"
 catalog_sequence="${4:-}"
 candidate_revision="${5:-}"
+publication_authorization="${6:-}"
 repository="${GITHUB_REPOSITORY:-}"
 
 fail_publish() {
@@ -21,8 +22,13 @@ fail_publish() {
   exit 1
 }
 
-[[ "$#" -eq 5 ]] ||
-  fail_publish "usage: CHANNEL RELEASE_DIRECTORY VERSION CATALOG_SEQUENCE CANDIDATE_REVISION"
+if [[ "${channel}" == data-seed ]]; then
+  [[ "$#" -eq 5 ]] ||
+    fail_publish "usage: data-seed RELEASE_DIRECTORY VERSION CATALOG_SEQUENCE CANDIDATE_REVISION"
+else
+  [[ "$#" -eq 6 ]] ||
+    fail_publish "usage: CHANNEL RELEASE_DIRECTORY VERSION CATALOG_SEQUENCE CANDIDATE_REVISION AUTHORIZATION_TAG"
+fi
 [[ "${repository}" == Ares-X/Linnet ]] ||
   fail_publish "GITHUB_REPOSITORY must be Ares-X/Linnet"
 [[ -n "${GH_TOKEN:-}" ]] || fail_publish "GH_TOKEN is required"
@@ -172,6 +178,35 @@ verify_release_revision() {
     fail_publish "${requested_tag} resolves to a different source revision"
 }
 
+ensure_release_tag() {
+  local requested_tag="$1"
+  inspect_exact_tag "${requested_tag}"
+  if [[ "${exact_tag_status}" == present ]]; then
+    [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
+      fail_publish "${requested_tag} already resolves to a different source revision"
+    return
+  fi
+  [[ "${exact_tag_status}" == absent ]] ||
+    fail_publish "${requested_tag} tag identity is invalid"
+
+  local create_error="${work_root}/tag-create-error"
+  if ! gh api --method POST "repos/${repository}/git/refs" \
+      -f ref="refs/tags/${requested_tag}" \
+      -f sha="${candidate_revision}" >"${work_root}/tag-create-response" \
+      2>"${create_error}"; then
+    # A concurrent creator may win after the absent lookup. Only the exact
+    # candidate is an idempotent success; every other result remains foreign.
+    inspect_exact_tag "${requested_tag}"
+    if [[ "${exact_tag_status}" == present &&
+       "${exact_tag_revision}" == "${candidate_revision}" ]]; then
+      return
+    fi
+    [[ ! -s "${create_error}" ]] || cat "${create_error}" >&2
+    fail_publish "${requested_tag} tag could not be created for the exact candidate"
+  fi
+  verify_release_revision "${requested_tag}"
+}
+
 verify_candidate_archive() {
   LINNET_RELEASE_TOOL="${LINNET_RELEASE_TOOL:-}" \
     "${project_root}/package/verify_publication_artifacts" \
@@ -185,51 +220,13 @@ verify_candidate_source() {
     return
   fi
 
-  local main_revision
-  main_revision="$(gh api "repos/${repository}/git/ref/heads/main" \
-    --jq '.object.sha')" || fail_publish "remote main identity is unavailable"
-  [[ "${main_revision}" =~ ^[0-9a-f]{40}$ ]] ||
-    fail_publish "remote main identity is invalid"
-
-  if [[ "${channel}" == catalog ]]; then
-    [[ "${main_revision}" == "${candidate_revision}" ]] ||
-      fail_publish "Catalog candidate is not the current remote main revision"
-  elif [[ "${channel}" == public ]]; then
-    inspect_exact_tag "v${version}"
-    if [[ "${exact_tag_status}" == present ]]; then
-      [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
-        fail_publish "v${version} resolves to a different source revision"
-    elif [[ "${exact_tag_status}" == absent ]]; then
-      [[ "${main_revision}" == "${candidate_revision}" ]] ||
-        fail_publish "an untagged Public candidate is not current remote main"
-    else
-      fail_publish "v${version} tag identity is invalid"
-    fi
-  elif [[ "${main_revision}" != "${candidate_revision}" ]]; then
-    verify_release_revision "v${version}"
-  fi
-
-  local runs="${work_root}/main-ci-runs.json"
-  gh api --method GET \
-    "repos/${repository}/actions/workflows/commit-ci.yml/runs" \
-    -f head_sha="${candidate_revision}" -f branch=main -f event=push \
-    -F per_page=100 >"${runs}" ||
-    fail_publish "main CI evidence is unavailable"
-  ruby -rjson -e '
-    document = JSON.parse(File.binread(ARGV.fetch(0)))
-    revision = ARGV.fetch(1)
-    accepted = document.fetch("workflow_runs").any? do |run|
-      run.fetch("name") == "Linnet commit CI" &&
-        run.fetch("path") == ".github/workflows/commit-ci.yml" &&
-        run.fetch("head_sha") == revision &&
-        run.fetch("head_branch") == "main" &&
-        run.fetch("event") == "push" &&
-        run.fetch("status") == "completed" &&
-        run.fetch("conclusion") == "success"
-    end
-    abort unless accepted
-  ' "${runs}" "${candidate_revision}" ||
-    fail_publish "candidate has no successful exact main CI run"
+  local pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-a([1-9][0-9]*)$'
+  [[ "${publication_authorization}" =~ ${pattern} ]] ||
+    fail_publish "publication authorization tag is invalid"
+  [[ "${BASH_REMATCH[1]}" == "${version}" &&
+     "${BASH_REMATCH[2]}" == "${candidate_revision}" ]] ||
+    fail_publish "publication authorization differs from candidate identity"
+  verify_release_revision "${publication_authorization}"
 }
 
 verify_published_channel() {
@@ -330,11 +327,10 @@ EOF
     ;;
 esac
 
-# Every remote mutation revalidates the final eight-file candidate itself.
-# Catalog additionally requires the candidate to remain the current remote
-# main revision. Public may create its absent version tag only from that exact
-# main revision after Core, data and Catalog bytes are already verified. The
-# data-seed bootstrap is isolated to one exact seed tag and the data prerelease.
+# Every remote mutation revalidates both the final eight-file candidate and the
+# same immutable SSH authorization tag. Main may advance after UAT without
+# stranding a partially published release. The data-seed bootstrap remains
+# isolated to one exact seed tag and the data prerelease.
 verify_candidate_archive
 verify_candidate_source
 
@@ -474,14 +470,12 @@ if [[ "${channel}" == public ]]; then
   ensure_catalog_pointer false
 fi
 
-release_tag_preexisting=false
 inspect_exact_tag "${tag}"
 if [[ "${exact_tag_status}" == present ]]; then
   [[ "${exact_tag_revision}" == "${candidate_revision}" ]] ||
     fail_publish "${tag} already resolves to a different source revision"
-  release_tag_preexisting=true
 elif [[ "${exact_tag_status}" == absent ]]; then
-  release_tag_preexisting=false
+  :
 else
   fail_publish "${tag} tag identity is invalid"
 fi
@@ -526,7 +520,6 @@ verify_draft_assets() {
 
 verify_retryable_draft_assets() {
   local actual="${work_root}/actual-retry-draft-assets.tsv"
-  verify_release_revision "${tag}"
   actual_assets >"${actual}"
   if LC_ALL=C comm -23 "${actual}" "${expected_assets}" | grep -q .; then
     fail_publish "${tag} draft contains assets outside the verified ${channel} channel"
@@ -568,18 +561,16 @@ if [[ "${release_is_draft}" == true ]]; then
   [[ "${actual_prerelease}" == "${prerelease}" ]] ||
     fail_publish "${tag} draft kind differs from the channel contract"
   verify_retryable_draft_assets
+  ensure_release_tag "${tag}"
   gh release delete "${tag}" --repo "${repository}" --yes
+else
+  ensure_release_tag "${tag}"
 fi
 
 create_args=(release create "${tag}" "${assets[@]}" --repo "${repository}"
-  --draft --title "${title}" --notes-file "${notes}")
+  --draft --verify-tag --title "${title}" --notes-file "${notes}")
 if [[ "${prerelease}" == true ]]; then
   create_args+=(--prerelease)
-fi
-if [[ "${release_tag_preexisting}" == true ]]; then
-  create_args+=(--verify-tag)
-else
-  create_args+=(--target "${candidate_revision}")
 fi
 gh "${create_args[@]}"
 verify_release_revision "${tag}"

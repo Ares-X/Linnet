@@ -31,7 +31,7 @@ runs:
 
     # Restored bytes are acceleration only. action-install.sh revalidates every
     # locked commit, digest, fingerprint and artifact shape before using them.
-    - name: Restore and save the default-branch cache
+    - name: Restore and save locked sources and generated data
       if: inputs.save == 'true'
       uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
       with:
@@ -45,7 +45,7 @@ runs:
         restore-keys: |
           linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
 
-    - name: Restore the read-only ref cache
+    - name: Restore locked sources and generated data read-only
       if: inputs.save == 'false'
       uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
       with:
@@ -58,3 +58,21 @@ runs:
         key: linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/LinnetEnglishDataSources.swift', 'tools/LinnetEnglishDataGenerator.swift', 'data/linnet/**', 'data/chinese/**') }}
         restore-keys: |
           linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
+
+    - name: Restore and save the verified native runtime
+      if: inputs.save == 'true'
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+      with:
+        path: build/rime-runtime-cache
+        key: linnet-rime-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'data/linnet/lua/**') }}
+        restore-keys: |
+          linnet-rime-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
+
+    - name: Restore the verified native runtime read-only
+      if: inputs.save == 'false'
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+      with:
+        path: build/rime-runtime-cache
+        key: linnet-rime-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'data/linnet/lua/**') }}
+        restore-keys: |
+          linnet-rime-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-

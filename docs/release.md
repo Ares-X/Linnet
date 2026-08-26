@@ -73,30 +73,46 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 
 ## GitHub 发布
 
-`.github/workflows/release-ci.yml` 只允许从受保护的 `main` 手动启动，不再由版本
-标签触发，也不会在安装验收后重建：
+`.github/workflows/release-ci.yml` 不需要 GitHub 网页按钮或网页审批。受保护的
+`main` 在精确 commit CI 成功后，由一次 SSH candidate intent 生成候选；安装验收后
+再由一个 SSH publication tag 授权发布，且不会在验收后重建。GitHub CLI 的只读
+Actions 访问需要预先完成一次认证；每次发布不需要再打开 GitHub 网页：
 
-1. `build-candidate` 先确认当前 revision 等于远端 `main`，且该精确 revision 的
-   main CI 已成功；之后才从 `community-signing` Environment Secrets 导入固定 P12，
-   在临时 Keychain 中只编译、CMS 签名一次；
-2. 最终 verifier 接受精确 8 个文件后，workflow 将这 8 个文件上传为不可覆盖的
-   GitHub Actions artifact，并记录 artifact ID、digest、逐文件 SHA-256 和下载链接；
-3. 维护者下载同一个 artifact，在真实账号完成“两轮同 leaf Core”：先用前一已验收
+1. 在 clean、精确当前 `main` checkout 执行 `scripts/release-control request`。它只会
+   非 force 推送 `linnet-candidate/v<VERSION>-<FULL_REVISION>`；重复 intent 会失败；
+2. `build-candidate` 核对 candidate tag、版本、revision、远端 `main`、唯一成功的
+   exact-revision commit CI，并拒绝同版本/revision 的既有未过期 artifact；
+   之后才从 `community-signing` Environment Secrets 导入固定 P12，在临时
+   Keychain 中只编译、CMS 签名一次；
+3. 最终 verifier 接受精确 8 个文件后，workflow 将这 8 个文件上传为不可覆盖的
+   GitHub Actions artifact，并硬比较实际 ZIP SHA-256、REST digest 和重新解包字节；
+4. 执行 `scripts/release-control fetch /absolute/new/root`。命令精确发现唯一 artifact，
+   验 producer run 和 candidate ref，保存 `artifact.zip`、远端 metadata/producer
+   receipt，并把相同字节解到 `release/`。随后在真实账号完成“两轮同 leaf Core”：
+   先用前一已验收
    的固定 CMS 版（首次公开后即前一公开版）升级到候选，再把同一候选的原字节重装
    一次。两轮都须验证无注销、无
    Keychain 密码提示、登录会话不变，并保留 enabled/selected、UserData、输入菜单、
    Settings 和真实输入；此时尚未创建 Release、标签或推进 Catalog；
-4. 验收通过后，维护者只批准一次受保护的 `community-publication` Environment。
-   `stage-update-channels` 才按该 artifact ID 下载并重验，不接触证书、不重编或重签
-   产品；唯一 publisher 依次发布 Core、data，并在核对远端字节后推进 Catalog；
-5. `publish-stable` 依赖上述受保护阶段，再按同一 artifact ID 下载并重验，只上传
-   `Linnet.pkg`，由同一 publisher 创建指向该 revision 的 `v<version>` 标签并设为
-   Latest。标签只是版本身份，不是重建触发器或第二个发布授权 owner。
+5. 验收通过后，在同一 clean checkout 执行
+   `scripts/release-control approve /absolute/root`。该命令重查远端 artifact/producer，
+   对比 candidate tag、ZIP digest、receipt、重新解包字节、八件原字节和本地
+   revision，再通过现有 Git SSH 凭据创建
+   唯一的轻量控制标签
+   `linnet-publication/v<VERSION>-<FULL_REVISION>-a<ARTIFACT_ID>`；不调用网页审批、
+   `workflow_dispatch` 或 GitHub 写 API。候选一经上传即由这些不可变身份冻结；UAT
+   期间 `main` 可以继续前进，不会成为 approve 的第二个授权 owner；
+6. `publish-approved` 反查并核对控制标签、artifact ID/digest、producer run、完整
+   revision 和版本，下载 ZIP 一次并硬比较 digest，再作一次 publication preflight。
+   唯一 publisher 随后依次发布 Core、data、Catalog、Public / Latest；四个 mutation
+   boundary 各自复核同一个 SSH control tag 和候选 verifier，因此 main 后续前进不会
+   中途破坏或阻止同一授权发布。它创建的
+   `v<version>` 标签仍只是公开版本身份，控制标签是同一 artifact 的唯一发布授权。
 
-任一项失败都不批准任何公开频道；修复必须形成新的 revision、build 和必要的数据
-sequence，再生成新的 artifact，不能替换旧 artifact 或已公开资产。重复执行只接受
-字节完全相同的远端状态。签名任务无论成功或失败都会恢复原 Keychain 搜索列表，
-删除临时 Keychain、P12、密码文件和目录。
+任一项失败都不推送控制标签；修复必须形成新的 revision、build 和必要的数据
+sequence，再生成新的 artifact，不能替换旧 artifact 或已公开资产。发布 run 的重试
+仍只接受同一标签绑定的 artifact ID 和字节完全相同的远端状态。签名任务无论成功
+或失败都会恢复原 Keychain 搜索列表，删除临时 Keychain、P12、密码文件和目录。
 
 旧 ad-hoc → 固定 CMS 只是一条一次性的历史 Core lifecycle 验收边；唯一记录在
 `config/linnet-community-signing.json`。其中固定 leaf、bundle ID、macOS major 和

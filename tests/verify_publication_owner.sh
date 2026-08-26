@@ -58,7 +58,7 @@ policy_docs=(
   "${repo_root}/docs/development.md"
   "${repo_root}/docs/release.md"
 )
-if rg -ni 'approval commit|publication=go|installation_uat=passed|machine-bound' \
+if rg -ni 'approval commit|publication=go|installation_uat=passed|machine-bound|community-publication|Environment approval|stage-update-channels|publish-stable' \
     "${policy_docs[@]}"; then
   fail "retired publication approval state returned to the policy documents"
 fi
@@ -270,13 +270,15 @@ if "${asset_manifest}" public "${version}" "${catalog_sequence}" |
 fi
 for required in \
     '"${project_root}/package/verify_publication_artifacts"' \
-    'git/ref/heads/main' \
-    'actions/workflows/commit-ci.yml/runs' \
-    'run.fetch("path") == ".github/workflows/commit-ci.yml"' \
+    'linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)' \
+    'verify_release_revision "${publication_authorization}"' \
     'data-seed-${catalog_sequence}' \
     'release create "${tag}" "${assets[@]}"' \
     'release delete "${tag}"' \
-    'release_tag_preexisting' \
+    'ensure_release_tag "${tag}"' \
+    '--method POST "repos/${repository}/git/refs"' \
+    '-f ref="refs/tags/${requested_tag}"' \
+    '--draft --verify-tag' \
     'git/ref/tags/${requested_tag}' \
     'verify_retryable_draft_assets' \
     'verify_release_state' \
@@ -289,86 +291,36 @@ for required in \
     '"${api}/trees"' \
     '"${api}/commits"' \
     'force=false'; do
-  rg -Fq "${required}" "${publisher}" ||
+  rg -Fq -- "${required}" "${publisher}" ||
     fail "the bounded GitHub publication state machine is incomplete: ${required}"
 done
 if rg -n -- '--clobber|--cleanup-tag|releases/delete' "${publisher}"; then
   fail "the publisher regained a destructive published-asset replacement path"
 fi
+if rg -n -- '--target' "${publisher}"; then
+  fail "a draft Release regained authority to create its own source tag"
+fi
 if rg -n 'verify_draft_target|targetCommitish' "${publisher}"; then
   fail "draft metadata regained authority over the exact tag ref"
 fi
-if rg -Fq 'actions/runs' "${publisher}" "${workflow}"; then
+if rg -Fq 'actions/runs' "${publisher}"; then
   fail "publication regained a repository-wide same-name CI lookup"
 fi
 if rg -Fq 'repos/${repository}/commits/${requested_tag}' "${publisher}"; then
   fail "the publisher regained a branch-compatible tag identity lookup"
 fi
 rg -Fq 'actions: read' "${workflow}" ||
-  fail "the release publisher cannot read exact main CI evidence"
+  fail "the release workflow cannot read exact candidate provenance"
+if rg -n '32855610087|Retire the exact legacy|actions/runs/\$\{LEGACY_RUN_ID\}/cancel' \
+    "${workflow}"; then
+  fail "one-time legacy approval retirement returned to the release owner"
+fi
 rg -Fq 'LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack' \
     "${workflow}" ||
   fail "the release publisher did not retain the verified pack CLI"
 if rg -Fq 'package/publish_github_release data-seed' "${workflow}"; then
   fail "the product release workflow regained the cold-build seed path"
 fi
-
-ruby -e '
-  workflow = File.read(ARGV.fetch(0))
-  publisher = File.read(ARGV.fetch(1))
-  abort if workflow.match?(/^\s*push:\s*$/)
-  abort unless workflow.scan(/^\s*make --no-print-directory archive\s*$/).size == 1
-  abort unless workflow.scan(%r{^\s*uses:\s*actions/upload-artifact@[0-9a-f]{40}(?:\s+#.*)?$}).size == 1
-  abort unless workflow.scan(%r{^\s*uses:\s*actions/download-artifact@[0-9a-f]{40}(?:\s+#.*)?$}).size == 2
-  release_path = %q{path: ${{ runner.temp }}/linnet-candidate/release}
-  abort unless workflow.scan(/^\s*#{Regexp.escape(release_path)}\s*$/).size == 3
-  abort if workflow.match?(%r{^\s*path:\s*\$\{\{ runner\.temp \}\}/linnet-candidate(?:/tools)?\s*$})
-  abort unless workflow.scan(/package\/verify_publication_artifacts/).size == 3
-  abort unless workflow.include?("build-candidate:") &&
-    workflow.include?("stage-update-channels:") &&
-    workflow.include?("publish-stable:")
-  abort unless workflow.scan(/^    environment: community-publication$/).size == 1
-  abort unless workflow.scan(/artifact-ids:\s*\$\{\{ needs\.build-candidate\.outputs\.artifact_id \}\}/).size == 2
-  build = workflow[/^  build-candidate:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
-  stage = workflow[/^  stage-update-channels:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
-  public_job = workflow[/^  publish-stable:\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\z)/m, :body]
-  abort unless build && stage && public_job
-  abort unless stage.include?("environment: community-publication")
-  abort if public_job.include?("environment: community-publication")
-  ci_contract = [
-    %q{actions/workflows/commit-ci.yml/runs},
-    %q{run.fetch("name") == "Linnet commit CI"},
-    %q{run.fetch("path") == ".github/workflows/commit-ci.yml"},
-    %q{run.fetch("head_sha") == revision},
-    %q{run.fetch("head_branch") == "main"},
-    %q{run.fetch("event") == "push"},
-    %q{run.fetch("status") == "completed"},
-    %q{run.fetch("conclusion") == "success"},
-  ]
-  [build, publisher].each do |boundary|
-    abort unless ci_contract.all? { |predicate| boundary.include?(predicate) }
-  end
-  abort unless build.index("git/ref/heads/main") <
-    build.index("LINNET_COMMUNITY_CMS_P12_BASE64")
-  abort unless build.index("actions/workflows/commit-ci.yml/runs") <
-    build.index("LINNET_COMMUNITY_CMS_P12_BASE64")
-  abort unless build.include?(%q{run.fetch("path") == ".github/workflows/commit-ci.yml"})
-  abort unless build.include?(%q{rm -rf -- "${signing_root}"})
-  abort unless build.index("package/verify_publication_artifacts") <
-    build.index("actions/upload-artifact")
-  abort unless stage.include?("package/publish_github_release core") &&
-    stage.include?("package/publish_github_release data") &&
-    stage.include?("package/publish_github_release catalog")
-  abort unless public_job.include?("package/publish_github_release public")
-  [stage, public_job].each do |job|
-    abort if job.match?(/make --no-print-directory archive|LINNET_COMMUNITY_CMS|LINNET_CODE_SIGN|security import/)
-    abort unless job.scan(/xcrun swiftc/).size == 1
-    abort unless job.scan(/package\/verify_publication_artifacts/).size == 1
-    abort unless job.index("actions/download-artifact") <
-      job.index("package/verify_publication_artifacts")
-  end
-' "${workflow}" "${publisher}" ||
-  fail "the release workflow can rebuild or replace the installation candidate bytes"
 
 publication_fixture="$(mktemp -d "${TMPDIR:-/tmp}/linnet-publication-owner.XXXXXX")"
 cleanup() {
@@ -436,6 +388,7 @@ if [[ "${1:-}" == api ]]; then
   include=false
   input=""
   endpoint=""
+  ref_field=""
   sha_field=""
   force_field=""
   while [[ "$#" -gt 0 ]]; do
@@ -446,6 +399,7 @@ if [[ "${1:-}" == api ]]; then
       --jq) shift 2 ;;
       -f|-F)
         case "$2" in
+          ref=*) ref_field="${2#ref=}" ;;
           sha=*) sha_field="${2#sha=}" ;;
           force=*) force_field="${2#force=}" ;;
         esac
@@ -474,7 +428,7 @@ if [[ "${1:-}" == api ]]; then
       fi
       ;;
     GET:repos/Ares-X/Linnet/git/ref/tags/*)
-      release_tag="${endpoint##*/}"
+      release_tag="${endpoint#repos/Ares-X/Linnet/git/ref/tags/}"
       if [[ -f "${state}/tag-ref-transport-error" ]]; then
         printf '%s\n' 'gh: simulated tag-ref transport failure' >&2
         exit 1
@@ -553,8 +507,22 @@ if [[ "${1:-}" == api ]]; then
       printf '%s\n' "${sha}"
       ;;
     POST:repos/Ares-X/Linnet/git/refs)
-      [[ ! -f "${branch}/ref" && -n "${sha_field}" ]]
-      printf '%s\n' "${sha_field}" >"${branch}/ref"
+      if [[ "${ref_field}" == refs/tags/* ]]; then
+        release_tag="${ref_field#refs/tags/}"
+        tag_path="${state}/tags/${release_tag}"
+        race_path="${state}/tag-create-races/${release_tag}"
+        mkdir -p "${tag_path%/*}"
+        if [[ -f "${race_path}" ]]; then
+          mv "${race_path}" "${tag_path}"
+        fi
+        [[ "${sha_field}" =~ ^[0-9a-f]{40}$ ]] || exit 1
+        [[ ! -f "${tag_path}" ]] || exit 1
+        printf '%s\n' "${sha_field}" >"${tag_path}"
+      else
+        [[ "${ref_field}" == refs/heads/data-channel &&
+          ! -f "${branch}/ref" && -n "${sha_field}" ]]
+        printf '%s\n' "${sha_field}" >"${branch}/ref"
+      fi
       ;;
     PATCH:repos/Ares-X/Linnet/git/refs/heads/data-channel)
       [[ -f "${branch}/ref" && -n "${sha_field}" && "${force_field}" == false ]]
@@ -632,15 +600,6 @@ case "${action}" in
     if [[ "${verify_tag}" == true ]]; then
       [[ -f "${state}/tags/${tag}" ]] || exit 1
       revision="$(cat "${state}/tags/${tag}")"
-    else
-      mkdir -p "${state}/tags"
-      if [[ -f "${state}/tag-create-races/${tag}" ]]; then
-        mv "${state}/tag-create-races/${tag}" "${state}/tags/${tag}"
-      fi
-      if [[ ! -f "${state}/tags/${tag}" ]]; then
-        grep -Eq '^[0-9a-f]{40}$' <<<"${revision}"
-        printf '%s\n' "${revision}" >"${state}/tags/${tag}"
-      fi
     fi
     printf '%s\n' "${revision}" >"${root}/revision"
     printf 'true %s\n' "${prerelease}" >"${root}/status"
@@ -683,14 +642,20 @@ esac
 FAKE_GH
 chmod 755 "${fake_bin}/gh"
 run_fixture() {
+  local requested_channel="$1"
+  local authorization_tag="${FAKE_AUTHORIZATION_TAG:-linnet-publication/v${version}-${candidate_revision}-a731}"
+  local args=("${requested_channel}" "${fixture_assets}" "${version}"
+    "${catalog_sequence}" "${candidate_revision}")
+  if [[ "${requested_channel}" != data-seed ]]; then
+    args+=("${authorization_tag}")
+  fi
   GITHUB_REPOSITORY=Ares-X/Linnet GH_TOKEN=fixture \
     FAKE_GH_STATE="${fake_state}" FAKE_RELEASE_ASSETS="${fixture_assets}" \
     FAKE_CANDIDATE_REVISION="${candidate_revision}" FAKE_VERSION="${version}" \
     FAKE_RELEASE_TOOL="${fake_release_tool}" \
     LINNET_RELEASE_TOOL="${fake_release_tool}" \
-    RUNNER_TEMP="${publication_fixture}" \
-    PATH="${fake_bin}:${PATH}" "${fixture_publisher}" "$1" "${fixture_assets}" \
-      "${version}" "${catalog_sequence}" "${candidate_revision}"
+    RUNNER_TEMP="${publication_fixture}" PATH="${fake_bin}:${PATH}" \
+    "${fixture_publisher}" "${args[@]}"
 }
 publish_fixture() {
   if ! run_fixture "$1" >/dev/null; then
@@ -803,26 +768,42 @@ ruby -rjson -e '
   File.binwrite(ARGV.fetch(0), JSON.generate(document))
 ' "${fake_state}/main-ci.json"
 
+authorization_tag="linnet-publication/v${version}-${candidate_revision}-a731"
+mkdir -p "${fake_state}/tags/${authorization_tag%/*}"
+printf '%s\n' "${candidate_revision}" \
+  >"${fake_state}/tags/${authorization_tag}"
+
 core_creates_before="$(grep -c "^release create core-v${version} " \
   "${fake_state}/calls.log" || true)"
-ruby -rjson -e '
-  document = JSON.parse(File.binread(ARGV.fetch(0)))
-  document.fetch("workflow_runs").fetch(0)["path"] = ".github/workflows/lookalike-ci.yml"
-  File.binwrite(ARGV.fetch(0), JSON.generate(document))
-' "${fake_state}/main-ci.json"
-if run_fixture core >"${publication_fixture}/rejected-ci-owner.log" 2>&1; then
-  fail "the publisher accepted a same-name run from another workflow"
+mv "${fake_state}/tags/${authorization_tag}" \
+  "${publication_fixture}/authorization-tag"
+if run_fixture core >"${publication_fixture}/rejected-authorization.log" 2>&1; then
+  fail "the publisher accepted a missing SSH authorization tag"
 fi
 [[ "$(grep -c "^release create core-v${version} " \
   "${fake_state}/calls.log" || true)" == "${core_creates_before}" ]] ||
-  fail "a foreign CI workflow authorized a Release mutation"
-ruby -rjson -e '
-  document = JSON.parse(File.binread(ARGV.fetch(0)))
-  document.fetch("workflow_runs").fetch(0)["path"] = ".github/workflows/commit-ci.yml"
-  File.binwrite(ARGV.fetch(0), JSON.generate(document))
-' "${fake_state}/main-ci.json"
+  fail "a missing SSH authorization tag mutated a Release"
+printf '%040d\n' 0 >"${fake_state}/tags/${authorization_tag}"
+if run_fixture core >"${publication_fixture}/rejected-authorization.log" 2>&1; then
+  fail "the publisher accepted an SSH authorization for another revision"
+fi
+mv "${publication_fixture}/authorization-tag" \
+  "${fake_state}/tags/${authorization_tag}"
+if FAKE_AUTHORIZATION_TAG="linnet-publication/v${version}-${candidate_revision}-a0" \
+    run_fixture core >"${publication_fixture}/rejected-authorization.log" 2>&1; then
+  fail "the publisher accepted a malformed SSH authorization tag"
+fi
 
+mkdir -p "${fake_state}/tag-create-races"
+printf '%s\n' "${candidate_revision}" \
+  >"${fake_state}/tag-create-races/core-v${version}"
 publish_fixture core
+rg -Fq "api --method POST repos/Ares-X/Linnet/git/refs -f ref=refs/tags/core-v${version} -f sha=${candidate_revision}" \
+    "${fake_state}/calls.log" ||
+  fail "the publisher did not explicitly create the missing Core tag"
+rg -F "release create core-v${version}" "${fake_state}/calls.log" |
+  rg -Fq -- '--draft --verify-tag' ||
+  fail "the Core draft did not consume an explicitly verified tag"
 rg -Fq -- "${current_release_change}" \
   "${fake_state}/core-v${version}/notes" ||
   fail "the Core Release omitted the version change summary"
@@ -903,22 +884,8 @@ rg -Fq "verify_publication_artifacts ${fixture_assets} ${version} ${candidate_re
   "${fake_state}/calls.log" ||
   fail "Catalog promotion did not invoke the exact final artifact verifier"
 
+# A later main commit must not strand a candidate already authorized after UAT.
 printf '%040d\n' 0 >"${fake_state}/main-ref"
-require_unpromoted_catalog_rejection
-printf '%s\n' "${candidate_revision}" >"${fake_state}/main-ref"
-
-ruby -rjson -e '
-  document = JSON.parse(File.binread(ARGV.fetch(0)))
-  document.fetch("workflow_runs").fetch(0)["conclusion"] = "failure"
-  File.binwrite(ARGV.fetch(0), JSON.generate(document))
-' "${fake_state}/main-ci.json"
-require_unpromoted_catalog_rejection
-ruby -rjson -e '
-  document = JSON.parse(File.binread(ARGV.fetch(0)))
-  document.fetch("workflow_runs").fetch(0)["conclusion"] = "success"
-  File.binwrite(ARGV.fetch(0), JSON.generate(document))
-' "${fake_state}/main-ci.json"
-
 publish_fixture catalog
 [[ "$(cat "${fake_state}/data-channel/commit-count")" == 1 ]] ||
   fail "Catalog promotion did not create exactly one stable pointer commit"
@@ -936,7 +903,6 @@ rg -Fq "release download core-v${version} --repo Ares-X/Linnet --pattern ${core_
   "${fake_state}/calls.log" ||
   fail "Catalog promotion did not verify the exact published Core asset"
 
-printf '%s\n' "${candidate_revision}" >"${fake_state}/branches/v${version}"
 mkdir -p "${fake_state}/tags" "${fake_state}/tag-types" \
   "${fake_state}/tag-object-ids" "${fake_state}/tag-objects"
 printf '%040d\n' 0 >"${fake_state}/tags/v${version}"
@@ -952,20 +918,6 @@ rm "${fake_state}/tags/v${version}" \
   "${fake_state}/tag-types/v${version}" \
   "${fake_state}/tag-object-ids/v${version}" \
   "${fake_state}/tag-objects/${version_tag_object}"
-printf '%040d\n' 0 >"${fake_state}/main-ref"
-require_public_fixture_rejection
-printf '%s\n' "${candidate_revision}" >"${fake_state}/main-ref"
-ruby -rjson -e '
-  document = JSON.parse(File.binread(ARGV.fetch(0)))
-  document.fetch("workflow_runs").fetch(0)["conclusion"] = "failure"
-  File.binwrite(ARGV.fetch(0), JSON.generate(document))
-' "${fake_state}/main-ci.json"
-require_public_fixture_rejection
-ruby -rjson -e '
-  document = JSON.parse(File.binread(ARGV.fetch(0)))
-  document.fetch("workflow_runs").fetch(0)["conclusion"] = "success"
-  File.binwrite(ARGV.fetch(0), JSON.generate(document))
-' "${fake_state}/main-ci.json"
 
 for release_tag in "core-v${version}" "data-${catalog_sequence}"; do
   revision="${fake_state}/tags/${release_tag}"
@@ -1046,14 +998,18 @@ mkdir -p "${fake_state}/tag-create-races"
 wrong_public_tag_revision="$(printf 'd%.0s' {1..40})"
 printf '%s\n' "${wrong_public_tag_revision}" \
   >"${fake_state}/tag-create-races/v${version}"
+public_creates_before_race="$(grep -c "^release create v${version} " \
+  "${fake_state}/calls.log" || true)"
 public_edits_before_race="$(grep -c "^release edit v${version} " \
   "${fake_state}/calls.log" || true)"
 if run_fixture public >"${publication_fixture}/rejected-public-tag-race.log" 2>&1; then
   fail "tagless public publication accepted a concurrently created foreign tag"
 fi
-[[ -f "${fake_state}/v${version}/status" &&
-  "$(cut -d' ' -f1 "${fake_state}/v${version}/status")" == true ]] ||
-  fail "tagless public publication exposed a draft before rejecting its foreign tag"
+[[ ! -e "${fake_state}/v${version}" ]] ||
+  fail "a foreign tag race created a draft Release"
+[[ "$(grep -c "^release create v${version} " \
+  "${fake_state}/calls.log" || true)" == "${public_creates_before_race}" ]] ||
+  fail "a foreign tag race reached draft creation"
 [[ "$(grep -c "^release edit v${version} " \
   "${fake_state}/calls.log" || true)" == "${public_edits_before_race}" ]] ||
   fail "tagless public publication invoked draft=false before verifying its tag"
@@ -1065,12 +1021,16 @@ rm -f -- "${fake_state}/tags/v${version}"
 publish_fixture public
 [[ "$(cat "${fake_state}/v${version}/revision")" == "${candidate_revision}" &&
   "$(cat "${fake_state}/tags/v${version}")" == "${candidate_revision}" ]] ||
-  fail "tagless public publication did not bind its draft and tag to exact main"
+  fail "tagless public publication did not bind its draft and tag to the approved candidate"
 rg -Fq "release create v${version} ${fixture_assets}/Linnet.pkg" \
     "${fake_state}/calls.log" ||
   fail "tagless public publication did not create the verified Installer draft"
-rg -Fq -- "--target ${candidate_revision}" "${fake_state}/calls.log" ||
-  fail "tagless public publication did not create its tag from exact main"
+rg -Fq "api --method POST repos/Ares-X/Linnet/git/refs -f ref=refs/tags/v${version} -f sha=${candidate_revision}" \
+    "${fake_state}/calls.log" ||
+  fail "the stable publisher did not explicitly create the approved version tag"
+rg -F "release create v${version}" "${fake_state}/calls.log" |
+  rg -Fq -- '--draft --verify-tag' ||
+  fail "the stable draft did not consume an explicitly verified tag"
 rg -Fq '## 本版本更新' "${fake_state}/v${version}/notes" ||
   fail "the stable Release omitted the version change summary"
 rg -Fq -- "${current_release_change}" "${fake_state}/v${version}/notes" ||
@@ -1151,6 +1111,8 @@ ruby -e '
   pull_request = File.read(ARGV.fetch(2))
   cache = File.read(ARGV.fetch(3))
   publisher = File.read(ARGV.fetch(4))
+  runtime_builder = File.read(ARGV.fetch(5))
+  development_gate = File.read(ARGV.fetch(6))
   local_cache = "./.github/actions/restore-locked-build-cache"
   pinned_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
   pinned_restore = "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25"
@@ -1165,28 +1127,87 @@ ruby -e '
   abort unless workflow_uses.count(local_cache) == 1
   abort unless commit_uses.count(local_cache) == 1
   abort unless pull_request_uses.count(local_cache) == 1
-  abort unless cache_uses == [pinned_cache, pinned_restore]
+  abort unless cache_uses == [pinned_cache, pinned_restore, pinned_cache, pinned_restore]
   abort if workflow.include?("actions/cache") || commit.include?("actions/cache") ||
     pull_request.include?("actions/cache")
-  save_policy = "save: ${{ github.ref == \x27refs/heads/main\x27 }}"
-  abort unless workflow.scan(/^\s*save:\s*true\s*$/).size == 1
-  abort unless commit.scan(save_policy).size == 1
+  abort unless workflow.scan(/^\s*save:\s*false\s*$/).size == 1
+  main_cache_writer = "save: ${{ matrix.profile == \x27rime\x27 }}"
+  abort unless commit.scan(main_cache_writer).size == 1
   abort unless pull_request.scan(/^\s*save:\s*false\s*$/).size == 1
   abort unless cache.include?("if: inputs.save == \x27true\x27") &&
     cache.include?("if: inputs.save == \x27false\x27")
   abort unless cache.match?(/inputs:\s*\n\s*save:.*?required:\s*true/m)
-  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 3
-  abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 1
-  abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 1
+  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
+  abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 2
+  abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 2
+  abort unless commit.match?(/push:\s*\n\s*branches:\s*\n\s*- main\s*$/m)
+  abort if commit.include?("- \x27**\x27")
+  abort unless pull_request.match?(/^on:\s*\[pull_request\]\s*$/)
+  abort unless commit.include?(%q{group: linnet-main-${{ github.ref }}}) &&
+    pull_request.include?(%q{group: linnet-pr-${{ github.event.pull_request.number }}})
+  abort unless commit.scan(/^\s*cancel-in-progress:\s*true\s*$/).size == 1 &&
+    pull_request.scan(/^\s*cancel-in-progress:\s*true\s*$/).size == 1
+  [commit, pull_request].each do |ci|
+    abort unless ci.scan(/^\s*needs:\s*quality\s*$/).size == 1
+    abort unless ci.scan(/^\s*profile:\s*\[app, swift, rime\]\s*$/).size == 1
+    abort unless ci.scan(/^\s*fail-fast:\s*false\s*$/).size == 1
+    abort unless ci.scan(%r{tests/verify_release_automation\.sh && tests/verify_publication_owner\.sh}).size == 1
+    abort unless ci.scan(/^\s*\.\/action-build\.sh release\s*$/).size == 1
+    abort unless ci.scan(/^\s*\.\/action-install\.sh\s*$/).size == 1
+    abort unless ci.scan(%r{tests/verify_development\.sh app}).size == 1
+    abort unless ci.scan(%r{tests/verify_development\.sh "\$\{LINNET_CI_PROFILE\}"}).size == 1
+  end
+  abort unless development_gate.include?("[all|app|swift|rime]")
+  abort unless development_gate.scan(/^if \[\[ "\$\{run_app\}" -eq 1 \]\]; then$/).size == 1
+  abort unless development_gate.scan(/^if \[\[ "\$\{run_swift\}" -eq 1 \]\]; then$/).size == 1
+  abort unless development_gate.scan(/^if \[\[ "\$\{run_rime\}" -eq 1 \]\]; then$/).size == 1
+  abort unless development_gate.scan(/^\s*all\) run_app=1; run_swift=1; run_rime=1 ;;$/).size == 1
+  app_start = development_gate.index(%q{if [[ "${run_app}" -eq 1 ]]; then})
+  swift_start = development_gate.index(%q{if [[ "${run_swift}" -eq 1 ]]; then})
+  rime_start = development_gate.index(%q{if [[ "${run_rime}" -eq 1 ]]; then})
+  abort unless app_start && swift_start && rime_start &&
+    app_start < swift_start && swift_start < rime_start
+  profile_blocks = {
+    app: development_gate[app_start...swift_start],
+    swift: development_gate[swift_start...rime_start],
+    rime: development_gate[rime_start..]
+  }
+  required_profile_commands = {
+    app: {
+      "tests/verify_runtime_footprint.sh" => 1,
+      "LINNET_LIFECYCLE_CANDIDATE_APP=" => 1,
+      "tests/verify_package_lifecycle.sh" => 1,
+      "tests/verify_visible_settings_fixture.sh" => 1
+    },
+    swift: { "tests/verify_swift_units.sh" => 1 },
+    rime: {
+      "tests/verify_chinese_source_projection.sh" => 1,
+      "tests/verify_english_data_projection.sh" => 1,
+      "tests/verify_rime_runtime.sh" => 2,
+      "--lifecycle-raw-exit-probe" => 1
+    }
+  }
+  required_profile_commands.each do |profile, markers|
+    markers.each do |marker, count|
+      abort unless profile_blocks.fetch(profile).scan(marker).size == count
+    end
+  end
+  required_profile_commands.each_value do |markers|
+    markers.each do |marker, count|
+      abort unless development_gate.scan(marker).size == count
+    end
+  end
   abort unless workflow.scan(/^\s*group:\s*linnet-release-publication\s*$/).size == 1
   abort unless cache.scan(/^\s*key:\s*linnet-build-v2-/).size == 2
-  abort unless cache.scan(/^\s*restore-keys:\s*\|/).size == 2
+  abort unless cache.scan(/^\s*key:\s*linnet-rime-runtime-v2-/).size == 2
+  abort unless cache.scan(/^\s*restore-keys:\s*\|/).size == 4
   %w[
     build/upstreams
     build/dependencies
     data/chinese/grammar
     build/linnet-english-cache
   ].each { |path| abort unless cache.scan(/^\s*#{Regexp.escape(path)}\s*$/).size == 2 }
+  abort unless cache.scan(/^\s*path:\s*build\/rime-runtime-cache\s*$/).size == 2
   %w[data/plum/build build/precompiled.fingerprint].each do |path|
     abort if cache.match?(/^\s*#{Regexp.escape(path)}\s*$/)
   end
@@ -1194,6 +1215,40 @@ ruby -e '
     cache.include?("config/linnet-data-releases.json")
   abort if cache.match?(%r{^\s*(?:librime|plum|upstreams/[^/]+)\s*$})
   abort unless cache.include?("Restored bytes are acceleration only")
+  cache_contract = %w[
+    linnet-rime-runtime-cache-v2
+    runtime_tree_inventory
+    runtime_cache_is_valid
+    restore_runtime_cache
+    refresh_runtime_cache
+    inventory.sha256
+    boost.inventory.sha256
+    Digest::SHA256.file
+    File.readlink
+    /usr/bin/lockf
+    runtime_paths_share_device
+  ]
+  abort unless cache_contract.all? { |marker| runtime_builder.include?(marker) }
+  restore_guard = <<~BASH
+    if [[ ! -e "${dist_target}" && ! -L "${dist_target}" &&
+          ! -e "${opencc_target}" && ! -L "${opencc_target}" &&
+          -d "${boost_target}/boost" ]] &&
+        runtime_cache_is_valid "${runtime_cache_target}" &&
+        restore_runtime_cache; then
+  BASH
+  abort unless runtime_builder.scan(restore_guard).size == 1
+  abort unless runtime_builder.index(%q{run "${upstream_sync}" verify}) <
+    runtime_builder.index(restore_guard)
+  refresh = %q{refresh_runtime_cache || fail "verified runtime cache refresh failed"}
+  stamp = %q{mv "${runtime_fingerprint_stamp}.tmp" "${runtime_fingerprint_stamp}"}
+  abort unless runtime_builder.scan(/^#{Regexp.escape(refresh)}$/).size == 1
+  abort unless runtime_builder.scan(/^\s*#{Regexp.escape(stamp)}$/).size == 2
+  abort unless runtime_builder.index(refresh) < runtime_builder.rindex(stamp)
+  abort if runtime_builder.include?("/private/tmp/linnet-rime-cache")
+  abort unless runtime_builder.include?(%q{build/.rime-runtime-restore.XXXXXX}) &&
+    runtime_builder.include?(%q{build/.rime-runtime-publish.XXXXXX})
+  final_cache_check = %q{runtime_cache_is_valid "${runtime_cache_target}"}
+  abort unless runtime_builder.rindex(final_cache_check) < runtime_builder.rindex(stamp)
   abort unless workflow.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 1
   abort unless workflow.scan(/^\s*make --no-print-directory archive\s*$/).size == 1
   abort if workflow.include?("./action-build.sh archive")
@@ -1220,13 +1275,9 @@ ruby -e '
   abort unless publisher.scan(catalog_gate).size == 1
   abort unless publisher.scan(public_gate).size == 1
   abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
-  abort unless workflow.match?(/build-candidate:\s*\n\s*if:\s*github\.event_name == ["\x27]workflow_dispatch["\x27] && github\.ref == ["\x27]refs\/heads\/main["\x27]/)
   abort unless workflow.include?("environment: community-signing")
-  abort unless workflow.scan(/^    environment: community-publication$/).size == 1
-  abort if workflow.match?(/^\s*push:\s*$/)
   abort unless workflow.match?(/^permissions:\s*\n\s*contents:\s*read\s*$/m)
-  abort unless workflow.match?(/stage-update-channels:.*?contents:\s*write/m)
-  abort unless workflow.match?(/publish-stable:.*?contents:\s*write/m)
+  abort unless workflow.match?(/publish-approved:.*?contents:\s*write/m)
   abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 1
   abort unless commit.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort unless pull_request.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
@@ -1244,7 +1295,8 @@ ruby -e '
   abort if workflow.match?(/security\s+import.*(?:^|\s)-A(?:\s|$)/) ||
     workflow.match?(/notary|Developer ID|publication_plan|community-adhoc/)
 ' "${workflow}" "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" \
-    "${publisher}" ||
+    "${publisher}" "${repo_root}/scripts/build-rime-runtime" \
+    "${repo_root}/tests/verify_development.sh" ||
   fail "immutable-candidate community workflow is incomplete"
 
 echo "Linnet unsigned PKG / stable CMS App publication owner: PASS"

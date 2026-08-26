@@ -1,79 +1,137 @@
 name: Linnet community release
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'linnet-candidate/v*-*'
+      - 'linnet-publication/v*-*-a*'
 
 permissions:
   contents: read
 
-concurrency:
-  group: linnet-release-publication
-  cancel-in-progress: false
-
 jobs:
   build-candidate:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' &&
+      github.event.created == true &&
+      github.event.deleted == false &&
+      github.repository == 'Ares-X/Linnet' &&
+      github.actor == 'Ares-X' &&
+      startsWith(github.ref, 'refs/tags/linnet-candidate/') &&
+      github.run_attempt == 1
+    concurrency:
+      group: linnet-release-candidate
+      cancel-in-progress: true
     environment: community-signing
     permissions:
       actions: read
       contents: read
     runs-on: macos-latest
-    outputs:
-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
-      version: ${{ steps.identity.outputs.version }}
-      catalog_sequence: ${{ steps.identity.outputs.catalog_sequence }}
     steps:
       - name: Checkout exact protected-main source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
           submodules: false
 
-      - name: Validate protected main and exact CI before secrets
+      - name: Validate the SSH candidate intent and exact main CI before secrets
+        id: request
         env:
           GH_TOKEN: ${{ github.token }}
+          CANDIDATE_REF: ${{ github.ref }}
+          LINNET_CANDIDATE_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "${GITHUB_EVENT_NAME}" = workflow_dispatch
-          test "${GITHUB_REF}" = refs/heads/main
+          test "${GITHUB_EVENT_NAME}" = push
+          test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
+          test "${GITHUB_ACTOR}" = Ares-X
+          test "${GITHUB_RUN_ATTEMPT}" = 1
+          [[ "${LINNET_CANDIDATE_REVISION}" =~ ^[0-9a-f]{40}$ ]]
+          candidate_pattern='^refs/tags/linnet-candidate/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})$'
+          [[ "${CANDIDATE_REF}" =~ ${candidate_pattern} ]]
+          requested_version="${BASH_REMATCH[1]}"
+          requested_revision="${BASH_REMATCH[2]}"
+          test "${requested_revision}" = "${LINNET_CANDIDATE_REVISION}"
           test -z "$(git status --porcelain)"
-          test "$(git rev-parse --verify HEAD^{commit})" = "${GITHUB_SHA}"
+          test "$(git rev-parse --verify HEAD^{commit})" = \
+            "${LINNET_CANDIDATE_REVISION}"
+          candidate_tag="${CANDIDATE_REF#refs/tags/}"
+          tag_json="${RUNNER_TEMP}/linnet-candidate-tag.json"
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${candidate_tag}" \
+            >"${tag_json}"
+          ruby -rjson -e '
+            tag = JSON.parse(File.binread(ARGV.fetch(0)))
+            abort "candidate intent ref differs" unless
+              tag.fetch("ref") == ARGV.fetch(1)
+            object = tag.fetch("object")
+            abort "candidate intent must be a lightweight commit tag" unless
+              object.fetch("type") == "commit" && object.fetch("sha") == ARGV.fetch(2)
+          ' "${tag_json}" "${CANDIDATE_REF}" "${LINNET_CANDIDATE_REVISION}"
+          rm -f -- "${tag_json}"
           remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" \
             --jq '.object.sha')"
-          test "${remote_main}" = "${GITHUB_SHA}"
+          test "${remote_main}" = "${LINNET_CANDIDATE_REVISION}"
+
           main_ci_runs="${RUNNER_TEMP}/linnet-main-ci-runs.json"
           gh api --method GET \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/commit-ci.yml/runs" \
-            -f head_sha="${GITHUB_SHA}" -f branch=main -f event=push \
-            -F per_page=100 >"${main_ci_runs}"
+            -f head_sha="${LINNET_CANDIDATE_REVISION}" -f branch=main \
+            -f event=push -F per_page=100 >"${main_ci_runs}"
           ruby -rjson -e '
             document = JSON.parse(File.binread(ARGV.fetch(0)))
             revision = ARGV.fetch(1)
-            accepted = document.fetch("workflow_runs").any? do |run|
+            accepted = document.fetch("workflow_runs").select do |run|
               run.fetch("name") == "Linnet commit CI" &&
                 run.fetch("path") == ".github/workflows/commit-ci.yml" &&
                 run.fetch("head_sha") == revision &&
                 run.fetch("head_branch") == "main" &&
                 run.fetch("event") == "push" &&
                 run.fetch("status") == "completed" &&
-                run.fetch("conclusion") == "success"
+                run.fetch("conclusion") == "success" &&
+                run.fetch("run_attempt") == 1 &&
+                run.dig("repository", "full_name") == "Ares-X/Linnet" &&
+                run.dig("head_repository", "full_name") == "Ares-X/Linnet"
             end
-            abort unless accepted
-          ' "${main_ci_runs}" "${GITHUB_SHA}"
+            abort "candidate requires exactly one successful exact main CI" unless
+              accepted.size == 1
+          ' "${main_ci_runs}" "${LINNET_CANDIDATE_REVISION}"
           rm -f -- "${main_ci_runs}"
+
           product_version="$(sed -n \
             's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
             config/LinnetProduct.xcconfig | LC_ALL=C sort -u)"
+          test "${product_version}" = "${requested_version}"
           package/data_release_metadata validate config/linnet-data-releases.json
           package/data_release_metadata check-core \
             config/linnet-data-releases.json "${product_version}"
           ruby scripts/upstream-sync report
 
+          existing_artifacts="${RUNNER_TEMP}/linnet-existing-candidates.json"
+          artifact_name="linnet-${product_version}-${LINNET_CANDIDATE_REVISION}"
+          gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts" \
+            -f name="${artifact_name}" -F per_page=100 >"${existing_artifacts}"
+          ruby -rjson -e '
+            document = JSON.parse(File.binread(ARGV.fetch(0)))
+            name = ARGV.fetch(1)
+            duplicate = document.fetch("artifacts").any? do |artifact|
+              artifact.fetch("name") == name && artifact.fetch("expired") == false
+            end
+            abort "an unexpired candidate already exists for this revision" if duplicate
+          ' "${existing_artifacts}" "${artifact_name}"
+          rm -f -- "${existing_artifacts}"
+          {
+            echo "version=${product_version}"
+            echo "revision=${LINNET_CANDIDATE_REVISION}"
+            echo "candidate_tag=${candidate_tag}"
+          } >>"${GITHUB_OUTPUT}"
+
       - name: Restore locked build cache
         uses: ./.github/actions/restore-locked-build-cache
         with:
-          save: true
+          save: false
 
       - name: Install declared build tools
         run: scripts/install_ci_build_tools.sh release
@@ -125,7 +183,7 @@ jobs:
 
       - name: Build and sign the candidate exactly once
         env:
-          LINNET_CANDIDATE_REVISION: ${{ github.sha }}
+          LINNET_CANDIDATE_REVISION: ${{ steps.request.outputs.revision }}
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
         run: |
           set -euo pipefail
@@ -136,7 +194,7 @@ jobs:
       - name: Verify and bind the exact candidate bytes
         id: identity
         env:
-          LINNET_CANDIDATE_REVISION: ${{ github.sha }}
+          LINNET_CANDIDATE_REVISION: ${{ steps.request.outputs.revision }}
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
           LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
         run: |
@@ -147,9 +205,7 @@ jobs:
             sources/LinnetDataRegistry.swift \
             tools/LinnetDataCatalogBuilder.swift \
             tools/LinnetPackTool.swift -o "${LINNET_RELEASE_TOOL}"
-          version="$(sed -n \
-            's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
-            config/LinnetProduct.xcconfig)"
+          version="${{ steps.request.outputs.version }}"
           package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
             "${version}" "${LINNET_CANDIDATE_REVISION}"
           catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
@@ -172,17 +228,47 @@ jobs:
           overwrite: false
           include-hidden-files: false
 
+      - name: Verify the uploaded artifact archive and extracted bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
+        run: |
+          set -euo pipefail
+          [[ "${ARTIFACT_ID}" =~ ^[1-9][0-9]*$ ]]
+          # upload-artifact exposes a bare SHA-256; the REST artifact resource
+          # used by publication exposes the same value with a sha256: prefix.
+          [[ "${ARTIFACT_DIGEST}" =~ ^[0-9a-f]{64}$ ]]
+          artifact_zip="${RUNNER_TEMP}/linnet-candidate.zip"
+          extracted="${RUNNER_TEMP}/linnet-candidate-roundtrip"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            >"${artifact_zip}"
+          actual_digest="$(shasum -a 256 "${artifact_zip}" | awk '{print $1}')"
+          test "${actual_digest}" = "${ARTIFACT_DIGEST}"
+          mkdir "${extracted}"
+          ditto -x -k "${artifact_zip}" "${extracted}"
+          expected="${RUNNER_TEMP}/linnet-candidate-expected.tsv"
+          actual="${RUNNER_TEMP}/linnet-candidate-actual.tsv"
+          (cd "${ARCHIVE_OUTPUT_DIR}" && find . -type f -print0 | LC_ALL=C sort -z |
+            xargs -0 shasum -a 256) >"${expected}"
+          (cd "${extracted}" && find . -type f -print0 | LC_ALL=C sort -z |
+            xargs -0 shasum -a 256) >"${actual}"
+          cmp -s "${expected}" "${actual}"
+          test "$(find "${extracted}" -mindepth 1 | wc -l | tr -d ' ')" = 8
+
       - name: Record the immutable installation candidate identity
         env:
           ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
+          LINNET_CANDIDATE_REVISION: ${{ steps.request.outputs.revision }}
         run: |
           {
             echo "### Linnet installation candidate"
             echo
-            echo "- Source: \`${GITHUB_SHA}\`"
+            echo "- Source: \`${LINNET_CANDIDATE_REVISION}\`"
             echo "- Artifact ID: \`${ARTIFACT_ID}\`"
             echo "- Artifact digest: \`${ARTIFACT_DIGEST}\`"
             echo "- Download: ${ARTIFACT_URL}"
@@ -221,85 +307,149 @@ jobs:
           fi
           exit "${cleanup_status}"
 
-  stage-update-channels:
-    needs: build-candidate
-    environment: community-publication
+  publish-approved:
+    if: >-
+      github.event_name == 'push' &&
+      github.event.created == true &&
+      github.event.deleted == false &&
+      github.repository == 'Ares-X/Linnet' &&
+      github.actor == 'Ares-X' &&
+      startsWith(github.ref, 'refs/tags/linnet-publication/')
+    concurrency:
+      group: linnet-release-publication
+      queue: max
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
     runs-on: macos-latest
     steps:
-      - name: Checkout the candidate source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-          submodules: false
-
-      - name: Download the immutable installation candidate by artifact ID
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53  # v6.0.0
-        with:
-          artifact-ids: ${{ needs.build-candidate.outputs.artifact_id }}
-          path: ${{ runner.temp }}/linnet-candidate/release
-
-      - name: Verify the downloaded candidate bytes
-        env:
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-          LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
-        run: |
-          xcrun swiftc -warnings-as-errors \
-            sources/LinnetPackContract.swift \
-            sources/LinnetDataChannel.swift \
-            sources/LinnetDataRegistry.swift \
-            tools/LinnetDataCatalogBuilder.swift \
-            tools/LinnetPackTool.swift -o "${LINNET_RELEASE_TOOL}"
-          package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
-            "${{ needs.build-candidate.outputs.version }}" "${GITHUB_SHA}"
-
-      - name: Publish the staged update channels
+      - name: Validate the SSH approval and exact artifact provenance
+        id: approval
         env:
           GH_TOKEN: ${{ github.token }}
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-          LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
+          APPROVAL_REF: ${{ github.ref }}
+          APPROVAL_SHA: ${{ github.sha }}
         run: |
-          version="${{ needs.build-candidate.outputs.version }}"
-          catalog_sequence="${{ needs.build-candidate.outputs.catalog_sequence }}"
-          package/publish_github_release core "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
-          package/publish_github_release data "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
-          package/publish_github_release catalog "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = push
+          test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
+          test "${GITHUB_ACTOR}" = Ares-X
+          approval_pattern='^refs/tags/linnet-publication/v[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{40}-a[1-9][0-9]*$'
+          [[ "${APPROVAL_REF}" =~ ${approval_pattern} ]]
+          approval_tag="${APPROVAL_REF#refs/tags/}"
+          artifact_id="${APPROVAL_REF##*-a}"
+          [[ "${artifact_id}" =~ ^[1-9][0-9]*$ ]]
 
-  publish-stable:
-    needs:
-      - build-candidate
-      - stage-update-channels
-    permissions:
-      actions: read
-      contents: write
-    runs-on: macos-latest
-    steps:
+          tag_json="${RUNNER_TEMP}/linnet-approval-tag.json"
+          artifact_json="${RUNNER_TEMP}/linnet-artifact.json"
+          producer_json="${RUNNER_TEMP}/linnet-producer-run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${approval_tag}" \
+            >"${tag_json}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}" \
+            >"${artifact_json}"
+          producer_run_id="$(ruby -rjson -e '
+            value = JSON.parse(File.binread(ARGV.fetch(0))).dig("workflow_run", "id")
+            abort unless value.is_a?(Integer) && value.positive?
+            puts value
+          ' "${artifact_json}")"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${producer_run_id}" \
+            >"${producer_json}"
+
+          ruby -rjson -e '
+            ref, approval_sha, output, tag_path, artifact_path, producer_path = ARGV
+            match = ref.match(%r{\Arefs/tags/linnet-publication/v
+              (?<version>[0-9]+\.[0-9]+\.[0-9]+)-
+              (?<revision>[0-9a-f]{40})-a
+              (?<artifact_id>[1-9][0-9]*)\z}x)
+            abort unless match && approval_sha == match[:revision]
+
+            tag = JSON.parse(File.binread(tag_path))
+            artifact = JSON.parse(File.binread(artifact_path))
+            run = JSON.parse(File.binread(producer_path))
+            object = tag.fetch("object")
+            artifact_run = artifact.fetch("workflow_run")
+            revision = match[:revision]
+            artifact_id = Integer(match[:artifact_id], 10)
+            candidate_tag = "linnet-candidate/v#{match[:version]}-#{revision}"
+
+            abort unless tag.fetch("ref") == ref &&
+              object.fetch("type") == "commit" &&
+              object.fetch("sha") == revision &&
+              artifact.fetch("id") == artifact_id &&
+              artifact.fetch("name") == "linnet-#{match[:version]}-#{revision}" &&
+              artifact.fetch("expired") == false &&
+              artifact.fetch("digest").match?(/\Asha256:[0-9a-f]{64}\z/) &&
+              artifact_run.fetch("id") == run.fetch("id") &&
+              artifact_run.fetch("head_sha") == revision &&
+              artifact_run.fetch("head_branch") == candidate_tag &&
+              artifact_run.fetch("repository_id") == run.dig("repository", "id") &&
+              artifact_run.fetch("head_repository_id") == run.dig("head_repository", "id") &&
+              run.fetch("name") == "Linnet community release" &&
+              run.fetch("path") == ".github/workflows/release-ci.yml" &&
+              run.fetch("head_sha") == revision &&
+              run.fetch("head_branch") == candidate_tag &&
+              run.fetch("event") == "push" &&
+              run.fetch("status") == "completed" &&
+              run.fetch("conclusion") == "success" &&
+              run.fetch("run_attempt") == 1 &&
+              run.dig("repository", "full_name") == "Ares-X/Linnet" &&
+              run.dig("head_repository", "full_name") == "Ares-X/Linnet"
+
+            File.open(output, "a") do |file|
+              file.puts "version=#{match[:version]}"
+              file.puts "revision=#{revision}"
+              file.puts "artifact_id=#{artifact_id}"
+              file.puts "artifact_digest=#{artifact.fetch("digest")}"
+              file.puts "producer_run_id=#{run.fetch("id")}"
+              file.puts "authorization_tag=#{ref.delete_prefix("refs/tags/")}"
+            end
+          ' "${APPROVAL_REF}" "${APPROVAL_SHA}" "${GITHUB_OUTPUT}" \
+            "${tag_json}" "${artifact_json}" "${producer_json}"
+          rm -f -- "${tag_json}" "${artifact_json}" "${producer_json}"
+
       - name: Checkout the approved candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ steps.approval.outputs.revision }}
           fetch-depth: 0
           persist-credentials: false
           submodules: false
 
-      - name: Download the approved immutable candidate by artifact ID
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53  # v6.0.0
-        with:
-          artifact-ids: ${{ needs.build-candidate.outputs.artifact_id }}
-          path: ${{ runner.temp }}/linnet-candidate/release
+      - name: Download and verify the approved artifact archive exactly once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.approval.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.approval.outputs.artifact_digest }}
+          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
+        run: |
+          set -euo pipefail
+          [[ "${ARTIFACT_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${ARTIFACT_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          artifact_zip="${RUNNER_TEMP}/linnet-approved-candidate.zip"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            >"${artifact_zip}"
+          actual_digest="sha256:$(shasum -a 256 "${artifact_zip}" | awk '{print $1}')"
+          test "${actual_digest}" = "${ARTIFACT_DIGEST}"
+          mkdir -p "${ARCHIVE_OUTPUT_DIR}"
+          ditto -x -k "${artifact_zip}" "${ARCHIVE_OUTPUT_DIR}"
 
       - name: Verify the approved candidate bytes
         env:
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
           LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
         run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse --verify HEAD^{commit})" = \
+            "${{ steps.approval.outputs.revision }}"
+          product_version="$(sed -n \
+            's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+            config/LinnetProduct.xcconfig | LC_ALL=C sort -u)"
+          test "${product_version}" = "${{ steps.approval.outputs.version }}"
+          package/data_release_metadata validate config/linnet-data-releases.json
+          package/data_release_metadata check-core \
+            config/linnet-data-releases.json "${product_version}"
           xcrun swiftc -warnings-as-errors \
             sources/LinnetPackContract.swift \
             sources/LinnetDataChannel.swift \
@@ -307,15 +457,28 @@ jobs:
             tools/LinnetDataCatalogBuilder.swift \
             tools/LinnetPackTool.swift -o "${LINNET_RELEASE_TOOL}"
           package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
-            "${{ needs.build-candidate.outputs.version }}" "${GITHUB_SHA}"
+            "${product_version}" "${{ steps.approval.outputs.revision }}"
 
-      - name: Publish the approved stable installer
+      - name: Publish the unchanged approved candidate in channel order
         env:
           GH_TOKEN: ${{ github.token }}
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
           LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
         run: |
+          set -euo pipefail
+          version="${{ steps.approval.outputs.version }}"
+          revision="${{ steps.approval.outputs.revision }}"
+          catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
+            config/linnet-data-releases.json)"
+          package/publish_github_release core "${ARCHIVE_OUTPUT_DIR}" \
+            "${version}" "${catalog_sequence}" "${revision}" \
+            "${{ steps.approval.outputs.authorization_tag }}"
+          package/publish_github_release data "${ARCHIVE_OUTPUT_DIR}" \
+            "${version}" "${catalog_sequence}" "${revision}" \
+            "${{ steps.approval.outputs.authorization_tag }}"
+          package/publish_github_release catalog "${ARCHIVE_OUTPUT_DIR}" \
+            "${version}" "${catalog_sequence}" "${revision}" \
+            "${{ steps.approval.outputs.authorization_tag }}"
           package/publish_github_release public "${ARCHIVE_OUTPUT_DIR}" \
-            "${{ needs.build-candidate.outputs.version }}" \
-            "${{ needs.build-candidate.outputs.catalog_sequence }}" \
-            "${GITHUB_SHA}"
+            "${version}" "${catalog_sequence}" "${revision}" \
+            "${{ steps.approval.outputs.authorization_tag }}"

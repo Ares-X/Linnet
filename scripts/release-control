@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# One local maintainer boundary owns the web-free release handoff. `request`
+# creates the immutable candidate intent over SSH, `fetch` binds the downloaded
+# Actions archive to its exact producer, and `approve` authorizes publication
+# only after those same local bytes have passed installation acceptance.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+repository="Ares-X/Linnet"
+command_name="${1:-}"
+
+fail() {
+  echo "release-control: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+usage:
+  scripts/release-control request
+  scripts/release-control fetch ABSOLUTE_NEW_FETCH_ROOT
+  scripts/release-control approve ABSOLUTE_FETCH_ROOT
+USAGE
+  exit 64
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "$1 is unavailable"
+}
+
+remote_ref_value() {
+  local ref="$1"
+  local description="$2"
+  local record sha reported_ref
+  record="$(git -C "${repo_root}" ls-remote --exit-code origin "${ref}")" ||
+    fail "${description} is unavailable over SSH"
+  [[ "$(printf '%s\n' "${record}" | /usr/bin/awk 'NF { count += 1 } END { print count + 0 }')" -eq 1 ]] ||
+    fail "${description} is ambiguous"
+  IFS=$'\t' read -r sha reported_ref <<<"${record}"
+  [[ "${sha}" =~ ^[0-9a-f]{40}$ && "${reported_ref}" == "${ref}" ]] ||
+    fail "${description} has an invalid identity"
+  printf '%s\n' "${sha}"
+}
+
+remote_ref_absent() {
+  local ref="$1"
+  local description="$2"
+  local record
+  record="$(git -C "${repo_root}" ls-remote origin "${ref}")" ||
+    fail "${description} lookup failed"
+  [[ -z "${record}" ]] || fail "${description} already exists"
+}
+
+resolve_new_fetch_root() {
+  local requested="$1"
+  local requested_parent leaf canonical_parent
+  [[ "${requested}" == /* ]] || fail "fetch root must be absolute"
+  requested_parent="${requested%/*}"
+  leaf="${requested##*/}"
+  [[ -n "${requested_parent}" && "${leaf}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
+    fail "fetch root name is unsafe"
+  [[ -d "${requested_parent}" ]] || fail "fetch root parent is unavailable"
+  canonical_parent="$(cd "${requested_parent}" && pwd -P)"
+  [[ -d "${canonical_parent}" && ! -L "${canonical_parent}" ]] ||
+    fail "fetch root parent is unsafe"
+  printf '%s/%s\n' "${canonical_parent}" "${leaf}"
+}
+
+resolve_existing_fetch_root() {
+  local requested="$1"
+  local canonical
+  [[ "${requested}" == /* && -d "${requested}" && ! -L "${requested}" ]] ||
+    fail "fetch root is unsafe"
+  canonical="$(cd "${requested}" && pwd -P)"
+  [[ -d "${canonical}" && ! -L "${canonical}" ]] || fail "fetch root is unsafe"
+  printf '%s\n' "${canonical}"
+}
+
+validate_provenance() {
+  local candidate_json="$1"
+  local artifact_json="$2"
+  local producer_json="$3"
+  ruby -rjson -e '
+    candidate_path, artifact_path, producer_path, repository, version, revision,
+      candidate_tag = ARGV
+    candidate_ref = "refs/tags/#{candidate_tag}"
+    artifact_name = "linnet-#{version}-#{revision}"
+    candidate = JSON.parse(File.binread(candidate_path))
+    artifact = JSON.parse(File.binread(artifact_path))
+    producer = JSON.parse(File.binread(producer_path))
+
+    object = candidate.fetch("object")
+    abort "candidate ref differs from the requested SSH intent" unless
+      candidate.fetch("ref") == candidate_ref &&
+      object.fetch("type") == "commit" && object.fetch("sha") == revision
+
+    artifact_id = artifact.fetch("id")
+    producer_id = producer.fetch("id")
+    artifact_run = artifact.fetch("workflow_run")
+    digest = artifact.fetch("digest")
+    size = artifact.fetch("size_in_bytes")
+    abort "artifact identity is invalid" unless
+      artifact_id.is_a?(Integer) && artifact_id.positive? &&
+      artifact.fetch("name") == artifact_name &&
+      artifact.fetch("expired") == false &&
+      digest.is_a?(String) && digest.match?(/\Asha256:[0-9a-f]{64}\z/) &&
+      size.is_a?(Integer) && size.positive?
+    abort "artifact producer projection is invalid" unless
+      artifact_run.fetch("id") == producer_id &&
+      artifact_run.fetch("head_sha") == revision &&
+      artifact_run.fetch("head_branch") == candidate_tag &&
+      artifact_run.fetch("repository_id") == producer.dig("repository", "id") &&
+      artifact_run.fetch("head_repository_id") ==
+        producer.dig("head_repository", "id")
+    abort "producer run is not the exact candidate workflow" unless
+      producer_id.is_a?(Integer) && producer_id.positive? &&
+      producer.fetch("name") == "Linnet community release" &&
+      producer.fetch("path") == ".github/workflows/release-ci.yml" &&
+      producer.fetch("head_sha") == revision &&
+      producer.fetch("head_branch") == candidate_tag &&
+      producer.fetch("event") == "push" &&
+      producer.fetch("status") == "completed" &&
+      producer.fetch("conclusion") == "success" &&
+      producer.fetch("run_attempt") == 1 &&
+      producer.dig("repository", "full_name") == repository &&
+      producer.dig("head_repository", "full_name") == repository &&
+      producer.dig("actor", "login") == "Ares-X" &&
+      producer.dig("triggering_actor", "login") == "Ares-X"
+    puts [artifact_id, digest, producer_id, size].join("\t")
+  ' "${candidate_json}" "${artifact_json}" "${producer_json}" \
+    "${repository}" "${version}" "${revision}" "${candidate_tag}"
+}
+
+verify_archive_digest() {
+  local archive="$1"
+  local expected="$2"
+  local actual
+  [[ -f "${archive}" && ! -L "${archive}" && -s "${archive}" ]] ||
+    fail "artifact ZIP is missing or unsafe"
+  actual="$(/usr/bin/shasum -a 256 "${archive}" | /usr/bin/awk '{print $1}')"
+  [[ "sha256:${actual}" == "${expected}" ]] ||
+    fail "artifact ZIP digest differs from GitHub metadata"
+}
+
+extract_archive() {
+  local archive="$1"
+  local destination="$2"
+  local entries entry_count unique_count
+  [[ ! -e "${destination}" && ! -L "${destination}" ]] ||
+    fail "archive extraction target already exists"
+  entries="$(/usr/bin/unzip -Z1 "${archive}")" ||
+    fail "artifact ZIP inventory is unreadable"
+  entry_count="$(printf '%s\n' "${entries}" |
+    /usr/bin/awk 'NF { count += 1 } END { print count + 0 }')"
+  unique_count="$(printf '%s\n' "${entries}" | /usr/bin/awk 'NF' |
+    LC_ALL=C /usr/bin/sort -u | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
+  [[ "${entry_count}" -eq 8 && "${unique_count}" -eq 8 ]] ||
+    fail "artifact ZIP inventory is not the exact eight-file candidate"
+  while IFS= read -r entry; do
+    [[ "${entry}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] ||
+      fail "artifact ZIP contains an unsafe entry"
+  done <<<"${entries}"
+  /bin/mkdir -p "${destination}"
+  /usr/bin/unzip -qq "${archive}" -d "${destination}"
+}
+
+compile_release_tool() {
+  local output="$1"
+  xcrun swiftc -warnings-as-errors \
+    "${repo_root}/sources/LinnetPackContract.swift" \
+    "${repo_root}/sources/LinnetDataChannel.swift" \
+    "${repo_root}/sources/LinnetDataRegistry.swift" \
+    "${repo_root}/tools/LinnetDataCatalogBuilder.swift" \
+    "${repo_root}/tools/LinnetPackTool.swift" -o "${output}"
+  [[ -x "${output}" && ! -L "${output}" ]] ||
+    fail "release verifier tool was not built"
+}
+
+verify_release_directory() {
+  local release_dir="$1"
+  local release_tool="$2"
+  LINNET_RELEASE_TOOL="${release_tool}" \
+    "${repo_root}/package/verify_publication_artifacts" \
+      "${release_dir}" "${version}" "${revision}"
+}
+
+compare_release_directories() {
+  local accepted="$1"
+  local extracted="$2"
+  local accepted_files extracted_files relative
+  accepted_files="$(find "${accepted}" -mindepth 1 -maxdepth 1 -type f ! -type l \
+    -exec basename {} \; | LC_ALL=C sort)"
+  extracted_files="$(find "${extracted}" -mindepth 1 -maxdepth 1 -type f ! -type l \
+    -exec basename {} \; | LC_ALL=C sort)"
+  [[ "${accepted_files}" == "${extracted_files}" ]] ||
+    fail "accepted release inventory differs from the artifact ZIP"
+  while IFS= read -r relative; do
+    /usr/bin/cmp -s "${accepted}/${relative}" "${extracted}/${relative}" ||
+      fail "accepted release bytes differ from the artifact ZIP: ${relative}"
+  done <<<"${accepted_files}"
+}
+
+case "${command_name}" in
+  request) [[ "$#" -eq 1 ]] || usage ;;
+  fetch|approve) [[ "$#" -eq 2 ]] || usage ;;
+  *) usage ;;
+esac
+
+require_command git
+require_command ruby
+[[ -z "$(git -C "${repo_root}" status --porcelain)" ]] ||
+  fail "the release checkout is not clean"
+origin_url="$(git -C "${repo_root}" remote get-url origin)"
+case "${origin_url}" in
+  git@github.com:Ares-X/Linnet.git | ssh://git@github.com/Ares-X/Linnet.git) ;;
+  *) fail "origin is not the canonical Linnet SSH repository" ;;
+esac
+revision="$(git -C "${repo_root}" rev-parse --verify HEAD^{commit})"
+[[ "${revision}" =~ ^[0-9a-f]{40}$ ]] || fail "source revision is invalid"
+version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+  "${repo_root}/config/LinnetProduct.xcconfig" | LC_ALL=C sort -u)"
+[[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail "product version is invalid"
+candidate_tag="linnet-candidate/v${version}-${revision}"
+candidate_ref="refs/tags/${candidate_tag}"
+artifact_name="linnet-${version}-${revision}"
+
+if [[ "${command_name}" == request ]]; then
+  remote_main="$(remote_ref_value refs/heads/main "remote main")"
+  [[ "${remote_main}" == "${revision}" ]] ||
+    fail "the candidate request is not the current remote main"
+  if git -C "${repo_root}" show-ref --verify --quiet "${candidate_ref}"; then
+    fail "candidate request tag already exists locally"
+  fi
+  remote_ref_absent "${candidate_ref}" "candidate request tag"
+  git -C "${repo_root}" push origin "${revision}:${candidate_ref}"
+  echo "Linnet candidate requested by SSH tag: ${candidate_tag}"
+  exit 0
+fi
+
+require_command gh
+require_command xcrun
+require_command unzip
+
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-release-control.XXXXXX")"
+fetch_stage=""
+cleanup() {
+  local cleanup_path
+  for cleanup_path in "${fetch_stage}" "${work_root}"; do
+    [[ -n "${cleanup_path}" ]] || continue
+    if [[ "${cleanup_path}" == "${TMPDIR:-/tmp}/linnet-release-control."* ||
+          "${cleanup_path}" == */.linnet-release-fetch.* ]]; then
+      rm -rf -- "${cleanup_path}"
+    fi
+  done
+}
+trap cleanup EXIT
+
+if [[ "${command_name}" == fetch ]]; then
+  fetch_root="$(resolve_new_fetch_root "$2")"
+  [[ ! -e "${fetch_root}" && ! -L "${fetch_root}" ]] ||
+    fail "fetch root already exists"
+  fetch_stage="$(mktemp -d "${fetch_root%/*}/.linnet-release-fetch.XXXXXX")"
+  chmod 0700 "${fetch_stage}"
+  candidate_json="${fetch_stage}/candidate-ref.json"
+  artifact_list="${work_root}/artifact-list.json"
+  artifact_json="${fetch_stage}/artifact.json"
+  producer_json="${fetch_stage}/producer-run.json"
+  archive="${fetch_stage}/artifact.zip"
+  release_dir="${fetch_stage}/release"
+
+  gh api --method GET "repos/${repository}/git/ref/tags/${candidate_tag}" \
+    >"${candidate_json}"
+  gh api --method GET "repos/${repository}/actions/artifacts" \
+    -f name="${artifact_name}" -F per_page=100 >"${artifact_list}"
+  artifact_id="$(ruby -rjson -e '
+    document = JSON.parse(File.binread(ARGV.fetch(0)))
+    expected = ARGV.fetch(2)
+    artifacts = document.fetch("artifacts")
+    matches = artifacts.select { |artifact| artifact.fetch("name") == expected }
+    abort "candidate artifact is not unique" unless
+      document.fetch("total_count") == 1 && matches.length == 1
+    artifact = matches.fetch(0)
+    File.binwrite(ARGV.fetch(1), JSON.pretty_generate(artifact) + "\n")
+    puts artifact.fetch("id")
+  ' "${artifact_list}" "${artifact_json}" "${artifact_name}")" ||
+    fail "candidate artifact discovery failed"
+  [[ "${artifact_id}" =~ ^[1-9][0-9]*$ ]] ||
+    fail "candidate artifact ID is invalid"
+  producer_run_id="$(ruby -rjson -e '
+    artifact = JSON.parse(File.binread(ARGV.fetch(0)))
+    value = artifact.dig("workflow_run", "id")
+    abort "candidate producer run ID is invalid" unless
+      value.is_a?(Integer) && value.positive?
+    puts value
+  ' "${artifact_json}")" || fail "candidate producer discovery failed"
+  gh api --method GET "repos/${repository}/actions/runs/${producer_run_id}" \
+    >"${producer_json}"
+  identity="$(validate_provenance \
+    "${candidate_json}" "${artifact_json}" "${producer_json}")" ||
+    fail "candidate provenance is invalid"
+  IFS=$'\t' read -r verified_artifact_id artifact_digest \
+    verified_producer_run_id artifact_size <<<"${identity}"
+  [[ "${verified_artifact_id}" == "${artifact_id}" &&
+     "${verified_producer_run_id}" == "${producer_run_id}" ]] ||
+    fail "candidate discovery changed during fetch"
+
+  gh api --method GET \
+    "repos/${repository}/actions/artifacts/${artifact_id}/zip" >"${archive}"
+  verify_archive_digest "${archive}" "${artifact_digest}"
+  [[ "$(/usr/bin/wc -c <"${archive}" | /usr/bin/tr -d ' ')" -eq "${artifact_size}" ]] ||
+    fail "artifact ZIP size differs from GitHub metadata"
+  extract_archive "${archive}" "${release_dir}"
+  release_tool="${work_root}/linnet-pack"
+  compile_release_tool "${release_tool}"
+  verify_release_directory "${release_dir}" "${release_tool}"
+  mv "${fetch_stage}" "${fetch_root}"
+  fetch_stage=""
+  printf 'fetch_root=%s\nartifact_id=%s\nproducer_run_id=%s\nartifact_digest=%s\n' \
+    "${fetch_root}" "${artifact_id}" "${producer_run_id}" "${artifact_digest}"
+  exit 0
+fi
+
+fetch_root="$(resolve_existing_fetch_root "$2")"
+candidate_json="${fetch_root}/candidate-ref.json"
+artifact_json="${fetch_root}/artifact.json"
+producer_json="${fetch_root}/producer-run.json"
+archive="${fetch_root}/artifact.zip"
+accepted_release="${fetch_root}/release"
+expected_root_inventory="$(printf '%s\n' \
+  artifact.json artifact.zip candidate-ref.json producer-run.json release | LC_ALL=C sort)"
+actual_root_inventory="$(find "${fetch_root}" -mindepth 1 -maxdepth 1 \
+  -exec basename {} \; | LC_ALL=C sort)"
+[[ "${actual_root_inventory}" == "${expected_root_inventory}" ]] ||
+  fail "fetch root inventory is not exact"
+for metadata in "${candidate_json}" "${artifact_json}" "${producer_json}"; do
+  [[ -f "${metadata}" && ! -L "${metadata}" && -s "${metadata}" &&
+     "$(/usr/bin/wc -c <"${metadata}" | /usr/bin/tr -d ' ')" -le 1048576 ]] ||
+    fail "fetch metadata is missing, unsafe, or oversized"
+done
+[[ -d "${accepted_release}" && ! -L "${accepted_release}" ]] ||
+  fail "accepted release directory is unsafe"
+
+local_identity="$(validate_provenance \
+  "${candidate_json}" "${artifact_json}" "${producer_json}")" ||
+  fail "stored candidate provenance is invalid"
+IFS=$'\t' read -r artifact_id artifact_digest producer_run_id artifact_size \
+  <<<"${local_identity}"
+
+remote_candidate_json="${work_root}/candidate-ref.json"
+remote_artifact_json="${work_root}/artifact.json"
+remote_producer_json="${work_root}/producer-run.json"
+gh api --method GET "repos/${repository}/git/ref/tags/${candidate_tag}" \
+  >"${remote_candidate_json}"
+gh api --method GET "repos/${repository}/actions/artifacts/${artifact_id}" \
+  >"${remote_artifact_json}"
+gh api --method GET "repos/${repository}/actions/runs/${producer_run_id}" \
+  >"${remote_producer_json}"
+remote_identity="$(validate_provenance \
+  "${remote_candidate_json}" "${remote_artifact_json}" "${remote_producer_json}")" ||
+  fail "remote candidate provenance is invalid"
+[[ "${remote_identity}" == "${local_identity}" ]] ||
+  fail "stored candidate provenance differs from GitHub"
+[[ "$(remote_ref_value "${candidate_ref}" "candidate request tag")" == "${revision}" ]] ||
+  fail "candidate request tag no longer names the accepted revision"
+
+verify_archive_digest "${archive}" "${artifact_digest}"
+[[ "$(/usr/bin/wc -c <"${archive}" | /usr/bin/tr -d ' ')" -eq "${artifact_size}" ]] ||
+  fail "artifact ZIP size differs from its accepted metadata"
+fresh_release="${work_root}/release"
+extract_archive "${archive}" "${fresh_release}"
+release_tool="${work_root}/linnet-pack"
+compile_release_tool "${release_tool}"
+verify_release_directory "${accepted_release}" "${release_tool}"
+verify_release_directory "${fresh_release}" "${release_tool}"
+compare_release_directories "${accepted_release}" "${fresh_release}"
+
+approval_tag="linnet-publication/v${version}-${revision}-a${artifact_id}"
+approval_ref="refs/tags/${approval_tag}"
+if git -C "${repo_root}" show-ref --verify --quiet "${approval_ref}"; then
+  fail "publication approval tag already exists locally"
+fi
+remote_ref_absent "${approval_ref}" "publication approval tag"
+git -C "${repo_root}" push origin "${revision}:${approval_ref}"
+echo "Linnet publication authorized by SSH tag: ${approval_tag}"

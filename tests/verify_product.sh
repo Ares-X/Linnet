@@ -127,6 +127,7 @@ tests/verify_visible_settings_fixture.sh --ui-test
 tests/verify_swift_units.sh
 tests/verify_package_architecture.sh
 LINNET_LIFECYCLE_CANDIDATE_APP="${app}" tests/verify_package_lifecycle.sh
+tests/verify_release_automation.sh
 tests/verify_publication_owner.sh
 tests/verify_chinese_grammar.sh
 ruby tests/verify_profile_golden.rb

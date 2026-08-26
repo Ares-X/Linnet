@@ -2,8 +2,13 @@ name: Linnet pull request CI
 on: [pull_request]
 permissions:
   contents: read
+
+concurrency:
+  group: linnet-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  quality:
     runs-on: macos-latest
     steps:
       - name: Checkout last commit
@@ -13,11 +18,6 @@ jobs:
           persist-credentials: false
           # Keep all five source submodules on the lock-owning build path.
           submodules: false
-
-      - name: Restore locked build cache
-        uses: ./.github/actions/restore-locked-build-cache
-        with:
-          save: false
 
       - name: Install build tools
         run: scripts/install_ci_build_tools.sh quality
@@ -39,8 +39,50 @@ jobs:
               "${previous}" config/linnet-data-releases.json
           fi
 
-      - name: Build and verify Linnet
-        run: ./action-build.sh release && tests/verify_development.sh
+      - name: Check release and publication owners
+        run: tests/verify_release_automation.sh && tests/verify_publication_owner.sh
+
+  product:
+    needs: quality
+    name: Product ${{ matrix.profile }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [app, swift, rime]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout last commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Restore locked build cache
+        uses: ./.github/actions/restore-locked-build-cache
+        with:
+          save: false
+
+      - name: Install build tools
+        run: scripts/install_ci_build_tools.sh release
+
+      - name: Prepare and verify ${{ matrix.profile }} profile
+        env:
+          LINNET_CI_PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          case "${LINNET_CI_PROFILE}" in
+            app)
+              ./action-build.sh release
+              tests/verify_development.sh app
+              ;;
+            swift|rime)
+              ./action-install.sh
+              tests/verify_development.sh "${LINNET_CI_PROFILE}"
+              ;;
+            *) exit 2 ;;
+          esac
 
       - name: Check Unused Code
+        if: matrix.profile == 'app'
         run: scripts/run_periphery.sh

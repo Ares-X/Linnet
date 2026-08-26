@@ -1,13 +1,15 @@
 # Linnet product acceptance
 
 Current policy: except for the isolated cold-build `data-seed` boundary below,
-one manual workflow run on the exact protected-main revision and its successful
-exact-revision CI owns the candidate. It compiles and CMS-signs once, then a
-passing final `package/verify_publication_artifacts` run uploads exactly eight
-files as one immutable Actions artifact. Real installed Settings/InputMethodKit
-acceptance consumes those bytes before any remote publication mutation. The
-protected `community-publication` Environment approval then authorizes the one
-ordered Core/data/Catalog/public publication chain; the publisher creates the
+one lightweight SSH candidate-intent tag may start the candidate owner only
+after the exact protected-main commit CI succeeds. It compiles and CMS-signs
+once, then a passing final
+`package/verify_publication_artifacts` run uploads exactly eight files as one
+immutable Actions artifact. Real installed Settings/InputMethodKit acceptance
+consumes those bytes before any remote publication mutation. The maintainer then
+uses Git SSH to create one lightweight control tag binding version, full
+revision and artifact ID. That tag authorizes the one ordered
+Core/data/Catalog/public publication chain; the publisher creates the public
 version tag as identity, not as a rebuild trigger. Installation acceptance
 remains separate evidence and must name the exact revision, build, artifact
 ID/digest and file hashes exercised.
@@ -47,9 +49,10 @@ is no longer a candidate or a current product projection.
 `README.md` defines the user-visible product promise; this file records the
 evidence required before those promises may be reported as installed-product
 acceptance. Exact main, embedded release metadata and the immutable artifact ID
-own the staged candidate identity; Environment approval owns publication
-authorization, and the version tag records the resulting public version. This
-document defines evidence levels but does not authorize either mutation.
+own the staged candidate identity; the `linnet-publication/*` SSH control tag
+owns publication authorization, and the version tag records the resulting
+public version. This document defines evidence levels but does not authorize
+either mutation.
 
 Passing source tests, engine smoke tests or package expansion is necessary but
 not sufficient for installed-product acceptance. Each V/I claim below requires
@@ -96,12 +99,14 @@ all non-install blockers are closed.
   the corresponding V/I claim. P2 findings require an explicit product
   decision and must be listed in the release notes.
 - Core/data assets, stable Catalog promotion and the public `Linnet.pkg` must
-  come from the exact current main revision, its successful CI run and the
-  immutable artifact produced after the final eight-artifact verifier. The
-  same artifact must pass installed acceptance before one
-  `community-publication` approval releases any of those remote mutations. A
-  later source revision requires a new artifact, CI and installed acceptance
-  before a new tag or channel update.
+  come from a candidate created while its revision is exact current `main`,
+  after that revision's successful CI and the final eight-artifact verifier.
+  Once uploaded, the candidate tag, artifact ID/digest, producer run and exact
+  eight-file bytes freeze that candidate even if `main` later advances. The
+  same artifact must pass installed acceptance before one SSH control tag bound
+  to its exact version, full revision and artifact ID releases any of those
+  remote mutations. A later source revision requires a new artifact, CI,
+  installed acceptance and control tag before a new channel update.
 - The sole bootstrap exception is `data-seed-N`: an exact temporary seed tag
   plus the same final eight-artifact verifier may publish only the five data
   prerelease assets needed by a future cold build. It cannot call `catalog`,
@@ -109,11 +114,12 @@ all non-install blockers are closed.
   and CI gates must later reaccept the same bytes before installed acceptance.
 - No validation step may push, create a tag, publish a GitHub Release, weaken
   macOS security settings or delete user data.
-- Manual release-CI dispatch is the sole candidate build/sign owner and is
-  restricted to protected main after exact CI. It uses the fixed community P12
-  only in an isolated temporary Keychain, uploads the immutable artifact, and
-  deletes all temporary secret files. Later stage/public jobs have no signing
-  secret and may only download and reverify that artifact ID.
+- One non-force SSH candidate-intent tag starts the sole candidate build/sign
+  owner after exact protected-main commit CI succeeds. Ordinary main commits
+  do not build or sign a candidate. It uses the fixed community P12 only in an
+  isolated temporary Keychain, uploads the immutable artifact, and deletes all
+  temporary secret files. The SSH-authorized publication job has no signing
+  secret and may only download and reverify that exact artifact ID.
 
 ### Data-update authority subtraction
 
@@ -123,7 +129,7 @@ all non-install blockers are closed.
 | Settings/Registry verification interpretations | Settings container check + Registry pack check + Settings identity recheck (3) | Registry install call (1) |
 | local package dependencies on external data roots | 1 | 0 |
 | App-revision fields in language-data handoffs | 1 | 0 |
-| public Latest authorization owners | machine record + version tag (2) | protected Environment approval (1) |
+| public Latest authorization owners | machine record + version tag (2) | revision + artifact ID SSH control tag (1) |
 | stable Catalog promotion owners | public-release side effect (1) | explicit catalog stage (1) |
 
 Retained checks protect distinct boundaries: direct canonical GitHub HTTPS owns
@@ -131,6 +137,30 @@ Catalog origin; sequence floors prevent replay; Catalog byte count/SHA-256
 bind the downloaded container; manifest/path/file hashes protect extraction;
 Core/ABI checks protect runtime compatibility; atomic activation protects live
 state. No retained check re-signs or independently reconstructs pack identity.
+
+### CI and release-control authority subtraction
+
+| Count | Before | After |
+| --- | ---: | ---: |
+| full product gates for one feature revision before merge | branch push + PR (2) | PR only (1) |
+| commit-CI product execution | one serial composite (1) | App/Swift/Rime profiles in parallel under one workflow owner (3 profiles, 1 authority) |
+| upstream Git fetches with the exact locked commit already cached | one per source (all) | 0 |
+| native Rime compilations on a verified exact cache hit | 1 | 0 |
+| cache writers per main run | 1 | native Rime profile only (1) |
+| cache transport facts | locked source/generated data (1) | locked source/generated data + compiled native runtime (2 distinct owners) |
+| per-release GitHub webpage controls | dispatch + protected web approval (2) | 0 |
+| candidate build/sign owners | 1 | SSH candidate intent (1) |
+| publication authorization owners | protected web approval (1) | revision + artifact ID SSH tag (1) |
+| publisher qualification paths | current main or public version tag (2) | SSH publication tag (1) |
+| publication artifact downloads | stage + stable jobs (2) | one publication job (1) |
+| publication jobs | stage + stable (2) | ordered publisher (1) |
+
+The second cache path owns a genuinely new transport fact: verified compiled
+runtime bytes. It does not own source identity and cannot merge with a partial
+live runtime; the lock, source commits, patches and runtime fingerprint remain
+the sole product authority. Candidate and publication tags protect different
+mutation boundaries: the first may build/sign and upload only, while the second
+may publish only the exact artifact that passed installed acceptance.
 
 ## Core language-experience gates
 
@@ -201,7 +231,7 @@ locale. Localization completeness alone is not visual proof.
 | J17 | keyboard navigation, focus order, labels, VoiceOver and reduced-motion behavior | V, I | pending |
 | J18 | cold start, first key, sustained typing, memory, disk and p95/p99 latency | E, P, I | The native runtime gate is the threshold owner and requires p95 ≤ 5 ms and p99 ≤ 15 ms. A frozen-candidate report must retain its actual measurements; component PASS alone is not P/I evidence. Retired UAT9 historically measured 458,736,785 compressed bytes and 885,915,895 logical payload bytes. The new LTS identity and current source require a new package size projection; installed cold start, APFS usage and first-run cache growth remain I pending. |
 | J19 | empty, loading, download, validation, disk-full, conflict and rollback error states | C, V, I | partial headless coverage; visible recovery audit pending |
-| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | The candidate owner accepts one exact main revision only after successful CI, signs once, and uploads exactly eight verifier-approved files as one immutable artifact. Installation consumes that artifact ID before any channel mutation. Only protected Environment approval may release `stage-update-channels`; its Core/data/Catalog publications then unlock the dependent final job to route the unchanged `Linnet.pkg` to public Release / Latest and create the version tag. Staged remote-byte and final Release-page evidence remain distinct R rows. |
+| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | The candidate owner accepts one exact main revision only after successful CI, signs once, and uploads exactly eight verifier-approved files as one immutable artifact. Installation consumes that artifact ID before any channel mutation. Only the SSH control tag binding version, full revision and artifact ID may start `publish-approved`; it downloads and revalidates once before the existing publisher routes Core/data/Catalog and the unchanged `Linnet.pkg` to public Release / Latest. Staged remote-byte and final Release-page evidence remain distinct R rows. |
 
 ## Finding ledger
 
@@ -217,8 +247,8 @@ locale. Localization completeness alone is not visual proof.
 | closed | P1 | The Host lifecycle CLI discarded InputMethodKit failures and postinstall treated the Installer service as the user's Text Input UI session, so transient enable/selection results could be reported as success without adding Linnet to the user's persistent input-source list. | `SquirrelInstaller` TIS boundary and Host CLI exit projection | registration, explicit enablement, selection and disablement retain typed failures. Complete registers and requests enablement but never selects. Core accepts only its package-bound prior-state tuple and may conditionally restore Linnet within its single refresh transition; it cannot enable or accept an alternate target identifier. Uninstall leaves source retirement to the required fresh login session. |
 | closed | P0 | During exact `83e7adb` default-uninstall UAT, the old App and generated data were removed but the preserved `linnet_zh.userdb` rotated its LevelDB log and manifest after the uninstaller invoked `--disable-input-source`; the pre-action and post-action byte manifests differed while the already-quiesced Host had no pending user input. | default uninstaller lifecycle sequence | remove the TIS disable transition from uninstall, retain the exact Host/Settings quit as the only pre-delete product action, and let the already-required fresh login retire the absent source; the real default-uninstall row must repeat from restored pre-action bytes and prove UserData, Backups and Transactions byte-identical before installation can pass |
 | closed | P1 | Caps Lock lacked an automated key-event proof across Chinese and Smart English. | input-event engine acceptance | `rime_smoke_test` now proves Caps Lock down/type/up enters and leaves raw ASCII in both schemas; installed Terminal/password-field coverage remains in J05 |
-| gate | P1 | Every publication candidate requires a fresh revision-bound Core/complete/uninstaller projection after source, LTS identity or Settings bytes change. | language-data release identity and immutable workflow artifact | before any pre-public mutation, require exact current main, successful exact-revision CI and one immutable eight-file artifact accepted by `package/verify_publication_artifacts`; before Environment approval, also pass installed Settings/InputMethodKit acceptance on those same bytes. Full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity remain candidate gates. |
-| closed | P1 | The release workflow could publish Core/data and advance the stable Catalog before the same immutable CI artifact completed installed UAT. | single `community-publication` mutation boundary | the sole Environment approval now gates `stage-update-channels`; before approval the workflow may only build, sign, verify and upload the immutable artifact, and after approval the existing publisher performs the ordered Core/data/Catalog/public chain |
+| gate | P1 | Every publication candidate requires a fresh revision-bound Core/complete/uninstaller projection after source, LTS identity or Settings bytes change. | language-data release identity and immutable workflow artifact | before candidate build/sign, require exact current main and successful exact-revision CI; then freeze one immutable eight-file artifact accepted by `package/verify_publication_artifacts`. Later main movement is non-authoritative for that frozen candidate. Before pushing its SSH control tag, pass installed Settings/InputMethodKit acceptance on those same bytes. Full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity remain candidate gates. |
+| closed | P1 | The release workflow could publish Core/data and advance the stable Catalog before the same immutable CI artifact completed installed UAT. | single revision + artifact ID SSH authorization boundary | before the control tag exists, the workflow may only build, sign, verify and upload the immutable artifact; after installed UAT, the one control tag starts the existing publisher's ordered Core/data/Catalog/public chain without a rebuild |
 | closed | P2 | Candidate labels/opacity/radius, fuzzy-pinyin policy, restore defaults and reviewed advanced overrides are not Beta controls. The former design draft over-promised them; font and theme presets are implemented. | typed settings document and deterministic projection renderer | retired controls remain outside the Beta contract; any future addition requires its own typed owner and product evidence |
 | closed | P1 | Settings previously shipped partial Traditional-Chinese strings beside otherwise English fallback, and dynamic status classified any Chinese locale as Simplified Chinese. | Settings bundle string catalog and typed presentation locale | Beta now supports exactly English and Simplified Chinese; every entry has reviewed Simplified Chinese, unsupported Chinese scripts uniformly fall back to English, and structural/component gates reject a mixed third locale |
 | superseded | P1 | Earlier packaging added private LaunchServices unregister calls for scratch Apps. The later upstream-alignment audit found that mature Squirrel/Hallelujah package flows do not create this cleanup owner. | ordinary temporary work-root cleanup plus macOS registration lifecycle | private `lsregister` calls are retired; current package/source guards require build products never to become selectable input sources, while actual installed registration remains J02/J16 product evidence |
@@ -245,16 +275,17 @@ Any future installed-product acceptance record must name:
 - draft release asset and download/update verification for R evidence;
 - every accepted residual P2 risk and its user-visible mitigation.
 
-The manual protected-main workflow creates the signing handoff only after exact
-main CI succeeds. Its first job assembles all eight product assets and signs
-exactly once; the immutable artifact ID/digest and per-file hashes identify the
-only installable candidate. Later jobs download and reverify that artifact to
-prepare the waiting publication handoff. Installation acceptance records those
-same identities but does not itself authorize publication. Protected
-`community-publication` approval releases `stage-update-channels`, which downloads
-the same artifact and publishes Core/data plus the stable Catalog; the dependent
-final job revalidates the same bytes, uploads `Linnet.pkg`, and creates the version
-tag. An existing data or Core release must
+The maintainer creates the signing handoff with `scripts/release-control request`
+only after exact main CI succeeds. Its candidate job assembles all eight product
+assets and signs exactly once; the immutable artifact ID/digest and per-file
+hashes identify the only installable candidate. Installation acceptance records
+those same identities but does not itself authorize publication. The maintainer
+uses `scripts/release-control fetch` to materialize the digest-bound UAT root,
+then runs `scripts/release-control approve` in the exact clean checkout; its one
+non-force SSH tag binds version, revision and artifact ID. `publish-approved`
+revalidates that tag and producer, downloads the same artifact once, then the
+existing publisher uploads Core/data, advances the stable Catalog, uploads
+`Linnet.pkg`, and creates the public version tag. An existing data or Core release must
 be a prerelease with the same verified bytes; an existing stable product release
 must retain the exact verified asset set. Any extra or differing asset is a hard
 failure, while a byte-identical planned subset is the only retry state.
