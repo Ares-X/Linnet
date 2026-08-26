@@ -44,8 +44,11 @@ struct SettingsRootView: View {
     VStack(spacing: 0) {
       conflictNotice
       tabs
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       Divider()
       footer
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
     }
     .task {
       model.refreshBackups()

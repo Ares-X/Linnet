@@ -2,11 +2,18 @@ import Darwin
 import XCTest
 
 final class SettingsUITests: XCTestCase {
+  private static var suiteHasFailed = false
   private let isolatedBundleIdentifier =
     "io.github.ares-x.inputmethod.Linnet.settings-ui-uat.settings"
 
   override func setUpWithError() throws {
+    try XCTSkipIf(Self.suiteHasFailed, "Skipped after the first Settings UI failure")
     continueAfterFailure = false
+  }
+
+  override func record(_ issue: XCTIssue) {
+    Self.suiteHasFailed = true
+    super.record(issue)
   }
 
   @MainActor
@@ -324,6 +331,10 @@ final class SettingsUITests: XCTestCase {
 
     let interfaceLanguage = app.popUpButtons["settings.interfaceLanguage"]
     XCTAssertTrue(interfaceLanguage.exists)
+    XCTAssertTrue(
+      app.windows.firstMatch.frame.contains(interfaceLanguage.frame),
+      "Interface language is outside the Settings window: "
+        + "window=\(app.windows.firstMatch.frame), control=\(interfaceLanguage.frame)")
     XCTAssertTrue(interfaceLanguage.isHittable, "Interface language is outside the visible footer")
     selectEachPopUpOption([
       "Follow System",

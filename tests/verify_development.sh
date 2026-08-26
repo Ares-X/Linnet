@@ -105,6 +105,14 @@ verify_inputs_predate() {
   tests/verify_runtime_footprint.sh
   LINNET_LIFECYCLE_CANDIDATE_APP="${host_app}" tests/verify_package_lifecycle.sh
   tests/verify_visible_settings_fixture.sh --verify
+  tests/verify_release_metadata.sh
+  tests/verify_package_architecture.sh
+  make --no-print-directory english-data-generator
+  tests/verify_english_data_projection.sh
+  ruby tests/generate_m2_fixtures.rb --check
+  APP_PATH="${host_app}" LANGUAGE_DATA_ROOT="${repo_root}/data/plum" \
+    tests/verify_input_process_offline.sh
+  scripts/build-privacy scan "${host_app}"
 fi
 
 if [[ "${run_swift}" -eq 1 ]]; then
@@ -112,10 +120,16 @@ if [[ "${run_swift}" -eq 1 ]]; then
 fi
 
 if [[ "${run_rime}" -eq 1 ]]; then
+  tests/verify_lua_lifetime.sh
+  tests/verify_data_release_baseline.sh
+  tests/verify_chinese_upstream_workflow.sh
+  ruby scripts/upstream-sync verify
   tests/verify_chinese_source_projection.sh
-  tests/verify_english_data_projection.sh
+  tests/verify_locked_release_asset.sh
+  tests/verify_chinese_grammar.sh
+  ruby tests/verify_profile_golden.rb
+  tests/verify_chinese_learning_policy.sh
   tests/verify_rime_runtime.sh
-  tests/verify_rime_runtime.sh --lifecycle-raw-exit-probe
 fi
 
 echo "Linnet development gate (${profile}): PASS (no signing or installation)"

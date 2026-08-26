@@ -14,6 +14,16 @@ fail() {
   exit 1
 }
 
+run_phase() {
+  local label="$1"
+  local started="${SECONDS}"
+  shift
+  printf '==> Candidate verification: %s\n' "${label}"
+  "$@"
+  printf '<== Candidate verification: PASS in %ss: %s\n' \
+    "$((SECONDS - started))" "${label}"
+}
+
 assert_clean_checkout() {
   local status
   status="$(git status --porcelain=v1 --untracked-files=all)"
@@ -34,7 +44,7 @@ settings="${repo_root}/build/Build/Products/Release/Settings.app"
 
 frozen_revision="$(git rev-parse --verify HEAD^{commit})"
 assert_clean_checkout
-tests/verify_candidate_native_idle.sh
+run_phase "native process isolation" tests/verify_candidate_native_idle.sh
 signing_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app}/Contents/Info.plist")"
 [[ "${signing_profile}" == community-cms ]] ||
@@ -113,29 +123,14 @@ for retired in ComponentInputModeDict PrimaryInputModeIdentifier; do
   ! plutil -extract "${retired}" raw -o - "${info}" >/dev/null 2>&1
 done
 
-tests/verify_runtime_footprint.sh
-tests/verify_lua_lifetime.sh
-tests/verify_release_metadata.sh
-tests/verify_data_release_baseline.sh
-tests/verify_chinese_upstream_workflow.sh
-ruby scripts/upstream-sync verify
-tests/verify_chinese_source_projection.sh
-tests/verify_locked_release_asset.sh
-tests/verify_english_data_projection.sh
-ruby tests/generate_m2_fixtures.rb --check
-tests/verify_visible_settings_fixture.sh --ui-test
-tests/verify_swift_units.sh
-tests/verify_package_architecture.sh
-LINNET_LIFECYCLE_CANDIDATE_APP="${app}" tests/verify_package_lifecycle.sh
-tests/verify_release_automation.sh
-tests/verify_publication_owner.sh
-tests/verify_chinese_grammar.sh
-ruby tests/verify_profile_golden.rb
-tests/verify_chinese_learning_policy.sh
-tests/verify_rime_runtime.sh
-APP_PATH="${app}" LANGUAGE_DATA_ROOT="${repo_root}/data/plum" \
+run_phase "fixed-home signed Settings bundle" \
+  tests/verify_visible_settings_fixture.sh --verify
+run_phase "signed package lifecycle" env \
+  LINNET_LIFECYCLE_CANDIDATE_APP="${app}" tests/verify_package_lifecycle.sh
+run_phase "offline candidate process" env \
+  APP_PATH="${app}" LANGUAGE_DATA_ROOT="${repo_root}/data/plum" \
   tests/verify_input_process_offline.sh
-scripts/build-privacy scan "${app}"
+run_phase "candidate privacy boundary" scripts/build-privacy scan "${app}"
 
 snapshot_reports "${scratch}/reports.after"
 comm -13 "${scratch}/reports.before" "${scratch}/reports.after" \
@@ -154,4 +149,4 @@ final_candidate_identity="$(scripts/linnet-code-identity verify-product \
 [[ "${final_candidate_identity}" == "${candidate_identity}" ]] ||
   fail "finalized App identity changed during product acceptance"
 git diff --check
-echo "verify_product: PASS (C/E + candidate-App P evidence; V/I/R NOT_EXERCISED; zero new crashes)"
+echo "verify_product: PASS (exact-main C/E reused; candidate-byte P evidence; V/I/R NOT_EXERCISED; zero new crashes)"

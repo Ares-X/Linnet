@@ -7,10 +7,24 @@ cd "${repo_root}"
 
 generator=build/linnet-english-data-generator
 cache=build/linnet-english-cache
+installer=action-install.sh
 [[ -x "${generator}" && "$(lipo -archs "${generator}")" == arm64 ]] || {
   echo "verify_english_data_projection: native generator is missing" >&2
   exit 1
 }
+
+ruby -e '
+  source = File.binread(ARGV.fetch(0))
+  compile = %q{"${linnet_make}" english-data-generator}
+  miss = %q{else
+    rm -rf -- "${english_cache}"}
+  execute = %q{build/linnet-english-data-generator \\}
+  abort "English generator compile owner is not exact" unless
+    source.scan(compile).length == 1 && source.scan(execute).length == 1
+  abort "English generator is compiled on a warm cache hit" unless
+    source.index(miss) < source.index(compile) &&
+      source.index(compile) < source.index(execute)
+' "${installer}"
 expected=$'linnet.english-data-manifest.json\nlinnet.smart-index.tsv\nlinnet.smart.db\nlinnet_en.dict.yaml'
 actual="$(find "${cache}" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)"
 [[ "${actual}" == "${expected}" ]] || {

@@ -11,17 +11,23 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
-[[ "$#" -le 1 ]] || {
-  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test]" >&2
+[[ "$#" -le 2 ]] || {
+  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name]]" >&2
   exit 2
 }
 mode="${1:---verify}"
+ui_test_name="${2:-}"
 run_ui_tests=false
 case "${mode}" in
-  --verify) ;;
+  --verify)
+    [[ -z "${ui_test_name}" ]] || {
+      echo "--verify does not accept a UI test name" >&2
+      exit 2
+    }
+    ;;
   --ui-test) run_ui_tests=true ;;
   *)
-    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test]" >&2
+    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name]]" >&2
     exit 2
     ;;
 esac
@@ -31,6 +37,11 @@ fail() {
   exit 1
 }
 
+if [[ "${run_ui_tests}" == true && "${CI:-}" != true &&
+      "${LINNET_ISOLATED_UI_TEST_DESKTOP:-}" != 1 ]]; then
+  fail "Settings UI tests require a CI runner or an explicitly isolated macOS desktop"
+fi
+
 uat_host_identifier="io.github.ares-x.inputmethod.Linnet.settings-ui-uat"
 uat_settings_identifier="${uat_host_identifier}.settings"
 uat_test_identifier="${uat_host_identifier}.SettingsUITests"
@@ -38,6 +49,16 @@ uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
 uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
 xcode_user_name="$(id -un)"
 settings_ui_source="tests/SettingsUITests/SettingsUITests.swift"
+only_testing=()
+if [[ -n "${ui_test_name}" ]]; then
+  [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+$ ]] ||
+    fail "invalid Settings UI test name: ${ui_test_name}"
+  rg -q "^[[:space:]]*func ${ui_test_name}\\(\\) throws \\{" \
+    "${settings_ui_source}" || fail "unknown Settings UI test: ${ui_test_name}"
+  only_testing=(
+    "-only-testing:SettingsUITests/SettingsUITests/${ui_test_name}"
+  )
+fi
 xcode_generated_paths=(
   "${repo_root}/Linnet.xcodeproj/project.xcworkspace/xcuserdata/${xcode_user_name}.xcuserdatad/UserInterfaceState.xcuserstate"
   "${repo_root}/Linnet.xcodeproj/xcuserdata/${xcode_user_name}.xcuserdatad/xcschemes/xcschememanagement.plist"
@@ -58,6 +79,9 @@ if /usr/bin/grep -Eq \
   "${settings_ui_source}"; then
   fail "SettingsUITests restored a retired scroll helper or segmented fallback"
 fi
+rg -Fq 'override func record(_ issue: XCTIssue)' "${settings_ui_source}" &&
+  rg -Fq 'try XCTSkipIf(Self.suiteHasFailed' "${settings_ui_source}" ||
+  fail "SettingsUITests lost suite-level fail-fast behavior"
 
 if [[ "${run_ui_tests}" == true ]] &&
   { [[ -e "${uat_home}" ]] || [[ -L "${uat_home}" ]]; }; then
@@ -380,12 +404,18 @@ HOME="${isolated_home}" CFFIXED_USER_HOME="${isolated_home}" TMPDIR="${isolated_
   fail "fixed-home probe changed protected real-user Settings content"
 
 if [[ "${run_ui_tests}" == true ]]; then
+  if [[ -n "${ui_test_name}" ]]; then
+    echo "Visible Settings focused UI test: ${ui_test_name}"
+  else
+    echo "Visible Settings full UI suite: fail-fast after the first failed test"
+  fi
   xcodebuild -project Linnet.xcodeproj -scheme SettingsUITests \
     -configuration Debug -destination 'platform=macOS' \
     -derivedDataPath "${fixture}/DerivedData" \
     -resultBundlePath "${fixture}/SettingsUITests.xcresult" \
     LINNET_BUNDLE_IDENTIFIER="${uat_host_identifier}" \
     CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+    "${only_testing[@]}" \
     test
   [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||
     fail "Settings UI tests changed a protected real-user path"

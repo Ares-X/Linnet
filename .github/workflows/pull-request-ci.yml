@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [app, swift, rime]
+        profile: [app, settings-ui, swift, rime]
     runs-on: macos-latest
     steps:
       - name: Checkout last commit
@@ -75,6 +75,10 @@ jobs:
             app)
               ./action-build.sh release
               tests/verify_development.sh app
+              ;;
+            settings-ui)
+              ./action-build.sh release
+              tests/verify_visible_settings_fixture.sh --ui-test
               ;;
             swift|rime)
               ./action-install.sh

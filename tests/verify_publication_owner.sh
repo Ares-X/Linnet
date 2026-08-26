@@ -1113,6 +1113,7 @@ ruby -e '
   publisher = File.read(ARGV.fetch(4))
   runtime_builder = File.read(ARGV.fetch(5))
   development_gate = File.read(ARGV.fetch(6))
+  product_gate = File.read(ARGV.fetch(7))
   local_cache = "./.github/actions/restore-locked-build-cache"
   pinned_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
   pinned_restore = "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25"
@@ -1149,13 +1150,15 @@ ruby -e '
     pull_request.scan(/^\s*cancel-in-progress:\s*true\s*$/).size == 1
   [commit, pull_request].each do |ci|
     abort unless ci.scan(/^\s*needs:\s*quality\s*$/).size == 1
-    abort unless ci.scan(/^\s*profile:\s*\[app, swift, rime\]\s*$/).size == 1
+    abort unless ci.scan(/^\s*profile:\s*\[app, settings-ui, swift, rime\]\s*$/).size == 1
     abort unless ci.scan(/^\s*fail-fast:\s*false\s*$/).size == 1
     abort unless ci.scan(%r{tests/verify_release_automation\.sh && tests/verify_publication_owner\.sh}).size == 1
-    abort unless ci.scan(/^\s*\.\/action-build\.sh release\s*$/).size == 1
+    abort unless ci.scan(/^\s*\.\/action-build\.sh release\s*$/).size == 2
     abort unless ci.scan(/^\s*\.\/action-install\.sh\s*$/).size == 1
     abort unless ci.scan(%r{tests/verify_development\.sh app}).size == 1
     abort unless ci.scan(%r{tests/verify_development\.sh "\$\{LINNET_CI_PROFILE\}"}).size == 1
+    abort unless ci.scan(%r{tests/verify_visible_settings_fixture\.sh --ui-test}).size == 1
+    abort unless ci.scan(/^\s*settings-ui\)\s*$/).size == 1
   end
   abort unless development_gate.include?("[all|app|swift|rime]")
   abort unless development_gate.scan(/^if \[\[ "\$\{run_app\}" -eq 1 \]\]; then$/).size == 1
@@ -1177,14 +1180,27 @@ ruby -e '
       "tests/verify_runtime_footprint.sh" => 1,
       "LINNET_LIFECYCLE_CANDIDATE_APP=" => 1,
       "tests/verify_package_lifecycle.sh" => 1,
-      "tests/verify_visible_settings_fixture.sh" => 1
+      "tests/verify_visible_settings_fixture.sh --verify" => 1,
+      "tests/verify_release_metadata.sh" => 1,
+      "tests/verify_package_architecture.sh" => 1,
+      "english-data-generator" => 1,
+      "tests/verify_english_data_projection.sh" => 1,
+      "ruby tests/generate_m2_fixtures.rb --check" => 1,
+      "tests/verify_input_process_offline.sh" => 1,
+      "scripts/build-privacy scan" => 1
     },
     swift: { "tests/verify_swift_units.sh" => 1 },
     rime: {
+      "tests/verify_lua_lifetime.sh" => 1,
+      "tests/verify_data_release_baseline.sh" => 1,
+      "tests/verify_chinese_upstream_workflow.sh" => 1,
+      "ruby scripts/upstream-sync verify" => 1,
       "tests/verify_chinese_source_projection.sh" => 1,
-      "tests/verify_english_data_projection.sh" => 1,
-      "tests/verify_rime_runtime.sh" => 2,
-      "--lifecycle-raw-exit-probe" => 1
+      "tests/verify_locked_release_asset.sh" => 1,
+      "tests/verify_chinese_grammar.sh" => 1,
+      "ruby tests/verify_profile_golden.rb" => 1,
+      "tests/verify_chinese_learning_policy.sh" => 1,
+      "tests/verify_rime_runtime.sh" => 1
     }
   }
   required_profile_commands.each do |profile, markers|
@@ -1197,6 +1213,32 @@ ruby -e '
       abort unless development_gate.scan(marker).size == count
     end
   end
+  retired_candidate_source_gates = [
+    "tests/verify_runtime_footprint.sh",
+    "tests/verify_lua_lifetime.sh",
+    "tests/verify_release_metadata.sh",
+    "tests/verify_data_release_baseline.sh",
+    "tests/verify_chinese_upstream_workflow.sh",
+    "ruby scripts/upstream-sync verify",
+    "tests/verify_chinese_source_projection.sh",
+    "tests/verify_locked_release_asset.sh",
+    "tests/verify_english_data_projection.sh",
+    "ruby tests/generate_m2_fixtures.rb --check",
+    "tests/verify_swift_units.sh",
+    "tests/verify_package_architecture.sh",
+    "tests/verify_release_automation.sh",
+    "tests/verify_publication_owner.sh",
+    "tests/verify_chinese_grammar.sh",
+    "ruby tests/verify_profile_golden.rb",
+    "tests/verify_chinese_learning_policy.sh",
+    "tests/verify_rime_runtime.sh"
+  ]
+  abort if retired_candidate_source_gates.any? { |gate| product_gate.include?(gate) }
+  abort unless product_gate.scan(%r{tests/verify_visible_settings_fixture\.sh --verify}).size == 1
+  abort if product_gate.include?("--ui-test")
+  abort unless product_gate.scan(/LINNET_LIFECYCLE_CANDIDATE_APP=/).size == 1
+  abort unless product_gate.scan(%r{tests/verify_input_process_offline\.sh}).size == 1
+  abort unless product_gate.scan(%r{scripts/build-privacy scan}).size == 1
   abort unless workflow.scan(/^\s*group:\s*linnet-release-publication\s*$/).size == 1
   abort unless cache.scan(/^\s*key:\s*linnet-build-v2-/).size == 2
   abort unless cache.scan(/^\s*key:\s*linnet-rime-runtime-v2-/).size == 2
@@ -1296,7 +1338,8 @@ ruby -e '
     workflow.match?(/notary|Developer ID|publication_plan|community-adhoc/)
 ' "${workflow}" "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" \
     "${publisher}" "${repo_root}/scripts/build-rime-runtime" \
-    "${repo_root}/tests/verify_development.sh" ||
+    "${repo_root}/tests/verify_development.sh" \
+    "${repo_root}/tests/verify_product.sh" ||
   fail "immutable-candidate community workflow is incomplete"
 
 echo "Linnet unsigned PKG / stable CMS App publication owner: PASS"
