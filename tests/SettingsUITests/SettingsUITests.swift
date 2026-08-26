@@ -218,7 +218,8 @@ final class SettingsUITests: XCTestCase {
 
     clickTab("Data", in: app)
 
-    let checkAgain = try visibleButton("Check Again", in: app)
+    let checkAgain = app.buttons["Check Again"]
+    try reveal(checkAgain, named: "Check Again", in: app)
     try waitUntilEnabled(checkAgain, timeout: 30)
     checkAgain.click()
     try waitUntilEnabled(checkAgain, timeout: 30)
@@ -309,7 +310,8 @@ final class SettingsUITests: XCTestCase {
       try cancelConfirmation("Restore this verified backup?", in: app)
     }
 
-    let refresh = try visibleButton("Refresh", in: app)
+    let refresh = app.buttons["Refresh"]
+    try reveal(refresh, named: "Refresh", in: app)
     refresh.click()
     try waitUntilEnabled(refresh, timeout: 10)
     try openAndCancelPanel(button: "Save…", title: "Export Linnet Diagnostics", in: app)
@@ -438,7 +440,8 @@ final class SettingsUITests: XCTestCase {
     title: String,
     in app: XCUIApplication
   ) throws {
-    let button = try visibleButton(label, in: app)
+    let button = app.buttons[label]
+    try reveal(button, named: label, in: app)
     try waitUntilEnabled(button, timeout: 10)
     button.click()
     let panel = app.dialogs.firstMatch
@@ -458,7 +461,8 @@ final class SettingsUITests: XCTestCase {
     value: String,
     in app: XCUIApplication
   ) throws {
-    let add = try visibleButton(addLabel, in: app)
+    let add = app.buttons[addLabel]
+    try reveal(add, named: addLabel, in: app)
     let fields = app.textFields.matching(NSPredicate(
       format: "placeholderValue == %@ OR label == %@ OR identifier == %@",
       fieldLabel,
@@ -507,7 +511,8 @@ final class SettingsUITests: XCTestCase {
     value: String,
     in app: XCUIApplication
   ) throws {
-    let add = try visibleButton(addLabel, in: app)
+    let add = app.buttons[addLabel]
+    try reveal(add, named: addLabel, in: app)
     let fields = app.textFields.matching(NSPredicate(
       format: "placeholderValue == %@ OR label == %@ OR identifier == %@",
       fieldLabel,
@@ -529,23 +534,6 @@ final class SettingsUITests: XCTestCase {
     app.typeKey(.tab, modifierFlags: [])
     XCTAssertNotEqual(app.state, .notRunning)
     XCTAssertEqual(fields.count, originalFieldCount)
-  }
-
-  @MainActor
-  private func visibleButton(
-    _ label: String,
-    in app: XCUIApplication
-  ) throws -> XCUIElement {
-    let button = app.buttons[label]
-    let scrollView = app.scrollViews["settings.page.scroll"]
-    for _ in 0..<12 {
-      if button.exists, button.isHittable { return button }
-      if scrollView.exists {
-        scrollView.scroll(byDeltaX: 0, deltaY: 600)
-      }
-    }
-    XCTFail("Settings button is unavailable: \(label)")
-    return button
   }
 
   @MainActor
@@ -574,28 +562,8 @@ final class SettingsUITests: XCTestCase {
   ) throws {
     let container = app.descendants(matching: .any)[identifier]
     for option in options {
-      let candidates = [
-        container.descendants(matching: .radioButton)[option],
-        container.descendants(matching: .button)[option],
-      ]
-      var selected: XCUIElement?
-      let scrollView = app.scrollViews["settings.page.scroll"]
-      for deltaY in [-600.0, 600.0] {
-        for _ in 0..<12 {
-          if let candidate = candidates.first(where: { $0.exists && $0.isHittable }) {
-            selected = candidate
-            break
-          }
-          if scrollView.exists {
-            scrollView.scroll(byDeltaX: 0, deltaY: deltaY)
-          }
-        }
-        if selected != nil { break }
-      }
-      guard let selected else {
-        XCTFail("Missing segmented option \(option) in \(identifier)")
-        return
-      }
+      let selected = container.descendants(matching: .radioButton)[option]
+      try reveal(selected, named: option, in: app)
       selected.click()
       XCTAssertEqual(String(describing: selected.value), "Optional(1)")
       XCTAssertNotEqual(app.state, .notRunning)

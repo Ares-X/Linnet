@@ -37,10 +37,27 @@ uat_test_identifier="${uat_host_identifier}.SettingsUITests"
 uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
 uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
 xcode_user_name="$(id -un)"
+settings_ui_source="tests/SettingsUITests/SettingsUITests.swift"
 xcode_generated_paths=(
   "${repo_root}/Linnet.xcodeproj/project.xcworkspace/xcuserdata/${xcode_user_name}.xcuserdatad/UserInterfaceState.xcuserstate"
   "${repo_root}/Linnet.xcodeproj/xcuserdata/${xcode_user_name}.xcuserdatad/xcschemes/xcschememanagement.plist"
 )
+
+scroll_owners="$(awk '
+  /func [A-Za-z0-9_]+\(/ {
+    owner = $0
+    sub(/^.*func /, "", owner)
+    sub(/\(.*/, "", owner)
+  }
+  /\.scroll\(/ { print owner }
+' "${settings_ui_source}" | sort -u)"
+[[ "${scroll_owners}" == reveal ]] ||
+  fail "SettingsUITests must keep reveal as its only manual scroll owner"
+if /usr/bin/grep -Eq \
+  'func visibleButton|descendants\(matching: \.button\)\[option\]' \
+  "${settings_ui_source}"; then
+  fail "SettingsUITests restored a retired scroll helper or segmented fallback"
+fi
 
 if [[ "${run_ui_tests}" == true ]] &&
   { [[ -e "${uat_home}" ]] || [[ -L "${uat_home}" ]]; }; then
@@ -48,7 +65,7 @@ if [[ "${run_ui_tests}" == true ]] &&
 fi
 if [[ "${run_ui_tests}" == true ]] &&
   ! /usr/bin/grep -Fq "\"${uat_settings_identifier}\"" \
-    tests/SettingsUITests/SettingsUITests.swift; then
+    "${settings_ui_source}"; then
   fail "SettingsUITests does not require the isolated UAT preference domain"
 fi
 if [[ "${run_ui_tests}" == true ]]; then
