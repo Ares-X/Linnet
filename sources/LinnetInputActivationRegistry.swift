@@ -62,12 +62,12 @@ final class LinnetInputActivationRegistry {
     client: AnyObject,
     retire: (ClosedActivation) -> Void
   ) -> Token? {
-    guard admission == .accepting, !retiresActivation else { return nil }
+    guard admission == .accepting else { return nil }
     pruneReleasedNativeActivations()
     if let closed = takeCurrent() {
       retire(closed)
     }
-    guard admission == .accepting, !retiresActivation, activation == nil
+    guard admission == .accepting, activation == nil
     else { return nil }
     nextGeneration &+= 1
     if nextGeneration == 0 { nextGeneration = 1 }
@@ -135,7 +135,7 @@ final class LinnetInputActivationRegistry {
   }
 
   func sourceDidTurnOn() {
-    guard admission != .terminating, !retiresActivation else { return }
+    guard admission != .terminating else { return }
     admission = .accepting
   }
 
@@ -147,6 +147,9 @@ final class LinnetInputActivationRegistry {
     return retireCurrentAndNativeActivations(retire: retire)
   }
 
+  /// Closes the old generation before its callbacks run. A verified source-on
+  /// delivered by macOS during that callback may therefore admit exactly one
+  /// replacement without reviving the retired owner.
   private func retireCurrentAndNativeActivations(
     retire: (ClosedActivation) -> Void
   ) -> Bool {

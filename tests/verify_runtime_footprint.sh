@@ -1750,13 +1750,15 @@ ruby -e '
   abort "activation registry owners are missing" unless
     admission && begin_owner && native_owner && source_off && source_on &&
       terminate && retire
-  abort "source-off or termination can still admit a new activation" unless
+  abort "inactive-source or termination state can still admit a new activation" unless
     %w[accepting sourceInactive terminating].all? { |state| admission.include?("case #{state}") } &&
       begin_owner.scan("admission == .accepting").length == 2 &&
-      begin_owner.scan("!retiresActivation").length == 2 &&
+      !begin_owner.include?("retiresActivation") &&
       source_off.index("admission = .sourceInactive") <
         source_off.index("retireCurrentAndNativeActivations") &&
-      source_on.include?("admission != .terminating, !retiresActivation") &&
+      source_on.include?("admission != .terminating") &&
+      source_on.include?("admission = .accepting") &&
+      !source_on.include?("retiresActivation") &&
       terminate.index("admission = .terminating") <
         terminate.index("retireCurrentAndNativeActivations")
   abort "native deactivation lost FIFO generation correlation" unless
@@ -1766,7 +1768,7 @@ ruby -e '
       native_owner.include?("$0.controller === controller && $0.client === client") &&
       native_owner.index("nativeActivations.remove(at: index)") <
         native_owner.index("activation?.token == nativeActivation.token")
-  abort "global retirement lost its synchronous reentry barrier" unless
+  abort "global retirement lost its nested-retirement barrier" unless
     retire.include?("guard !retiresActivation else { return false }") &&
       retire.include?("retiresActivation = true") &&
       retire.include?("defer { retiresActivation = false }") &&

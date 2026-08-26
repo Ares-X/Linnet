@@ -7,7 +7,8 @@ struct LinnetInputActivationRegistryTests {
     rejectsStaleAndMismatchedCloses()
     correlatesDelayedNativeDeactivationByGeneration()
     preservesReentrantActivation()
-    keepsTheSourceClosedUntilItIsSelectedAgain()
+    rejectsReentryWhileTheSourceRemainsInactive()
+    acceptsVerifiedSourceReturnDuringRetirement()
     neverReopensAfterTermination()
     stopsAuthorizingReleasedObjects()
     print("LinnetInputActivationRegistryTests: PASS")
@@ -134,7 +135,7 @@ struct LinnetInputActivationRegistryTests {
       "the reentrant activation was not the sole current owner")
   }
 
-  private static func keepsTheSourceClosedUntilItIsSelectedAgain() {
+  private static func rejectsReentryWhileTheSourceRemainsInactive() {
     let registry = LinnetInputActivationRegistry()
     let controller = NSObject()
     let client = NSObject()
@@ -145,12 +146,11 @@ struct LinnetInputActivationRegistryTests {
     require(
       registry.sourceDidTurnOff { closed in
         require(closed.token == token, "source exit retired another generation")
-        registry.sourceDidTurnOn()
         reentrantToken = registry.begin(
           controller: NSObject(), client: NSObject(), retire: { _ in })
       } && registry.currentToken == nil,
       "input-source exit did not close the process-wide owner")
-    require(reentrantToken == nil, "synchronous exit commit reopened an activation")
+    require(reentrantToken == nil, "inactive-source reentry reopened an activation")
     require(
       !registry.sourceDidTurnOff { _ in fail("repeated source exit retired twice") },
       "repeated source exit reported another close")
@@ -171,6 +171,35 @@ struct LinnetInputActivationRegistryTests {
       registry.closeNative(controller: controller, client: client) == nil &&
         registry.currentToken == next,
       "a pre-exit native callback survived the source boundary")
+  }
+
+  private static func acceptsVerifiedSourceReturnDuringRetirement() {
+    let registry = LinnetInputActivationRegistry()
+    let oldController = NSObject()
+    let oldClient = NSObject()
+    guard registry.begin(
+      controller: oldController, client: oldClient, retire: { _ in }) != nil
+    else { fail("the rapid source-return fixture could not activate") }
+
+    let returnedController = NSObject()
+    let returnedClient = NSObject()
+    var returnedToken: LinnetInputActivationRegistry.Token?
+    require(
+      registry.sourceDidTurnOff { _ in
+        registry.sourceDidTurnOn()
+        returnedToken = registry.begin(
+          controller: returnedController,
+          client: returnedClient,
+          retire: { _ in fail("verified source return observed two owners") })
+      },
+      "rapid source return did not retire its old activation")
+    require(
+      returnedToken != nil && registry.currentToken == returnedToken &&
+        registry.isCurrent(
+          returnedToken!,
+          controller: returnedController,
+          client: returnedClient),
+      "a verified source-on callback was dropped during source retirement")
   }
 
   private static func neverReopensAfterTermination() {

@@ -450,20 +450,11 @@ private extension MacOSKeyCodesTests {
         && readiness.contains("synchronizeRecoveredInputMode("),
       "session recovery can swallow its first modifier event by rebasing from post-event hardware"
     )
-    let missedCapsReleaseRecovery = readyDispatch.range(
-      of: "event.type != .flagsChanged || event.keyCode != UInt16(kVK_CapsLock)")?.lowerBound
-    let readyDispatchSwitch = readyDispatch.range(of: "switch event.type")?.lowerBound
-    let transportedFlags = flagsChanged.range(of: "modifierTransitions.transitions(")?.lowerBound
-    let reconciledFlags = flagsChanged.range(of: "synchronizeCapsLockBaseline()")?.lowerBound
     require(
-      missedCapsReleaseRecovery != nil && readyDispatchSwitch != nil
-        && missedCapsReleaseRecovery! < readyDispatchSwitch!
-        && transportedFlags != nil && reconciledFlags != nil
-        && transportedFlags! < reconciledFlags!
-        && occurrences(of: "synchronizeCapsLockBaseline()", in: readyDispatch) == 2
+      occurrences(of: "synchronizeCapsLockBaseline()", in: readyDispatch) == 0
         && !readyDispatch.contains("set_option(session, \"ascii_mode\"")
         && !readyDispatch.contains("set_property(session,"),
-      "a missed Caps release can leave raw ASCII active through the event that should close it"
+      "ready-event ingress regained a second Caps or ASCII state owner"
     )
     require(
       !createSession.contains("inputModeIdentity = nil")
