@@ -360,6 +360,11 @@ private extension MacOSKeyCodesTests {
       startingAt: "case .flagsChanged:",
       endingAt: "case .keyDown:"
     )
+    let readyDispatch = section(
+      in: controller,
+      startingAt: "private func dispatchReadyEvent(",
+      endingAt: "override func recognizedEvents("
+    )
     let reset = section(
       in: controller,
       startingAt: "func resetModifierEpoch()",
@@ -444,6 +449,17 @@ private extension MacOSKeyCodesTests {
         && readiness.contains("if recoveredSession")
         && readiness.contains("synchronizeRecoveredInputMode("),
       "session recovery can swallow its first modifier event by rebasing from post-event hardware"
+    )
+    let missedCapsReleaseRecovery = readyDispatch.range(
+      of: "event.type != .flagsChanged || event.keyCode != UInt16(kVK_CapsLock)")?.lowerBound
+    let readyDispatchSwitch = readyDispatch.range(of: "switch event.type")?.lowerBound
+    require(
+      missedCapsReleaseRecovery != nil && readyDispatchSwitch != nil
+        && missedCapsReleaseRecovery! < readyDispatchSwitch!
+        && occurrences(of: "synchronizeCapsLockBaseline()", in: readyDispatch) == 1
+        && !readyDispatch.contains("set_option(session, \"ascii_mode\"")
+        && !readyDispatch.contains("set_property(session,"),
+      "a Caps release consumed outside InputMethodKit can strand the live session in raw ASCII"
     )
     require(
       !createSession.contains("inputModeIdentity = nil")

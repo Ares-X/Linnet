@@ -5,6 +5,7 @@
 //  Created by Leo Liu on 5/7/24.
 //
 
+import Carbon
 import InputMethodKit
 
 final class SquirrelInputController: IMKInputController {
@@ -74,6 +75,13 @@ final class SquirrelInputController: IMKInputController {
     modifiers: NSEvent.ModifierFlags,
     activationToken: LinnetInputActivationRegistry.Token
   ) -> Bool {
+    // macOS can consume the matching Caps Lock release while temporarily
+    // routing text through its own input-source switch. Reconcile the existing
+    // Caps-owned baseline before the next event; other ASCII-mode owners are
+    // left unchanged when the Caps ownership property is absent.
+    if event.type != .flagsChanged || event.keyCode != UInt16(kVK_CapsLock) {
+      synchronizeCapsLockBaseline()
+    }
     switch event.type {
     case .flagsChanged:
       for transition in modifierTransitions.transitions(
