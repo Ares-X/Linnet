@@ -44,8 +44,11 @@ struct SettingsRootView: View {
     VStack(spacing: 0) {
       conflictNotice
       tabs
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       Divider()
       footer
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
     }
     .task {
       model.refreshBackups()
@@ -172,18 +175,18 @@ struct SettingsRootView: View {
       AppearanceTabView(model: model)
         .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
       InputTabView(model: model)
-        .tabItem { Label("Input", systemImage: "keyboard") }
-      DictionaryTabView(model: model)
-        .tabItem { Label("Dictionary", systemImage: "text.book.closed") }
+        .tabItem { Label("Chinese Input", systemImage: "keyboard") }
       EnglishTabView(model: model)
         .tabItem {
           Label {
-            Text("English")
+            Text("Smart English")
           } icon: {
             LinnetSettingsPageMarkView(mark: .latinABC, context: .tab)
               .font(.system(size: 10, weight: .bold))
           }
         }
+      DictionaryTabView(model: model)
+        .tabItem { Label("Dictionary", systemImage: "text.book.closed") }
       DataTabView(
         model: model,
         updateChecker: model.updateChecker,

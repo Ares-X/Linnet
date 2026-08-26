@@ -293,6 +293,12 @@ struct LinnetCandidateWindowInteractionTests {
     require(
       text == "En",
       "input-mode status did not render the compact language label: \(text ?? "<missing>")")
+    panel.handlePassiveEmptyUpdate(
+      controller: controller,
+      activationToken: controller.activeInputToken)
+    require(
+      panel.isVisible && panel.statusTimer != nil,
+      "a passive empty Rime update dismissed the timed input-mode status")
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {

@@ -17,12 +17,25 @@ trap cleanup EXIT INT TERM
 swiftc="$(xcrun --find swiftc)"
 sdk="$(xcrun --show-sdk-path)"
 target=arm64-apple-macosx13.0
+phase_started=0
+
+begin_phase() {
+  phase_started="${SECONDS}"
+  printf '==> Swift owner tests: %s\n' "$1"
+}
+
+end_phase() {
+  printf '<== Swift owner tests: PASS in %ss: %s\n' \
+    "$((SECONDS - phase_started))" "$1"
+}
 
 compile_run() {
   local name="$1"
   shift
+  begin_phase "compile and run ${name}"
   "${swiftc}" -warnings-as-errors -sdk "${sdk}" "$@" -o "${scratch}/${name}"
   "${scratch}/${name}"
+  end_phase "compile and run ${name}"
 }
 
 compile_run hallelujah-importer \
@@ -117,12 +130,16 @@ compile_run input-activation-policy \
   sources/LinnetInputActivationPolicy.swift tests/LinnetInputActivationPolicyTests.swift
 compile_run input-source-lifecycle -parse-as-library -framework InputMethodKit -framework Carbon \
   sources/InputSource.swift tests/LinnetInputSourceLifecycleTests.swift
+begin_phase "parse Host entrypoints"
 "${swiftc}" -swift-version 5 -parse sources/Main.swift sources/InputSource.swift
+end_phase "parse Host entrypoints"
 compile_run preedit-geometry -parse-as-library \
   sources/LinnetPreeditGeometry.swift tests/LinnetPreeditGeometryTests.swift
 compile_run panel-geometry -parse-as-library \
   sources/LinnetPanelGeometry.swift tests/LinnetPanelGeometryTests.swift
+begin_phase "candidate window interaction"
 tests/verify_candidate_window_interaction.sh
+end_phase "candidate window interaction"
 compile_run client-appearance -framework AppKit \
   sources/LinnetClientAppearance.swift tests/LinnetClientAppearanceTests.swift
 compile_run settings-contract \
@@ -152,11 +169,13 @@ compile_run pack \
   sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift \
   tests/LinnetPackTests.swift
 
+begin_phase "Rime filesystem projection"
 "${swiftc}" -parse-as-library -warnings-as-errors -sdk "${sdk}" \
   tests/RimeFilesystemPathProjectionTests.swift -o "${scratch}/rime-path"
 "${scratch}/rime-path" \
   sources/SquirrelApplicationDelegate.swift \
   sources/SquirrelApplicationPresentation.swift
+end_phase "Rime filesystem projection"
 
 common_settings_sources=(
   sources/LinnetPackContract.swift
@@ -172,6 +191,7 @@ common_settings_sources=(
   sources/LinnetSettings/RimeUserDataBridge.swift
 )
 
+begin_phase "Rime user-data bridge"
 "${swiftc}" -warnings-as-errors -sdk "${sdk}" -target "${target}" \
   -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
   -I librime/dist/include \
@@ -180,7 +200,9 @@ common_settings_sources=(
   -o "${scratch}/user-data-bridge"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   "${scratch}/user-data-bridge"
+end_phase "Rime user-data bridge"
 
+begin_phase "Settings data coordinator"
 "${swiftc}" -warnings-as-errors -sdk "${sdk}" -target "${target}" \
   -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
   -I librime/dist/include \
@@ -200,6 +222,9 @@ if ! RIME_LOG_DIR="${scratch}/rime-logs" \
   exit 1
 fi
 rg -Fq 'SettingsDataCoordinatorTests: PASS' "${scratch}/settings-data.out"
+end_phase "Settings data coordinator"
 
+begin_phase "Settings transaction IPC"
 tests/verify_settings_transaction_ipc.sh
+end_phase "Settings transaction IPC"
 echo "Linnet Swift owner tests: PASS"

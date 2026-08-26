@@ -10,6 +10,22 @@ readonly maximum_baseline_entries=72
 readonly periphery_version="3.8.0"
 readonly periphery_archive_sha256="07d4e286e31dd79164df39097e0b59f533c94badbe18158464a455ea88a166d7"
 
+read_product_bundle_identifier() {
+  local contract="${project_root}/config/LinnetProduct.xcconfig"
+  local identifier
+  identifier="$(sed -n 's/^LINNET_BUNDLE_IDENTIFIER = //p' "${contract}")"
+  if [[ -z "${identifier}" || "${identifier}" == *$'\n'* ||
+        ! "${identifier}" =~ ^[A-Za-z0-9.-]+$ ]]; then
+    echo "Unable to read the canonical Linnet bundle identifier." >&2
+    return 1
+  fi
+  printf '%s\n' "${identifier}"
+}
+
+product_bundle_identifier="$(read_product_bundle_identifier)"
+readonly product_bundle_identifier
+readonly analysis_bundle_identifier="${product_bundle_identifier}.periphery"
+
 if [[ -n "${RUNNER_TEMP:-}" ]]; then
   periphery_root="${RUNNER_TEMP}/linnet-periphery-${periphery_version}"
 else
@@ -49,4 +65,5 @@ fi
 "${periphery_binary}" scan \
   --relative-results \
   --strict \
-  --baseline "${baseline_path}"
+  --baseline "${baseline_path}" \
+  -- LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}"

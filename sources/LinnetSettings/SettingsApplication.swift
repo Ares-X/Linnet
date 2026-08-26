@@ -8,6 +8,19 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool { true }
 
+  func applicationDidBecomeActive(_ notification: Notification) {
+    guard let application = notification.object as? NSApplication else { return }
+    presentSettingsWindow(in: application)
+  }
+
+  func applicationShouldHandleReopen(
+    _ sender: NSApplication,
+    hasVisibleWindows _: Bool
+  ) -> Bool {
+    presentSettingsWindow(in: sender)
+    return true
+  }
+
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard let model else { return .terminateNow }
     if model.operationActive {
@@ -36,6 +49,11 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
       }
     }
     return .terminateLater
+  }
+
+  private func presentSettingsWindow(in application: NSApplication) {
+    guard let window = application.windows.first(where: { $0.canBecomeKey }) else { return }
+    window.makeKeyAndOrderFront(nil)
   }
 }
 

@@ -662,10 +662,11 @@ extension SquirrelInputController {
         candidateSnapshot.items.isEmpty,
         !presentsModeTransition {
         _ = rimeAPI.free_context(&ctx)
-        hidePalettes()
+        NSApp.squirrelAppDelegate.panel?.handlePassiveEmptyUpdate(
+          controller: self,
+          activationToken: updateToken)
         return
       }
-
       let selRange = NSRange(location: start.utf16Offset(in: preedit), length: preedit.utf16.distance(from: start, to: end))
       guard showPanel(
         preedit: inlinePreedit ? "" : preedit,

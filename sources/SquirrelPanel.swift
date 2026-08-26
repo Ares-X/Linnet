@@ -156,6 +156,18 @@ final class SquirrelPanel: NSPanel {
     hide()
   }
 
+  /// An empty Rime refresh has no candidate geometry to publish. Keep an
+  /// active mode-transition timer visible; otherwise dismiss the panel.
+  func handlePassiveEmptyUpdate(
+    controller: SquirrelInputController,
+    activationToken: LinnetInputActivationRegistry.Token
+  ) {
+    guard inputController === controller, self.activationToken == activationToken,
+      statusTimer == nil
+    else { return }
+    hide()
+  }
+
   func hide() {
     panelPublicationGeneration &+= 1
     let hiddenGeneration = panelPublicationGeneration

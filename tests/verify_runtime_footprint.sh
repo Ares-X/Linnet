@@ -2428,6 +2428,29 @@ if rg -n 'commit\(string: pendingInput\)|commit\(string: String\(cString: input\
   fail "the InputMethodKit boundary regained a second raw reconstruction owner"
 fi
 
+# SquirrelPanel alone owns the lifetime of a visible mode transition. Passive
+# empty Rime updates must reach that owner instead of bypassing its status timer.
+if ruby -e '
+  source = File.read(ARGV.fetch(0))
+  abort if source.match?(/if preedit\.isEmpty,\s*\n\s*candidateSnapshot\.items\.isEmpty,\s*\n\s*!presentsModeTransition \{\s*\n\s*_ = rimeAPI\.free_context\(&ctx\)\s*\n\s*hidePalettes\(\)/m)
+' sources/SquirrelInputController.swift; then
+  :
+else
+  fail "the controller still hides a timed mode transition on an empty Rime update"
+fi
+rg -Fq 'else if statusTimer == nil {' sources/SquirrelPanel.swift ||
+  fail "the candidate panel lost timed mode-transition retention"
+rg -Fq 'func handlePassiveEmptyUpdate(' sources/SquirrelPanel.swift ||
+  fail "passive empty updates no longer defer to the candidate panel"
+
+# The Settings process owns activation of its own window. Reopening Settings
+# must never depend on cross-process window inference in the input-method host.
+rg -Fq 'applicationShouldHandleReopen' \
+  sources/LinnetSettings/SettingsApplication.swift ||
+  fail "Settings lost its reopen activation owner"
+rg -Fq 'makeKeyAndOrderFront' sources/LinnetSettings/SettingsApplication.swift ||
+  fail "Settings no longer brings its window to the front"
+
 # Per-application Rime options remain in Squirrel's canonical session owner.
 # Do not defer or reinterpret that lifecycle through a Linnet transition layer.
 test "$(rg -F -o 'func updateAppOptions()' \

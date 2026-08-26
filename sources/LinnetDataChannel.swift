@@ -78,7 +78,15 @@ enum LinnetDataChannel {
   enum UpdateAvailability: Equatable, Sendable {
     case current
     case core(Core)
-    case languageData
+    case languageData([LanguageDataUpdate])
+  }
+
+  struct LanguageDataUpdate: Equatable, Sendable {
+    let kind: LinnetPackContract.Kind
+    let installedVersion: String?
+    let installedSequence: UInt64?
+    let availableVersion: String
+    let availableSequence: UInt64
   }
 
   struct Core: Codable, Equatable, Sendable {
@@ -132,9 +140,19 @@ enum LinnetDataChannel {
         return .core(core)
       }
       guard let edition, let selected = activationSet(for: edition) else { return .current }
-      return selected.packs.allSatisfy { artifact in
-        installedPacks.contains(where: artifact.matches)
-      } ? .current : .languageData
+      let updates = selected.packs.compactMap { artifact -> LanguageDataUpdate? in
+        let installed = installedPacks.first {
+          $0.kind.rawValue == artifact.kind.rawValue
+        }
+        guard installed.map({ artifact.matches($0) }) != true else { return nil }
+        return .init(
+          kind: artifact.kind,
+          installedVersion: installed?.version,
+          installedSequence: installed?.sequence,
+          availableVersion: artifact.version,
+          availableSequence: artifact.sequence)
+      }
+      return updates.isEmpty ? .current : .languageData(updates)
     }
   }
 

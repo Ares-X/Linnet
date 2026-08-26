@@ -81,13 +81,16 @@ extension DataTabView {
         } else {
           ForEach(orderedInstalledPacks, id: \.kind.rawValue) { pack in
             LabeledContent(packLabel(pack.kind)) {
-              HStack(spacing: 4) {
-                Text(verbatim: pack.version)
-                Text("revision")
-                Text(verbatim: String(pack.sequence))
-              }
+              Text(verbatim: packReleaseDescription(
+                version: pack.version,
+                sequence: pack.sequence))
             }
           }
+          Text(
+            "Data release is the pack's increasing content sequence, not a Git revision. The version identifies the corresponding published content."
+          )
+          .font(.caption2)
+          .foregroundStyle(.secondary)
         }
       }
       .padding(8)
@@ -124,15 +127,34 @@ extension DataTabView {
         VStack(alignment: .leading, spacing: 2) {
           Label("Core update available", systemImage: "arrow.down.circle.fill")
             .foregroundStyle(.orange)
-          Text(verbatim: core.version)
-            .font(.caption.monospacedDigit())
+          LabeledContent("Current") {
+            Text(verbatim: "\(model.appVersion) (\(model.appBuild))")
+          }
+          .font(.caption.monospacedDigit())
+          LabeledContent("Available") {
+            Text(verbatim: "\(core.version) (\(core.build))")
+          }
+          .font(.caption.monospacedDigit())
           Text("The Core update does not require another logout. macOS may ask you to approve the unsigned package.")
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
-      case .some(.languageData):
-        Label("A language-data update is available below. No logout is required.", systemImage: "arrow.down.circle.fill")
+      case .some(.languageData(let updates)):
+        VStack(alignment: .leading, spacing: 4) {
+          Label(
+            "Language-data updates are available. No logout is required.",
+            systemImage: "arrow.down.circle.fill"
+          )
           .foregroundStyle(Color.accentColor)
+          ForEach(updates, id: \.kind.rawValue) { update in
+            VStack(alignment: .leading, spacing: 1) {
+              Text(updatePackLabel(update.kind)).font(.caption.weight(.medium))
+              Text(verbatim: updateDescription(update))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
       case nil:
         Label("Update status is not available yet.", systemImage: "info.circle")
           .foregroundStyle(.secondary)
@@ -163,6 +185,31 @@ extension DataTabView {
     case .lts: "Chinese grammar model"
     case .extended: "Long-tail data"
     }
+  }
+
+  func updatePackLabel(_ kind: LinnetPackContract.Kind) -> LocalizedStringKey {
+    switch kind {
+    case .chinese: "Chinese data"
+    case .english: "English data"
+    case .lts: "Chinese grammar model"
+    case .extended: "Long-tail data"
+    }
+  }
+
+  func updateDescription(_ update: LinnetDataChannel.LanguageDataUpdate) -> String {
+    let installed = if let version = update.installedVersion,
+      let sequence = update.installedSequence {
+      packReleaseDescription(version: version, sequence: sequence)
+    } else {
+      String(localized: "Not installed")
+    }
+    return "\(String(localized: "Current")): \(installed) → "
+      + "\(String(localized: "Available")): \(update.availableVersion) · "
+      + "\(String(localized: "Data release")) \(update.availableSequence)"
+  }
+
+  func packReleaseDescription(version: String, sequence: UInt64) -> String {
+    "\(version) · \(String(localized: "Data release")) \(sequence)"
   }
 
   var grammarModelSection: some View {

@@ -6,8 +6,33 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${project_root}"
 lock_file="upstreams.lock.json"
 
+build_started_at="$(date +%s)"
+build_stage_started_at="${build_started_at}"
+build_stage_number=0
+build_stage_label=""
+
 build_stage() {
+    local now
+    now="$(date +%s)"
+    if [[ "${build_stage_number}" -gt 0 ]]; then
+        printf '<== Linnet build stage %s/6 complete in %ss: %s\n' \
+            "${build_stage_number}" "$((now - build_stage_started_at))" \
+            "${build_stage_label}" >&2
+    fi
+    build_stage_number="$1"
+    build_stage_label="$2"
+    build_stage_started_at="${now}"
     printf '==> Linnet build stage %s/6: %s\n' "$1" "$2" >&2
+}
+
+finish_build_stages() {
+    local now
+    now="$(date +%s)"
+    printf '<== Linnet build stage %s/6 complete in %ss: %s\n' \
+        "${build_stage_number}" "$((now - build_stage_started_at))" \
+        "${build_stage_label}" >&2
+    printf 'Linnet locked build preparation: PASS (%ss total)\n' \
+        "$((now - build_started_at))" >&2
 }
 
 lock_value() {
@@ -263,7 +288,6 @@ BOOST_INCLUDE_DIR=build/dependencies/boost "${linnet_make}" copy-rime-binaries
 # active Rime candidate stream owns Chinese/English overlap ranking, so Chinese
 # dictionaries, schemas and profile algebra cannot invalidate this cache.
 build_stage 4 "project Linnet-owned English data"
-"${linnet_make}" english-data-generator
 english_fingerprint_stamp="${project_root}/build/linnet-english.fingerprint"
 compute_english_fingerprint() {
     {
@@ -301,6 +325,7 @@ if [[ -f "${english_fingerprint_stamp}" &&
     echo "generate-linnet-english-data: SKIP (inputs unchanged; cached projection reused)"
 else
     rm -rf -- "${english_cache}"
+    "${linnet_make}" english-data-generator
     build/linnet-english-data-generator \
         --source "${hallelujah_path}" \
         --rime-ice-source "${rime_ice_path}" \
@@ -450,3 +475,4 @@ mv "${precompiled_stamp_candidate}" "${precompiled_fingerprint_stamp}"
 precompiled_publishing=0
 )
 fi
+finish_build_stages
