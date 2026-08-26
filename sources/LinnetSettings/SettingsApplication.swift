@@ -50,10 +50,11 @@ struct LinnetSettingsApp: App {
         .frame(
           minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth,
           idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth,
-          minHeight: 660,
-          idealHeight: 800)
+          minHeight: LinnetSettingsLayoutMetrics.windowHeight)
     }
-    .defaultSize(width: LinnetSettingsLayoutMetrics.defaultWindowWidth, height: 800)
+    .defaultSize(
+      width: LinnetSettingsLayoutMetrics.defaultWindowWidth,
+      height: LinnetSettingsLayoutMetrics.windowHeight)
     .windowResizability(.contentMinSize)
     .commands { CommandGroup(replacing: .newItem) {} }
   }

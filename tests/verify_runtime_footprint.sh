@@ -1855,7 +1855,9 @@ ruby -e '
   abort "the Settings Scene does not consume the canonical window metrics" unless
     settings.include?("minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth") &&
       settings.include?("idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth") &&
-      settings.include?(".defaultSize(")
+      settings.include?("minHeight: LinnetSettingsLayoutMetrics.windowHeight") &&
+      settings.include?("height: LinnetSettingsLayoutMetrics.windowHeight") &&
+      settings.scan("LinnetSettingsLayoutMetrics.windowHeight").length == 2
   abort "Settings root is missing" unless root.include?("struct SettingsRootView: View")
   conflict = root.index("if model.configuration.hasExternalConflict")
   tabs = root.index("TabView {")

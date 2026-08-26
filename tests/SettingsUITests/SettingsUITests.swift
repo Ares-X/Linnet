@@ -322,6 +322,9 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(app.buttons["Open Data Folder"].exists)
     XCTAssertTrue(app.buttons["Copy Report"].exists)
 
+    let interfaceLanguage = app.popUpButtons["settings.interfaceLanguage"]
+    XCTAssertTrue(interfaceLanguage.exists)
+    XCTAssertTrue(interfaceLanguage.isHittable, "Interface language is outside the visible footer")
     selectEachPopUpOption([
       "Follow System",
       "简体中文",
