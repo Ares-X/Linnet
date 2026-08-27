@@ -13,6 +13,8 @@ struct SettingsContractTests {
       testPinyinReverseLookupExamples()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
+        testProductIdentity(host: host, settings: settings)
+        testCoreActivationReadiness()
         testSuitePersistence(host: host, settings: settings, hostIdentifier: hostIdentifier)
         testInvalidStoredValueFallsBack(
           settings: settings,
@@ -58,6 +60,45 @@ struct SettingsContractTests {
       derivedFromSettings.bundleURL.standardizedFileURL == host.bundleURL.standardizedFileURL
     else {
       fail("the nested Settings bundle did not derive its input-method host")
+    }
+  }
+
+  private static func testProductIdentity(host: Bundle, settings: Bundle) {
+    let expected = LinnetSettingsContract.ProductIdentity(
+      version: "1.0.0",
+      build: 7,
+      revision: String(repeating: "a", count: 40)
+    )
+    guard LinnetSettingsContract.productIdentity(startingAt: host) == expected,
+      LinnetSettingsContract.productIdentity(startingAt: settings) == expected
+    else {
+      fail("installed and running product identity did not share one bundle owner")
+    }
+  }
+
+  private static func testCoreActivationReadiness() {
+    guard LinnetSettingsContract.coreActivationReadiness(
+      inputSourceIsActive: false,
+      connectedInputClientCount: 0,
+      dataTransactionActive: false
+    ) == .ready,
+      LinnetSettingsContract.coreActivationReadiness(
+        inputSourceIsActive: true,
+        connectedInputClientCount: 0,
+        dataTransactionActive: false
+      ) == .inputSourceActive,
+      LinnetSettingsContract.coreActivationReadiness(
+        inputSourceIsActive: false,
+        connectedInputClientCount: 1,
+        dataTransactionActive: false
+      ) == .inputClientConnected,
+      LinnetSettingsContract.coreActivationReadiness(
+        inputSourceIsActive: false,
+        connectedInputClientCount: 0,
+        dataTransactionActive: true
+      ) == .dataTransactionActive
+    else {
+      fail("Core activation readiness no longer fails closed at its Host boundaries")
     }
   }
 
@@ -217,6 +258,10 @@ struct SettingsContractTests {
       code: .diagnosticsReady,
       detail: "fixture running",
       health: .init(
+        productIdentity: .init(
+          version: "1.0.0", build: 7, revision: String(repeating: "a", count: 40)),
+        coreActivationReadiness: .ready,
+        connectedInputClientCount: 0,
         state: .running,
         phase: .running,
         rimeVersion: "1.16.0",
@@ -292,13 +337,27 @@ struct SettingsContractTests {
       deadline: deadline,
       expectedSettingsRevision: settingsDigest,
       alternateSettingsRevision: replacementSettingsDigest)
+    let validCoreActivation = LinnetSettingsContract.DataRequest(
+      transactionID: transactionID,
+      command: .activateCore,
+      candidate: nil,
+      requesterPID: requesterPID,
+      deadline: deadline)
+    let invalidCoreActivation = LinnetSettingsContract.DataRequest(
+      transactionID: transactionID,
+      command: .activateCore,
+      candidate: candidate,
+      requesterPID: requesterPID,
+      deadline: deadline)
     guard !LinnetSettingsContract.validDataRequest(missingCandidate),
       !LinnetSettingsContract.validDataRequest(missingCAS),
       !LinnetSettingsContract.validDataRequest(invalidPause),
       !LinnetSettingsContract.validDataRequest(invalidReload),
       !LinnetSettingsContract.validDataRequest(invalidRefreshWithoutCAS),
       LinnetSettingsContract.validDataRequest(validRecoveryReload),
-      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh)
+      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh),
+      LinnetSettingsContract.validDataRequest(validCoreActivation),
+      !LinnetSettingsContract.validDataRequest(invalidCoreActivation)
     else {
       fail("invalid command and candidate combinations were accepted")
     }
@@ -327,9 +386,21 @@ struct SettingsContractTests {
         "CFBundleName": "Host",
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "1.0.0",
+        "CFBundleVersion": "7",
         "InputMethodConnectionName": "Linnet_Test_Connection",
       ]
     )
+    let releaseDirectory = hostURL.appendingPathComponent(
+      "Contents/Resources/LinnetRelease", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: releaseDirectory, withIntermediateDirectories: true)
+    let versionDocument: [String: Any] = [
+      "version": "1.0.0",
+      "build": "7",
+      "source": ["candidate_revision": String(repeating: "a", count: 40)],
+    ]
+    let versionData = try JSONSerialization.data(withJSONObject: versionDocument)
+    try versionData.write(to: releaseDirectory.appendingPathComponent("VERSION.json"))
     try writeInfoPlist(
       at: settingsURL,
       values: [

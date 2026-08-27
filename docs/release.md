@@ -113,8 +113,10 @@ Secrets 中。它们不是 Apple 开发者凭据，也不会被打包、写入�
 后输入源可用；同一 bundle ID/path 的后续 Core 更新必须验证：Installer 返回
 `RestartAction=None`、登录会话不变、个人数据不变、输入源 enabled/selected
 意图不被覆盖，更新期间 Host PID 不变且 `AXHidden=false`；安装脚本不得启动、隐藏或替换
-Host，更新前已连接及更新后新打开的应用都可输入；
-再单独验证 Host 自然重启后由新 build 提供输入。每个精确候选的“两轮同 leaf Core”必须使用
+Host，更新前已连接及更新后新打开的应用都可输入。安装后还须验证 Settings 分别显示
+installed/running version、build 和 revision；Host 在 Linnet 已切走、旧 controller 数为零且
+无数据事务时接受优雅激活，在每一项不满足时拒绝，并由 Settings 从 canonical 路径启动后
+核对精确 revision。每个精确候选的“两轮同 leaf Core”必须使用
 同一不可变 artifact：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
 升级，第二轮重装候选原字节；两轮均
 不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、

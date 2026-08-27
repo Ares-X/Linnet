@@ -73,6 +73,7 @@ extension DataTabView {
           Text(verbatim: "\(model.appVersion) (\(model.appBuild))")
         }
         LabeledContent("Language data") { Text(languageDataEditionLabel) }
+        runtimeActivationRow
         updateCheckRow
         if model.installedPacks.isEmpty {
           LabeledContent("Data status") { Text("Installation needs repair") }
@@ -96,6 +97,89 @@ extension DataTabView {
       .padding(8)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder var runtimeActivationRow: some View {
+    switch updateChecker.runtimeActivationState {
+    case .checking:
+      LabeledContent("Running Core") { Text("Checking…") }
+        .foregroundStyle(.secondary)
+    case .current(let identity):
+      LabeledContent("Running Core") {
+        Text(verbatim: productIdentityDescription(identity))
+      }
+    case .pending(let running, let readiness, let connectedClients):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("Installed update is waiting to activate", systemImage: "arrow.clockwise.circle")
+          .foregroundStyle(.orange)
+        LabeledContent("Running") {
+          Text(verbatim: productIdentityDescription(running))
+        }
+        LabeledContent("Installed") {
+          Text(verbatim: "\(model.appVersion) (\(model.appBuild))")
+        }
+        if connectedClients > 0 {
+          LabeledContent("Connected apps") {
+            Text(verbatim: String(connectedClients))
+          }
+          .font(.caption.monospacedDigit())
+        }
+        Text(coreActivationInstruction(readiness))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        HStack {
+          if readiness == .ready {
+            Button("Apply Installed Update") { updateChecker.activateInstalledCore() }
+          }
+          Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+        }
+      }
+    case .applying:
+      Label("Activating the installed Core…", systemImage: "arrow.triangle.2.circlepath")
+        .foregroundStyle(.secondary)
+    case .applied(let identity):
+      VStack(alignment: .leading, spacing: 2) {
+        Label("Installed Core is now running", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+        Text(verbatim: productIdentityDescription(identity))
+          .font(.caption.monospacedDigit())
+      }
+    case .unavailable:
+      HStack {
+        Label("Running Core identity is unavailable.", systemImage: "exclamationmark.circle")
+          .foregroundStyle(.orange)
+        Spacer()
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
+    case .failed:
+      HStack {
+        Label("The installed Core could not be activated.", systemImage: "xmark.circle")
+          .foregroundStyle(.red)
+        Spacer()
+        Button("Try Again") { updateChecker.refreshRuntime() }
+      }
+    }
+  }
+
+  func productIdentityDescription(
+    _ identity: LinnetSettingsContract.ProductIdentity
+  ) -> String {
+    "\(identity.version) (\(identity.build)) · \(identity.revision.prefix(8))"
+  }
+
+  func coreActivationInstruction(
+    _ readiness: LinnetSettingsContract.CoreActivationReadiness
+  ) -> LocalizedStringKey {
+    switch readiness {
+    case .ready:
+      "Linnet is idle. The update can be applied without logout."
+    case .inputSourceActive:
+      "Switch to another input source, then check the runtime again."
+    case .inputClientConnected:
+      "Close apps still connected to this Host, then check again."
+    case .dataTransactionActive:
+      "Wait for the current data operation to finish, then check again."
+    }
   }
 
   @ViewBuilder var updateCheckRow: some View {

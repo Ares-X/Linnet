@@ -73,6 +73,9 @@ enum LinnetSettingsContract {
     case activateLanguage = "activate_language"
     case cancel
     case diagnose
+    /// Gracefully exits an inactive Host so the already-installed Core can be
+    /// launched from its canonical bundle. The Host alone decides readiness.
+    case activateCore = "activate_core"
     /// Atomically publishes a candidate settings document whose differences
     /// are limited to the panel-live appearance subset, then reconciles and
     /// redeploys squirrel.yaml without rebuilding dictionaries.
@@ -92,6 +95,7 @@ enum LinnetSettingsContract {
     case rolledBack
     case rejected
     case failed
+    case terminating
   }
 
   enum RuntimePhase: String, Codable, Equatable, Sendable {
@@ -127,9 +131,27 @@ enum LinnetSettingsContract {
     case rollbackFailed = "rollback_failed"
     case deadlineExpired = "deadline_expired"
     case requesterExited = "requester_exited"
+    case coreActivationAccepted = "core_activation_accepted"
+    case coreActivationBlocked = "core_activation_blocked"
+  }
+
+  struct ProductIdentity: Codable, Equatable, Sendable {
+    let version: String
+    let build: UInt64
+    let revision: String
+  }
+
+  enum CoreActivationReadiness: String, Codable, Equatable, Sendable {
+    case ready
+    case inputSourceActive = "input_source_active"
+    case inputClientConnected = "input_client_connected"
+    case dataTransactionActive = "data_transaction_active"
   }
 
   struct RuntimeHealth: Codable, Equatable, Sendable {
+    let productIdentity: ProductIdentity?
+    let coreActivationReadiness: CoreActivationReadiness
+    let connectedInputClientCount: Int
     let state: RuntimeStatus
     let phase: RuntimePhase
     let rimeVersion: String
@@ -311,23 +333,6 @@ enum LinnetSettingsContract {
         alternateSettingsRevision: request.alternateSettingsRevision)
   }
 
-  static func validRuntimeReply(_ reply: RuntimeReply) -> Bool {
-    guard !reply.detail.isEmpty else { return false }
-    guard let health = reply.health else { return true }
-    let validSettingsRevision: Bool
-    if let activeSettingsRevision = health.activeSettingsRevision {
-      validSettingsRevision = isSHA256(activeSettingsRevision)
-    } else {
-      validSettingsRevision = health.state == .degraded
-    }
-    return [.running, .paused, .degraded].contains(health.state)
-      && !health.rimeVersion.isEmpty
-      && health.availableSchemaCount >= 0
-      && health.requiredSchemaCount > 0
-      && health.availableSchemaCount <= health.requiredSchemaCount
-      && validSettingsRevision
-  }
-
   static func requesterIsAlive(_ pid: Int32) -> Bool {
     guard pid > 0 else { return false }
     if kill(pid, 0) == 0 { return true }
@@ -340,6 +345,60 @@ enum LinnetSettingsContract {
 }
 
 extension LinnetSettingsContract {
+  static func productIdentity(startingAt bundle: Bundle = .main) -> ProductIdentity? {
+    guard let host = hostBundle(startingAt: bundle),
+      let version = host.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+      !version.isEmpty,
+      let buildText = host.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+      let build = UInt64(buildText), build > 0,
+      let data = try? Data(contentsOf: host.bundleURL.appending(
+        path: "Contents/Resources/LinnetRelease/VERSION.json")),
+      let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      document["version"] as? String == version,
+      document["build"] as? String == buildText,
+      let source = document["source"] as? [String: Any],
+      let revision = source["candidate_revision"] as? String,
+      isRevision(revision)
+    else { return nil }
+    return .init(version: version, build: build, revision: revision)
+  }
+
+  static func coreActivationReadiness(
+    inputSourceIsActive: Bool,
+    connectedInputClientCount: Int,
+    dataTransactionActive: Bool
+  ) -> CoreActivationReadiness {
+    if dataTransactionActive { return .dataTransactionActive }
+    if inputSourceIsActive { return .inputSourceActive }
+    if connectedInputClientCount > 0 { return .inputClientConnected }
+    return .ready
+  }
+
+  static func validRuntimeReply(_ reply: RuntimeReply) -> Bool {
+    guard !reply.detail.isEmpty else { return false }
+    guard let health = reply.health else { return true }
+    let validSettingsRevision: Bool
+    if let activeSettingsRevision = health.activeSettingsRevision {
+      validSettingsRevision = isSHA256(activeSettingsRevision)
+    } else {
+      validSettingsRevision = health.state == .degraded
+    }
+    let validProductIdentity = if let productIdentity = health.productIdentity {
+      !productIdentity.version.isEmpty && productIdentity.build > 0
+        && isRevision(productIdentity.revision)
+    } else {
+      true
+    }
+    return [.running, .paused, .degraded].contains(health.state)
+      && validProductIdentity
+      && health.connectedInputClientCount >= 0
+      && !health.rimeVersion.isEmpty
+      && health.availableSchemaCount >= 0
+      && health.requiredSchemaCount > 0
+      && health.availableSchemaCount <= health.requiredSchemaCount
+      && validSettingsRevision
+  }
+
   fileprivate static func validDataRequestShape(
     command: DataCommand,
     candidate: URL?,
@@ -374,6 +433,9 @@ extension LinnetSettingsContract {
     }
     let requiresCandidate = command == .activate || command == .activateLanguage
     guard requiresCandidate == (candidate != nil) else { return false }
+    if command == .activateCore {
+      return expectedGeneration == nil && expectedDigest == nil
+    }
     return command == .activateLanguage
       ? expectedGeneration != nil
       : (command == .pause || expectedGeneration == nil)
@@ -381,6 +443,12 @@ extension LinnetSettingsContract {
 
   fileprivate static func isSHA256(_ value: String) -> Bool {
     value.count == 64 && value.unicodeScalars.allSatisfy {
+      CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+    }
+  }
+
+  fileprivate static func isRevision(_ value: String) -> Bool {
+    value.count == 40 && value.unicodeScalars.allSatisfy {
       CharacterSet(charactersIn: "0123456789abcdef").contains($0)
     }
   }

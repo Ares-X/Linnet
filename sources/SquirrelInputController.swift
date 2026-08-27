@@ -11,6 +11,14 @@ import InputMethodKit
 final class SquirrelInputController: IMKInputController {
   static let keyRollOver = 50
   static var unknownAppCount: UInt = 0
+  private static let connectedControllerLock = NSLock()
+  private static var connectedControllerIDs = Set<ObjectIdentifier>()
+
+  static var connectedInputClientCount: Int {
+    connectedControllerLock.lock()
+    defer { connectedControllerLock.unlock() }
+    return connectedControllerIDs.count
+  }
 
   weak var activeClient: IMKTextInput?
   let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
@@ -165,6 +173,7 @@ final class SquirrelInputController: IMKInputController {
   override init!(server: IMKServer!, delegate: Any!, client: Any!) {
     self.activeClient = client as? IMKTextInput
     super.init(server: server, delegate: delegate, client: client)
+    markInputClientConnected()
     createSession(client: activeClient)
   }
 
@@ -214,7 +223,20 @@ final class SquirrelInputController: IMKInputController {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    markInputClientDisconnected()
     destroySession()
+  }
+
+  private func markInputClientConnected() {
+    Self.connectedControllerLock.lock()
+    Self.connectedControllerIDs.insert(ObjectIdentifier(self))
+    Self.connectedControllerLock.unlock()
+  }
+
+  private func markInputClientDisconnected() {
+    Self.connectedControllerLock.lock()
+    Self.connectedControllerIDs.remove(ObjectIdentifier(self))
+    Self.connectedControllerLock.unlock()
   }
 }
 

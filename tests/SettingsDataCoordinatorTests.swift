@@ -1,6 +1,12 @@
 import CryptoKit
 import Darwin
 import Foundation
+
+private let fixtureRuntimeIdentity = LinnetSettingsContract.ProductIdentity(
+  version: "0.1.0",
+  build: 1,
+  revision: String(repeating: "a", count: 40)
+)
 import SQLite3
 
 private struct SettingsOwnedFileSnapshot: Equatable {
@@ -630,6 +636,9 @@ struct SettingsDataCoordinatorTests {
             "fixture running",
             request: request,
             health: .init(
+              productIdentity: fixtureRuntimeIdentity,
+              coreActivationReadiness: .ready,
+              connectedInputClientCount: 0,
               state: .running,
               phase: .running,
               rimeVersion: "fixture",
@@ -641,6 +650,8 @@ struct SettingsDataCoordinatorTests {
               activeSettingsRevision: try? LinnetSettingsDocumentStore.snapshot(from: live).revision
             )
           )
+        case .activateCore:
+          fail("the data coordinator requested Core activation")
         }
       }
 
@@ -2577,6 +2588,9 @@ struct SettingsDataCoordinatorTests {
     activeRevision: String
   ) -> LinnetSettingsContract.RuntimeHealth {
     .init(
+      productIdentity: fixtureRuntimeIdentity,
+      coreActivationReadiness: .ready,
+      connectedInputClientCount: 0,
       state: .running,
       phase: .running,
       rimeVersion: "fixture",
@@ -2605,6 +2619,7 @@ struct SettingsDataCoordinatorTests {
       case .running, .degraded: code = .diagnosticsReady
       case .paused: code = .runtimePaused
       case .activated: code = .activationVerified
+      case .terminating: code = .coreActivationAccepted
       case .cancelled: code = .runtimeResumed
       case .rolledBack: code = .activationRolledBack
       case .rejected: code = .invalidCandidate

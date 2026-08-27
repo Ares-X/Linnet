@@ -449,7 +449,7 @@ private extension MacOSKeyCodesTests {
     let shutdown = section(
       in: host,
       startingAt: "func shutdownRime()",
-      endingAt: "fileprivate func workspaceWillPowerOff"
+      endingAt: "fileprivate func dataRequested"
     )
     let reopen = section(
       in: host,

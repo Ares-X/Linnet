@@ -287,8 +287,11 @@ enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身�
 授权同 leaf Core 重新 register、enable 或 select。preinstall 必须在 payload 前以
 正常 AppKit 退出请求只确认 Settings 已停止；Settings 拒绝退出、未保存草稿或进行中
 操作必须让安装 fail closed，不能强杀。运行中的 Host 必须保持同一 PID，更新前已
-连接的应用与更新后新打开的应用都要继续输入；新 Core 版本只在 Host 自然重启后
-成为运行版本。还要分别证明 enabled/disabled、selected、
+连接的应用与更新后新打开的应用都要继续输入。安装完成后，Settings 必须分别显示
+磁盘与运行中的 version/build/revision；只有切换离开 Linnet、所有旧 Host 的
+InputMethodKit controller 已断开且没有数据事务时，Host 才能接受自行退出。Settings
+随后只从 canonical 安装路径启动 Host，并在精确 revision 一致后报告生效；任一前提
+不满足都必须拒绝，不能强杀。还要分别证明 enabled/disabled、selected、
 missing-App+unregistered repair 与用户数据均保留；missing App 仍有
 enabled/disabled 系统身份必须在 payload 前失败。默认卸载和显式 purge 仍需要独立
 验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**

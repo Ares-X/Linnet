@@ -88,7 +88,7 @@ final class SettingsModel: ObservableObject {
     updateChecker = LinnetSettingsUpdateChecker(
       currentVersion: appVersion, currentBuild: appBuild,
       service: dataChannelService, edition: runtimeSnapshot?.state.edition,
-      installedPacks: runtimeSnapshot?.state.packs ?? [])
+      installedPacks: runtimeSnapshot?.state.packs ?? [], bundle: bundle)
     let downloadPreference = LinnetSettingsDownloadSource.load()
     downloadSourceMode = downloadPreference.mode
     downloadMirrorPrefix = downloadPreference.mirrorPrefix

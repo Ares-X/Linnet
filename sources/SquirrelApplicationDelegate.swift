@@ -108,6 +108,16 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
   }
 }
 extension SquirrelApplicationDelegate {
+  func applicationWillTerminate(_ notification: Notification) {
+    rimeSyncController.stop()
+    removeObservers()
+    transactionMonitor?.cancel()
+    transactionMonitor = nil
+    panel?.hide()
+    shutdownRime()
+    if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+    statusItem = nil
+  }
   // MARK: Rime-owned status projection
   @discardableResult
   func setupRime(tentativeLanguageActivation: Bool = false) -> Bool {
@@ -367,18 +377,6 @@ extension SquirrelApplicationDelegate {
 }
 
 extension SquirrelApplicationDelegate {
-  func applicationWillTerminate(_ notification: Notification) {
-    rimeSyncController.stop()
-    removeObservers()
-    transactionMonitor?.cancel()
-    transactionMonitor = nil
-    panel?.hide()
-    shutdownRime()
-    if let statusItem {
-      NSStatusBar.system.removeStatusItem(statusItem)
-      self.statusItem = nil
-    }
-  }
   private func performRimeUserDataSync() -> LinnetRimeSyncOutcome {
     guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
     let activeController = panel?.inputController
@@ -430,10 +428,6 @@ extension SquirrelApplicationDelegate {
     rimeAPI.finalize()
     isRimeRunning = false
   }
-  fileprivate func workspaceWillPowerOff(_: Notification) {
-    print("Finalizing before logging out.")
-    self.shutdownRime()
-  }
   fileprivate func dataRequested(
     _ request: LinnetSettingsContract.DataRequest,
     transactionReply: @escaping LinnetSettingsTransactionIPC.Reply
@@ -458,6 +452,8 @@ extension SquirrelApplicationDelegate {
         detail: "Runtime diagnostics are available.",
         health: health
       )
+    case .activateCore:
+      activateInstalledCore(request)
     case .refresh:
       publishSettingsCandidate(request, scope: .appearance)
     case .reloadConfiguration:
@@ -1018,9 +1014,13 @@ extension SquirrelApplicationDelegate {
     return runtimeHealth()
   }
 
-  fileprivate func runtimeHealth() -> LinnetSettingsContract.RuntimeHealth {
+  func runtimeHealth() -> LinnetSettingsContract.RuntimeHealth {
+    let activation = coreActivationState(dataTransactionActive: activeDataTransaction != nil)
     if let active = activeDataTransaction, active.phase == .paused {
       return .init(
+        productIdentity: LinnetSettingsContract.productIdentity(),
+        coreActivationReadiness: activation.readiness,
+        connectedInputClientCount: activation.connectedClientCount,
         state: .paused,
         phase: .paused,
         rimeVersion: rimeVersion(),
@@ -1058,6 +1058,9 @@ extension SquirrelApplicationDelegate {
       && smartEnglishLoaded && octagramLoaded && available == requiredSchemas.count
       && activeSettingsRevision != nil
     return .init(
+      productIdentity: LinnetSettingsContract.productIdentity(),
+      coreActivationReadiness: activation.readiness,
+      connectedInputClientCount: activation.connectedClientCount,
       state: healthy ? .running : .degraded,
       phase: activeDataTransaction?.phase ?? .running,
       rimeVersion: rimeVersion(),
@@ -1074,11 +1077,14 @@ extension SquirrelApplicationDelegate {
     LinnetSettingsContract.ChineseProfile.allCases.map(\.schemaID)
       + [LinnetSettingsContract.englishSchemaID]
   }
-
   fileprivate func degradedHealth(
     phase: LinnetSettingsContract.RuntimePhase
   ) -> LinnetSettingsContract.RuntimeHealth {
-    .init(
+    let activation = coreActivationState(dataTransactionActive: activeDataTransaction != nil)
+    return .init(
+      productIdentity: LinnetSettingsContract.productIdentity(),
+      coreActivationReadiness: activation.readiness,
+      connectedInputClientCount: activation.connectedClientCount,
       state: .degraded,
       phase: phase,
       rimeVersion: rimeVersion(),
@@ -1090,12 +1096,6 @@ extension SquirrelApplicationDelegate {
       activeSettingsRevision: activeSettingsRevision
     )
   }
-
-  fileprivate func rimeVersion() -> String {
-    guard let value = rimeAPI.get_version() else { return "unknown" }
-    return String(cString: value)
-  }
-
   fileprivate func validateCandidate(
     _ candidate: URL,
     live: URL,
@@ -1162,7 +1162,7 @@ extension SquirrelApplicationDelegate {
     }
   }
 
-  fileprivate func reply(
+  func reply(
     to transactionID: UUID,
     status: LinnetSettingsContract.RuntimeStatus,
     code: LinnetSettingsContract.RuntimeReplyCode,

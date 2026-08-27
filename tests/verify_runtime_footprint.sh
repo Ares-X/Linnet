@@ -98,7 +98,7 @@ ruby -e '
 ruby -e '
   source = File.read(ARGV.fetch(0))
   activation = source[/fileprivate func activateDataTransaction\(.*?\n  \}\n\n  fileprivate func startTransactionMonitor/m]
-  resume = source[/fileprivate func resumeCurrentRuntime\(\).*?\n  \}\n\n  fileprivate func runtimeHealth/m]
+  resume = source[/fileprivate func resumeCurrentRuntime\(\).*?\n  \}\n\n  func runtimeHealth/m]
   abort "transaction runtime owners are missing" unless activation && resume
   abort "activation ignores Settings readiness" if
     activation.match?(/^\s*loadSettings\(\)\s*$/)
@@ -1383,6 +1383,31 @@ if rg -n 'Timer|LaunchAgent|UNUserNotification|startMonitoring' \
     sources/LinnetSettings/LinnetSettingsUpdateChecker.swift; then
   fail "the quiet Settings update check regained a background notification owner"
 fi
+ruby -e '
+  contract = File.read("sources/LinnetSettings/SettingsContract.swift")
+  host = File.read("sources/SquirrelApplicationDelegate.swift")
+  lifecycle = File.read("sources/SquirrelApplicationPresentation.swift")
+  controller = File.read("sources/SquirrelInputController.swift")
+  settings = File.read("sources/LinnetSettings/LinnetSettingsUpdateChecker.swift")
+  activation = lifecycle[/func activateInstalledCore\(.*?\n  \}/m]
+  abort "the Core activation owner is missing" unless activation
+  abort "Core activation can bypass Host readiness" unless
+    activation.scan("coreActivationReadiness == .ready").length == 2 &&
+      activation.scan("requestCanContinue(request)").length == 2 &&
+      activation.scan("NSApp.terminate(nil)").length == 1 &&
+      !activation.include?("forceTerminate")
+  abort "connected InputMethodKit clients lost their lifecycle owner" unless
+    controller.scan("markInputClientConnected()").length == 2 &&
+      controller.scan("markInputClientDisconnected()").length == 2 &&
+      controller.include?("connectedInputClientCount")
+  abort "Settings can activate an unverified or substituted Host" unless
+    settings.include?("health.productIdentity == installedIdentity") &&
+      settings.include?("allowsRunningApplicationSubstitution = false") &&
+      settings.include?("reply.code == .coreActivationAccepted")
+  combined = contract + host + lifecycle + controller + settings
+  abort "Core activation gained a second input-source mutation path" if
+    combined.match?(/TIS(Register|Enable|Select|Disable)InputSource/)
+' || fail "safe installed-Core activation ownership regressed"
 retired_catalog_url='https://github.com/Ares-X/Linnet/releases/download/'\
 'data-channel/Linnet-Data-Channel.json'
 if rg -nF "${retired_catalog_url}" \
@@ -1531,7 +1556,7 @@ ruby -e '
 # read-only schema-list API and forbid session or selection mutations here.
 ruby -e '
   source = File.read(ARGV.fetch(0))
-  method = source[/fileprivate func runtimeHealth\(\) -> LinnetSettingsContract\.RuntimeHealth \{.*?\n  \}\n\n  fileprivate var requiredSchemas/m]
+  method = source[/func runtimeHealth\(\) -> LinnetSettingsContract\.RuntimeHealth \{.*?\n  \}\n\n  fileprivate var requiredSchemas/m]
   abort "runtimeHealth owner is missing" unless method
   abort "runtimeHealth must read the deployed schema list exactly once" unless
     method.scan("rimeAPI.get_schema_list").length == 1 &&

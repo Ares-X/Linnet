@@ -7,6 +7,67 @@ extension SquirrelApplicationDelegate {
     print("\(SquirrelApp.productName) is quitting.")
     return .terminateNow
   }
+
+  func workspaceWillPowerOff(_: Notification) {
+    print("Finalizing before logging out.")
+    shutdownRime()
+  }
+
+  func rimeVersion() -> String {
+    guard let value = rimeAPI.get_version() else { return "unknown" }
+    return String(cString: value)
+  }
+
+  func coreActivationState(dataTransactionActive: Bool) -> (
+    readiness: LinnetSettingsContract.CoreActivationReadiness,
+    connectedClientCount: Int
+  ) {
+    let connectedClientCount = SquirrelInputController.connectedInputClientCount
+    return (
+      LinnetSettingsContract.coreActivationReadiness(
+        inputSourceIsActive: SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier,
+        connectedInputClientCount: connectedClientCount,
+        dataTransactionActive: dataTransactionActive
+      ),
+      connectedClientCount
+    )
+  }
+
+  func activateInstalledCore(_ request: LinnetSettingsContract.DataRequest) {
+    guard LinnetSettingsContract.requestCanContinue(request) else {
+      reply(
+        to: request.transactionID,
+        status: .rejected,
+        code: .requesterUnavailable,
+        detail: "The requester is unavailable or its deadline expired."
+      )
+      return
+    }
+    let health = runtimeHealth()
+    guard health.coreActivationReadiness == .ready else {
+      reply(
+        to: request.transactionID,
+        status: .rejected,
+        code: .coreActivationBlocked,
+        detail: "The input runtime is still in use.",
+        health: health
+      )
+      return
+    }
+    reply(
+      to: request.transactionID,
+      status: .terminating,
+      code: .coreActivationAccepted,
+      detail: "The inactive Host accepted Core activation.",
+      health: health
+    )
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      guard LinnetSettingsContract.requestCanContinue(request),
+        self?.runtimeHealth().coreActivationReadiness == .ready
+      else { return }
+      NSApp.terminate(nil)
+    }
+  }
 }
 
 extension SquirrelApplicationDelegate {
