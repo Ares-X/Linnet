@@ -8,13 +8,6 @@
 import AppKit
 
 extension SquirrelPanel {
-  struct SidecarLayout {
-    let rowStartIndex: Int
-    let anchorIndex: Int
-    let detailGeometry: LinnetCandidatePresentation.CandidateDetailGeometry
-    let theme: SquirrelTheme
-  }
-
   func beginPublication(controller: SquirrelInputController) -> Publication? {
     guard inputController === controller else { return nil }
     panelPublicationGeneration &+= 1
@@ -171,10 +164,17 @@ extension SquirrelPanel {
     }
 
     // Break line if the text is too long, based on screen size.
-    let textWidth = maxTextWidth(metrics: metrics)
+    let maximumTextWidth = maxTextWidth(metrics: metrics)
     let maxTextHeight = metrics.vertical
       ? screenRect.width - metrics.edgeInset.width * 2
       : screenRect.height - metrics.edgeInset.height * 2
+    let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
+      forLinearLayout: linear || metrics.vertical,
+      candidateFontPoint: theme.font.pointSize)
+    let hasSidecar = detailGeometry.placement == .sidecar && !view.detailTextView.isHidden
+    let textWidth = hasSidecar
+      ? min(maximumTextWidth, detailGeometry.candidateColumnMaximumWidth ?? maximumTextWidth)
+      : maximumTextWidth
     textContainer.size = NSSize(width: textWidth, height: maxTextHeight)
     textLayoutManager.ensureLayout(for: textLayoutManager.documentRange)
     guard publicationIsCurrent(publication) else { return false }
@@ -184,6 +184,21 @@ extension SquirrelPanel {
     var panelRect = NSRect.zero
     // in vertical mode, the width and height are interchanged
     var contentRect = view.contentRect
+    var sidecarFrames: LinnetCandidatePresentation.CandidateDetailFrames?
+    if hasSidecar, let detailTextContainer = view.detailTextView.textContainer,
+      let detailTextLayoutManager = view.detailTextView.textLayoutManager {
+      let detailWidth = detailGeometry.detailColumnMaximumWidth ?? maximumTextWidth
+      detailTextContainer.size = NSSize(width: detailWidth, height: maxTextHeight)
+      detailTextLayoutManager.ensureLayout(for: detailTextLayoutManager.documentRange)
+      let detailRect = view.detailContentRect
+      sidecarFrames = detailGeometry.frames(
+        candidateSize: contentRect.size,
+        detailSize: NSSize(width: detailWidth, height: detailRect.height),
+        dividerSize: NSSize(width: 1, height: max(contentRect.height, detailRect.height)))
+      if let sidecarFrames {
+        contentRect = NSRect(origin: .zero, size: sidecarFrames.size)
+      }
+    }
     let relativeCaretY = LinnetPanelGeometry.relativeVerticalPosition(
       caret: position,
       screen: screenRect
@@ -291,12 +306,35 @@ extension SquirrelPanel {
     view.textView.setBoundsOrigin(.zero)
 
     view.frame = contentView.bounds
-    view.textView.frame = LinnetPanelGeometry.pagingLayout(
+    let contentFrame = LinnetPanelGeometry.pagingLayout(
       configuration: metrics.paging,
       in: contentView.bounds,
       preferredAxisCenter: .nan,
       vertical: metrics.vertical).contentFrame
+    view.textView.frame = contentFrame
     view.textView.textContainerInset = metrics.edgeInset
+    if let sidecarFrames,
+      let dividerFrame = sidecarFrames.divider {
+      let top = contentFrame.maxY - metrics.edgeInset.height
+      view.detailTextView.frame = NSRect(
+        x: contentFrame.minX + metrics.edgeInset.width + sidecarFrames.detail.minX,
+        y: top - sidecarFrames.detail.height,
+        width: sidecarFrames.detail.width,
+        height: sidecarFrames.detail.height)
+      view.detailDividerView.frame = NSRect(
+        x: contentFrame.minX + metrics.edgeInset.width + dividerFrame.minX,
+        y: top - dividerFrame.height,
+        width: dividerFrame.width,
+        height: dividerFrame.height)
+      let dividerColor = (theme.detailAttrs[.foregroundColor] as? NSColor) ?? .separatorColor
+      view.detailDividerView.layer?.backgroundColor =
+        dividerColor.withAlphaComponent(0.3).cgColor
+      view.applyCandidateColumnWidth(metrics.edgeInset.width + dividerFrame.minX)
+    } else {
+      view.detailTextView.frame = .zero
+      view.detailDividerView.frame = .zero
+      view.applyCandidateColumnWidth(nil)
+    }
     guard publicationIsCurrent(publication) else { return false }
 
     if theme.translucency {
@@ -331,6 +369,7 @@ extension SquirrelPanel {
       return
     }
     textContentStorage.attributedString = text
+    view.publishSidecarDetail(nil)
     guard publicationIsCurrent(publication) else { return }
     view.textView.setLayoutOrientation(.horizontal)
     guard publicationIsCurrent(publication) else { return }
@@ -371,68 +410,4 @@ extension SquirrelPanel {
     ).attributedString
   }
 
-  func attachSidecar(
-    _ detail: NSAttributedString,
-    to text: NSMutableAttributedString,
-    candidateRanges: inout [NSRange],
-    layout: SidecarLayout
-  ) -> NSRange {
-    let detailGeometry = layout.detailGeometry
-    let theme = layout.theme
-    let divider = NSMutableAttributedString(
-      string: detailGeometry.textSeparator,
-      attributes: theme.detailAttrs)
-    divider.append(detail)
-    guard let insertion = LinnetCandidatePresentation.sidecarInsertion(
-      candidateRanges: candidateRanges,
-      anchorIndex: layout.anchorIndex,
-      insertedLength: divider.length
-    ) else { return .empty }
-
-    let physicalRanges = candidateRanges.filter { $0.location != NSNotFound }
-    guard let candidateStart = physicalRanges.map(\.location).min(),
-      let candidateEnd = physicalRanges.map(\.upperBound).max()
-    else { return .empty }
-    let candidateSize = text.attributedSubstring(
-      from: NSRange(location: candidateStart, length: candidateEnd - candidateStart)
-    ).boundingRect(
-      with: NSSize(
-        width: CGFloat.greatestFiniteMagnitude,
-        height: CGFloat.greatestFiniteMagnitude),
-      options: [.usesLineFragmentOrigin]).size
-    let detailSize = detail.boundingRect(
-      with: NSSize(
-        width: CGFloat.greatestFiniteMagnitude,
-        height: CGFloat.greatestFiniteMagnitude),
-      options: [.usesLineFragmentOrigin]).size
-    let dividerSize = NSAttributedString(
-      string: detailGeometry.dividerText,
-      attributes: theme.detailAttrs).boundingRect(
-        with: NSSize(
-          width: CGFloat.greatestFiniteMagnitude,
-          height: CGFloat.greatestFiniteMagnitude),
-        options: [.usesLineFragmentOrigin]).size
-    let frames = detailGeometry.frames(
-      candidateSize: candidateSize,
-      detailSize: detailSize,
-      dividerSize: dividerSize)
-    text.insert(divider, at: insertion.location)
-    candidateRanges = insertion.candidateRanges
-    guard candidateRanges.indices.contains(layout.rowStartIndex) else { return .empty }
-    let rowStart = candidateRanges[layout.rowStartIndex]
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.setParagraphStyle(theme.firstParagraphStyle)
-    guard let dividerFrame = frames.divider else { return .empty }
-    paragraph.tabStops = [
-      NSTextTab(textAlignment: .left, location: dividerFrame.minX),
-      NSTextTab(textAlignment: .left, location: frames.detail.minX)
-    ]
-    text.addAttribute(
-      .paragraphStyle,
-      value: paragraph,
-      range: NSRange(
-        location: rowStart.location,
-        length: insertion.location + divider.length - rowStart.location))
-    return NSRange(location: insertion.location, length: divider.length)
-  }
 }

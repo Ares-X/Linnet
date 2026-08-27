@@ -371,13 +371,15 @@ extension LinnetCandidatePresentation {
     let placement: DetailPlacement
     let spacing: CGFloat
     let dividerText: String
+    let candidateColumnMaximumWidth: CGFloat?
+    let detailColumnMaximumWidth: CGFloat?
 
     var textSeparator: String {
       switch placement {
       case .footer:
         "\n"
       case .sidecar:
-        "\t\(dividerText)\t"
+        ""
       }
     }
 
@@ -386,53 +388,62 @@ extension LinnetCandidatePresentation {
       detailSize: CGSize,
       dividerSize: CGSize
     ) -> CandidateDetailFrames {
-      let candidate = CGRect(origin: .zero, size: candidateSize)
+      let fittedCandidateSize = CGSize(
+        width: min(candidateSize.width, candidateColumnMaximumWidth ?? candidateSize.width),
+        height: candidateSize.height)
+      let fittedDetailSize = CGSize(
+        width: placement == .sidecar
+          ? detailColumnMaximumWidth ?? detailSize.width
+          : min(detailSize.width, detailColumnMaximumWidth ?? detailSize.width),
+        height: detailSize.height)
+      let candidate = CGRect(origin: .zero, size: fittedCandidateSize)
       switch placement {
       case .footer:
         let detail = CGRect(
-          origin: CGPoint(x: 0, y: candidateSize.height + spacing),
-          size: detailSize)
+          origin: CGPoint(x: 0, y: fittedCandidateSize.height + spacing),
+          size: fittedDetailSize)
         return CandidateDetailFrames(
           candidate: candidate,
           divider: nil,
           detail: detail,
           size: CGSize(
-            width: max(candidateSize.width, detailSize.width),
-            height: candidateSize.height + spacing + detailSize.height))
+            width: max(fittedCandidateSize.width, fittedDetailSize.width),
+            height: fittedCandidateSize.height + spacing + fittedDetailSize.height))
       case .sidecar:
         let divider = CGRect(
-          origin: CGPoint(x: candidateSize.width + spacing, y: 0),
+          origin: CGPoint(x: fittedCandidateSize.width + spacing, y: 0),
           size: dividerSize)
         let detail = CGRect(
           origin: CGPoint(x: divider.maxX + spacing, y: 0),
-          size: detailSize)
+          size: fittedDetailSize)
         return CandidateDetailFrames(
           candidate: candidate,
           divider: divider,
           detail: detail,
           size: CGSize(
             width: detail.maxX,
-            height: max(candidateSize.height, dividerSize.height, detailSize.height)))
+            height: max(
+              fittedCandidateSize.height, dividerSize.height, fittedDetailSize.height)))
       }
     }
   }
 
   static func candidateDetailGeometry(
-    forLinearLayout linear: Bool
+    forLinearLayout linear: Bool,
+    candidateFontPoint: CGFloat = 16
   ) -> CandidateDetailGeometry {
-    CandidateDetailGeometry(
+    let candidateColumnMaximumWidth = min(240, max(150, candidateFontPoint * 10))
+    let detailColumnMaximumWidth = min(320, max(220, candidateFontPoint * 14))
+    return CandidateDetailGeometry(
       placement: linear ? .footer : .sidecar,
       spacing: candidateRowSpacing,
-      dividerText: "│")
+      dividerText: "│",
+      candidateColumnMaximumWidth: linear ? nil : candidateColumnMaximumWidth,
+      detailColumnMaximumWidth: linear ? nil : detailColumnMaximumWidth)
   }
 
   static func usesInlineComments(candidateFormat: String) -> Bool {
     candidateFormat.contains("[comment]")
-  }
-
-  struct SidecarInsertion: Equatable {
-    let location: Int
-    let candidateRanges: [NSRange]
   }
 
   static func selectedDetailText(_ rawComment: String) -> String {
@@ -465,20 +476,4 @@ extension LinnetCandidatePresentation {
     return parts.joined(separator: ", ")
   }
 
-  static func sidecarInsertion(
-    candidateRanges: [NSRange],
-    anchorIndex: Int,
-    insertedLength: Int
-  ) -> SidecarInsertion? {
-    guard candidateRanges.indices.contains(anchorIndex), insertedLength >= 0 else {
-      return nil
-    }
-    let anchor = candidateRanges[anchorIndex]
-    let insertionLocation = anchor.upperBound
-    var adjusted = candidateRanges
-    for index in adjusted.indices where adjusted[index].location >= insertionLocation {
-      adjusted[index].location += insertedLength
-    }
-    return SidecarInsertion(location: insertionLocation, candidateRanges: adjusted)
-  }
 }

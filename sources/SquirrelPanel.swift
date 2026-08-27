@@ -72,6 +72,8 @@ final class SquirrelPanel: NSPanel {
     contentView.addSubview(back)
     contentView.addSubview(view)
     contentView.addSubview(view.textView)
+    contentView.addSubview(view.detailDividerView)
+    contentView.addSubview(view.detailTextView)
     self.contentView = contentView
     candidateAccessibility.install(parent: view, rawTextView: view.textView)
   }
@@ -284,10 +286,12 @@ extension SquirrelPanel {
     let usesInlineComments = LinnetCandidatePresentation.usesInlineComments(
       candidateFormat: theme.candidateFormat)
     let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
-      forLinearLayout: linear)
+      forLinearLayout: linear || vertical,
+      candidateFontPoint: theme.font.pointSize)
     let selectedDetail = usesInlineComments
       ? nil : selectedDetail(theme: theme, candidates: candidates.items, highlighted: index)
     var detailRange = NSRange.empty
+    var sidecarDetail: NSAttributedString?
 
     // candidates
     var candidateRanges = [NSRange](
@@ -365,23 +369,14 @@ extension SquirrelPanel {
         detailRange = NSRange(location: text.length, length: selectedDetail.length)
         text.append(selectedDetail)
       case .sidecar:
-        if let sidecarRow = visualRows.first(where: { $0.contains(index) }),
-          let rowStartIndex = sidecarRow.first,
-          let anchorIndex = sidecarRow.last {
-          detailRange = attachSidecar(
-            selectedDetail, to: text, candidateRanges: &candidateRanges,
-            layout: SidecarLayout(
-              rowStartIndex: rowStartIndex,
-              anchorIndex: anchorIndex,
-              detailGeometry: detailGeometry,
-              theme: theme))
-        }
+        sidecarDetail = selectedDetail
       }
     }
 
     // text done!
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.textContentStorage?.attributedString = text
+    view.publishSidecarDetail(sidecarDetail)
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.setLayoutOrientation(vertical ? .vertical : .horizontal)
     guard publicationIsCurrent(currentPublication) else { return false }

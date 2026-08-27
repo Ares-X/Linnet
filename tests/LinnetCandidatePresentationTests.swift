@@ -70,52 +70,6 @@ struct LinnetCandidatePresentationTests {
     )
     require(bounded.last == "…", "truncated detail has no ellipsis")
 
-    let ranges = [
-      NSRange(location: 0, length: 3),
-      NSRange(location: 5, length: 4),
-      NSRange(location: 11, length: 5),
-    ]
-    guard let insertion = LinnetCandidatePresentation.sidecarInsertion(
-      candidateRanges: ranges, anchorIndex: 1, insertedLength: 7)
-    else { fail("valid selected candidate was rejected") }
-    require(insertion.location == 9, "sidecar did not follow the selected candidate")
-    require(insertion.candidateRanges[0] == ranges[0], "earlier candidate moved")
-    require(insertion.candidateRanges[1] == ranges[1], "selected candidate range changed")
-    require(
-      insertion.candidateRanges[2] == NSRange(location: 18, length: 5),
-      "later candidate did not move with inserted detail"
-    )
-    require(
-      LinnetCandidatePresentation.sidecarInsertion(
-        candidateRanges: ranges, anchorIndex: 3, insertedLength: 2) == nil,
-      "invalid selected candidate was accepted"
-    )
-
-    // A vertical expanded grid is rendered in visual row order, while the
-    // ranges remain indexed by the candidates' absolute order. Inserting a
-    // sidecar must therefore shift ranges by their physical text position,
-    // not by their logical candidate index.
-    let reorderedRanges = [
-      NSRange(location: 0, length: 3),
-      NSRange(location: 20, length: 4),
-      NSRange(location: 5, length: 3),
-    ]
-    guard let reorderedInsertion = LinnetCandidatePresentation.sidecarInsertion(
-      candidateRanges: reorderedRanges, anchorIndex: 2, insertedLength: 4)
-    else { fail("valid expanded-grid sidecar anchor was rejected") }
-    require(
-      reorderedInsertion.location == 8,
-      "expanded-grid sidecar did not follow its visual-row anchor"
-    )
-    require(
-      reorderedInsertion.candidateRanges[1] == NSRange(location: 24, length: 4),
-      "a physically later candidate did not move with expanded-grid detail"
-    )
-    require(
-      reorderedInsertion.candidateRanges[2] == reorderedRanges[2],
-      "the sidecar anchor range changed"
-    )
-
     require(
       LinnetCandidatePresentation.accessibilityAnnouncement(
         candidate: "interface", comment: "  n. 接口  ", page: 2, indexOnPage: 1
@@ -470,14 +424,23 @@ struct LinnetCandidatePresentationTests {
       dividerSize: CGSize(width: 1, height: 60))
     require(
       sidecar.placement == .sidecar &&
-        sidecar.textSeparator == "\t│\t",
+        sidecar.textSeparator.isEmpty,
       "vertical candidate detail lost its shared sidecar policy")
     require(
       sidecarFrames.candidate == CGRect(x: 0, y: 0, width: 40, height: 60) &&
         sidecarFrames.divider == CGRect(x: 46, y: 0, width: 1, height: 60) &&
-        sidecarFrames.detail == CGRect(x: 53, y: 0, width: 30, height: 12) &&
-        sidecarFrames.size == CGSize(width: 83, height: 60),
+        sidecarFrames.detail == CGRect(x: 53, y: 0, width: 224, height: 12) &&
+        sidecarFrames.size == CGSize(width: 277, height: 60),
       "sidecar candidate, divider, and detail no longer share one spatial geometry")
+
+    let longDefinitionFrames = sidecar.frames(
+      candidateSize: CGSize(width: 112, height: 156),
+      detailSize: CGSize(width: 680, height: 18),
+      dividerSize: CGSize(width: 1, height: 156))
+    require(
+      longDefinitionFrames.detail.width <= 300 &&
+        longDefinitionFrames.size.width <= 425,
+      "a long English definition can still stretch the vertical candidate panel")
   }
 
   /// Expansion starts at the current Rime page and may inspect at most three

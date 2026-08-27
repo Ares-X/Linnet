@@ -174,7 +174,13 @@ struct LinnetCandidateWindowInteractionTests {
       outputPath: naturalShotPath,
       middlePageOutputPath: pagingShotPath)
     testEnglishMetadataFooterNaturalSize()
-    testSharedCandidateDetailSidecarGeometry()
+    let verticalDetailShotPath = CommandLine.arguments.firstIndex(
+      of: "--vertical-detail-shot"
+    ).flatMap { index in
+      CommandLine.arguments.indices.contains(index + 1)
+        ? CommandLine.arguments[index + 1] : nil
+    }
+    testSharedCandidateDetailSidecarGeometry(outputPath: verticalDetailShotPath)
     testVerticalPanelDoesNotMemorizeWhenDisabled()
     for point in [CGFloat(12), 16, 32] {
       for linear in [true, false] {
@@ -1691,7 +1697,7 @@ struct LinnetCandidateWindowInteractionTests {
     panel.hide()
   }
 
-  private static func testSharedCandidateDetailSidecarGeometry() {
+  private static func testSharedCandidateDetailSidecarGeometry(outputPath: String?) {
     for point in [CGFloat(12), 15, 16, 32] {
       let panel = SquirrelPanel(position: NSRect(x: 0, y: 0, width: 2, height: 20))
       let controller = SquirrelInputController()
@@ -1726,8 +1732,12 @@ struct LinnetCandidateWindowInteractionTests {
       ]
       theme.firstParagraphStyle = NSMutableParagraphStyle()
       theme.paragraphStyle = NSMutableParagraphStyle()
-      let detailText = "/ef/ · n. 字母 F"
-      let values = ["f", "far", "fast"]
+      let detailText = LinnetCandidatePresentation.selectedDetailText(
+        "/ˈwɜːkɪŋ/ · adj. 做工作的；劳动的；工作上的；初步的；暂定的；"
+          + "基本够用的；起作用的；n. 矿；作业区；（复）workings：运作；工作方法。")
+      let values = [
+        "working", "workings", "working", "waking", "workington", "workingman",
+      ]
       _ = panel.update(
         preedit: "", selRange: .empty, caretPos: 0,
         candidates: SquirrelInputController.CandidateSnapshot(
@@ -1753,59 +1763,70 @@ struct LinnetCandidateWindowInteractionTests {
         panel.hide()
         continue
       }
-      let candidateWidth = candidateView.candidateRanges.reduce(CGFloat.zero) {
-        width, range in
-        max(
-          width,
-          text.attributedSubstring(from: range).boundingRect(
-            with: NSSize(
-              width: CGFloat.greatestFiniteMagnitude,
-              height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin]).width)
-      }
-      let detailStringRange = (text.string as NSString).range(of: detailText)
-      guard detailStringRange.location != NSNotFound else {
-        failures.append("\(point)pt live sidecar lost its metadata text")
-        panel.hide()
-        continue
-      }
-      let detail = text.attributedSubstring(from: detailStringRange)
       let geometry = LinnetCandidatePresentation.candidateDetailGeometry(
-        forLinearLayout: false)
-      let dividerSize = NSAttributedString(
-        string: geometry.dividerText,
-        attributes: theme.detailAttrs).boundingRect(
-          with: NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude),
-          options: [.usesLineFragmentOrigin]).size
-      let expected = geometry.frames(
-        candidateSize: CGSize(width: candidateWidth, height: 0),
-        detailSize: detail.boundingRect(
-          with: NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude),
-          options: [.usesLineFragmentOrigin]).size,
-        dividerSize: dividerSize)
-      let paragraph = text.attribute(
-        .paragraphStyle,
-        at: candidateView.candidateRanges[0].location,
-        effectiveRange: nil) as? NSParagraphStyle
-      let tabs = paragraph?.tabStops ?? []
+        forLinearLayout: false,
+        candidateFontPoint: point)
       require(
-        tabs.count == 2 &&
-          abs(tabs[0].location - (expected.divider?.minX ?? .nan)) < 0.001 &&
-          abs(tabs[1].location - expected.detail.minX) < 0.001,
-        "\(point)pt live sidecar did not consume the shared candidate-detail frames")
-      require(
-        text.attributedSubstring(from: candidateView.detailRange).string
-          == geometry.textSeparator + detail.string,
-        "\(point)pt live sidecar diverged from the shared separator")
+        candidateView.detailRange == .empty && !text.string.contains(detailText),
+        "\(point)pt sidecar metadata returned to the candidate text owner")
       require(
         zip(candidateView.candidateRanges, values).allSatisfy { range, value in
           text.attributedSubstring(from: range).string.hasSuffix(value)
         },
-        "\(point)pt sidecar insertion changed a candidate range")
+        "\(point)pt independent detail layout changed a candidate range")
+      require(
+        !candidateView.detailTextView.isHidden &&
+          !candidateView.detailDividerView.isHidden &&
+          candidateView.detailTextView.textContentStorage?.attributedString?.string
+            == detailText,
+        "\(point)pt independent detail surface did not publish selected metadata: "
+          + "hidden=\(candidateView.detailTextView.isHidden), "
+          + "value="
+          + (candidateView.detailTextView.textContentStorage?.attributedString?.string
+            .debugDescription ?? "<missing>")
+          + " expected=\(detailText.debugDescription)")
+      if let textLayoutManager = candidateView.detailTextView.textLayoutManager {
+        var detailSegments: [CGRect] = []
+        textLayoutManager.enumerateTextSegments(
+          in: textLayoutManager.documentRange,
+          type: .selection,
+          options: [.rangeNotRequired]
+        ) { _, rect, _, _ in
+          detailSegments.append(rect)
+          return true
+        }
+        require(
+          detailSegments.count >= 2 && detailSegments.allSatisfy {
+            $0.minX >= -0.5 &&
+              $0.maxX <= candidateView.detailTextView.bounds.width + 0.5
+          },
+          "\(point)pt long definition escaped its bounded detail surface: "
+            + "\(detailSegments)")
+      } else {
+        failures.append("\(point)pt long definition has no TextKit geometry")
+      }
+      let candidateFrames = candidateView.candidateAccessibilityGeometry().candidateFrames
+      require(
+        candidateFrames.allSatisfy {
+          $0.maxX <= candidateView.detailDividerView.frame.minX + 0.5
+        },
+        "\(point)pt candidate hit or highlight geometry still extends into the detail column")
+      let expectedMaximumWidth =
+        (geometry.candidateColumnMaximumWidth ?? 0) +
+        (geometry.detailColumnMaximumWidth ?? 0) +
+        geometry.spacing * 2 + 1 + theme.edgeInset.width * 2
+      require(
+        abs(
+          candidateView.detailTextView.frame.width -
+            (geometry.detailColumnMaximumWidth ?? .nan)) <= 0.5 &&
+          panel.frame.width <= ceil(expectedMaximumWidth) + 1,
+        "\(point)pt vertical English panel detail width "
+          + "\(candidateView.detailTextView.frame.width), panel width \(panel.frame.width), "
+          + "expected detail \(String(describing: geometry.detailColumnMaximumWidth)), "
+          + "maximum panel \(ceil(expectedMaximumWidth) + 1)")
+      if point == 15, let outputPath {
+        writeSnapshot(of: panel.contentView, outputPath: outputPath)
+      }
       panel.hide()
     }
   }
