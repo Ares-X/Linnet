@@ -169,19 +169,22 @@ if rg -n 'AF_INET6?|SOCK_DGRAM|socketpair|getaddrinfo|getnameinfo|sendto|recv(fr
     "${local_ipc_owner}"; then
   fail "the local IPC owner escaped its AF_UNIX stream contract"
 fi
-[[ "$(rg -F -c 'socket(AF_UNIX, SOCK_STREAM, 0)' "${local_ipc_owner}")" -eq 2 ]] ||
+[[ "$(rg -F -c 'socket(AF_UNIX, SOCK_STREAM, 0)' "${local_ipc_owner}")" -eq 3 ]] ||
   fail "the local IPC owner changed its socket creation contract"
 for call_contract in \
   'Darwin.bind(fd, address, length)' \
   'listen(fd, 8)' \
   'accept(listener, nil, nil)' \
-  'Darwin.connect(fd, address, length)' \
   'MSG_DONTWAIT | MSG_NOSIGNAL)'
 do
   [[ "$(rg -F -c "${call_contract}" "${local_ipc_owner}")" -eq 1 ]] ||
     fail "the local IPC owner changed its system-call set"
 done
-[[ "$(rg -c --pcre2 "${local_ipc_source_pattern}" "${local_ipc_owner}")" -eq 5 ]] ||
+# One connection drives each client request; the other classifies an existing
+# owner-only endpoint before the Host may replace a genuinely stale socket.
+[[ "$(rg -F -c 'Darwin.connect' "${local_ipc_owner}")" -eq 2 ]] ||
+  fail "the local IPC owner changed its client/probe connection contract"
+[[ "$(rg -c --pcre2 "${local_ipc_source_pattern}" "${local_ipc_owner}")" -eq 6 ]] ||
   fail "the local IPC owner gained another network-shaped call"
 [[ "$(rg -F -c 'getpeereid(descriptor, &uid, &gid)' "${local_ipc_owner}")" -eq 1 ]] ||
   fail "the local IPC owner lost peer-UID authentication"
@@ -317,7 +320,7 @@ actual_local_ipc_symbols="$(
   rg -o --pcre2 '_(socket|connect|send|accept|listen|bind)(?=[[:space:]@]|$)' \
     "${scratch_root}/input-symbols" | LC_ALL=C sort -u
 )"
-expected_local_ipc_symbols=$'_accept\n_bind\n_listen\n_send\n_socket'
+expected_local_ipc_symbols=$'_accept\n_bind\n_connect\n_listen\n_send\n_socket'
 [[ "${actual_local_ipc_symbols}" == "${expected_local_ipc_symbols}" ]] ||
   fail "the main executable changed its exact local IPC server symbol set"
 

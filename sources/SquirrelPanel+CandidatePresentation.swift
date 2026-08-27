@@ -19,8 +19,9 @@ extension SquirrelPanel {
   }
 
   func publicationIsCurrent(_ publication: Publication) -> Bool {
-    guard let inputController else { return false }
-    return self.publication == publication &&
+    guard let current = self.publication, let inputController else { return false }
+    return current.generation == publication.generation &&
+      current.controllerID == publication.controllerID &&
       publication.controllerID == ObjectIdentifier(inputController)
   }
 

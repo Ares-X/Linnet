@@ -48,6 +48,19 @@ final class SquirrelInstaller {
     }
   }
 
+  /// An InputMethodKit Host is valid only from the per-user installation
+  /// location. Build, analysis, and cache copies must fail before they open the
+  /// production Rime data or publish the production Settings IPC endpoint.
+  static func hostMayStartRuntime(
+    bundleURL: URL,
+    homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+  ) -> Bool {
+    let installedHost = homeDirectory.appending(
+      path: "Library/Input Methods/\(SquirrelApp.appDir.lastPathComponent)",
+      directoryHint: .isDirectory)
+    return bundleURL.standardizedFileURL == installedHost.standardizedFileURL
+  }
+
   private func inputSources(identifier: String) -> [TISInputSource] {
     let sourceList = TISCreateInputSourceList(nil, true).takeRetainedValue()
       as! [TISInputSource]

@@ -80,6 +80,16 @@ if rg -n -i 'launch[M]arker|launch [Ss]tate|crash[- ]loop' \
 fi
 ruby -e '
   source = File.read(ARGV.fetch(0))
+  entry = source[/static func main\(\).*?let delegate = SquirrelApplicationDelegate\(\)/m]
+  abort "Host runtime entry owner is missing" unless entry
+  location = entry.index("SquirrelInstaller.hostMayStartRuntime")
+  lifecycle = entry.index("let handled = autoreleasepool")
+  server = entry.index("_ = IMKServer")
+  setup = entry.index("let delegate = SquirrelApplicationDelegate()")
+  abort "a non-installed executable can mutate the input-source lifecycle" unless
+    location && lifecycle && location < lifecycle
+  abort "a non-installed Host can initialize InputMethodKit or Rime" unless
+    server && setup && location < server && server < setup
   startup = source[/let delegate = SquirrelApplicationDelegate\(\).*?app\.run\(\)/m]
   abort "Host startup owner is missing" unless startup
   run = startup.index("app.run()")
@@ -2405,13 +2415,10 @@ rg -Fq 'if [[ "${install_mode}" == complete ]]' \
 if rg -n -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
   fail "Core update regained a live InputMethodKit Host termination path"
 fi
-test "$(rg -F -c -- '"$${launch_services_register}" -u "$${local_app}"' \
-  Makefile)" = 1 ||
-  fail "local builds no longer retire their LaunchServices registration"
-rg -Fq '"$${launch_services_register}" -dump' Makefile ||
-  fail "local builds trust unregister exit codes instead of final registry state"
-if rg -Fq '|| cleanup_status=$$?' Makefile; then
-  fail "an unregistered local App can still make a successful build fail"
+test "$(rg -F -c -- 'REGISTER_WITH_LAUNCH_SERVICES=NO' Makefile)" = 1 ||
+  fail "local builds can register non-installed Apps with LaunchServices"
+if rg -n 'launch_services_register|unregister_local_builds|lsregister' Makefile; then
+  fail "local builds regained compensating LaunchServices cleanup"
 fi
 rg -Fq 'unregister_fixture_apps' tests/verify_visible_settings_fixture.sh ||
   fail "Settings UI tests can leave fixture Apps registered with LaunchServices"

@@ -9,6 +9,17 @@ enum SquirrelApp {
 struct LinnetInputSourceLifecycleTests {
   static func main() {
     let identifier = SquirrelApp.bundleIdentifier
+    let home = URL(fileURLWithPath: "/Users/linnet-fixture", isDirectory: true)
+    let installed = home.appending(
+      path: "Library/Input Methods/Linnet.app", directoryHint: .isDirectory)
+    let cachedBuild = home.appending(
+      path: "Library/Caches/build/Debug/Linnet.app", directoryHint: .isDirectory)
+    guard SquirrelInstaller.hostMayStartRuntime(
+      bundleURL: installed, homeDirectory: home)
+    else { fatalError("the canonical installed Host was rejected") }
+    guard !SquirrelInstaller.hostMayStartRuntime(
+      bundleURL: cachedBuild, homeDirectory: home)
+    else { fatalError("a cached development Host could access the production runtime") }
     do {
       guard try SquirrelInstaller.registrationRequired(
         inputSourceCount: 0, identifier: identifier)

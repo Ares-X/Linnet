@@ -10,7 +10,14 @@ struct LinnetDataRegistry {
   let backupsDirectory: URL
 
   init(productName: String, coreVersion: String) throws {
-    rootDirectory = URL(fileURLWithPath: "/tmp/linnet-ipc-registry", isDirectory: true)
+    guard let root = ProcessInfo.processInfo.environment["LINNET_IPC_TEST_ROOT"],
+      root.hasPrefix("/")
+    else {
+      throw NSError(
+        domain: "LinnetSettingsTransactionIPCTests", code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "missing isolated IPC root"])
+    }
+    rootDirectory = URL(fileURLWithPath: root, isDirectory: true)
     userDataDirectory = rootDirectory.appending(path: "User", directoryHint: .isDirectory)
     transactionsDirectory = rootDirectory.appending(
       path: "Transactions", directoryHint: .isDirectory)
@@ -66,12 +73,11 @@ struct LinnetSettingsTransactionIPCTests {
       guard let mode = arguments.first,
         [
           "--serve-success", "--serve-reload", "--serve-rejection",
+          "--serve-owner-collision",
           "--serve-timeout-recovery",
         ].contains(mode),
         arguments.count == (mode == "--serve-timeout-recovery" ? 4 : 2)
       else { throw TestFailure.invalidInvocation }
-      let endpoint = URL(fileURLWithPath: arguments[1])
-
       let invoked = DispatchSemaphore(value: 0)
       let invocation = LockedFlag()
       let recoveryObservations = LockedRecoveryObservations()
@@ -80,7 +86,7 @@ struct LinnetSettingsTransactionIPCTests {
       let firstReadMarker = mode == "--serve-timeout-recovery"
         ? URL(fileURLWithPath: arguments[3]) : nil
       let host = try LinnetSettingsTransactionIPC.Host(
-        endpointURL: endpoint
+        startingAt: .main
       ) { request, reply in
         invocation.set()
         defer { invoked.signal() }
@@ -140,6 +146,19 @@ struct LinnetSettingsTransactionIPCTests {
       try host.start()
       defer { host.stop() }
 
+      if mode == "--serve-owner-collision" {
+        let duplicate = try LinnetSettingsTransactionIPC.Host(
+          startingAt: .main
+        ) { _, _ in }
+        do {
+          try duplicate.start()
+          duplicate.stop()
+          throw TestFailure.duplicateOwnerAccepted
+        } catch LinnetSettingsTransactionIPC.Failure.unavailable {
+          print("LinnetSettingsTransactionIPCTests: active endpoint owner preserved")
+        }
+      }
+
       if mode == "--serve-timeout-recovery" {
         for _ in 0..<2 {
           guard invoked.wait(timeout: .now() + 8) == .success else {
@@ -190,10 +209,8 @@ struct LinnetSettingsTransactionIPCTests {
         (mode == "--request-timeout-recovery"
           ? arguments.count == 4 : arguments.count == 2 || arguments.count == 3)
       else { throw TestFailure.invalidInvocation }
-      let endpoint = URL(fileURLWithPath: arguments[1])
       if mode == "--request-timeout-recovery" {
         try await runTimeoutRecovery(
-          endpoint: endpoint,
           liveDirectory: URL(fileURLWithPath: arguments[2], isDirectory: true),
           firstReadMarker: URL(fileURLWithPath: arguments[3]))
         return
@@ -211,7 +228,7 @@ struct LinnetSettingsTransactionIPCTests {
         expectedSettingsRevision: reload ? ConfigurationFixture.baseRevision : nil)
 
       do {
-        let client = try LinnetSettingsTransactionIPC.Client(endpointURL: endpoint)
+        let client = LinnetSettingsTransactionIPC.Client(startingAt: .main)
         let progress = LockedReplies()
         let terminal = try await client.request(request, timeout: 2) {
           progress.append($0)
@@ -230,7 +247,6 @@ struct LinnetSettingsTransactionIPCTests {
     }
 
     private static func runTimeoutRecovery(
-      endpoint: URL,
       liveDirectory: URL,
       firstReadMarker: URL
     ) async throws {
@@ -241,7 +257,7 @@ struct LinnetSettingsTransactionIPCTests {
       try TimeoutRecoveryFixture.nextSecondary.write(
         to: TimeoutRecoveryFixture.secondary(in: liveDirectory), options: .atomic)
 
-      let client = try LinnetSettingsTransactionIPC.Client(endpointURL: endpoint)
+      let client = LinnetSettingsTransactionIPC.Client(startingAt: .main)
       let firstTransactionID = UUID()
       let first = LinnetSettingsContract.DataRequest(
         transactionID: firstTransactionID,
@@ -297,6 +313,7 @@ struct LinnetSettingsTransactionIPCTests {
     case legitimateFlow
     case timeoutExpected
     case recoveryGeneration
+    case duplicateOwnerAccepted
   }
 
   private static func fail(_ message: String) -> Never {

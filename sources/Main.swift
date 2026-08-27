@@ -117,6 +117,10 @@ struct SquirrelApp {
   }
   // swiftlint:disable:next cyclomatic_complexity
   static func main() {
+    let main = Bundle.main
+    guard SquirrelInstaller.hostMayStartRuntime(bundleURL: main.bundleURL) else {
+      configurationFailure("The Linnet executable must run from its installed user path")
+    }
     let handled = autoreleasepool {
       let installer = SquirrelInstaller()
       let args = CommandLine.arguments
@@ -162,7 +166,6 @@ struct SquirrelApp {
 
     autoreleasepool {
       // find the bundle identifier and then initialize the input method server
-      let main = Bundle.main
       guard
         let connectionName = main.object(forInfoDictionaryKey: "InputMethodConnectionName")
           as? String,

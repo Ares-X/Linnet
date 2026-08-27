@@ -39,14 +39,6 @@ enum LinnetSettingsTransactionIPC {
       self.init(identity: try liveIdentity(startingAt: bundle), handler: handler)
     }
 
-    init(
-      endpointURL: URL,
-      handler: @escaping Handler
-    ) throws {
-      identity = try fixedIdentity(endpointURL: endpointURL)
-      self.handler = handler
-    }
-
     private init(identity: Identity, handler: @escaping Handler) {
       self.identity = identity
       self.handler = handler
@@ -64,17 +56,19 @@ enum LinnetSettingsTransactionIPC {
       try LinnetSettingsTransactionIPC.removeStaleSocket(at: identity.endpointURL)
       let fd = socket(AF_UNIX, SOCK_STREAM, 0)
       guard fd >= 0 else { throw Failure.unavailable }
+      var boundIdentity: (dev_t, ino_t)?
       do {
         try withSocketAddress(identity.endpointURL.path) { address, length in
-          guard Darwin.bind(fd, address, length) == 0,
-            chmod(identity.endpointURL.path, S_IRUSR | S_IWUSR) == 0,
-            listen(fd, 8) == 0
-          else { throw Failure.unavailable }
+          guard Darwin.bind(fd, address, length) == 0 else { throw Failure.unavailable }
         }
         var info = stat()
         guard lstat(identity.endpointURL.path, &info) == 0,
           (info.st_mode & S_IFMT) == S_IFSOCK,
           info.st_uid == geteuid()
+        else { throw Failure.unavailable }
+        boundIdentity = (info.st_dev, info.st_ino)
+        guard chmod(identity.endpointURL.path, S_IRUSR | S_IWUSR) == 0,
+          listen(fd, 8) == 0
         else { throw Failure.unavailable }
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.acceptPendingConnections() }
@@ -87,7 +81,13 @@ enum LinnetSettingsTransactionIPC {
         source.resume()
       } catch {
         Darwin.close(fd)
-        try? FileManager.default.removeItem(at: identity.endpointURL)
+        if let boundIdentity {
+          var current = stat()
+          if lstat(identity.endpointURL.path, &current) == 0,
+            current.st_dev == boundIdentity.0, current.st_ino == boundIdentity.1 {
+            try? FileManager.default.removeItem(at: identity.endpointURL)
+          }
+        }
         throw error
       }
     }
@@ -159,16 +159,9 @@ enum LinnetSettingsTransactionIPC {
   }
 
   final class Client: LinnetSettingsTransactionRequesting, @unchecked Sendable {
-    private enum IdentitySource { case live(Bundle), fixed(Identity) }
-    private let identitySource: IdentitySource
+    private let bundle: Bundle
 
-    init(startingAt bundle: Bundle = .main) { identitySource = .live(bundle) }
-
-    init(
-      endpointURL: URL
-    ) throws {
-      identitySource = .fixed(try fixedIdentity(endpointURL: endpointURL))
-    }
+    init(startingAt bundle: Bundle = .main) { self.bundle = bundle }
 
     func request(
       _ request: LinnetSettingsContract.DataRequest,
@@ -178,11 +171,7 @@ enum LinnetSettingsTransactionIPC {
       guard LinnetSettingsContract.validDataRequest(request), timeout > 0 else {
         throw Failure.invalidMessage
       }
-      let identity: Identity
-      switch identitySource {
-      case .live(let bundle): identity = try liveIdentity(startingAt: bundle)
-      case .fixed(let fixed): identity = fixed
-      }
+      let identity = try liveIdentity(startingAt: bundle)
       return try await withCheckedThrowingContinuation { continuation in
         DispatchQueue.global(qos: .userInitiated).async {
           do {
@@ -401,6 +390,20 @@ extension LinnetSettingsTransactionIPC {
       return
     }
     guard (info.st_mode & S_IFMT) == S_IFSOCK, info.st_uid == geteuid()
+    else { throw Failure.unavailable }
+    let staleIdentity = (info.st_dev, info.st_ino)
+    let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard probe >= 0 else { throw Failure.unavailable }
+    defer { Darwin.close(probe) }
+    let connectionError = try withSocketAddress(url.path) { address, length in
+      if Darwin.connect(probe, address, length) == 0 { return Int32(0) }
+      return errno
+    }
+    // A successful connection proves a live owner. Any result other than a
+    // refused connection is ambiguous and therefore also fails closed.
+    guard connectionError == ECONNREFUSED else { throw Failure.unavailable }
+    guard lstat(url.path, &info) == 0,
+      info.st_dev == staleIdentity.0, info.st_ino == staleIdentity.1
     else { throw Failure.unavailable }
     try FileManager.default.removeItem(at: url)
   }

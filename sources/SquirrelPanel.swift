@@ -8,7 +8,7 @@
 import AppKit
 
 final class SquirrelPanel: NSPanel {
-  struct Publication: Equatable {
+  struct Publication {
     let generation: UInt64
     let controllerID: ObjectIdentifier
   }
