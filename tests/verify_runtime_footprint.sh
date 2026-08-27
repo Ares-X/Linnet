@@ -2431,6 +2431,9 @@ rg -Fq 'grep -Fqx -- "${app}"' scripts/unregister-local-apps ||
   fail "local App cleanup does not verify final LaunchServices state"
 rg -Fq '"${lsregister}" -u -R "${app}"' scripts/unregister-local-apps ||
   fail "local App cleanup is not symmetric with Xcode recursive registration"
+rg -Fq 'for pass in 1 2' scripts/unregister-local-apps &&
+  rg -Fq '[[ "${pass}" -eq 2 ]] || sleep 1' scripts/unregister-local-apps ||
+  fail "local App cleanup does not retire delayed embedded registrations"
 rg -Fq 'unregister_fixture_apps' tests/verify_visible_settings_fixture.sh ||
   fail "Settings UI tests can leave fixture Apps registered with LaunchServices"
 # The live Rime session is the sole mode owner. Do not restore the locally

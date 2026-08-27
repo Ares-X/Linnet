@@ -26,8 +26,14 @@ done
 lsregister="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
 [[ -x "${lsregister}" ]] || fail "LaunchServices registration tool is unavailable"
 
-for app in "${apps[@]}"; do
-  "${lsregister}" -u -R "${app}" >/dev/null 2>&1 || true
+# Xcode's recursive registration returns before LaunchServices has necessarily
+# published every embedded App. Retire the outer registration, allow that one
+# queued expansion to settle, then remove the final exact recursive set.
+for pass in 1 2; do
+  for app in "${apps[@]}"; do
+    "${lsregister}" -u -R "${app}" >/dev/null 2>&1 || true
+  done
+  [[ "${pass}" -eq 2 ]] || sleep 1
 done
 
 registry_paths="$(
