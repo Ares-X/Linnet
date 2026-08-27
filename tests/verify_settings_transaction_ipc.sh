@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Product-shaped focused acceptance for the Settings <-> Host AF_UNIX owner.
-# Both peers are separate compiled processes. The kernel-owned UID/PID facts
-# and exact counterpart executable paths are the only peer identity boundary.
+# Both peers are separate compiled processes. The owner-only endpoint and
+# kernel-owned UID/PID facts are the same-user peer identity boundary.
 
 set -euo pipefail
 
@@ -62,10 +62,9 @@ wait_for_socket() {
 start_host() {
   local mode="$1"
   local endpoint="$2"
-  local expected_settings_path="$3"
-  local log="$4"
-  shift 4
-  "${host_helper}" "${mode}" "${endpoint}" "${expected_settings_path}" "$@" \
+  local log="$3"
+  shift 3
+  "${host_helper}" "${mode}" "${endpoint}" "$@" \
     >"${log}" 2>&1 &
   active_host_pid="$!"
   wait_for_socket "${endpoint}" "${active_host_pid}" || {
@@ -88,13 +87,11 @@ wait_for_host() {
 run_rejection() {
   local label="$1"
   local client="$2"
-  local expected_settings_path="$3"
-  shift 3
+  shift 2
   local endpoint="${fixture}/${label}.sock"
   local log="${fixture}/${label}.host.log"
-  start_host --serve-rejection "${endpoint}" "${expected_settings_path}" "${log}"
-  "${client}" --expect-rejection "${endpoint}" "${host_helper}" \
-    "${active_host_pid}" "$@"
+  start_host --serve-rejection "${endpoint}" "${log}"
+  "${client}" --expect-rejection "${endpoint}" "$@"
   wait_for_host "${log}"
 }
 
@@ -102,17 +99,34 @@ run_rejection() {
 # user exchange a real progress + terminal reply sequence.
 positive_endpoint="${fixture}/positive.sock"
 positive_log="${fixture}/positive.host.log"
-start_host --serve-success "${positive_endpoint}" "${settings_helper}" "${positive_log}"
-"${settings_helper}" --request-success "${positive_endpoint}" "${host_helper}" \
-  "${active_host_pid}"
+start_host --serve-success "${positive_endpoint}" "${positive_log}"
+"${settings_helper}" --request-success "${positive_endpoint}"
 wait_for_host "${positive_log}"
 
 reload_endpoint="${fixture}/reload.sock"
 reload_log="${fixture}/reload.host.log"
-start_host --serve-reload "${reload_endpoint}" "${settings_helper}" "${reload_log}"
-"${settings_helper}" --request-reload "${reload_endpoint}" "${host_helper}" \
-  "${active_host_pid}"
+start_host --serve-reload "${reload_endpoint}" "${reload_log}"
+"${settings_helper}" --request-reload "${reload_endpoint}"
 wait_for_host "${reload_log}"
+
+# A Core update atomically replaces the bundle while the InputMethodKit Host
+# stays alive. The old executable vnode can then lose its pathname, but the
+# kernel-authenticated same-user Host still owns the established runtime
+# endpoint. A newly launched Settings process must continue to reach it.
+update_host="${fixture}/LinnetHostIPC.update"
+retired_host="${fixture}/.LinnetHostIPC.update.retired"
+update_endpoint="${fixture}/core-update.sock"
+update_log="${fixture}/core-update.host.log"
+cp "${host_helper}" "${update_host}"
+"${update_host}" --serve-success "${update_endpoint}" \
+  >"${update_log}" 2>&1 &
+active_host_pid="$!"
+wait_for_socket "${update_endpoint}" "${active_host_pid}"
+mv "${update_host}" "${retired_host}"
+cp "${host_helper}" "${update_host}"
+/bin/rm -f -- "${retired_host}"
+"${settings_helper}" --request-success "${update_endpoint}"
+wait_for_host "${update_log}"
 
 # Product-shaped timeout/recovery: the first real Host connection reads one
 # renderer-owned projection, remains inside the owned-file read beyond the exact 3 s
@@ -124,29 +138,17 @@ timeout_endpoint="${fixture}/timeout-recovery.sock"
 timeout_log="${fixture}/timeout-recovery.host.log"
 timeout_live="${fixture}/timeout-recovery-live"
 timeout_marker="${fixture}/timeout-recovery-first-read"
-start_host --serve-timeout-recovery "${timeout_endpoint}" "${settings_helper}" \
+start_host --serve-timeout-recovery "${timeout_endpoint}" \
   "${timeout_log}" "${timeout_live}" "${timeout_marker}"
 "${settings_helper}" --request-timeout-recovery "${timeout_endpoint}" \
-  "${host_helper}" "${active_host_pid}" "${timeout_live}" "${timeout_marker}"
+  "${timeout_live}" "${timeout_marker}"
 wait_for_host "${timeout_log}"
 rg -Fq \
   'timeout/recovery generation PASS (expired mixed read non-authoritative; stable recovery accepted)' \
   "${timeout_log}"
 
-wrong_path_client="${fixture}/SettingsWrongPath"
-cp "${settings_helper}" "${wrong_path_client}"
-run_rejection wrong-path "${wrong_path_client}" "${host_helper}"
-
-wrong_host_endpoint="${fixture}/wrong-host.sock"
-wrong_host_log="${fixture}/wrong-host.host.log"
-start_host --serve-rejection "${wrong_host_endpoint}" "${settings_helper}" "${wrong_host_log}"
-"${settings_helper}" --expect-rejection "${wrong_host_endpoint}" \
-  "${settings_helper}" "${active_host_pid}"
-wait_for_host "${wrong_host_log}"
-
 forged_pid_client="${fixture}/SettingsForgedRequesterPID"
 cp "${settings_helper}" "${forged_pid_client}"
-run_rejection forged-requester-pid "${forged_pid_client}" \
-  "${forged_pid_client}" --forged-requester-pid
+run_rejection forged-requester-pid "${forged_pid_client}" --forged-requester-pid
 
-echo "LinnetSettingsTransactionIPCTwoProcessTests: PASS (activate + reload + 3s timeout/recovery generation + host-path + client-path + forged-pid)"
+echo "LinnetSettingsTransactionIPCTwoProcessTests: PASS (activate + reload + live Core replacement + 3s timeout/recovery generation + owner-only socket + peer UID/PID + forged-pid)"

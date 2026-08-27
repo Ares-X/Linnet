@@ -183,15 +183,16 @@ do
 done
 [[ "$(rg -c --pcre2 "${local_ipc_source_pattern}" "${local_ipc_owner}")" -eq 5 ]] ||
   fail "the local IPC owner gained another network-shaped call"
-[[ "$(rg -F -c 'getpeereid(fd, &uid, &gid)' "${local_ipc_owner}")" -eq 1 ]] ||
+[[ "$(rg -F -c 'getpeereid(descriptor, &uid, &gid)' "${local_ipc_owner}")" -eq 1 ]] ||
   fail "the local IPC owner lost peer-UID authentication"
 [[ "$(rg -F -c 'getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID' "${local_ipc_owner}")" -eq 1 ]] ||
   fail "the local IPC owner lost peer-PID authentication"
-# Same-user local IPC has one identity owner: kernel UID/PID plus the exact
-# counterpart executable path. Product code signing is a release boundary, not
-# a second runtime IPC identity system.
-[[ "$(rg -F -c 'proc_pidpath(pid' "${local_ipc_owner}")" -eq 1 ]] ||
-  fail "the local IPC owner lost exact peer executable authentication"
+# Same-user local IPC has one stable identity owner: the owner-only AF_UNIX
+# endpoint plus kernel UID/PID. Executable paths cannot own runtime identity
+# because a live InputMethodKit Host intentionally outlives Core replacement.
+if rg -n 'peerExecutableURL|proc_pidpath' "${local_ipc_owner}"; then
+  fail "the retired executable-path identity returned"
+fi
 if rg -n 'import Security|Sec(Code|StaticCode|Certificate)|kSecCode|CC_SHA256|leafCertificate|peerBundleIdentifier' \
     "${local_ipc_owner}"; then
   fail "the local IPC owner regained certificate-based peer identity"
