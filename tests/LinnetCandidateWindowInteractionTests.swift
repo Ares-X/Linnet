@@ -117,63 +117,16 @@ final class SquirrelInputController {
   private(set) var selectedCandidateIndices: [Int] = []
   private(set) var pageDirections: [Bool] = []
   private(set) var refreshCount = 0
-  private let activationRegistry = LinnetInputActivationRegistry()
-  private let activationClient = NSObject()
-  private var activationToken: LinnetInputActivationRegistry.Token?
+  var activeClient: Any?
 
-  init() {
-    activationToken = beginActivation()
-  }
-
-  var activeInputToken: LinnetInputActivationRegistry.Token {
-    guard let activationToken else {
-      preconditionFailure("candidate harness controller has no active token")
-    }
-    return activationToken
-  }
-
-  @discardableResult
-  func beginActivation() -> LinnetInputActivationRegistry.Token {
-    guard let token = activationRegistry.begin(
-      controller: self,
-      client: activationClient,
-      retire: { _ in }
-    ) else {
-      preconditionFailure("candidate harness activation was rejected")
-    }
-    activationToken = token
-    return token
-  }
-
-  func inputActivationIsCurrent(
-    _ token: LinnetInputActivationRegistry.Token
-  ) -> Bool {
-    activationRegistry.isCurrent(
-      token,
-      controller: self,
-      client: activationClient)
-  }
-
-  func client() -> Any? { nil }
-  func page(
-    up: Bool,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) -> Bool {
-    guard inputActivationIsCurrent(activationToken) else { return false }
+  func page(up: Bool) -> Bool {
     pageDirections.append(up)
     return true
   }
-  func refreshCandidatePresentation(
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard inputActivationIsCurrent(activationToken) else { return }
+  func refreshCandidatePresentation() {
     refreshCount += 1
   }
-  func selectCandidate(
-    absoluteIndex: Int,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) -> Bool {
-    guard inputActivationIsCurrent(activationToken) else { return false }
+  func selectCandidate(absoluteIndex: Int) -> Bool {
     selectedCandidateIndices.append(absoluteIndex)
     return true
   }
@@ -276,26 +229,24 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testInputModeStatusNotice() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     panel.updateStatus(
       long: "Smart English", short: "En",
-      activationToken: controller.activeInputToken)
+      controller: controller)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: .init(
         items: [], pageSize: 0, currentPage: 0, isLastPage: true,
         isExpanded: false, canExpand: false),
       highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     let text = panel.contentView?.subviews.compactMap { $0 as? NSTextView }.first?
       .textContentStorage?.attributedString?.string
     require(panel.isVisible, "input-mode status was not presented beside the caret")
     require(
       text == "En",
       "input-mode status did not render the compact language label: \(text ?? "<missing>")")
-    panel.handlePassiveEmptyUpdate(
-      controller: controller,
-      activationToken: controller.activeInputToken)
+    panel.handlePassiveEmptyUpdate(controller: controller)
     require(
       panel.isVisible && panel.statusTimer != nil,
       "a passive empty Rime update dismissed the timed input-mode status")
@@ -329,7 +280,7 @@ struct LinnetCandidateWindowInteractionTests {
       height: 18)
     let panel = SquirrelPanel(position: caret)
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -345,13 +296,13 @@ struct LinnetCandidateWindowInteractionTests {
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidatePublication([(text: longText, absoluteIndex: 1)]),
       highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     let longHeight = panel.frame.height
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidatePublication([(text: "词", absoluteIndex: 2)]),
       highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     let shortHeight = panel.frame.height
     require(
       shortHeight + 1 < longHeight,
@@ -400,7 +351,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testSyntheticHoverLifecycle() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     let candidates = SquirrelInputController.CandidateSnapshot(
       items: [
         .init(text: "输入", comment: "", page: 0, indexOnPage: 0,
@@ -416,7 +367,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -499,7 +450,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testAccessibilitySelectionKeepsElementIdentity() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -516,7 +467,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     guard let firstChildren = candidateView.accessibilityChildren(),
       firstChildren.count >= 2
     else {
@@ -528,7 +479,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 1, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     let secondChildren = candidateView.accessibilityChildren() ?? []
     let selected = candidateView.accessibilitySelectedChildren() ?? []
     let firstElements = firstChildren.compactMap { $0 as? NSAccessibilityElement }
@@ -552,19 +503,18 @@ struct LinnetCandidateWindowInteractionTests {
     do {
       let controller = SquirrelInputController()
       releasedController = controller
-      let token = controller.activeInputToken
-      panel.bind(controller: controller, activationToken: token)
+      panel.bind(controller: controller)
       _ = panel.update(
         preedit: "", selRange: .empty, caretPos: 0,
         candidates: candidatePublication([(text: "甲", absoluteIndex: 101)]),
         highlighted: 0, update: true,
-        activationToken: token)
+        controller: controller)
       let candidateView = panel.contentView?.subviews.compactMap({
         $0 as? SquirrelView
       }).first
       staleElement = candidateView?.accessibilityChildren()?.first
         as? LinnetCandidateAccessibilityElement
-      panel.unbind(controller: controller, activationToken: token)
+      panel.unbind(controller: controller)
     }
     require(
       releasedController == nil,
@@ -754,7 +704,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testCandidatePressPublicationIdentity() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     let firstPublication = candidatePublication([
       (text: "甲", absoluteIndex: 101),
       (text: "乙", absoluteIndex: 102),
@@ -767,7 +717,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
@@ -794,7 +744,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     require(
       candidateView.shape.candidateIndex == nil &&
         !candidateView.shape.isPressed,
@@ -826,7 +776,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 23)
     sendCandidateMouse(.mouseExited, at: outsidePoint, to: panel, eventNumber: 24)
     sendCandidateMouse(.leftMouseUp, at: outsidePoint, to: panel, eventNumber: 25)
@@ -841,7 +791,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 26)
     sendCandidateMouse(.mouseExited, at: outsidePoint, to: panel, eventNumber: 27)
     sendCandidateMouse(.leftMouseDragged, at: secondCandidatePoint, to: panel, eventNumber: 28)
@@ -858,12 +808,12 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 30)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: secondPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     require(
       candidateView.shape.candidateIndex == nil &&
         !candidateView.shape.isPressed,
@@ -881,12 +831,12 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     sendCandidateMouse(.leftMouseDown, at: secondCandidatePoint, to: panel, eventNumber: 32)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: false,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     sendCandidateMouse(.leftMouseUp, at: secondCandidatePoint, to: panel, eventNumber: 33)
     require(
       controller.selectedCandidateIndices == [102],
@@ -906,7 +856,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testCandidateControlPointerFeedback() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -927,7 +877,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     guard let nextPage = candidateView.pagingLayout.nextPage else {
       failures.append("candidate control feedback fixture lost next-page geometry")
@@ -964,12 +914,12 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testPreeditPressDoesNotInferEngineCaret() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     let candidates = candidatePublication([(text: "测试", absoluteIndex: 0)])
     _ = panel.update(
       preedit: "ceshi", selRange: NSRange(location: 0, length: 5), caretPos: 5,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
@@ -1013,8 +963,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testSameControllerReactivationInvalidatesOldPublication() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    let firstToken = controller.activeInputToken
-    panel.bind(controller: controller, activationToken: firstToken)
+    panel.bind(controller: controller)
     let candidates = candidatePublication([
       (text: "甲", absoluteIndex: 101),
       (text: "乙", absoluteIndex: 102),
@@ -1022,7 +971,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: firstToken)
+      controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
@@ -1039,10 +988,11 @@ struct LinnetCandidateWindowInteractionTests {
       to: nil)
     sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 34)
 
-    let replacementToken = controller.beginActivation()
+    panel.unbind(controller: controller)
+    panel.bind(controller: controller)
     require(
-      replacementToken != firstToken && !controller.inputActivationIsCurrent(firstToken),
-      "same-controller reactivation did not retire the previous token")
+      panel.publication == nil && panel.inputController === controller,
+      "same-controller reactivation retained the previous publication")
     require(
       !staleAccessibilityAction.accessibilityPerformPress(),
       "an accessibility action crossed same-controller activation generations")
@@ -1051,11 +1001,10 @@ struct LinnetCandidateWindowInteractionTests {
       controller.selectedCandidateIndices.isEmpty,
       "a mouse press crossed same-controller activation generations")
 
-    panel.bind(controller: controller, activationToken: replacementToken)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: replacementToken)
+      controller: controller)
     guard let currentAccessibilityAction = candidateView.accessibilityChildren()?.first
       as? LinnetCandidateAccessibilityElement
     else {
@@ -1079,11 +1028,11 @@ struct LinnetCandidateWindowInteractionTests {
       (text: "甲", absoluteIndex: 101),
       (text: "乙", absoluteIndex: 102),
     ])
-    panel.bind(controller: oldController, activationToken: oldController.activeInputToken)
+    panel.bind(controller: oldController)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: oldController.activeInputToken)
+      controller: oldController)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
@@ -1104,7 +1053,7 @@ struct LinnetCandidateWindowInteractionTests {
       return
     }
     sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 35)
-    panel.bind(controller: newController, activationToken: newController.activeInputToken)
+    panel.bind(controller: newController)
     require(!panel.isVisible, "controller swap retained the previous candidate panel")
     require(
       candidateView.shape.candidateIndex == nil &&
@@ -1123,9 +1072,9 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: newController.activeInputToken)
+      controller: newController)
     sendCandidateScroll(deltaY: 6, phase: 0, to: panel)
-    panel.bind(controller: finalController, activationToken: finalController.activeInputToken)
+    panel.bind(controller: finalController)
     sendCandidateScroll(deltaY: 6, phase: 0, to: panel)
     require(
       finalController.pageDirections.isEmpty,
@@ -1136,7 +1085,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testCandidateScrollPublicationIdentity() {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     let firstPublication = candidatePublication([
       (text: "甲", absoluteIndex: 101),
       (text: "乙", absoluteIndex: 102),
@@ -1148,7 +1097,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
@@ -1175,7 +1124,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: secondPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     sendCandidateScroll(deltaY: 8, phase: 2, to: panel)
     sendCandidateScroll(deltaY: 0, phase: 4, to: panel)
     require(
@@ -1202,7 +1151,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: firstPublication, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     sendCandidateScroll(deltaY: 6, phase: 0, to: panel)
     require(
       controller.pageDirections.isEmpty,
@@ -1382,7 +1331,7 @@ struct LinnetCandidateWindowInteractionTests {
 
     let panel = SquirrelPanel(position: NSRect(x: 320, y: 420, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -1444,7 +1393,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     render(candidateView)
 
@@ -1516,7 +1465,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: middlePage, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     render(candidateView)
 
@@ -1548,7 +1497,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: lastPage, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     render(candidateView)
     let lastPaging = candidateView.pagingLayout
@@ -1579,7 +1528,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: expanded, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     render(candidateView)
     let expandedNaturalHeight = ceil(candidateView.contentRect.height + inset.height * 2)
@@ -1593,7 +1542,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     render(candidateView)
     require(
@@ -1615,7 +1564,7 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testEnglishMetadataFooterNaturalSize(candidatePoint: CGFloat) {
     let panel = SquirrelPanel(position: NSRect(x: 360, y: 460, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else {
@@ -1702,7 +1651,7 @@ struct LinnetCandidateWindowInteractionTests {
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     render(candidateView)
 
@@ -1746,7 +1695,7 @@ struct LinnetCandidateWindowInteractionTests {
     for point in [CGFloat(12), 15, 16, 32] {
       let panel = SquirrelPanel(position: NSRect(x: 0, y: 0, width: 2, height: 20))
       let controller = SquirrelInputController()
-      panel.bind(controller: controller, activationToken: controller.activeInputToken)
+      panel.bind(controller: controller)
       guard let candidateView = panel.contentView?.subviews.compactMap({
         $0 as? SquirrelView
       }).first else {
@@ -1795,7 +1744,7 @@ struct LinnetCandidateWindowInteractionTests {
           canExpand: false),
         highlighted: 0,
         update: true,
-        activationToken: controller.activeInputToken)
+        controller: controller)
       render(candidateView)
       guard let text = candidateView.textView.textContentStorage?.attributedString,
         candidateView.candidateRanges.count == values.count
@@ -2277,17 +2226,17 @@ struct LinnetCandidateWindowInteractionTests {
   private static func renderStatusNotice(_ label: String) -> NSBitmapImageRep? {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     panel.updateStatus(
       long: label, short: label,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: .init(
         items: [], pageSize: 9, currentPage: 0, isLastPage: true,
         isExpanded: false, canExpand: false),
       highlighted: 0, update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     defer { panel.hide() }
     return bitmapSnapshot(of: panel.contentView)
@@ -2300,7 +2249,7 @@ struct LinnetCandidateWindowInteractionTests {
   ) -> NSBitmapImageRep? {
     let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
     let controller = SquirrelInputController()
-    panel.bind(controller: controller, activationToken: controller.activeInputToken)
+    panel.bind(controller: controller)
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first else { return nil }
@@ -2366,7 +2315,7 @@ struct LinnetCandidateWindowInteractionTests {
       candidates: snapshot,
       highlighted: 0,
       update: true,
-      activationToken: controller.activeInputToken)
+      controller: controller)
     panel.displayIfNeeded()
     defer { panel.hide() }
     return bitmapSnapshot(of: panel.contentView)

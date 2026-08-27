@@ -21,16 +21,9 @@
     "contract": {
       "algorithm": "sha256-git-mode-content-path-v1",
       "paths": [
-        "package/Distribution-Core.xml",
-        "package/core-installer-scripts/preinstall",
-        "package/installer-scripts/candidate-app-identity.sh",
-        "package/installer-scripts/postinstall",
-        "package/installer-scripts/quit-applications-clean.jxa",
-        "resources/Info.plist",
-        "sources/InputSource.swift",
-        "sources/Main.swift"
+        "package/installer-scripts/candidate-app-identity.sh"
       ],
-      "sha256": "4777a2105398c20e7671153abc2bb275f59fe6eae45afc3eb71d4ca7305a53e7"
+      "sha256": "3fbe8f1cb67a0ee56237283ee2d5fd033315d622dc16b95270811d8892351d31"
     },
     "runtime": {
       "architecture": "arm64",

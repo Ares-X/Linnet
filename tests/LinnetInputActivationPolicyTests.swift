@@ -26,25 +26,6 @@ struct LinnetInputActivationPolicyTests {
         "com.apple.keylayout.Colemak",
       "a canonical Apple layout identifier was changed")
 
-    require(
-      LinnetInputActivationPolicy.capsLockBaseline(
-        capsLockActive: true,
-        previouslyOwnedAsciiMode: false
-      ) == .init(asciiMode: true, ownsAsciiMode: true),
-      "active Caps Lock did not acquire the raw-ASCII baseline")
-    require(
-      LinnetInputActivationPolicy.capsLockBaseline(
-        capsLockActive: false,
-        previouslyOwnedAsciiMode: true
-      ) == .init(asciiMode: false, ownsAsciiMode: false),
-      "inactive Caps Lock did not release its prior raw-ASCII baseline")
-    require(
-      LinnetInputActivationPolicy.capsLockBaseline(
-        capsLockActive: false,
-        previouslyOwnedAsciiMode: false
-      ) == .init(asciiMode: nil, ownsAsciiMode: false),
-      "inactive Caps Lock overwrote an ASCII mode owned by another policy")
-
     let markedRange = NSRange(location: 8, length: 4)
     require(
       LinnetInputActivationPolicy.shouldCommitCompositionForClick(

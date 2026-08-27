@@ -10,19 +10,13 @@ import AppKit
 final class SquirrelPanel: NSPanel {
   struct Publication: Equatable {
     let generation: UInt64
-    let activationToken: LinnetInputActivationRegistry.Token
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-      lhs.generation == rhs.generation &&
-        lhs.activationToken == rhs.activationToken
-    }
+    let controllerID: ObjectIdentifier
   }
 
   let view: SquirrelView
   let back: NSVisualEffectView
   let candidateAccessibility: LinnetCandidateAccessibility
   private(set) weak var inputController: SquirrelInputController?
-  var activationToken: LinnetInputActivationRegistry.Token?
   var panelPublicationGeneration: UInt64 = 0
   var publication: Publication?
 
@@ -110,60 +104,35 @@ final class SquirrelPanel: NSPanel {
     super.sendEvent(event)
   }
 
-  func bind(
-    controller: SquirrelInputController,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard controller.inputActivationIsCurrent(activationToken) else { return }
-    if inputController === controller, self.activationToken == activationToken {
-      return
-    }
+  func bind(controller: SquirrelInputController) {
+    if inputController === controller { return }
     inputController = nil
-    self.activationToken = nil
     lastUsablePosition = nil
     statusMessage = ""
     hide()
-    guard inputController == nil, self.activationToken == nil,
-      controller.inputActivationIsCurrent(activationToken)
-    else { return }
+    guard inputController == nil else { return }
     inputController = controller
-    self.activationToken = activationToken
   }
 
-  func unbind(
-    controller: SquirrelInputController,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard inputController === controller, self.activationToken == activationToken else {
-      return
-    }
+  func unbind(controller: SquirrelInputController) {
+    guard inputController === controller else { return }
     inputController = nil
-    self.activationToken = nil
     lastUsablePosition = nil
     statusMessage = ""
     hide()
-    guard inputController == nil, self.activationToken == nil else { return }
+    guard inputController == nil else { return }
     updateAppearance(client: nil)
   }
 
-  func hide(
-    controller: SquirrelInputController,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard inputController === controller, self.activationToken == activationToken else {
-      return
-    }
+  func hide(controller: SquirrelInputController) {
+    guard inputController === controller else { return }
     hide()
   }
 
   /// An empty Rime refresh has no candidate geometry to publish. Keep an
   /// active mode-transition timer visible; otherwise dismiss the panel.
-  func handlePassiveEmptyUpdate(
-    controller: SquirrelInputController,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard inputController === controller, self.activationToken == activationToken,
-      statusTimer == nil
+  func handlePassiveEmptyUpdate(controller: SquirrelInputController) {
+    guard inputController === controller, statusTimer == nil
     else { return }
     hide()
   }
@@ -196,7 +165,7 @@ final class SquirrelPanel: NSPanel {
       let candidateSnapshot,
       !candidateSnapshot.items.isEmpty || !preedit.isEmpty
     else { return }
-    updateAppearance(client: inputController?.client() as? NSObjectProtocol)
+    updateAppearance(client: inputController?.activeClient as? NSObjectProtocol)
     guard publicationIsCurrent(publication) else { return }
     _ = update(
       preedit: preedit,
@@ -205,7 +174,7 @@ final class SquirrelPanel: NSPanel {
       candidates: candidateSnapshot,
       highlighted: index,
       update: false,
-      activationToken: publication.activationToken
+      controller: inputController
     )
   }
 
@@ -217,25 +186,21 @@ final class SquirrelPanel: NSPanel {
     else { return false }
     switch action {
     case .pageUp:
-      return inputController.page(
-        up: true, activationToken: publication.activationToken)
+      return inputController.page(up: true)
     case .pageDown:
-      return inputController.page(
-        up: false, activationToken: publication.activationToken)
+      return inputController.page(up: false)
     case .expand:
       guard view.currentTheme.candidateExpansionAllowed,
         candidateSnapshot?.canExpand == true,
         !candidateExpansionRequested
       else { return false }
       candidateExpansionRequested = true
-      inputController.refreshCandidatePresentation(
-        activationToken: publication.activationToken)
+      inputController.refreshCandidatePresentation()
       return true
     case .collapse:
       guard candidateExpansionRequested else { return false }
       candidateExpansionRequested = false
-      inputController.refreshCandidatePresentation(
-        activationToken: publication.activationToken)
+      inputController.refreshCandidatePresentation()
       return true
     }
   }
@@ -251,11 +216,12 @@ extension SquirrelPanel {
     candidates: SquirrelInputController.CandidateSnapshot,
     highlighted index: Int,
     update: Bool,
-    activationToken: LinnetInputActivationRegistry.Token
+    controller: SquirrelInputController?
   ) -> Bool {
+    guard let controller, inputController === controller else { return false }
     let currentPublication: Publication
     if update {
-      guard let begun = beginPublication(activationToken: activationToken) else {
+      guard let begun = beginPublication(controller: controller) else {
         return false
       }
       currentPublication = begun
@@ -269,7 +235,7 @@ extension SquirrelPanel {
       self.index = index
     } else {
       guard let publication,
-        publication.activationToken == activationToken,
+        publication.controllerID == ObjectIdentifier(controller),
         publicationIsCurrent(publication)
       else { return false }
       currentPublication = publication
@@ -438,7 +404,6 @@ extension SquirrelPanel {
       return false
     }
     let publishedController = inputController
-    let publishedToken = currentPublication.activationToken
     let publishedGeneration = currentPublication
     candidateAccessibility.publish(
       parent: view,
@@ -450,9 +415,7 @@ extension SquirrelPanel {
       selectCandidate: { [weak self, weak publishedController] absoluteIndex in
         guard let self, let publishedController else { return false }
         guard publicationIsCurrent(publishedGeneration) else { return false }
-        return publishedController.selectCandidate(
-          absoluteIndex: absoluteIndex,
-          activationToken: publishedToken)
+        return publishedController.selectCandidate(absoluteIndex: absoluteIndex)
       },
       performControl: { [weak self] action in
         guard let self else { return false }
@@ -466,11 +429,9 @@ extension SquirrelPanel {
   func updateStatus(
     long longMessage: String,
     short shortMessage: String,
-    activationToken: LinnetInputActivationRegistry.Token
+    controller: SquirrelInputController
   ) {
-    guard self.activationToken == activationToken,
-      inputController?.inputActivationIsCurrent(activationToken) == true
-    else { return }
+    guard inputController === controller else { return }
     let theme = view.currentTheme
     switch theme.statusMessageType {
     case .mix:

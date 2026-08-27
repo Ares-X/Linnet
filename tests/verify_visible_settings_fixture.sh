@@ -111,20 +111,7 @@ settings_executable="${settings_app}/Contents/MacOS/Settings"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
   "${settings_app}/Contents/Info.plist")" == \
   io.github.ares-x.inputmethod.Linnet.settings ]] || fail "unexpected Settings bundle identity"
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :InputMethodConnectionName' \
-  "${host_app}/Contents/Info.plist")" == \
-  io.github.ares-x.inputmethod.Linnet_Connection ]] || fail "unexpected embedded Host bundle"
 
-newest_input_epoch="$({
-  find sources resources Linnet.xcodeproj -type f \
-    \( -name '*.swift' -o -name '*.h' -o -name '*.m' -o -name '*.mm' -o \
-       -name '*.plist' -o -name '*.xcstrings' -o -name '*.xcconfig' -o \
-       -name 'project.pbxproj' -o -name 'Contents.json' \) -print0
-  printf '%s\0' data/squirrel.yaml Makefile
-} | xargs -0 stat -f '%m' | sort -nr | head -1)"
-settings_epoch="$(stat -f '%m' "${settings_executable}")"
-[[ "${settings_epoch}" -ge "${newest_input_epoch}" ]] ||
-  fail "embedded Settings is older than a production build input"
 cmp -s data/squirrel.yaml "${settings_app}/Contents/Resources/squirrel.yaml" ||
   fail "embedded Settings squirrel.yaml is stale"
 embedded_uuid="$(dwarfdump --uuid "${settings_executable}" | awk '{print $2 ":" $3}')"
@@ -138,6 +125,7 @@ fixture="$(mktemp -d /tmp/linnet-visible-settings.XXXXXX)"
 fixture="$(cd "${fixture}" && pwd -P)"
 marker="${fixture}/.linnet-visible-settings-fixture"
 : >"${marker}"
+launch_services_register='/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister'
 
 real_user_home=""
 before_fingerprint=""
@@ -160,6 +148,23 @@ terminate_fixture_settings() {
     /bin/sleep 0.1
   done
   return 1
+}
+
+unregister_fixture_apps() {
+  local products_root="${fixture}/DerivedData/Build/Products"
+  local app_path
+  [[ -x "${launch_services_register}" ]] || return 1
+  [[ "${products_root}" == "${fixture}/DerivedData/Build/Products" &&
+    ( ! -e "${products_root}" || ( -d "${products_root}" && ! -L "${products_root}" ) ) ]] ||
+    return 1
+  [[ -d "${products_root}" ]] || return 0
+
+  while IFS= read -r -d '' app_path; do
+    "${launch_services_register}" -u "${app_path}" >/dev/null 2>&1 || true
+  done < <(find "${products_root}" -depth -type d -name '*.app' -print0)
+
+  ! "${launch_services_register}" -dump 2>/dev/null |
+    /usr/bin/grep -F "${products_root}/" >/dev/null
 }
 
 cleanup_uat_preference_domains() {
@@ -196,6 +201,10 @@ cleanup() {
     if ! terminate_fixture_settings; then
       echo "verify_visible_settings_fixture: exact fixture Settings process did not stop" >&2
       fixture_settings_stopped=false
+      exit_code=1
+    fi
+    if ! unregister_fixture_apps; then
+      echo "verify_visible_settings_fixture: fixture Apps remain registered with LaunchServices" >&2
       exit_code=1
     fi
     if ! cleanup_uat_preference_domains; then

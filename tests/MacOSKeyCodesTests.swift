@@ -13,6 +13,7 @@ struct MacOSKeyCodesTests {
     verifyModifierTransitionState()
     verifyComposingKeypadEquivalents()
     verifyInputDispatchAuthority()
+    verifyPerControllerClientOwnership()
     verifyModifierEpochLifecycle()
     verifyDelayedCallbackSessionOwnership()
     require(
@@ -50,6 +51,66 @@ struct MacOSKeyCodesTests {
 }
 
 private extension MacOSKeyCodesTests {
+  private static func verifyPerControllerClientOwnership() {
+    let controller = controllerSource()
+    let delegate = readSource("sources/SquirrelApplicationDelegate.swift")
+    let presentation = readSource("sources/SquirrelApplicationPresentation.swift")
+    let handle = section(
+      in: controller,
+      startingAt: "override func handle(",
+      endingAt: "private func dispatchReadyEvent("
+    )
+    let activation = section(
+      in: controller,
+      startingAt: "override func activateServer",
+      endingAt: "override init!"
+    )
+    let deactivation = section(
+      in: controller,
+      startingAt: "override func deactivateServer",
+      endingAt: "override func hidePalettes()"
+    )
+    let candidatePublication = section(
+      in: controller,
+      startingAt: "private func showPanel(",
+      endingAt: "\n}"
+    )
+
+    require(
+      !controller.contains("LinnetInputActivationRegistry")
+        && !delegate.contains("inputActivationRegistry")
+        && !presentation.contains("beginInputActivation(")
+        && !presentation.contains("finishInputActivation("),
+      "a process-global registry still competes with InputMethodKit controller ownership"
+    )
+    require(
+      activation.contains("activeClient = activatingClient")
+        && !activation.contains("guard let activationToken")
+        && !activation.contains("beginInputActivation("),
+      "a native App activation can still be rejected by a process-global owner"
+    )
+    require(
+      handle.contains("activeClient = senderClient")
+        && controller.contains("guard let updateClient = activeClient")
+        && deactivation.contains("activeClient = nil")
+        && !controller.contains("client ===")
+        && !controller.contains("=== expectedClient")
+        && !controller.contains("=== targetClient")
+        && !controller.contains("=== senderClient")
+        && !controller.contains("=== activatingClient")
+        && !controller.contains("=== deactivatingClient"),
+      "an InputMethodKit proxy address still decides whether accepted input is published"
+    )
+    let eventBinding = candidatePublication.range(of: "panel.bind(controller: self)")?.lowerBound
+    let publicationGuard = candidatePublication.range(
+      of: "panel.inputController === self")?.lowerBound
+    require(
+      eventBinding != nil && publicationGuard != nil
+        && eventBinding! < publicationGuard!,
+      "candidate publication still depends on activateServer being replayed after a Host update"
+    )
+  }
+
   private static func verifyModifierTransitionState() {
     verifySingleShiftTransport(
       physicalKeycode: UInt16(kVK_Shift), rimeKeycode: UInt32(XK_Shift_L), name: "left")
@@ -397,7 +458,7 @@ private extension MacOSKeyCodesTests {
     )
     let createSession = section(
       in: controller,
-      startingAt: "func createSession()",
+      startingAt: "func createSession(",
       endingAt: "func sessionIsCurrent()"
     )
     let modeBaseline = section(
@@ -413,7 +474,7 @@ private extension MacOSKeyCodesTests {
     let activeCommit = section(
       in: controller,
       startingAt: "func commitActiveComposition(",
-      endingAt: "func rimeUpdate()"
+      endingAt: "func rimeUpdate("
     )
 
     require(
@@ -437,22 +498,22 @@ private extension MacOSKeyCodesTests {
       "modifier epoch owner no longer resets the typed transition state from hardware"
     )
     require(
-      activation.contains("ensureReadySession(for: activationToken)")
+      activation.contains("ensureReadySession(for: activatingClient)")
         && activation.contains("resetModifierEpoch()")
         && !activation.contains("SquirrelModifierTransitionState"),
       "activation no longer establishes the modifier epoch before user events"
     )
     require(
-      readiness.contains("recoveredSession || readyActivationToken != activationToken")
+      readiness.contains("if recoveredSession")
+        && readiness.contains("synchronizeRecoveredInputMode(")
         && !readiness.contains("resetModifierEpoch()")
-        && readiness.contains("synchronizeCapsLockBaseline()")
-        && readiness.contains("if recoveredSession")
-        && readiness.contains("synchronizeRecoveredInputMode("),
-      "session recovery can swallow its first modifier event by rebasing from post-event hardware"
+        && !readiness.contains("CGEventSource.flagsState")
+        && !readiness.contains("set_option(session, \"ascii_mode\"")
+        && !readiness.contains("set_property(session,"),
+      "session recovery regained physical modifier or input-mode ownership"
     )
     require(
-      occurrences(of: "synchronizeCapsLockBaseline()", in: readyDispatch) == 0
-        && !readyDispatch.contains("set_option(session, \"ascii_mode\"")
+      !readyDispatch.contains("set_option(session, \"ascii_mode\"")
         && !readyDispatch.contains("set_property(session,"),
       "ready-event ingress regained a second Caps or ASCII state owner"
     )
@@ -492,7 +553,7 @@ private extension MacOSKeyCodesTests {
       activation.range(of: "guard NSApp.squirrelAppDelegate.canAcceptRimeInput")?.lowerBound
     let modifierReset = activation.range(of: "resetModifierEpoch()")?.lowerBound
     let readinessCall =
-      activation.range(of: "ensureReadySession(for: activationToken)")?.lowerBound
+      activation.range(of: "ensureReadySession(for: activatingClient)")?.lowerBound
     require(
       modifierReset != nil && availabilityGuard != nil && readinessCall != nil
         && modifierReset! < availabilityGuard! && availabilityGuard! < readinessCall!,
@@ -556,11 +617,12 @@ private extension MacOSKeyCodesTests {
     )
     require(
       status.contains("let sessionLease = controller.currentSessionLease(")
-        && status.contains("matching: session,")
+        && status.contains("matching: session)")
         && status.contains("ownsCurrentSession(")
+        && status.contains("panel?.inputController === controller")
         && status.contains("sessionLease")
         && message.contains("controller.currentSessionLease(")
-        && message.contains("matching: session,"),
+        && message.contains("matching: session)"),
       "status callbacks do not retain and revalidate the exact session lease"
     )
     let availability = leaseValidation.range(of: "canAcceptRimeInput")?.lowerBound

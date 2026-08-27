@@ -314,8 +314,6 @@ verify_product() (
   local host_app="$1"
   local standalone_settings_app="${2:-}"
   local embedded_settings_app
-  local scratch
-  local scratch_root
   local expected_leaf
   local actual_leaf
   local signing_profile
@@ -352,13 +350,19 @@ verify_product() (
     require_inventory "${standalone_settings_app}" "${standalone_settings_inventory}"
   fi
 
-  scratch_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)" ||
+  # Keep these values in the isolated subshell until its EXIT trap runs. Bash
+  # can discard function-local variables before that trap after a failed
+  # command substitution, masking the real verification error and leaking the
+  # verification directory.
+  verification_scratch_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)" ||
     fail_identity "the canonical temporary root is unavailable"
-  scratch="$(mktemp -d "${scratch_root}/linnet-code-identity.XXXXXX")"
+  verification_scratch="$(
+    mktemp -d "${verification_scratch_root}/linnet-code-identity.XXXXXX"
+  )"
   cleanup_verification() {
-    if [[ "${scratch%/*}" == "${scratch_root}" &&
-      "${scratch##*/}" == linnet-code-identity.* ]]; then
-      /bin/rm -rf -- "${scratch}"
+    if [[ "${verification_scratch%/*}" == "${verification_scratch_root}" &&
+      "${verification_scratch##*/}" == linnet-code-identity.* ]]; then
+      /bin/rm -rf -- "${verification_scratch}"
     fi
   }
   # Verification owns one isolated shell so its cleanup and strict failure
@@ -368,34 +372,34 @@ verify_product() (
   trap cleanup_verification EXIT
 
   expected_leaf="$(verify_code "${host_app}/Contents/Frameworks/librime.1.dylib" \
-    '' "${scratch}" host-runtime)"
+    '' "${verification_scratch}" host-runtime)"
   while IFS= read -r relative; do
     [[ -n "${relative}" ]] || continue
     actual_leaf="$(verify_code "${host_app}/${relative}" "${expected_leaf}" \
-      "${scratch}" "host-$(tr '/.' '--' <<<"${relative}")")"
+      "${verification_scratch}" "host-$(tr '/.' '--' <<<"${relative}")")"
     [[ "${actual_leaf}" == "${expected_leaf}" ]] ||
       fail_identity "Host code leaf mismatch"
   done <<<"${host_inventory}"
   actual_leaf="$(verify_code "${embedded_settings_app}" "${expected_leaf}" \
-    "${scratch}" embedded-settings-bundle "${settings_bundle_id}")"
+    "${verification_scratch}" embedded-settings-bundle "${settings_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "embedded Settings leaf mismatch"
   if [[ -n "${standalone_settings_app}" ]]; then
     while IFS= read -r relative; do
       [[ -n "${relative}" ]] || continue
       actual_leaf="$(verify_code "${standalone_settings_app}/${relative}" "${expected_leaf}" \
-        "${scratch}" "standalone-$(tr '/.' '--' <<<"${relative}")")"
+        "${verification_scratch}" "standalone-$(tr '/.' '--' <<<"${relative}")")"
       [[ "${actual_leaf}" == "${expected_leaf}" ]] ||
         fail_identity "standalone Settings code leaf mismatch"
     done <<<"${standalone_settings_inventory}"
     actual_leaf="$(verify_code "${standalone_settings_app}" "${expected_leaf}" \
-      "${scratch}" standalone-settings-bundle "${settings_bundle_id}")"
+      "${verification_scratch}" standalone-settings-bundle "${settings_bundle_id}")"
     [[ "${actual_leaf}" == "${expected_leaf}" ]] ||
       fail_identity "standalone Settings leaf mismatch"
   fi
   codesign --verify --deep --strict "${host_app}" >/dev/null 2>&1 ||
     fail_identity "Host nested-code verification failed"
   actual_leaf="$(verify_code "${host_app}" "${expected_leaf}" \
-    "${scratch}" host-bundle "${host_bundle_id}")"
+    "${verification_scratch}" host-bundle "${host_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "Host leaf mismatch"
   if [[ "${signing_profile}" == community-cms ]]; then
     [[ "${expected_leaf}" == "$(community_certificate_contract | sed -n '2p')" ]] ||
@@ -465,11 +469,12 @@ verify_product() (
     "${signing_profile}" "${expected_leaf}" "${product_version}" "${product_build}")" ||
     fail_identity "signed release metadata is invalid"
   "${project_root}/scripts/generate-release-metadata" \
-    "${project_root}/upstreams.lock.json" "${scratch}/expected-release-metadata" \
+    "${project_root}/upstreams.lock.json" \
+    "${verification_scratch}/expected-release-metadata" \
     "${product_version}" "${product_build}" 1704067200 \
     "${metadata_projection}" >/dev/null ||
     fail_identity "canonical release metadata cannot be projected"
-  diff -qr "${scratch}/expected-release-metadata" \
+  diff -qr "${verification_scratch}/expected-release-metadata" \
     "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||
     fail_identity "signed release metadata differs from the canonical projection"
   printf '%s\n' "${metadata_projection}"

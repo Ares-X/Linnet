@@ -10,63 +10,6 @@ extension SquirrelApplicationDelegate {
 }
 
 extension SquirrelApplicationDelegate {
-  func beginInputActivation(
-    controller: SquirrelInputController,
-    client: IMKTextInput
-  ) -> LinnetInputActivationRegistry.Token? {
-    if SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier {
-      inputActivationRegistry.sourceDidTurnOn()
-    }
-    return inputActivationRegistry.begin(controller: controller, client: client) { [weak self] closed in
-      self?.retireClosedInputActivation(closed)
-    }
-  }
-
-  @discardableResult
-  func finishInputActivation(
-    controller: SquirrelInputController,
-    client: IMKTextInput
-  ) -> Bool {
-    guard let closed = inputActivationRegistry.closeNative(
-      controller: controller, client: client)
-    else { return false }
-    retireClosedInputActivation(closed)
-    return true
-  }
-
-  @discardableResult
-  func finishInputActivation(
-    token: LinnetInputActivationRegistry.Token?
-  ) -> Bool {
-    guard let token, let closed = inputActivationRegistry.close(token) else {
-      return false
-    }
-    retireClosedInputActivation(closed)
-    return true
-  }
-
-  @discardableResult
-  func finishInputSourceActivations() -> Bool {
-    inputActivationRegistry.sourceDidTurnOff { [weak self] closed in
-      self?.retireClosedInputActivation(closed)
-    }
-  }
-
-  @discardableResult
-  func terminateInputActivations() -> Bool {
-    inputActivationRegistry.terminate { [weak self] closed in
-      self?.retireClosedInputActivation(closed)
-    }
-  }
-
-  private func retireClosedInputActivation(
-    _ closed: LinnetInputActivationRegistry.ClosedActivation
-  ) {
-    (closed.controller as? SquirrelInputController)?.activationDidClose(
-      closed.token,
-      client: closed.client as? IMKTextInput)
-  }
-
   func showStatusMessage(
     msgTextLong: String?,
     msgTextShort: String?,
@@ -74,45 +17,33 @@ extension SquirrelApplicationDelegate {
   ) {
     guard canAcceptRimeInput,
       !(msgTextLong ?? "").isEmpty || !(msgTextShort ?? "").isEmpty,
-      let activationToken = inputActivationRegistry.currentToken,
-      let controller = inputActivationRegistry.currentController(
-        as: SquirrelInputController.self),
-      controller.currentSessionLease(
-        matching: session,
-        activationToken: activationToken) != nil
+      let controller = panel?.inputController,
+      controller.currentSessionLease(matching: session) != nil
     else { return }
     panel?.updateStatus(
       long: msgTextLong ?? "",
       short: msgTextShort ?? "",
-      activationToken: activationToken)
+      controller: controller)
   }
 
   func updateStatusIcon(session: RimeSessionId) {
     guard canAcceptRimeInput,
-      let activationToken = inputActivationRegistry.currentToken,
-      let controller = inputActivationRegistry.currentController(
-        as: SquirrelInputController.self),
-      let sessionLease = controller.currentSessionLease(
-        matching: session,
-        activationToken: activationToken)
+      let controller = panel?.inputController,
+      let sessionLease = controller.currentSessionLease(matching: session)
     else { return }
     let asciiMode = rimeAPI.get_option(sessionLease.identifier, "ascii_mode")
     let schemaLabel = rimeAPI.get_state_label_abbreviated(
       sessionLease.identifier, "ascii_mode", asciiMode, true).asString
     DispatchQueue.main.async { [weak self, weak controller] in
       guard let self, let controller,
-        controller.ownsCurrentSession(
-          sessionLease, activationToken: activationToken)
+        panel?.inputController === controller,
+        controller.ownsCurrentSession(sessionLease)
       else { return }
       applyStatusIcon(asciiMode: asciiMode, schemaLabel: schemaLabel)
     }
   }
 
-  func inputSourceDidActivate(
-    activationToken: LinnetInputActivationRegistry.Token,
-    session: RimeSessionId
-  ) {
-    guard inputActivationRegistry.isCurrent(activationToken) else { return }
+  func inputSourceDidActivate(session: RimeSessionId) {
     updateStatusIcon(session: session)
     setStatusItemVisibility(inputSourceIsActive: true)
   }
@@ -164,17 +95,24 @@ extension SquirrelApplicationDelegate {
   }
 
   @objc func inputSourceChanged(_: Notification) {
-    guard let currentInputSourceID = SquirrelInstaller.currentInputSourceID() else { return }
-    let inputSourceIsActive =
-      currentInputSourceID == SquirrelApp.bundleIdentifier
-    setStatusItemVisibility(inputSourceIsActive: inputSourceIsActive)
-    if inputSourceIsActive {
-      inputActivationRegistry.sourceDidTurnOn()
+    DispatchQueue.main.async { [weak self] in
+      self?.updateStatusItemVisibility()
+      self?.finalizeStrandedComposition()
+    }
+  }
+
+  // macOS may omit deactivateServer when another process selects an input
+  // source through TIS. Defer until the native transition settles, then close
+  // only the token that was active before the switch. Native activateServer
+  // remains the sole authority for admitting the returned input source.
+  private func finalizeStrandedComposition() {
+    guard SquirrelInstaller.currentInputSourceID() != SquirrelApp.bundleIdentifier else {
       return
     }
-    // macOS may omit deactivateServer when another process selects an input
-    // source through TIS. The process-wide owner closes the exact activation.
-    finishInputSourceActivations()
+    guard let inputController = panel?.inputController,
+      let activeClient = inputController.activeClient
+    else { return }
+    inputController.deactivateServer(activeClient)
   }
 
   // MARK: input menu

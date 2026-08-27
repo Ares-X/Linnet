@@ -18,15 +18,15 @@ checksum differs or macOS reports damage or malware.
 
 After installation:
 
-- A clean Complete first installation registers and requests enablement for
-  Linnet, but never selects it for you. Core keeps enabled/disabled unchanged
-  and conditionally restores Linnet only when it was selected before or during
-  that update; a newer choice of another input source is preserved.
+- A clean Complete first installation registers Linnet but never enables or
+  selects it for you. Core neither re-registers the source nor stops the live
+  InputMethodKit Host. Existing applications keep their input connections; the
+  new Core takes over the next time macOS naturally launches the Host.
 - For a first Complete installation, save open work, log out of macOS once,
   and log in again. Complete rejects an existing App or Active state and directs
-  it to Core. Core refreshes the same input-source identity without requesting
-  logout. Stop instead of retrying with Complete if Core rejects the installed
-  identity or version.
+  it to Core. Core preserves the same input-source identity and current client
+  connections without requesting logout. Stop instead of retrying with
+  Complete if Core rejects the installed identity or version.
 - Open System Settings > Keyboard > Text Input > Edit, add and allow Linnet if
   macOS asks, then select Linnet from the menu-bar input menu.
 - A fresh installation defaults to full pinyin. Choose it or one of seven
@@ -75,12 +75,13 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 
 安装完成后：
 
-- 全新首次安装使用 Complete：它会注册并请求启用 Linnet，但不会替你
-  选择输入源。Core 不改变 enabled/disabled；只有 Linnet 在更新前或更新期间已被选中时
-  才条件恢复它，用户新切换的其他输入源会被保留。
+- 全新首次安装使用 Complete：它只注册 Linnet，不会程序化启用或选择输入源。
+  macOS 14 及以上必须在系统设置中手动添加并允许一次。Core 不会重新注册或停止
+  正在服务的 InputMethodKit Host；现有应用保持输入连接，新 Core 在 macOS 下一次
+  自然启动 Host 时接管，也不会再次弹出启用授权。
 - 首次完整安装时，保存工作，注销一次 macOS，再登录同一账户。Complete 会拒绝
-  已有 App 或 Active state 并提示使用 Core。Core 刷新同一个输入源身份且不请求
-  注销。若 Core 拒绝现有身份或版本，请停止安装，不要改用 Complete 重试。
+  已有 App 或 Active state 并提示使用 Core。Core 保持同一个输入源身份和当前连接
+  且不请求注销。若 Core 拒绝现有身份或版本，请停止安装，不要改用 Complete 重试。
 - 打开 系统设置 → 键盘 → 文本输入 → 编辑；添加 Linnet，并在 macOS 请求时
   选择允许，然后从菜单栏输入菜单选择 Linnet。
 - 全新安装默认全拼；可在 Settings → 输入选择全拼或七种双拼之一并应用更改。

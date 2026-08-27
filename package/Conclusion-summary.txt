@@ -1,8 +1,8 @@
 双韵（Linnet）安装完成。
 
-首次 Complete 会注册并请求启用 Linnet，但不会替你选择输入源。
-Core 只刷新同一注册，并保留更新前的 enabled/disabled 与
-selected 状态。
+首次 Complete 只注册 Linnet，不会程序化启用或选择输入源。
+macOS 14 及以上由用户在系统设置中手动添加并允许一次。Core 不重新注册输入源，
+并保留系统状态与现有应用的输入连接，不会再次请求启用授权。
 
 如果这是首次完整安装：
 
@@ -12,10 +12,10 @@ selected 状态。
    允许 Linnet，请选择“允许”。
 3. 确认 Linnet 已在启用列表中，再从菜单栏输入菜单选择 Linnet。
 
-Core 更新在替换前由 Installer 要求关闭 Host/Settings，替换后只温和退出可能被
-InputMethodKit 重启的 Host，再刷新同一个输入源身份；它不请求注销，也不改变
-enabled/disabled 或 selected 状态。当前候选仍须通过真实安装升级 UAT，才能把
-免注销作为发布结论。
+Core 更新只要求 Settings 温和退出，不停止正在服务的 InputMethodKit Host，也不
+触碰输入源注册、启用或选择状态。现有应用继续使用当前 Host；磁盘上的新 Core 在
+macOS 下一次自然启动 Host 时接管。当前候选仍须通过真实安装升级 UAT，才能把
+免注销与输入连续性作为发布结论。
 
 日常使用：
 
@@ -40,10 +40,9 @@ enabled/disabled 或 selected 状态。当前候选仍须通过真实安装升�
 
 双韵 (Linnet) installation is complete.
 
-A first Complete installation registers and requests enablement for Linnet but
-does not select the input source for you. Core keeps enabled/disabled unchanged
-and conditionally restores Linnet only when it was selected before or during
-that update; a newer choice of another input source is preserved.
+A first Complete installation registers Linnet but does not enable or select
+the input source for you. Core does not re-register it or stop the live
+InputMethodKit Host, so existing applications keep their input connections.
 
 For a first Complete installation:
 
@@ -53,12 +52,11 @@ For a first Complete installation:
    Allow if macOS asks for permission.
 3. Confirm that Linnet is enabled, then select it from the menu-bar input menu.
 
-Core has Installer close Host and Settings before replacement, then one new-Host
-transition cleanly stops any InputMethodKit-relaunched Host, refreshes the same
-input-source identity, and conditionally restores a selected Linnet without
-overriding a newer choice. It does not request logout or change enabled/disabled.
-This candidate still requires installed upgrade UAT before no-logout behavior is
-an accepted release claim.
+Core asks only Settings to quit cleanly. It does not stop the live Host or touch
+input-source registration, enablement, or selection. Existing applications keep
+using the current Host; the new Core takes over on the next natural Host launch.
+This candidate still requires installed upgrade UAT before no-logout and input
+continuity are accepted release claims.
 
 Daily use:
 

@@ -2,16 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>TISInputSourceID</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>TISIntendedLanguage</key>
 	<string>zh-Hans</string>
 	<key>TICapsLockLanguageSwitchCapable</key>
 	<true/>
 	<key>tsInputMethodCharacterRepertoireKey</key>
 	<array>
-		<string>Hans</string>
-		<string>Hant</string>
+		<string>zh-Hans</string>
 	</array>
 	<key>tsInputMethodIconFileKey</key>
 	<string>linnet.pdf</string>
@@ -38,7 +35,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>InputMethodConnectionName</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)_Connection</string>
+	<string>$(PRODUCT_NAME)_Connection</string>
 	<key>InputMethodServerControllerClass</key>
 	<string>Squirrel.SquirrelInputController</string>
 	<key>InputMethodServerDelegateClass</key>

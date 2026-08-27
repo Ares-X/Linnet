@@ -8,7 +8,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 verifier="${repo_root}/package/verify_publication_artifacts"
 asset_manifest="${repo_root}/package/release_asset_manifest"
 publisher="${repo_root}/package/publish_github_release"
-workflow="${repo_root}/.github/workflows/release-ci.yml"
+candidate_identity_owner="${repo_root}/package/release_candidate_identity"
 commit_workflow="${repo_root}/.github/workflows/commit-ci.yml"
 pull_request_workflow="${repo_root}/.github/workflows/pull-request-ci.yml"
 cache_action="${repo_root}/.github/actions/restore-locked-build-cache/action.yml"
@@ -24,7 +24,7 @@ for retired in package/publication_plan package/publish_release \
     fail "retired approval-commit publication path returned: ${retired}"
 done
 
-for owner in "${asset_manifest}" "${publisher}"; do
+for owner in "${asset_manifest}" "${candidate_identity_owner}" "${publisher}"; do
   [[ -f "${owner}" && ! -L "${owner}" && -x "${owner}" ]] ||
     fail "release channel owner is missing: ${owner##*/}"
   bash -n "${owner}"
@@ -136,14 +136,7 @@ contract = acceptance.fetch("contract")
 abort unless contract.keys.sort == %w[algorithm paths sha256]
 abort unless contract.fetch("algorithm") == "sha256-git-mode-content-path-v1"
 expected_paths = %w[
-  package/Distribution-Core.xml
-  package/core-installer-scripts/preinstall
   package/installer-scripts/candidate-app-identity.sh
-  package/installer-scripts/postinstall
-  package/installer-scripts/quit-applications-clean.jxa
-  resources/Info.plist
-  sources/InputSource.swift
-  sources/Main.swift
 ]
 paths = contract.fetch("paths")
 abort unless paths == expected_paths && paths == paths.sort && paths.uniq == paths
@@ -281,6 +274,8 @@ fi
 for required in \
     '"${project_root}/package/verify_publication_artifacts"' \
     'linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)' \
+    '"${project_root}/package/release_candidate_identity"' \
+    'publication authorization differs from candidate bytes' \
     'verify_release_revision "${publication_authorization}"' \
     'data-seed-${catalog_sequence}' \
     'release create "${tag}" "${assets[@]}"' \
@@ -319,19 +314,6 @@ fi
 if rg -Fq 'repos/${repository}/commits/${requested_tag}' "${publisher}"; then
   fail "the publisher regained a branch-compatible tag identity lookup"
 fi
-rg -Fq 'actions: read' "${workflow}" ||
-  fail "the release workflow cannot read exact candidate provenance"
-if rg -n '32855610087|Retire the exact legacy|actions/runs/\$\{LEGACY_RUN_ID\}/cancel' \
-    "${workflow}"; then
-  fail "one-time legacy approval retirement returned to the release owner"
-fi
-rg -Fq 'LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack' \
-    "${workflow}" ||
-  fail "the release publisher did not retain the verified pack CLI"
-if rg -Fq 'package/publish_github_release data-seed' "${workflow}"; then
-  fail "the product release workflow regained the cold-build seed path"
-fi
-
 publication_fixture="$(mktemp -d "${TMPDIR:-/tmp}/linnet-publication-owner.XXXXXX")"
 cleanup() {
   [[ "${publication_fixture}" == "${TMPDIR:-/tmp}/linnet-publication-owner."* ]] &&
@@ -348,6 +330,8 @@ mkdir -p "${fixture_assets}" "${fake_bin}" "${fake_state}" \
   "${fixture_repo}/package"
 cp "${publisher}" "${fixture_publisher}"
 cp "${asset_manifest}" "${fixture_repo}/package/release_asset_manifest"
+cp "${candidate_identity_owner}" \
+  "${fixture_repo}/package/release_candidate_identity"
 cp "${repo_root}/CHANGELOG.md" "${fixture_repo}/CHANGELOG.md"
 cat >"${fixture_repo}/package/verify_publication_artifacts" <<'FAKE_VERIFIER'
 #!/usr/bin/env bash
@@ -361,6 +345,7 @@ printf 'verify_publication_artifacts %s\n' "$*" >>"${FAKE_GH_STATE:?}/calls.log"
 FAKE_VERIFIER
 chmod 755 "${fixture_publisher}" \
   "${fixture_repo}/package/release_asset_manifest" \
+  "${fixture_repo}/package/release_candidate_identity" \
   "${fixture_repo}/package/verify_publication_artifacts"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${fake_release_tool}"
 chmod 755 "${fake_release_tool}"
@@ -387,6 +372,11 @@ while IFS= read -r asset; do
 done < <("${asset_manifest}" candidate "${version}" "${catalog_sequence}")
 printf '{"sequence":%s}\n' "${catalog_sequence}" \
   >"${fixture_assets}/Linnet-Data-Channel.json"
+candidate_identity="$("${fixture_repo}/package/release_candidate_identity" \
+  "${fixture_assets}" "${version}" "${catalog_sequence}")"
+candidate_digest="${candidate_identity#sha256:}"
+[[ "${candidate_digest}" =~ ^[0-9a-f]{64}$ ]] ||
+  fail "fixture candidate identity is invalid"
 cat >"${fake_bin}/gh" <<'FAKE_GH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -653,7 +643,7 @@ FAKE_GH
 chmod 755 "${fake_bin}/gh"
 run_fixture() {
   local requested_channel="$1"
-  local authorization_tag="${FAKE_AUTHORIZATION_TAG:-linnet-publication/v${version}-${candidate_revision}-a731}"
+  local authorization_tag="${FAKE_AUTHORIZATION_TAG:-linnet-publication/v${version}-${candidate_revision}-h${candidate_digest}}"
   local args=("${requested_channel}" "${fixture_assets}" "${version}"
     "${catalog_sequence}" "${candidate_revision}")
   if [[ "${requested_channel}" != data-seed ]]; then
@@ -778,7 +768,7 @@ ruby -rjson -e '
   File.binwrite(ARGV.fetch(0), JSON.generate(document))
 ' "${fake_state}/main-ci.json"
 
-authorization_tag="linnet-publication/v${version}-${candidate_revision}-a731"
+authorization_tag="linnet-publication/v${version}-${candidate_revision}-h${candidate_digest}"
 mkdir -p "${fake_state}/tags/${authorization_tag%/*}"
 printf '%s\n' "${candidate_revision}" \
   >"${fake_state}/tags/${authorization_tag}"
@@ -799,7 +789,7 @@ if run_fixture core >"${publication_fixture}/rejected-authorization.log" 2>&1; t
 fi
 mv "${publication_fixture}/authorization-tag" \
   "${fake_state}/tags/${authorization_tag}"
-if FAKE_AUTHORIZATION_TAG="linnet-publication/v${version}-${candidate_revision}-a0" \
+if FAKE_AUTHORIZATION_TAG="linnet-publication/v${version}-${candidate_revision}-h0" \
     run_fixture core >"${publication_fixture}/rejected-authorization.log" 2>&1; then
   fail "the publisher accepted a malformed SSH authorization tag"
 fi
@@ -1116,39 +1106,34 @@ if rg -n 'xattr[[:space:]].*(-d|-c)|spctl[[:space:]].*--master-disable' \
 fi
 
 ruby -e '
-  workflow = File.read(ARGV.fetch(0))
-  commit = File.read(ARGV.fetch(1))
-  pull_request = File.read(ARGV.fetch(2))
-  cache = File.read(ARGV.fetch(3))
-  publisher = File.read(ARGV.fetch(4))
-  runtime_builder = File.read(ARGV.fetch(5))
-  development_gate = File.read(ARGV.fetch(6))
-  product_gate = File.read(ARGV.fetch(7))
+  commit = File.read(ARGV.fetch(0))
+  pull_request = File.read(ARGV.fetch(1))
+  cache = File.read(ARGV.fetch(2))
+  publisher = File.read(ARGV.fetch(3))
+  runtime_builder = File.read(ARGV.fetch(4))
+  development_gate = File.read(ARGV.fetch(5))
+  product_gate = File.read(ARGV.fetch(6))
   local_cache = "./.github/actions/restore-locked-build-cache"
   pinned_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
   pinned_restore = "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25"
-  workflow_uses = workflow.scan(/^\s*uses:\s*(\S+)/).flatten
   commit_uses = commit.scan(/^\s*uses:\s*(\S+)/).flatten
   pull_request_uses = pull_request.scan(/^\s*uses:\s*(\S+)/).flatten
   cache_uses = cache.scan(/^\s*uses:\s*(\S+)/).flatten
-  all_uses = workflow_uses + commit_uses + pull_request_uses + cache_uses
+  all_uses = commit_uses + pull_request_uses + cache_uses
   abort unless all_uses.all? { |value|
     value == local_cache || value.match?(/@[0-9a-f]{40}\z/)
   }
-  abort unless workflow_uses.count(local_cache) == 1
   abort unless commit_uses.count(local_cache) == 1
   abort unless pull_request_uses.count(local_cache) == 1
   abort unless cache_uses == [pinned_cache, pinned_restore, pinned_cache, pinned_restore]
-  abort if workflow.include?("actions/cache") || commit.include?("actions/cache") ||
+  abort if commit.include?("actions/cache") ||
     pull_request.include?("actions/cache")
-  abort unless workflow.scan(/^\s*save:\s*false\s*$/).size == 1
   main_cache_writer = "save: ${{ matrix.profile == \x27rime\x27 }}"
   abort unless commit.scan(main_cache_writer).size == 1
   abort unless pull_request.scan(/^\s*save:\s*false\s*$/).size == 1
   abort unless cache.include?("if: inputs.save == \x27true\x27") &&
     cache.include?("if: inputs.save == \x27false\x27")
   abort unless cache.match?(/inputs:\s*\n\s*save:.*?required:\s*true/m)
-  abort unless workflow.scan(/^\s*submodules:\s*false\s*$/).size == 2
   abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 2
   abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 2
   abort unless commit.match?(/push:\s*\n\s*branches:\s*\n\s*- main\s*$/m)
@@ -1249,7 +1234,6 @@ ruby -e '
   abort unless product_gate.scan(/LINNET_LIFECYCLE_CANDIDATE_APP=/).size == 1
   abort unless product_gate.scan(%r{tests/verify_input_process_offline\.sh}).size == 1
   abort unless product_gate.scan(%r{scripts/build-privacy scan}).size == 1
-  abort unless workflow.scan(/^\s*group:\s*linnet-release-publication\s*$/).size == 1
   abort unless cache.scan(/^\s*key:\s*linnet-build-v2-/).size == 2
   abort unless cache.scan(/^\s*key:\s*linnet-rime-runtime-v2-/).size == 2
   abort unless cache.scan(/^\s*restore-keys:\s*\|/).size == 4
@@ -1301,18 +1285,6 @@ ruby -e '
     runtime_builder.include?(%q{build/.rime-runtime-publish.XXXXXX})
   final_cache_check = %q{runtime_cache_is_valid "${runtime_cache_target}"}
   abort unless runtime_builder.rindex(final_cache_check) < runtime_builder.rindex(stamp)
-  abort unless workflow.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 1
-  abort unless workflow.scan(/^\s*make --no-print-directory archive\s*$/).size == 1
-  abort if workflow.include?("./action-build.sh archive")
-  abort unless workflow.include?("package/verify_publication_artifacts")
-  abort unless workflow.include?("package/publish_github_release")
-  abort if workflow.include?(%q{"${ARCHIVE_OUTPUT_DIR}"/*})
-  release_positions = %w[core data catalog public].map do |channel|
-    needle = "package/publish_github_release #{channel}"
-    abort unless workflow.scan(needle).size == 1
-    workflow.index(needle)
-  end
-  abort unless release_positions.each_cons(2).all? { |left, right| left < right }
   catalog_gate = <<~'BASH'
     if [[ "${channel}" == catalog ]]; then
       ensure_catalog_pointer true
@@ -1326,30 +1298,12 @@ ruby -e '
   abort unless pointer_calls == ["ensure_catalog_pointer true", "ensure_catalog_pointer false"]
   abort unless publisher.scan(catalog_gate).size == 1
   abort unless publisher.scan(public_gate).size == 1
-  abort unless workflow.include?(%q{GH_TOKEN: ${{ github.token }}})
-  abort unless workflow.include?("environment: community-signing")
-  abort unless workflow.match?(/^permissions:\s*\n\s*contents:\s*read\s*$/m)
-  abort unless workflow.match?(/publish-approved:.*?contents:\s*write/m)
-  abort unless workflow.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh release\s*$/).size == 1
   abort unless commit.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort unless pull_request.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
-  %w[
-    LINNET_COMMUNITY_CMS_P12_BASE64
-    LINNET_COMMUNITY_CMS_P12_PASSWORD
-    LINNET_CODE_SIGN_KEYCHAIN
-    LINNET_CODE_SIGN_PASSWORD_FILE
-    security\ set-key-partition-list
-    security\ delete-keychain
-  ].each { |marker| abort unless workflow.include?(marker.gsub("\\ ", " ")) }
-  abort if workflow.include?("LINNET_CODE_SIGN_PROFILE")
-  abort unless workflow.include?("if: always()") &&
-    workflow.include?(%q{rm -rf -- "${signing_root}"})
-  abort if workflow.match?(/security\s+import.*(?:^|\s)-A(?:\s|$)/) ||
-    workflow.match?(/notary|Developer ID|publication_plan|community-adhoc/)
-' "${workflow}" "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" \
+' "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" \
     "${publisher}" "${repo_root}/scripts/build-rime-runtime" \
     "${repo_root}/tests/verify_development.sh" \
     "${repo_root}/tests/verify_product.sh" ||
-  fail "immutable-candidate community workflow is incomplete"
+  fail "community CI or local publication owner is incomplete"
 
 echo "Linnet unsigned PKG / stable CMS App publication owner: PASS"

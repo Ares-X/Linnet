@@ -56,9 +56,8 @@ export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release.XXXXXX)"
 `package/make_package` 只封装已验证字节，不重新签名或修复。普通 `release` / `debug`
 仍是 unsigned 开发产物；旧的可安装 UAT 签名 profile 与 `candidate` lane 已删除。
 
-本地 `archive` 只用于维护者预检。CMS 签名含签名时间，因此本机验收后再由 CI
-重新编译或重签会产生另一组字节，不能冒充同一候选。正式安装验收与公开发布只认
-下面发布 workflow 一次生成的不可变八文件 artifact。
+本地 `archive` 是正式候选的唯一构建边界。CMS 签名含签名时间，因此安装验收后
+不得重新编译或重签。正式安装验收与公开发布必须复用同一个精确八文件目录。
 
 最终 8 个候选产物使用独立 pack CLI 验证：
 
@@ -73,53 +72,32 @@ LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
 
 ## GitHub 发布
 
-`.github/workflows/release-ci.yml` 不需要 GitHub 网页按钮或网页审批。受保护的
-`main` 在精确 commit CI 成功后，由一次 SSH candidate intent 生成候选；安装验收后
-再由一个 SSH publication tag 授权发布，且不会在验收后重建。GitHub CLI 的只读
-Actions 访问需要预先完成一次认证；每次发布不需要再打开 GitHub 网页：
+发布不再调用 GitHub Actions 构建，也不需要 GitHub 网页审批：
 
-1. 在 clean、精确当前 `main` checkout 执行 `scripts/release-control request`。它只会
-   非 force 推送 `linnet-candidate/v<VERSION>-<FULL_REVISION>`；重复 intent 会失败；
-2. `build-candidate` 核对 candidate tag、版本、revision、远端 `main`、唯一成功的
-   exact-revision commit CI，并拒绝同版本/revision 的既有未过期 artifact；
-   之后才从 `community-signing` Environment Secrets 导入固定 P12，在临时
-   Keychain 中只编译、CMS 签名一次；
-3. 最终 verifier 接受精确 8 个文件后，workflow 将这 8 个文件上传为不可覆盖的
-   GitHub Actions artifact，并硬比较实际 ZIP SHA-256、REST digest 和重新解包字节；
-4. 执行 `scripts/release-control fetch /absolute/new/root`。命令精确发现唯一 artifact，
-   验 producer run 和 candidate ref，保存 `artifact.zip`、远端 metadata/producer
-   receipt，并把相同字节解到 `release/`。随后在真实账号完成“两轮同 leaf Core”：
-   先用前一已验收
-   的固定 CMS 版（首次公开后即前一公开版）升级到候选，再把同一候选的原字节重装
-   一次。两轮都须验证无注销、无
-   Keychain 密码提示、登录会话不变，并保留 enabled/selected、UserData、输入菜单、
-   Settings 和真实输入；此时尚未创建 Release、标签或推进 Catalog；
-5. 验收通过后，在同一 clean checkout 执行
-   `scripts/release-control approve /absolute/root`。该命令重查远端 artifact/producer，
-   对比 candidate tag、ZIP digest、receipt、重新解包字节、八件原字节和本地
-   revision，再通过现有 Git SSH 凭据创建
-   唯一的轻量控制标签
-   `linnet-publication/v<VERSION>-<FULL_REVISION>-a<ARTIFACT_ID>`；不调用网页审批、
-   `workflow_dispatch` 或 GitHub 写 API。候选一经上传即由这些不可变身份冻结；UAT
-   期间 `main` 可以继续前进，不会成为 approve 的第二个授权 owner；
-6. `publish-approved` 反查并核对控制标签、artifact ID/digest、producer run、完整
-   revision 和版本，下载 ZIP 一次并硬比较 digest，再作一次 publication preflight。
-   唯一 publisher 随后依次发布 Core、data、Catalog、Public / Latest；四个 mutation
-   boundary 各自复核同一个 SSH control tag 和候选 verifier，因此 main 后续前进不会
-   中途破坏或阻止同一授权发布。它创建的
-   `v<version>` 标签仍只是公开版本身份，控制标签是同一 artifact 的唯一发布授权。
+1. 在 clean、精确当前 `main` checkout 运行 `./action-build.sh archive`，生成并验证
+   八文件正式候选；
+2. 在真实账号用该目录完成“两轮同 leaf Core”：从前一公开版升级到候选，再原字节
+   重装一次。两轮都须无注销、无 Keychain 密码提示、Host PID 不变且
+   `AXHidden=false`，并保留 enabled/selected、UserData、输入菜单、Settings 和真实输入；
+3. 验收通过后运行
+   `scripts/release-control publish "$ARCHIVE_OUTPUT_DIR"`。命令重新验证八件产物，
+   计算文件名与逐文件 SHA-256 的集合摘要，并通过 SSH 创建唯一轻量标签
+   `linnet-publication/v<VERSION>-<FULL_REVISION>-h<ARCHIVE_SHA256>`；
+4. 同一命令使用既有 GitHub CLI 登录依次发布 Core、data、Catalog、Public / Latest。
+   每个 mutation boundary 都重新验证同一标签、revision 和八文件摘要，不重建、不重签。
 
-任一项失败都不推送控制标签；修复必须形成新的 revision、build 和必要的数据
-sequence，再生成新的 artifact，不能替换旧 artifact 或已公开资产。发布 run 的重试
-仍只接受同一标签绑定的 artifact ID 和字节完全相同的远端状态。签名任务无论成功
-或失败都会恢复原 Keychain 搜索列表，删除临时 Keychain、P12、密码文件和目录。
+任一项失败都停止在当前幂等边界；修复必须形成新的 revision、build 和必要的数据
+sequence，再生成新的八文件目录，不能替换已公开资产。`v<version>` 只标识公开版本，
+哈希控制标签只授权已验收的同一批字节。
 
 旧 ad-hoc → 固定 CMS 只是一条一次性的历史 Core lifecycle 验收边；唯一记录在
 `config/linnet-community-signing.json`。其中固定 leaf、bundle ID、macOS major 和
-“迁移契约指纹”共同决定该历史证据能否继续复用：任一项与当前候选失配，才必须在
-隔离的 legacy-seeded 账号或虚拟机中重做迁移；全部匹配时不得要求每个候选重复该
-迁移。该记录只闭合 legacy lifecycle edge，不能冒充当前候选的菜单、Settings、
-输入交互或完整安装 UAT；当前候选仍以步骤 3 的“两轮同 leaf Core”为发布前证据。
+identity classifier 的“迁移契约指纹”共同决定该历史证据能否继续复用：任一项与
+当前候选失配，才必须在隔离的 legacy-seeded 账号或虚拟机中重做迁移；全部匹配时
+不得要求每个候选重复该迁移。Host 连续性和 TIS 不变性由当前 package lifecycle
+matrix 独立验证。该记录只闭合 legacy identity edge，不能冒充当前候选的菜单、
+Settings、输入交互或完整安装 UAT；当前候选仍以步骤 3 的“两轮同 leaf Core”为
+发布前证据。
 
 Settings 只读取 `data-channel` 的一个稳定指针，不读取可变 Release 别名，也不
 维护第二份 Core 版本清单。仓库没有候选 Catalog 地址或自动回退路径。
@@ -134,7 +112,9 @@ Secrets 中。它们不是 Apple 开发者凭据，也不会被打包、写入�
 代码、静态产物和安装产品必须分别报告。首次 Complete 安装需验证一次注销
 后输入源可用；同一 bundle ID/path 的后续 Core 更新必须验证：Installer 返回
 `RestartAction=None`、登录会话不变、个人数据不变、输入源 enabled/selected
-意图不被覆盖，并由新 build 提供输入。每个精确候选的“两轮同 leaf Core”必须使用
+意图不被覆盖，更新期间 Host PID 不变且 `AXHidden=false`；安装脚本不得启动、隐藏或替换
+Host，更新前已连接及更新后新打开的应用都可输入；
+再单独验证 Host 自然重启后由新 build 提供输入。每个精确候选的“两轮同 leaf Core”必须使用
 同一不可变 artifact：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
 升级，第二轮重装候选原字节；两轮均
 不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、

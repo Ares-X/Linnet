@@ -27,12 +27,9 @@ extension SquirrelInputController {
     let isExpanded: Bool
   }
 
-  func selectCandidate(
-    absoluteIndex: Int,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) -> Bool {
+  func selectCandidate(absoluteIndex: Int) -> Bool {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
-      inputActivationIsCurrent(activationToken),
+      activeClient != nil,
       sessionIsCurrent(),
       absoluteIndex >= 0
     else { return false }
@@ -45,19 +42,14 @@ extension SquirrelInputController {
 
   /// Rebuilds the current candidate snapshot after a panel-only interaction,
   /// such as expanding or collapsing disclosure. It never edits Rime input.
-  func refreshCandidatePresentation(
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard inputActivationIsCurrent(activationToken) else { return }
+  func refreshCandidatePresentation() {
+    guard activeClient != nil else { return }
     rimeUpdate()
   }
 
-  func page(
-    up towardPreviousPage: Bool,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) -> Bool {
+  func page(up towardPreviousPage: Bool) -> Bool {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
-      inputActivationIsCurrent(activationToken), sessionIsCurrent()
+      activeClient != nil, sessionIsCurrent()
     else { return false }
     let handled = rimeAPI.change_page(session, towardPreviousPage)
     if handled {
@@ -68,10 +60,9 @@ extension SquirrelInputController {
 
   private func onChordTimer(
     _: Timer,
-    activationToken: LinnetInputActivationRegistry.Token,
     sessionLease: LinnetRimeSessionLease
   ) {
-    guard inputActivationIsCurrent(activationToken),
+    guard activeClient != nil,
       self.sessionLease == sessionLease
     else { return }
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
@@ -80,9 +71,7 @@ extension SquirrelInputController {
       return
     }
     var processedKeys = false
-    guard ownsCurrentSession(
-      sessionLease,
-      activationToken: activationToken)
+    guard ownsCurrentSession(sessionLease)
     else {
       retireSessionLease()
       clearChord()
@@ -107,8 +96,7 @@ extension SquirrelInputController {
 
   private func updateChord(
     keycode: UInt32,
-    modifiers: UInt32,
-    activationToken: LinnetInputActivationRegistry.Token
+    modifiers: UInt32
   ) {
     for index in 0..<chordKeyCount where chordKeyCodes[index] == keycode {
       return
@@ -129,14 +117,13 @@ extension SquirrelInputController {
       chordDuration = duration
     }
     guard let sessionLease,
-      ownsCurrentSession(sessionLease, activationToken: activationToken)
+      ownsCurrentSession(sessionLease)
     else { return }
     chordTimer = Timer.scheduledTimer(
       withTimeInterval: chordDuration, repeats: false
     ) { [weak self] timer in
       self?.onChordTimer(
         timer,
-        activationToken: activationToken,
         sessionLease: sessionLease)
     }
   }
@@ -151,12 +138,12 @@ extension SquirrelInputController {
     }
   }
 
-  func createSession() {
+  func createSession(client sessionClient: IMKTextInput?) {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
       retireSessionLease()
       return
     }
-    let app = client?.bundleIdentifier() ?? {
+    let app = sessionClient?.bundleIdentifier() ?? {
       Self.unknownAppCount &+= 1
       return "UnknownApp\(Self.unknownAppCount)"
     }()
@@ -182,28 +169,19 @@ extension SquirrelInputController {
     sessionLease = nil
   }
 
-  /// Establishes the one modifier/Caps baseline for an activation and repeats
-  /// it only when runtime recovery creates a replacement Rime session.
-  func ensureReadySession(
-    for activationToken: LinnetInputActivationRegistry.Token
-  ) -> Bool {
-    guard inputActivationIsCurrent(activationToken) else { return false }
+  /// Recreates an invalid Rime session and restores only its presentation
+  /// projection. Physical modifier state remains owned by macOS and Rime.
+  func ensureReadySession(for expectedClient: IMKTextInput) -> Bool {
     let recoveredSession = !sessionIsCurrent()
     if recoveredSession {
       clearChord()
       retireSessionLease()
-      createSession()
+      createSession(client: expectedClient)
     }
-    guard sessionIsCurrent(), inputActivationIsCurrent(activationToken) else {
+    guard sessionIsCurrent() else { return false }
+    if recoveredSession,
+      !synchronizeRecoveredInputMode() {
       return false
-    }
-    if recoveredSession || readyActivationToken != activationToken {
-      synchronizeCapsLockBaseline()
-      if recoveredSession,
-        !synchronizeRecoveredInputMode(activationToken: activationToken) {
-        return false
-      }
-      readyActivationToken = activationToken
     }
     return true
   }
@@ -231,11 +209,10 @@ extension SquirrelInputController {
 
   func processKey(
     _ rimeKeycode: UInt32,
-    modifiers rimeModifiers: UInt32,
-    activationToken: LinnetInputActivationRegistry.Token
+    modifiers rimeModifiers: UInt32
   ) -> Bool {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
-      inputActivationIsCurrent(activationToken), sessionIsCurrent()
+      activeClient != nil, sessionIsCurrent()
     else { return false }
 
     synchronizeCandidateLayoutOptions()
@@ -247,8 +224,7 @@ extension SquirrelInputController {
     if handled {
       updateChordState(
         keycode: effectiveKeycode,
-        modifiers: rimeModifiers,
-        activationToken: activationToken)
+        modifiers: rimeModifiers)
     } else {
       enterVimCommandModeIfNeeded(
         keycode: effectiveKeycode,
@@ -292,14 +268,12 @@ extension SquirrelInputController {
 
   private func updateChordState(
     keycode: UInt32,
-    modifiers: UInt32,
-    activationToken: LinnetInputActivationRegistry.Token
+    modifiers: UInt32
   ) {
     if isChordingKey(keycode) && rimeAPI.get_option(session, "_chord_typing") {
       updateChord(
         keycode: keycode,
-        modifiers: modifiers,
-        activationToken: activationToken)
+        modifiers: modifiers)
     } else if modifiers & kReleaseMask.rawValue == 0 {
       clearChord()
     }

@@ -13,7 +13,6 @@ support_root="${application_support_root}/Linnet"
 active_state="${support_root}/Runtime/Active/activation.json"
 state_link="${support_root}/State/active.json"
 state_root="${support_root}/State"
-selection_state="${state_root}/core-update-selection-v1.plist"
 script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 candidate_file="${script_root}/candidate-core-version"
 mode_file="${script_root}/install-mode"
@@ -21,18 +20,7 @@ identity_helper="${script_root}/candidate-app-identity.sh"
 identity_metadata="${script_root}/candidate-app-identity.json"
 application_quiescer="${script_root}/quit-applications-clean.jxa"
 current_uid="$(/usr/bin/id -u)"
-selection_state_tmp=""
 identity_transition=""
-
-cleanup_selection_state_tmp() {
-  if [[ -n "${selection_state_tmp}" && -f "${selection_state_tmp}" &&
-    ! -L "${selection_state_tmp}" &&
-    "${selection_state_tmp%/*}" == "${state_root}" &&
-    "${selection_state_tmp##*/}" == .core-update-selection.* ]]; then
-    /bin/rm -f -- "${selection_state_tmp}"
-  fi
-}
-trap cleanup_selection_state_tmp EXIT
 
 secure_owned_path() {
   local path="$1"
@@ -236,9 +224,11 @@ check_active_core "${candidate_core_version}" || {
 }
 
 # Distribution must-close is the early Installer UI boundary. Enforce the
-# mutation-time invariant again after every compatibility check and immediately
-# before allowing payload replacement. NSRunningApplication sends normal quit
-# requests, so Settings can reject while work or an unsaved draft is active;
+# Settings mutation-time invariant again after every compatibility check and
+# immediately before allowing payload replacement. The InputMethodKit Host
+# deliberately remains alive: existing client applications keep their server
+# connection while new bytes wait for the next natural Host launch. Settings
+# can reject the normal quit request while work or an unsaved draft is active;
 # any refusal or relaunch leaves the process visible and fails this preinstall.
 [[ -f "${application_quiescer}" && ! -L "${application_quiescer}" ]] || {
   echo "Linnet Core preinstall: application quiescence owner is unavailable" >&2
@@ -252,80 +242,10 @@ quiescer_mode="$(/usr/bin/stat -f '%Lp' "${application_quiescer}")" || {
   echo "Linnet Core preinstall: application quiescence owner is unsafe" >&2
   exit 1
 }
-if [[ -e "${selection_state}" || -L "${selection_state}" ]]; then
-  secure_owned_path "${selection_state}" file || {
-    echo "Linnet Core preinstall: prior selection transaction is unsafe" >&2
-    exit 1
-  }
-fi
-target_input_source_id="$(/usr/bin/plutil -extract bundle_identifier raw -o - \
-  "${identity_metadata}")" || {
-  echo "Linnet Core preinstall: candidate input source identity is unavailable" >&2
+/usr/bin/osascript -l JavaScript "${application_quiescer}" 30 \
+  io.github.ares-x.inputmethod.Linnet.settings >/dev/null || {
+  echo "Linnet Core update requires Settings to quit cleanly before replacement" >&2
   exit 1
 }
-selection_document="$(/usr/bin/osascript -l JavaScript "${application_quiescer}" 30 \
-  "${target_input_source_id}" \
-  io.github.ares-x.inputmethod.Linnet.settings \
-  io.github.ares-x.inputmethod.Linnet)" || {
-    echo "Linnet Core update requires Linnet and Settings to quit cleanly before replacement" >&2
-    exit 1
-  }
-selection_state_tmp="$(/usr/bin/mktemp \
-  "${state_root}/.core-update-selection.XXXXXX")" || {
-  echo "Linnet Core preinstall: selection transaction cannot be created" >&2
-  exit 1
-}
-/usr/bin/printf '%s\n' "${selection_document}" |
-  /usr/bin/plutil -convert binary1 -o - - >"${selection_state_tmp}" || {
-  echo "Linnet Core preinstall: selection transaction is invalid" >&2
-  exit 1
-}
-/bin/chmod 0600 "${selection_state_tmp}"
-selection_format="$(/usr/bin/plutil -extract format raw -o - \
-  "${selection_state_tmp}")" || exit 1
-selection_target="$(/usr/bin/plutil -extract target_input_source_id raw -o - \
-  "${selection_state_tmp}")" || exit 1
-selection_was_current="$(/usr/bin/plutil -extract was_current raw -o - \
-  "${selection_state_tmp}")" || exit 1
-selection_post_quiescence="$(/usr/bin/plutil -extract \
-  post_quiescence_input_source_id raw -o - "${selection_state_tmp}")" || exit 1
-selection_prior_enablement="$(/usr/bin/plutil -extract prior_enablement raw -o - \
-  "${selection_state_tmp}")" || exit 1
-[[ "${selection_format}" == 2 &&
-  "${selection_target}" == "${target_input_source_id}" &&
-  ( "${selection_was_current}" == true || "${selection_was_current}" == false ) &&
-  ( "${selection_prior_enablement}" == enabled ||
-    "${selection_prior_enablement}" == disabled ||
-    "${selection_prior_enablement}" == unregistered ) &&
-  ( "${selection_prior_enablement}" != unregistered ||
-    "${selection_was_current}" == false ) &&
-  -n "${selection_post_quiescence}" &&
-  "${selection_post_quiescence}" != *$'\n'* &&
-  "${selection_post_quiescence}" != *$'\r'* ]] || {
-  echo "Linnet Core preinstall: selection transaction fields are invalid" >&2
-  exit 1
-}
-if [[ "${identity_transition}" == missing-app-install &&
-  "${selection_prior_enablement}" != unregistered ]]; then
-  echo "Linnet Core preinstall: a missing App still has a registered input-source identity" >&2
-  exit 1
-fi
-candidate_revision="$(/usr/bin/plutil -extract candidate_revision raw -o - \
-  "${identity_metadata}")" || exit 1
-candidate_build="$(/usr/bin/plutil -extract build raw -o - \
-  "${identity_metadata}")" || exit 1
-candidate_leaf="$(/usr/bin/plutil -extract leaf_certificate_sha256 raw -o - \
-  "${identity_metadata}")" || exit 1
-[[ "${candidate_leaf}" =~ ^[0-9a-f]{64}$ ]] || exit 1
-/usr/bin/plutil -insert identity_transition -string "${identity_transition}" \
-  "${selection_state_tmp}"
-/usr/bin/plutil -insert candidate_revision -string "${candidate_revision}" \
-  "${selection_state_tmp}"
-/usr/bin/plutil -insert candidate_build -string "${candidate_build}" \
-  "${selection_state_tmp}"
-/usr/bin/plutil -insert candidate_leaf_sha256 -string "${candidate_leaf}" \
-  "${selection_state_tmp}"
-/bin/mv -f -- "${selection_state_tmp}" "${selection_state}"
-selection_state_tmp=""
 
 exit 0

@@ -48,17 +48,7 @@ diff --git a/src/rime/gear/ascii_composer.cc b/src/rime/gear/ascii_composer.cc
 index e49dc38..2a8ece6 100644
 --- a/src/rime/gear/ascii_composer.cc
 +++ b/src/rime/gear/ascii_composer.cc
-@@ -15,6 +15,9 @@
- 
- namespace rime {
- 
-+constexpr char kCapsLockAsciiModeProperty[] =
-+    "_linnet_caps_lock_ascii_mode";
-+
- static struct AsciiModeSwitchStyleDefinition {
-   const char* repr;
-   AsciiModeSwitchStyle style;
-@@ -51,18 +54,23 @@ static void load_bindings(const an<ConfigMap>& src,
+@@ -51,18 +51,23 @@ static void load_bindings(const an<ConfigMap>& src,
  
  AsciiComposer::AsciiComposer(const Ticket& ticket) : Processor(ticket) {
    LoadConfig(ticket.schema);
@@ -84,7 +74,7 @@ index e49dc38..2a8ece6 100644
      return kNoop;
    }
    if (caps_lock_switch_style_ != kAsciiModeSwitchNoop) {
-@@ -73,7 +81,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+@@ -73,7 +78,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
    int ch = key_event.keycode();
    if (ch == XK_Eisu_toggle) {  // Alphanumeric toggle
      if (!key_event.release()) {
@@ -93,7 +83,7 @@ index e49dc38..2a8ece6 100644
        ToggleAsciiModeWithKey(ch);
        return kAccepted;
      } else {
-@@ -86,40 +94,38 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+@@ -86,40 +91,38 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
    bool is_super = (ch == XK_Super_L || ch == XK_Super_R);
    if (is_shift || is_ctrl || is_alt || is_super) {
      if (key_event.release()) {
@@ -156,7 +146,7 @@ index e49dc38..2a8ece6 100644
    // possible key binding: Control+x, Shift+space
    if (key_event.ctrl() || key_event.alt() || key_event.super() ||
        (key_event.shift() && ch == XK_space)) {
-@@ -144,23 +150,15 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
+@@ -144,23 +147,12 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
    int ch = key_event.keycode();
    if (ch == XK_Caps_Lock) {
      if (!key_event.release()) {
@@ -178,24 +168,19 @@ index e49dc38..2a8ece6 100644
        // Caps Lock modifier has been set before we process VK_CAPITAL.
        // here we assume IBus' behavior and invert caps with ! operation.
 -      SwitchAsciiMode(!key_event.caps(), caps_lock_switch_style_);
-+      const bool caps_lock_active = !key_event.caps();
-+      SwitchAsciiMode(caps_lock_active, caps_lock_switch_style_);
-+      engine_->context()->set_property(
-+          kCapsLockAsciiModeProperty, caps_lock_active ? "1" : "");
++      SwitchAsciiMode(!key_event.caps(), caps_lock_switch_style_);
        // When good_old_caps_lock is enabled, allow the key event to pass
        // through the input method to toggle the Caps Lock state.
        return good_old_caps_lock_ ? kRejected : kAccepted;
-@@ -236,7 +234,8 @@ bool AsciiComposer::ToggleAsciiModeWithKey(int key_code) {
+@@ -236,7 +231,6 @@ bool AsciiComposer::ToggleAsciiModeWithKey(int key_code) {
      return false;
    }
    SwitchAsciiMode(new_mode, style);
 -  toggle_with_caps_ = (key_code == XK_Caps_Lock);
-+  if (key_code != XK_Caps_Lock)
-+    ctx->set_property(kCapsLockAsciiModeProperty, "");
    return true;
  }
  
-@@ -255,10 +254,13 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+@@ -255,10 +249,13 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
              [this](Context* ctx) { OnContextUpdate(ctx); });
        }
      } else if (style == kAsciiModeSwitchCommitText) {
@@ -212,7 +197,7 @@ index e49dc38..2a8ece6 100644
      } else if (style == kAsciiModeSwitchClear || style == kAsciiModeSet ||
                 style == kAsciiModeUnset) {
        ctx->Clear();
-@@ -268,6 +270,12 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+@@ -268,6 +265,12 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
    ctx->set_option("ascii_mode", ascii_mode);
  }
  

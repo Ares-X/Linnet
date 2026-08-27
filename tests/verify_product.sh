@@ -100,23 +100,29 @@ done)
 info="${app}/Contents/Info.plist"
 bundle_identifier="$(plutil -extract CFBundleIdentifier raw -o - "${info}")"
 [[ "${bundle_identifier}" == io.github.ares-x.inputmethod.Linnet ]]
-[[ "$(plutil -extract TISInputSourceID raw -o - "${info}")" == \
-  "${bundle_identifier}" ]] || {
-  echo "verify_product: the sole input source ID must equal the bundle identifier" >&2
-  exit 1
-}
+for no_modes_info in resources/Info.plist "${info}"; do
+  ! plutil -extract TISInputSourceID raw -o - "${no_modes_info}" >/dev/null 2>&1 || {
+    echo "verify_product: no-modes input method has an explicit competing source ID: ${no_modes_info}" >&2
+    exit 1
+  }
+done
 [[ "$(plutil -extract TISIntendedLanguage raw -o - "${info}")" == zh-Hans ]]
 for repertoire_info in resources/Info.plist "${info}"; do
   [[ "$(plutil -extract tsInputMethodCharacterRepertoireKey json -o - \
-    "${repertoire_info}")" == '["Hans","Hant"]' ]] || {
-    echo "verify_product: input-method repertoire must be exact Hans/Hant scripts: ${repertoire_info}" >&2
+    "${repertoire_info}")" == '["zh-Hans"]' ]] || {
+    echo "verify_product: no-modes repertoire must be exact zh-Hans: ${repertoire_info}" >&2
     exit 1
   }
 done
 [[ "$(plutil -extract tsInputMethodIconFileKey raw -o - "${info}")" == linnet.pdf ]]
+[[ "$(plutil -extract InputMethodConnectionName raw -o - resources/Info.plist)" == \
+  '$(PRODUCT_NAME)_Connection' ]] || {
+  echo "verify_product: source IMK connection must follow the stable product-name contract" >&2
+  exit 1
+}
 connection_name="$(plutil -extract InputMethodConnectionName raw -o - "${info}")"
-[[ "${connection_name}" == "${bundle_identifier}_Connection" ]] || {
-  echo "verify_product: IMK connection must match the registered bundle endpoint" >&2
+[[ "${connection_name}" == Linnet_Connection ]] || {
+  echo "verify_product: built IMK connection must follow the stable product-name contract" >&2
   exit 1
 }
 for retired in ComponentInputModeDict PrimaryInputModeIdentifier; do

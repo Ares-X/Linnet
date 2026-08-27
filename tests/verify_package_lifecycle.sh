@@ -34,6 +34,20 @@ cp package/installer-scripts/candidate-app-identity.sh \
   "${scripts_root}/candidate-app-identity.sh"
 cp package/installer-scripts/quit-applications-clean.jxa \
   "${scripts_root}/quit-applications-clean.jxa"
+
+# A Core update must not replace the live InputMethodKit server. Existing
+# client applications retain per-server connections and are not required to
+# reconnect merely because package bytes changed on disk. Complete install and
+# uninstall own their separate registration/termination boundaries.
+if rg -Fq -- '--quit-host-clean' package/installer-scripts/postinstall ||
+    rg -Fq '/usr/bin/open' package/installer-scripts/postinstall ||
+    rg -Fq '<app id="io.github.ares-x.inputmethod.Linnet"/>' \
+      package/Distribution-Core.xml ||
+    rg -Fq 'io.github.ares-x.inputmethod.Linnet >/dev/null' \
+      package/core-installer-scripts/preinstall; then
+  echo "Core update can launch, hide, or terminate the live InputMethodKit server." >&2
+  exit 1
+fi
 fake_codesign="${scripts_root}/fake-codesign"
 cat >"${fake_codesign}" <<'SH'
 #!/usr/bin/env bash
@@ -204,81 +218,25 @@ rg -Fq 'verification_scope="${4:-}"' package/verify_package
 rg -Fq '"${verification_scope}"' package/make_package
 rg -Fq '"${identity_helper}" existing' package/core-installer-scripts/preinstall
 rg -Fq '"${identity_helper}" installed' package/installer-scripts/postinstall
-for field in identity_transition prior_enablement candidate_leaf_sha256; do
-  rg -Fq "${field}" package/core-installer-scripts/preinstall \
-    package/installer-scripts/postinstall
-done
-# Candidate identity and the quiescer are the package producers. Swift consumes
-# their string wire values through RawRepresentable enums. Keep both languages
-# closed over one exact set so a producer or consumer cannot drift silently.
-ruby -e '
-  def enum_raw_values(source, name)
-    body = source[/enum\s+#{Regexp.escape(name)}:\s*String\s*\{(.*?)^\s*\}/m, 1]
-    abort "Swift enum #{name} is unavailable" unless body
-    body.scan(/^\s*case\s+([A-Za-z][A-Za-z0-9]*)(?:\s*=\s*"([^"]+)")?\s*$/)
-      .map { |case_name, raw_value| raw_value || case_name }
-      .uniq.sort
-  end
-
-  def assert_exact(label, actual, expected)
-    actual = actual.uniq.sort
-    expected = expected.sort
-    abort "#{label} drifted: #{actual.inspect}" unless actual == expected
-  end
-
-  helper = File.binread(ARGV.fetch(0))
-  quiescer = File.binread(ARGV.fetch(1))
-  swift = File.binread(ARGV.fetch(2))
-  package_transitions = helper.scan(
-    /^\s*identity_transition=([a-z][a-z0-9-]*)\s*$/).flatten
-  package_transitions.concat(helper.scan(
-    /^\s*printf\s+\x27%s\\n\x27\s+([a-z][a-z0-9-]*)\s*$/).flatten)
-  prior_body = quiescer[
-    /function\s+priorEnablement\([^)]*\)\s*\{(.*?)^\}/m, 1]
-  abort "package prior-enablement producer is unavailable" unless prior_body
-  package_prior = prior_body.scan(/return\s+"([^"]+)"/).flatten
-  package_prior.concat(prior_body.scan(
-    /return\s+\w+\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"/).flatten)
-
-  expected_transitions = %w[
-    legacy-community-adhoc-to-cms missing-app-install same-community-cms-leaf
-  ]
-  expected_prior = %w[disabled enabled unregistered]
-  swift_transitions = enum_raw_values(swift, "CoreIdentityTransition")
-  swift_prior = enum_raw_values(swift, "PriorEnablement")
-  assert_exact("package transition producer", package_transitions,
-    expected_transitions)
-  assert_exact("Swift transition consumer", swift_transitions,
-    expected_transitions)
-  assert_exact("cross-language transition set", package_transitions,
-    swift_transitions)
-  assert_exact("package prior-enablement producer", package_prior,
-    expected_prior)
-  assert_exact("Swift prior-enablement consumer", swift_prior, expected_prior)
-  assert_exact("cross-language prior-enablement set", package_prior, swift_prior)
-' package/installer-scripts/candidate-app-identity.sh \
-  package/installer-scripts/quit-applications-clean.jxa sources/InputSource.swift
-rg -Fq 'prior_enablement' package/installer-scripts/quit-applications-clean.jxa
-rg -Fq 'format: 2' package/installer-scripts/quit-applications-clean.jxa
 rg -Fq 'community-cms' package/make_package package/verify_package \
   package/installer-scripts/candidate-app-identity.sh
 rg -Fq 'document["format"] = 3' package/make_package
 rg -Fq 'candidate_identity["format"] = 3' package/verify_package
 rg -Fq 'quit-applications-clean.jxa' package/core-installer-scripts/preinstall \
   package/make_package package/verify_package
-rg -Fq 'core-update-selection-v1.plist' \
-  package/core-installer-scripts/preinstall package/installer-scripts/postinstall
-rg -Fq -- '--refresh-core-input-source' \
-  package/installer-scripts/postinstall sources/Main.swift
-if rg -Fq -- '--select-input-source' package/installer-scripts/postinstall; then
-  echo "Core postinstall regained an unconditional input-source selection path." >&2
+if rg -n 'core-update-selection|prior_enablement|TISDisable|TISEnableInputSource|TISSelectInputSource|--activate-input-source|--disable-input-source|--select-input-source|--refresh-core-input-source' \
+    package/core-installer-scripts/preinstall package/installer-scripts \
+    sources/InputSource.swift sources/Main.swift; then
+  echo "Installer regained a user-owned input-source state path." >&2
   exit 1
 fi
+test "$(rg -F -c 'TISRegisterInputSource' sources/InputSource.swift)" = 1
+test "$(rg -F -c -- '"${executable}" --register-input-source' \
+  package/installer-scripts/postinstall)" = 1
 
 # The package-owned helper uses exact LaunchServices identities and cooperative
 # AppKit termination only. A refused request remains observable until timeout;
-# there is no signal, force-quit, activation, enable/disable, or selection
-# mutation path; reading the public TIS enablement property is allowed.
+# there is no signal, force-quit, activation, or Text Input state path.
 quiescer=package/installer-scripts/quit-applications-clean.jxa
 rg -Fq 'runningApplicationsWithBundleIdentifier' "${quiescer}"
 rg -Fq 'Boolean(application.terminate)' "${quiescer}"
@@ -295,19 +253,15 @@ rg -Fq 'quiesceApplication(bundleIdentifier, timeoutSeconds);' "${quiescer}" || 
   echo "Core application quiescence does not preserve the package-owned exit order." >&2
   exit 1
 }
-rg -Fq 'TISCopyCurrentKeyboardInputSource' "${quiescer}"
-rg -Fq 'post_quiescence_input_source_id' "${quiescer}"
-if rg -n 'forceTerminate|kill|pkill|killall|\.activate|TISEnableInputSource|TISDisableInputSource|TISSelectInputSource' \
+if rg -n 'forceTerminate|kill|pkill|killall|\.activate|TIS|InputSource' \
     "${quiescer}"; then
-  echo "Core application quiescence gained a forcing or input-state mutation path." >&2
+  echo "Core application quiescence gained a forcing or Text Input state path." >&2
   exit 1
 fi
 /usr/bin/osascript -l JavaScript "${quiescer}" 1 \
-  io.github.ares-x.inputmethod.Linnet.lifecycle-test-source \
   io.github.ares-x.inputmethod.Linnet.lifecycle-test-settings \
   io.github.ares-x.inputmethod.Linnet.lifecycle-test-host >/dev/null
 if /usr/bin/osascript -l JavaScript "${quiescer}" 0 \
-    io.github.ares-x.inputmethod.Linnet.lifecycle-test-source \
     io.github.ares-x.inputmethod.Linnet.lifecycle-test-settings \
     io.github.ares-x.inputmethod.Linnet.lifecycle-test-host >/dev/null 2>&1; then
   echo "Core application quiescence accepted an invalid deadline." >&2
@@ -553,11 +507,9 @@ else
   echo "Package lifecycle: signed candidate identity behavior NOT_EXERCISED" >&2
 fi
 
-# Complete owns first registration and still requires one fresh login.  The
-# Core-only product is update-only: must-close prompts early, then the Core
-# preinstall enforces exact Host/Settings quiescence immediately before payload
-# replacement. The post-payload Host boundary catches only an InputMethodKit-
-# relaunched Host before refreshing the same TIS identity without logging out.
+# Complete owns first registration and still requires one fresh login. The
+# Core-only product is update-only: it closes Settings but deliberately leaves
+# the live InputMethodKit Host and its per-application connections untouched.
 ruby -rrexml/document -e '
   component = REXML::Document.new(File.binread(ARGV.shift)).root
   abort "component duplicates the product conclusion owner" if
@@ -574,19 +526,20 @@ ruby -rrexml/document -e '
     complete_ref&.attributes&.[]("onConclusion") == "RequireLogout"
   abort "Core update still requires an unnecessary logout" if
     core_ref&.attributes&.key?("onConclusion")
-  documents.each do |document|
+  documents.each_with_index do |document, index|
     close = document.get_elements("pkg-ref/must-close")
     abort "Core payload must have one Apple must-close contract" unless close.length == 1
     ids = close.first.get_elements("app").map { |app| app.attributes["id"] }
-    abort "must-close does not own exact Host and Settings identities" unless ids == %w[
+    expected = index.zero? ? %w[
       io.github.ares-x.inputmethod.Linnet
       io.github.ares-x.inputmethod.Linnet.settings
-    ]
+    ] : %w[io.github.ares-x.inputmethod.Linnet.settings]
+    abort "must-close does not own the edition lifecycle" unless ids == expected
   end
 ' package/PackageInfo package/Distribution.xml package/Distribution-Core.xml
 rg -Fq 'cp -X "${project_root}/package/installer-scripts/postinstall"' \
   package/make_package || {
-  echo "Core update lost its post-payload TIS refresh." >&2
+  echo "Core update lost its post-payload identity verification." >&2
   exit 1
 }
 rg -Fq 'cp -X "${project_root}/package/installer-scripts/quit-applications-clean.jxa"' \
@@ -657,23 +610,6 @@ SH
   chmod 755 "${fake_executable}"
 }
 
-write_core_selection_token() {
-  local home="$1"
-  local was_current="$2"
-  local post_quiescence_id="$3"
-  local identity_transition="${4:-same-community-cms-leaf}"
-  local prior_enablement="${5:-enabled}"
-  local state="${home}/Library/Application Support/Linnet/State"
-  mkdir -p "${state}"
-  printf '{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":%s,"post_quiescence_input_source_id":"%s","identity_transition":"%s","prior_enablement":"%s","candidate_revision":"%s","candidate_build":"%s","candidate_leaf_sha256":"%s"}\n' \
-    "${was_current}" "${post_quiescence_id}" "${identity_transition}" \
-    "${prior_enablement}" "${candidate_revision}" "${candidate_build}" \
-    "${candidate_leaf}" |
-    /usr/bin/plutil -convert binary1 -o \
-      "${state}/core-update-selection-v1.plist" -
-  chmod 0600 "${state}/core-update-selection-v1.plist"
-}
-
 assert_postinstall_rejects_parent_symlink() {
   local label="$1"
   local relative="$2"
@@ -740,9 +676,8 @@ if HOME="${unsafe_mode_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Postinstall is the distinct post-payload mutation boundary. A canonical tree
-# must still invoke the exact lifecycle sequence, while a replaced App or Active
-# parent must fail before the first Host CLI call.
+# Postinstall is the distinct post-payload identity boundary. Complete performs
+# the only first-install registration; Core must make no Host CLI call.
 if [[ "${candidate_fixture_available}" == true ]]; then
   postinstall_home="${test_root}/postinstall-positive/home"
   postinstall_log="${test_root}/postinstall-positive/host-invocations"
@@ -750,127 +685,26 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   HOME="${postinstall_home}" LINNET_FAKE_HOST_LOG="${postinstall_log}" \
     LINNET_TEST_EXECUTABLE="${postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
-  [[ "$(cat "${postinstall_log}")" == \
-    $'--quit-host-clean\n--register-input-source\n--enable-input-source' ]] || {
-    echo "Complete postinstall did not validate, quiesce, register and enable the sole input source." >&2
+  [[ "$(cat "${postinstall_log}")" == '--register-input-source' ]] || {
+    echo "Complete postinstall did not perform exactly first registration." >&2
     exit 1
   }
 fi
 
-# Core refreshes the unchanged TIS identity but must preserve a user's disabled
-# state. The package-local mode is the only edition owner; Core therefore never
-# invokes enable while Complete still does exactly once above.
+# Core replaces App bytes without stopping the connected Host or touching the
+# existing TIS identity. The replacement activates on a natural Host launch.
 printf 'core-update\n' >"${scripts_root}/install-mode"
 if [[ "${candidate_fixture_available}" == true ]]; then
   core_postinstall_home="${test_root}/postinstall-core/home"
   core_postinstall_log="${test_root}/postinstall-core/host-invocations"
   prepare_signed_postinstall_home "${core_postinstall_home}"
-  write_core_selection_token "${core_postinstall_home}" true com.apple.keylayout.ABC
   HOME="${core_postinstall_home}" LINNET_FAKE_HOST_LOG="${core_postinstall_log}" \
     LINNET_TEST_EXECUTABLE="${core_postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
-  [[ "$(cat "${core_postinstall_log}")" == \
-    '--refresh-core-input-source true com.apple.keylayout.ABC same-community-cms-leaf enabled' ]] || {
-    echo "Core postinstall split quiescence, registration and selection continuity across multiple Host processes." >&2
+  [[ ! -e "${core_postinstall_log}" || ! -s "${core_postinstall_log}" ]] || {
+    echo "Core postinstall invoked the live Host or input-source registration." >&2
     exit 1
   }
-  [[ ! -e "${core_postinstall_home}/Library/Application Support/Linnet/State/core-update-selection-v1.plist" ]] || {
-    echo "Core postinstall retained its one-shot selection token." >&2
-    exit 1
-  }
-
-  unselected_postinstall_home="${test_root}/postinstall-core-unselected/home"
-  unselected_postinstall_log="${test_root}/postinstall-core-unselected/host-invocations"
-  prepare_signed_postinstall_home "${unselected_postinstall_home}"
-  write_core_selection_token "${unselected_postinstall_home}" false \
-    github.dongyuwei.inputmethod.hallelujahInputMethod \
-    same-community-cms-leaf disabled
-  HOME="${unselected_postinstall_home}" \
-    LINNET_FAKE_HOST_LOG="${unselected_postinstall_log}" \
-    LINNET_TEST_EXECUTABLE="${unselected_postinstall_home}/fake-Linnet" \
-    "${scripts_root}/postinstall"
-  [[ "$(cat "${unselected_postinstall_log}")" == \
-    '--refresh-core-input-source false github.dongyuwei.inputmethod.hallelujahInputMethod same-community-cms-leaf disabled' ]] || {
-    echo "Core postinstall selected Linnet even though it was not current before update." >&2
-    exit 1
-  }
-
-  legacy_postinstall_home="${test_root}/postinstall-core-legacy/home"
-  legacy_postinstall_log="${test_root}/postinstall-core-legacy/host-invocations"
-  prepare_signed_postinstall_home "${legacy_postinstall_home}"
-  write_core_selection_token "${legacy_postinstall_home}" true \
-    com.apple.keylayout.ABC legacy-community-adhoc-to-cms enabled
-  HOME="${legacy_postinstall_home}" \
-    LINNET_FAKE_HOST_LOG="${legacy_postinstall_log}" \
-    LINNET_TEST_EXECUTABLE="${legacy_postinstall_home}/fake-Linnet" \
-    "${scripts_root}/postinstall"
-  [[ "$(cat "${legacy_postinstall_log}")" == \
-    '--refresh-core-input-source true com.apple.keylayout.ABC legacy-community-adhoc-to-cms enabled' ]] || {
-    echo "Core postinstall lost the one-time legacy ad-hoc to CMS transition." >&2
-    exit 1
-  }
-
-  unregistered_postinstall_home="${test_root}/postinstall-core-unregistered/home"
-  unregistered_postinstall_log="${test_root}/postinstall-core-unregistered/host-invocations"
-  prepare_signed_postinstall_home "${unregistered_postinstall_home}"
-  write_core_selection_token "${unregistered_postinstall_home}" false \
-    com.apple.keylayout.ABC missing-app-install unregistered
-  HOME="${unregistered_postinstall_home}" \
-    LINNET_FAKE_HOST_LOG="${unregistered_postinstall_log}" \
-    LINNET_TEST_EXECUTABLE="${unregistered_postinstall_home}/fake-Linnet" \
-    "${scripts_root}/postinstall"
-  [[ "$(cat "${unregistered_postinstall_log}")" == \
-    '--refresh-core-input-source false com.apple.keylayout.ABC missing-app-install unregistered' ]] || {
-    echo "Core postinstall lost the typed unregistered state." >&2
-    exit 1
-  }
-
-  for invalid_transaction in identity-transition prior-enablement candidate-leaf \
-      missing-app-prior missing-app-current unregistered-current; do
-    invalid_transaction_home="${test_root}/postinstall-core-invalid-${invalid_transaction}/home"
-    invalid_transaction_log="${test_root}/postinstall-core-invalid-${invalid_transaction}/host-invocations"
-    prepare_signed_postinstall_home "${invalid_transaction_home}"
-    case "${invalid_transaction}" in
-      identity-transition)
-        write_core_selection_token "${invalid_transaction_home}" true \
-          com.apple.keylayout.ABC unknown-transition enabled
-        ;;
-      prior-enablement)
-        write_core_selection_token "${invalid_transaction_home}" true \
-          com.apple.keylayout.ABC same-community-cms-leaf unknown-enablement
-        ;;
-      candidate-leaf)
-        write_core_selection_token "${invalid_transaction_home}" true \
-          com.apple.keylayout.ABC same-community-cms-leaf enabled
-        /usr/bin/plutil -replace candidate_leaf_sha256 -string \
-          "${wrong_candidate_leaf}" \
-          "${invalid_transaction_home}/Library/Application Support/Linnet/State/core-update-selection-v1.plist"
-        ;;
-      missing-app-prior)
-        write_core_selection_token "${invalid_transaction_home}" false \
-          com.apple.keylayout.ABC missing-app-install enabled
-        ;;
-      missing-app-current)
-        write_core_selection_token "${invalid_transaction_home}" true \
-          com.apple.keylayout.ABC missing-app-install unregistered
-        ;;
-      unregistered-current)
-        write_core_selection_token "${invalid_transaction_home}" true \
-          com.apple.keylayout.ABC same-community-cms-leaf unregistered
-        ;;
-    esac
-    if HOME="${invalid_transaction_home}" \
-        LINNET_FAKE_HOST_LOG="${invalid_transaction_log}" \
-        LINNET_TEST_EXECUTABLE="${invalid_transaction_home}/fake-Linnet" \
-        "${scripts_root}/postinstall" >/dev/null 2>&1; then
-      echo "Core postinstall accepted an invalid typed ${invalid_transaction}." >&2
-      exit 1
-    fi
-    [[ ! -e "${invalid_transaction_log}" || ! -s "${invalid_transaction_log}" ]] || {
-      echo "Core postinstall invoked Host before rejecting ${invalid_transaction}." >&2
-      exit 1
-    }
-  done
 
   rejected_postinstall_home="${test_root}/postinstall-rejected-identity/home"
   rejected_postinstall_log="${test_root}/postinstall-rejected-identity/host-invocations"
@@ -1026,89 +860,34 @@ cat >"${support_root}/Runtime/Active/activation.json" <<'JSON'
 JSON
 ln -s ../Runtime/Active/activation.json "${support_root}/State/active.json"
 quit_log="${test_root}/core-update-quit.log"
-missing_selection_document='{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":false,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"unregistered"}'
-for stale_missing_enablement in enabled disabled; do
-  stale_missing_selection_document="{\"format\":2,\"target_input_source_id\":\"io.github.ares-x.inputmethod.Linnet\",\"was_current\":false,\"post_quiescence_input_source_id\":\"com.apple.keylayout.ABC\",\"prior_enablement\":\"${stale_missing_enablement}\"}"
-  if LINNET_FAKE_SELECTION_DOCUMENT="${stale_missing_selection_document}" \
-      LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
-      "${scripts_root}/preinstall" >/dev/null 2>&1; then
-    echo "Core update accepted a missing App with stale ${stale_missing_enablement} registration." >&2
-    exit 1
-  fi
-  [[ ! -e "${support_root}/State/core-update-selection-v1.plist" ]] || {
-    echo "Core update persisted a transaction for stale missing-App registration." >&2
-    exit 1
-  }
-done
-LINNET_FAKE_SELECTION_DOCUMENT="${missing_selection_document}" \
-  LINNET_FAKE_QUIESCER_LOG="${quit_log}" \
-  HOME="${user_home}" "${scripts_root}/preinstall"
-selection_state="${support_root}/State/core-update-selection-v1.plist"
-[[ "$(/usr/bin/plutil -extract identity_transition raw -o - \
-    "${selection_state}")" == missing-app-install &&
-  "$(/usr/bin/plutil -extract prior_enablement raw -o - \
-    "${selection_state}")" == unregistered ]] || {
-  echo "Core update did not preserve missing-App repair intent." >&2
-  exit 1
-}
+LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
+  "${scripts_root}/preinstall"
 if [[ "${candidate_fixture_available}" == true ]]; then
   copy_candidate_app "${user_home}"
 fi
 : >"${quit_log}"
-unregistered_current_document='{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":true,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"unregistered"}'
-if LINNET_FAKE_SELECTION_DOCUMENT="${unregistered_current_document}" \
-    LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
-    "${scripts_root}/preinstall" >/dev/null 2>&1; then
-  echo "Core update accepted an unregistered source as previously current." >&2
-  exit 1
-fi
-: >"${quit_log}"
 LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" "${scripts_root}/preinstall"
-expected_quiescence="-l JavaScript ${scripts_root}/quit-applications-clean.jxa 30 io.github.ares-x.inputmethod.Linnet io.github.ares-x.inputmethod.Linnet.settings io.github.ares-x.inputmethod.Linnet"
+expected_quiescence="-l JavaScript ${scripts_root}/quit-applications-clean.jxa 30 io.github.ares-x.inputmethod.Linnet.settings"
 [[ "$(cat "${quit_log}")" == "${expected_quiescence}" ]] || {
-  echo "Core preinstall did not quiesce Settings before Host ahead of payload." >&2
+  echo "Core preinstall did not quiesce only Settings ahead of payload." >&2
   exit 1
 }
 [[ ! -e "${support_root}/Transactions" && ! -L "${support_root}/Transactions" ]] || {
   echo "Core preinstall created the runtime-owned Transactions directory." >&2
   exit 1
 }
-selection_state="${support_root}/State/core-update-selection-v1.plist"
-[[ -f "${selection_state}" && ! -L "${selection_state}" ]] || {
-  echo "Core preinstall did not persist the one-shot input-source selection token." >&2
-  exit 1
-}
-[[ "$(/usr/bin/plutil -extract was_current raw -o - "${selection_state}")" == true ]] || {
-  echo "Core preinstall lost the pre-update selected state." >&2
-  exit 1
-}
-[[ "$(/usr/bin/plutil -extract format raw -o - "${selection_state}")" == 2 &&
-  "$(/usr/bin/plutil -extract identity_transition raw -o - \
-    "${selection_state}")" == same-community-cms-leaf &&
-  "$(/usr/bin/plutil -extract prior_enablement raw -o - \
-    "${selection_state}")" == enabled &&
-  "$(/usr/bin/plutil -extract candidate_leaf_sha256 raw -o - \
-    "${selection_state}")" == "${candidate_leaf}" ]] || {
-  echo "Core preinstall did not persist the typed CMS selection transaction." >&2
+[[ ! -e "${support_root}/State/core-update-selection-v1.plist" ]] || {
+  echo "Core preinstall persisted retired input-source state." >&2
   exit 1
 }
 
-# The only admitted identity migration and each TIS state are captured before
-# payload mutation. Prove the legacy edge is typed rather than reconstructed by
-# postinstall from the new App.
+# The signing migration remains an App identity decision only; it must not gain
+# an input-source enablement or selection transaction.
 if [[ "${candidate_fixture_available}" == true ]]; then
   configure_installed_identity "${user_home}" legacy-community-adhoc
-  legacy_selection_document='{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":false,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"disabled"}'
-  LINNET_FAKE_SELECTION_DOCUMENT="${legacy_selection_document}" \
-    LINNET_FAKE_QUIESCER_LOG="${quit_log}" \
-    HOME="${user_home}" "${scripts_root}/preinstall"
-  [[ "$(/usr/bin/plutil -extract identity_transition raw -o - \
-      "${selection_state}")" == legacy-community-adhoc-to-cms &&
-    "$(/usr/bin/plutil -extract prior_enablement raw -o - \
-      "${selection_state}")" == disabled ]] || {
-    echo "Core preinstall lost the legacy CMS migration transaction." >&2
-    exit 1
-  }
+  : >"${quit_log}"
+  LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
+    "${scripts_root}/preinstall"
   configure_installed_identity "${user_home}" exact-community-cms
 fi
 
@@ -1176,24 +955,16 @@ if HOME="${user_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
   exit 1
 fi
 
-# The package helper owns only pre-payload cooperative Host/Settings quiescence.
-# Main owns the later boundaries: uninstall may force after its grace period,
-# while Core postinstall targets only a relaunched Host and never reaches force.
+# The package helper owns only pre-payload cooperative Settings quiescence.
+# Main owns the distinct uninstall boundary and may force both product processes
+# only after its grace period; Core has no Host termination command.
 rg -Fq 'settingsBundleIdentifier' sources/Main.swift
 test "$(rg -F -c 'runningApplications(withBundleIdentifier:' sources/Main.swift)" -eq 1
 rg -Fq 'forceTerminate()' sources/Main.swift
-rg -Fq 'case "--quit-host-clean":' sources/Main.swift
-rg -Fq 'quitProductProcesses(.uninstall)' sources/Main.swift
-rg -Fq 'quitProductProcesses(.hostClean)' sources/Main.swift
-if ! ruby -e '
-  source = File.read(ARGV.fetch(0))
-  policy = source[/enum TerminationPolicy.*?\n  \}/m] or abort "termination policy missing"
-  abort "host-clean policy can target Settings" unless
-    policy.include?("case .hostClean:") && policy.include?("return [bundleIdentifier]")
-  abort "host-clean policy can force terminate" unless
-    policy.include?("case .uninstall:") && policy.include?("case .hostClean: return false")
-' sources/Main.swift; then
-  echo "Host-clean and uninstall no longer share one bounded termination owner." >&2
+rg -Fq 'quitProductProcesses()' sources/Main.swift
+rg -Fq '[bundleIdentifier, settingsBundleIdentifier].flatMap' sources/Main.swift
+if rg -Fq -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
+  echo "A retired Core Host termination path returned." >&2
   exit 1
 fi
 rg -Fq -- '--purge-owned-temporary-state' sources/Main.swift package/uninstall-linnet
@@ -1207,10 +978,14 @@ if rg -Fq '"${host_cli}" --disable-input-source' package/uninstall-linnet; then
   exit 1
 fi
 
-# TIS identity resolution is exact-one and typed. A duplicate or absent source
-# must not let postinstall enable an arbitrary first match and report success.
-rg -Fq 'case inputSourceCountMismatch(String, Int)' sources/InputSource.swift
-rg -Fq 'guard matches.count == 1' sources/InputSource.swift
+# Registration is a first-install boundary. A Core update must preserve the
+# one existing TIS identity instead of registering it again.
+rg -Fq 'case registrationFailed(OSStatus)' sources/InputSource.swift
+if ! rg -Fq 'static func registrationRequired' sources/InputSource.swift ||
+    ! rg -Fq 'Input source is already registered' sources/InputSource.swift; then
+  echo "Core updates can re-register the existing input source." >&2
+  exit 1
+fi
 if rg -Fq 'case inputSourceUnavailable' sources/InputSource.swift; then
   echo "TIS resolution retained a separate zero-match interpretation." >&2
   exit 1
@@ -1218,7 +993,7 @@ fi
 
 # Every shipped macOS candidate has one new build identity, and the expanded
 # package verifier mirrors (rather than contradicts) each product conclusion.
-grep -Fqx 'CURRENT_PROJECT_VERSION = 37' config/LinnetProduct.xcconfig
+grep -Fqx 'CURRENT_PROJECT_VERSION = 55' config/LinnetProduct.xcconfig
 rg -Fq 'if edition == "complete" && kind == "core"' package/verify_package
 
 # The user-owned support root is a deletion trust boundary. A replaced root

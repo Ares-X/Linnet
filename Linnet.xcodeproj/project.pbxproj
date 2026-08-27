@@ -22,7 +22,7 @@
 		B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */; };
 		A11E55050000000000000002 /* SquirrelInputController+RimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */; };
 		A11E55000000000000000002 /* LinnetRimeSessionLease.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55000000000000000001 /* LinnetRimeSessionLease.swift */; };
-		A11E55020000000000000002 /* LinnetInputActivationRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55020000000000000001 /* LinnetInputActivationRegistry.swift */; };
+		A11E55080000000000000002 /* LinnetRimeWarmSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55080000000000000001 /* LinnetRimeWarmSession.swift */; };
 		A11E55040000000000000002 /* LinnetInputActivationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55040000000000000001 /* LinnetInputActivationPolicy.swift */; };
 		A11E55030000000000000002 /* LinnetCandidateInteractionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55030000000000000001 /* LinnetCandidateInteractionState.swift */; };
 		A11E55010000000000000002 /* LinnetRimeCandidateSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */; };
@@ -177,7 +177,7 @@
 		B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelInputController.swift; path = sources/SquirrelInputController.swift; sourceTree = "<group>"; };
 		A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SquirrelInputController+RimeSession.swift"; path = "sources/SquirrelInputController+RimeSession.swift"; sourceTree = "<group>"; };
 		A11E55000000000000000001 /* LinnetRimeSessionLease.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeSessionLease.swift; path = sources/LinnetRimeSessionLease.swift; sourceTree = "<group>"; };
-		A11E55020000000000000001 /* LinnetInputActivationRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetInputActivationRegistry.swift; path = sources/LinnetInputActivationRegistry.swift; sourceTree = "<group>"; };
+		A11E55080000000000000001 /* LinnetRimeWarmSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeWarmSession.swift; path = sources/LinnetRimeWarmSession.swift; sourceTree = "<group>"; };
 		A11E55040000000000000001 /* LinnetInputActivationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetInputActivationPolicy.swift; path = sources/LinnetInputActivationPolicy.swift; sourceTree = "<group>"; };
 		A11E55030000000000000001 /* LinnetCandidateInteractionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCandidateInteractionState.swift; path = sources/LinnetCandidateInteractionState.swift; sourceTree = "<group>"; };
 		A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetRimeCandidateSnapshotBuilder.swift; path = sources/LinnetRimeCandidateSnapshotBuilder.swift; sourceTree = "<group>"; };
@@ -287,7 +287,7 @@
 				B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */,
 				A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */,
 				A11E55000000000000000001 /* LinnetRimeSessionLease.swift */,
-				A11E55020000000000000001 /* LinnetInputActivationRegistry.swift */,
+				A11E55080000000000000001 /* LinnetRimeWarmSession.swift */,
 				A11E55040000000000000001 /* LinnetInputActivationPolicy.swift */,
 				A11E55030000000000000001 /* LinnetCandidateInteractionState.swift */,
 				A11E55010000000000000001 /* LinnetRimeCandidateSnapshotBuilder.swift */,
@@ -668,7 +668,7 @@
 				B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */,
 				A11E55050000000000000002 /* SquirrelInputController+RimeSession.swift in Sources */,
 				A11E55000000000000000002 /* LinnetRimeSessionLease.swift in Sources */,
-				A11E55020000000000000002 /* LinnetInputActivationRegistry.swift in Sources */,
+				A11E55080000000000000002 /* LinnetRimeWarmSession.swift in Sources */,
 				A11E55040000000000000002 /* LinnetInputActivationPolicy.swift in Sources */,
 				A11E55030000000000000002 /* LinnetCandidateInteractionState.swift in Sources */,
 				A11E55010000000000000002 /* LinnetRimeCandidateSnapshotBuilder.swift in Sources */,

@@ -15,25 +15,20 @@ extension SquirrelPanel {
     let theme: SquirrelTheme
   }
 
-  func beginPublication(
-    activationToken: LinnetInputActivationRegistry.Token
-  ) -> Publication? {
-    guard self.activationToken == activationToken,
-      inputController?.inputActivationIsCurrent(activationToken) == true
-    else { return nil }
+  func beginPublication(controller: SquirrelInputController) -> Publication? {
+    guard inputController === controller else { return nil }
     panelPublicationGeneration &+= 1
     let publication = Publication(
       generation: panelPublicationGeneration,
-      activationToken: activationToken)
+      controllerID: ObjectIdentifier(controller))
     self.publication = publication
     return publication
   }
 
   func publicationIsCurrent(_ publication: Publication) -> Bool {
-    self.publication == publication &&
-      activationToken == publication.activationToken &&
-      inputController?.inputActivationIsCurrent(
-        publication.activationToken) == true
+    guard let inputController else { return false }
+    return self.publication == publication &&
+      publication.controllerID == ObjectIdentifier(inputController)
   }
 
   /// A caret rectangle is usable only when it is not degenerate and its
@@ -55,14 +50,13 @@ extension SquirrelPanel {
     let hit = candidateInteraction.finishPress(
       view.click(at: mousePosition(for: event)))
     publishCandidatePointerFeedback()
-    guard let hit else { return }
+      guard let hit else { return }
     switch hit {
     case .candidate(let itemIndex):
       guard let candidateSnapshot, candidateSnapshot.items.indices.contains(itemIndex)
       else { return }
       _ = inputController.selectCandidate(
-        absoluteIndex: candidateSnapshot.items[itemIndex].absoluteIndex,
-        activationToken: publication.activationToken)
+        absoluteIndex: candidateSnapshot.items[itemIndex].absoluteIndex)
     case .control(let action):
       _ = performControl(action)
     case .none:
@@ -110,9 +104,7 @@ extension SquirrelPanel {
       vertical: vertical)
     publishCandidatePointerFeedback()
     guard let pagingIntent else { return }
-    _ = inputController.page(
-      up: pagingIntent == .previousPage,
-      activationToken: publication.activationToken)
+    _ = inputController.page(up: pagingIntent == .previousPage)
   }
 
   func updateUsableScreenRect() {

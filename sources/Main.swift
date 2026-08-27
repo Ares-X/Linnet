@@ -41,7 +41,6 @@ struct SquirrelApp {
   static var productSlug: String { productName.lowercased() }
   static var rimeAppName: String { "rime.\(productSlug)" }
   static var settingsBundleIdentifier: String { "\(bundleIdentifier).settings" }
-
   static let dataRegistry: LinnetDataRegistry = {
     do {
       return try LinnetDataRegistry(productName: productName, coreVersion: productVersion)
@@ -53,35 +52,14 @@ struct SquirrelApp {
 
   static let appDir = Bundle.main.bundleURL
 
-  enum TerminationPolicy {
-    case uninstall
-    case hostClean
-
-    var bundleIdentifiers: [String] {
-      switch self {
-      case .uninstall: return [bundleIdentifier, settingsBundleIdentifier]
-      case .hostClean: return [bundleIdentifier]
-      }
-    }
-
-    var allowsForcedTermination: Bool {
-      switch self {
-      case .uninstall: return true
-      case .hostClean: return false
-      }
-    }
-  }
-
   /// Owns process enumeration for executable-driven lifecycle boundaries.
   /// Uninstall may force Host and Settings only after its grace period. Core
-  /// postinstall uses the same owner to request a clean Host-only exit and
-  /// fails closed instead of overriding Settings or force terminating Host.
-  /// The package's pre-payload cooperative boundary is separately owned by its
-  /// packaged script because the installed executable is about to be replaced.
-  static func quitProductProcesses(_ policy: TerminationPolicy) -> Bool {
+  /// updates never call this owner because live InputMethodKit client
+  /// connections must survive replacement of the App bytes on disk.
+  static func quitProductProcesses() -> Bool {
     let ownPID = ProcessInfo.processInfo.processIdentifier
     func runningTargets() -> [NSRunningApplication] {
-      policy.bundleIdentifiers.flatMap { identifier in
+      [bundleIdentifier, settingsBundleIdentifier].flatMap { identifier in
         NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
       }.filter { $0.processIdentifier != ownPID && !$0.isTerminated }
     }
@@ -96,7 +74,6 @@ struct SquirrelApp {
     let targets = runningTargets()
     targets.forEach { _ = $0.terminate() }
     if waitForExit(until: Date().addingTimeInterval(3)) { return true }
-    guard policy.allowsForcedTermination else { return false }
     runningTargets().forEach { _ = $0.forceTerminate() }
     return waitForExit(until: Date().addingTimeInterval(2))
   }
@@ -150,16 +127,8 @@ struct SquirrelApp {
             guard args.count == 2 else {
               configurationFailure("Quit accepts no process identifier")
             }
-            guard quitProductProcesses(.uninstall) else {
+            guard quitProductProcesses() else {
               configurationFailure("Linnet processes did not terminate before uninstall")
-            }
-            return true
-          case "--quit-host-clean":
-            guard args.count == 2 else {
-              configurationFailure("Clean Host quit accepts no process identifier")
-            }
-            guard quitProductProcesses(.hostClean) else {
-              configurationFailure("Linnet Host did not terminate cleanly before Core activation")
             }
             return true
           case "--purge-owned-temporary-state":
@@ -172,51 +141,6 @@ struct SquirrelApp {
               configurationFailure("Register accepts no input source identifier")
             }
             try installer.register()
-            return true
-          case "--enable-input-source":
-            guard args.count == 2 else {
-              configurationFailure("Enable accepts no input source identifier")
-            }
-            try installer.enable()
-            return true
-          case "--disable-input-source":
-            guard args.count == 2 else {
-              configurationFailure("Disable accepts no input source identifier")
-            }
-            try installer.disable()
-            return true
-          case "--select-input-source":
-            guard args.count == 2 else {
-              configurationFailure("Select accepts no input source identifier")
-            }
-            try installer.select()
-            return true
-          case "--refresh-core-input-source":
-            guard args.count == 6, !args[3].isEmpty else {
-              configurationFailure(
-                "Core refresh requires current, fallback, identity, and enablement state")
-            }
-            let wasCurrent: Bool
-            switch args[2] {
-            case "true": wasCurrent = true
-            case "false": wasCurrent = false
-            default:
-              configurationFailure(
-                "Core refresh requires current to be true or false")
-            }
-            guard let identityTransition = CoreIdentityTransition(rawValue: args[4])
-            else {
-              configurationFailure("Core refresh received an unknown identity transition")
-            }
-            guard let priorEnablement = PriorEnablement(rawValue: args[5]) else {
-              configurationFailure("Core refresh received an unknown prior enablement state")
-            }
-            try installer.refreshAfterCoreUpdate(
-              wasCurrent: wasCurrent,
-              postQuiescenceInputSourceID: args[3],
-              identityTransition: identityTransition,
-              priorEnablement: priorEnablement,
-              quiesceHost: { quitProductProcesses(.hostClean) })
             return true
           case "--help":
             print(helpDoc)
@@ -284,15 +208,10 @@ struct SquirrelApp {
     Supported arguments:
     Perform actions:
       --quit                     quit all \(productName) processes
-      --quit-host-clean          cleanly quit only the \(productName) Host
       --purge-owned-temporary-state
                                  remove Linnet-owned temporary logs
     Manage \(productName):
       --register-input-source             register input source
-      --enable-input-source               enable input source
-      --disable-input-source             disable input source
-      --select-input-source              select input source
-      --refresh-core-input-source        atomically refresh a Core update's TIS state
     """
   }
 }

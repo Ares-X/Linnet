@@ -6,7 +6,6 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 workflow="${repo_root}/.github/workflows/chinese-upstream-sync.yml"
-release_workflow="${repo_root}/.github/workflows/release-ci.yml"
 reporter="${repo_root}/scripts/upstream-sync"
 retired_relay="${repo_root}/.github/workflows/chinese-upstream-review.yml"
 
@@ -34,7 +33,6 @@ ruby -e '
 ' "${workflow}"
 ruby -e '
   reporter = File.read(ARGV.fetch(0))
-  release = File.read(ARGV.fetch(1))
   local_verifier = reporter[/def verify_local\(lock\).*?\nend/m]
   abort "the local verifier still depends on developer-only upstream tags" unless
     local_verifier && !local_verifier.include?("tag_ref")
@@ -45,11 +43,6 @@ ruby -e '
       reporter.include?("browser_download_url")
   abort "the upstream report still presents mutable release assets as unconditionally locked" if
     reporter.include?(%q{grammar.fetch("sha256")[0, 12], grammar.fetch("release"), "locked"})
-  report = release.index("ruby scripts/upstream-sync report")
-  prepare = release.index("./action-install.sh")
-  archive = release.index("make --no-print-directory archive")
-  abort "release validation no longer checks locked upstream identities before the expensive build" unless
-    report && prepare && archive && report < prepare && prepare < archive
-' "${reporter}" "${release_workflow}"
+' "${reporter}"
 
 echo "Chinese upstream workflow: PASS (read-only standard upstream report; no Python composer)"

@@ -47,7 +47,7 @@ if rg -n 'candidate_revision|candidate-revision' \
   fail "data-pack identity is coupled to an App revision"
 fi
 if rg -n 'LINNET_PACK_PRIVATE|private[_-]key|manifest\.ed25519' \
-    package tools sources .github/workflows/release-ci.yml; then
+    package tools sources scripts/release-control; then
   fail "candidate-controlled production code can read a Catalog private key"
 fi
 rg -Fq 'build-container' package/make_archive ||

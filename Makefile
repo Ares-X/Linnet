@@ -204,12 +204,27 @@ define build-linnet-app
 	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Linnet.app)"; \
 	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app)"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
+	launch_services_register='/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister'; \
+	unregister_local_builds() { \
+		local registry_dump=''; \
+		for local_app in "$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}"; do \
+			"$${launch_services_register}" -u "$${local_app}" >/dev/null 2>&1 || true; \
+		done; \
+		registry_dump="$$("$${launch_services_register}" -dump 2>/dev/null)" || return 1; \
+		for local_app in "$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}"; do \
+			case "$${registry_dump}" in *"$${local_app}"*) return 1 ;; esac; \
+		done; \
+		return 0; \
+	}; \
+	trap 'unregister_local_builds >/dev/null 2>&1 || true' EXIT INT TERM HUP; \
 		xcodebuild -project Linnet.xcodeproj -configuration $(1) -scheme Linnet \
 			-destination '$(XCODE_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) \
 			-showBuildTimingSummary $(BUILD_SETTINGS) build; \
 	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
 	scripts/build-privacy sanitize-localizations \
 		"$${app_path}" "$${embedded_settings_app_path}" "$${settings_app_path}"; \
+	unregister_local_builds; \
+	trap - EXIT INT TERM HUP; \
 	echo "Linnet $(1) App: BUILT (local, unsigned)"
 endef
 

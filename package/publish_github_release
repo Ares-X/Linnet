@@ -31,7 +31,6 @@ else
 fi
 [[ "${repository}" == Ares-X/Linnet ]] ||
   fail_publish "GITHUB_REPOSITORY must be Ares-X/Linnet"
-[[ -n "${GH_TOKEN:-}" ]] || fail_publish "GH_TOKEN is required"
 [[ "${release_dir}" == /* && -d "${release_dir}" && ! -L "${release_dir}" ]] ||
   fail_publish "release directory is unsafe"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
@@ -220,12 +219,19 @@ verify_candidate_source() {
     return
   fi
 
-  local pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-a([1-9][0-9]*)$'
+  local pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h([0-9a-f]{64})$'
   [[ "${publication_authorization}" =~ ${pattern} ]] ||
     fail_publish "publication authorization tag is invalid"
   [[ "${BASH_REMATCH[1]}" == "${version}" &&
      "${BASH_REMATCH[2]}" == "${candidate_revision}" ]] ||
     fail_publish "publication authorization differs from candidate identity"
+  local authorized_digest="${BASH_REMATCH[3]}"
+  local candidate_identity
+  candidate_identity="$("${project_root}/package/release_candidate_identity" \
+    "${release_dir}" "${version}" "${catalog_sequence}")" ||
+    fail_publish "candidate archive identity is unavailable"
+  [[ "${candidate_identity}" == "sha256:${authorized_digest}" ]] ||
+    fail_publish "publication authorization differs from candidate bytes (${authorized_digest} != ${candidate_identity#sha256:})"
   verify_release_revision "${publication_authorization}"
 }
 

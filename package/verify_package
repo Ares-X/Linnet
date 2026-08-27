@@ -231,13 +231,16 @@ ruby -rjson -rrexml/document -e '
     secondary_nodes = children.call(secondary)
     if kind == "core"
       must_close = secondary_nodes.shift
+      expected_closed_apps = edition == "core" ? [
+        ["app", {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}, []],
+      ] : [
+        ["app", {"id" => "io.github.ares-x.inputmethod.Linnet"}, []],
+        ["app", {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}, []],
+      ]
       abort "Core must-close mapping mismatch" unless must_close&.name == "must-close" &&
         attrs.call(must_close).empty? && children.call(must_close).map { |app|
           [app.name, attrs.call(app), children.call(app)]
-        } == [
-          ["app", {"id" => "io.github.ares-x.inputmethod.Linnet"}, []],
-          ["app", {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}, []],
-        ]
+        } == expected_closed_apps
     end
     bundle_version = secondary_nodes.shift
     abort "Distribution bundle-version mismatch" unless bundle_version.name == "bundle-version"

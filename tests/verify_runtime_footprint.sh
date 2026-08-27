@@ -235,7 +235,7 @@ if ! ruby -e '
     controller.include?("inputModeTransitionLabel(") &&
       controller.include?("InputModeIdentity(") &&
       controller.include?("panel.updateStatus(") &&
-      controller.include?("activationToken: updateToken")
+      controller.include?("controller: self")
   abort "idle Shift feedback no longer reaches the normal caret panel" unless
     builder.include?("LinnetCandidatePresentation.candidateMenuPage(") &&
       builder.include?("guard menuPage.pageSize > 0 else")
@@ -1244,15 +1244,22 @@ test "$(rg -F -o 'mark: .latinABC' sources/LinnetSettings/SettingsMain.swift \
 test "$(rg -F -c 'NSSelectorFromString("windowEffectiveAppearance")' \
   sources/LinnetClientAppearance.swift)" -eq 1 ||
   fail "the optional InputMethodKit client-appearance capability lost its single owner"
-test "$(rg -F -c 'panel.updateAppearance(client: client as? NSObjectProtocol)' \
-  sources/SquirrelInputController.swift)" -eq 2 ||
+test "$((
+  $(rg -F -c 'panel.updateAppearance(client: activatingClient as? NSObjectProtocol)' \
+    sources/SquirrelInputController.swift) +
+  $(rg -F -c 'panel.updateAppearance(client: expectedClient as? NSObjectProtocol)' \
+    sources/SquirrelInputController.swift)
+))" -eq 2 ||
   fail "the candidate panel stopped resolving appearance from the active text client"
 test "$(rg -F -c 'updateAppearance(client: nil)' \
   sources/SquirrelPanel.swift)" -eq 1 ||
   fail "the candidate panel stopped clearing a deactivated client's appearance"
-test "$(rg -F -c 'updateAppearance(client: inputController?.client() as? NSObjectProtocol)' \
+test "$(rg -F -c 'updateAppearance(client: inputController?.activeClient as? NSObjectProtocol)' \
   sources/SquirrelPanel.swift)" -eq 1 ||
   fail "a live Settings theme refresh stopped re-resolving the active client's appearance"
+if rg -F 'inputController?.client()' sources/SquirrelPanel.swift; then
+  fail "the candidate panel regained InputMethodKit's stored client as a second appearance owner"
+fi
 rg -Fq 'view.applyClientAppearance(isDark: resolution.isDark)' sources/SquirrelPanel.swift ||
   fail "the candidate theme stopped consuming the resolved client appearance"
 if rg -n 'NSApp\.effectiveAppearance' sources/SquirrelView.swift; then
@@ -1436,7 +1443,26 @@ test "$(rg -c 'to: \\.log_dir' sources/SquirrelApplicationDelegate.swift)" -eq 1
 
 # startRime is the sole runtime-readiness owner. Maintenance makes librime's
 # Service unavailable, so Host must join it, deploy the presentation config,
-# and prove one session can be created before publishing running exactly once.
+# and prepare the one retained resource session before publishing running.
+test -f sources/LinnetRimeWarmSession.swift ||
+  fail "the retained Rime resource-session owner is missing"
+ruby -e '
+  owner = File.read(ARGV.fetch(0))
+  abort "the warm-session owner does not retain exactly one session" unless
+    owner.scan("private(set) var identifier: RimeSessionId = 0").length == 1 &&
+      owner.scan("api.create_session()").length == 1
+  abort "the warm-session owner does not prime the real candidate path" unless
+    owner.scan(%q{"ceshi".withCString}).length == 1 &&
+      owner.scan(%q{api.simulate_key_sequence(created, $0)}).length == 1 &&
+      owner.scan("api.clear_composition(created)").length == 1
+  abort "the warm-session owner can be recycled as stale" unless
+    owner.scan("api.find_session(identifier)").length == 1
+  abort "warm-session failure cleanup is not owned locally" unless
+    owner.scan("discard(using: api)").length == 1 &&
+      owner.scan("api.destroy_session(discarded)").length == 1 &&
+      owner.scan("api.destroy_session").length == 1
+' sources/LinnetRimeWarmSession.swift ||
+  fail "the retained Rime resource-session contract changed"
 ruby -e '
   source = File.read(ARGV.fetch(0))
   method = source[/func startRime\(fullCheck: Bool\) -> Bool \{.*?\n  \}\n  private func startStaleSessionCleaner/m]
@@ -1444,24 +1470,59 @@ ruby -e '
   maintenance = method.index("rimeAPI.start_maintenance(fullCheck)")
   join = method.index("rimeAPI.join_maintenance_thread()")
   deploy = method.index(%q{rimeAPI.deploy_config_file("squirrel.yaml", "config_version")})
-  create = method.index("rimeAPI.create_session()")
-  destroy = method.index("rimeAPI.destroy_session(readinessSession)")
+  prepare = method.index("warmRimeSession.prepare(using: rimeAPI)")
   publish = method.index("isRimeRunning = true")
   abort "runtime readiness order changed" unless
-    [maintenance, join, deploy, create, destroy, publish].all? &&
-      maintenance < join && join < deploy && deploy < create &&
-      create < destroy && destroy < publish
+    [maintenance, join, deploy, prepare, publish].all? &&
+      maintenance < join && join < deploy && deploy < prepare &&
+      prepare < publish
   abort "runtime readiness no longer fails closed" unless
     method.include?(%q{guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else}) &&
-      method.include?("guard readinessSession != 0, rimeAPI.destroy_session(readinessSession) else")
+      method.include?("guard warmRimeSession.prepare(using: rimeAPI) != nil else")
   abort "runtime readiness gained retry or duplicate probes" unless
     method.scan("rimeAPI.join_maintenance_thread()").length == 1 &&
-      method.scan("rimeAPI.create_session()").length == 1 &&
+      method.scan("warmRimeSession.prepare(using: rimeAPI)").length == 1 &&
+      !method.include?("rimeAPI.create_session") &&
+      !method.include?("rimeAPI.destroy_session") &&
       !method.include?("runtimeHealth()")
   abort "runtime running gained a second publication path" unless
     method.scan("isRimeRunning = true").length == 1
 ' sources/SquirrelApplicationDelegate.swift ||
   fail "Host can publish runtime readiness before maintenance and session validation"
+
+ruby -e '
+  host = File.read(ARGV.fetch(0))
+  cleaner = host[/private func startStaleSessionCleaner\(\) \{.*?\n  \}/m]
+  invalidate = host[/private func invalidateRimeSessions\(\) \{.*?\n  \}/m]
+  sync = host[/private func performRimeUserDataSync\(\).*?\n  \}/m]
+  activation = host[/private func activatePublishedSettings\(.*?\n  \}\n\n  private func validConfigurationCandidate/m]
+  reload = activation && activation[/case \.configuration:.*?\n      return true/m]
+  abort "the warm-session lifecycle consumers are missing" unless
+    cleaner && invalidate && sync && reload
+  refresh = cleaner.index("warmRimeSession.refresh(using: rimeAPI)")
+  cleanup_stale = cleaner.index("rimeAPI.cleanup_stale_sessions()")
+  retire = invalidate.index("warmRimeSession.retire()")
+  cleanup_all = invalidate.index("rimeAPI.cleanup_all_sessions()")
+  abort "stale cleanup can recycle the retained resource owner" unless
+    refresh && cleanup_stale && refresh < cleanup_stale
+  abort "runtime invalidation can leave a recycled warm identifier" unless
+    retire && cleanup_all && retire < cleanup_all
+  sync_retire = sync.index("warmRimeSession.retire()")
+  synchronize = sync.index("rimeAPI.sync_user_data()")
+  sync_join = sync.index("rimeAPI.join_maintenance_thread()")
+  sync_prepare = sync.index("warmRimeSession.prepare(using: rimeAPI)")
+  sync_reopen = sync.index("reopenRimeInput()", sync_join || 0)
+  abort "user-data sync can retain a destroyed warm identifier" unless
+    [sync_retire, synchronize, sync_join, sync_prepare, sync_reopen].all? &&
+      sync_retire < synchronize && synchronize < sync_join &&
+      sync_join < sync_prepare && sync_prepare < sync_reopen
+  abort "configuration reload regained a second readiness-session path" unless
+    reload.scan("warmRimeSession.prepare(using: rimeAPI)").length == 1 &&
+      reload.scan("warmRimeSession.discard(using: rimeAPI)").length == 1 &&
+      !reload.include?("rimeAPI.create_session") &&
+      !reload.include?("rimeAPI.destroy_session")
+' sources/SquirrelApplicationDelegate.swift ||
+  fail "the retained resource session is not governed by runtime lifecycle"
 
 # Runtime diagnostics report deployed schema availability; they do not own the
 # user's selected schema.  Selecting every schema in probe sessions writes
@@ -1515,6 +1576,14 @@ if rg -n 'isRimeRunning|isRimeInputSuspended' \
     sources/SquirrelInputController+RimeSession.swift; then
   fail "the input controller bypasses the Host runtime-availability owner"
 fi
+# macOS owns physical Caps Lock state and Rime's ascii_composer owns the input
+# mode transition.  The Host must not keep a private Caps/ASCII ledger or
+# reconstruct that state when a controller/session is activated.
+if rg -n \
+    'capsLockBaseline|synchronizeCapsLockBaseline|_linnet_caps_lock_ascii_mode|readyActivationToken' \
+    sources patches/librime-linnet-core-interactions.patch; then
+  fail "the Host or patched runtime regained a second Caps/ASCII state owner"
+fi
 ruby -e '
   controller = File.read("sources/SquirrelInputController.swift") +
     File.read("sources/SquirrelInputController+RimeSession.swift")
@@ -1524,7 +1593,7 @@ ruby -e '
   current_session = controller[/func sessionIsCurrent\(\) -> Bool \{.*?\n  \}/m]
   current_lease = controller[/func currentSessionLease\(.*?\n  \}/m]
   owns_lease = controller[/func ownsCurrentSession\(.*?\n  \}/m]
-  create_session = controller[/func createSession\(\) \{.*?\n  \}/m]
+  create_session = controller[/func createSession\(client .*?\) \{.*?\n  \}/m]
   chord_timer = controller[/func onChordTimer\(.*?\n  \}/m]
   recovered_mode = controller[/func synchronizeRecoveredInputMode\(.*?\n  \}/m]
   handle = controller[/override func handle\(.*?\n  \}/m]
@@ -1560,10 +1629,11 @@ ruby -e '
       status.include?("sessionLease.identifier")
   abort "live-session recovery no longer validates and recreates one generation" unless
     ensure_session.scan("sessionIsCurrent()").length == 2 &&
-      ensure_session.scan("createSession()").length == 1
+      ensure_session.scan("createSession(client: expectedClient)").length == 1
   abort "key events bypass canonical live-session recovery" unless
-    handle.include?("guard ensureReadySession(for: inputToken)")
-  recover = activation.index("guard ensureReadySession(for: activationToken)")
+    handle.include?("activeClient = senderClient") &&
+      handle.include?("guard ensureReadySession(for: senderClient)")
+  recover = activation.index("guard ensureReadySession(for: activatingClient)")
   baseline = activation.index("rimeUpdate()")
   publish = activation.index("inputSourceDidActivate(")
   abort "activation can publish a stale session before the first key" unless
@@ -1572,18 +1642,16 @@ ruby -e '
     baseline && recover < baseline && baseline < publish
   abort "activation retained raw nonzero-session inference" if
     activation.include?("if session != 0")
-  token = activation.index("self.activationToken = activationToken")
+  native_client = activation.index("activeClient = activatingClient")
   modifier_epoch = activation.index("resetModifierEpoch()")
   abort "activation can sample its modifier epoch after session recovery" unless
-    token && modifier_epoch && recover && token < modifier_epoch && modifier_epoch < recover
+    native_client && modifier_epoch && recover &&
+      native_client < modifier_epoch && modifier_epoch < recover
   recovered = ensure_session.index("let recoveredSession = !sessionIsCurrent()")
-  recreate = ensure_session.index("createSession()")
-  caps = ensure_session.index("synchronizeCapsLockBaseline()")
+  recreate = ensure_session.index("createSession(client: expectedClient)")
   mode = ensure_session.index("synchronizeRecoveredInputMode(")
-  ready = ensure_session.index("readyActivationToken = activationToken")
-  abort "session recovery no longer restores Caps and mode before readiness" unless
-    recovered && recreate && caps && mode && ready &&
-      recovered < recreate && recreate < caps && caps < mode && mode < ready
+  abort "session recovery no longer restores presentation before readiness" unless
+    recovered && recreate && mode && recovered < recreate && recreate < mode
   abort "session recovery can swallow the triggering modifier event" if
     ensure_session.include?("resetModifierEpoch()") ||
       ensure_session.include?("CGEventSource.flagsState")
@@ -1654,7 +1722,7 @@ ruby -e '
     abort "recognizedEvents lost #{event}" unless recognized.include?(event)
   end
   mouse_ingress = handle.index("if [.leftMouseDown, .rightMouseDown, .otherMouseDown]")
-  session_recovery = handle.index("guard ensureReadySession(for: inputToken)")
+  session_recovery = handle.index("guard ensureReadySession(for: senderClient)")
   abort "raw mouse exit can touch or recreate Rime before click classification" unless
     mouse_ingress && session_recovery && mouse_ingress < session_recovery &&
       handle.include?("handleCompositionMouseDown(") &&
@@ -1670,10 +1738,10 @@ ruby -e '
     sdk_mouse.include?("keepTracking?.pointee = false") &&
       sdk_mouse.include?("commitCompositionIfClickIsOutside(") &&
       sdk_mouse.match?(/return false\s*\n  \}\z/)
-  abort "mouse exit bypasses the typed click policy or activation identity" unless
-    exit_owner.include?("inputActivationIsCurrent(activationToken, client: targetClient)") &&
-      exit_owner.include?("LinnetInputActivationPolicy.shouldCommitCompositionForClick(") &&
-      exit_owner.include?("commitActiveComposition(")
+  abort "mouse exit bypasses the typed click policy or regained proxy identity" unless
+    exit_owner.include?("LinnetInputActivationPolicy.shouldCommitCompositionForClick(") &&
+      exit_owner.include?("commitActiveComposition(") &&
+      !exit_owner.include?("===")
 ' sources/SquirrelInputController.swift ||
   fail "raw InputMethodKit mouse composition exit regressed"
 rg -Fq 'weak var inputController: SquirrelInputController?' sources/SquirrelPanel.swift ||
@@ -1705,111 +1773,56 @@ test "$(rg -F -c 'kTISNotifySelectedKeyboardInputSourceChanged as String' \
 ruby -e '
   source = File.read(ARGV.fetch(0))
   controller = File.read(ARGV.fetch(1))
-  registry = File.read(ARGV.fetch(2))
-  delegate = File.read(ARGV.fetch(3))
-  begin_projection = source[/func beginInputActivation\(.*?\n  \}/m]
-  native_finish = source[/func finishInputActivation\(\n    controller:.*?\n  \}/m]
-  source_finish = source[/func finishInputSourceActivations\(\).*?\n  \}/m]
-  termination_finish = source[/func terminateInputActivations\(\).*?\n  \}/m]
+  delegate = File.read(ARGV.fetch(2))
   activation = source[/func inputSourceDidActivate\(.*?\n  \}/m]
   selection = source[/@objc func inputSourceChanged\(_:\s*Notification\) \{.*?\n  \}/m]
+  fallback = source[/private func finalizeStrandedComposition\(\).*?\n  \}/m]
+  activate = controller[/override func activateServer\(.*?\n  \}/m]
+  deactivate = controller[/override func deactivateServer\(.*?\n  \}/m]
+  teardown = controller[/deinit \{.*?\n  \}/m]
   abort "input-source presentation lifecycle owners are missing" unless
-    begin_projection && native_finish && source_finish && termination_finish &&
-      activation && selection
+    activation && selection && fallback && activate && deactivate && teardown
   abort "activation can publish stale visibility from a deferred callback" if
     activation.include?("DispatchQueue.main.async")
   status = activation.index("updateStatusIcon(")
   visibility = activation.index("setStatusItemVisibility(inputSourceIsActive: true)")
   abort "activation no longer synchronously publishes the active source" unless
     status && visibility && status < visibility
-  abort "selection notification can reorder lifecycle transitions on the main queue" if
-    selection.include?("DispatchQueue.main.async")
-  abort "selection notification must sample the current input source exactly once" unless
-    selection.scan("SquirrelInstaller.currentInputSourceID()").length == 1 &&
-      selection.include?("guard let currentInputSourceID =") &&
-      selection.include?("else { return }")
-  sampled = selection.index("guard let currentInputSourceID =")
-  published = selection.index("setStatusItemVisibility(inputSourceIsActive: inputSourceIsActive)")
-  admitted = selection.index("inputActivationRegistry.sourceDidTurnOn()")
-  deactivated = selection.index("finishInputSourceActivations()")
-  abort "one sampled selection no longer owns synchronous source admission/retirement" unless
-    sampled && published && admitted && deactivated &&
-      sampled < published && published < admitted && admitted < deactivated
-  abort "retired second-read composition finalizer returned" if
-    source.include?("finalizeStrandedComposition")
-  abort "the process-wide activation registry is not owned exactly once" unless
-    delegate.scan("let inputActivationRegistry = LinnetInputActivationRegistry()").length == 1 &&
-      !controller.include?("activationEpoch")
-  admission = registry[/private enum Admission \{.*?\n  \}/m]
-  begin_owner = registry[/func begin\(.*?\n  \}/m]
-  native_owner = registry[/func closeNative\(.*?\n  \}/m]
-  source_off = registry[/func sourceDidTurnOff\(.*?\n  \}/m]
-  source_on = registry[/func sourceDidTurnOn\(\).*?\n  \}/m]
-  terminate = registry[/func terminate\(.*?\n  \}/m]
-  retire = registry[/private func retireCurrentAndNativeActivations\(.*?\n  \}/m]
-  abort "activation registry owners are missing" unless
-    admission && begin_owner && native_owner && source_off && source_on &&
-      terminate && retire
-  abort "inactive-source or termination state can still admit a new activation" unless
-    %w[accepting sourceInactive terminating].all? { |state| admission.include?("case #{state}") } &&
-      begin_owner.scan("admission == .accepting").length == 2 &&
-      !begin_owner.include?("retiresActivation") &&
-      source_off.index("admission = .sourceInactive") <
-        source_off.index("retireCurrentAndNativeActivations") &&
-      source_on.include?("admission != .terminating") &&
-      source_on.include?("admission = .accepting") &&
-      !source_on.include?("retiresActivation") &&
-      terminate.index("admission = .terminating") <
-        terminate.index("retireCurrentAndNativeActivations")
-  abort "native deactivation lost FIFO generation correlation" unless
-    registry.include?("private var nativeActivations: [Activation] = []") &&
-      begin_owner.include?("nativeActivations.append(opened)") &&
-      native_owner.include?("nativeActivations.firstIndex(where:") &&
-      native_owner.include?("$0.controller === controller && $0.client === client") &&
-      native_owner.index("nativeActivations.remove(at: index)") <
-        native_owner.index("activation?.token == nativeActivation.token")
-  abort "global retirement lost its nested-retirement barrier" unless
-    retire.include?("guard !retiresActivation else { return false }") &&
-      retire.include?("retiresActivation = true") &&
-      retire.include?("defer { retiresActivation = false }") &&
-      retire.index("takeCurrent()") < retire.index("retire(closed)")
-  abort "retired activation owners returned" if
-    registry.include?("func closeCurrent") || registry.include?("nativeCloseOrder") ||
-      registry.include?("consumeNextNativeClose")
-  abort "presentation bypasses the source-admission owner" unless
-    begin_projection.include?("inputActivationRegistry.sourceDidTurnOn()") &&
-      begin_projection.include?("inputActivationRegistry.begin(") &&
-      native_finish.include?("inputActivationRegistry.closeNative(") &&
-      source_finish.include?("inputActivationRegistry.sourceDidTurnOff") &&
-      termination_finish.include?("inputActivationRegistry.terminate")
-  will_terminate = delegate[/func applicationWillTerminate\(.*?\n  \}/m]
-  power_off = delegate[/func workspaceWillPowerOff\(.*?\n  \}/m]
-  abort "application termination can finalize before closing admission" unless
-    will_terminate && power_off &&
-      will_terminate.index("terminateInputActivations()") <
-        will_terminate.index("shutdownRime()") &&
-      power_off.index("terminateInputActivations()") < power_off.index("shutdownRime()")
-  activate = controller[/override func activateServer\(.*?\n  \}/m]
-  deactivate = controller[/override func deactivateServer\(.*?\n  \}/m]
-  abort "controller activation projections are missing" unless activate && deactivate
-  abort "controller activation bypasses the application owner" unless
-    activate.include?("beginInputActivation(") &&
-      activate.include?("controller: self") &&
-      deactivate.include?("finishInputActivation(") &&
-      deactivate.include?("controller: self")
-  abort "native deactivation still infers input-source state locally" if
+  abort "selection fallback can run reentrantly inside the native IMK transition" unless
+    selection.include?("DispatchQueue.main.async") &&
+      selection.include?("updateStatusItemVisibility()") &&
+      selection.include?("finalizeStrandedComposition()")
+  abort "stranded-composition fallback no longer exits the panel-bound native client" unless
+      fallback.scan("SquirrelInstaller.currentInputSourceID()").length == 1 &&
+      fallback.include?("let inputController = panel?.inputController") &&
+      fallback.include?("let activeClient = inputController.activeClient") &&
+      fallback.include?("inputController.deactivateServer(activeClient)")
+  combined = source + controller + delegate
+  abort "the retired process-global activation owner returned" if
+    combined.include?("LinnetInputActivationRegistry") ||
+      combined.include?("inputActivationRegistry") ||
+      combined.include?("beginInputActivation(") ||
+      combined.include?("finishInputActivation(") ||
+      combined.include?("terminateInputActivations(")
+  abort "native activation can still be rejected by another controller" unless
+    activate.include?("guard let activatingClient = sender as? IMKTextInput else { return }") &&
+      activate.include?("activeClient = activatingClient") &&
+      activate.include?("panel.unbind(controller: self)") &&
+      activate.include?("panel.bind(controller: self)")
+  retire = deactivate.index("activeClient = nil")
+  commit_raw = deactivate.index("commitRawComposition(to: deactivatingClient)")
+  abort "native deactivation can clear a replacement client" unless
+    retire && commit_raw && retire < commit_raw && !deactivate.include?("===")
+  abort "native deactivation regained input-source inference" if
     deactivate.include?("SquirrelInstaller.currentInputSourceID()")
-  teardown = controller[/deinit \{.*?\n  \}/m]
-  abort "controller teardown can destroy an open application activation" unless
-    teardown &&
-      teardown.scan("finishInputActivation(token:").length == 1 &&
-      teardown.scan("destroySession()").length == 1 &&
-      teardown.index("finishInputActivation(token:") <
-        teardown.index("destroySession()")
+  abort "controller teardown no longer destroys exactly its Rime session" unless
+    teardown.scan("destroySession()").length == 1 &&
+      !teardown.include?("Activation")
 ' sources/SquirrelApplicationPresentation.swift \
-  sources/SquirrelInputController.swift sources/LinnetInputActivationRegistry.swift \
-  sources/SquirrelApplicationDelegate.swift ||
-  fail "input-source presentation lifecycle can reorder away/back transitions"
+  sources/SquirrelInputController.swift sources/SquirrelApplicationDelegate.swift ||
+  fail "InputMethodKit per-controller ownership or away/back transitions regressed"
+test ! -e sources/LinnetInputActivationRegistry.swift ||
+  fail "the retired process-global activation owner file returned"
 ruby -e '
   controller = File.read(ARGV.fetch(0))
   update = controller[/func rimeUpdate\(\) \{.*?\n  \}\n\n  private func commit\(string:/m]
@@ -1818,20 +1831,21 @@ ruby -e '
   panel = controller[/private func showPanel\(.*?\n  \}\n\}/m]
   abort "client-publication lifecycle owners are missing" unless
     update && commit && show && panel
-  token = update.index("guard let updateToken = activeInputToken")
-  consume = update.index("rimeConsumeCommittedText(to: client)")
-  post_consume = update.index(
-    "guard inputActivationIsCurrent(updateToken) else { return }", consume || 0)
-  abort "an old Rime update can continue after a commit reactivates the controller" unless
-    token && consume && post_consume && token < consume && consume < post_consume
-  abort "marked-text callbacks are not guarded by the originating activation" unless
-    update.include?("activationToken: updateToken") &&
-      show.include?("activationToken: LinnetInputActivationRegistry.Token") &&
-      show.include?("inputActivationIsCurrent(activationToken, client: client)")
-  abort "client geometry can publish a panel for a replacement activation" unless
-    panel.include?("activationToken: LinnetInputActivationRegistry.Token") &&
-      panel.include?("inputActivationIsCurrent(activationToken, client: client)") &&
-      panel.include?("panel.bind(controller: self, activationToken: activationToken)")
+  native_client = update.index("guard let updateClient = activeClient")
+  consume = update.index("rimeConsumeCommittedText(to: updateClient)")
+  abort "a Rime update no longer captures its event client before callbacks" unless
+    native_client && consume && native_client < consume &&
+      !update.include?("client === updateClient")
+  abort "marked-text callbacks no longer publish to the captured event client" unless
+    update.include?("client: updateClient") &&
+      show.include?("client expectedClient: IMKTextInput") &&
+      show.include?("expectedClient.setMarkedText(") &&
+      !show.include?("===")
+  abort "client geometry bypasses the controller-scoped panel boundary" unless
+    panel.include?("client expectedClient: IMKTextInput") &&
+      panel.include?("guard panel.inputController === self else { return }") &&
+      !panel.include?("client === expectedClient") &&
+      panel.include?("controller: self")
   reset = commit.index(%q{preedit = ""})
   marked = commit.index("targetClient.setMarkedText(")
   inserted = commit.index("targetClient.insertText(")
@@ -1890,24 +1904,35 @@ ruby -e '
       menu.include?("private func setStatusItemVisibility(inputSourceIsActive: Bool)") &&
       menu.include?("statusItem?.isVisible = showStatusIcon && inputSourceIsActive") &&
       menu.include?("func inputSourceDidActivate(") &&
-      menu.include?("activationToken: LinnetInputActivationRegistry.Token") &&
+      menu.include?("func inputSourceDidActivate(session: RimeSessionId)") &&
       controller.include?("inputSourceDidActivate(") &&
-      controller.include?("activationToken: activationToken")
+      controller.include?("inputSourceDidActivate(session: session)")
 ' Linnet.xcodeproj/project.pbxproj sources/LinnetSettings/SettingsApplication.swift \
   sources/LinnetSettings/SettingsRootView.swift \
   sources/SquirrelApplicationDelegate.swift \
   sources/SquirrelApplicationPresentation.swift \
   sources/SquirrelInputController.swift ||
   fail "Settings surface lifecycle or input-menu ownership regressed"
-[[ "$(/usr/bin/plutil -extract TISInputSourceID raw -o - resources/Info.plist)" == \
-  '$(PRODUCT_BUNDLE_IDENTIFIER)' ]] ||
-  fail "the source input-method identity is not the product bundle identifier"
+if /usr/bin/plutil -extract TISInputSourceID raw -o - \
+    resources/Info.plist >/dev/null 2>&1; then
+  fail "the no-modes input method regained a competing explicit source identity"
+fi
+[[ "$(/usr/bin/plutil -extract TISIntendedLanguage raw -o - resources/Info.plist)" == \
+  zh-Hans ]] || fail "the input source language is not Simplified Chinese"
+[[ "$(/usr/bin/plutil -extract tsInputMethodCharacterRepertoireKey json -o - \
+  resources/Info.plist)" == '["zh-Hans"]' ]] ||
+  fail "the no-modes input source repertoire is not the exact zh-Hans contract"
+[[ "$(/usr/bin/plutil -extract tsInputMethodIconFileKey raw -o - \
+  resources/Info.plist)" == linnet.pdf ]] || fail "the input source icon is invalid"
 for retired_input_mode_key in ComponentInputModeDict PrimaryInputModeIdentifier; do
   if /usr/bin/plutil -extract "${retired_input_mode_key}" raw -o - \
     resources/Info.plist >/dev/null 2>&1; then
-    fail "retired source input-mode metadata returned: ${retired_input_mode_key}"
+    fail "a competing input-mode identity returned: ${retired_input_mode_key}"
   fi
 done
+[[ "$(/usr/bin/plutil -extract InputMethodConnectionName raw -o - \
+  resources/Info.plist)" == '$(PRODUCT_NAME)_Connection' ]] ||
+  fail "the stable upstream-style IMK connection contract is invalid"
 ruby -e '
   page = File.read("sources/LinnetSettings/LinnetSettingsPage.swift")
   views = File.read("sources/LinnetSettings/SettingsViews.swift")
@@ -2058,89 +2083,30 @@ ruby -rjson -e '
 ruby -e '
   source = File.read("sources/InputSource.swift")
   register = source[/func register\(\) throws \{.*?\n  \}/m]
-  registration_owner = source[/private func register\(intent: RegistrationIntent\) throws \{.*?\n  \}/m]
-  registration_required = source[/static func registrationRequired\(.*?\n  \}/m]
-  enable = source[/func enable\(\) throws \{.*?\n  \}/m]
-  select = source[/func select\(\) throws \{.*?\n  \}/m]
-  refresh = source[/func refreshAfterCoreUpdate\(.*?\n  \}/m]
-  core_plan = source[/static func coreUpdatePlan\(.*?\n  \}/m]
-  desired = source[/static func desiredInputSourceAfterCoreUpdate\(.*?\n  \}/m]
-  restoration = source[/static func inputSourceToRestoreAfterRegistration\(.*?\n  \}/m]
-  select_source = source[/private func selectSource\(.*?\n  \}/m]
-  enable_source = source[/private func enableSource\(.*?\n  \}/m]
-  abort "input-source lifecycle owners are missing" unless
-    register && registration_owner && registration_required && enable && select && refresh &&
-      core_plan &&
-      desired && restoration && select_source && enable_source
-  abort "manual and Complete registration stopped using the ensure-present owner" unless
-    register.include?("register(intent: .ensurePresent)")
-  abort "Core registration stopped consuming its typed transition intent" unless
-    registration_owner.include?("let existingSources = inputSources(identifier:") &&
-      registration_owner.match?(/guard try Self\.registrationRequired\(\s*inputSourceCount: existingSources\.count,\s*intent: intent,\s*identifier: identifier\)\s*else \{.*?\breturn\b.*?\}/m) &&
-      registration_owner.index("Self.registrationRequired(") <
-        registration_owner.index("TISRegisterInputSource") &&
-      registration_required.include?("(.ensurePresent, 0): return true") &&
-      registration_required.include?("(.preservePresent, 1)") &&
-      registration_required.include?("(.preserveAbsent, 0)") &&
-      registration_required.include?("registrationStateMismatch") &&
-      registration_required.include?("inputSourceCountMismatch")
-  abort "the missing-source repair must only register the input source" unless
-    registration_owner.include?("TISRegisterInputSource") &&
-      !registration_owner.include?("TISEnableInputSource") &&
-      !registration_owner.include?("TISSelectInputSource")
-  abort "register must fail closed unless the refreshed identity resolves exactly once" unless
-    registration_owner.include?("try inputSource(identifier: identifier)")
-  abort "enable must delegate only to the enable owner" unless
-    enable.include?("enableSource(identifier:") && !enable.include?("select()") &&
-      !enable.include?("TISSelectInputSource")
-  abort "enableSource must not select the input source" unless
-    enable_source.include?("TISEnableInputSource") &&
-      enable_source.include?("enabled && intent == .preserve") &&
-      !enable_source.include?("TISSelectInputSource")
-  abort "Core identity migration plan is incomplete or gained a second owner" unless
-    core_plan.include?("(.missingAppInstall, .unregistered)") &&
-      core_plan.include?("registrationIntent: .ensurePresent") &&
-      core_plan.include?("(.legacyCommunityAdhocToCMS, .enabled)") &&
-      core_plan.include?("registrationIntent: .preservePresent, enableIntent: .reassert") &&
-      core_plan.include?("(.sameCommunityCMSLeaf, .unregistered)") &&
-      core_plan.include?("registrationIntent: .preserveAbsent, enableIntent: .preserve") &&
-      refresh.include?("coreUpdatePlan(") &&
-      refresh.include?("try register(intent: plan.registrationIntent)") &&
-      refresh.include?("if plan.enableIntent == .reassert")
-  abort "manual selection stopped delegating to the sole mutation owner" unless
-    select.include?("selectSource(identifier:")
-  abort "Core selection continuity is not one post-payload transition owner" unless
-    desired.include?("currentBeforeQuiescence != targetInputSourceID") &&
-      desired.include?("currentAfterQuiescence != currentBeforeQuiescence") &&
-      desired.include?("currentBeforeQuiescence == targetInputSourceID") &&
-      desired.include?("wasCurrent &&") &&
-      desired.include?("currentBeforeQuiescence == postQuiescenceInputSourceID") &&
-      restoration.include?("postRegistrationInputSourceID == desiredInputSourceID") &&
-      restoration.include?("postRegistrationInputSourceID != preRegistrationInputSourceID") &&
-      refresh.include?("desiredInputSourceAfterCoreUpdate(") &&
-      refresh.include?("inputSourceToRestoreAfterRegistration(") &&
-      refresh.include?("quiesceHost()") &&
-      refresh.include?("currentAfterQuiescence") &&
-      refresh.include?("currentAfterRegister") &&
-      refresh.include?("try register(intent: plan.registrationIntent)") &&
-      refresh.include?("try selectSource(") &&
-      refresh.include?("expectedCurrentInputSourceID: currentAfterRegister")
-  abort "the retired split Core selection owner returned" if
-    source.include?("restoreSelectionIfPreviouslyCurrent") ||
-      source.include?("shouldRestoreTargetAfterCoreUpdate")
-  abort "selection mutation and verification stopped sharing one owner" unless
-    select_source.include?("TISSelectInputSource") &&
-      select_source.include?("selectionVerificationFailed")
-  abort "TIS register/enable/select call-site counts changed" unless
-    source.scan("TISRegisterInputSource").length == 1 &&
-      source.scan("TISEnableInputSource").length == 1 &&
-      source.scan("TISSelectInputSource").length == 1
-' || fail "input-source register/enable/no-select ownership regressed"
+  abort "the sole first-install registration owner is missing" unless
+    register && register.scan("TISRegisterInputSource").length == 1 &&
+      register.include?("inputSources(identifier:") &&
+      register.include?("already registered")
+  forbidden = %w[
+    TISDisableInputSource
+    refreshAfterCoreUpdate desiredInputSourceAfterCoreUpdate
+    inputSourceToRestoreAfterRegistration
+  ]
+  returned = forbidden.select { |name| source.include?(name) }
+  abort "user-owned input-source mutations returned: #{returned.join(", ")}" unless
+    returned.empty?
+  abort "TIS registration gained a second owner" unless
+    source.scan("TISRegisterInputSource").length == 1
+  forbidden_mutations = %w[TISEnableInputSource TISSelectInputSource]
+  returned_mutations = forbidden_mutations.select { |name| source.include?(name) }
+  abort "programmatic input-source activation returned: #{returned_mutations.join(", ")}" unless
+    returned_mutations.empty?
+' || fail "install-boundary input-source availability regressed"
 if rg -n 'community-adhoc|sign_adhoc_code|verify_community_code|inspect-community-contract|sign-community-product|verify-publication-product|unsigned-community' \
     scripts/linnet-code-identity scripts/generate-release-metadata \
     Makefile action-build.sh package/make_archive package/make_package \
     package/verify_package package/verify_publication_artifacts \
-    .github/workflows/release-ci.yml; then
+    scripts/release-control package/publish_github_release; then
   fail "the retired public ad-hoc signing path returned"
 fi
 ruby -rjson -e '
@@ -2164,7 +2130,7 @@ ruby -e '
   abort "live status owner is missing" unless
     update && option_notification && schema_notification && activation
   abort "live status must query the current session option and abbreviated label" unless
-    update.include?("inputActivationRegistry.currentToken") &&
+    update.include?("let controller = panel?.inputController") &&
       update.scan("currentSessionLease(").length == 1 &&
       update.scan("ownsCurrentSession(").length == 1 &&
     update.include?(%q{get_option(sessionLease.identifier, "ascii_mode")}) &&
@@ -2176,8 +2142,7 @@ ruby -e '
     schema_notification.include?("delegate.updateStatusIcon(session: sessionId)")
   abort "client activation must seed the live status" unless
     activation.include?("inputSourceDidActivate(") &&
-      activation.include?("activationToken: activationToken") &&
-      activation.include?("session: session")
+      activation.include?("inputSourceDidActivate(session: session)")
 ' || fail "live input-mode status projection regressed"
 ruby -e '
   host = File.read("sources/SquirrelApplicationDelegate.swift")
@@ -2374,12 +2339,31 @@ fi
 if rg -n 'struct Source|sourceProvider|registerInputSource:' sources/InputSource.swift; then
   fail "a test-only adapter remains between the input lifecycle owner and HIToolbox"
 fi
-for lifecycle_argument in --register-input-source --enable-input-source \
-    --select-input-source --disable-input-source \
-    --refresh-core-input-source; do
-  rg -Fq -- "${lifecycle_argument}" sources/Main.swift ||
-    fail "standard input-source command is missing: ${lifecycle_argument}"
-done
+rg -Fq -- '--register-input-source' sources/Main.swift ||
+  fail "install-boundary input-source registration command is missing"
+if rg -n -- '--activate-input-source|--select-input-source|--disable-input-source|--refresh-core-input-source' \
+    sources/Main.swift package/installer-scripts; then
+  fail "Installer regained an activation, selection, disablement, or refresh command"
+fi
+test "$(rg -F -c -- '"${executable}" --register-input-source' \
+  package/installer-scripts/postinstall)" = 1 ||
+  fail "postinstall no longer ensures the installed input source exactly once"
+rg -Fq 'if [[ "${install_mode}" == complete ]]' \
+  package/installer-scripts/postinstall ||
+  fail "input-source registration escaped the Complete-only boundary"
+if rg -n -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
+  fail "Core update regained a live InputMethodKit Host termination path"
+fi
+test "$(rg -F -c -- '"$${launch_services_register}" -u "$${local_app}"' \
+  Makefile)" = 1 ||
+  fail "local builds no longer retire their LaunchServices registration"
+rg -Fq '"$${launch_services_register}" -dump' Makefile ||
+  fail "local builds trust unregister exit codes instead of final registry state"
+if rg -Fq '|| cleanup_status=$$?' Makefile; then
+  fail "an unregistered local App can still make a successful build fail"
+fi
+rg -Fq 'unregister_fixture_apps' tests/verify_visible_settings_fixture.sh ||
+  fail "Settings UI tests can leave fixture Apps registered with LaunchServices"
 # The live Rime session is the sole mode owner. Do not restore the locally
 # invented cross-process CLI/notification bridge that duplicated it and failed
 # even while an InputMethodKit session was active.

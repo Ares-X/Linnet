@@ -46,7 +46,6 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     (fileName: "squirrel.yaml", versionKey: "config_version")
   ]
   let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
-  let inputActivationRegistry = LinnetInputActivationRegistry()
   var config: SquirrelConfig?
   var panel: SquirrelPanel?
   var enableNotifications = false
@@ -57,6 +56,7 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
   private var activeDataTransaction: ActiveDataTransaction?
   private var transactionMonitor: DispatchSourceTimer?
   private var staleSessionCleaner: Timer?
+  private let warmRimeSession = LinnetRimeWarmSession()
   private var workspacePowerOffObserver: NSObjectProtocol?
   private var settingsTransactionHost: LinnetSettingsTransactionIPC.Host?
   private var currentTransactionReply:
@@ -193,8 +193,7 @@ extension SquirrelApplicationDelegate {
         return failStart("Linnet runtime configuration deployment failed.")
       }
     }
-    let readinessSession = rimeAPI.create_session()
-    guard readinessSession != 0, rimeAPI.destroy_session(readinessSession) else {
+    guard warmRimeSession.prepare(using: rimeAPI) != nil else {
       return failStart("Linnet runtime session readiness check failed.")
     }
     reopenRimeInput()
@@ -207,8 +206,7 @@ extension SquirrelApplicationDelegate {
   /// Events that passed through while Rime was suspended must not become the
   /// next Shift/Caps transition baseline.
   private func reopenRimeInput() {
-    if let inputController = inputActivationRegistry.currentController(
-      as: SquirrelInputController.self) {
+    if let inputController = panel?.inputController {
       inputController.resetModifierEpoch()
     }
     isRimeInputSuspended = false
@@ -219,9 +217,8 @@ extension SquirrelApplicationDelegate {
       withTimeInterval: Self.staleSessionCleanupInterval, repeats: true
     ) { [weak self] _ in
       guard let self, canAcceptRimeInput else { return }
-      inputActivationRegistry.currentController(
-        as: SquirrelInputController.self
-      )?.refreshSessionLeaseForStaleCleanup()
+      panel?.inputController?.refreshSessionLeaseForStaleCleanup()
+      warmRimeSession.refresh(using: rimeAPI)
       rimeAPI.cleanup_stale_sessions()
     }
   }
@@ -375,7 +372,6 @@ extension SquirrelApplicationDelegate {
     removeObservers()
     transactionMonitor?.cancel()
     transactionMonitor = nil
-    terminateInputActivations()
     panel?.hide()
     shutdownRime()
     if let statusItem {
@@ -385,33 +381,39 @@ extension SquirrelApplicationDelegate {
   }
   private func performRimeUserDataSync() -> LinnetRimeSyncOutcome {
     guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
-    let activeController = inputActivationRegistry.currentController(
-      as: SquirrelInputController.self)
+    let activeController = panel?.inputController
     if panel?.isVisible == true || activeController?.hasPendingRimeInput == true {
       return .busy
     }
     isRimeInputSuspended = true
     activeController?.prepareForRimeMaintenance()
     panel?.hide()
-    guard rimeAPI.sync_user_data() else {
-      reopenRimeInput()
-      return .failed
+    // librime sync owns CleanupAllSessions. The warm session is the single
+    // process-level preload owner; it never owns an application's composition,
+    // caret, or candidate publication state. Retire its identifier before the
+    // cleanup boundary so no stale session survives. Once sync finishes,
+    // recreate only that resource owner before reopening input; every client
+    // session continues to be created by its own InputMethodKit controller.
+    warmRimeSession.retire()
+    let synchronized = rimeAPI.sync_user_data()
+    if synchronized {
+      rimeAPI.join_maintenance_thread()
     }
-    rimeAPI.join_maintenance_thread()
+    let resourcesReady = warmRimeSession.prepare(using: rimeAPI) != nil
     reopenRimeInput()
-    return .completed
+    return synchronized && resourcesReady ? .completed : .failed
   }
   // Finish the one current composition, close the input gate, then invalidate
   // every controller's Rime generation. Controllers recover on their next key.
   private func invalidateRimeSessions() {
-    if let inputController = inputActivationRegistry.currentController(
-      as: SquirrelInputController.self) {
+    if let inputController = panel?.inputController {
       if canAcceptRimeInput {
         inputController.commitCurrentComposition()
       }
     }
     isRimeInputSuspended = true
     panel?.hide()
+    warmRimeSession.retire()
     rimeAPI.cleanup_all_sessions()
   }
   // Tear down the runtime in the order librime-lua requires: destroy every
@@ -430,7 +432,6 @@ extension SquirrelApplicationDelegate {
   }
   fileprivate func workspaceWillPowerOff(_: Notification) {
     print("Finalizing before logging out.")
-    terminateInputActivations()
     self.shutdownRime()
   }
   fileprivate func dataRequested(
@@ -694,22 +695,21 @@ extension SquirrelApplicationDelegate {
       // The compiled schema is deployment output and must never select intent.
       // Readiness below only compares that intent with the fresh session,
       // so a stale or mismatched deployment fails before acknowledgement.
-      let readinessSession = rimeAPI.create_session()
+      guard let readinessSession = warmRimeSession.prepare(using: rimeAPI) else {
+        return false
+      }
       var activeSchemaBuffer = [CChar](repeating: 0, count: Int(PATH_MAX))
-      let readActiveSchema = readinessSession != 0
-        && activeSchemaBuffer.withUnsafeMutableBufferPointer { buffer in
-          rimeAPI.get_current_schema(readinessSession, buffer.baseAddress, buffer.count)
-        }
+      let readActiveSchema = activeSchemaBuffer.withUnsafeMutableBufferPointer { buffer in
+        rimeAPI.get_current_schema(readinessSession, buffer.baseAddress, buffer.count)
+      }
       let activeSchemaID = readActiveSchema ? String(cString: activeSchemaBuffer) : ""
       guard readActiveSchema, activeSchemaID == selectedProfile.schemaID else {
-        if readinessSession != 0 { _ = rimeAPI.destroy_session(readinessSession) }
+        warmRimeSession.discard(using: rimeAPI)
         return false
       }
       let asciiMode = rimeAPI.get_option(readinessSession, "ascii_mode")
       let schemaLabel = rimeAPI.get_state_label_abbreviated(
         readinessSession, "ascii_mode", asciiMode, true).asString
-      guard rimeAPI.destroy_session(readinessSession) else { return false }
-
       loadSettings(for: activeSchemaID)
       panel?.refreshAppearance()
       reopenRimeInput()

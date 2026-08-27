@@ -124,11 +124,10 @@ scripts/upstream-sync verify
 patch 是否仍精确适用，以及 Linnet 自己的词典和交互优化是否被保留；然后运行
 focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有这些结果都
 通过后，才在同一个提交中更新 gitlink、`upstreams.lock.json`、必要 patch 和数据
-release identity。进入发布时，只有精确 main revision、该 revision 的成功 CI 和最终
-八件产物 `package/verify_publication_artifacts` 验证才能让一次 SSH candidate intent
-生成不可变 artifact；普通 main 提交不会额外构建或签名候选。真实安装验收必须使用
-该 workflow 同一次签名产生的 artifact；
-通过后，唯一的 revision + artifact ID SSH 控制标签依次授权 `core`、`data`、
+release identity。进入发布时，只有精确 main revision 和最终八件产物
+`package/verify_publication_artifacts` 验证才能冻结本地候选；普通 main 提交不会额外
+构建或签名候选。真实安装验收必须使用该本地归档同一次签名产生的原字节；
+通过后，唯一的 revision + 八文件集合摘要 SSH 控制标签依次授权 `core`、`data`、
 `catalog` 与 `public` / Latest。控制标签推送前不得创建 Release 或推进稳定 Catalog。
 定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并上游或发布。
 
@@ -161,20 +160,14 @@ git tag -d "data-seed-${sequence}"
 发布成功后立即删除；正式 `data-N` tag 继续绑定该提交。普通构建没有回退到可变
 上游资产的路径。
 
-进入正常产品发布时，候选必须是当前精确 main revision，该 revision 的 main CI 已
-成功。`scripts/release-control request` 以非 force SSH tag 显式启动 `release-ci`；
-workflow 只构建并 CMS 签名一次，最终独立 verifier 接受精确八文件、上传 artifact，
-并对 Actions archive digest 和解包字节做硬比较。维护者以
-`scripts/release-control fetch /absolute/new/root` 精确发现并下载唯一 artifact，真实安装态
-Settings 激活和 InputMethodKit 验收只使用其中 `release/` 的字节；通过后执行
-`scripts/release-control approve /absolute/root`，以第二个非 force SSH tag 创建绑定
-版本、完整 revision 和 artifact ID 的唯一控制标签。候选上传后，其 tag、artifact
-ID/digest、producer run 和八件原字节成为冻结 owner；UAT 期间 `main` 前进不会使其
-失效，也不会成为 approve 的第二个授权条件。发布 job 再按该 artifact ID
-下载一次并核对 archive digest，依次执行 `core`、
+进入正常产品发布时，候选必须是 clean、精确远端 `main` revision。本机固定 CMS
+身份只构建和签名一次，独立 verifier 接受精确八文件；真实 Settings 与
+InputMethodKit 安装验收只使用该目录的原字节。通过后执行
+`scripts/release-control publish /absolute/release-directory`。命令以非 force SSH tag
+绑定版本、完整 revision 和八文件集合摘要，再由同一个 publisher 依次执行 `core`、
 `data`（此时只接受既有 seed 的相同字节）、`catalog` 和 `public` / Latest。正式
-`v<version>` 标签只标识版本，`linnet-publication/*` 控制标签只授权已验收的同一
-artifact；二者都不触发重建。稳定 Catalog 仍只有一个 owner 和一个 URL。
+`v<version>` 标签只标识版本，`linnet-publication/*` 控制标签只授权已验收的同一批
+字节；GitHub 不重新编译或重签。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖、经 fingerprint 和 inventory digest
 验证的原生 Rime 编译 transport，以及英文生成数据。只有默认 `main`
@@ -274,25 +267,28 @@ PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修
 
 不得用 `xattr` 清除隔离属性、关闭 Gatekeeper 或修改系统安全策略。公开用户流程使用同一套 Finder / 隐私与安全性确认，不提供绕过系统保护的命令。
 
-随后在自己的测试账户完成 clean Complete 首装：它注册并请求 enable，随后完成
+随后在自己的测试账户完成 clean Complete 首装：它只注册，随后由用户完成
 唯一一次真正的注销/登录、系统输入源添加与允许、从 macOS 输入菜单选择 Linnet
 和真实输入。
 
 旧 ad-hoc → 固定 CMS 是一次性的历史 Core lifecycle 验收，唯一记录在
 `config/linnet-community-signing.json`。其固定 leaf、bundle ID、macOS major 和
-“迁移契约指纹”是完整失效键：任一项与当前候选失配，才在隔离的 legacy-seeded
-账号或虚拟机中重做；四项全部匹配时不得为每个候选重复迁移。该历史记录只闭合
-legacy lifecycle edge，不是当前候选菜单、Settings、真实输入或完整安装 UAT。
+identity classifier 的“迁移契约指纹”是完整失效键：任一项与当前候选失配，才在
+隔离的 legacy-seeded 账号或虚拟机中重做；四项全部匹配时不得为每个候选重复迁移。
+Host 连续性和 TIS 不变性不从这份历史指纹推断，统一由当前 package lifecycle matrix
+验证。该历史记录只闭合 legacy identity edge，不是当前候选菜单、Settings、真实输入
+或完整安装 UAT。
 
 每个精确候选仍须在同一真实账号使用 workflow 的不可变 artifact 完成
 “两轮同 leaf Core”：先从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级
 到候选，再把同一候选的原字节重装一次。两轮都要
 证明 Installer 无注销、无 Keychain 密码提示、登录会话不变，并保留
-enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移仅当
-来源原本 enabled 时重申过一次 enable；同 leaf Core 重装与升级不调用 enable，只有
-来源确实缺失时才 register。preinstall 必须在 payload 前以正常 AppKit 退出请求确认
-Host/Settings 均已停止，Settings 拒绝退出、未保存草稿或进行中操作必须让安装 fail
-closed，不能强杀。还要分别证明 enabled/disabled、selected、
+enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移不
+授权同 leaf Core 重新 register、enable 或 select。preinstall 必须在 payload 前以
+正常 AppKit 退出请求只确认 Settings 已停止；Settings 拒绝退出、未保存草稿或进行中
+操作必须让安装 fail closed，不能强杀。运行中的 Host 必须保持同一 PID，更新前已
+连接的应用与更新后新打开的应用都要继续输入；新 Core 版本只在 Host 自然重启后
+成为运行版本。还要分别证明 enabled/disabled、selected、
 missing-App+unregistered repair 与用户数据均保留；missing App 仍有
 enabled/disabled 系统身份必须在 payload 前失败。默认卸载和显式 purge 仍需要独立
 验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**
@@ -302,10 +298,11 @@ Dock，并在最后一个窗口关闭后退出。
 安装器、系统设置、授权提示、输入菜单、菜单栏状态、真实候选和 Settings 的教程截图都必须来自同一冻结候选完成的这次安装 UAT。可以保留品牌图，但不能用 mock、其他 revision、局部测试窗口或另一台机器的提示冒充当前步骤；未实际出现的提示不写成已观察事实。
 
 PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出
-精确 commit、artifact ID/digest、逐文件 SHA-256、实际通过的工作流和未执行项。
+精确 commit、八文件集合摘要、逐文件 SHA-256、实际通过的验证和未执行项。
 安装验收不会自行创建公开版本 tag 或稳定 Release；只有验收人显式运行
-`scripts/release-control approve` 后，workflow 才能复用该控制标签绑定的同一
-artifact 完成发布。该操作只使用 Git SSH，不依赖 GitHub 网页控制。
+`scripts/release-control publish /absolute/release-directory` 后，唯一 publisher 才能
+复用哈希控制标签绑定的同一批字节完成发布。该操作使用 Git SSH 与 GitHub CLI，
+不依赖 GitHub 网页或 GitHub Actions 编译。
 
 ## 数据维护
 

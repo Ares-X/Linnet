@@ -1270,6 +1270,32 @@ void BenchmarkSchema(RimeApi_stdbool* api,
   }
 }
 
+void ExpectRetainedWarmSessionLatency(RimeApi_stdbool* api) {
+  const RimeSessionId warm = CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, warm, "ceshi");
+  if (CandidateOrigins(warm).empty()) {
+    Fail("resource warm-up did not traverse the candidate path");
+  }
+  api->clear_composition(warm);
+
+  const auto started = std::chrono::steady_clock::now();
+  const RimeSessionId client = CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, client, "ceshi");
+  if (CandidateOrigins(client).empty()) {
+    Fail("a client session produced no candidate after resource warm-up");
+  }
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started);
+  std::cout << "rime_smoke_test: retained warm-session first-candidate_ms="
+            << elapsed.count() << '\n';
+  api->destroy_session(client);
+  api->destroy_session(warm);
+  if (elapsed >= std::chrono::milliseconds(100)) {
+    Fail("a new client exceeded the 100ms first-candidate contract after "
+         "resource warm-up");
+  }
+}
+
 void ExpectSchemaList(RimeApi_stdbool* api) {
   RimeSchemaList list = {};
   if (!api->get_schema_list(&list)) {
@@ -1669,12 +1695,6 @@ void ExpectCapsLockRawPath(RimeApi_stdbool* api, const char* schema_id) {
       !api->get_option(session, "ascii_mode")) {
     Fail(std::string(schema_id) + " did not enter the Caps Lock raw path");
   }
-  char caps_owner[2] = {};
-  if (!api->get_property(session, "_linnet_caps_lock_ascii_mode",
-                         caps_owner, sizeof(caps_owner)) ||
-      std::string(caps_owner) != "1") {
-    Fail(std::string(schema_id) + " did not retain Caps Lock mode ownership");
-  }
   if (api->process_key(session, 'A', kLockMask)) {
     Fail(std::string(schema_id) + " swallowed Caps Lock raw text");
   }
@@ -1705,32 +1725,6 @@ void ExpectCapsLockRawPath(RimeApi_stdbool* api, const char* schema_id) {
   if (api->process_key(session, XK_Caps_Lock, kLockMask) ||
       api->get_option(session, "ascii_mode")) {
     Fail(std::string(schema_id) + " did not leave the Caps Lock raw path");
-  }
-  if (api->get_property(session, "_linnet_caps_lock_ascii_mode",
-                        caps_owner, sizeof(caps_owner))) {
-    Fail(std::string(schema_id) + " retained stale Caps Lock mode ownership");
-  }
-  api->destroy_session(session);
-}
-
-void ExpectCapsLockReconcilesRestoredHardwareState(RimeApi_stdbool* api,
-                                                   const char* schema_id) {
-  const RimeSessionId session = CreateSchemaSession(api, schema_id);
-  // The Host restores this baseline when Caps Lock changed while Linnet was
-  // inactive. AsciiComposer must derive the next transition from transported
-  // hardware state, not from an internal toggle history it never observed.
-  api->set_option(session, "ascii_mode", true);
-  api->set_property(session, "_linnet_caps_lock_ascii_mode", "1");
-  if (api->process_key(session, XK_Caps_Lock, kLockMask) ||
-      api->get_option(session, "ascii_mode")) {
-    Fail(std::string(schema_id) +
-         " kept stale ASCII mode after restored Caps Lock turned off");
-  }
-  char caps_owner[2] = {};
-  if (api->get_property(session, "_linnet_caps_lock_ascii_mode",
-                        caps_owner, sizeof(caps_owner))) {
-    Fail(std::string(schema_id) +
-         " retained restored Caps Lock ownership after it turned off");
   }
   api->destroy_session(session);
 }
@@ -5287,6 +5281,8 @@ int main(int argc, char** argv) {
       std::strcmp(argv[3], "--mixed-learning-off-probe") == 0;
   const bool mixed_latency_probe =
       argc == 4 && std::strcmp(argv[3], "--mixed-latency-probe") == 0;
+  const bool warm_session_probe =
+      argc == 4 && std::strcmp(argv[3], "--warm-session-probe") == 0;
   if (argc != 3 && !input_options_probe && !input_switches_probe &&
       !settings_off_probe && !learning_off_probe &&
       !shift_probe && !core_shift_overlap_probe &&
@@ -5297,7 +5293,7 @@ int main(int argc, char** argv) {
       !single_key_ranking_probe && !mixed_input_probe &&
       !mixed_learning_on_probe &&
       !mixed_learning_off_probe &&
-      !mixed_latency_probe) {
+      !mixed_latency_probe && !warm_session_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|--shift-probe|"
          "--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe|"
@@ -5308,7 +5304,7 @@ int main(int argc, char** argv) {
          "--single-key-ranking-probe|--mixed-input-probe|"
          "--mixed-learning-on-probe|"
          "--mixed-learning-off-probe|"
-         "--mixed-latency-probe]");
+         "--mixed-latency-probe|--warm-session-probe]");
   }
   int expected_page_size = 0;
   if (page_size_probe) {
@@ -5447,6 +5443,13 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  if (warm_session_probe) {
+    ExpectRetainedWarmSessionLatency(api);
+    api->finalize();
+    std::cout << "rime_smoke_test: retained warm session: PASS\n";
+    return 0;
+  }
+
   if (input_options_probe) {
     const RimeSessionId chinese =
         CreateSchemaSession(api, "linnet_zh_pinyin");
@@ -5533,7 +5536,6 @@ int main(int argc, char** argv) {
   if (shift_probe) {
     for (const char* schema_id : kProductSchemaIDs) {
       ExpectCapsLockRawPath(api, schema_id);
-      ExpectCapsLockReconcilesRestoredHardwareState(api, schema_id);
     }
     ExpectCapsLockPreservesExplicitPrefix(api);
     ExpectReturnPreservesExplicitPrefix(api);
@@ -5641,7 +5643,6 @@ int main(int argc, char** argv) {
   ExpectDeployedMenuPageSize(api, "linnet_en", 9);
   for (const char* schema_id : kProductSchemaIDs) {
     ExpectCapsLockRawPath(api, schema_id);
-    ExpectCapsLockReconcilesRestoredHardwareState(api, schema_id);
   }
   ExpectCapsLockPreservesExplicitPrefix(api);
   ExpectReturnPreservesExplicitPrefix(api);
