@@ -586,6 +586,20 @@ ruby -e '
   abort "the lifecycle API changed librime C++ virtual ABI" if
     added.include?("virtual bool CommitRawInput") ||
       added.include?("virtual void ClearComposition")
+  abort "grammar can again erase the canonical system dictionary weight" unless
+    added.include?("system_lexical_weight_(std::move(system_lexical_weight))") &&
+      added.include?("system_lexical_weight() const") &&
+      added.include?("FindSystemLexicalWeight") &&
+      added.include?("FindRemainingEntry(text)") &&
+      added.include?("dictionary::MakeEntry(chunk, chunk.cursor)")
+  abort "the retired duplicate lexical-weight field returned" if
+    added.include?("lexical_weight_(entry->weight)") ||
+      added.include?("double lexical_weight() const")
+  abort "Smart English can again infer the main translator spelling path" unless
+    added.include?("SpellingType spelling_type = kInvalidSpelling") &&
+      added.include?("SpellingType spelling_type() const") &&
+      added.include?("const SpellingType spelling_type_") &&
+      added.include?("syllabifier_->SpellingTypeAt(phrase_code_length)")
 ' || fail "the pinned core input-interaction repair regressed"
 ruby -e '
   callers = []
@@ -818,8 +832,7 @@ fi
 for extracted_symbol in \
   'ProjectSmartEnglishCandidate' \
   'class SmartEnglishTailTranslation' \
-  'SmartEnglishFilter::Apply' \
-  'SmartEnglishFilter::InspectChineseSpelling'; do
+  'SmartEnglishFilter::Apply'; do
   rg -Fq "${extracted_symbol}" "${smart_english_filter}" ||
     fail "the extracted Smart English candidate owner lost ${extracted_symbol}"
 done
@@ -864,24 +877,22 @@ if rg -n 'kForcedRawQuality|forced_raw\s*=|quality\(\)\s*==|==\s*.*quality\(\)' 
     plugins/smart_english; then
   fail "Smart English regained numeric inference for forced-raw identity"
 fi
+if rg -n \
+    'InspectChineseSpelling|InitializeChineseSpellingDecoder|chinese_dictionary_|Dictionary::Require|Syllabifier' \
+    "${smart_english_filter_header}" "${smart_english_filter}"; then
+  fail "Smart English regained a second Chinese dictionary or spelling owner"
+fi
 if ! ruby -e '
   owner = File.read(ARGV.fetch(0))
   %w[
-    InspectChineseSpelling(input_word)
-    graph.vertices.find(input.size())
-    end->second>=kAbbreviation
     phrase->is_exact_match()
-    chinese_dictionary_->Lookup(graph,0,&chinese_blacklist_)
-    entries->find(input.size())
-    entry->IsExactMatch()
-    kEstablishedChinesePhraseMinimumLexicalWeight
-    entry->weight<kEstablishedChinesePhraseMinimumLexicalWeight
-    established_exact_phrases.count(item.genuine->text())
+    phrase->spelling_type()<kAbbreviation
+    phrase->system_lexical_weight()
+    *system_weight>=kEstablishedChinesePhraseMinimumLexicalWeight
     strong_chinese_collision
     has_same_span_chinese
     input_word.size()==1
     single_letter_chinese_input
-    ChineseSpellingPath::kUnavailable
     std::exchange(pending_segment_input_,std::nullopt)
     composition().input()
     pending_segment_input_=composition_input.substr(segment->start,segment->end-segment->start)
@@ -896,8 +907,7 @@ if ! ruby -e '
   abort "the retired syllable-count collision heuristic returned" if
     owner.include?("phrase->code().size()")
   abort "learned Chinese candidates are still rejected by runtime type" if
-    owner.gsub(/\s+/, "").include?(%q[item.genuine->type()=="phrase"]) ||
-      owner.include?(%q["user_phrase"])
+    owner.include?(%q["user_phrase"])
   abort "cross-language numeric ranking returned" if
     owner.match?(/quality\(\)/) || owner.include?("phrase->weight()")
   abort "whole-composition bilingual ranking returned" if
@@ -1379,6 +1389,22 @@ test "$(rg -c 'func check\(\)' sources/LinnetSettings/LinnetSettingsUpdateChecke
 rg -Fq 'LinnetDataChannel.verifyPublished(data)' \
   sources/LinnetSettings/LinnetSettingsUpdateChecker.swift ||
   fail "Settings stopped verifying the shared Core/data Catalog"
+ruby -e '
+  model = File.read("sources/LinnetSettings/SettingsMain.swift")
+  updater = File.read("sources/LinnetSettings/LinnetSettingsUpdateChecker.swift")
+  initializer = model[/  init\(bundle: Bundle = \.main\) \{.*?\n  \}\n\}/m]
+  preparation = model[/  func prepareInitialState\(\) async \{.*?\n  \}\n\n  private func/m]
+  update_initializer = updater[/  init\(\n.*?\n  \}\n\n  func check/m]
+  abort "Settings startup owners are missing" unless
+    initializer && preparation && update_initializer
+  abort "Settings init can again hash the full data installation on the main actor" if
+    initializer.include?("runtimeSnapshot()")
+  abort "Settings initial data validation is no longer one deferred owner" unless
+    preparation.scan("runtimeSnapshot()").length == 1 &&
+      preparation.include?("Task.detached(priority: .userInitiated)")
+  abort "UpdateChecker init regained an implicit network or runtime check" if
+    update_initializer.match?(/\b(?:check|refreshRuntime|startCheck)\(\)/)
+' || fail "Settings first-screen work escaped its deferred owner"
 if rg -n 'Timer|LaunchAgent|UNUserNotification|startMonitoring' \
     sources/LinnetSettings/LinnetSettingsUpdateChecker.swift; then
   fail "the quiet Settings update check regained a background notification owner"

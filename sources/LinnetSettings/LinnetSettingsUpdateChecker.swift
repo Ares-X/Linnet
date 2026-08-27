@@ -59,7 +59,6 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     hostBundleIdentifier = host?.bundleIdentifier
     self.transactionRequester = transactionRequester
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
-    check()
   }
 
   func check() {

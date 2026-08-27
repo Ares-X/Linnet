@@ -443,3 +443,202 @@ index 30f4514..4d2f797 100644
    }
    return &s_api;
  }
+
+diff --git a/src/rime/gear/translator_commons.h b/src/rime/gear/translator_commons.h
+--- a/src/rime/gear/translator_commons.h
++++ b/src/rime/gear/translator_commons.h
+@@ -7,6 +7,7 @@
+ #ifndef RIME_TRANSLATOR_COMMONS_H_
+ #define RIME_TRANSLATOR_COMMONS_H_
+ 
++#include <optional>
+ #include <boost/regex.hpp>
+ #include <rime/common.h>
+ #include <rime/config.h>
+@@ -68,6 +69,12 @@ class Phrase : public Candidate {
+          size_t end,
+-         const an<DictEntry>& entry)
++         const an<DictEntry>& entry,
++         SpellingType spelling_type = kInvalidSpelling,
++         std::optional<double> system_lexical_weight = std::nullopt)
+-      : Candidate(type, start, end), language_(language), entry_(entry) {}
++      : Candidate(type, start, end),
++        language_(language),
++        entry_(entry),
++        spelling_type_(spelling_type),
++        system_lexical_weight_(std::move(system_lexical_weight)) {}
+   const string& text() const { return entry_->text; }
+   string comment() const { return entry_->comment; }
+   string preedit() const { return entry_->preedit; }
+@@ -77,6 +84,10 @@ class Phrase : public Candidate {
+     syllabifier_ = syllabifier;
+   }
+   double weight() const { return entry_->weight; }
++  SpellingType spelling_type() const { return spelling_type_; }
++  const std::optional<double>& system_lexical_weight() const {
++    return system_lexical_weight_;
++  }
+   void set_weight(double weight) { entry_->weight = weight; }
+   Code& code() const { return entry_->code; }
+   const DictEntry& entry() const { return *entry_; }
+@@ -104,6 +115,8 @@ class Phrase : public Candidate {
+   const Language* language_;
+   an<DictEntry> entry_;
+   an<PhraseSyllabifier> syllabifier_;
++  const SpellingType spelling_type_;
++  const std::optional<double> system_lexical_weight_;
+ };
+ 
+ //
+
+diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translator.cc
+--- a/src/rime/gear/script_translator.cc
++++ b/src/rime/gear/script_translator.cc
+@@ -95,7 +95,13 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+   virtual Spans Syllabify(const Phrase* phrase);
+   size_t BuildSyllableGraph(Prism& prism);
+   string GetPreeditString(const Phrase& cand) const;
+   string GetOriginalSpelling(const Phrase& cand) const;
+   bool IsCorrection(const Code& code, size_t code_length) const;
++  SpellingType SpellingTypeAt(size_t end_pos) const {
++    const auto vertex = syllable_graph_.vertices.find(end_pos);
++    return vertex == syllable_graph_.vertices.end()
++               ? kInvalidSpelling
++               : vertex->second;
++  }
+ 
+   const SyllableGraph& syllable_graph() const { return syllable_graph_; }
+@@ -136,6 +142,8 @@ class ScriptTranslation : public Translation {
+   bool CheckEmpty();
+   bool IsNormalSpelling() const;
+   bool PrepareCandidate();
++  std::optional<double> FindSystemLexicalWeight(
++      const string& text, size_t code_length) const;
+   template <class QueryResult>
+   void EnrollEntries(map<int, DictEntryList>& entries_by_end_pos,
+                      const an<QueryResult>& query_result);
+@@ -587,6 +595,15 @@ inline static bool prefer_user_phrase(
+   return user_phrase_weight > sys_phrase_weight ||
+          (user_phrase_weight == sys_phrase_weight && compare_on_tie());
+ }
+ 
++std::optional<double> ScriptTranslation::FindSystemLexicalWeight(
++    const string& text, size_t code_length) const {
++  if (!phrase_) return std::nullopt;
++  const auto group = phrase_->find(code_length);
++  if (group == phrase_->end()) return std::nullopt;
++  const auto entry = group->second.FindRemainingEntry(text);
++  return entry ? std::optional<double>(entry->weight) : std::nullopt;
++}
++
+ bool ScriptTranslation::PrepareCandidate() {
+ iter_incremented:
+@@ -642,7 +659,10 @@ bool ScriptTranslation::PrepareCandidate() {
+     candidate_ =
+         New<Phrase>(translator_->language(),
+                     entry->IsPredictiveMatch() ? "completion" : "user_phrase",
+-                    start_, start_ + user_phrase_code_length, entry);
++                    start_, start_ + user_phrase_code_length, entry,
++                    syllabifier_->SpellingTypeAt(user_phrase_code_length),
++                    FindSystemLexicalWeight(entry->text,
++                                            user_phrase_code_length));
+     candidate_->set_quality(std::exp(entry->weight) +
+                             translator_->initial_quality() +
+                             (entry->quality_len / full_code_length));
+@@ -660,7 +680,9 @@ bool ScriptTranslation::PrepareCandidate() {
+     candidate_ =
+         New<Phrase>(translator_->language(),
+                     entry->IsPredictiveMatch() ? "completion" : "phrase",
+-                    start_, start_ + phrase_code_length, entry);
++                    start_, start_ + phrase_code_length, entry,
++                    syllabifier_->SpellingTypeAt(phrase_code_length),
++                    entry->weight);
+     candidate_->set_quality(std::exp(entry->weight) +
+                             translator_->initial_quality() +
+                             (entry->quality_len / full_code_length));
+
+diff --git a/src/rime/dict/dictionary.h b/src/rime/dict/dictionary.h
+--- a/src/rime/dict/dictionary.h
++++ b/src/rime/dict/dictionary.h
+@@ -35,6 +35,7 @@ class RIME_DLL DictEntryIterator : public DictEntryFilterBinder {
+   void Sort();
+   void AddFilter(DictEntryFilter filter) override;
+   an<DictEntry> Peek();
++  an<DictEntry> FindRemainingEntry(const string& text) const;
+   bool Next();
+   bool Skip(size_t num_entries);
+   bool exhausted() const;
+
+diff --git a/src/rime/dict/dictionary.cc b/src/rime/dict/dictionary.cc
+--- a/src/rime/dict/dictionary.cc
++++ b/src/rime/dict/dictionary.cc
+@@ -64,8 +64,26 @@ struct Chunk {
+   bool is_exact_match() const { return matching_code_size == code.size(); }
+ 
+   bool is_predictive_match() const { return matching_code_size < code.size(); }
+ };
+ 
++an<DictEntry> MakeEntry(const Chunk& chunk, size_t cursor) {
++  const auto& table_entry = chunk.entries[cursor];
++  auto entry = New<DictEntry>();
++  entry->code = chunk.code;
++  entry->text = chunk.table->GetEntryText(table_entry);
++  const double kS = 18.420680743952367;  // log(1e8)
++  entry->weight = table_entry.weight - kS + chunk.credibility;
++  entry->quality_len = chunk.quality_len;
++  if (!chunk.remaining_code.empty()) {
++    entry->comment = "~" + chunk.remaining_code;
++    entry->remaining_code_length = chunk.remaining_code.length();
++  }
++  if (chunk.is_predictive_match()) {
++    entry->matching_code_size = chunk.matching_code_size;
++  }
++  return entry;
++}
++
+ struct QueryResult {
+   vector<Chunk> chunks;
+ };
+@@ -153,27 +171,27 @@ void DictEntryIterator::AddFilter(DictEntryFilter filter) {
+ an<DictEntry> DictEntryIterator::Peek() {
+   if (!entry_ && !exhausted()) {
+     // get next entry from current chunk
+     const auto& chunk = query_result_->chunks[chunk_index_];
+-    const auto& e = chunk.entries[chunk.cursor];
+     DLOG(INFO) << "creating temporary dict entry '"
+-               << chunk.table->GetEntryText(e) << "'.";
+-    entry_ = New<DictEntry>();
+-    entry_->code = chunk.code;
+-    entry_->text = chunk.table->GetEntryText(e);
+-    const double kS = 18.420680743952367;  // log(1e8)
+-    entry_->weight = e.weight - kS + chunk.credibility;
+-    entry_->quality_len = chunk.quality_len;
+-    if (!chunk.remaining_code.empty()) {
+-      entry_->comment = "~" + chunk.remaining_code;
+-      entry_->remaining_code_length = chunk.remaining_code.length();
+-    }
+-    if (chunk.is_predictive_match()) {
+-      entry_->matching_code_size = chunk.matching_code_size;
+-    }
++               << chunk.table->GetEntryText(chunk.entries[chunk.cursor])
++               << "'.";
++    entry_ = dictionary::MakeEntry(chunk, chunk.cursor);
+   }
+   return entry_;
+ }
+ 
++an<DictEntry> DictEntryIterator::FindRemainingEntry(const string& text) const {
++  for (size_t chunk_index = chunk_index_;
++       chunk_index < query_result_->chunks.size(); ++chunk_index) {
++    const auto& chunk = query_result_->chunks[chunk_index];
++    for (size_t cursor = chunk.cursor; cursor < chunk.size; ++cursor) {
++      auto entry = dictionary::MakeEntry(chunk, cursor);
++      if (entry->text == text && (!filter_ || filter_(entry))) return entry;
++    }
++  }
++  return nullptr;
++}
++
+ bool DictEntryIterator::FindNextEntry() {
+   if (exhausted()) {
+     return false;

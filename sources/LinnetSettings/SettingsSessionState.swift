@@ -78,6 +78,10 @@ struct SettingsConfigurationSession: Equatable, Sendable {
   mutating func markSourceUnreadable() {
     readiness = .sourceUnreadable
   }
+  mutating func setServicesAvailable(_ available: Bool) {
+    guard readiness != .sourceUnreadable else { return }
+    readiness = available ? .ready : .servicesUnavailable
+  }
   func makeDocumentTicket() -> DocumentTicket? {
     guard canPersist, let documentBaselineRevision else { return nil }
     return DocumentTicket(

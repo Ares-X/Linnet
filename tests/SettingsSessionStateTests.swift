@@ -229,12 +229,23 @@ struct SettingsSessionStateTests {
       personalFailure.personalBaselineRevision == nil
     else { fail("an unreadable source exposed an editable fallback") }
 
-    let unavailable = SettingsConfigurationSession(
+    var unavailable = SettingsConfigurationSession(
       document: documentSnapshot(.default), personal: baseline, servicesAvailable: false)
     guard unavailable.readiness == .servicesUnavailable,
       !unavailable.canEdit, !unavailable.canPersist,
       unavailable.personalBaselineRevision == "r1"
     else { fail("unavailable data services exposed writable configuration") }
+
+    unavailable.documentDraft.input.traditionalChinese = true
+    unavailable.personalDraft.customWords.append(.init(value: "保留", code: "baoliu"))
+    let pendingDocument = unavailable.documentDraft
+    let pendingPersonal = unavailable.personalDraft
+    unavailable.setServicesAvailable(true)
+    guard unavailable.readiness == .ready,
+      unavailable.canEdit, unavailable.canPersist,
+      unavailable.documentDraft == pendingDocument,
+      unavailable.personalDraft == pendingPersonal
+    else { fail("asynchronous service readiness discarded Settings drafts") }
   }
 
   private static func testObservedSnapshots() {

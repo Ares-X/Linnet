@@ -146,6 +146,7 @@ struct LinnetCandidateWindowInteractionTests {
 
   static func main() {
     _ = NSApplication.shared
+    testColdCandidatePresentationLatency()
     testTrackingArea()
     testExactCandidatePathHitTesting()
     testSyntheticHoverLifecycle()
@@ -230,6 +231,38 @@ struct LinnetCandidateWindowInteractionTests {
       exit(EXIT_FAILURE)
     }
     print("LinnetCandidateWindowInteractionTests: PASS")
+  }
+
+  private static func testColdCandidatePresentationLatency() {
+    let panel = SquirrelPanel(position: NSRect(x: 320, y: 420, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller)
+    let candidates = SquirrelInputController.CandidateSnapshot(
+      items: ["测试", "侧室", "测速", "策士", "测式"].enumerated().map { index, value in
+        .init(
+          text: value, comment: "", page: 0, indexOnPage: index,
+          absoluteIndex: index, selectionLabel: String(index + 1))
+      },
+      pageSize: 5,
+      currentPage: 0,
+      isLastPage: true,
+      isExpanded: false,
+      canExpand: false)
+    let started = ProcessInfo.processInfo.systemUptime
+    let published = panel.update(
+      preedit: "ceshi", selRange: .empty, caretPos: 5,
+      candidates: candidates, highlighted: 0, update: true,
+      controller: controller)
+    let elapsedMilliseconds =
+      (ProcessInfo.processInfo.systemUptime - started) * 1_000
+    require(published, "cold candidate presentation did not publish")
+    require(
+      elapsedMilliseconds < 100,
+      "cold candidate presentation took \(elapsedMilliseconds)ms")
+    print(
+      "candidate_interaction: cold_presentation_ms="
+        + String(format: "%.2f", elapsedMilliseconds))
+    panel.hide()
   }
 
   private static func testInputModeStatusNotice() {

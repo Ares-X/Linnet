@@ -14,13 +14,14 @@ if [[ "${1:-}" == --single-key-ranking-probe ||
       "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --mixed-latency-probe ||
       "${1:-}" == --warm-session-probe ||
+      "${1:-}" == --cold-client-probe ||
       "${1:-}" == --shift-probe ||
       "${1:-}" == --core-shift-overlap-probe ||
       "${1:-}" == --prediction-layout-probe ||
       "${1:-}" == --partial-return-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--shift-probe|--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe]" >&2
+  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--shift-probe|--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe]" >&2
   exit 64
 fi
 
@@ -220,6 +221,8 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime mixed-input latency measurement: COMPLETE"
   elif [[ "${runtime_probe}" == --warm-session-probe ]]; then
     echo "Linnet native Rime retained warm-session latency: PASS"
+  elif [[ "${runtime_probe}" == --cold-client-probe ]]; then
+    echo "Linnet native Rime cold-client first-key latency: PASS"
   elif [[ "${runtime_probe}" == --single-key-ranking-probe ]]; then
     echo "Linnet native Rime focused single-key ranking probe: PASS"
   elif [[ "${runtime_probe}" == --shift-probe ]]; then
