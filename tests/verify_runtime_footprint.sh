@@ -1402,11 +1402,13 @@ rg -Fq 'LinnetDataChannel.verifyPublished(data)' \
 ruby -e '
   model = File.read("sources/LinnetSettings/SettingsMain.swift")
   updater = File.read("sources/LinnetSettings/LinnetSettingsUpdateChecker.swift")
+  host_presentation = File.read("sources/SquirrelApplicationPresentation.swift")
   initializer = model[/  init\(bundle: Bundle = \.main\) \{.*?\n  \}\n\}/m]
   preparation = model[/  func prepareInitialState\(\) async \{.*?\n  \}\n\n  private func/m]
   update_initializer = updater[/  init\(\n.*?\n  \}\n\n  func check/m]
+  settings_launch = host_presentation[/  @objc func openSettings\(\) \{.*?\n  \}/m]
   abort "Settings startup owners are missing" unless
-    initializer && preparation && update_initializer
+    initializer && preparation && update_initializer && settings_launch
   abort "Settings init can again hash the full data installation on the main actor" if
     initializer.include?("runtimeSnapshot()")
   abort "Settings initial data validation is no longer one deferred owner" unless
@@ -1414,6 +1416,9 @@ ruby -e '
       preparation.include?("Task.detached(priority: .userInitiated)")
   abort "UpdateChecker init regained an implicit network or runtime check" if
     update_initializer.match?(/\b(?:check|refreshRuntime|startCheck)\(\)/)
+  abort "Host can launch a substituted or recent-item Settings copy" unless
+    settings_launch.include?("allowsRunningApplicationSubstitution = false") &&
+      settings_launch.include?("addsToRecentItems = false")
 ' || fail "Settings first-screen work escaped its deferred owner"
 if rg -n 'Timer|LaunchAgent|UNUserNotification|startMonitoring' \
     sources/LinnetSettings/LinnetSettingsUpdateChecker.swift; then
