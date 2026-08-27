@@ -1816,10 +1816,10 @@ struct LinnetCandidateWindowInteractionTests {
         (geometry.detailColumnMaximumWidth ?? 0) +
         geometry.spacing * 2 + 1 + theme.edgeInset.width * 2
       require(
-        abs(
-          candidateView.detailTextView.frame.width -
-            (geometry.detailColumnMaximumWidth ?? .nan)) <= 0.5 &&
-          panel.frame.width <= ceil(expectedMaximumWidth) + 1,
+        candidateView.detailTextView.frame.width <=
+          (geometry.detailColumnMaximumWidth ?? 0) + 0.5 &&
+          panel.frame.width <= ceil(expectedMaximumWidth) + 1 &&
+          (point > 16 || panel.frame.width <= 300),
         "\(point)pt vertical English panel detail width "
           + "\(candidateView.detailTextView.frame.width), panel width \(panel.frame.width), "
           + "expected detail \(String(describing: geometry.detailColumnMaximumWidth)), "

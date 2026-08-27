@@ -424,13 +424,14 @@ struct LinnetCandidatePresentationTests {
       dividerSize: CGSize(width: 1, height: 60))
     require(
       sidecar.placement == .sidecar &&
-        sidecar.textSeparator.isEmpty,
+        sidecar.textSeparator.isEmpty &&
+        sidecar.detailColumnMaximumWidth == 160,
       "vertical candidate detail lost its shared sidecar policy")
     require(
       sidecarFrames.candidate == CGRect(x: 0, y: 0, width: 40, height: 60) &&
         sidecarFrames.divider == CGRect(x: 46, y: 0, width: 1, height: 60) &&
-        sidecarFrames.detail == CGRect(x: 53, y: 0, width: 224, height: 12) &&
-        sidecarFrames.size == CGSize(width: 277, height: 60),
+        sidecarFrames.detail == CGRect(x: 53, y: 0, width: 30, height: 12) &&
+        sidecarFrames.size == CGSize(width: 83, height: 60),
       "sidecar candidate, divider, and detail no longer share one spatial geometry")
 
     let longDefinitionFrames = sidecar.frames(
@@ -438,8 +439,8 @@ struct LinnetCandidatePresentationTests {
       detailSize: CGSize(width: 680, height: 18),
       dividerSize: CGSize(width: 1, height: 156))
     require(
-      longDefinitionFrames.detail.width <= 300 &&
-        longDefinitionFrames.size.width <= 425,
+      longDefinitionFrames.detail.width <= 160 &&
+        longDefinitionFrames.size.width <= 300,
       "a long English definition can still stretch the vertical candidate panel")
   }
 

@@ -392,9 +392,7 @@ extension LinnetCandidatePresentation {
         width: min(candidateSize.width, candidateColumnMaximumWidth ?? candidateSize.width),
         height: candidateSize.height)
       let fittedDetailSize = CGSize(
-        width: placement == .sidecar
-          ? detailColumnMaximumWidth ?? detailSize.width
-          : min(detailSize.width, detailColumnMaximumWidth ?? detailSize.width),
+        width: min(detailSize.width, detailColumnMaximumWidth ?? detailSize.width),
         height: detailSize.height)
       let candidate = CGRect(origin: .zero, size: fittedCandidateSize)
       switch placement {
@@ -433,7 +431,7 @@ extension LinnetCandidatePresentation {
     candidateFontPoint: CGFloat = 16
   ) -> CandidateDetailGeometry {
     let candidateColumnMaximumWidth = min(240, max(150, candidateFontPoint * 10))
-    let detailColumnMaximumWidth = min(320, max(220, candidateFontPoint * 14))
+    let detailColumnMaximumWidth = min(280, max(160, candidateFontPoint * 10))
     return CandidateDetailGeometry(
       placement: linear ? .footer : .sidecar,
       spacing: candidateRowSpacing,

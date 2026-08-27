@@ -193,7 +193,9 @@ extension SquirrelPanel {
       let detailRect = view.detailContentRect
       sidecarFrames = detailGeometry.frames(
         candidateSize: contentRect.size,
-        detailSize: NSSize(width: detailWidth, height: detailRect.height),
+        detailSize: NSSize(
+          width: min(detailWidth, ceil(detailRect.width)),
+          height: detailRect.height),
         dividerSize: NSSize(width: 1, height: max(contentRect.height, detailRect.height)))
       if let sidecarFrames {
         contentRect = NSRect(origin: .zero, size: sidecarFrames.size)
