@@ -208,6 +208,8 @@ extension SquirrelApplicationDelegate {
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
+    configuration.addsToRecentItems = false
+    configuration.allowsRunningApplicationSubstitution = false
     NSWorkspace.shared.openApplication(
       at: settingsURL,
       configuration: configuration
