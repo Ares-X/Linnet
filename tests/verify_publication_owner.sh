@@ -118,9 +118,10 @@ abort unless target.fetch("bundle_identifier") == bundle_identifier &&
 periphery = File.read(File.join(root, "scripts/run_periphery.sh"))
 analysis_identity =
   'readonly analysis_bundle_identifier="${product_bundle_identifier}.periphery"'
-build_identity = '-- LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}"'
+build_identity = 'LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}"'
 analysis_name = 'readonly analysis_product_name="${product_name}Periphery"'
 build_name = 'LINNET_PRODUCT_NAME="${analysis_product_name}"'
+registration_cleanup = '"${local_app_cleanup}" "${products}"'
 abort unless periphery.include?(
   'product_bundle_identifier="$(read_product_setting LINNET_BUNDLE_IDENTIFIER)"') &&
   periphery.include?('product_name="$(read_product_setting LINNET_PRODUCT_NAME)"') &&
@@ -128,8 +129,13 @@ abort unless periphery.include?(
   periphery.include?(analysis_name) &&
   periphery.scan(build_identity).size == 1 &&
   periphery.scan(build_name).size == 1 &&
+  periphery.scan(registration_cleanup).size == 1 &&
+  periphery.scan("cleanup_local_registrations").size == 3 &&
+  periphery.include?("com.github.peripheryapp") &&
+  periphery.include?("WorkspacePath") &&
   periphery.index(analysis_identity) < periphery.index(build_identity) &&
   periphery.index(analysis_name) < periphery.index(build_name) &&
+  !periphery.include?("-derivedDataPath") &&
   !periphery.include?(bundle_identifier)
 historical_signing_text, historical_signing_status = Open3.capture2(
   "git", "-C", root, "show", "#{source_revision}:config/linnet-community-signing.json")

@@ -183,7 +183,7 @@ opencc-data:
 
 deps: verify-rime-binaries data
 
-BUILD_SETTINGS += COMPILER_INDEX_STORE_ENABLE=YES REGISTER_WITH_LAUNCH_SERVICES=NO
+BUILD_SETTINGS += COMPILER_INDEX_STORE_ENABLE=YES
 
 define remove-linnet-local-residue
 for stale_path in \
@@ -204,12 +204,18 @@ define build-linnet-app
 	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Linnet.app)"; \
 	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app)"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
+	products_root="$(abspath $(DERIVED_DATA_PATH)/Build/Products)"; \
+	local_app_cleanup='scripts/unregister-local-apps'; \
+	trap '"$${local_app_cleanup}" "$${products_root}" "$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}" >/dev/null 2>&1 || true' EXIT INT TERM HUP; \
 		xcodebuild -project Linnet.xcodeproj -configuration $(1) -scheme Linnet \
 			-destination '$(XCODE_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) \
 			-showBuildTimingSummary $(BUILD_SETTINGS) build; \
 	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
 	scripts/build-privacy sanitize-localizations \
 		"$${app_path}" "$${embedded_settings_app_path}" "$${settings_app_path}"; \
+	"$${local_app_cleanup}" "$${products_root}" \
+		"$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}"; \
+	trap - EXIT INT TERM HUP; \
 	echo "Linnet $(1) App: BUILT (local, unsigned)"
 endef
 

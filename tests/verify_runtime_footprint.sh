@@ -2415,11 +2415,22 @@ rg -Fq 'if [[ "${install_mode}" == complete ]]' \
 if rg -n -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
   fail "Core update regained a live InputMethodKit Host termination path"
 fi
-test "$(rg -F -c -- 'REGISTER_WITH_LAUNCH_SERVICES=NO' Makefile)" = 1 ||
-  fail "local builds can register non-installed Apps with LaunchServices"
-if rg -n 'launch_services_register|unregister_local_builds|lsregister' Makefile; then
-  fail "local builds regained compensating LaunchServices cleanup"
+test "$(rg -F -c -- 'scripts/unregister-local-apps' Makefile)" = 1 ||
+  fail "local App registration cleanup has multiple Makefile owners"
+test "$(rg -F -c -- '"$${local_app_cleanup}" "$${products_root}"' Makefile)" = 2 ||
+  fail "local builds do not clean exact App registrations on success and failure"
+if rg -n 'REGISTER_WITH_LAUNCH_SERVICES|launch_services_register|unregister_local_builds|lsregister' \
+    Makefile; then
+  fail "local builds regained an ineffective or duplicated registration owner"
 fi
+[[ -x scripts/unregister-local-apps ]] ||
+  fail "the local App registration cleanup owner is not executable"
+rg -Fq '[[ "${products_root}" == /*/Build/Products' scripts/unregister-local-apps ||
+  fail "local App cleanup lost its Build/Products boundary"
+rg -Fq 'grep -Fqx -- "${app}"' scripts/unregister-local-apps ||
+  fail "local App cleanup does not verify final LaunchServices state"
+rg -Fq '"${lsregister}" -u -R "${app}"' scripts/unregister-local-apps ||
+  fail "local App cleanup is not symmetric with Xcode recursive registration"
 rg -Fq 'unregister_fixture_apps' tests/verify_visible_settings_fixture.sh ||
   fail "Settings UI tests can leave fixture Apps registered with LaunchServices"
 # The live Rime session is the sole mode owner. Do not restore the locally

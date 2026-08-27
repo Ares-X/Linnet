@@ -43,14 +43,53 @@ else
   periphery_root="${project_root}/build/tools/periphery-${periphery_version}"
 fi
 periphery_binary="${periphery_root}/periphery"
+readonly local_app_cleanup="${project_root}/scripts/unregister-local-apps"
+download_root=""
+
+periphery_products_roots() {
+  local cache_root="${HOME}/Library/Caches/com.github.peripheryapp"
+  local info workspace
+  [[ -d "${cache_root}" ]] || return 1
+  while IFS= read -r -d '' info; do
+    workspace="$(plutil -extract WorkspacePath raw -o - "${info}" 2>/dev/null)" ||
+      continue
+    if [[ "${workspace}" == "${project_root}/Linnet.xcodeproj" ]]; then
+      printf '%s/Build/Products\n' "${info%/info.plist}"
+    fi
+  done < <(find "${cache_root}" -mindepth 2 -maxdepth 2 -type f \
+    -name info.plist -print0)
+}
+
+cleanup_local_registrations() {
+  local required="${1:-false}"
+  local products analysis_app settings_app embedded_settings_app retired_app
+  local found=false
+  while IFS= read -r products; do
+    [[ -n "${products}" ]] || continue
+    found=true
+    analysis_app="${products}/Debug/${analysis_product_name}.app"
+    settings_app="${products}/Debug/Settings.app"
+    embedded_settings_app="${analysis_app}/Contents/Applications/Settings.app"
+    retired_app="${products}/Debug/${product_name}.app"
+    "${local_app_cleanup}" "${products}" \
+      "${analysis_app}" "${settings_app}" "${embedded_settings_app}" "${retired_app}"
+  done < <(periphery_products_roots)
+  [[ "${found}" == true || "${required}" != true ]]
+}
+
+cleanup() {
+  cleanup_local_registrations false >/dev/null 2>&1 || true
+  if [[ -n "${download_root}" && -d "${download_root}" ]]; then
+    rm -rf -- "${download_root}"
+  fi
+}
+trap cleanup EXIT INT TERM HUP
 
 if [[ ! -x "${periphery_binary}" ]]; then
   archive_url="https://github.com/peripheryapp/periphery/releases/download/"
   archive_url+="${periphery_version}/periphery-${periphery_version}.zip"
   download_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-periphery.XXXXXX")"
   archive_path="${download_root}/periphery.zip"
-  trap 'rm -rf -- "${download_root}"' EXIT
-
   curl --fail --location --silent --show-error \
     "${archive_url}" \
     --output "${archive_path}"
@@ -79,3 +118,10 @@ fi
   --baseline "${baseline_path}" \
   -- LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}" \
   LINNET_PRODUCT_NAME="${analysis_product_name}"
+
+cleanup_local_registrations true
+if [[ -n "${download_root}" && -d "${download_root}" ]]; then
+  rm -rf -- "${download_root}"
+  download_root=""
+fi
+trap - EXIT INT TERM HUP
