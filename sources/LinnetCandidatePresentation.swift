@@ -21,6 +21,9 @@ enum LinnetCandidatePresentation {
   static let inlineCandidateSeparator = "  "
   static let candidateMaterial = NSVisualEffectView.Material.popover
 
+  private static let detailPartOfSpeechBoundary =
+    #/[；;]\s*(n|vt|vi|v|adj|adv|abbr|int|interj|prep|pref|conj|pron|suf|vbl|num|aux|art|det)[.]\s*/#
+
   struct InputModeIdentity: Equatable {
     let schemaID: String
     let asciiMode: Bool
@@ -431,7 +434,7 @@ extension LinnetCandidatePresentation {
     candidateFontPoint: CGFloat = 16
   ) -> CandidateDetailGeometry {
     let candidateColumnMaximumWidth = min(240, max(150, candidateFontPoint * 10))
-    let detailColumnMaximumWidth = min(280, max(160, candidateFontPoint * 10))
+    let detailColumnMaximumWidth = min(160, max(120, candidateFontPoint * 5))
     return CandidateDetailGeometry(
       placement: linear ? .footer : .sidecar,
       spacing: candidateRowSpacing,
@@ -446,8 +449,12 @@ extension LinnetCandidatePresentation {
 
   static func selectedDetailText(_ rawComment: String) -> String {
     let normalized = rawComment.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard normalized.count > maximumDetailCharacterCount else { return normalized }
-    return String(normalized.prefix(maximumDetailCharacterCount - 1)) + "…"
+    let bounded = normalized.count > maximumDetailCharacterCount
+      ? String(normalized.prefix(maximumDetailCharacterCount - 1)) + "…"
+      : normalized
+    return bounded.replacing(detailPartOfSpeechBoundary) { match in
+      "\n\(match.1). "
+    }
   }
 
   static func accessibilityAnnouncement(
@@ -469,7 +476,7 @@ extension LinnetCandidatePresentation {
     var parts = [position, candidate]
     let detail = selectedDetailText(comment)
     if !detail.isEmpty {
-      parts.append(detail)
+      parts.append(detail.replacingOccurrences(of: "\n", with: ", "))
     }
     return parts.joined(separator: ", ")
   }

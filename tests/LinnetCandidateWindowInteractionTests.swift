@@ -1733,10 +1733,10 @@ struct LinnetCandidateWindowInteractionTests {
       theme.firstParagraphStyle = NSMutableParagraphStyle()
       theme.paragraphStyle = NSMutableParagraphStyle()
       let detailText = LinnetCandidatePresentation.selectedDetailText(
-        "/ˈwɜːkɪŋ/ · adj. 做工作的；劳动的；工作上的；初步的；暂定的；"
-          + "基本够用的；起作用的；n. 矿；作业区；（复）workings：运作；工作方法。")
+        "/wɜːk/ · n. 工作；职业；作品；[复]工厂；工程；v. 工作；运行；奏效；"
+          + "产生影响；造成；抽搐；逐渐移动")
       let values = [
-        "working", "workings", "working", "waking", "workington", "workingman",
+        "work", "works", "woke", "week", "wiki", "weak", "worse", "wise", "working",
       ]
       _ = panel.update(
         preedit: "", selRange: .empty, caretPos: 0,
@@ -1819,7 +1819,7 @@ struct LinnetCandidateWindowInteractionTests {
         candidateView.detailTextView.frame.width <=
           (geometry.detailColumnMaximumWidth ?? 0) + 0.5 &&
           panel.frame.width <= ceil(expectedMaximumWidth) + 1 &&
-          (point > 16 || panel.frame.width <= 300),
+          (point > 16 || panel.frame.width <= 260),
         "\(point)pt vertical English panel detail width "
           + "\(candidateView.detailTextView.frame.width), panel width \(panel.frame.width), "
           + "expected detail \(String(describing: geometry.detailColumnMaximumWidth)), "

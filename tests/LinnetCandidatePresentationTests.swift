@@ -62,6 +62,12 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.selectedDetailText("  short definition  ") == "short definition",
       "short detail was not normalized"
     )
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "/wɜːk/ · n. 工作；职业；v. 运行；奏效；adj. 工作的"
+      ) == "/wɜːk/ · n. 工作；职业\nv. 运行；奏效\nadj. 工作的",
+      "selected English detail did not start each part of speech on its own line"
+    )
     let long = String(repeating: "释", count: 90)
     let bounded = LinnetCandidatePresentation.selectedDetailText(long)
     require(
@@ -75,6 +81,12 @@ struct LinnetCandidatePresentationTests {
         candidate: "interface", comment: "  n. 接口  ", page: 2, indexOnPage: 1
       ) == "Page 3, candidate 2, interface, n. 接口",
       "candidate accessibility announcement lost position or definition"
+    )
+    require(
+      LinnetCandidatePresentation.accessibilityAnnouncement(
+        candidate: "work", comment: "n. 工作；v. 运行", page: 0, indexOnPage: 0
+      ) == "Page 1, candidate 1, work, n. 工作, v. 运行",
+      "visual part-of-speech line breaks leaked into accessibility speech"
     )
     require(
       LinnetCandidatePresentation.accessibilityAnnouncement(
@@ -425,7 +437,7 @@ struct LinnetCandidatePresentationTests {
     require(
       sidecar.placement == .sidecar &&
         sidecar.textSeparator.isEmpty &&
-        sidecar.detailColumnMaximumWidth == 160,
+        sidecar.detailColumnMaximumWidth == 120,
       "vertical candidate detail lost its shared sidecar policy")
     require(
       sidecarFrames.candidate == CGRect(x: 0, y: 0, width: 40, height: 60) &&
@@ -439,8 +451,8 @@ struct LinnetCandidatePresentationTests {
       detailSize: CGSize(width: 680, height: 18),
       dividerSize: CGSize(width: 1, height: 156))
     require(
-      longDefinitionFrames.detail.width <= 160 &&
-        longDefinitionFrames.size.width <= 300,
+      longDefinitionFrames.detail.width <= 120 &&
+        longDefinitionFrames.size.width <= 260,
       "a long English definition can still stretch the vertical candidate panel")
   }
 
