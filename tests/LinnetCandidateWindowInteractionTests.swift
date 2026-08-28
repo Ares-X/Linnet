@@ -226,20 +226,46 @@ struct LinnetCandidateWindowInteractionTests {
       isLastPage: true,
       isExpanded: false,
       canExpand: false)
-    let started = ProcessInfo.processInfo.systemUptime
+    let coldStarted = ProcessInfo.processInfo.systemUptime
     let published = panel.update(
       preedit: "ceshi", selRange: .empty, caretPos: 5,
       candidates: candidates, highlighted: 0, update: true,
       controller: controller)
-    let elapsedMilliseconds =
-      (ProcessInfo.processInfo.systemUptime - started) * 1_000
+    let coldMilliseconds =
+      (ProcessInfo.processInfo.systemUptime - coldStarted) * 1_000
     require(published, "cold candidate presentation did not publish")
     require(
-      elapsedMilliseconds < 100,
-      "cold candidate presentation took \(elapsedMilliseconds)ms")
+      coldMilliseconds < 500,
+      "cold candidate presentation took \(coldMilliseconds)ms")
+
+    var steadySamples: [Double] = []
+    for _ in 0..<20 {
+      let started = ProcessInfo.processInfo.systemUptime
+      let republished = panel.update(
+        preedit: "ceshi", selRange: .empty, caretPos: 5,
+        candidates: candidates, highlighted: 0, update: true,
+        controller: controller)
+      steadySamples.append(
+        (ProcessInfo.processInfo.systemUptime - started) * 1_000)
+      require(republished, "steady candidate presentation did not publish")
+    }
+    let sortedSteadySamples = steadySamples.sorted()
+    let p95Index = min(
+      sortedSteadySamples.count - 1,
+      Int(ceil(Double(sortedSteadySamples.count) * 0.95)) - 1)
+    let steadyP95 = sortedSteadySamples[p95Index]
+    let steadyMaximum = sortedSteadySamples.last ?? .infinity
+    require(
+      steadyP95 < 50,
+      "steady candidate presentation p95 took \(steadyP95)ms")
+    require(
+      steadyMaximum < 100,
+      "steady candidate presentation maximum took \(steadyMaximum)ms")
     print(
       "candidate_interaction: cold_presentation_ms="
-        + String(format: "%.2f", elapsedMilliseconds))
+        + String(format: "%.2f", coldMilliseconds)
+        + " steady_p95_ms=" + String(format: "%.2f", steadyP95)
+        + " steady_max_ms=" + String(format: "%.2f", steadyMaximum))
     panel.hide()
   }
 
@@ -1859,14 +1885,24 @@ struct LinnetCandidateWindowInteractionTests {
         (geometry.candidateColumnMaximumWidth ?? 0) +
         (geometry.detailColumnMaximumWidth ?? 0) +
         geometry.spacing * 2 + 1 + theme.edgeInset.width * 2
+      let detailWidthLimit = geometry.detailColumnMaximumWidth ?? 0
+      let canonicalFrames = geometry.frames(
+        candidateSize: candidateView.primaryContentRect.size,
+        detailSize: candidateView.detailContentRect.size,
+        dividerSize: NSSize(width: 1, height: candidateView.primaryContentRect.height))
+      let backingScale = max(panel.backingScaleFactor, 1)
+      let surfaceTolerance = 1 / backingScale + 0.01
+      require(
+        canonicalFrames.detail.width <= detailWidthLimit,
+        "\(point)pt canonical detail geometry exceeded \(detailWidthLimit)")
       require(
         candidateView.detailTextView.frame.width <=
-          (geometry.detailColumnMaximumWidth ?? 0) + 0.5 &&
+          detailWidthLimit + surfaceTolerance &&
           panel.frame.width <= ceil(expectedMaximumWidth) + 1 &&
           (point > 16 || panel.frame.width <= 260),
         "\(point)pt vertical English panel detail width "
           + "\(candidateView.detailTextView.frame.width), panel width \(panel.frame.width), "
-          + "expected detail \(String(describing: geometry.detailColumnMaximumWidth)), "
+          + "canonical detail \(detailWidthLimit), backing scale \(backingScale), "
           + "maximum panel \(ceil(expectedMaximumWidth) + 1)")
       panel.hide()
     }

@@ -1476,8 +1476,9 @@ ruby -e '
       preparation.include?("Task.detached(priority: .userInitiated)")
   abort "UpdateChecker init regained an implicit network or runtime check" if
     update_initializer.match?(/\b(?:check|refreshRuntime|startCheck)\(\)/)
-  abort "Host can launch a substituted or recent-item Settings copy" unless
-    settings_launch.include?("allowsRunningApplicationSubstitution = false") &&
+  abort "Host can launch Settings without activation or exact-copy guards" unless
+    settings_launch.include?("configuration.activates = true") &&
+      settings_launch.include?("allowsRunningApplicationSubstitution = false") &&
       settings_launch.include?("addsToRecentItems = false")
 ' || fail "Settings first-screen work escaped its deferred owner"
 if rg -n 'Timer|LaunchAgent|UNUserNotification|startMonitoring' \
