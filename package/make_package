@@ -17,6 +17,7 @@ profile_receipt="io.github.ares-x.inputmethod.Linnet.profile.pkg"
 core_install_location="/Library/Input Methods"
 support_install_location="/Library/Application Support/Linnet"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
+release_tool="${LINNET_RELEASE_TOOL:-}"
 unset LINNET_RELEASE_TOOL
 
 fail_package() {
@@ -31,7 +32,7 @@ fail_package() {
 [[ "${source_epoch}" =~ ^[0-9]+$ ]] || fail_package "invalid SOURCE_DATE_EPOCH"
 
 for required_tool in awk bash chmod cmp codesign cp date ditto find git grep mkdir mktemp mv \
-    pkgbuild plutil productbuild readlink ruby sed sort stat touch unlink xcrun; do
+    pkgbuild plutil productbuild readlink ruby sed sort stat touch unlink; do
   command -v "${required_tool}" >/dev/null 2>&1 ||
     fail_package "required release tool is unavailable: ${required_tool}"
 done
@@ -48,6 +49,9 @@ build="$(plutil -extract CFBundleVersion raw -o - "${info_path}")"
 [[ "${build}" =~ ^(0|[1-9][0-9]*)$ ]] || fail_package "invalid product build"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
   fail_package "LINNET_CANDIDATE_REVISION must name the exact candidate Git OID"
+[[ "${release_tool}" == /* && -f "${release_tool}" && ! -L "${release_tool}" &&
+   -x "${release_tool}" ]] ||
+  fail_package "LINNET_RELEASE_TOOL must name the canonical precompiled pack CLI"
 actual_revision="$(git -C "${project_root}" rev-parse --verify HEAD^{commit})"
 [[ "${actual_revision}" == "${candidate_revision}" ]] ||
   fail_package "candidate revision differs from the candidate checkout"
@@ -105,8 +109,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-pack_tool="${project_root}/build/linnet-pack"
-make -C "${project_root}" --no-print-directory linnet-pack-tool
+pack_tool="${release_tool}"
 
 core_payload="${work_root}/payload-core"
 chinese_payload="${work_root}/payload-chinese"

@@ -27,6 +27,15 @@ rg -Fq 'verification_scope=publication' package/make_package ||
   fail "package assembly has no single public community verification scope"
 rg -Fq 'case "${verification_scope}" in publication)' package/verify_package ||
   fail "package verification accepts a non-public identity scope"
+[[ "$(rg -c 'package/verify_package' package/make_package)" -eq 2 ]] ||
+  fail "package assembly must verify Core and Complete exactly once"
+if rg -n 'package/verify_package' package/make_archive; then
+  fail "archive assembly repeated the package owner's completed verification"
+fi
+rg -q '^archive:[[:space:]]+package$' Makefile ||
+  fail "archive no longer consumes the package owner's verified output"
+[[ "$(rg -c 'package/verify_package' package/verify_publication_artifacts)" -eq 1 ]] ||
+  fail "final publication lost its distinct byte-consumer verification boundary"
 
 tests/verify_lean_data_trust.sh
 
@@ -67,9 +76,25 @@ ruby -e '
     tests/verify_data_channel_release.sh tests/verify_visible_settings_fixture.sh
   ]
   sources = paths.to_h { |path| [path, File.read(path)] }
-  callers = paths - ["Makefile", "tests/verify_package_architecture.sh"]
-  abort "a pack-tool caller bypasses the canonical Make target" unless
-    callers.all? { |path| sources.fetch(path).include?("linnet-pack-tool") }
+  compiler_callers = %w[
+    action-install.sh scripts/release-control tests/verify_data_channel_release.sh
+    tests/verify_visible_settings_fixture.sh
+  ]
+  abort "a pack-tool compiler caller bypasses the canonical Make target" unless
+    compiler_callers.all? { |path|
+      sources.fetch(path).include?("linnet-pack-tool")
+    }
+  packaging_consumers = %w[package/make_package package/make_archive]
+  abort "package assembly regained a second pack-tool compiler" unless
+    packaging_consumers.all? { |path|
+      source = sources.fetch(path)
+      source.include?(%q{release_tool="${LINNET_RELEASE_TOOL:-}"}) &&
+        !source.include?("linnet-pack-tool")
+    }
+  makefile = sources.fetch("Makefile")
+  abort "Make did not pass one precompiled pack tool through both assemblies" unless
+    makefile.include?("package: community-verified linnet-pack-tool") &&
+    makefile.scan(%q{LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))"}).size == 2
 ' || fail "the pack CLI does not have one incremental compiler owner"
 if rg -n 'LINNET_PACK_PRIVATE|private[_-]key|manifest\.ed25519' \
     package tools sources scripts/release-control; then

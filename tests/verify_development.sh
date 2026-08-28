@@ -104,6 +104,7 @@ if [[ "${run_swift}" -eq 1 ]]; then
 fi
 
 if [[ "${run_rime}" -eq 1 ]]; then
+  tests/verify_rime_test_orchestration.sh
   tests/verify_lua_lifetime.sh
   tests/verify_data_release_baseline.sh
   tests/verify_chinese_upstream_workflow.sh

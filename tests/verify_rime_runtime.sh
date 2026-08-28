@@ -319,32 +319,34 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     --fast-config-reload-probe
 
 profile_cases=(
-  'natural:linnet_zh:srfa'
-  'full_pinyin:linnet_zh_pinyin:suanfa'
-  'flypy:linnet_zh_flypy:srfa'
-  'microsoft:linnet_zh_mspy:srfa'
-  'sogou:linnet_zh_sogou:srfa'
-  'abc:linnet_zh_abc:spfa'
-  'ziguang:linnet_zh_ziguang:slfa'
-  'jiajia:linnet_zh_jiajia:scfa'
+  'semicolon:natural:linnet_zh:srfa'
+  'semicolon:full_pinyin:linnet_zh_pinyin:suanfa'
+  'semicolon:flypy:linnet_zh_flypy:srfa'
+  'semicolon:microsoft:linnet_zh_mspy:srfa'
+  'semicolon:sogou:linnet_zh_sogou:srfa'
+  'semicolon:abc:linnet_zh_abc:spfa'
+  'semicolon:ziguang:linnet_zh_ziguang:slfa'
+  'semicolon:jiajia:linnet_zh_jiajia:scfa'
+  # Profile and trigger are separate renderer facts. The Swift owner test
+  # proves the alternate trigger reaches every schema; retain the one native
+  # cross-case whose Microsoft code itself contains a semicolon.
+  'vertical_bar:microsoft:linnet_zh_mspy:srfa'
 )
-for trigger in semicolon vertical_bar; do
-  for profile_case in "${profile_cases[@]}"; do
-    IFS=: read -r profile schema code <<<"${profile_case}"
-    "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
-    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-      bin/rime_deployer --build "${user}" "${shared}" \
-        "${user}/build" >/dev/null
-    rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
-    rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
-    test -s "${user}/build/${schema}.prism.bin"
-    prefix=';'
-    [[ "${trigger}" == vertical_bar ]] && prefix='|'
-    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-      "${scratch}/rime-smoke" "${shared}" "${user}" \
-        --english-profile-probe \
-          "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
-  done
+for profile_case in "${profile_cases[@]}"; do
+  IFS=: read -r trigger profile schema code <<<"${profile_case}"
+  "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    bin/rime_deployer --build "${user}" "${shared}" \
+      "${user}/build" >/dev/null
+  rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
+  rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
+  test -s "${user}/build/${schema}.prism.bin"
+  prefix=';'
+  [[ "${trigger}" == vertical_bar ]] && prefix='|'
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${scratch}/rime-smoke" "${shared}" "${user}" \
+      --english-profile-probe \
+        "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
 done
 
 for page_size in 3 5 7 9; do

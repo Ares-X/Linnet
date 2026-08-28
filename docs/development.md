@@ -124,62 +124,51 @@ scripts/upstream-sync verify
 patch 是否仍精确适用，以及 Linnet 自己的词典和交互优化是否被保留；然后运行
 focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有这些结果都
 通过后，才在同一个提交中更新 gitlink、`upstreams.lock.json`、必要 patch 和数据
-release identity。进入发布时，只有精确 main revision 和最终八件产物
-`package/verify_publication_artifacts` 验证才能冻结本地候选；普通 main 提交不会额外
-构建或签名候选。真实安装验收必须使用该本地归档同一次签名产生的原字节；
-通过后，唯一的 revision + 八文件集合摘要 SSH 控制标签依次授权 `core`、`data`、
-`catalog` 与 `public` / Latest。控制标签推送前不得创建 Release 或推进稳定 Catalog。
-定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并上游或发布。
+release identity。定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并
+上游或发布。
 
-RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此上游 URL 只用于
-发现和本地审查候选；被 Linnet 接纳的原始模型字节数与摘要仍记录在
-`rime_lmdg_grammar`，冷构建只从 lock 指定的同仓库固定 `data-N` LTS 包获取，再由
-PackTool 验证容器、解包并复核内部原始模型。接受新模型时，维护者须先在隔离
-checkout 中预计算未来 LTS 包摘要，并在同一个最终提交里写入未来 `data-N` URL、
-容器摘要、原始模型摘要和数据 release identity。本地已验证的原始模型允许这个最终
-提交在远端包尚未存在时生成并验证完整八件归档。随后先把该精确提交推到一个临时、
-不匹配 `v*.*.*` 的 seed tag，再由唯一 mutation owner 发布同一提交的五件数据资产：
+正常正式候选必须是 clean、精确远端 `main` revision，并已有同 revision 成功的
+`Linnet manual full CI`。显式
+`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动 macOS release Action；
+GitHub runner 使用临时 Keychain 构建、签名、打包和最终验证一次，再把互不重叠的
+Core 2 件、data 5 件和 public 1 件直接写入三个 Draft GitHub Releases。候选传输
+不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
 
-```bash
-git tag "data-seed-${sequence}" "${candidate_revision}"
-git push origin "refs/tags/data-seed-${sequence}"
-GH_TOKEN=... GITHUB_REPOSITORY=Ares-X/Linnet \
-  LINNET_RELEASE_TOOL=/absolute/path/to/verified/linnet-pack \
-  package/publish_github_release data-seed "${archive_dir}" \
-  "${version}" "${sequence}" "${candidate_revision}"
-git push origin ":refs/tags/data-seed-${sequence}"
-git tag -d "data-seed-${sequence}"
-```
+RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此普通冷构建只从
+lock 指定的同仓库固定 `data-N` LTS pack 恢复，再由 PackTool 验证容器、内部模型
+bytes 和 SHA-256。接受新模型时，维护者仍先在隔离 checkout 预计算未来 LTS pack
+摘要，并在同一个最终提交写入上游原始模型身份、未来 `data-N` 身份和数据 release
+identity。由于未来 `data-N` 尚不存在，只有显式
+`linnet-data-seed/v<VERSION>-<SEQUENCE>-<FULL_REVISION>` 标签可以启动 seed：
 
-这个 `data-seed` 步骤是正常 main/CI 发布门之外唯一的冷构建启动边界：它仍须由最终
-八件产物 verifier 接受，并且远端 `data-seed-N` 必须精确指向 candidate revision；
-它只允许发布五件 `data` 预发布资产，不得调用 `catalog`，也不得推进 `data-channel`，
-因此尚未验收的未来模型不会被已安装用户看到。发布后必须从 clean checkout 走一次
-固定包冷构建，确认外层容器和内部原始模型都与 lock 一致；只有同一个
-`candidate_revision` 才能快进到 `main`。临时 seed tag 不触发产品发布 workflow，
-发布成功后立即删除；正式 `data-N` tag 继续绑定该提交。普通构建没有回退到可变
-上游资产的路径。
+- macOS Action 只在这个显式模式从上游锁定 URL 下载原始模型，并先验证 lock 中的
+  bytes/SHA-256；
+- 同一个 Action 完成正式的完整八文件构建和
+  `package/verify_publication_artifacts`，但只暂存并公开五件 data 预发布资产；
+- seed 不创建 Core/Public Release，不写 `data-channel`，因此已安装用户看不到它；
+- 只有同一个 `candidate_revision` 可以快进到 `main`；随后正常 manual CI 和
+  candidate Action 必须从已发布的固定 `data-N` pack 冷构建并得到相同 data bytes。
 
-进入正常产品发布时，候选必须是 clean、精确远端 `main` revision。本机固定 CMS
-身份只构建和签名一次，独立 verifier 接受精确八文件；真实 Settings 与
-InputMethodKit 安装验收只使用该目录的原字节。通过后执行
-`scripts/release-control publish /absolute/release-directory`。命令以非 force SSH tag
-绑定版本、完整 revision 和八文件集合摘要，再由同一个 publisher 依次执行 `core`、
-`data`（此时只接受既有 seed 的相同字节）、`catalog` 和 `public` / Latest。正式
-`v<version>` 标签只标识版本，`linnet-publication/*` 控制标签只授权已验收的同一批
-字节；GitHub 不重新编译或重签。稳定 Catalog 仍只有一个 owner 和一个 URL。
+进入安装验收时，本地只下载 candidate Action 的三个 Draft Release 原字节。验收人
+运行 `scripts/release-control authorize /absolute/release-directory` 后，本地 owner
+重新验证八文件、远端 SHA-256/size 和精确 main，只创建非 force 的
+`linnet-publication/*` 标签。该标签启动 Ubuntu Action；publisher 不下载大型资产，
+只读取 GitHub metadata 和约 4 KB Catalog，按 Core → data → 非强制快进 Catalog →
+public / Latest 发布。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖、经 fingerprint 和 inventory digest
-验证的原生 Rime 编译 transport，以及英文生成数据。只有默认 `main`
-的 native Rime profile 可以在成功任务结束后写入缓存；功能分支和候选只读取当前
-ref 或默认分支缓存，避免每个
-候选保存一份无法被后续候选复用的大型副本。
-缓存不是版本或发布权威：每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、
-内部 fingerprint 与产物形状；不匹配时只重建受影响部分。缓存命中也不会跳过
-archive 和 publication 验证。commit/PR CI 先串行执行快速 lint、release owner 和数据
-identity 门，通过后把 App、Swift owner tests 与 native Rime 三个完整 profile 放到
-隔离 runner 并行执行；任一 profile 失败仍使精确 revision 的整体 CI 失败。branch push
-不再与同 revision 的 PR workflow 重复运行完整门，连续更新也只保留最新一次。
+验证的原生 Rime 编译 transport，以及英文生成数据。只有手动 full CI 的 native Rime
+profile 可以在成功任务结束后写入缓存；PR 和候选只读缓存。缓存不是版本或发布权威：
+每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、内部 fingerprint 与产物
+形状，不匹配时只重建受影响部分。
+
+PR CI 先执行快速 lint、release owner 和数据 identity 门，再把 App、Swift owner
+tests 与 native Rime 三个有独立耗时价值的 profile 放到隔离 runner 并行执行。
+Settings UI acceptance 已并入唯一 App build，不再为同一 App 启动第四个 product
+runner。旧四 product runner 加 quality 的成功样本合计约 30 个 macOS runner
+minutes；新矩阵的真实总量必须等工作流启用后的首个完整运行再测，不能把并行墙钟
+当成用量。`main` push 不自动重复完整矩阵；需要发布或专项验收时才手动运行
+`Linnet manual full CI`。连续 PR 更新仍只保留最新一次。
 
 ## 构建
 
@@ -204,16 +193,17 @@ no_download=1 ./action-build.sh release
 - 不安装、注册、启用或选择输入源；
 - 不创建公开 PKG，也不授权发布。
 
-普通贡献者运行到 `release` 即可，不需要证书或 Keychain。官方 `archive` lane
-必须使用仓库钉住的固定 community CMS leaf，因此只对持有仓库外发布身份的维护者
-开放；缺少精确身份时会在打包前失败，不会回退到 ad-hoc。旧 `candidate` lane 与
-自定义 UAT 签名 profile 已删除；任何可安装候选只认固定 production CMS identity。
+普通贡献者运行到 `release` 即可，不需要证书或 Keychain。正式 `archive` lane
+由 macOS release Action 使用仓库钉住的固定 community CMS leaf；缺少精确身份时
+会在打包前失败，不会回退到 ad-hoc。维护者 Mac 上的同身份 `archive` 只作预检，
+不能成为候选或上传源。旧 `candidate` lane 与自定义 UAT 签名 profile 已删除；
+任何可安装候选只认固定 production CMS identity。
 
 ## 社区版打包
 
-### 一次性配置本机签名身份
+### 一次性配置本机预检签名身份
 
-本地发布身份属于维护者工具，不属于 Linnet 产品数据，也不会被卸载器清理。先把固定
+本地预检身份属于维护者工具，不属于 Linnet 产品数据，也不会被卸载器清理。先把固定
 P12 和它的一行密码分别放到以下仓库外路径，两者都必须是当前用户拥有、权限为
 `0600` 的普通文件：
 
@@ -234,7 +224,7 @@ scripts/provision-community-signing
 任一输出已经存在都会直接停止；命令没有 replace、repair 或 delete 模式。失败时只
 清理本次创建的精确目标并恢复原 Keychain 搜索列表。P12 密码和随机 Keychain 密码都
 不是 macOS 登录密码；如果配置或之后的 `archive` 弹出密码框，应取消并排查，不要
-输入登录密码、删除既有目标或重复运行配置命令。日常 signer 只消费这两个固定输出。
+输入登录密码、删除既有目标或重复运行配置命令。本地预检 signer 只消费这两个固定输出。
 
 发布维护者可以在自己的 Mac 上预检固定 production CMS 打包。前提是：
 
@@ -253,12 +243,13 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 
 `archive` 会沿同一链生成并验证固定 CMS leaf 的 App、未签名的 Complete/Core
 PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修补输出。由于 CMS
-签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载自动
-`release-ci` 记录的同一不可变八文件 artifact。
+签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载
+`release-ci` 直接写入三个 Draft GitHub Releases 的同一八文件原字节。
 
 ### 本地安装验收与 macOS 安全检查
 
-社区安装包没有 Apple Developer ID，也没有 Apple 公证。只有在独立确认精确 HEAD、artifact SHA-256 和候选 metadata 后，才可以使用 macOS 的单次标准信任流程：
+社区安装包没有 Apple Developer ID，也没有 Apple 公证。只有在独立确认精确 source
+revision、Draft Release SHA-256 和候选 metadata 后，才可以使用 macOS 的单次标准信任流程：
 
 1. 在 Finder 中按住 Control 点击或右键点击已经校验的 PKG，选择“打开”。
 2. 如果系统只报告无法验证开发者或无法检查恶意软件，打开 **系统设置 → 隐私与安全性**，在安全性区域选择 **仍要打开 / Open Anyway**；该按钮通常只在打开尝试后约一小时内出现，具体界面以 [Apple 的当前说明](https://support.apple.com/guide/mac-help/mh40616/mac) 为准。
@@ -279,7 +270,7 @@ Host 连续性和 TIS 不变性不从这份历史指纹推断，统一由当前 
 验证。该历史记录只闭合 legacy identity edge，不是当前候选菜单、Settings、真实输入
 或完整安装 UAT。
 
-每个精确候选仍须在同一真实账号使用 workflow 的不可变 artifact 完成
+每个精确候选仍须在同一真实账号使用 Action 生成的 Draft Release 原字节完成
 “两轮同 leaf Core”：先从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级
 到候选，再把同一候选的原字节重装一次。两轮都要
 证明 Installer 无注销、无 Keychain 密码提示、登录会话不变，并保留
@@ -303,9 +294,9 @@ Dock，并在最后一个窗口关闭后退出。
 PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出
 精确 commit、八文件集合摘要、逐文件 SHA-256、实际通过的验证和未执行项。
 安装验收不会自行创建公开版本 tag 或稳定 Release；只有验收人显式运行
-`scripts/release-control publish /absolute/release-directory` 后，唯一 publisher 才能
-复用哈希控制标签绑定的同一批字节完成发布。该操作使用 Git SSH 与 GitHub CLI，
-不依赖 GitHub 网页或 GitHub Actions 编译。
+`scripts/release-control authorize /absolute/release-directory` 后，本地才会用
+Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
+复核同一批字节并完成发布；本地命令不能上传、编辑 Release 或推进 Catalog。
 
 ## 数据维护
 

@@ -277,8 +277,9 @@ community-verified: community
 # The stable community PKG follows Squirrel's pkgbuild/component route, then
 # wraps the component with visible license, upstream notice and privacy pages.
 # Creation and static expansion do not install, launch or register the App.
-package: community-verified
+package: community-verified linnet-pack-tool
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
+	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_package \
 		"$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)" \
 		"$(ARCHIVE_OUTPUT_DIR)"
@@ -287,6 +288,7 @@ package: community-verified
 # the canonical normal-install artifact and is built first.
 archive: package
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
+	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_archive \
 		"$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)" \
 		"$(ARCHIVE_OUTPUT_DIR)"

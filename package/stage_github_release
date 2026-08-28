@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# GitHub Actions transport boundary for a verified candidate. It may create an
+# unpublished GitHub draft and upload missing exact assets. An already
+# published byte-identical data seed is accepted read-only, but this owner
+# cannot publish a release, create a release tag, or advance the stable Catalog.
+
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+mode="${1:-}"
+channel="${2:-}"
+release_dir="${3:-}"
+version="${4:-}"
+catalog_sequence="${5:-}"
+candidate_revision="${6:-}"
+repository="${GITHUB_REPOSITORY:-}"
+
+fail_stage() {
+  echo "stage_github_release: $*" >&2
+  exit 1
+}
+
+[[ "$#" -eq 6 && ( "${mode}" == stage || "${mode}" == verify ) ]] ||
+  fail_stage "usage: {stage|verify} {core|data|public} RELEASE_DIRECTORY VERSION CATALOG_SEQUENCE CANDIDATE_REVISION"
+[[ "${mode}" == verify || "${GITHUB_ACTIONS:-}" == true ]] ||
+  fail_stage "candidate draft mutation is owned by GitHub Actions"
+[[ "${channel}" == core || "${channel}" == data || "${channel}" == public ]] ||
+  fail_stage "unknown release channel: ${channel}"
+[[ "${repository}" == Ares-X/Linnet ]] ||
+  fail_stage "GITHUB_REPOSITORY must be Ares-X/Linnet"
+[[ "${release_dir}" == /* && -d "${release_dir}" && ! -L "${release_dir}" ]] ||
+  fail_stage "release directory is unsafe"
+[[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail_stage "product version is invalid"
+[[ "${catalog_sequence}" =~ ^[1-9][0-9]*$ ]] ||
+  fail_stage "Catalog sequence is invalid"
+[[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
+  fail_stage "candidate revision is invalid"
+[[ "$(git -C "${project_root}" rev-parse --verify HEAD^{commit})" == \
+  "${candidate_revision}" ]] || fail_stage "candidate checkout differs"
+command -v gh >/dev/null 2>&1 || fail_stage "gh is unavailable"
+
+case "${channel}" in
+  core)
+    tag="core-v${version}"
+    title="Linnet Core update ${version}"
+    prerelease=true
+    ;;
+  data)
+    tag="data-${catalog_sequence}"
+    title="Linnet automatic data channel ${catalog_sequence}"
+    prerelease=true
+    ;;
+  public)
+    tag="v${version}"
+    title="Linnet ${version}"
+    prerelease=false
+    ;;
+esac
+
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-release-stage.XXXXXX")"
+cleanup() {
+  if [[ "${work_root}" == "${TMPDIR:-/tmp}/linnet-release-stage."* ]]; then
+    find "${work_root}" -depth -delete 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM HUP
+
+expected="${work_root}/expected.tsv"
+release_json="${work_root}/release.json"
+notes="${work_root}/notes.md"
+: >"${expected}"
+while IFS= read -r name; do
+  [[ -n "${name}" ]] || continue
+  path="${release_dir}/${name}"
+  [[ -f "${path}" && ! -L "${path}" ]] ||
+    fail_stage "verified release asset is missing: ${name}"
+  digest="$(shasum -a 256 "${path}" | awk '{print $1}')"
+  bytes="$(stat -f %z "${path}")"
+  printf '%s\tsha256:%s\t%s\n' "${name}" "${digest}" "${bytes}" >>"${expected}"
+done < <("${project_root}/package/release_asset_manifest" \
+  "${channel}" "${version}" "${catalog_sequence}")
+[[ -s "${expected}" ]] || fail_stage "release channel is empty"
+LC_ALL=C sort -o "${expected}" "${expected}"
+
+append_version_changes() {
+  ruby - "${project_root}/CHANGELOG.md" "${version}" <<'RUBY'
+path, version = ARGV
+lines = File.readlines(path, chomp: false)
+prefix = "## #{version} — "
+starts = lines.each_index.select { |index| lines.fetch(index).start_with?(prefix) }
+abort "CHANGELOG must contain exactly one #{version} section" unless starts.size == 1
+first = starts.fetch(0) + 1
+last = (first...lines.size).find { |index| lines.fetch(index).start_with?("## ") } || lines.size
+body = lines[first...last].join.strip
+abort "CHANGELOG #{version} section is empty" if body.empty?
+abort "CHANGELOG #{version} section needs a category heading" unless body.match?(/^### /)
+abort "CHANGELOG #{version} section needs a user-visible change" unless body.match?(/^- /)
+puts body
+RUBY
+}
+
+case "${channel}" in
+  public)
+    digest="$(awk -F '\t' '$1 == "Linnet.pkg" { sub(/^sha256:/, "", $2); print $2 }' \
+      "${expected}")"
+    {
+      echo "## 本版本更新"
+      echo
+      append_version_changes
+      echo
+      echo "## 下载与升级"
+      echo
+      echo "普通用户只需下载 **Linnet.pkg**。这是本版本唯一的正式安装资产。"
+      echo
+      echo "SHA-256：\`${digest}\`"
+      echo
+      echo "已完成首次安装和一次注销的用户，请使用同仓库的"
+      echo "[Core 更新包](https://github.com/${repository}/releases/tag/core-v${version})；"
+      echo "Core 更新不会再次要求注销。"
+    } >"${notes}"
+    ;;
+  core)
+    {
+      echo "## 本版本更新"
+      echo
+      append_version_changes
+      echo
+      echo "## Core 更新"
+      echo
+      echo "仅用于已经完成首次安装和一次注销的 Linnet 用户。"
+      echo "Core 更新保留语言包和个人数据，不要求再次注销。"
+      echo
+      echo "SHA-256："
+      while IFS=$'\t' read -r name digest _; do
+        printf -- '- `%s` — `%s`\n' "${name}" "${digest#sha256:}"
+      done <"${expected}"
+    } >"${notes}"
+    ;;
+  data)
+    {
+      echo "Linnet Settings 使用的同仓库自动数据频道。普通用户无需手动下载这些文件。"
+      echo "Catalog 绑定每个语言包的字节数和 SHA-256。"
+      echo
+      echo "频道资产："
+      while IFS=$'\t' read -r name digest _; do
+        printf -- '- `%s` — `%s`\n' "${name}" "${digest#sha256:}"
+      done <"${expected}"
+    } >"${notes}"
+    ;;
+esac
+
+release_exists=false
+release_error="${work_root}/release-error"
+if gh release view "${tag}" --repo "${repository}" \
+    --json databaseId,isDraft,isPrerelease,tagName,targetCommitish,assets \
+    >"${release_json}" 2>"${release_error}"; then
+  release_exists=true
+elif [[ "$(tr -d '\r\n' <"${release_error}")" != "release not found" ]]; then
+  [[ ! -s "${release_error}" ]] || cat "${release_error}" >&2
+  fail_stage "${tag} release identity is unavailable"
+fi
+
+if [[ "${release_exists}" == false ]]; then
+  [[ "${mode}" == stage ]] || fail_stage "${tag} draft is missing"
+  create_args=(release create "${tag}" --repo "${repository}"
+    --target "${candidate_revision}" --draft --title "${title}"
+    --notes-file "${notes}")
+  [[ "${prerelease}" == true ]] && create_args+=(--prerelease)
+  gh "${create_args[@]}"
+  gh release view "${tag}" --repo "${repository}" \
+    --json databaseId,isDraft,isPrerelease,tagName,targetCommitish,assets \
+    >"${release_json}"
+fi
+
+release_state="$(ruby -rjson -e '
+  release = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort unless release.fetch("tagName") == ARGV.fetch(1)
+  abort unless release.fetch("isPrerelease") == (ARGV.fetch(2) == "true")
+  puts release.fetch("isDraft")
+' "${release_json}" "${tag}" "${prerelease}")" ||
+  fail_stage "${tag} release kind is invalid"
+
+if [[ "${release_state}" == true ]]; then
+  ruby -rjson -e '
+    release = JSON.parse(File.binread(ARGV.fetch(0)))
+    abort unless release.fetch("targetCommitish") == ARGV.fetch(1)
+  ' "${release_json}" "${candidate_revision}" ||
+    fail_stage "${tag} draft targets another revision"
+else
+  tag_revision="$(gh api "repos/${repository}/git/ref/tags/${tag}" --jq '.object.sha')" ||
+    fail_stage "${tag} published tag is unavailable"
+  [[ "${tag_revision}" == "${candidate_revision}" ]] ||
+    fail_stage "${tag} published tag resolves to another revision"
+fi
+
+actual="${work_root}/actual.tsv"
+ruby -rjson -e '
+  release = JSON.parse(File.binread(ARGV.fetch(0)))
+  release.fetch("assets").each do |asset|
+    puts [asset.fetch("name"), asset.fetch("digest"), asset.fetch("size")].join("\t")
+  end
+' "${release_json}" | LC_ALL=C sort >"${actual}"
+
+ruby -e '
+  expected = File.readlines(ARGV.fetch(0), chomp: true).to_h do |line|
+    name, digest, bytes = line.split("\t", 3)
+    [name, [digest, bytes]]
+  end
+  seen = {}
+  actual = File.readlines(ARGV.fetch(1), chomp: true).to_h do |line|
+    name, digest, bytes = line.split("\t", 3)
+    abort "duplicate remote asset" if seen.key?(name)
+    seen[name] = true
+    [name, [digest, bytes]]
+  end
+  actual.each { |name, identity| abort "foreign remote asset" unless expected[name] == identity }
+' "${expected}" "${actual}" || fail_stage "${tag} contains foreign asset bytes"
+
+if [[ "${release_state}" == true && "${mode}" == stage ]]; then
+  while IFS=$'\t' read -r name _ _; do
+    if ! cut -f1 "${actual}" | grep -Fxq "${name}"; then
+      gh release upload "${tag}" "${release_dir}/${name}" --repo "${repository}"
+    fi
+  done <"${expected}"
+  gh release view "${tag}" --repo "${repository}" \
+    --json databaseId,isDraft,isPrerelease,tagName,targetCommitish,assets \
+    >"${release_json}"
+  ruby -rjson -e '
+    release = JSON.parse(File.binread(ARGV.fetch(0)))
+    release.fetch("assets").each do |asset|
+      puts [asset.fetch("name"), asset.fetch("digest"), asset.fetch("size")].join("\t")
+    end
+  ' "${release_json}" | LC_ALL=C sort >"${actual}"
+fi
+
+cmp -s "${expected}" "${actual}" ||
+  fail_stage "${tag} assets are not the exact verified ${channel} set"
+if [[ "${release_state}" == false && "${mode}" == stage &&
+      "${channel}" != data ]]; then
+  fail_stage "only a byte-identical published data seed can be reused"
+fi
+if [[ "${release_state}" == true ]]; then
+  state_label=draft
+else
+  state_label=published
+fi
+echo "Linnet ${channel} ${state_label} Release bytes: VERIFIED (${tag})"

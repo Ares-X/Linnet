@@ -35,8 +35,11 @@ namespace {
 using Nanoseconds = std::chrono::nanoseconds;
 using LatencySample = Nanoseconds::rep;
 
-constexpr size_t kLatencyWarmupSamples = 4096;
-constexpr size_t kLatencySamples = 32768;
+// Keep enough observations for a stable p99 (about 82 tail samples) without
+// making every CI run pay for benchmark-scale repetition. Correctness cases
+// are exercised separately below; this loop owns only the latency contract.
+constexpr size_t kLatencyWarmupSamples = 1024;
+constexpr size_t kLatencySamples = 8192;
 constexpr int kBackSpace = 0xff08;
 constexpr int kTab = 0xff09;
 constexpr int kReturn = 0xff0d;

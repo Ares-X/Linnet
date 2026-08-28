@@ -58,19 +58,14 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-if [[ -n "${release_tool}" ]]; then
-  [[ "${release_tool}" == /* && -f "${release_tool}" && ! -L "${release_tool}" && -x "${release_tool}" ]] ||
-    fail_archive "LINNET_RELEASE_TOOL must name the precompiled pack CLI"
-  pack_tool="${release_tool}"
-else
-  pack_tool="${project_root}/build/linnet-pack"
-  make -C "${project_root}" --no-print-directory linnet-pack-tool
-fi
+[[ "${release_tool}" == /* && -f "${release_tool}" && ! -L "${release_tool}" &&
+   -x "${release_tool}" ]] ||
+  fail_archive "LINNET_RELEASE_TOOL must name the canonical precompiled pack CLI"
+pack_tool="${release_tool}"
 signing_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app_path}/Contents/Info.plist" 2>/dev/null || true)"
 case "${signing_profile}" in
   community-cms)
-    verification_scope=publication
     code_identity="$("${project_root}/scripts/linnet-code-identity" \
       verify-product "${app_path}")" ||
       fail_archive "community App identity is invalid"
@@ -87,12 +82,6 @@ ruby -rjson -e '
     identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
 ' "${code_identity}" "${candidate_revision}" ||
   fail_archive "App identity differs from the candidate revision"
-LINNET_RELEASE_TOOL="${pack_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
-  "${project_root}/package/verify_package" "${core_pkg}" "${app_path}" core \
-    "${verification_scope}"
-LINNET_RELEASE_TOOL="${pack_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
-  "${project_root}/package/verify_package" "${complete_pkg}" "${app_path}" complete \
-    "${verification_scope}"
 expanded_complete="${work_root}/expanded-complete"
 pkgutil --expand-full "${complete_pkg}" "${expanded_complete}"
 
