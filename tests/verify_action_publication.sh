@@ -386,6 +386,10 @@ end
 FAKE_GH
 chmod 755 "${fake_bin}/git" "${fake_bin}/gh"
 
+# The real GitHub runner exports this globally. Fixture calls without an
+# explicit override model a local maintainer process and must not inherit it.
+unset GITHUB_ACTIONS
+
 write_release() {
   local state="$1" channel="$2" tag="$3" prerelease="$4" draft="$5"
   ruby -rjson -rdigest - "${state}" "${fixture_assets}" \
