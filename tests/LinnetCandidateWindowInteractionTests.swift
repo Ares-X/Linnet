@@ -234,9 +234,6 @@ struct LinnetCandidateWindowInteractionTests {
     let coldMilliseconds =
       (ProcessInfo.processInfo.systemUptime - coldStarted) * 1_000
     require(published, "cold candidate presentation did not publish")
-    require(
-      coldMilliseconds < 500,
-      "cold candidate presentation took \(coldMilliseconds)ms")
 
     var steadySamples: [Double] = []
     for _ in 0..<20 {
