@@ -14,13 +14,14 @@ if [[ "${1:-}" == --single-key-ranking-probe ||
       "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --mixed-latency-probe ||
       "${1:-}" == --warm-session-probe ||
+      "${1:-}" == --cold-client-probe ||
       "${1:-}" == --shift-probe ||
       "${1:-}" == --core-shift-overlap-probe ||
       "${1:-}" == --prediction-layout-probe ||
       "${1:-}" == --partial-return-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--shift-probe|--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe]" >&2
+  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--shift-probe|--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe]" >&2
   exit 64
 fi
 
@@ -112,11 +113,11 @@ sdk="$(xcrun --show-sdk-path)"
 "${swiftc}" -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionFixture.swift \
   -o "${scratch}/projection-fixture"
@@ -220,6 +221,8 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime mixed-input latency measurement: COMPLETE"
   elif [[ "${runtime_probe}" == --warm-session-probe ]]; then
     echo "Linnet native Rime retained warm-session latency: PASS"
+  elif [[ "${runtime_probe}" == --cold-client-probe ]]; then
+    echo "Linnet native Rime cold-client first-key latency: PASS"
   elif [[ "${runtime_probe}" == --single-key-ranking-probe ]]; then
     echo "Linnet native Rime focused single-key ranking probe: PASS"
   elif [[ "${runtime_probe}" == --shift-probe ]]; then
@@ -316,32 +319,34 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     --fast-config-reload-probe
 
 profile_cases=(
-  'natural:linnet_zh:srfa'
-  'full_pinyin:linnet_zh_pinyin:suanfa'
-  'flypy:linnet_zh_flypy:srfa'
-  'microsoft:linnet_zh_mspy:srfa'
-  'sogou:linnet_zh_sogou:srfa'
-  'abc:linnet_zh_abc:spfa'
-  'ziguang:linnet_zh_ziguang:slfa'
-  'jiajia:linnet_zh_jiajia:scfa'
+  'semicolon:natural:linnet_zh:srfa'
+  'semicolon:full_pinyin:linnet_zh_pinyin:suanfa'
+  'semicolon:flypy:linnet_zh_flypy:srfa'
+  'semicolon:microsoft:linnet_zh_mspy:srfa'
+  'semicolon:sogou:linnet_zh_sogou:srfa'
+  'semicolon:abc:linnet_zh_abc:spfa'
+  'semicolon:ziguang:linnet_zh_ziguang:slfa'
+  'semicolon:jiajia:linnet_zh_jiajia:scfa'
+  # Profile and trigger are separate renderer facts. The Swift owner test
+  # proves the alternate trigger reaches every schema; retain the one native
+  # cross-case whose Microsoft code itself contains a semicolon.
+  'vertical_bar:microsoft:linnet_zh_mspy:srfa'
 )
-for trigger in semicolon vertical_bar; do
-  for profile_case in "${profile_cases[@]}"; do
-    IFS=: read -r profile schema code <<<"${profile_case}"
-    "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
-    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-      bin/rime_deployer --build "${user}" "${shared}" \
-        "${user}/build" >/dev/null
-    rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
-    rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
-    test -s "${user}/build/${schema}.prism.bin"
-    prefix=';'
-    [[ "${trigger}" == vertical_bar ]] && prefix='|'
-    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-      "${scratch}/rime-smoke" "${shared}" "${user}" \
-        --english-profile-probe \
-          "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
-  done
+for profile_case in "${profile_cases[@]}"; do
+  IFS=: read -r trigger profile schema code <<<"${profile_case}"
+  "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    bin/rime_deployer --build "${user}" "${shared}" \
+      "${user}/build" >/dev/null
+  rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
+  rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
+  test -s "${user}/build/${schema}.prism.bin"
+  prefix=';'
+  [[ "${trigger}" == vertical_bar ]] && prefix='|'
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${scratch}/rime-smoke" "${shared}" "${user}" \
+      --english-profile-probe \
+        "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
 done
 
 for page_size in 3 5 7 9; do

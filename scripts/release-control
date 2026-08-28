@@ -2,8 +2,9 @@
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# One local maintainer boundary verifies, authorizes, and publishes the exact
-# archive already accepted on this Mac. GitHub never rebuilds release bytes.
+# The maintainer Mac consumes the exact bytes staged by the candidate Action.
+# After installed-product acceptance, one byte-bound SSH tag authorizes the
+# GitHub Action publisher. Local code cannot upload or publish release bytes.
 
 set -euo pipefail
 
@@ -17,15 +18,15 @@ fail() {
   exit 1
 }
 
-[[ "${command_name}" == publish && "$#" -eq 2 ]] || {
-  echo "usage: scripts/release-control publish ABSOLUTE_RELEASE_DIRECTORY" >&2
+[[ "${command_name}" == authorize && "$#" -eq 2 ]] || {
+  echo "usage: scripts/release-control authorize ABSOLUTE_RELEASE_DIRECTORY" >&2
   exit 64
 }
 [[ "${release_dir}" == /* && -d "${release_dir}" && ! -L "${release_dir}" ]] ||
   fail "release directory is unsafe"
 release_dir="$(cd "${release_dir}" && pwd -P)"
 
-for required_command in gh git ruby xcrun; do
+for required_command in gh git make ruby; do
   command -v "${required_command}" >/dev/null 2>&1 ||
     fail "${required_command} is unavailable"
 done
@@ -49,22 +50,8 @@ version="$(sed -n \
 catalog_sequence="$("${repo_root}/package/data_release_metadata" \
   get-catalog-sequence "${repo_root}/config/linnet-data-releases.json")"
 
-work_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-local-publication.XXXXXX")"
-cleanup() {
-  if [[ "${work_root}" == "${TMPDIR:-/tmp}/linnet-local-publication."* ]]; then
-    chmod -R u+w "${work_root}" 2>/dev/null || true
-    find "${work_root}" -depth -delete 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT INT TERM HUP
-
-release_tool="${work_root}/linnet-pack"
-xcrun swiftc -warnings-as-errors \
-  "${repo_root}/sources/LinnetPackContract.swift" \
-  "${repo_root}/sources/LinnetDataChannel.swift" \
-  "${repo_root}/sources/LinnetDataRegistry.swift" \
-  "${repo_root}/tools/LinnetDataCatalogBuilder.swift" \
-  "${repo_root}/tools/LinnetPackTool.swift" -o "${release_tool}"
+release_tool="${repo_root}/build/linnet-pack"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
 [[ -x "${release_tool}" && ! -L "${release_tool}" ]] ||
   fail "verified pack CLI was not produced"
 
@@ -75,8 +62,20 @@ candidate_identity="$("${repo_root}/package/release_candidate_identity" \
   "${release_dir}" "${version}" "${catalog_sequence}")"
 [[ "${candidate_identity}" =~ ^sha256:([0-9a-f]{64})$ ]] ||
   fail "candidate archive identity is invalid"
-authorization_tag="linnet-publication/v${version}-${revision}-h${BASH_REMATCH[1]}"
+candidate_digest="${BASH_REMATCH[1]}"
+authorization_tag="linnet-publication/v${version}-${revision}-h${candidate_digest}"
 authorization_ref="refs/tags/${authorization_tag}"
+
+gh auth status --hostname github.com >/dev/null
+# Authorization never uploads or repairs bytes after installed acceptance. It
+# proves that all three Action-staged drafts still contain the accepted
+# eight-file set, then creates the immutable tag consumed by release-ci.yml.
+for channel in core data public; do
+  GITHUB_REPOSITORY="${repository}" \
+    "${repo_root}/package/stage_github_release" verify \
+      "${channel}" "${release_dir}" "${version}" "${catalog_sequence}" \
+      "${revision}"
+done
 
 existing="$(git -C "${repo_root}" ls-remote origin "${authorization_ref}")" ||
   fail "publication authorization lookup failed"
@@ -86,12 +85,4 @@ elif [[ "${existing}" != "${revision}"$'\t'"${authorization_ref}" ]]; then
   fail "publication authorization already names another revision"
 fi
 
-gh auth status --hostname github.com >/dev/null
-for channel in core data catalog public; do
-  GITHUB_REPOSITORY="${repository}" LINNET_RELEASE_TOOL="${release_tool}" \
-    "${repo_root}/package/publish_github_release" \
-      "${channel}" "${release_dir}" "${version}" "${catalog_sequence}" \
-      "${revision}" "${authorization_tag}"
-done
-
-echo "Linnet ${version} published from ${candidate_identity}"
+echo "Linnet ${version} GitHub Action publication authorized from ${candidate_identity}"

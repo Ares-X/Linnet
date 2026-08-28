@@ -22,24 +22,24 @@ struct LinnetClientAppearanceTests {
 
     let client = LinnetClientAppearance.resolve(
       client: DarkClient(), systemAppearance: light)
-    require(client.source == .client && client.isDark,
+    require(client.isDark,
             "the active client's window appearance did not own automatic mode")
     require(client.appearance.name == .darkAqua,
             "the client appearance was replaced after it was resolved")
 
     let unsupported = LinnetClientAppearance.resolve(
       client: OrdinaryClient(), systemAppearance: dark)
-    require(unsupported.source == .system && unsupported.isDark,
+    require(unsupported.isDark && unsupported.appearance.name == .darkAqua,
             "a client without the optional appearance capability did not use macOS")
 
     let malformed = LinnetClientAppearance.resolve(
       client: MalformedClient(), systemAppearance: light)
-    require(malformed.source == .system && !malformed.isDark,
+    require(!malformed.isDark && malformed.appearance.name == .aqua,
             "a malformed private capability result became authoritative")
 
     let absent = LinnetClientAppearance.resolve(
       client: nil, systemAppearance: light)
-    require(absent.source == .system && !absent.isDark,
+    require(!absent.isDark && absent.appearance.name == .aqua,
             "an absent input client retained a stale application appearance")
 
     require(

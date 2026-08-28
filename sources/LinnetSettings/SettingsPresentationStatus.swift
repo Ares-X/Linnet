@@ -59,13 +59,6 @@ enum SettingsPresentationPackState: Equatable {
   case storageFailed
 }
 
-enum SettingsRuntimeReachability: Equatable {
-  case running
-  case paused
-  case degraded
-  case unreachable
-}
-
 enum SettingsPresentationSeverity: Equatable {
   case informational
   case success

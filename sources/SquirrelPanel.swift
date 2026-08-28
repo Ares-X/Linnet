@@ -8,7 +8,7 @@
 import AppKit
 
 final class SquirrelPanel: NSPanel {
-  struct Publication: Equatable {
+  struct Publication {
     let generation: UInt64
     let controllerID: ObjectIdentifier
   }
@@ -72,6 +72,8 @@ final class SquirrelPanel: NSPanel {
     contentView.addSubview(back)
     contentView.addSubview(view)
     contentView.addSubview(view.textView)
+    contentView.addSubview(view.detailDividerView)
+    contentView.addSubview(view.detailTextView)
     self.contentView = contentView
     candidateAccessibility.install(parent: view, rawTextView: view.textView)
   }
@@ -208,7 +210,7 @@ final class SquirrelPanel: NSPanel {
 
 extension SquirrelPanel {
   // Main function to add attributes to text output from librime
-  // swiftlint:disable:next cyclomatic_complexity function_parameter_count
+  // swiftlint:disable:next cyclomatic_complexity
   func update(
     preedit: String,
     selRange: NSRange,
@@ -284,10 +286,12 @@ extension SquirrelPanel {
     let usesInlineComments = LinnetCandidatePresentation.usesInlineComments(
       candidateFormat: theme.candidateFormat)
     let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
-      forLinearLayout: linear)
+      forLinearLayout: linear || vertical,
+      candidateFontPoint: theme.font.pointSize)
     let selectedDetail = usesInlineComments
       ? nil : selectedDetail(theme: theme, candidates: candidates.items, highlighted: index)
     var detailRange = NSRange.empty
+    var sidecarDetail: NSAttributedString?
 
     // candidates
     var candidateRanges = [NSRange](
@@ -359,29 +363,18 @@ extension SquirrelPanel {
     if let selectedDetail {
       switch detailGeometry.placement {
       case .footer:
-        text.append(NSAttributedString(
-          string: detailGeometry.textSeparator,
-          attributes: theme.detailAttrs))
+        text.append(NSAttributedString(string: "\n", attributes: theme.detailAttrs))
         detailRange = NSRange(location: text.length, length: selectedDetail.length)
         text.append(selectedDetail)
       case .sidecar:
-        if let sidecarRow = visualRows.first(where: { $0.contains(index) }),
-          let rowStartIndex = sidecarRow.first,
-          let anchorIndex = sidecarRow.last {
-          detailRange = attachSidecar(
-            selectedDetail, to: text, candidateRanges: &candidateRanges,
-            layout: SidecarLayout(
-              rowStartIndex: rowStartIndex,
-              anchorIndex: anchorIndex,
-              detailGeometry: detailGeometry,
-              theme: theme))
-        }
+        sidecarDetail = selectedDetail
       }
     }
 
     // text done!
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.textContentStorage?.attributedString = text
+    view.publishSidecarDetail(sidecarDetail)
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.setLayoutOrientation(vertical ? .vertical : .horizontal)
     guard publicationIsCurrent(currentPublication) else { return false }
@@ -407,11 +400,12 @@ extension SquirrelPanel {
     let publishedGeneration = currentPublication
     candidateAccessibility.publish(
       parent: view,
-      geometry: view.candidateAccessibilityGeometry(),
-      candidates: candidates.items,
-      highlightedIndex: index,
-      controlMode: controlMode,
-      shouldAnnounce: update,
+      publication: .init(
+        geometry: view.candidateAccessibilityGeometry(),
+        candidates: candidates.items,
+        highlightedIndex: index,
+        controlMode: controlMode,
+        shouldAnnounce: update),
       selectCandidate: { [weak self, weak publishedController] absoluteIndex in
         guard let self, let publishedController else { return false }
         guard publicationIsCurrent(publishedGeneration) else { return false }

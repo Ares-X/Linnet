@@ -41,7 +41,7 @@ enum LinnetSettingsAppearancePreview {
     }
   }
 
-  struct RGB: Equatable {
+  struct ColorComponents: Equatable {
     let red: UInt8
     let green: UInt8
     let blue: UInt8
@@ -75,12 +75,12 @@ enum LinnetSettingsAppearancePreview {
   }
 
   struct Palette: Equatable {
-    let background: RGB
-    let border: RGB
-    let primary: RGB
-    let secondary: RGB
-    let selectedBackground: RGB
-    let selectedPrimary: RGB
+    let background: ColorComponents
+    let border: ColorComponents
+    let primary: ColorComponents
+    let secondary: ColorComponents
+    let selectedBackground: ColorComponents
+    let selectedPrimary: ColorComponents
   }
 
   struct Catalog {
@@ -100,10 +100,6 @@ enum LinnetSettingsAppearancePreview {
     }
 
     let schemes: [String: Scheme]
-
-    var linnetSchemeIDs: Set<String> {
-      Set(schemes.keys)
-    }
 
     init(contents: String) throws {
       var parsed: [String: Scheme] = [:]
@@ -218,13 +214,16 @@ enum LinnetSettingsAppearancePreview {
       )
     }
 
-    private static func color(_ key: String, _ fields: [String: String]) throws -> RGB {
+    private static func color(
+      _ key: String,
+      _ fields: [String: String]
+    ) throws -> ColorComponents {
       guard let raw = fields[key]?.lowercased().replacingOccurrences(of: "0x", with: ""),
         let value = UInt32(raw, radix: 16)
       else {
         throw Failure.malformedThemeData
       }
-      return RGB(value)
+      return ColorComponents(value)
     }
 
     private static func metric(_ key: String, _ fields: [String: String]) throws -> Double {
@@ -247,7 +246,6 @@ enum LinnetSettingsAppearancePreview {
   }
 
   struct Presentation: Equatable {
-    let schemeID: String
     let palette: Palette
     let selectionStyle: SelectionStyle
     let cornerRadius: Double
@@ -274,7 +272,8 @@ enum LinnetSettingsAppearancePreview {
       case .vertical: false
       }
       return LinnetCandidatePresentation.candidateDetailGeometry(
-        forLinearLayout: linear)
+        forLinearLayout: linear,
+        candidateFontPoint: CGFloat(candidateFontPoint))
     }
   }
 
@@ -293,7 +292,6 @@ enum LinnetSettingsAppearancePreview {
     case .dark: isDark = true
     }
     return .success(Presentation(
-      schemeID: scheme.identifier,
       palette: scheme.palette,
       selectionStyle: scheme.selectionStyle,
       cornerRadius: scheme.cornerRadius,
@@ -385,9 +383,13 @@ private struct LinnetCandidateDetailSurfaceLayout: Layout {
   ) -> LinnetCandidatePresentation.CandidateDetailFrames? {
     // A transient SwiftUI tree mismatch is a rendering failure, not a process invariant.
     guard subviews.count == 3 else { return nil }
+    let candidateProposal = ProposedViewSize(
+      width: geometry.candidateColumnMaximumWidth, height: nil)
+    let detailProposal = ProposedViewSize(
+      width: geometry.detailColumnMaximumWidth, height: nil)
     return geometry.frames(
-      candidateSize: subviews[0].sizeThatFits(.unspecified),
-      detailSize: subviews[2].sizeThatFits(.unspecified),
+      candidateSize: subviews[0].sizeThatFits(candidateProposal),
+      detailSize: subviews[2].sizeThatFits(detailProposal),
       dividerSize: subviews[1].sizeThatFits(.unspecified))
   }
 
@@ -494,8 +496,10 @@ struct LinnetSettingsAppearancePreviewView: View {
             .fixedSize(horizontal: true, vertical: false)
           candidateDetailDivider(preview, geometry: detailGeometry)
             .fixedSize(horizontal: true, vertical: false)
-          candidateDetail(preview, language: language)
-            .fixedSize(horizontal: true, vertical: false)
+          candidateDetail(
+            preview,
+            language: language,
+            maximumWidth: detailGeometry.detailColumnMaximumWidth)
         }
         .fixedSize(horizontal: true, vertical: true)
       }
@@ -648,16 +652,24 @@ private extension LinnetSettingsAppearancePreviewView {
   @ViewBuilder
   func candidateDetail(
     _ preview: LinnetSettingsAppearancePreview.Presentation,
-    language: LinnetSettingsAppearancePreview.PreviewLanguage
+    language: LinnetSettingsAppearancePreview.PreviewLanguage,
+    maximumWidth: CGFloat?
   ) -> some View {
     let rawDetail = switch language {
     case .chinese: "［shu ru］"
     case .english: "/ˈɪntəfeɪs/ · n. 接口"
     }
     let detail = LinnetCandidatePresentation.selectedDetailText(rawDetail)
-    Text(AttributedString(candidateDetailLine(preview, text: detail)))
-    .fixedSize(horizontal: true, vertical: false)
-    .accessibilityElement(children: .combine)
+    if let maximumWidth {
+      Text(AttributedString(candidateDetailLine(preview, text: detail)))
+        .frame(maxWidth: maximumWidth, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    } else {
+      Text(AttributedString(candidateDetailLine(preview, text: detail)))
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .combine)
+    }
   }
 
   func candidateDetailDivider(

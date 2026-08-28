@@ -9,7 +9,6 @@
 //
 
 import AppKit
-import Darwin
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -49,8 +48,7 @@ final class SettingsModel: ObservableObject {
   let productName: String
   let appVersion: String
   let appBuild: UInt64
-  let dataServicesAvailable: Bool
-  let dataChannelService: LinnetDataChannel.Service
+  @Published private(set) var dataServicesAvailable: Bool
   let updateChecker: LinnetSettingsUpdateChecker
 
   let coordinator: SettingsDataCoordinator
@@ -67,6 +65,7 @@ final class SettingsModel: ObservableObject {
   private var legacyInspectionTask: Task<Void, Never>?
   private let personalValidationExecutor = SettingsPersonalValidationExecutor()
   private var pendingAppearance: LinnetSettingsDocument.Appearance?
+  private var initialStatePrepared = false
 
   init(bundle: Bundle = .main) {
     let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
@@ -80,15 +79,12 @@ final class SettingsModel: ObservableObject {
     appBuild = UInt64(host?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
     let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
     dataRegistry = registry
-    let runtimeSnapshot = registry.flatMap { try? $0.runtimeSnapshot() }
-    installedPacks = runtimeSnapshot?.state.packs ?? []
-    dataEdition = runtimeSnapshot?.state.edition
-    dataServicesAvailable = runtimeSnapshot != nil
-    dataChannelService = LinnetDataChannel.service
+    installedPacks = []
+    dataEdition = nil
+    dataServicesAvailable = false
     updateChecker = LinnetSettingsUpdateChecker(
       currentVersion: appVersion, currentBuild: appBuild,
-      service: dataChannelService, edition: runtimeSnapshot?.state.edition,
-      installedPacks: runtimeSnapshot?.state.packs ?? [])
+      edition: nil, installedPacks: [], bundle: bundle)
     let downloadPreference = LinnetSettingsDownloadSource.load()
     downloadSourceMode = downloadPreference.mode
     downloadMirrorPrefix = downloadPreference.mirrorPrefix
@@ -132,11 +128,11 @@ final class SettingsModel: ObservableObject {
     let initialConfiguration = SettingsConfigurationSession(
       document: loadedDocument,
       personal: personalSnapshot,
-      servicesAvailable: dataServicesAvailable
+      servicesAvailable: false
     )
     configuration = initialConfiguration
     personalValidation = .valid(initialConfiguration.personalDraft)
-    legacyImportState = dataServicesAvailable ? .checking : .unavailable
+    legacyImportState = .unavailable
     cloudSyncEnabled = LinnetSettingsContract.cloudSyncEnabled(startingAt: bundle)
     if cloudSyncEnabled {
       do {
@@ -145,12 +141,28 @@ final class SettingsModel: ObservableObject {
         print("The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription)")
       }
     }
-    detectGrammarModel()
     schedulePersonalValidation()
   }
 }
 
 extension SettingsModel {
+  func prepareInitialState() async {
+    guard !initialStatePrepared else { return }
+    initialStatePrepared = true
+    updateChecker.refreshRuntime()
+    let registry = dataRegistry
+    let snapshot = await Task.detached(priority: .userInitiated) {
+      registry.flatMap { try? $0.runtimeSnapshot() }
+    }.value
+    dataServicesAvailable = snapshot != nil
+    installedPacks = snapshot?.state.packs ?? []
+    dataEdition = snapshot?.state.edition
+    configuration.setServicesAvailable(dataServicesAvailable)
+    legacyImportState = dataServicesAvailable ? .checking : .unavailable
+    detectGrammarModel()
+    updateChecker.refreshInstalledData(edition: dataEdition, packs: installedPacks)
+  }
+
   private func schedulePersonalValidation() {
     let draft = configuration.personalDraft
     personalValidationPending = true

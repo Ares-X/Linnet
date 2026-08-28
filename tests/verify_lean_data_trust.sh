@@ -23,8 +23,8 @@ for retired in resources/linnet-pack-publishers.json package/build_signing_reque
 done
 
 if rg -n 'manifest\.ed25519|verifySignedManifest|publisherKeyID|publisher_key_id|PublisherDocument|loadPublishers|trustedPublishers|signingPreimage|invalidSignature|invalidPublisher|publishers-file' \
-    sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift \
-    tools/LinnetPackTool.swift package/make_archive package/make_package \
+    sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
+    tools/LinnetPackEncoder.swift tools/LinnetPackTool.swift package/make_archive package/make_package \
     package/verify_package; then
   echo "A retired catalog publisher/signature authority returned." >&2
   exit 1
@@ -51,7 +51,7 @@ rg -Fq 'source: .direct' sources/LinnetSettings/LinnetSettingsDownloadTransport.
 }
 
 if rg -n 'candidate_revision|candidate-revision|signing-request-set|pack-signing-request' \
-    package/build_data_pack tools/LinnetPackTool.swift; then
+    package/build_data_pack tools/LinnetPackEncoder.swift tools/LinnetPackTool.swift; then
   echo "Language-pack identity is still coupled to an App revision." >&2
   exit 1
 fi

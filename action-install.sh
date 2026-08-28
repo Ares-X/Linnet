@@ -218,19 +218,14 @@ fetch_grammar_model() (
     mkdir -p "${project_root}/build"
     download_dir="$(mktemp -d "${project_root}/build/linnet-grammar.XXXXXX")"
     pack_file="${download_dir}/${lmdg_pack_name}"
-    pack_tool="${download_dir}/linnet-pack"
+    pack_tool="${project_root}/build/linnet-pack"
     extracted_dir="${download_dir}/extracted"
     extracted_model="${extracted_dir}/${lmdg_model_name}"
     echo "Restoring the locked Wanxiang LTS grammar from Linnet data:" >&2
     echo "  ${lmdg_pack_download_url}" >&2
     scripts/fetch-locked-release-asset \
         "${lock_file}" rime_lmdg_grammar.linnet_pack "${pack_file}"
-    xcrun swiftc -warnings-as-errors \
-        sources/LinnetPackContract.swift \
-        sources/LinnetDataChannel.swift \
-        sources/LinnetDataRegistry.swift \
-        tools/LinnetDataCatalogBuilder.swift \
-        tools/LinnetPackTool.swift -o "${pack_tool}"
+    make -C "${project_root}" --no-print-directory linnet-pack-tool
     "${pack_tool}" extract \
         --pack "${pack_file}" \
         --core-version "${product_version}" \

@@ -59,6 +59,55 @@ if rg -Fq '${repo_root}/build/rime-runtime.XXXXXX' scripts/build-rime-runtime; t
   fail "the retired project-local runtime scratch owner returned"
 fi
 
+for retired_orphan in \
+  action-changelog.sh \
+  package/report_size \
+  tests/linnet_pinyin_probe.cc \
+  tests/fixtures/linnet_zh_english_metadata_off.custom.yaml; do
+  [[ ! -e "${retired_orphan}" ]] ||
+    fail "a retired zero-entry artifact returned: ${retired_orphan}"
+done
+if rg -n '#sourceLocation|NotificationCenter\.default\.removeObserver\(self\)' \
+    sources/SquirrelView.swift sources/SquirrelInputController.swift; then
+  fail "a retired diagnostic alias or observer cleanup without registration returned"
+fi
+if rg -n 'createDirIfNotExist' \
+    sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift; then
+  fail "the retired check-then-create directory wrapper returned"
+fi
+if rg -n 'GrammarProfile|grammarProfile|hostUserDirectory|dataTransactionsRoot|static func backupsRoot' \
+    sources; then
+  fail "a retired constant projection, directory wrapper, or reachability mirror returned"
+fi
+swiftc_path="$(xcrun --find swiftc)"
+swift_host_library="$(cd "$(dirname "${swiftc_path}")/../lib/swift/host" && pwd -P)"
+swift_sources=()
+while IFS= read -r swift_source; do
+  swift_sources+=("${swift_source}")
+done < <(rg --files sources -g '*.swift' | sort)
+xcrun swift -I "${swift_host_library}" -L "${swift_host_library}" \
+  -lSwiftParser -lSwiftSyntax tests/verify_retired_projection_owners.swift \
+  "${swift_sources[@]}" ||
+  fail "a retired snapshot, preview, or import-result owner path returned"
+rg -Fq 'enum SettingsRuntimeReachability: String, Equatable, Sendable {' \
+  sources/LinnetSettings/SettingsRuntimeReachability.swift ||
+  fail "the canonical Settings runtime reachability contract is missing"
+test "$(rg -F -o 'enum SettingsRuntimeReachability: String, Equatable, Sendable {' \
+  sources/LinnetSettings | wc -l | tr -d ' ')" -eq 1 ||
+  fail "Settings runtime reachability has more than one canonical owner"
+if rg -n 'enum Reachability: String, Equatable, Sendable|func runtimeStatus\(' \
+    sources/LinnetSettings/SettingsDataCoordinator.swift \
+    sources/LinnetSettings/SettingsDataViews.swift; then
+  fail "a duplicate Settings runtime reachability owner or mapper returned"
+fi
+if rg -n '\.synchronize\(\)' sources/LinnetSettings/SettingsContract.swift; then
+  fail "the retired UserDefaults synchronization barrier returned"
+fi
+if rg -n 'enum PackKind|struct ActiveRequirement|LinnetDataRegistry\.PackKind|packKind\(|Kind\(rawValue: (?:pack|kind|expected)\.rawValue\)|kind\.rawValue == (?:pack|artifact)\.kind\.rawValue' \
+    sources tools; then
+  fail "the retired duplicate pack kind or requirement projection returned"
+fi
+
 for retired_path in \
   sources/LinnetModeSwitcher.swift \
   sources/LinnetApplicationModeMemory.swift \
@@ -80,6 +129,16 @@ if rg -n -i 'launch[M]arker|launch [Ss]tate|crash[- ]loop' \
 fi
 ruby -e '
   source = File.read(ARGV.fetch(0))
+  entry = source[/static func main\(\).*?let delegate = SquirrelApplicationDelegate\(\)/m]
+  abort "Host runtime entry owner is missing" unless entry
+  location = entry.index("SquirrelInstaller.hostMayStartRuntime")
+  lifecycle = entry.index("let handled = autoreleasepool")
+  server = entry.index("_ = IMKServer")
+  setup = entry.index("let delegate = SquirrelApplicationDelegate()")
+  abort "a non-installed executable can mutate the input-source lifecycle" unless
+    location && lifecycle && location < lifecycle
+  abort "a non-installed Host can initialize InputMethodKit or Rime" unless
+    server && setup && location < server && server < setup
   startup = source[/let delegate = SquirrelApplicationDelegate\(\).*?app\.run\(\)/m]
   abort "Host startup owner is missing" unless startup
   run = startup.index("app.run()")
@@ -96,15 +155,15 @@ ruby -e '
     startup.include?(%q{schemaLabel: "故障"})
 ' sources/Main.swift || fail "Host startup failure can still publish a fake input source"
 ruby -e '
-  source = File.read(ARGV.fetch(0))
-  activation = source[/fileprivate func activateDataTransaction\(.*?\n  \}\n\n  fileprivate func startTransactionMonitor/m]
-  resume = source[/fileprivate func resumeCurrentRuntime\(\).*?\n  \}\n\n  fileprivate func runtimeHealth/m]
+  source = ARGV.map { |path| File.read(path) }.join("\n")
+  activation = source[/func activateDataTransaction\(.*?\n  \}\n\n  func startTransactionMonitor/m]
+  resume = source[/func resumeCurrentRuntime\(\).*?\n  \}\n\n  func runtimeHealth/m]
   abort "transaction runtime owners are missing" unless activation && resume
   abort "activation ignores Settings readiness" if
     activation.match?(/^\s*loadSettings\(\)\s*$/)
   abort "resume ignores Settings readiness" if
     resume.match?(/^\s*loadSettings\(\)\s*$/)
-' sources/SquirrelApplicationDelegate.swift ||
+' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "a transaction path can report runtime success after Settings failed to load"
 if ! ruby -e '
   panel = File.read(ARGV[0]) + File.read(ARGV[1])
@@ -230,7 +289,11 @@ fi
 if ! ruby -e '
   controller = File.read("sources/SquirrelInputController.swift")
   builder = File.read("sources/LinnetRimeCandidateSnapshotBuilder.swift")
-  delegate = File.read("sources/SquirrelApplicationDelegate.swift")
+  delegate = %w[
+    sources/SquirrelApplicationDelegate.swift
+    sources/SquirrelApplicationRuntime.swift
+    sources/SquirrelApplicationTransactions.swift
+  ].map { |path| File.read(path) }.join("\n")
   abort "controller does not consume the typed mode-transition label" unless
     controller.include?("inputModeTransitionLabel(") &&
       controller.include?("InputModeIdentity(") &&
@@ -301,7 +364,10 @@ rg -Fq '  initials: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA' \
   data/linnet/linnet_en.schema.yaml ||
   fail "Smart English again allows punctuation to start hidden spelling"
 ruby -e '
-  document, renderer, views, preview = ARGV.map { |path| File.read(path) }
+  document = [File.read(ARGV.fetch(0)), File.read(ARGV.fetch(1))].join("\n")
+  renderer = File.read(ARGV.fetch(2))
+  views = File.read(ARGV.fetch(3))
+  preview = File.read(ARGV.fetch(4))
   layout = document[/enum CandidateLayout:.*?\n  \}/m]
   browsing = document[/enum CandidateBrowsingMode:.*?\n  \}/m]
   abort "candidate layout owner is missing" unless layout
@@ -324,7 +390,7 @@ ruby -e '
       preview.include?("LinnetCandidatePresentation.rowRanges(")
   abort "renderer retained the retired static expanded layout" if
     renderer.include?("case .expanded") || renderer.include?("linnet_expand_candidate_rows")
-' sources/LinnetSettings/LinnetSettingsDocument.swift \
+' sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   sources/LinnetSettings/SettingsViews.swift \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift ||
@@ -586,6 +652,20 @@ ruby -e '
   abort "the lifecycle API changed librime C++ virtual ABI" if
     added.include?("virtual bool CommitRawInput") ||
       added.include?("virtual void ClearComposition")
+  abort "grammar can again erase the canonical system dictionary weight" unless
+    added.include?("system_lexical_weight_(std::move(system_lexical_weight))") &&
+      added.include?("system_lexical_weight() const") &&
+      added.include?("FindSystemLexicalWeight") &&
+      added.include?("FindRemainingEntry(text)") &&
+      added.include?("dictionary::MakeEntry(chunk, chunk.cursor)")
+  abort "the retired duplicate lexical-weight field returned" if
+    added.include?("lexical_weight_(entry->weight)") ||
+      added.include?("double lexical_weight() const")
+  abort "Smart English can again infer the main translator spelling path" unless
+    added.include?("SpellingType spelling_type = kInvalidSpelling") &&
+      added.include?("SpellingType spelling_type() const") &&
+      added.include?("const SpellingType spelling_type_") &&
+      added.include?("syllabifier_->SpellingTypeAt(phrase_code_length)")
 ' || fail "the pinned core input-interaction repair regressed"
 ruby -e '
   callers = []
@@ -643,12 +723,12 @@ ruby -e '
 ' || fail "candidate pointer/scroll publication ownership regressed"
 test "$(rg -F -c '.livePanelProjection' \
   sources/LinnetSettings/SettingsMain.swift)" -eq 3 &&
-  test "$(rg -F -c '.livePanelProjection' \
-  sources/LinnetSettings/SettingsDataCoordinator.swift)" -eq 2 ||
+  test "$(rg -F -o '.livePanelProjection' \
+  sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "live appearance boundaries stopped consuming the canonical session projection"
 if rg -n 'previewableAppearance|currentDocument\.appearance\.pageSize == document\.appearance\.pageSize' \
     sources/LinnetSettings/SettingsMain.swift \
-    sources/LinnetSettings/SettingsDataCoordinator.swift; then
+    sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift; then
   fail "a handwritten lightweight-appearance field list returned"
 fi
 if rg -n 'linnet_detail_placement' sources data/squirrel.yaml; then
@@ -818,8 +898,7 @@ fi
 for extracted_symbol in \
   'ProjectSmartEnglishCandidate' \
   'class SmartEnglishTailTranslation' \
-  'SmartEnglishFilter::Apply' \
-  'SmartEnglishFilter::InspectChineseSpelling'; do
+  'SmartEnglishFilter::Apply'; do
   rg -Fq "${extracted_symbol}" "${smart_english_filter}" ||
     fail "the extracted Smart English candidate owner lost ${extracted_symbol}"
 done
@@ -864,24 +943,22 @@ if rg -n 'kForcedRawQuality|forced_raw\s*=|quality\(\)\s*==|==\s*.*quality\(\)' 
     plugins/smart_english; then
   fail "Smart English regained numeric inference for forced-raw identity"
 fi
+if rg -n \
+    'InspectChineseSpelling|InitializeChineseSpellingDecoder|chinese_dictionary_|Dictionary::Require|Syllabifier' \
+    "${smart_english_filter_header}" "${smart_english_filter}"; then
+  fail "Smart English regained a second Chinese dictionary or spelling owner"
+fi
 if ! ruby -e '
   owner = File.read(ARGV.fetch(0))
   %w[
-    InspectChineseSpelling(input_word)
-    graph.vertices.find(input.size())
-    end->second>=kAbbreviation
     phrase->is_exact_match()
-    chinese_dictionary_->Lookup(graph,0,&chinese_blacklist_)
-    entries->find(input.size())
-    entry->IsExactMatch()
-    kEstablishedChinesePhraseMinimumLexicalWeight
-    entry->weight<kEstablishedChinesePhraseMinimumLexicalWeight
-    established_exact_phrases.count(item.genuine->text())
+    phrase->spelling_type()<kAbbreviation
+    phrase->system_lexical_weight()
+    *system_weight>=kEstablishedChinesePhraseMinimumLexicalWeight
     strong_chinese_collision
     has_same_span_chinese
     input_word.size()==1
     single_letter_chinese_input
-    ChineseSpellingPath::kUnavailable
     std::exchange(pending_segment_input_,std::nullopt)
     composition().input()
     pending_segment_input_=composition_input.substr(segment->start,segment->end-segment->start)
@@ -896,8 +973,7 @@ if ! ruby -e '
   abort "the retired syllable-count collision heuristic returned" if
     owner.include?("phrase->code().size()")
   abort "learned Chinese candidates are still rejected by runtime type" if
-    owner.gsub(/\s+/, "").include?(%q[item.genuine->type()=="phrase"]) ||
-      owner.include?(%q["user_phrase"])
+    owner.include?(%q["user_phrase"])
   abort "cross-language numeric ranking returned" if
     owner.match?(/quality\(\)/) || owner.include?("phrase->weight()")
   abort "whole-composition bilingual ranking returned" if
@@ -1083,6 +1159,8 @@ ruby -e '
     update.include?("[weak self, weak publishedController]")
   abort "AX element actions lost their weak publication owner" unless
     accessibility.scan("element.performPress = { [weak self]").length == 2
+  abort "candidate accessibility regained hand-written value equality" if
+    accessibility.match?(/private struct (?:CandidateLayout|LayoutSignature): Equatable.*?static func ==/m)
   abort "AX layout changes stopped identifying the replaced elements" unless
     accessibility.include?("elements: newElements,") &&
       accessibility.include?("userInfo: [.uiElements: elements]")
@@ -1277,26 +1355,26 @@ if rg -n 'LINNET_PRIVATE_BUILD_OUTPUT|ruby|scripts/upstream-sync verify' action-
   fail "ordinary builds still recurse or run the release-only Ruby upstream audit"
 fi
 
-test "$(rg -c 'for: \.applicationSupportDirectory' sources/LinnetDataRegistry.swift)" -eq 1 ||
+test "$(rg -o 'for: \.applicationSupportDirectory' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the Linnet Application Support root owner count changed"
-rg -Fq 'struct LinnetDataRegistry' sources/LinnetDataRegistry.swift ||
+rg -Fq 'struct LinnetDataRegistry' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "the language-data registry owner is missing"
-for root in UserData Build Downloads Transactions Backups Runtime/Active State/active.json; do
-  rg -Fq "${root}" sources/LinnetDataRegistry.swift ||
+for root in UserData Build Downloads Transactions Backups Runtime/Active; do
+  rg -Fq "${root}" sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
     fail "the registry no longer owns ${root}"
 done
 test "$(rg -c 'return try LinnetDataRegistry' sources/Main.swift)" -eq 1 ||
   fail "the host must consume one canonical registry"
-test "$(rg -c 'runtimeSnapshot\(\)' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'runtimeSnapshot\(\)' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the runtime data snapshot owner count changed"
-test "$(rg -c 'runtimeSnapshot\(\)' sources/LinnetSettings/SettingsDataCoordinator.swift)" -eq 1 ||
+test "$(rg -o 'runtimeSnapshot\(\)' sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the Settings data snapshot owner count changed"
-test "$(rg -c 'dataRegistry\.activeRevision\(\)' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'dataRegistry\.activeRevision\(\)' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the Host language-activation CAS owner count changed"
 cas_line="$(rg -n -m1 'dataRegistry\.activeRevision\(\)' \
-  sources/SquirrelApplicationDelegate.swift | cut -d: -f1)"
+  --no-filename sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | cut -d: -f1)"
 swap_line="$(rg -n -m1 'guard swapDirectories\(live, candidate\)' \
-  sources/SquirrelApplicationDelegate.swift | cut -d: -f1)"
+  --no-filename sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | cut -d: -f1)"
 [[ -n "${cas_line}" && -n "${swap_line}" && "${cas_line}" -lt "${swap_line}" ]] ||
   fail "the Host CAS no longer occurs immediately before its first language-data swap"
 for field in 'let expectedActiveGeneration: Int?' 'let expectedActiveStateSHA256: String?'; do
@@ -1306,10 +1384,10 @@ done
 if rg -n 'expected_active_generation|expected_active_state_sha256' sources --glob '*.swift'; then
   fail "the retired distributed-notification CAS wire shape returned"
 fi
-test "$(rg -c 'dataRegistry\.commitDataChannelUpdate\(' \
-  sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'dataRegistry\.commitDataChannelUpdate\(' \
+  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "post-health language publication is not owned exactly once by Host"
-if rg -q 'commitDataChannelUpdate\(' sources/LinnetSettings/SettingsDataCoordinator.swift; then
+if rg -q 'commitDataChannelUpdate\(' sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift; then
   fail "Settings regained language-publication ownership"
 fi
 test "$(rg -c 'let downloadDirectory = update\.downloadDirectory' \
@@ -1320,24 +1398,24 @@ if rg -q 'downloadsDirectory\.appending\([^)]*UUID\(\)' \
   sources/LinnetSettings/SettingsModelLanguageData.swift; then
   fail "Settings regained an unowned random download directory"
 fi
-rg -Fq 'let createdAt: TimeInterval' sources/LinnetDataRegistry.swift ||
+rg -Fq 'let createdAt: TimeInterval' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "the durable language transaction lost its crash-expiry timestamp"
 rg -Fq 'try removeOwnedDownloadDirectory(transactionID: cleanup.transactionID)' \
-  sources/LinnetDataRegistry.swift ||
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "expired language transactions no longer retire their owned download directory"
 if rg -n 'completeActivation\(' sources tests --glob '*.swift'; then
   fail "the retired pre-transaction publication API returned"
 fi
-test "$(rg -c 'tentativeRuntimeSnapshot\(' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'tentativeRuntimeSnapshot\(' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "tentative language health no longer has one non-reconciling snapshot owner"
-test "$(rg -c 'recoverPreparedLanguageActivation\(' \
-  sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'recoverPreparedLanguageActivation\(' \
+  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "prepared crash recovery no longer has one Host startup caller"
-if rg -n 'rimeSetupDone' sources/SquirrelApplicationDelegate.swift; then
+if rg -n 'rimeSetupDone' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift; then
   fail "manual restart can bypass authoritative setup and prepared recovery"
 fi
 if rg -n 'restartRuntime|运行时不可用|重新启动运行时' \
-    sources/SquirrelApplicationDelegate.swift resources/Localizable.xcstrings; then
+    sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift resources/Localizable.xcstrings; then
   fail "a manual runtime-restart owner can bypass the active Settings transaction"
 fi
 if rg -n 'abortDataChannelUpdate\(|discardActivation\(' sources --glob '*.swift'; then
@@ -1346,16 +1424,19 @@ fi
 test "$(rg -c 'registry\.cancelDataChannelUpdate\(transactionID: update\.transactionID\)' \
   sources/LinnetSettings/SettingsModelLanguageData.swift)" -eq 1 ||
   fail "SettingsMain must cancel its one Registry transaction from one defer"
-if rg -n 'cancelDataChannelUpdate\(' sources/LinnetSettings/SettingsDataCoordinator.swift; then
+if rg -n 'cancelDataChannelUpdate\(' sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift; then
   fail "the transport coordinator regained language cleanup ownership"
 fi
 if rg -n 'PendingDataChannel|pendingDataChannel|Profiles|ProfileMarker|profilesDirectory|profileDirectory|data-channel\.json|rollback\.json' \
-    sources/LinnetDataRegistry.swift; then
+    sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift; then
   fail "a retired second language state file or profile lifecycle returned"
+fi
+if rg -n 'activeStateURL|State/active\.json' sources --glob '*.swift'; then
+  fail "the installer-owned State alias or its test-only API returned to Swift runtime code"
 fi
 for field in 'var publication: Publication' 'let acceptedCatalog: DataChannelReceipt?' \
   'let rollbackPacks: [ActivePack]'; do
-  rg -Fq "${field}" sources/LinnetDataRegistry.swift ||
+  rg -Fq "${field}" sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
     fail "Active lost its publication/catalog/rollback ownership field: ${field}"
 done
 rg -Fq 'https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/Linnet-Data-Channel.json' \
@@ -1369,20 +1450,97 @@ fi
 if rg -n 'https?://' sources/LinnetDataChannel.swift; then
   fail "the shared catalog verifier regained a remote endpoint"
 fi
-rg -Fq 'static let service: Service = .published' sources/LinnetDataChannel.swift ||
-  fail "the published update channel became unavailable"
-rg -Fq 'dataChannelService == .published' \
-  sources/LinnetSettings/SettingsModelLanguageData.swift ||
-  fail "Settings stopped consuming the typed data-channel service state"
+if rg -n 'enum Service|static let service|dataChannelService|service: LinnetDataChannel\.Service' \
+    sources/LinnetDataChannel.swift sources/LinnetSettings; then
+  fail "the retired constant data-channel rollout state returned"
+fi
 test "$(rg -c 'func check\(\)' sources/LinnetSettings/LinnetSettingsUpdateChecker.swift)" -eq 1 ||
   fail "Settings lost its single bounded update-check entrypoint"
 rg -Fq 'LinnetDataChannel.verifyPublished(data)' \
   sources/LinnetSettings/LinnetSettingsUpdateChecker.swift ||
   fail "Settings stopped verifying the shared Core/data Catalog"
+ruby -e '
+  model = File.read("sources/LinnetSettings/SettingsMain.swift")
+  updater = File.read("sources/LinnetSettings/LinnetSettingsUpdateChecker.swift")
+  host_presentation = File.read("sources/SquirrelApplicationPresentation.swift")
+  initializer = model[/  init\(bundle: Bundle = \.main\) \{.*?\n  \}\n\}/m]
+  preparation = model[/  func prepareInitialState\(\) async \{.*?\n  \}\n\n  private func/m]
+  update_initializer = updater[/  init\(\n.*?\n  \}\n\n  func check/m]
+  settings_launch = host_presentation[/  @objc func openSettings\(\) \{.*?\n  \}/m]
+  abort "Settings startup owners are missing" unless
+    initializer && preparation && update_initializer && settings_launch
+  abort "Settings init can again hash the full data installation on the main actor" if
+    initializer.include?("runtimeSnapshot()")
+  abort "Settings initial data validation is no longer one deferred owner" unless
+    preparation.scan("runtimeSnapshot()").length == 1 &&
+      preparation.include?("Task.detached(priority: .userInitiated)")
+  abort "UpdateChecker init regained an implicit network or runtime check" if
+    update_initializer.match?(/\b(?:check|refreshRuntime|startCheck)\(\)/)
+  abort "Host can launch a substituted or recent-item Settings copy" unless
+    settings_launch.include?("allowsRunningApplicationSubstitution = false") &&
+      settings_launch.include?("addsToRecentItems = false")
+' || fail "Settings first-screen work escaped its deferred owner"
 if rg -n 'Timer|LaunchAgent|UNUserNotification|startMonitoring' \
     sources/LinnetSettings/LinnetSettingsUpdateChecker.swift; then
   fail "the quiet Settings update check regained a background notification owner"
 fi
+ruby -e '
+  contract = File.read("sources/LinnetSettings/SettingsContract.swift")
+  host = %w[
+    sources/SquirrelApplicationDelegate.swift
+    sources/SquirrelApplicationRuntime.swift
+    sources/SquirrelApplicationTransactions.swift
+  ].map { |path| File.read(path) }.join("\n")
+  controller = File.read("sources/SquirrelInputController.swift")
+  settings = File.read("sources/LinnetSettings/LinnetSettingsUpdateChecker.swift")
+  ui = File.read("sources/LinnetSettings/SettingsDataViews.swift")
+  combined = contract + host + controller + settings + ui
+  activation = host[/private func activateInstalledCore\(.*?\n  \}/m]
+  ledger = contract[/final class LinnetInputClientLedger.*?\n\}/m]
+  abort "the explicit Core activation owner is missing" unless activation
+  abort "the process-lifetime input-client ledger is missing" unless ledger
+  abort "the retired transient Controller-count readiness path returned" if
+    combined.match?(/connectedInputClientCount|markInputClient(?:Connected|Disconnected)/)
+  abort "the client ledger can forget a live-process historical endpoint" unless
+    ledger.include?("bundleIdentifiers.insert") &&
+      !ledger.match?(/bundleIdentifiers\.(?:remove|subtract)/)
+  abort "InputMethodKit controller creation no longer records client history" unless
+    controller.scan("coreActivationClientLedger.record").length == 1 &&
+      !controller.include?("coreActivationClientLedger.remove")
+  abort "Host activation can bypass its connection or mutation boundaries" unless
+    activation.scan("requestCanContinue(request)").length == 2 &&
+      activation.include?("history.generation") &&
+      activation.scan("coreActivationDecision(").length == 2 &&
+      activation.scan("NSApp.terminate(nil)").length == 1 &&
+      !activation.include?("forceTerminate")
+  decision = host[/private func coreActivationDecision\(.*?\n  \}/m]
+  abort "the Host activation decision is incomplete" unless
+    decision &&
+      decision.include?("currentInputSourceID") &&
+      decision.include?("hasPendingRimeInput") &&
+      decision.include?("activeDataTransaction != nil") &&
+      decision.include?("runningApplications")
+  abort "Settings can activate an unverified or substituted Host" unless
+    settings.include?("reply.code == .coreActivationAccepted") &&
+      settings.include?("health.productIdentity == installedIdentity") &&
+      settings.include?("allowsRunningApplicationSubstitution = false")
+  initializer = settings[/  init\(.*?\n  \}/m]
+  check = settings[/  func check\(\).*?\n  \}/m]
+  refresh = settings[/  func refreshRuntime\(\).*?\n  \}/m]
+  abort "Core activation is no longer explicitly user initiated" unless
+    ui.include?(%q{Button("Apply Installed Update…")}) &&
+      ui.include?("confirmCoreActivation()") &&
+      [initializer, check, refresh].compact.none? { |method| method.include?("activateInstalledCore") }
+  abort "the running Core identity is not captured at Host process start" unless
+    host.include?("processProductIdentity") &&
+      host.scan("productIdentity: processProductIdentity").length == 3
+  abort "Settings lost the passive installed-versus-running identity comparison" unless
+    settings.include?("installedIdentity == running") &&
+      settings.include?("case pending(") &&
+      settings.include?("installed: LinnetSettingsContract.ProductIdentity")
+  abort "Core activation gained a second input-source mutation path" if
+    combined.match?(/TIS(Register|Enable|Select|Disable)InputSource/)
+' || fail "explicit installed-Core activation ownership regressed"
 retired_catalog_url='https://github.com/Ares-X/Linnet/releases/download/'\
 'data-channel/Linnet-Data-Channel.json'
 if rg -nF "${retired_catalog_url}" \
@@ -1391,54 +1549,54 @@ if rg -nF "${retired_catalog_url}" \
 fi
 rg -Fq 'FileManager.default.temporaryDirectory' sources/Main.swift ||
   fail "the disposable log/launch-marker boundary moved"
-test "$(rg -c 'reconcileLanguageStorage\(' sources/LinnetDataRegistry.swift)" -eq 4 ||
+test "$(rg -o 'reconcileLanguageStorage\(' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 4 ||
   fail "language storage reconciliation must have one owner and three lifecycle callers"
 rg -Fq 'static let languageTransactionMarkerName = ".linnet-language-transaction.json"' \
-  sources/LinnetDataRegistry.swift ||
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "the canonical language transaction marker changed"
-rg -Fq 'private static let orphanSafetyAge: TimeInterval = 24 * 60 * 60' \
-  sources/LinnetDataRegistry.swift ||
+rg -Fq 'static let orphanSafetyAge: TimeInterval = 24 * 60 * 60' \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "orphan reconciliation lost its explicit safety horizon"
 rg -Fq 'static let personalScratchMarkerName = ".linnet-personal-scratch.json"' \
-  sources/LinnetDataRegistry.swift ||
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "personal mutation scratch lost its typed Registry marker"
-test "$(rg -c 'environment\.registry\.beginPersonalScratch' \
-  sources/LinnetSettings/SettingsDataCoordinator.swift)" -eq 2 ||
+test "$(rg -o 'environment\.registry\.beginPersonalScratch' \
+  sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "full and quick Settings scratch must each be marked once by Registry"
-test "$(rg -c 'validatedPersonalScratch\(' sources/LinnetDataRegistry.swift)" -eq 2 ||
+test "$(rg -o 'validatedPersonalScratch\(' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "personal scratch GC must have one Registry validator and one caller"
-rg -Fq 'try? reconcileLanguageStorage(activeState: state)' sources/LinnetDataRegistry.swift ||
+rg -Fq 'try? reconcileLanguageStorage(activeState: state)' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "retryable reconciliation can block the validated runtime snapshot"
-test "$(rg -c 'supersededPackCleanups\(' sources/LinnetDataRegistry.swift)" -eq 2 ||
+test "$(rg -o 'supersededPackCleanups\(' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "immutable-pack cleanup owner is missing"
 ruby -e '
-  source = File.read(ARGV.fetch(0))
+  source = ARGV.map { |path| File.read(path) }.join("\n")
   method = source[/  func activateLanguage\(.*?\n  \}\n\}\n/m]
   abort "language activation owner is missing" unless method
   abort "language activation lost its canonical deadline" unless
     method.include?("Self.transactionRequestTimeout")
   abort "language activation reintroduced the generic reply timeout" unless
     method.scan("remainingTransactionTime(until: deadline)").length == 3
-' sources/LinnetSettings/SettingsDataCoordinator.swift ||
+' sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift ||
   fail "language activation no longer uses one absolute 300-second deadline"
-rg -Fq 'validatedPackDeletion(at: entry, kind: kind)' sources/LinnetDataRegistry.swift ||
+rg -Fq 'validatedPackDeletion(at: entry, kind: kind)' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
   fail "immutable-pack deletion bypasses manifest identity validation"
 if rg -n 'contentsOfDirectory\(.*UserData|contentsOfDirectory\(.*Backups' \
-  sources/LinnetDataRegistry.swift; then
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift; then
   fail "language reconciliation traverses preserved personal-data roots"
 fi
 rg -Fq 'let scratch = fileManager.temporaryDirectory.appending(' \
-  sources/LinnetSettings/SettingsDataCoordinator.swift ||
+  sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift ||
   fail "the Settings scratch boundary moved"
 rg -Fq 'defer { try? fileManager.removeItem(at: scratch) }' \
-  sources/LinnetSettings/SettingsDataCoordinator.swift ||
+  sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift ||
   fail "Settings scratch no longer has scoped cleanup"
 
-test "$(rg -c 'to: \\.shared_data_dir' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'to: \\.shared_data_dir' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "librime shared-data owner count changed"
-test "$(rg -c 'to: \\.user_data_dir' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'to: \\.user_data_dir' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "librime user-data owner count changed"
-test "$(rg -c 'to: \\.log_dir' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'to: \\.log_dir' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "librime log owner count changed"
 
 # startRime is the sole runtime-readiness owner. Maintenance makes librime's
@@ -1464,7 +1622,7 @@ ruby -e '
 ' sources/LinnetRimeWarmSession.swift ||
   fail "the retained Rime resource-session contract changed"
 ruby -e '
-  source = File.read(ARGV.fetch(0))
+  source = ARGV.map { |path| File.read(path) }.join("\n")
   method = source[/func startRime\(fullCheck: Bool\) -> Bool \{.*?\n  \}\n  private func startStaleSessionCleaner/m]
   abort "startRime owner is missing" unless method
   maintenance = method.index("rimeAPI.start_maintenance(fullCheck)")
@@ -1487,14 +1645,14 @@ ruby -e '
       !method.include?("runtimeHealth()")
   abort "runtime running gained a second publication path" unless
     method.scan("isRimeRunning = true").length == 1
-' sources/SquirrelApplicationDelegate.swift ||
+' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "Host can publish runtime readiness before maintenance and session validation"
 
 ruby -e '
-  host = File.read(ARGV.fetch(0))
+  host = ARGV.map { |path| File.read(path) }.join("\n")
   cleaner = host[/private func startStaleSessionCleaner\(\) \{.*?\n  \}/m]
   invalidate = host[/private func invalidateRimeSessions\(\) \{.*?\n  \}/m]
-  sync = host[/private func performRimeUserDataSync\(\).*?\n  \}/m]
+  sync = host[/\n  func performRimeUserDataSync\(\).*?\n  \}/m]
   activation = host[/private func activatePublishedSettings\(.*?\n  \}\n\n  private func validConfigurationCandidate/m]
   reload = activation && activation[/case \.configuration:.*?\n      return true/m]
   abort "the warm-session lifecycle consumers are missing" unless
@@ -1521,7 +1679,7 @@ ruby -e '
       reload.scan("warmRimeSession.discard(using: rimeAPI)").length == 1 &&
       !reload.include?("rimeAPI.create_session") &&
       !reload.include?("rimeAPI.destroy_session")
-' sources/SquirrelApplicationDelegate.swift ||
+' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "the retained resource session is not governed by runtime lifecycle"
 
 # Runtime diagnostics report deployed schema availability; they do not own the
@@ -1530,8 +1688,8 @@ ruby -e '
 # starts in whichever probe ran last.  Keep this boundary on librime's
 # read-only schema-list API and forbid session or selection mutations here.
 ruby -e '
-  source = File.read(ARGV.fetch(0))
-  method = source[/fileprivate func runtimeHealth\(\) -> LinnetSettingsContract\.RuntimeHealth \{.*?\n  \}\n\n  fileprivate var requiredSchemas/m]
+  source = ARGV.map { |path| File.read(path) }.join("\n")
+  method = source[/func runtimeHealth\(\) -> LinnetSettingsContract\.RuntimeHealth \{.*?\n  \}\n\n  var requiredSchemas/m]
   abort "runtimeHealth owner is missing" unless method
   abort "runtimeHealth must read the deployed schema list exactly once" unless
     method.scan("rimeAPI.get_schema_list").length == 1 &&
@@ -1540,20 +1698,24 @@ ruby -e '
     method.include?("rimeAPI.create_session") ||
       method.include?("rimeAPI.select_schema") ||
       method.include?("rimeAPI.destroy_session")
-' sources/SquirrelApplicationDelegate.swift ||
+' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "runtime diagnostics can mutate the user-selected schema"
 
 # InputMethodKit callbacks, timers and controller teardown can all arrive while
 # a Settings transaction has suspended input or finalized librime. One Host
 # predicate owns runtime availability; controllers never reinterpret its bits.
-test "$(rg -c 'var canAcceptRimeInput: Bool' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'var canAcceptRimeInput: Bool' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the Host runtime-input availability owner count changed"
-rg -Fq 'isRimeRunning && !isRimeInputSuspended' sources/SquirrelApplicationDelegate.swift ||
+rg -Fq 'isRimeRunning && !isRimeInputSuspended' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "runtime input is no longer gated by both running and suspension state"
-test "$(rg -c 'rimeAPI\.cleanup_all_sessions\(\)' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'rimeAPI\.cleanup_all_sessions\(\)' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "session-generation invalidation gained a second cleanup implementation"
 ruby -e '
-  host = File.read("sources/SquirrelApplicationDelegate.swift")
+  host = %w[
+    sources/SquirrelApplicationDelegate.swift
+    sources/SquirrelApplicationRuntime.swift
+    sources/SquirrelApplicationTransactions.swift
+  ].map { |path| File.read(path) }.join("\n")
   invalidate = host[/private func invalidateRimeSessions\(\) \{.*?\n  \}/m]
   shutdown = host[/func shutdownRime\(\) \{.*?\n  \}/m]
   abort "the canonical session invalidation owner is missing" unless
@@ -1659,6 +1821,10 @@ ruby -e '
     recovered_mode.include?("rimeAPI.get_status(session, &status)") &&
       recovered_mode.include?("applyInputModeIdentity(") &&
       recovered_mode.include?("announcesTransition: false")
+  abort "input-mode application regained an impossible optional result" if
+    controller.match?(/func applyInputModeIdentity\(.*?\n  \) -> Bool\?/m) ||
+      recovered_mode.include?("!= nil") ||
+      update.match?(/guard let transition = applyInputModeIdentity\(/)
   raw_commit = raw_commit_owner.index("rimeAPI.commit_raw_input(session)")
   consume = raw_commit_owner.index("rimeConsumeCommittedText(to: targetClient)")
   abort "InputMethodKit exit no longer reuses Rime commit_raw_input semantics" unless
@@ -1746,34 +1912,34 @@ ruby -e '
   fail "raw InputMethodKit mouse composition exit regressed"
 rg -Fq 'weak var inputController: SquirrelInputController?' sources/SquirrelPanel.swift ||
   fail "the candidate panel strongly retains an inactive input controller"
-test "$(rg -c 'private var .*Observer: NSObjectProtocol\?' sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -o 'var .*Observer: NSObjectProtocol\?' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the Host observer-token owner count changed"
 for observer_owner in workspacePowerOffObserver; do
-  test "$(rg -F -c "private var ${observer_owner}: NSObjectProtocol?" \
-    sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+  test "$(rg -F -o "var ${observer_owner}: NSObjectProtocol?" \
+    sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
     fail "the distinct ${observer_owner} boundary lost its single token owner"
 done
-if rg -n 'inputSourceSelectionObserver' sources/SquirrelApplicationDelegate.swift; then
+if rg -n 'inputSourceSelectionObserver' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift; then
   fail "the retired block-token input-source observer returned"
 fi
-test "$(rg -F -c 'selector: #selector(inputSourceChanged(_:))' \
-  sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -F -o 'selector: #selector(inputSourceChanged(_:))' \
+  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the input-source lifecycle lost its single upstream selector owner"
 ruby -e '
-  source = File.read(ARGV.fetch(0))
+  source = ARGV.map { |path| File.read(path) }.join("\n")
   registration = source[/selector: #selector\(inputSourceChanged\(_:\)\).*?\n\s*\)/m]
   abort "input-source selector registration is missing" unless registration
   abort "input-source lifecycle can be suspended while Linnet is inactive" unless
     registration.include?("suspensionBehavior: .deliverImmediately")
-' sources/SquirrelApplicationDelegate.swift ||
+' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "the input-source lifecycle can be suspended while Linnet is inactive"
-test "$(rg -F -c 'kTISNotifySelectedKeyboardInputSourceChanged as String' \
-  sources/SquirrelApplicationDelegate.swift)" -eq 2 ||
+test "$(rg -F -o 'kTISNotifySelectedKeyboardInputSourceChanged as String' \
+  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "the input-source selector registration/removal pair changed"
 ruby -e '
   source = File.read(ARGV.fetch(0))
   controller = File.read(ARGV.fetch(1))
-  delegate = File.read(ARGV.fetch(2))
+  delegate = ARGV.drop(2).map { |path| File.read(path) }.join("\n")
   activation = source[/func inputSourceDidActivate\(.*?\n  \}/m]
   selection = source[/@objc func inputSourceChanged\(_:\s*Notification\) \{.*?\n  \}/m]
   fallback = source[/private func finalizeStrandedComposition\(\).*?\n  \}/m]
@@ -1819,7 +1985,7 @@ ruby -e '
     teardown.scan("destroySession()").length == 1 &&
       !teardown.include?("Activation")
 ' sources/SquirrelApplicationPresentation.swift \
-  sources/SquirrelInputController.swift sources/SquirrelApplicationDelegate.swift ||
+  sources/SquirrelInputController.swift sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "InputMethodKit per-controller ownership or away/back transitions regressed"
 test ! -e sources/LinnetInputActivationRegistry.swift ||
   fail "the retired process-global activation owner file returned"
@@ -1854,12 +2020,16 @@ ruby -e '
       (!marked || reset < marked) && !commit.include?("hidePalettes()")
 ' sources/SquirrelInputController.swift ||
   fail "InputMethodKit client callback reentrancy can publish stale UI"
-test "$(rg -F -c 'private var settingsTransactionHost: LinnetSettingsTransactionIPC.Host?' \
-  sources/SquirrelApplicationDelegate.swift)" -eq 1 ||
+test "$(rg -F -o 'var settingsTransactionHost: LinnetSettingsTransactionIPC.Host?' \
+  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -eq 1 ||
   fail "the authenticated Settings transaction Host owner count changed"
 ruby -e '
-  project, settings, root, delegate, presentation, controller =
-    ARGV.map { |path| File.read(path) }
+  project = File.read(ARGV.fetch(0))
+  settings = File.read(ARGV.fetch(1))
+  root = File.read(ARGV.fetch(2))
+  delegate = ARGV[3, 3].map { |path| File.read(path) }.join("\n")
+  presentation = File.read(ARGV.fetch(6))
+  controller = File.read(ARGV.fetch(7))
   menu = delegate + presentation
   abort "retired Settings Info.plist reference returned" if project.include?("Settings-Info.plist")
   abort "retired nonexistent Frameworks search path returned" if
@@ -1909,7 +2079,7 @@ ruby -e '
       controller.include?("inputSourceDidActivate(session: session)")
 ' Linnet.xcodeproj/project.pbxproj sources/LinnetSettings/SettingsApplication.swift \
   sources/LinnetSettings/SettingsRootView.swift \
-  sources/SquirrelApplicationDelegate.swift \
+  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift \
   sources/SquirrelApplicationPresentation.swift \
   sources/SquirrelInputController.swift ||
   fail "Settings surface lifecycle or input-menu ownership regressed"
@@ -1973,7 +2143,7 @@ test -f sources/LinnetSettings/SettingsWindowCloseGuard.swift ||
 # userdb parser or an automatic portable/config backup path.
 test "$(rg -F -o 'rimeAPI.sync_user_data()' sources | wc -l | tr -d ' ')" -eq 1 ||
   fail "Rime user-data synchronization regained another runtime caller"
-rg -Fq 'rimeAPI.sync_user_data()' sources/SquirrelApplicationDelegate.swift ||
+rg -Fq 'rimeAPI.sync_user_data()' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "the Host stopped owning the single upstream Rime synchronization call"
 rg -Fq 'static let automaticInterval: TimeInterval = 60 * 60' \
   sources/LinnetSettings/LinnetRimeSyncController.swift ||
@@ -1991,7 +2161,7 @@ if rg -n 'userdb[.]txt|UserDbMerger|commit_count|dynamic_weight' \
 fi
 if rg -n 'exportPortable|uploadCloudBackupArchive|cloudBackupArchive' \
     sources/LinnetSettings/LinnetRimeSyncController.swift \
-    sources/SquirrelApplicationDelegate.swift \
+    sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift \
     sources/SquirrelInputController.swift; then
   fail "the automatic learning-sync path regained a full recovery archive"
 fi
@@ -2120,7 +2290,11 @@ ruby -rjson -e '
 ' config/linnet-community-signing.json ||
   fail "the fixed community CMS leaf and migration-acceptance owner is invalid"
 ruby -e '
-  delegate = File.read("sources/SquirrelApplicationDelegate.swift") +
+  delegate = %w[
+    sources/SquirrelApplicationDelegate.swift
+    sources/SquirrelApplicationRuntime.swift
+    sources/SquirrelApplicationTransactions.swift
+  ].map { |path| File.read(path) }.join("\n") +
     File.read("sources/SquirrelApplicationPresentation.swift")
   controller = File.read("sources/SquirrelInputController.swift")
   update = delegate[/func updateStatusIcon\(session: RimeSessionId\) \{.*?\n  \}/m]
@@ -2145,7 +2319,11 @@ ruby -e '
       activation.include?("inputSourceDidActivate(session: session)")
 ' || fail "live input-mode status projection regressed"
 ruby -e '
-  host = File.read("sources/SquirrelApplicationDelegate.swift")
+  host = %w[
+    sources/SquirrelApplicationDelegate.swift
+    sources/SquirrelApplicationRuntime.swift
+    sources/SquirrelApplicationTransactions.swift
+  ].map { |path| File.read(path) }.join("\n")
   publication = host[/private func publishSettingsCandidate\(.*?\n  \}\n\n  private func rollbackSettingsPublication/m]
   rollback = host[/private func rollbackSettingsPublication\(.*?\n  \}\n\n  private func activatePublishedSettings/m]
   activation = host[/private func activatePublishedSettings\(.*?\n  \}\n\n  private func validConfigurationCandidate/m]
@@ -2172,7 +2350,7 @@ ruby -e '
       publication.index("activeSettingsRevision = published.revision") <
         publication.index("status: .activated")
 
-  target_source = host[/private static let configurationReloadTargets.*?\n  \]/m]
+  target_source = host[/static let configurationReloadTargets.*?\n  \]/m]
   abort "the configuration reload deployment plan is missing" unless target_source
   actual_targets = target_source.scan(/fileName: "([^"]+)", versionKey: "([^"]+)"/)
   expected_targets = [
@@ -2214,10 +2392,14 @@ ruby -e '
     activation.include?("ChineseProfile(schemaID:") ||
       activation.include?("linnet_mode_switch/chinese_schema")
 
-  coordinator = File.read("sources/LinnetSettings/SettingsDataCoordinator.swift")
-  apply = coordinator[/private func applyConfiguration\(.*?\n  \}\n\n  \/\/\/ Lightweight appearance apply/m]
-  appearance = coordinator[/private func applyAppearance\(.*?\n  \}\n\n  private func stageConfigurationCandidate/m]
-  stage = coordinator[/private func stageConfigurationCandidate\(.*?\n  \}\n\n  private func restoreConfigurationRuntime/m]
+  coordinator = [
+    File.read("sources/LinnetSettings/SettingsDataCoordinator.swift"),
+    File.read("sources/LinnetSettings/SettingsDataCoordinatorMutation.swift"),
+    File.read("sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift")
+  ].join("\n")
+  apply = coordinator[/func applyConfiguration\(.*?\n  \}\n\n  \/\/\/ Lightweight appearance apply/m]
+  appearance = coordinator[/func applyAppearance\(.*?\n  \}\n\n  func stageConfigurationCandidate/m]
+  stage = coordinator[/func stageConfigurationCandidate\(.*?\n  \}\n\n  func restoreConfigurationRuntime/m]
   abort "configuration-only Settings owner is missing" unless apply
   abort "the shared typed configuration candidate boundary is missing" unless
     appearance && stage &&
@@ -2257,20 +2439,25 @@ ruby -e '
       renderer.include?(%q{"linnet_english_interaction/tab_behavior"})
   abort "the retired projection writer returned" if renderer.include?("writeProjections(")
 
-  backup = File.read("sources/LinnetSettings/LinnetBackupStore.swift")
+  backup = [
+    File.read("sources/LinnetSettings/LinnetBackupStore.swift"),
+    File.read("sources/LinnetSettings/LinnetBackupStoreSupport.swift")
+  ].join("\n")
   abort "backup normalization has more than one caller" unless
     backup.scan("writeBackupNormalization(").length == 1
-  mutate = coordinator[/private func mutate\(.*?\n  \}\n\n  private func diagnose/m]
-  abort "candidate materialization owner is missing" unless mutate
+  materialize = coordinator[/func materializeMutation\(.*?\n  \}\n\n  func recoverMutationFailure/m]
+  mutate = coordinator[/func mutate\(.*?\n  \}\n\n  func diagnose/m]
+  abort "candidate materialization owner is missing" unless
+    materialize && mutate && mutate.scan("materializeMutation(").length == 1
   abort "candidate materialization must write personal and runtime settings exactly once" unless
-    mutate.scan("LinnetPersonalDataStore.writePersonalFiles(").length == 1 &&
-      mutate.scan("LinnetPersonalDataStore.writeRuntimeSettings(").length == 1 &&
-      mutate.scan("LinnetSettingsProjectionRenderer.reconcile(").length == 1
+    materialize.scan("LinnetPersonalDataStore.writePersonalFiles(").length == 1 &&
+      materialize.scan("LinnetPersonalDataStore.writeRuntimeSettings(").length == 1 &&
+      materialize.scan("LinnetSettingsProjectionRenderer.reconcile(").length == 1
 ' || fail "configuration apply/reload and runtime writer ownership regressed"
-if rg -n 'removeObserver\(self\)' sources/SquirrelApplicationDelegate.swift; then
+if rg -n 'removeObserver\(self\)' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift; then
   fail "block observers are still incorrectly removed by delegate identity"
 fi
-test "$(rg -c '\[weak self\]' sources/SquirrelApplicationDelegate.swift)" -ge 4 ||
+test "$(rg -o '\[weak self\]' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift | wc -l | tr -d ' ')" -ge 4 ||
   fail "Host callback observers regained a strong delegate capture"
 
 if rg -n \
@@ -2295,9 +2482,9 @@ rg -Fq 'component: "Linnet"' \
   sources/LinnetSettings/LinnetCloudSyncLocation.swift ||
   fail "the fixed Linnet iCloud Drive directory is missing"
 
-rg -Fq 'to: \.prebuilt_data_dir' sources/SquirrelApplicationDelegate.swift ||
+rg -Fq 'to: \.prebuilt_data_dir' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "librime prebuilt data is not explicit"
-rg -Fq 'to: \.staging_dir' sources/SquirrelApplicationDelegate.swift ||
+rg -Fq 'to: \.staging_dir' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "librime staging data is not explicit"
 if rg -n 'stagePrecompiledArtifacts|configureGrammarModel' sources; then
   fail "a retired runtime copy or grammar inference path returned"
@@ -2324,7 +2511,7 @@ settings_urlsession="$(rg -l 'URLSession' sources/LinnetSettings || true)"
   fail "URLSession escaped the single Settings external-transport owner"
 
 if rg -n 'inputRuntimePreferences|chineseProfileKey|setChineseProfile|applyPreferredChineseProfileIfIdle|rimeAPI\.select_schema' \
-    sources/SquirrelApplicationDelegate.swift sources/SquirrelInputController.swift \
+    sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift sources/SquirrelInputController.swift \
     sources/LinnetSettings; then
   fail "the input frontend regained a selected-schema owner outside typed Settings Apply"
 fi
@@ -2354,14 +2541,25 @@ rg -Fq 'if [[ "${install_mode}" == complete ]]' \
 if rg -n -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
   fail "Core update regained a live InputMethodKit Host termination path"
 fi
-test "$(rg -F -c -- '"$${launch_services_register}" -u "$${local_app}"' \
-  Makefile)" = 1 ||
-  fail "local builds no longer retire their LaunchServices registration"
-rg -Fq '"$${launch_services_register}" -dump' Makefile ||
-  fail "local builds trust unregister exit codes instead of final registry state"
-if rg -Fq '|| cleanup_status=$$?' Makefile; then
-  fail "an unregistered local App can still make a successful build fail"
+test "$(rg -F -c -- 'scripts/unregister-local-apps' Makefile)" = 1 ||
+  fail "local App registration cleanup has multiple Makefile owners"
+test "$(rg -F -c -- '"$${local_app_cleanup}" "$${products_root}"' Makefile)" = 2 ||
+  fail "local builds do not clean exact App registrations on success and failure"
+if rg -n 'REGISTER_WITH_LAUNCH_SERVICES|launch_services_register|unregister_local_builds|lsregister' \
+    Makefile; then
+  fail "local builds regained an ineffective or duplicated registration owner"
 fi
+[[ -x scripts/unregister-local-apps ]] ||
+  fail "the local App registration cleanup owner is not executable"
+rg -Fq '[[ "${products_root}" == /*/Build/Products' scripts/unregister-local-apps ||
+  fail "local App cleanup lost its Build/Products boundary"
+rg -Fq 'grep -Fqx -- "${app}"' scripts/unregister-local-apps ||
+  fail "local App cleanup does not verify final LaunchServices state"
+rg -Fq '"${lsregister}" -u -R "${app}"' scripts/unregister-local-apps ||
+  fail "local App cleanup is not symmetric with Xcode recursive registration"
+rg -Fq 'for pass in 1 2' scripts/unregister-local-apps &&
+  rg -Fq '[[ "${pass}" -eq 2 ]] || sleep 1' scripts/unregister-local-apps ||
+  fail "local App cleanup does not retire delayed embedded registrations"
 rg -Fq 'unregister_fixture_apps' tests/verify_visible_settings_fixture.sh ||
   fail "Settings UI tests can leave fixture Apps registered with LaunchServices"
 # The live Rime session is the sole mode owner. Do not restore the locally
@@ -2375,12 +2573,12 @@ rg -Fq 'applyStatusIcon(asciiMode: false, schemaLabel: nil)' \
   sources/SquirrelApplicationPresentation.swift ||
   fail "status initialization is not derived from the standard live Rime state"
 if rg -n 'schemaLabel: "双"|asciiMode \? "EN"' \
-    sources/SquirrelApplicationDelegate.swift \
+    sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift \
     sources/SquirrelApplicationPresentation.swift; then
   fail "the status item retains a hard-coded or ambiguous language state"
 fi
 if rg -n 'NSLocalizedString\("Deploy"|NSLocalizedString\("Logs\.\.\."|#selector\(deploy\)|openLogFolder' \
-    sources/SquirrelApplicationDelegate.swift \
+    sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift \
     sources/SquirrelApplicationPresentation.swift \
     sources/SquirrelInputController.swift; then
   fail "maintenance-only Deploy or Logs actions returned to the user input menu"

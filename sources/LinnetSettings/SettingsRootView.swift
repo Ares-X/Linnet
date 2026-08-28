@@ -51,6 +51,7 @@ struct SettingsRootView: View {
         .layoutPriority(1)
     }
     .task {
+      await model.prepareInitialState()
       model.refreshBackups()
       model.refreshLegacyImportCandidate()
       if model.diagnostics == nil { model.refreshDiagnostics() }

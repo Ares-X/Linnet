@@ -25,12 +25,13 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
 - Complete 只用于首次安装并最多要求一次注销；之后 Core 更新不要求注销。
 
-## 本机构建与验证
+## 本地预检与 Action 正式候选
 
-普通开发构建不需要证书。只有维护者生成可公开安装的 `archive` 时才使用固定
-生产身份；Keychain 与密码都位于仓库外，并由脚本自动解锁和锁回：
+普通开发构建不需要证书。维护者 Mac 仍可用仓库外固定 CMS 身份做一次可选
+`archive` 预检，但它不是公开候选，也不能上传或授权发布。正式候选的唯一构建和
+签名 owner 是 `.github/workflows/release-ci.yml` 的 macOS GitHub Action。
 
-首次配置这台维护者 Mac 时，先把当前用户拥有且权限为 `0600` 的固定输入放到：
+首次配置维护者 Mac 的本地预检身份时，把当前用户拥有且权限为 `0600` 的固定输入放到：
 
 - `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/community-cms.p12`
 - `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/p12-password`
@@ -39,56 +40,66 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
 仓库钉住的证书 SHA-1/SHA-256，配置 `/usr/bin/codesign` 的访问分区，完成非交互
 签名探针并锁回。任一固定输出已经存在时都会失败，且没有 replace、repair 或 delete
 入口；失败只回滚本次创建的精确目标并恢复原搜索列表。成功后不要在每次发版前重跑。
-若配置或日常归档出现密码框，应取消并排查，不能输入 macOS 登录密码或删除既有身份。
+
+可选本地预检命令是：
 
 ```bash
 export LINNET_CANDIDATE_REVISION="$(git rev-parse HEAD)"
-export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release.XXXXXX)"
+export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release-preflight.XXXXXX)"
 ./action-build.sh archive
 ```
 
-本机固定路径为 `~/Library/Keychains/Linnet-Community-CMS.keychain-db`，解锁密码
-位于权限 `0600` 的
-`~/Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password`。
-它是 Linnet 专用随机密码，不是用户的 macOS 登录密码；初次配置一次后，脚本只从
-该文件非交互读取，日常构建不得显示密码框。构建要求工作树干净，并把当前 HEAD
-写入 App metadata。`make community` 复用唯一 external-CMS 签名 owner；
-`package/make_package` 只封装已验证字节，不重新签名或修复。普通 `release` / `debug`
-仍是 unsigned 开发产物；旧的可安装 UAT 签名 profile 与 `candidate` lane 已删除。
+本机固定 Keychain 的密码是 Linnet 专用随机密码，不是 macOS 登录密码；如果配置或
+预检出现密码框，应取消并排查。由于 CMS 签名时间会改变字节，本地预检输出不得作为
+安装验收或正式发布候选。
 
-本地 `archive` 是正式候选的唯一构建边界。CMS 签名含签名时间，因此安装验收后
-不得重新编译或重签。正式安装验收与公开发布必须复用同一个精确八文件目录。
+正式候选只在精确 revision 的 `Linnet manual full CI` 成功后由
+`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动。macOS Action 使用
+`community-signing` Environment 中的 P12 和密码创建临时 Keychain，运行锁定依赖
+准备和一次 `make archive`。同一次 Make 调用只编译一份 `build/linnet-pack`；
+`make_package` 在产物边界验证两个 PKG，最终
+`package/verify_publication_artifacts` 再验证完整八文件集合。中间的 archive
+投影不重复验证同一 PKG。
 
-最终 8 个候选产物使用独立 pack CLI 验证：
-
-```bash
-release_version="$(sed -n \
-  's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
-  config/LinnetProduct.xcconfig)"
-LINNET_RELEASE_TOOL=/absolute/path/to/linnet-pack \
-  package/verify_publication_artifacts \
-  "$ARCHIVE_OUTPUT_DIR" "$release_version" "$LINNET_CANDIDATE_REVISION"
-```
+候选 Action 把这 8 个原字节直接写入三个 Draft GitHub Releases：Core 2 件、data
+5 件、public 1 件。GitHub Actions artifact 不是发布传输或存储 owner，因此不会再
+上传约 906 MB artifact、随后在另一个 job 下载并解压同一份数据。
 
 ## GitHub 发布
 
-发布不再调用 GitHub Actions 构建，也不需要 GitHub 网页审批：
+构建、签名、候选暂存和最终公开都由 GitHub Actions 完成；维护者 Mac 只消费
+Action 生成的原字节做安装验收，并在验收后创建一个不可变授权标签：
 
-1. 在 clean、精确当前 `main` checkout 运行 `./action-build.sh archive`，生成并验证
-   八文件正式候选；
-2. 在真实账号用该目录完成“两轮同 leaf Core”：从前一公开版升级到候选，再原字节
-   重装一次。两轮都须无注销、无 Keychain 密码提示、Host PID 不变且
+1. 在 GitHub 手动运行精确 revision 的 `Linnet manual full CI`。成功后，从 clean、
+   精确远端 `main` 创建并推送
+   `linnet-candidate/v<VERSION>-<FULL_REVISION>`；
+2. 等待 macOS candidate job 成功。它只构建、签名一次，并把八件产物直接放入
+   `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
+3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
+   candidate job summary 的 revision 与八文件集合摘要，并在本地重新运行最终 verifier；
+4. 在真实账号用该目录完成“两轮同 leaf Core”：从前一公开版升级到候选，再重装
+   同一原字节。两轮都须无注销、无 Keychain 密码提示、Host PID 不变且
    `AXHidden=false`，并保留 enabled/selected、UserData、输入菜单、Settings 和真实输入；
-3. 验收通过后运行
-   `scripts/release-control publish "$ARCHIVE_OUTPUT_DIR"`。命令重新验证八件产物，
-   计算文件名与逐文件 SHA-256 的集合摘要，并通过 SSH 创建唯一轻量标签
-   `linnet-publication/v<VERSION>-<FULL_REVISION>-h<ARCHIVE_SHA256>`；
-4. 同一命令使用既有 GitHub CLI 登录依次发布 Core、data、Catalog、Public / Latest。
-   每个 mutation boundary 都重新验证同一标签、revision 和八文件摘要，不重建、不重签。
+5. 验收通过后运行
+   `scripts/release-control authorize "$ARCHIVE_OUTPUT_DIR"`。本地命令只能重新验证
+   八文件和三个远端 Release 的 SHA-256/size，并通过 SSH 创建
+   `linnet-publication/v<VERSION>-<FULL_REVISION>-h<SET_SHA256>`；它不能构建、
+   上传、编辑 Release 或推进 Catalog；
+6. 授权标签启动 Ubuntu publisher job。它从 GitHub Release metadata 验证完整八文件
+   集合，只下载约 4 KB 的 `Linnet-Data-Channel.json`，然后按
+   Core → data → 非强制快进 Catalog → Public / Latest 的顺序发布。大型资产不再下载。
 
-任一项失败都停止在当前幂等边界；修复必须形成新的 revision、build 和必要的数据
-sequence，再生成新的八文件目录，不能替换已公开资产。`v<version>` 只标识公开版本，
-哈希控制标签只授权已验收的同一批字节。
+更新锁定 LTS 模型时，显式
+`linnet-data-seed/v<VERSION>-<SEQUENCE>-<FULL_REVISION>` 标签启动同一个 macOS
+构建 owner。它从 `upstreams.lock.json` 的上游 URL 下载并验证固定 bytes/SHA-256，
+完成完整八文件构建与最终 verifier，但只暂存并公开五件 data 预发布资产；不得发布
+Core/Public，也不得推进 Catalog。随后只有同一 revision 可快进到 `main`，再走正常
+manual CI 和 candidate 流程。正常版本不运行 seed 模式。
+
+任一项失败都停止在当前幂等边界；不能覆盖、删除或 `--clobber` 已公开资产。候选
+字节本身有误时，修复必须形成新的 revision、build 和必要的数据 sequence，再由
+macOS Action 生成新候选。`v<VERSION>` 只标识公开版本，两个控制标签分别只授权
+显式 data seed 或已验收的八文件集合。
 
 旧 ad-hoc → 固定 CMS 只是一条一次性的历史 Core lifecycle 验收边；唯一记录在
 `config/linnet-community-signing.json`。其中固定 leaf、bundle ID、macOS major 和
@@ -96,7 +107,7 @@ identity classifier 的“迁移契约指纹”共同决定该历史证据能否
 当前候选失配，才必须在隔离的 legacy-seeded 账号或虚拟机中重做迁移；全部匹配时
 不得要求每个候选重复该迁移。Host 连续性和 TIS 不变性由当前 package lifecycle
 matrix 独立验证。该记录只闭合 legacy identity edge，不能冒充当前候选的菜单、
-Settings、输入交互或完整安装 UAT；当前候选仍以步骤 3 的“两轮同 leaf Core”为
+Settings、输入交互或完整安装 UAT；当前候选仍以步骤 4 的“两轮同 leaf Core”为
 发布前证据。
 
 Settings 只读取 `data-channel` 的一个稳定指针，不读取可变 Release 别名，也不
@@ -113,9 +124,16 @@ Secrets 中。它们不是 Apple 开发者凭据，也不会被打包、写入�
 后输入源可用；同一 bundle ID/path 的后续 Core 更新必须验证：Installer 返回
 `RestartAction=None`、登录会话不变、个人数据不变、输入源 enabled/selected
 意图不被覆盖，更新期间 Host PID 不变且 `AXHidden=false`；安装脚本不得启动、隐藏或替换
-Host，更新前已连接及更新后新打开的应用都可输入；
-再单独验证 Host 自然重启后由新 build 提供输入。每个精确候选的“两轮同 leaf Core”必须使用
-同一不可变 artifact：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
+Host，更新前已连接及更新后新打开的应用都可输入。安装后还须验证 Settings 分别显示
+installed/running version、build 和 revision。立即应用的安全 owner 是 Host 的进程生命周期
+客户端历史账本，不是旧 controller 瞬时数量：用户必须先通过系统菜单切走 Linnet；
+所有曾连接的其他
+应用必须已退出；不得有未完成输入、未知客户端或数据事务。任一条件不满足时 Host
+保持运行且 Settings 显示拒绝原因；Settings 不关闭用户应用，也不程序化切换输入源。
+Host 接受后还须在退出前复核账本 generation；Settings 只能从 canonical 路径启动并核对
+精确 revision；再单独验证 Host 自然重启后由新 build 提供输入。
+每个精确候选的“两轮同 leaf Core”必须使用
+同一组 Draft Release 原字节：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
 升级，第二轮重装候选原字节；两轮均
 不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、
 输入菜单、Settings 和真实输入。旧 ad-hoc 身份迁移的复用与失效条件只由

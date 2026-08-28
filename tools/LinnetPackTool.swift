@@ -149,11 +149,11 @@ struct LinnetPackTool {
     guard inventory.entries == manifest.files,
       inventory.contentSHA256 == manifest.contentSHA256
     else { throw ToolFailure.invalidSource("installed pack differs from its manifest") }
-    let encoded = try LinnetPackContract.compressZlib(source: raw, to: compressed)
+    let encoded = try LinnetPackEncoder.compressZlib(source: raw, to: compressed)
     guard encoded.unpackedBytes == inventory.bytes,
       encoded.unpackedSHA256 == inventory.contentSHA256
     else { throw ToolFailure.invalidSource("container payload differs from its manifest") }
-    try LinnetPackContract.writeContainer(
+    try LinnetPackEncoder.writeContainer(
       manifestData: manifestData, payload: compressed, to: output)
   }
 
@@ -409,15 +409,15 @@ extension LinnetPackTool {
 
   static func activePack(
     from root: URL,
-    expected: LinnetDataRegistry.PackKind,
+    expected: LinnetPackContract.Kind,
     coreVersion: String
   ) throws -> LinnetDataRegistry.ActivePack {
     let (manifest, manifestData) = try verifiedInstalledManifest(
       at: root, coreVersion: coreVersion)
     let identity = "\(manifest.sequence)-\(manifest.version)"
-    guard LinnetDataRegistry.PackKind(rawValue: manifest.kind.rawValue) == expected,
+    guard manifest.kind == expected,
       root.lastPathComponent == identity,
-      LinnetPackContract.Kind(rawValue: expected.rawValue)?.packID == manifest.packID
+      expected.packID == manifest.packID
     else { throw ToolFailure.invalidSource("package manifest does not match its identity") }
     return .init(
       packID: manifest.packID,
@@ -427,9 +427,7 @@ extension LinnetPackTool {
       dataABI: manifest.dataABI,
       contentSHA256: manifest.contentSHA256,
       minCore: manifest.minCore,
-      requirements: manifest.requires.map {
-        .init(kind: LinnetDataRegistry.PackKind(rawValue: $0.kind.rawValue)!, dataABI: $0.dataABI)
-      },
+      requirements: manifest.requires,
       relativePath: "Data/Packs/\(manifest.kind.rawValue)/\(identity)",
       manifestSHA256: hex(SHA256.hash(data: manifestData)))
   }

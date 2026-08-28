@@ -146,6 +146,7 @@ struct LinnetCandidateWindowInteractionTests {
 
   static func main() {
     _ = NSApplication.shared
+    testColdCandidatePresentationLatency()
     testTrackingArea()
     testExactCandidatePathHitTesting()
     testSyntheticHoverLifecycle()
@@ -160,19 +161,7 @@ struct LinnetCandidateWindowInteractionTests {
     testCandidateScrollPublicationIdentity()
     testPreeditPressDoesNotInferEngineCaret()
     testInputModeStatusNotice()
-    let naturalShotPath = CommandLine.arguments.firstIndex(of: "--natural-default-shot")
-      .flatMap { index in
-        CommandLine.arguments.indices.contains(index + 1)
-          ? CommandLine.arguments[index + 1] : nil
-      }
-    let pagingShotPath = CommandLine.arguments.firstIndex(of: "--paging-middle-shot")
-      .flatMap { index in
-        CommandLine.arguments.indices.contains(index + 1)
-          ? CommandLine.arguments[index + 1] : nil
-      }
-    testDefaultNineCandidateNaturalSize(
-      outputPath: naturalShotPath,
-      middlePageOutputPath: pagingShotPath)
+    testDefaultNineCandidateNaturalSize()
     testEnglishMetadataFooterNaturalSize()
     testSharedCandidateDetailSidecarGeometry()
     testVerticalPanelDoesNotMemorizeWhenDisabled()
@@ -186,13 +175,6 @@ struct LinnetCandidateWindowInteractionTests {
           testCandidateCellGeometry(fontPoint: point, linear: linear, style: style)
         }
       }
-    }
-    if let option = CommandLine.arguments.firstIndex(of: "--contact-sheet"),
-      CommandLine.arguments.indices.contains(option + 2)
-    {
-      makeContactSheet(
-        yamlPath: CommandLine.arguments[option + 1],
-        outputPath: CommandLine.arguments[option + 2])
     }
     if let option = CommandLine.arguments.firstIndex(of: "--readme-theme-gallery"),
       CommandLine.arguments.indices.contains(option + 2)
@@ -209,9 +191,12 @@ struct LinnetCandidateWindowInteractionTests {
         inputModesOutputPath: CommandLine.arguments[option + 2],
         bilingualOutputPath: CommandLine.arguments[option + 3])
     }
-    if let option = CommandLine.arguments.firstIndex(of: "--verify-readme-render"),
-      CommandLine.arguments.indices.contains(option + 3)
-    {
+    for option in CommandLine.arguments.indices
+    where CommandLine.arguments[option] == "--verify-readme-render" {
+      guard CommandLine.arguments.indices.contains(option + 3) else {
+        failures.append("--verify-readme-render requires committed, generated, and label arguments")
+        continue
+      }
       verifyReadmeRender(
         committedPath: CommandLine.arguments[option + 1],
         generatedPath: CommandLine.arguments[option + 2],
@@ -224,6 +209,38 @@ struct LinnetCandidateWindowInteractionTests {
       exit(EXIT_FAILURE)
     }
     print("LinnetCandidateWindowInteractionTests: PASS")
+  }
+
+  private static func testColdCandidatePresentationLatency() {
+    let panel = SquirrelPanel(position: NSRect(x: 320, y: 420, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller)
+    let candidates = SquirrelInputController.CandidateSnapshot(
+      items: ["测试", "侧室", "测速", "策士", "测式"].enumerated().map { index, value in
+        .init(
+          text: value, comment: "", page: 0, indexOnPage: index,
+          absoluteIndex: index, selectionLabel: String(index + 1))
+      },
+      pageSize: 5,
+      currentPage: 0,
+      isLastPage: true,
+      isExpanded: false,
+      canExpand: false)
+    let started = ProcessInfo.processInfo.systemUptime
+    let published = panel.update(
+      preedit: "ceshi", selRange: .empty, caretPos: 5,
+      candidates: candidates, highlighted: 0, update: true,
+      controller: controller)
+    let elapsedMilliseconds =
+      (ProcessInfo.processInfo.systemUptime - started) * 1_000
+    require(published, "cold candidate presentation did not publish")
+    require(
+      elapsedMilliseconds < 100,
+      "cold candidate presentation took \(elapsedMilliseconds)ms")
+    print(
+      "candidate_interaction: cold_presentation_ms="
+        + String(format: "%.2f", elapsedMilliseconds))
+    panel.hide()
   }
 
   private static func testInputModeStatusNotice() {
@@ -530,18 +547,19 @@ struct LinnetCandidateWindowInteractionTests {
     accessibility.install(parent: view, rawTextView: view.textView)
     accessibility.publish(
       parent: view,
-      geometry: .init(
-        candidateFrames: [],
-        previousPageFrame: nil,
-        nextPageFrame: nil),
-      candidates: [
-        .init(
-          text: "甲", comment: "", page: 0, indexOnPage: 0,
-          absoluteIndex: 101, selectionLabel: "1"),
-      ],
-      highlightedIndex: 0,
-      controlMode: .paging(canPageUp: false, canPageDown: false),
-      shouldAnnounce: false,
+      publication: .init(
+        geometry: .init(
+          candidateFrames: [],
+          previousPageFrame: nil,
+          nextPageFrame: nil),
+        candidates: [
+          .init(
+            text: "甲", comment: "", page: 0, indexOnPage: 0,
+            absoluteIndex: 101, selectionLabel: "1"),
+        ],
+        highlightedIndex: 0,
+        controlMode: .paging(canPageUp: false, canPageDown: false),
+        shouldAnnounce: false),
       selectCandidate: { _ in true },
       performControl: { _ in true })
     require(
@@ -590,18 +608,19 @@ struct LinnetCandidateWindowInteractionTests {
       var performedActions: [LinnetCandidatePresentation.CandidateControlAction] = []
       accessibility.publish(
         parent: view,
-        geometry: .init(
-          candidateFrames: [validCandidateFrame],
-          previousPageFrame: invalidCase.previous,
-          nextPageFrame: invalidCase.next),
-        candidates: [
-          .init(
-            text: "甲", comment: "", page: 0, indexOnPage: 0,
-            absoluteIndex: 101, selectionLabel: "1"),
-        ],
-        highlightedIndex: 0,
-        controlMode: invalidCase.mode,
-        shouldAnnounce: false,
+        publication: .init(
+          geometry: .init(
+            candidateFrames: [validCandidateFrame],
+            previousPageFrame: invalidCase.previous,
+            nextPageFrame: invalidCase.next),
+          candidates: [
+            .init(
+              text: "甲", comment: "", page: 0, indexOnPage: 0,
+              absoluteIndex: 101, selectionLabel: "1"),
+          ],
+          highlightedIndex: 0,
+          controlMode: invalidCase.mode,
+          shouldAnnounce: false),
         selectCandidate: { _ in true },
         performControl: { action in
           performedActions.append(action)
@@ -1318,10 +1337,7 @@ struct LinnetCandidateWindowInteractionTests {
     require(feedbackLayer == nil, "\(context) retained a visual feedback layer")
   }
 
-  private static func testDefaultNineCandidateNaturalSize(
-    outputPath: String?,
-    middlePageOutputPath: String?
-  ) {
+  private static func testDefaultNineCandidateNaturalSize() {
     guard let yaml = try? String(contentsOfFile: "data/squirrel.yaml", encoding: .utf8),
       let sample = parseThemeSamples(yaml)["linnet_paper_light"]
     else {
@@ -1447,10 +1463,6 @@ struct LinnetCandidateWindowInteractionTests {
         "default 16pt ninth candidate lost its natural-width hit target")
     }
 
-    if let outputPath {
-      writeSnapshot(of: panel.contentView, outputPath: outputPath)
-    }
-
     let middlePage = SquirrelInputController.CandidateSnapshot(
       items: values.enumerated().map { index, value in
         .init(
@@ -1479,10 +1491,6 @@ struct LinnetCandidateWindowInteractionTests {
       abs(panel.frame.height - middleNaturalHeight) <= 0.5,
       "switching to a middle page inflated the horizontal panel from natural height "
         + "\(middleNaturalHeight) to \(panel.frame.height)")
-    if let middlePageOutputPath {
-      writeSnapshot(of: panel.contentView, outputPath: middlePageOutputPath)
-    }
-
     let lastPage = SquirrelInputController.CandidateSnapshot(
       items: values.prefix(3).enumerated().map { index, value in
         .init(
@@ -1559,9 +1567,35 @@ struct LinnetCandidateWindowInteractionTests {
     for point in [CGFloat(12), 15, 16, 32] {
       testEnglishMetadataFooterNaturalSize(candidatePoint: point)
     }
+    testEnglishMetadataFooterNaturalSize(
+      candidatePoint: 16,
+      values: ["web"],
+      rawDetailText: "web · n. 网；网络；网状物；腹板；vi. 结网；vt. 结网于；使陷入罗网",
+      maximumPanelWidth: 280)
+    testEnglishMetadataFooterNaturalSize(
+      candidatePoint: 16,
+      values: ["web"],
+      rawDetailText: "web · n. 网；网络；网状物；腹板；vi. 结网；vt. 结网于；使陷入罗网",
+      maximumPanelWidth: 280,
+      darkMode: true)
+    testEnglishMetadataFooterNaturalSize(
+      candidatePoint: 16,
+      values: ["hgp", "横排", "横盘", "横屏", "横批", "横披", "横撒", "横评", "横坡"],
+      rawDetailText: "肝葡萄糖生成, 高丙种球蛋白血症性紫瘢, 高球蛋白血症性紫瘢",
+      translationMustNotWidenCandidateRow: true,
+      canExpand: true,
+      darkMode: true)
   }
 
-  private static func testEnglishMetadataFooterNaturalSize(candidatePoint: CGFloat) {
+  private static func testEnglishMetadataFooterNaturalSize(
+    candidatePoint: CGFloat,
+    values: [String] = ["f", "fa", "for", "fi", "ff", "fe", "fc", "fg", "fast"],
+    rawDetailText: String = "/ef/ · n. 字母 F",
+    maximumPanelWidth: CGFloat? = nil,
+    translationMustNotWidenCandidateRow: Bool = false,
+    canExpand: Bool = false,
+    darkMode: Bool = false
+  ) {
     let panel = SquirrelPanel(position: NSRect(x: 360, y: 460, width: 2, height: 20))
     let controller = SquirrelInputController()
     panel.bind(controller: controller)
@@ -1572,7 +1606,11 @@ struct LinnetCandidateWindowInteractionTests {
       return
     }
 
-    let theme = candidateView.lightTheme
+    if darkMode {
+      panel.resolvedAppearance = NSAppearance(named: .darkAqua)!
+      candidateView.applyClientAppearance(isDark: true)
+    }
+    let theme = candidateView.currentTheme
     let labelPoint = max(10, candidatePoint - 6)
     let detailPoint = max(10, candidatePoint - 4)
     let candidateFont = LinnetCandidatePresentation.platformFont(
@@ -1601,8 +1639,8 @@ struct LinnetCandidateWindowInteractionTests {
       placement: .standaloneDetail)
     theme.font = candidateFont
     theme.linear = true
-    theme.candidateExpansionAllowed = false
-    theme.showPaging = false
+    theme.candidateExpansionAllowed = canExpand
+    theme.showPaging = canExpand
     theme.linespace = LinnetCandidatePresentation.candidateRowSpacing
     theme.candidateFormat = "[label] [candidate]"
     theme.attrs = [.font: candidateFont, .foregroundColor: NSColor.labelColor]
@@ -1634,12 +1672,11 @@ struct LinnetCandidateWindowInteractionTests {
     paragraph.paragraphSpacingBefore = theme.linespace / 2
     theme.paragraphStyle = paragraph
 
-    let values = ["f", "fa", "for", "fi", "ff", "fe", "fc", "fg", "fast"]
-    let detailText = "/ef/ · n. 字母 F"
+    let detailText = LinnetCandidatePresentation.selectedDetailText(rawDetailText)
     let candidates = SquirrelInputController.CandidateSnapshot(
       items: values.enumerated().map { index, value in
         .init(
-          text: value, comment: index == 0 ? detailText : "",
+          text: value, comment: index == 0 ? rawDetailText : "",
           page: 0, indexOnPage: index, absoluteIndex: index,
           selectionLabel: String(index + 1))
       },
@@ -1647,7 +1684,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: true,
       isExpanded: false,
-      canExpand: false)
+      canExpand: canExpand)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
@@ -1655,39 +1692,52 @@ struct LinnetCandidateWindowInteractionTests {
     panel.displayIfNeeded()
     render(candidateView)
 
+    let candidateText = candidateView.textView.textContentStorage?.attributedString
     let detailRange = candidateView.detailRange
-    let attributed = candidateView.textView.textContentStorage?.attributedString
-    require(detailRange.length == detailText.utf16.count,
-            "\(candidatePoint)pt English footer did not publish one literal detail range")
-    if let attributed, detailRange.location != NSNotFound, detailRange.length > 0 {
+    require(
+      candidateView.detailTextView.isHidden &&
+        candidateView.detailDividerView.isHidden &&
+        detailRange.length == detailText.utf16.count &&
+        candidateText?.attributedSubstring(from: detailRange).string == detailText,
+      "\(candidatePoint)pt horizontal detail escaped the candidate text surface")
+    if let candidateText, detailRange.length > 0 {
       require(
-        attributed.attributedSubstring(from: detailRange).string == detailText,
-        "\(candidatePoint)pt English footer split or rewrote the runtime comment")
-      require(
-        (attributed.attribute(.font, at: detailRange.location, effectiveRange: nil)
+        (candidateText.attribute(.font, at: detailRange.location, effectiveRange: nil)
           as? NSFont)?.pointSize == detailPoint,
         "\(candidatePoint)pt English footer did not use the configured detail font")
       require(
-        abs(((attributed.attribute(
+        abs(((candidateText.attribute(
           .baselineOffset, at: detailRange.location, effectiveRange: nil)
           as? NSNumber)?.doubleValue ?? .nan) - Double(detailBaseline)) < 0.0001,
         "\(candidatePoint)pt English footer inherited the inline comment baseline")
     }
-    if let textRange = candidateView.convert(range: detailRange) {
-      let detailRect = candidateView.contentRect(range: textRange)
-      require(!detailRect.isEmpty,
-              "\(candidatePoint)pt English footer has no TextKit geometry")
-      require(candidateView.bounds.insetBy(dx: -0.5, dy: -0.5).contains(detailRect),
-              "\(candidatePoint)pt English footer is clipped by natural panel bounds")
-    } else {
-      failures.append("\(candidatePoint)pt English footer range could not convert to TextKit")
-    }
+    let detailRect = candidateView.convert(range: detailRange)
+      .map(candidateView.contentRect(range:)) ?? .zero
+    require(!detailRect.isEmpty,
+            "\(candidatePoint)pt English footer has no TextKit geometry")
     let inset = LinnetCandidatePresentation.candidateWindowInset
     let contentRect = candidateView.contentRect
+    let geometry = LinnetCandidatePresentation.candidateDetailGeometry(
+      forLinearLayout: true,
+      candidateFontPoint: candidatePoint)
+    let pagingStripWidth = panel.presentationMetrics(theme: theme).paging.stripWidth
     require(
-      abs(panel.frame.width - ceil(contentRect.width + inset.width * 2)) <= 0.5 &&
+      abs(panel.frame.width - ceil(
+        contentRect.width + inset.width * 2 + pagingStripWidth)) <= 0.5 &&
         abs(panel.frame.height - ceil(contentRect.height + inset.height * 2)) <= 0.5,
       "\(candidatePoint)pt English footer did not participate in natural panel sizing")
+    if let maximumPanelWidth {
+      require(
+        panel.frame.width <= maximumPanelWidth && detailRect.width <=
+          (geometry.detailColumnMaximumWidth ?? .greatestFiniteMagnitude),
+        "\(candidatePoint)pt short English candidate still created an oversized footer: "
+          + "panel \(panel.frame.width), detail \(detailRect.width)")
+    }
+    if translationMustNotWidenCandidateRow {
+      require(
+        abs(contentRect.width - candidateView.primaryContentRect.width) <= 0.5,
+        "\(candidatePoint)pt translation widened an already wider candidate row")
+    }
     panel.hide()
   }
 
@@ -1726,8 +1776,12 @@ struct LinnetCandidateWindowInteractionTests {
       ]
       theme.firstParagraphStyle = NSMutableParagraphStyle()
       theme.paragraphStyle = NSMutableParagraphStyle()
-      let detailText = "/ef/ · n. 字母 F"
-      let values = ["f", "far", "fast"]
+      let detailText = LinnetCandidatePresentation.selectedDetailText(
+        "/wɜːk/ · n. 工作；职业；作品；[复]工厂；工程；v. 工作；运行；奏效；"
+          + "产生影响；造成；抽搐；逐渐移动")
+      let values = [
+        "work", "works", "woke", "week", "wiki", "weak", "worse", "wise", "working",
+      ]
       _ = panel.update(
         preedit: "", selRange: .empty, caretPos: 0,
         candidates: SquirrelInputController.CandidateSnapshot(
@@ -1753,59 +1807,67 @@ struct LinnetCandidateWindowInteractionTests {
         panel.hide()
         continue
       }
-      let candidateWidth = candidateView.candidateRanges.reduce(CGFloat.zero) {
-        width, range in
-        max(
-          width,
-          text.attributedSubstring(from: range).boundingRect(
-            with: NSSize(
-              width: CGFloat.greatestFiniteMagnitude,
-              height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin]).width)
-      }
-      let detailStringRange = (text.string as NSString).range(of: detailText)
-      guard detailStringRange.location != NSNotFound else {
-        failures.append("\(point)pt live sidecar lost its metadata text")
-        panel.hide()
-        continue
-      }
-      let detail = text.attributedSubstring(from: detailStringRange)
       let geometry = LinnetCandidatePresentation.candidateDetailGeometry(
-        forLinearLayout: false)
-      let dividerSize = NSAttributedString(
-        string: geometry.dividerText,
-        attributes: theme.detailAttrs).boundingRect(
-          with: NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude),
-          options: [.usesLineFragmentOrigin]).size
-      let expected = geometry.frames(
-        candidateSize: CGSize(width: candidateWidth, height: 0),
-        detailSize: detail.boundingRect(
-          with: NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude),
-          options: [.usesLineFragmentOrigin]).size,
-        dividerSize: dividerSize)
-      let paragraph = text.attribute(
-        .paragraphStyle,
-        at: candidateView.candidateRanges[0].location,
-        effectiveRange: nil) as? NSParagraphStyle
-      let tabs = paragraph?.tabStops ?? []
+        forLinearLayout: false,
+        candidateFontPoint: point)
       require(
-        tabs.count == 2 &&
-          abs(tabs[0].location - (expected.divider?.minX ?? .nan)) < 0.001 &&
-          abs(tabs[1].location - expected.detail.minX) < 0.001,
-        "\(point)pt live sidecar did not consume the shared candidate-detail frames")
-      require(
-        text.attributedSubstring(from: candidateView.detailRange).string
-          == geometry.textSeparator + detail.string,
-        "\(point)pt live sidecar diverged from the shared separator")
+        !text.string.contains(detailText),
+        "\(point)pt sidecar metadata returned to the candidate text owner")
       require(
         zip(candidateView.candidateRanges, values).allSatisfy { range, value in
           text.attributedSubstring(from: range).string.hasSuffix(value)
         },
-        "\(point)pt sidecar insertion changed a candidate range")
+        "\(point)pt independent detail layout changed a candidate range")
+      require(
+        !candidateView.detailTextView.isHidden &&
+          !candidateView.detailDividerView.isHidden &&
+          candidateView.detailTextView.textContentStorage?.attributedString?.string
+            == detailText,
+        "\(point)pt independent detail surface did not publish selected metadata: "
+          + "hidden=\(candidateView.detailTextView.isHidden), "
+          + "value="
+          + (candidateView.detailTextView.textContentStorage?.attributedString?.string
+            .debugDescription ?? "<missing>")
+          + " expected=\(detailText.debugDescription)")
+      if let textLayoutManager = candidateView.detailTextView.textLayoutManager {
+        var detailSegments: [CGRect] = []
+        textLayoutManager.enumerateTextSegments(
+          in: textLayoutManager.documentRange,
+          type: .selection,
+          options: [.rangeNotRequired]
+        ) { _, rect, _, _ in
+          detailSegments.append(rect)
+          return true
+        }
+        require(
+          detailSegments.count >= 2 && detailSegments.allSatisfy {
+            $0.minX >= -0.5 &&
+              $0.maxX <= candidateView.detailTextView.bounds.width + 0.5
+          },
+          "\(point)pt long definition escaped its bounded detail surface: "
+            + "\(detailSegments)")
+      } else {
+        failures.append("\(point)pt long definition has no TextKit geometry")
+      }
+      let candidateFrames = candidateView.candidateAccessibilityGeometry().candidateFrames
+      require(
+        candidateFrames.allSatisfy {
+          $0.maxX <= candidateView.detailDividerView.frame.minX + 0.5
+        },
+        "\(point)pt candidate hit or highlight geometry still extends into the detail column")
+      let expectedMaximumWidth =
+        (geometry.candidateColumnMaximumWidth ?? 0) +
+        (geometry.detailColumnMaximumWidth ?? 0) +
+        geometry.spacing * 2 + 1 + theme.edgeInset.width * 2
+      require(
+        candidateView.detailTextView.frame.width <=
+          (geometry.detailColumnMaximumWidth ?? 0) + 0.5 &&
+          panel.frame.width <= ceil(expectedMaximumWidth) + 1 &&
+          (point > 16 || panel.frame.width <= 260),
+        "\(point)pt vertical English panel detail width "
+          + "\(candidateView.detailTextView.frame.width), panel width \(panel.frame.width), "
+          + "expected detail \(String(describing: geometry.detailColumnMaximumWidth)), "
+          + "maximum panel \(ceil(expectedMaximumWidth) + 1)")
       panel.hide()
     }
   }
@@ -1856,8 +1918,7 @@ struct LinnetCandidateWindowInteractionTests {
       candidateVertical: false,
       candidateCornerRadius: 10))
     view.drawView(
-      candidateRanges: ranges,
-      detailRange: .empty,
+      candidateRanges: ranges, detailRange: .empty,
       hilightedIndex: 0,
       preeditRange: .empty,
       highlightedPreeditRange: .empty,
@@ -1935,28 +1996,6 @@ struct LinnetCandidateWindowInteractionTests {
     view.cacheDisplay(in: view.bounds, to: representation)
   }
 
-  private static func writeSnapshot(of view: NSView?, outputPath: String) {
-    guard let view,
-      let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-    else {
-      failures.append("default natural-size panel could not allocate a bitmap surface")
-      return
-    }
-    view.cacheDisplay(in: view.bounds, to: representation)
-    guard let data = representation.representation(using: .png, properties: [:]),
-      !data.isEmpty
-    else {
-      failures.append("default natural-size panel bitmap was empty")
-      return
-    }
-    do {
-      try data.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
-      print("Default natural-size screenshot: \(outputPath)")
-    } catch {
-      failures.append("default natural-size panel could not be written: \(error)")
-    }
-  }
-
   private struct ThemeSample {
     let identifier: String
     let background: NSColor
@@ -1971,94 +2010,6 @@ struct LinnetCandidateWindowInteractionTests {
     let mutuallyExclusive: Bool
     let isTranslucent: Bool
     let selectionStyle: SquirrelTheme.SelectionStyle
-  }
-
-  private static func makeContactSheet(yamlPath: String, outputPath: String) {
-    guard let source = try? String(contentsOfFile: yamlPath, encoding: .utf8) else {
-      failures.append("contact sheet could not read canonical squirrel.yaml")
-      return
-    }
-    let samples = parseThemeSamples(source)
-    let familyPrefixes = [
-      "linnet_paper", "linnet_moon_jade", "linnet_sidecar", "linnet_clay",
-      "linnet_mist_jade", "linnet_glass", "linnet_ink_cinnabar",
-    ]
-    guard samples.count == 14,
-      familyPrefixes.allSatisfy({ samples["\($0)_light"] != nil && samples["\($0)_dark"] != nil })
-    else {
-      failures.append("contact sheet did not resolve all fourteen canonical palettes")
-      return
-    }
-
-    let cellSize = NSSize(width: 400, height: 104)
-    let sheetSize = NSSize(width: cellSize.width * 6, height: cellSize.height * 7)
-    guard let sheet = NSBitmapImageRep(
-      bitmapDataPlanes: nil,
-      pixelsWide: Int(sheetSize.width),
-      pixelsHigh: Int(sheetSize.height),
-      bitsPerSample: 8,
-      samplesPerPixel: 4,
-      hasAlpha: true,
-      isPlanar: false,
-      colorSpaceName: .deviceRGB,
-      bytesPerRow: 0,
-      bitsPerPixel: 0),
-      let context = NSGraphicsContext(bitmapImageRep: sheet)
-    else {
-      failures.append("contact sheet could not allocate a bitmap surface")
-      return
-    }
-
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = context
-    NSColor(calibratedWhite: 0.12, alpha: 1).setFill()
-    NSRect(origin: .zero, size: sheetSize).fill()
-    for (row, prefix) in familyPrefixes.enumerated() {
-      for (column, variant) in [
-        ("light", CGFloat(12)), ("dark", CGFloat(12)),
-        ("light", CGFloat(16)), ("dark", CGFloat(16)),
-        ("light", CGFloat(32)), ("dark", CGFloat(32)),
-      ].enumerated() {
-        guard let sample = samples["\(prefix)_\(variant.0)"],
-          let candidate = renderCandidate(sample: sample, fontPoint: variant.1)
-        else {
-          failures.append("contact sheet failed to render \(prefix) \(variant)")
-          continue
-        }
-        let cellX = CGFloat(column) * cellSize.width
-        let cellY = sheetSize.height - CGFloat(row + 1) * cellSize.height
-        let candidateImage = NSImage(size: candidate.size)
-        candidateImage.addRepresentation(candidate)
-        candidateImage.draw(
-          in: NSRect(
-            x: cellX + 12,
-            y: cellY + 12,
-            width: min(candidate.size.width, cellSize.width - 24),
-            height: candidate.size.height),
-          from: .zero,
-          operation: .sourceOver,
-          fraction: 1)
-        let materialLabel = sample.isTranslucent ? " · material" : ""
-        let label = "\(sample.identifier) · \(Int(variant.1)) pt · \(sample.selectionStyle.rawValue)\(materialLabel)" as NSString
-        label.draw(
-          at: NSPoint(x: cellX + 12, y: cellY + cellSize.height - 22),
-          withAttributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor(calibratedWhite: 0.82, alpha: 1),
-          ])
-      }
-    }
-    NSGraphicsContext.restoreGraphicsState()
-    guard let data = sheet.representation(using: .png, properties: [:]), data.count > 10_000 else {
-      failures.append("contact sheet render was empty")
-      return
-    }
-    do {
-      try data.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
-      print("Candidate contact sheet: \(outputPath)")
-    } catch {
-      failures.append("contact sheet could not be written: \(error)")
-    }
   }
 
   private static func makeReadmeProductGallery(
@@ -2617,8 +2568,7 @@ struct LinnetCandidateWindowInteractionTests {
       candidateVertical: false,
       candidateCornerRadius: sample.cornerRadius))
     view.drawView(
-      candidateRanges: ranges,
-      detailRange: .empty,
+      candidateRanges: ranges, detailRange: .empty,
       hilightedIndex: 0,
       preeditRange: .empty,
       highlightedPreeditRange: .empty,

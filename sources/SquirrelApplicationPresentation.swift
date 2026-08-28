@@ -7,6 +7,17 @@ extension SquirrelApplicationDelegate {
     print("\(SquirrelApp.productName) is quitting.")
     return .terminateNow
   }
+
+  func workspaceWillPowerOff(_: Notification) {
+    print("Finalizing before logging out.")
+    shutdownRime()
+  }
+
+  func rimeVersion() -> String {
+    guard let value = rimeAPI.get_version() else { return "unknown" }
+    return String(cString: value)
+  }
+
 }
 
 extension SquirrelApplicationDelegate {
@@ -147,6 +158,8 @@ extension SquirrelApplicationDelegate {
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
+    configuration.addsToRecentItems = false
+    configuration.allowsRunningApplicationSubstitution = false
     NSWorkspace.shared.openApplication(
       at: settingsURL,
       configuration: configuration

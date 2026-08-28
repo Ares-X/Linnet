@@ -36,4 +36,5 @@ data/chinese/cache/
 data/chinese/grammar/
 # Local agent indexes and one-off generated backups are never release inputs.
 .serena/
+.codegraph/
 data/chinese/reports/*.bak

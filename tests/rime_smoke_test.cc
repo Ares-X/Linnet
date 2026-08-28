@@ -35,8 +35,11 @@ namespace {
 using Nanoseconds = std::chrono::nanoseconds;
 using LatencySample = Nanoseconds::rep;
 
-constexpr size_t kLatencyWarmupSamples = 4096;
-constexpr size_t kLatencySamples = 32768;
+// Keep enough observations for a stable p99 (about 82 tail samples) without
+// making every CI run pay for benchmark-scale repetition. Correctness cases
+// are exercised separately below; this loop owns only the latency contract.
+constexpr size_t kLatencyWarmupSamples = 1024;
+constexpr size_t kLatencySamples = 8192;
 constexpr int kBackSpace = 0xff08;
 constexpr int kTab = 0xff09;
 constexpr int kReturn = 0xff0d;
@@ -90,6 +93,8 @@ struct CandidateOriginView {
   double quality;
   bool phrase_exact;
   size_t phrase_code_size;
+  double phrase_system_lexical_weight;
+  int phrase_spelling_type;
   std::string preedit;
 };
 
@@ -152,6 +157,10 @@ std::vector<CandidateOriginView> CandidateOrigins(RimeSessionId session_id,
                       candidate ? candidate->quality() : 0.0,
                       phrase && phrase->is_exact_match(),
                       phrase ? phrase->code().size() : 0,
+                      phrase && phrase->system_lexical_weight()
+                          ? *phrase->system_lexical_weight()
+                          : 0.0,
+                      phrase ? static_cast<int>(phrase->spelling_type()) : -1,
                       candidate ? candidate->preedit() : ""});
   }
   return values;
@@ -422,6 +431,18 @@ CandidateOriginView ExpectAmbiguousEnglishPreservesChinese(
          "' is absent for ambiguous English input '" + input + "'");
   }
   if (chinese != candidates.begin() || english == candidates.begin()) {
+    std::cerr << "Origins for displaced Chinese overlap '" << input << "':";
+    for (const auto& candidate : candidates) {
+      std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                << candidate.genuine_type << ":q=" << candidate.quality
+                << ":exact=" << candidate.phrase_exact
+                << ":code=" << candidate.phrase_code_size
+                << ":system_lexical="
+                << candidate.phrase_system_lexical_weight
+                << ":spelling=" << candidate.phrase_spelling_type
+                << ":preedit=" << candidate.preedit << "]";
+    }
+    std::cerr << '\n';
     Fail("ambiguous English displaced the same-span Chinese candidate for input '" +
          input + "'");
   }
@@ -1294,6 +1315,39 @@ void ExpectRetainedWarmSessionLatency(RimeApi_stdbool* api) {
     Fail("a new client exceeded the 100ms first-candidate contract after "
          "resource warm-up");
   }
+}
+
+void ExpectColdClientFirstKeyLatency(RimeApi_stdbool* api) {
+  const RimeSessionId warm = CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, warm, "ceshi");
+  if (CandidateOrigins(warm).empty()) {
+    Fail("cold-client probe could not warm the shared candidate path");
+  }
+  api->clear_composition(warm);
+
+  for (const auto& probe :
+       std::array<std::pair<const char*, char>, 2>{{
+           {"linnet_zh_pinyin", 'a'},
+           {"linnet_en", 'z'},
+       }}) {
+    const RimeSessionId client = CreateSchemaSession(api, probe.first);
+    const auto started = std::chrono::steady_clock::now();
+    if (!api->process_key(client, probe.second, 0) ||
+        CandidateOrigins(client).empty()) {
+      Fail(std::string(probe.first) +
+           " did not publish candidates for its first client key");
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    std::cout << "rime_smoke_test: cold-client first-key schema="
+              << probe.first << " elapsed_ms=" << elapsed.count() << '\n';
+    api->destroy_session(client);
+    if (elapsed >= std::chrono::milliseconds(100)) {
+      Fail(std::string(probe.first) +
+           " exceeded the 100ms cold-client first-key contract");
+    }
+  }
+  api->destroy_session(warm);
 }
 
 void ExpectSchemaList(RimeApi_stdbool* api) {
@@ -5283,6 +5337,8 @@ int main(int argc, char** argv) {
       argc == 4 && std::strcmp(argv[3], "--mixed-latency-probe") == 0;
   const bool warm_session_probe =
       argc == 4 && std::strcmp(argv[3], "--warm-session-probe") == 0;
+  const bool cold_client_probe =
+      argc == 4 && std::strcmp(argv[3], "--cold-client-probe") == 0;
   if (argc != 3 && !input_options_probe && !input_switches_probe &&
       !settings_off_probe && !learning_off_probe &&
       !shift_probe && !core_shift_overlap_probe &&
@@ -5293,7 +5349,7 @@ int main(int argc, char** argv) {
       !single_key_ranking_probe && !mixed_input_probe &&
       !mixed_learning_on_probe &&
       !mixed_learning_off_probe &&
-      !mixed_latency_probe && !warm_session_probe) {
+      !mixed_latency_probe && !warm_session_probe && !cold_client_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|--shift-probe|"
          "--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe|"
@@ -5304,7 +5360,7 @@ int main(int argc, char** argv) {
          "--single-key-ranking-probe|--mixed-input-probe|"
          "--mixed-learning-on-probe|"
          "--mixed-learning-off-probe|"
-         "--mixed-latency-probe|--warm-session-probe]");
+         "--mixed-latency-probe|--warm-session-probe|--cold-client-probe]");
   }
   int expected_page_size = 0;
   if (page_size_probe) {
@@ -5447,6 +5503,13 @@ int main(int argc, char** argv) {
     ExpectRetainedWarmSessionLatency(api);
     api->finalize();
     std::cout << "rime_smoke_test: retained warm session: PASS\n";
+    return 0;
+  }
+
+  if (cold_client_probe) {
+    ExpectColdClientFirstKeyLatency(api);
+    api->finalize();
+    std::cout << "rime_smoke_test: cold-client first-key latency: PASS\n";
     return 0;
   }
 
@@ -5621,6 +5684,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  ExpectColdClientFirstKeyLatency(api);
   ExpectPersistedSwitchDefaults(api);
   ExpectModeStatusLabels(api);
   const RimeSessionId english =

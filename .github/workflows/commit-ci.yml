@@ -1,13 +1,11 @@
-name: Linnet commit CI
+name: Linnet manual full CI
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 permissions:
   contents: read
 
 concurrency:
-  group: linnet-main-${{ github.ref }}
+  group: linnet-manual-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,16 +29,15 @@ jobs:
         run: scripts/run_swiftlint.sh
 
       - name: Check language-data release identity changes
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           changed="$(mktemp)"
           previous="$(mktemp)"
           trap 'rm -f "${changed}" "${previous}"' EXIT
-          if git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-            git diff --name-only "${BEFORE_SHA}" HEAD >"${changed}"
-            if git show "${BEFORE_SHA}:config/linnet-data-releases.json" \
+          if git cat-file -e 'HEAD^' 2>/dev/null; then
+            parent="$(git rev-parse 'HEAD^')"
+            git diff --name-only "${parent}" HEAD >"${changed}"
+            if git show "${parent}:config/linnet-data-releases.json" \
                 >"${previous}" 2>/dev/null; then
               package/data_release_metadata check-monotonic \
                 "${previous}" config/linnet-data-releases.json
@@ -59,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [app, settings-ui, swift, rime]
+        profile: [app, swift, rime]
     runs-on: macos-latest
     steps:
       - name: Checkout last commit
@@ -74,6 +71,15 @@ jobs:
         with:
           save: ${{ matrix.profile == 'rime' }}
 
+      - name: Restore and save incremental Swift owner tests
+        if: matrix.profile == 'swift'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        with:
+          path: build/swift-unit-cache
+          key: linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install build tools
         run: scripts/install_ci_build_tools.sh release
 
@@ -86,9 +92,6 @@ jobs:
             app)
               ./action-build.sh release
               tests/verify_development.sh app
-              ;;
-            settings-ui)
-              ./action-build.sh release
               tests/verify_visible_settings_fixture.sh --ui-test
               ;;
             swift|rime)

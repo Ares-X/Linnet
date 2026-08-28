@@ -18,6 +18,8 @@
 		B3216E5C2BF438F800E292D2 /* linnet.pdf in Resources */ = {isa = PBXBuildFile; fileRef = B3216E5B2BF438F800E292D2 /* linnet.pdf */; };
 		B35D2FE82BF00839009D156B /* BridgingFunctions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35D2FE72BF00839009D156B /* BridgingFunctions.swift */; };
 		B38E9B912BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */; };
+		E71200000000000000000001 /* SquirrelApplicationRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71200000000000000000002 /* SquirrelApplicationRuntime.swift */; };
+		E71200000000000000000003 /* SquirrelApplicationTransactions.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71200000000000000000004 /* SquirrelApplicationTransactions.swift */; };
 		FD2000000000000000000001 /* SquirrelApplicationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */; };
 		B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */; };
 		A11E55050000000000000002 /* SquirrelInputController+RimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */; };
@@ -54,20 +56,28 @@
 		D30000000000000000000004 /* SettingsContract.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000013 /* SettingsContract.swift */; };
 		D40000000000000000000001 /* LinnetDataRegistry.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000003 /* LinnetDataRegistry.swift */; };
 		D40000000000000000000002 /* LinnetDataRegistry.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000003 /* LinnetDataRegistry.swift */; };
+		E71000000000000000000001 /* LinnetDataRegistryStorage.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000003 /* LinnetDataRegistryStorage.swift */; };
+		E71000000000000000000002 /* LinnetDataRegistryStorage.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000003 /* LinnetDataRegistryStorage.swift */; };
+		E71100000000000000000001 /* LinnetDataRegistryTransactions.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */; };
+		E71100000000000000000002 /* LinnetDataRegistryTransactions.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */; };
 		D50000000000000000000001 /* LinnetPackContract.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000003 /* LinnetPackContract.swift */; };
 		D50000000000000000000002 /* LinnetPackContract.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000003 /* LinnetPackContract.swift */; };
 		D60000000000000000000001 /* LinnetDataChannel.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000003 /* LinnetDataChannel.swift */; };
 		D60000000000000000000002 /* LinnetDataChannel.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000003 /* LinnetDataChannel.swift */; };
 		D30000000000000000000005 /* HallelujahSubstitutionImporter.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000015 /* HallelujahSubstitutionImporter.swift */; };
 		D30000000000000000000006 /* SettingsDataCoordinator.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000016 /* SettingsDataCoordinator.swift */; };
+		E71000000000000000000006 /* SettingsDataCoordinatorRuntime.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000007 /* SettingsDataCoordinatorRuntime.swift */; };
+		E71100000000000000000004 /* SettingsDataCoordinatorMutation.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71100000000000000000005 /* SettingsDataCoordinatorMutation.swift */; };
 		D30000000000000000000007 /* librime.1.dylib in Settings Frameworks */ = {isa = PBXBuildFile; fileRef = 44CD640915E2633D0021234E /* librime.1.dylib */; };
 		D3000000000000000000000F /* librime.1.dylib in Copy Settings Runtime */ = {isa = PBXBuildFile; fileRef = 44CD640915E2633D0021234E /* librime.1.dylib */; };
 		D30000000000000000000008 /* PersonalDataStore.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000018 /* PersonalDataStore.swift */; };
 		A12E55000000000000000002 /* PersonalDataValidation.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = A12E55000000000000000001 /* PersonalDataValidation.swift */; };
 		A12E56000000000000000002 /* LinnetStableRowTextBinding.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = A12E56000000000000000001 /* LinnetStableRowTextBinding.swift */; };
 		D30000000000000000000009 /* LinnetBackupStore.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000019 /* LinnetBackupStore.swift */; };
+		E71000000000000000000004 /* LinnetBackupStoreSupport.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000005 /* LinnetBackupStoreSupport.swift */; };
 		D3000000000000000000000A /* RimeUserDataBridge.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001A /* RimeUserDataBridge.swift */; };
 		D3000000000000000000000B /* LinnetSettingsDocument.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001B /* LinnetSettingsDocument.swift */; };
+		E71100000000000000000006 /* LinnetSettingsDocumentStore.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71100000000000000000007 /* LinnetSettingsDocumentStore.swift */; };
 		D3000000000000000000000C /* LinnetSettingsProjectionRenderer.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001C /* LinnetSettingsProjectionRenderer.swift */; };
 		D3000000000000000000000D /* SettingsViews.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001D /* SettingsViews.swift */; };
 		FD1000000000000000000001 /* SettingsDataViews.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FD1000000000000000000002 /* SettingsDataViews.swift */; };
@@ -76,6 +86,7 @@
 		E90500000000000000000001 /* squirrel.yaml in Settings Resources */ = {isa = PBXBuildFile; fileRef = E90500000000000000000002 /* squirrel.yaml */; };
 		E60000000000000000000001 /* LinnetSettingsMutationLease.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E60000000000000000000002 /* LinnetSettingsMutationLease.swift */; };
 		E80000000000000000000001 /* SettingsPresentationStatus.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* SettingsPresentationStatus.swift */; };
+		E81200000000000000000001 /* SettingsRuntimeReachability.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E81200000000000000000002 /* SettingsRuntimeReachability.swift */; };
 		F10000000000000000000001 /* LinnetSettingsPage.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* LinnetSettingsPage.swift */; };
 		F20000000000000000000001 /* LinnetSettingsDownloadTransport.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */; };
 		F20000000000000000000003 /* LinnetSettingsExclusiveFileSink.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */; };
@@ -96,6 +107,7 @@
 		F82000000000000000000001 /* PersonalDataStore.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000018 /* PersonalDataStore.swift */; };
 		A12E55000000000000000003 /* PersonalDataValidation.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = A12E55000000000000000001 /* PersonalDataValidation.swift */; };
 		F82000000000000000000002 /* LinnetSettingsDocument.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001B /* LinnetSettingsDocument.swift */; };
+		E71100000000000000000008 /* LinnetSettingsDocumentStore.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = E71100000000000000000007 /* LinnetSettingsDocumentStore.swift */; };
 		F82000000000000000000003 /* LinnetSettingsProjectionRenderer.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001C /* LinnetSettingsProjectionRenderer.swift */; };
 		F70000000000000000000004 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000003 /* InfoPlist.strings */; };
 		A12E57000000000000000002 /* SettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12E57000000000000000001 /* SettingsUITests.swift */; };
@@ -173,6 +185,8 @@
 		B35D2FE72BF00839009D156B /* BridgingFunctions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BridgingFunctions.swift; path = sources/BridgingFunctions.swift; sourceTree = "<group>"; };
 		B38E9B8F2BE9AE1E0036ABEF /* Squirrel-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Squirrel-Bridging-Header.h"; path = "sources/Squirrel-Bridging-Header.h"; sourceTree = "<group>"; };
 		B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationDelegate.swift; path = sources/SquirrelApplicationDelegate.swift; sourceTree = "<group>"; };
+		E71200000000000000000002 /* SquirrelApplicationRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationRuntime.swift; path = sources/SquirrelApplicationRuntime.swift; sourceTree = "<group>"; };
+		E71200000000000000000004 /* SquirrelApplicationTransactions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationTransactions.swift; path = sources/SquirrelApplicationTransactions.swift; sourceTree = "<group>"; };
 		FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelApplicationPresentation.swift; path = sources/SquirrelApplicationPresentation.swift; sourceTree = "<group>"; };
 		B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelInputController.swift; path = sources/SquirrelInputController.swift; sourceTree = "<group>"; };
 		A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SquirrelInputController+RimeSession.swift"; path = "sources/SquirrelInputController+RimeSession.swift"; sourceTree = "<group>"; };
@@ -206,17 +220,23 @@
 		D30000000000000000000012 /* SettingsMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsMain.swift; path = sources/LinnetSettings/SettingsMain.swift; sourceTree = "<group>"; };
 		D30000000000000000000013 /* SettingsContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsContract.swift; path = sources/LinnetSettings/SettingsContract.swift; sourceTree = "<group>"; };
 		D40000000000000000000003 /* LinnetDataRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataRegistry.swift; path = sources/LinnetDataRegistry.swift; sourceTree = "<group>"; };
+		E71000000000000000000003 /* LinnetDataRegistryStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataRegistryStorage.swift; path = sources/LinnetDataRegistryStorage.swift; sourceTree = "<group>"; };
+		E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataRegistryTransactions.swift; path = sources/LinnetDataRegistryTransactions.swift; sourceTree = "<group>"; };
 		D50000000000000000000003 /* LinnetPackContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPackContract.swift; path = sources/LinnetPackContract.swift; sourceTree = "<group>"; };
 		D60000000000000000000003 /* LinnetDataChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataChannel.swift; path = sources/LinnetDataChannel.swift; sourceTree = "<group>"; };
 		D30000000000000000000015 /* HallelujahSubstitutionImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HallelujahSubstitutionImporter.swift; path = sources/LinnetSettings/HallelujahSubstitutionImporter.swift; sourceTree = "<group>"; };
 		D30000000000000000000016 /* SettingsDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsDataCoordinator.swift; path = sources/LinnetSettings/SettingsDataCoordinator.swift; sourceTree = "<group>"; };
+		E71000000000000000000007 /* SettingsDataCoordinatorRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsDataCoordinatorRuntime.swift; path = sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift; sourceTree = "<group>"; };
+		E71100000000000000000005 /* SettingsDataCoordinatorMutation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsDataCoordinatorMutation.swift; path = sources/LinnetSettings/SettingsDataCoordinatorMutation.swift; sourceTree = "<group>"; };
 		D30000000000000000000017 /* Settings-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Settings-Bridging-Header.h"; path = "sources/LinnetSettings/Settings-Bridging-Header.h"; sourceTree = "<group>"; };
 		D30000000000000000000018 /* PersonalDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PersonalDataStore.swift; path = sources/LinnetSettings/PersonalDataStore.swift; sourceTree = "<group>"; };
 		A12E55000000000000000001 /* PersonalDataValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PersonalDataValidation.swift; path = sources/LinnetSettings/PersonalDataValidation.swift; sourceTree = "<group>"; };
 		A12E56000000000000000001 /* LinnetStableRowTextBinding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetStableRowTextBinding.swift; path = sources/LinnetSettings/LinnetStableRowTextBinding.swift; sourceTree = "<group>"; };
 		D30000000000000000000019 /* LinnetBackupStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetBackupStore.swift; path = sources/LinnetSettings/LinnetBackupStore.swift; sourceTree = "<group>"; };
+		E71000000000000000000005 /* LinnetBackupStoreSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetBackupStoreSupport.swift; path = sources/LinnetSettings/LinnetBackupStoreSupport.swift; sourceTree = "<group>"; };
 		D3000000000000000000001A /* RimeUserDataBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RimeUserDataBridge.swift; path = sources/LinnetSettings/RimeUserDataBridge.swift; sourceTree = "<group>"; };
 		D3000000000000000000001B /* LinnetSettingsDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsDocument.swift; path = sources/LinnetSettings/LinnetSettingsDocument.swift; sourceTree = "<group>"; };
+		E71100000000000000000007 /* LinnetSettingsDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsDocumentStore.swift; path = sources/LinnetSettings/LinnetSettingsDocumentStore.swift; sourceTree = "<group>"; };
 		D3000000000000000000001C /* LinnetSettingsProjectionRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsProjectionRenderer.swift; path = sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift; sourceTree = "<group>"; };
 		D3000000000000000000001D /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsViews.swift; path = sources/LinnetSettings/SettingsViews.swift; sourceTree = "<group>"; };
 		FD1000000000000000000002 /* SettingsDataViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsDataViews.swift; path = sources/LinnetSettings/SettingsDataViews.swift; sourceTree = "<group>"; };
@@ -225,6 +245,7 @@
 		E90500000000000000000002 /* squirrel.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; name = squirrel.yaml; path = data/squirrel.yaml; sourceTree = "<group>"; };
 		E60000000000000000000002 /* LinnetSettingsMutationLease.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsMutationLease.swift; path = sources/LinnetSettings/LinnetSettingsMutationLease.swift; sourceTree = "<group>"; };
 		E80000000000000000000002 /* SettingsPresentationStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsPresentationStatus.swift; path = sources/LinnetSettings/SettingsPresentationStatus.swift; sourceTree = "<group>"; };
+		E81200000000000000000002 /* SettingsRuntimeReachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsRuntimeReachability.swift; path = sources/LinnetSettings/SettingsRuntimeReachability.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* LinnetSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsPage.swift; path = sources/LinnetSettings/LinnetSettingsPage.swift; sourceTree = "<group>"; };
 		F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsDownloadTransport.swift; path = sources/LinnetSettings/LinnetSettingsDownloadTransport.swift; sourceTree = "<group>"; };
 		F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsExclusiveFileSink.swift; path = sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift; sourceTree = "<group>"; };
@@ -280,9 +301,13 @@
 			children = (
 				D30000000000000000000050 /* LinnetSettings */,
 				D40000000000000000000003 /* LinnetDataRegistry.swift */,
+				E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */,
+				E71000000000000000000003 /* LinnetDataRegistryStorage.swift */,
 				D50000000000000000000003 /* LinnetPackContract.swift */,
 				D60000000000000000000003 /* LinnetDataChannel.swift */,
 				B38E9B902BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift */,
+				E71200000000000000000002 /* SquirrelApplicationRuntime.swift */,
+				E71200000000000000000004 /* SquirrelApplicationTransactions.swift */,
 				FD2000000000000000000002 /* SquirrelApplicationPresentation.swift */,
 				B38E9B942BEAFEFD0036ABEF /* SquirrelInputController.swift */,
 				A11E55050000000000000001 /* SquirrelInputController+RimeSession.swift */,
@@ -322,7 +347,10 @@
 				F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */,
 				D30000000000000000000015 /* HallelujahSubstitutionImporter.swift */,
 				D30000000000000000000016 /* SettingsDataCoordinator.swift */,
+				E71100000000000000000005 /* SettingsDataCoordinatorMutation.swift */,
+				E71000000000000000000007 /* SettingsDataCoordinatorRuntime.swift */,
 				E60000000000000000000002 /* LinnetSettingsMutationLease.swift */,
+				E81200000000000000000002 /* SettingsRuntimeReachability.swift */,
 				E80000000000000000000002 /* SettingsPresentationStatus.swift */,
 				F10000000000000000000002 /* LinnetSettingsPage.swift */,
 				F81000000000000000000002 /* SettingsWindowCloseGuard.swift */,
@@ -338,9 +366,11 @@
 				A12E55000000000000000001 /* PersonalDataValidation.swift */,
 				A12E56000000000000000001 /* LinnetStableRowTextBinding.swift */,
 				D30000000000000000000019 /* LinnetBackupStore.swift */,
+				E71000000000000000000005 /* LinnetBackupStoreSupport.swift */,
 				F60000000000000000000002 /* LinnetPortableJSONBudget.swift */,
 				D3000000000000000000001A /* RimeUserDataBridge.swift */,
 				D3000000000000000000001B /* LinnetSettingsDocument.swift */,
+				E71100000000000000000007 /* LinnetSettingsDocumentStore.swift */,
 				D3000000000000000000001C /* LinnetSettingsProjectionRenderer.swift */,
 				E90400000000000000000002 /* LinnetSettingsAppearancePreview.swift */,
 				E90600000000000000000002 /* LinnetSettingsThemeFamilyPicker.swift */,
@@ -616,11 +646,16 @@
 				D50000000000000000000002 /* LinnetPackContract.swift in Settings Sources */,
 				D60000000000000000000002 /* LinnetDataChannel.swift in Settings Sources */,
 				D40000000000000000000002 /* LinnetDataRegistry.swift in Settings Sources */,
+				E71100000000000000000002 /* LinnetDataRegistryTransactions.swift in Settings Sources */,
+				E71000000000000000000002 /* LinnetDataRegistryStorage.swift in Settings Sources */,
 				D30000000000000000000003 /* SettingsContract.swift in Settings Sources */,
 				F50000000000000000000001 /* LinnetSettingsTransactionIPC.swift in Settings Sources */,
 				D30000000000000000000005 /* HallelujahSubstitutionImporter.swift in Settings Sources */,
 				D30000000000000000000006 /* SettingsDataCoordinator.swift in Settings Sources */,
+				E71100000000000000000004 /* SettingsDataCoordinatorMutation.swift in Settings Sources */,
+				E71000000000000000000006 /* SettingsDataCoordinatorRuntime.swift in Settings Sources */,
 				E60000000000000000000001 /* LinnetSettingsMutationLease.swift in Settings Sources */,
+				E81200000000000000000001 /* SettingsRuntimeReachability.swift in Settings Sources */,
 				E80000000000000000000001 /* SettingsPresentationStatus.swift in Settings Sources */,
 				F10000000000000000000001 /* LinnetSettingsPage.swift in Settings Sources */,
 				F81000000000000000000001 /* SettingsWindowCloseGuard.swift in Settings Sources */,
@@ -635,9 +670,11 @@
 				A12E55000000000000000002 /* PersonalDataValidation.swift in Settings Sources */,
 				A12E56000000000000000002 /* LinnetStableRowTextBinding.swift in Settings Sources */,
 				D30000000000000000000009 /* LinnetBackupStore.swift in Settings Sources */,
+				E71000000000000000000004 /* LinnetBackupStoreSupport.swift in Settings Sources */,
 				F60000000000000000000001 /* LinnetPortableJSONBudget.swift in Settings Sources */,
 				D3000000000000000000000A /* RimeUserDataBridge.swift in Settings Sources */,
 				D3000000000000000000000B /* LinnetSettingsDocument.swift in Settings Sources */,
+				E71100000000000000000006 /* LinnetSettingsDocumentStore.swift in Settings Sources */,
 				D3000000000000000000000C /* LinnetSettingsProjectionRenderer.swift in Settings Sources */,
 				E90200000000000000000003 /* LinnetCandidatePresentation.swift in Settings Sources */,
 				E90400000000000000000001 /* LinnetSettingsAppearancePreview.swift in Settings Sources */,
@@ -663,6 +700,8 @@
 				D50000000000000000000001 /* LinnetPackContract.swift in Linnet Sources */,
 				D60000000000000000000001 /* LinnetDataChannel.swift in Linnet Sources */,
 				D40000000000000000000001 /* LinnetDataRegistry.swift in Linnet Sources */,
+				E71100000000000000000001 /* LinnetDataRegistryTransactions.swift in Linnet Sources */,
+				E71000000000000000000001 /* LinnetDataRegistryStorage.swift in Linnet Sources */,
 				B39771292BEDAF4A0093A49B /* SquirrelView.swift in Sources */,
 				A11E55060000000000000002 /* SquirrelView+CandidateDrawing.swift in Sources */,
 				B38E9B952BEAFEFD0036ABEF /* SquirrelInputController.swift in Sources */,
@@ -684,6 +723,7 @@
 				F82000000000000000000001 /* PersonalDataStore.swift in Linnet Sources */,
 				A12E55000000000000000003 /* PersonalDataValidation.swift in Linnet Sources */,
 				F82000000000000000000002 /* LinnetSettingsDocument.swift in Linnet Sources */,
+				E71100000000000000000008 /* LinnetSettingsDocumentStore.swift in Linnet Sources */,
 				F82000000000000000000003 /* LinnetSettingsProjectionRenderer.swift in Linnet Sources */,
 				B39771252BED899F0093A49B /* SquirrelConfig.swift in Sources */,
 				B397712F2BEECBED0093A49B /* Main.swift in Sources */,
@@ -691,6 +731,8 @@
 				B397712B2BEE4C160093A49B /* SquirrelPanel.swift in Sources */,
 				A11E55070000000000000002 /* SquirrelPanel+CandidatePresentation.swift in Sources */,
 				B38E9B912BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift in Sources */,
+				E71200000000000000000001 /* SquirrelApplicationRuntime.swift in Sources */,
+				E71200000000000000000003 /* SquirrelApplicationTransactions.swift in Sources */,
 				FD2000000000000000000001 /* SquirrelApplicationPresentation.swift in Sources */,
 				B39771272BED9B250093A49B /* SquirrelTheme.swift in Sources */,
 				B35D2FE82BF00839009D156B /* BridgingFunctions.swift in Sources */,

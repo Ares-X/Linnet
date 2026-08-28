@@ -10,7 +10,14 @@ struct LinnetDataRegistry {
   let backupsDirectory: URL
 
   init(productName: String, coreVersion: String) throws {
-    rootDirectory = URL(fileURLWithPath: "/tmp/linnet-ipc-registry", isDirectory: true)
+    guard let root = ProcessInfo.processInfo.environment["LINNET_IPC_TEST_ROOT"],
+      root.hasPrefix("/")
+    else {
+      throw NSError(
+        domain: "LinnetSettingsTransactionIPCTests", code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "missing isolated IPC root"])
+    }
+    rootDirectory = URL(fileURLWithPath: root, isDirectory: true)
     userDataDirectory = rootDirectory.appending(path: "User", directoryHint: .isDirectory)
     transactionsDirectory = rootDirectory.appending(
       path: "Transactions", directoryHint: .isDirectory)
@@ -66,26 +73,21 @@ struct LinnetSettingsTransactionIPCTests {
       guard let mode = arguments.first,
         [
           "--serve-success", "--serve-reload", "--serve-rejection",
+          "--serve-core-activation",
+          "--serve-owner-collision",
           "--serve-timeout-recovery",
         ].contains(mode),
-        arguments.count == (mode == "--serve-timeout-recovery" ? 5 : 3)
+        arguments.count == (mode == "--serve-timeout-recovery" ? 4 : 2)
       else { throw TestFailure.invalidInvocation }
-      let endpoint = URL(fileURLWithPath: arguments[1])
-      let settingsExecutable = URL(fileURLWithPath: arguments[2])
-      guard settingsExecutable.path != (try executableURL()).path else {
-        throw TestFailure.sameExecutable
-      }
-
       let invoked = DispatchSemaphore(value: 0)
       let invocation = LockedFlag()
       let recoveryObservations = LockedRecoveryObservations()
       let liveDirectory = mode == "--serve-timeout-recovery"
-        ? URL(fileURLWithPath: arguments[3], isDirectory: true) : nil
+        ? URL(fileURLWithPath: arguments[2], isDirectory: true) : nil
       let firstReadMarker = mode == "--serve-timeout-recovery"
-        ? URL(fileURLWithPath: arguments[4]) : nil
+        ? URL(fileURLWithPath: arguments[3]) : nil
       let host = try LinnetSettingsTransactionIPC.Host(
-        endpointURL: endpoint,
-        peerExecutableURL: settingsExecutable
+        startingAt: .main
       ) { request, reply in
         invocation.set()
         defer { invoked.signal() }
@@ -129,6 +131,10 @@ struct LinnetSettingsTransactionIPCTests {
                 code: .configurationReloadFailed,
                 detail: "owned-file read failed", health: nil))
           }
+        } else if request.command == .activateCore {
+          reply(.init(
+            transactionID: request.transactionID, status: .terminating,
+            code: .coreActivationAccepted, detail: "Core activation accepted", health: nil))
         } else if request.command == .reloadConfiguration {
           reply(.init(
             transactionID: request.transactionID, status: .activated,
@@ -144,6 +150,19 @@ struct LinnetSettingsTransactionIPCTests {
       }
       try host.start()
       defer { host.stop() }
+
+      if mode == "--serve-owner-collision" {
+        let duplicate = try LinnetSettingsTransactionIPC.Host(
+          startingAt: .main
+        ) { _, _ in }
+        do {
+          try duplicate.start()
+          duplicate.stop()
+          throw TestFailure.duplicateOwnerAccepted
+        } catch LinnetSettingsTransactionIPC.Failure.unavailable {
+          print("LinnetSettingsTransactionIPCTests: active endpoint owner preserved")
+        }
+      }
 
       if mode == "--serve-timeout-recovery" {
         for _ in 0..<2 {
@@ -190,47 +209,48 @@ struct LinnetSettingsTransactionIPCTests {
       guard let mode = arguments.first,
         [
           "--request-success", "--request-reload", "--expect-rejection",
+          "--request-core-activation",
           "--request-timeout-recovery",
         ].contains(mode),
         (mode == "--request-timeout-recovery"
-          ? arguments.count == 6 : arguments.count == 4 || arguments.count == 5),
-        let hostPID = pid_t(arguments[3]), hostPID > 0
+          ? arguments.count == 4 : arguments.count == 2 || arguments.count == 3)
       else { throw TestFailure.invalidInvocation }
-      let endpoint = URL(fileURLWithPath: arguments[1])
-      let hostExecutable = URL(fileURLWithPath: arguments[2])
-      guard hostPID != getpid(), hostExecutable.path != (try executableURL()).path else {
-        throw TestFailure.sameProcessOrExecutable
-      }
       if mode == "--request-timeout-recovery" {
         try await runTimeoutRecovery(
-          endpoint: endpoint,
-          hostExecutable: hostExecutable,
-          liveDirectory: URL(fileURLWithPath: arguments[4], isDirectory: true),
-          firstReadMarker: URL(fileURLWithPath: arguments[5]))
+          liveDirectory: URL(fileURLWithPath: arguments[2], isDirectory: true),
+          firstReadMarker: URL(fileURLWithPath: arguments[3]))
         return
       }
-      let forgedRequesterPID = arguments.count == 5 && arguments[4] == "--forged-requester-pid"
+      let forgedRequesterPID = arguments.count == 3 && arguments[2] == "--forged-requester-pid"
       let reload = mode == "--request-reload"
+      let coreActivation = mode == "--request-core-activation"
       let request = LinnetSettingsContract.DataRequest(
-        transactionID: UUID(), command: reload ? .reloadConfiguration : .activate,
+        transactionID: UUID(),
+        command: coreActivation ? .activateCore : (reload ? .reloadConfiguration : .activate),
         candidate:
-          reload
+          coreActivation ? nil : (reload
           ? URL(fileURLWithPath: "/tmp/linnet-ipc-configuration-candidate", isDirectory: true)
-          : URL(fileURLWithPath: "/tmp/linnet-ipc-candidate", isDirectory: true),
+          : URL(fileURLWithPath: "/tmp/linnet-ipc-candidate", isDirectory: true)),
         requesterPID: forgedRequesterPID ? getpid() + 1 : getpid(),
         deadline: Date().addingTimeInterval(10),
         expectedSettingsRevision: reload ? ConfigurationFixture.baseRevision : nil)
 
       do {
-        let client = try LinnetSettingsTransactionIPC.Client(
-          endpointURL: endpoint,
-          peerExecutableURL: hostExecutable)
+        let client = LinnetSettingsTransactionIPC.Client(startingAt: .main)
         let progress = LockedReplies()
         let terminal = try await client.request(request, timeout: 2) {
           progress.append($0)
         }
         guard mode != "--expect-rejection" else {
           throw TestFailure.untrustedPeerAccepted
+        }
+        if coreActivation {
+          guard terminal.transactionID == request.transactionID,
+            terminal.status == .terminating,
+            terminal.code == .coreActivationAccepted,
+            progress.snapshot().isEmpty
+          else { throw TestFailure.legitimateFlow }
+          return
         }
         guard terminal.transactionID == request.transactionID,
           terminal.status == .activated,
@@ -243,8 +263,6 @@ struct LinnetSettingsTransactionIPCTests {
     }
 
     private static func runTimeoutRecovery(
-      endpoint: URL,
-      hostExecutable: URL,
       liveDirectory: URL,
       firstReadMarker: URL
     ) async throws {
@@ -255,8 +273,7 @@ struct LinnetSettingsTransactionIPCTests {
       try TimeoutRecoveryFixture.nextSecondary.write(
         to: TimeoutRecoveryFixture.secondary(in: liveDirectory), options: .atomic)
 
-      let client = try LinnetSettingsTransactionIPC.Client(
-        endpointURL: endpoint, peerExecutableURL: hostExecutable)
+      let client = LinnetSettingsTransactionIPC.Client(startingAt: .main)
       let firstTransactionID = UUID()
       let first = LinnetSettingsContract.DataRequest(
         transactionID: firstTransactionID,
@@ -305,23 +322,14 @@ struct LinnetSettingsTransactionIPCTests {
     }
   #endif
 
-  private static func executableURL() throws -> URL {
-    var path = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
-    guard proc_pidpath(getpid(), &path, UInt32(path.count)) > 0
-    else { throw TestFailure.identity }
-    return URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath()
-  }
-
   private enum TestFailure: Error {
     case invalidInvocation
-    case sameExecutable
-    case sameProcessOrExecutable
     case handlerNotInvoked
     case untrustedPeerAccepted
     case legitimateFlow
     case timeoutExpected
     case recoveryGeneration
-    case identity
+    case duplicateOwnerAccepted
   }
 
   private static func fail(_ message: String) -> Never {

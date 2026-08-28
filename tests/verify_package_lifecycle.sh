@@ -991,9 +991,14 @@ if rg -Fq 'case inputSourceUnavailable' sources/InputSource.swift; then
   exit 1
 fi
 
-# Every shipped macOS candidate has one new build identity, and the expanded
-# package verifier mirrors (rather than contradicts) each product conclusion.
-grep -Fqx 'CURRENT_PROJECT_VERSION = 55' config/LinnetProduct.xcconfig
+# The product config is the sole build-identity owner. Lifecycle verification
+# checks its contract without copying a particular release's build number.
+project_builds="$(sed -n 's/^CURRENT_PROJECT_VERSION = \([1-9][0-9]*\)$/\1/p' \
+  config/LinnetProduct.xcconfig)"
+[[ "$(printf '%s\n' "${project_builds}" | sed '/^$/d' | wc -l | tr -d ' ')" == 1 ]] || {
+  echo "Product config must own exactly one positive integer build identity." >&2
+  exit 1
+}
 rg -Fq 'if edition == "complete" && kind == "core"' package/verify_package
 
 # The user-owned support root is a deletion trust boundary. A replaced root
@@ -1203,7 +1208,7 @@ test "$(wc -l <"${receipt_log}" | tr -d ' ')" = 12
 # Packaging must not invoke LaunchServices' private registration utility.
 if rg -n 'LaunchServices\.framework/Support/lsregister|[[:space:]]lsregister[[:space:]]+-[uf]' \
     package/make_package package/make_archive package/verify_package \
-    package/report_size package/uninstall-linnet; then
+    package/uninstall-linnet; then
   echo "A private LaunchServices cleanup path returned." >&2
   exit 1
 fi

@@ -41,8 +41,7 @@ struct RimeFilesystemPathProjectionTests {
         "setCString(snapshot.prebuiltDataDirectory.path, to: \\.prebuilt_data_dir)",
         "setCString(snapshot.stagingDirectory.path, to: \\.staging_dir)",
         "setCString(SquirrelApp.logDir.path, to: \\.log_dir)",
-        "fileExists(atPath: path.path)",
-        "Error creating user data directory: \\(path.path)"
+        "at: SquirrelApp.logDir,"
       ]
       for required in requiredNativePaths {
         try require(

@@ -3,7 +3,6 @@
 
 #include "smart_english_filter.h"
 
-#include <rime/algo/syllabifier.h>
 #include <rime/candidate.h>
 #include <rime/context.h>
 #include <rime/engine.h>
@@ -27,12 +26,9 @@ using namespace rime;
 using namespace smart_english_domain;
 namespace {
 
-// Rime projects a dictionary row with raw weight W as log(W / 1e8).
-// Its grammar uses log(1e-6) as the unknown-token floor.  Reusing that floor
-// gives Chinese lexical evidence one stable, corpus-local qualification rule:
-// a row needs raw weight >= 100 before it may block an exact English word.
-// This never compares weights from the independently scaled Chinese and
-// English dictionaries.
+// Rime dictionary weights are log(raw / 1e8). Preserve the established
+// raw-weight floor without reopening the Chinese dictionary after grammar has
+// adjusted the candidate's presentation weight.
 constexpr double kEstablishedChinesePhraseMinimumLexicalWeight =
     -13.815510557964274;
 
@@ -232,21 +228,13 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   const bool lowercase_chinese_input = (has_exact || has_mixed) &&
       schema_id_ != kSmartEnglishSchema && !explicit_english_case;
   const bool lowercase_chinese_exact = has_exact && lowercase_chinese_input;
-  const ChineseSpellingEvidence chinese_spelling =
-      lowercase_chinese_input ? InspectChineseSpelling(input_word)
-                              : ChineseSpellingEvidence{};
   for (auto& item : candidates) {
-    const auto phrase = rime::As<Phrase>(item.genuine);
     if (const auto mixed = As<ModelessMixedCandidate>(item.candidate)) {
       item.preferred_mixed = std::isfinite(best_chinese_sentence_weight) &&
           mixed->model_weight() - best_chinese_sentence_weight >=
               kMixedEntityAmbiguityLogMargin;
       has_preferred_mixed = has_preferred_mixed || item.preferred_mixed;
     }
-    item.strong_chinese_collision =
-        item.chinese && phrase && phrase->is_exact_match() &&
-        chinese_spelling.established_exact_phrases.count(
-            item.genuine->text());
   }
   auto bilingual_candidate = std::find_if(candidates.begin(), candidates.end(),
       [](const auto& item) { return item.exact; });
@@ -256,31 +244,33 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   }
   bool has_same_span_chinese = false;
   bool has_strong_same_span_chinese = false;
-  if (bilingual_candidate != candidates.end()) {
-    for (const auto& item : candidates) {
+  if (lowercase_chinese_input && bilingual_candidate != candidates.end()) {
+    for (auto& item : candidates) {
       if (!item.chinese ||
           item.genuine->start() != bilingual_candidate->genuine->start() ||
           item.genuine->end() != bilingual_candidate->genuine->end()) {
         continue;
       }
       has_same_span_chinese = true;
-      has_strong_same_span_chinese =
-          has_strong_same_span_chinese || item.strong_chinese_collision;
+      const auto phrase = rime::As<Phrase>(item.genuine);
+      const auto system_weight =
+          phrase ? phrase->system_lexical_weight() : std::nullopt;
+      item.strong_chinese_collision = phrase && phrase->is_exact_match() &&
+          phrase->spelling_type() < kAbbreviation && system_weight &&
+          *system_weight >= kEstablishedChinesePhraseMinimumLexicalWeight;
+      has_strong_same_span_chinese = has_strong_same_span_chinese ||
+          item.strong_chinese_collision;
     }
   }
-  const bool decoder_unavailable =
-      chinese_spelling.path == ChineseSpellingPath::kUnavailable;
   const bool single_letter_chinese_input =
       lowercase_chinese_exact && input_word.size() == 1 &&
       has_same_span_chinese;
   const bool preserve_chinese_exact =
       lowercase_chinese_exact &&
-      (single_letter_chinese_input || decoder_unavailable ||
-       (chinese_spelling.path == ChineseSpellingPath::kDirect &&
-        has_strong_same_span_chinese));
+      (single_letter_chinese_input || has_strong_same_span_chinese);
   const bool promote_exact = has_exact && !preserve_chinese_exact;
   const bool promote_mixed = !has_exact && has_preferred_mixed &&
-      !decoder_unavailable && !has_strong_same_span_chinese;
+      !has_strong_same_span_chinese;
   const bool has_non_raw = std::any_of(
       candidates.begin(), candidates.end(),
       [](const auto& item) { return item.genuine && !item.raw; });
@@ -353,7 +343,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
         const auto chinese = std::find_if(
             exact, candidates.end(), [&](const auto& item) {
               return item.chinese &&
-                     (single_letter_chinese_input || decoder_unavailable ||
+                     (single_letter_chinese_input ||
                       item.strong_chinese_collision) &&
                      item.genuine->start() == exact->genuine->start() &&
                      item.genuine->end() == exact->genuine->end();
@@ -426,74 +416,6 @@ bool SmartEnglishFilter::AppliesToSegment(Segment* segment) {
   pending_segment_input_ = composition_input.substr(
       segment->start, segment->end - segment->start);
   return true;
-}
-
-SmartEnglishFilter::ChineseSpellingEvidence
-SmartEnglishFilter::InspectChineseSpelling(const string& input) {
-  ChineseSpellingEvidence evidence;
-  if (schema_id_ == kSmartEnglishSchema || input.empty()) {
-    return evidence;
-  }
-  InitializeChineseSpellingDecoder();
-  // Decoder availability is a product-data boundary. If it cannot be proven
-  // healthy, fail closed and preserve Rime's Chinese-first order.
-  if (!chinese_dictionary_) {
-    evidence.path = ChineseSpellingPath::kUnavailable;
-    return evidence;
-  }
-
-  SyllableGraph graph;
-  Syllabifier syllabifier(chinese_delimiters_, false, false);
-  if (static_cast<size_t>(syllabifier.BuildSyllableGraph(
-          input, *chinese_dictionary_->prism(), &graph)) != input.size()) {
-    return evidence;
-  }
-  // Syllabifier already records the best whole-path spelling type at every
-  // vertex. Consume that owner instead of reconstructing a second path from
-  // individual edges (which loses Rime's overlap and correction pruning).
-  const auto end = graph.vertices.find(input.size());
-  if (end == graph.vertices.end() || end->second >= kAbbreviation) {
-    return evidence;
-  }
-  evidence.path = ChineseSpellingPath::kDirect;
-
-  // Candidate type is session state after a system phrase is learned. Qualify
-  // every form against the same static dictionary row, so learning cannot
-  // change bilingual intent and an arbitrary learned long-tail phrase cannot
-  // bypass the lexical floor.
-  auto entries = chinese_dictionary_->Lookup(graph, 0, &chinese_blacklist_);
-  if (!entries) return evidence;
-  const auto full_span = entries->find(input.size());
-  if (full_span == entries->end()) return evidence;
-  auto& iterator = full_span->second;
-  while (!iterator.exhausted()) {
-    const auto entry = iterator.Peek();
-    if (!entry ||
-        entry->weight < kEstablishedChinesePhraseMinimumLexicalWeight) {
-      break;
-    }
-    if (entry->IsExactMatch()) {
-      evidence.established_exact_phrases.insert(entry->text);
-    }
-    if (!iterator.Next()) break;
-  }
-  return evidence;
-}
-
-void SmartEnglishFilter::InitializeChineseSpellingDecoder() {
-  if (chinese_decoder_initialized_) return;
-  chinese_decoder_initialized_ = true;
-  if (!engine_) return;
-  auto component = Dictionary::Require("dictionary");
-  if (!component) return;
-  const Ticket translator_ticket(engine_, "translator");
-  TranslatorOptions translator_options(translator_ticket);
-  chinese_delimiters_ = translator_options.delimiters();
-  chinese_blacklist_ = translator_options.blacklist();
-  chinese_dictionary_.reset(component->Create(translator_ticket));
-  if (!chinese_dictionary_ || !chinese_dictionary_->Load()) {
-    chinese_dictionary_.reset();
-  }
 }
 
 }  // namespace linnet

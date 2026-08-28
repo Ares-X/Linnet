@@ -10,11 +10,11 @@ protocol LinnetSettingsTransactionRequesting: AnyObject {
 }
 
 /// The one authoritative Settings <-> Host transaction boundary. Both ends
-/// authenticate the connected Unix-domain peer using kernel-owned UID/PID facts
-/// and the exact counterpart executable path before any JSON is decoded. A
-/// connection carries exactly one request and its replies; the socket pathname
-/// is discovery data, never a credential. Product code signing belongs to the
-/// candidate/release boundary, not this same-user local transport.
+/// authenticate the connected Unix-domain peer inside the product's same-user
+/// trust domain using kernel-owned UID/PID facts before any JSON is decoded.
+/// The owner-only endpoint remains stable while Core updates atomically replace
+/// the app bundle; executable paths are deliberately not runtime identity
+/// because a still-running InputMethodKit Host can outlive its old pathname.
 enum LinnetSettingsTransactionIPC {
   enum Failure: Error, Equatable {
     case unavailable
@@ -36,17 +36,7 @@ enum LinnetSettingsTransactionIPC {
     private var channels: [Int32: Channel] = [:]
 
     convenience init(startingAt bundle: Bundle = .main, handler: @escaping Handler) throws {
-      self.init(identity: try liveIdentity(startingAt: bundle, peer: .settings), handler: handler)
-    }
-
-    init(
-      endpointURL: URL,
-      peerExecutableURL: URL,
-      handler: @escaping Handler
-    ) throws {
-      identity = try fixedIdentity(
-        endpointURL: endpointURL, peerExecutableURL: peerExecutableURL)
-      self.handler = handler
+      self.init(identity: try liveIdentity(startingAt: bundle), handler: handler)
     }
 
     private init(identity: Identity, handler: @escaping Handler) {
@@ -66,17 +56,19 @@ enum LinnetSettingsTransactionIPC {
       try LinnetSettingsTransactionIPC.removeStaleSocket(at: identity.endpointURL)
       let fd = socket(AF_UNIX, SOCK_STREAM, 0)
       guard fd >= 0 else { throw Failure.unavailable }
+      var boundIdentity: (dev_t, ino_t)?
       do {
         try withSocketAddress(identity.endpointURL.path) { address, length in
-          guard Darwin.bind(fd, address, length) == 0,
-            chmod(identity.endpointURL.path, S_IRUSR | S_IWUSR) == 0,
-            listen(fd, 8) == 0
-          else { throw Failure.unavailable }
+          guard Darwin.bind(fd, address, length) == 0 else { throw Failure.unavailable }
         }
         var info = stat()
         guard lstat(identity.endpointURL.path, &info) == 0,
           (info.st_mode & S_IFMT) == S_IFSOCK,
           info.st_uid == geteuid()
+        else { throw Failure.unavailable }
+        boundIdentity = (info.st_dev, info.st_ino)
+        guard chmod(identity.endpointURL.path, S_IRUSR | S_IWUSR) == 0,
+          listen(fd, 8) == 0
         else { throw Failure.unavailable }
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.acceptPendingConnections() }
@@ -89,7 +81,13 @@ enum LinnetSettingsTransactionIPC {
         source.resume()
       } catch {
         Darwin.close(fd)
-        try? FileManager.default.removeItem(at: identity.endpointURL)
+        if let boundIdentity {
+          var current = stat()
+          if lstat(identity.endpointURL.path, &current) == 0,
+            current.st_dev == boundIdentity.0, current.st_ino == boundIdentity.1 {
+            try? FileManager.default.removeItem(at: identity.endpointURL)
+          }
+        }
         throw error
       }
     }
@@ -128,7 +126,7 @@ enum LinnetSettingsTransactionIPC {
 
     private func receiveRequest(on channel: Channel) {
       guard let pid = peerPID(channel.fd),
-        authenticate(fd: channel.fd, pid: pid, as: identity),
+        authenticate(fd: channel.fd, pid: pid),
         let payload = try? channel.readFrame(deadline: Date().addingTimeInterval(3)),
         let request = try? decode(LinnetSettingsContract.DataRequest.self, from: payload),
         LinnetSettingsContract.validDataRequest(request),
@@ -161,18 +159,9 @@ enum LinnetSettingsTransactionIPC {
   }
 
   final class Client: LinnetSettingsTransactionRequesting, @unchecked Sendable {
-    private enum IdentitySource { case live(Bundle), fixed(Identity) }
-    private let identitySource: IdentitySource
+    private let bundle: Bundle
 
-    init(startingAt bundle: Bundle = .main) { identitySource = .live(bundle) }
-
-    init(
-      endpointURL: URL,
-      peerExecutableURL: URL
-    ) throws {
-      identitySource = .fixed(try fixedIdentity(
-        endpointURL: endpointURL, peerExecutableURL: peerExecutableURL))
-    }
+    init(startingAt bundle: Bundle = .main) { self.bundle = bundle }
 
     func request(
       _ request: LinnetSettingsContract.DataRequest,
@@ -182,11 +171,7 @@ enum LinnetSettingsTransactionIPC {
       guard LinnetSettingsContract.validDataRequest(request), timeout > 0 else {
         throw Failure.invalidMessage
       }
-      let identity: Identity
-      switch identitySource {
-      case .live(let bundle): identity = try liveIdentity(startingAt: bundle, peer: .host)
-      case .fixed(let fixed): identity = fixed
-      }
+      let identity = try liveIdentity(startingAt: bundle)
       return try await withCheckedThrowingContinuation { continuation in
         DispatchQueue.global(qos: .userInitiated).async {
           do {
@@ -214,7 +199,7 @@ enum LinnetSettingsTransactionIPC {
         try connectUnixSocket(
           fd: fd, address: address, length: length, deadline: deadline)
       }
-      guard let pid = peerPID(fd), authenticate(fd: fd, pid: pid, as: identity) else {
+      guard let pid = peerPID(fd), authenticate(fd: fd, pid: pid) else {
         throw Failure.unavailable
       }
       try channel.writeFrame(try encode(request), deadline: deadline)
@@ -236,10 +221,8 @@ enum LinnetSettingsTransactionIPC {
 }
 
 extension LinnetSettingsTransactionIPC {
-  private enum Peer { case host, settings }
   private struct Identity: @unchecked Sendable {
     let endpointURL: URL
-    let peerExecutableURL: URL
   }
 
   private final class Channel: @unchecked Sendable {
@@ -331,50 +314,26 @@ extension LinnetSettingsTransactionIPC {
     }
   }
 
-  private static func liveIdentity(startingAt bundle: Bundle, peer: Peer) throws -> Identity {
-    guard let host = LinnetSettingsContract.hostBundle(startingAt: bundle),
-      let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
+  private static func liveIdentity(startingAt bundle: Bundle) throws -> Identity {
+    guard let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
     else { throw Failure.unavailable }
-    let bundleURL = peer == .host
-      ? host.bundleURL
-      : host.bundleURL.appending(
-        path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
-    guard let executable = Bundle(url: bundleURL)?.executableURL else {
-      throw Failure.unavailable
-    }
-    return try fixedIdentity(
-      endpointURL: registry.rootDirectory.appending(
-        path: "State/settings-transaction.sock", directoryHint: .notDirectory),
-      peerExecutableURL: executable)
+    return try fixedIdentity(endpointURL: registry.rootDirectory.appending(
+      path: "State/settings-transaction.sock", directoryHint: .notDirectory))
   }
 
   private static func fixedIdentity(
-    endpointURL: URL,
-    peerExecutableURL: URL
+    endpointURL: URL
   ) throws -> Identity {
     let endpoint = endpointURL.standardizedFileURL
-    let executable = peerExecutableURL.resolvingSymlinksInPath()
-    var isDirectory = ObjCBool(false)
-    guard endpointURL.isFileURL, endpoint.path.hasPrefix("/"),
-      peerExecutableURL.isFileURL, executable.path.hasPrefix("/"),
-      FileManager.default.fileExists(atPath: executable.path, isDirectory: &isDirectory),
-      !isDirectory.boolValue, FileManager.default.isExecutableFile(atPath: executable.path)
+    guard endpointURL.isFileURL, endpoint.path.hasPrefix("/")
     else { throw Failure.unavailable }
-    return .init(
-      endpointURL: endpoint,
-      peerExecutableURL: executable)
+    return .init(endpointURL: endpoint)
   }
 
-  private static func authenticate(fd: Int32, pid: pid_t, as identity: Identity) -> Bool {
+  private static func authenticate(fd descriptor: Int32, pid: pid_t) -> Bool {
     var uid: uid_t = 0
     var gid: gid_t = 0
-    guard getpeereid(fd, &uid, &gid) == 0, uid == geteuid(), pid != getpid() else {
-      return false
-    }
-    var path = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
-    guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
-    return URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath()
-      == identity.peerExecutableURL
+    return getpeereid(descriptor, &uid, &gid) == 0 && uid == geteuid() && pid != getpid()
   }
 
   private static func connectUnixSocket(
@@ -432,6 +391,20 @@ extension LinnetSettingsTransactionIPC {
     }
     guard (info.st_mode & S_IFMT) == S_IFSOCK, info.st_uid == geteuid()
     else { throw Failure.unavailable }
+    let staleIdentity = (info.st_dev, info.st_ino)
+    let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard probe >= 0 else { throw Failure.unavailable }
+    defer { Darwin.close(probe) }
+    let connectionError = try withSocketAddress(url.path) { address, length in
+      if Darwin.connect(probe, address, length) == 0 { return Int32(0) }
+      return errno
+    }
+    // A successful connection proves a live owner. Any result other than a
+    // refused connection is ambiguous and therefore also fails closed.
+    guard connectionError == ECONNREFUSED else { throw Failure.unavailable }
+    guard lstat(url.path, &info) == 0,
+      info.st_dev == staleIdentity.0, info.st_ino == staleIdentity.1
+    else { throw Failure.unavailable }
     try FileManager.default.removeItem(at: url)
   }
 
@@ -482,6 +455,7 @@ extension LinnetSettingsTransactionIPC {
     case .refresh, .reloadConfiguration:
       return [.activated, .rejected, .failed].contains(status)
     case .diagnose: return [.running, .paused, .degraded, .failed].contains(status)
+    case .activateCore: return [.terminating, .rejected, .failed].contains(status)
     }
   }
 }

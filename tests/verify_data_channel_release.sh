@@ -15,15 +15,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-sdk="$(xcrun --sdk macosx --show-sdk-path)"
-tool="${fixture}/linnet-pack"
-xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetPackContract.swift \
-  sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
-  tools/LinnetDataCatalogBuilder.swift \
-  tools/LinnetPackTool.swift \
-  -o "${tool}"
+tool="${repo_root}/build/linnet-pack"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
 
 release="${fixture}/release"
 mkdir "${release}"

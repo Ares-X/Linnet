@@ -1,0 +1,334 @@
+name: Linnet release
+
+on:
+  push:
+    tags:
+      - 'linnet-candidate/v*-*'
+      - 'linnet-data-seed/v*-*-*'
+      - 'linnet-publication/v*-*-h*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-candidate:
+    if: >-
+      github.event_name == 'push' &&
+      github.event.created == true &&
+      github.event.deleted == false &&
+      github.repository == 'Ares-X/Linnet' &&
+      github.actor == 'Ares-X' &&
+      (startsWith(github.ref, 'refs/tags/linnet-candidate/') ||
+       startsWith(github.ref, 'refs/tags/linnet-data-seed/'))
+    concurrency:
+      group: linnet-release-candidate
+      cancel-in-progress: true
+    environment: community-signing
+    permissions:
+      actions: read
+      contents: write
+    runs-on: macos-latest
+    steps:
+      - name: Checkout the exact candidate request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Validate candidate intent and exact manual CI
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_REF: ${{ github.ref }}
+          CANDIDATE_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = push
+          test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
+          test "${GITHUB_ACTOR}" = Ares-X
+          [[ "${CANDIDATE_REVISION}" =~ ^[0-9a-f]{40}$ ]]
+          candidate_pattern='^refs/tags/linnet-candidate/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})$'
+          seed_pattern='^refs/tags/linnet-data-seed/v([0-9]+\.[0-9]+\.[0-9]+)-([1-9][0-9]*)-([0-9a-f]{40})$'
+          requested_sequence=""
+          if [[ "${CANDIDATE_REF}" =~ ${candidate_pattern} ]]; then
+            request_mode=candidate
+            version="${BASH_REMATCH[1]}"
+            test "${BASH_REMATCH[2]}" = "${CANDIDATE_REVISION}"
+          elif [[ "${CANDIDATE_REF}" =~ ${seed_pattern} ]]; then
+            request_mode=data-seed
+            version="${BASH_REMATCH[1]}"
+            requested_sequence="${BASH_REMATCH[2]}"
+            test "${BASH_REMATCH[3]}" = "${CANDIDATE_REVISION}"
+          else
+            exit 2
+          fi
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse --verify HEAD^{commit})" = \
+            "${CANDIDATE_REVISION}"
+
+          tag="${CANDIDATE_REF#refs/tags/}"
+          tag_record="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')"
+          test "${tag_record}" = $'commit\t'"${CANDIDATE_REVISION}"
+          if [[ "${request_mode}" == candidate ]]; then
+            remote_main="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            test "${remote_main}" = "${CANDIDATE_REVISION}"
+
+            ci_runs="${RUNNER_TEMP}/linnet-manual-ci.json"
+            gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/commit-ci.yml/runs" \
+              -f head_sha="${CANDIDATE_REVISION}" \
+              -f event=workflow_dispatch -F per_page=100 >"${ci_runs}"
+            ruby -rjson -e '
+              document = JSON.parse(File.binread(ARGV.fetch(0)))
+              revision = ARGV.fetch(1)
+              accepted = document.fetch("workflow_runs").any? do |run|
+                run.fetch("name") == "Linnet manual full CI" &&
+                  run.fetch("path") == ".github/workflows/commit-ci.yml" &&
+                  run.fetch("head_sha") == revision &&
+                  run.fetch("event") == "workflow_dispatch" &&
+                  run.fetch("status") == "completed" &&
+                  run.fetch("conclusion") == "success" &&
+                  run.dig("repository", "full_name") == "Ares-X/Linnet" &&
+                  run.dig("head_repository", "full_name") == "Ares-X/Linnet"
+              end
+              abort "candidate requires a successful exact manual full CI" unless accepted
+            ' "${ci_runs}" "${CANDIDATE_REVISION}"
+          fi
+
+          product_version="$(sed -n \
+            's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+            config/LinnetProduct.xcconfig)"
+          test "${product_version}" = "${version}"
+          package/data_release_metadata validate config/linnet-data-releases.json
+          package/data_release_metadata check-core \
+            config/linnet-data-releases.json "${version}"
+          ruby scripts/upstream-sync verify
+          catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
+            config/linnet-data-releases.json)"
+          if [[ "${request_mode}" == data-seed ]]; then
+            test "${requested_sequence}" = "${catalog_sequence}"
+          fi
+          {
+            echo "mode=${request_mode}"
+            echo "version=${version}"
+            echo "revision=${CANDIDATE_REVISION}"
+            echo "catalog_sequence=${catalog_sequence}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Restore locked build cache
+        uses: ./.github/actions/restore-locked-build-cache
+        with:
+          save: false
+
+      - name: Install declared build tools
+        run: scripts/install_ci_build_tools.sh release
+
+      - name: Bootstrap an exact future LTS data seed
+        if: steps.request.outputs.mode == 'data-seed'
+        run: |
+          set -euo pipefail
+          model_name="$(plutil -extract sources.rime_lmdg_grammar.asset raw \
+            -o - upstreams.lock.json)"
+          [[ "${model_name}" =~ ^[A-Za-z0-9._-]+$ ]]
+          target="${GITHUB_WORKSPACE}/data/chinese/grammar/${model_name}"
+          [[ ! -e "${target}" ||
+             ( -f "${target}" && ! -L "${target}" ) ]]
+          seed_root="$(mktemp -d "${RUNNER_TEMP}/linnet-data-seed.XXXXXX")"
+          cleanup_seed() {
+            [[ "${seed_root}" == "${RUNNER_TEMP}/linnet-data-seed."* ]] &&
+              find "${seed_root}" -depth -delete 2>/dev/null || true
+          }
+          trap cleanup_seed EXIT INT TERM HUP
+          scripts/fetch-locked-release-asset upstreams.lock.json \
+            rime_lmdg_grammar "${seed_root}/${model_name}"
+          scripts/verify-linnet-grammar-model \
+            "${seed_root}/${model_name}" >/dev/null
+          install -d -m 0755 "$(dirname "${target}")"
+          install -m 0600 "${seed_root}/${model_name}" "${target}"
+
+      - name: Prepare locked dependencies and generated data
+        run: ./action-install.sh
+
+      - name: Import the pinned community signing identity
+        env:
+          LINNET_COMMUNITY_CMS_P12_BASE64: ${{ secrets.LINNET_COMMUNITY_CMS_P12_BASE64 }}
+          LINNET_COMMUNITY_CMS_P12_PASSWORD: ${{ secrets.LINNET_COMMUNITY_CMS_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${LINNET_COMMUNITY_CMS_P12_BASE64}"
+          test -n "${LINNET_COMMUNITY_CMS_P12_PASSWORD}"
+          signing_root="${RUNNER_TEMP}/linnet-community-signing"
+          keychain="${signing_root}/community-cms.keychain-db"
+          password_file="${signing_root}/keychain-password"
+          p12_file="${signing_root}/community-cms.p12"
+          original_keychains="${signing_root}/original-keychains"
+          test ! -e "${signing_root}"
+          install -d -m 0700 "${signing_root}"
+          security list-keychains -d user |
+            sed -E 's/^[[:space:]]*"([^"].*)"[[:space:]]*$/\1/' \
+              >"${original_keychains}"
+          test -s "${original_keychains}"
+          printf '%s' "${LINNET_COMMUNITY_CMS_P12_BASE64}" |
+            base64 -D >"${p12_file}"
+          openssl rand -hex 32 >"${password_file}"
+          chmod 0600 "${p12_file}" "${password_file}" "${original_keychains}"
+          keychain_password="$(tr -d '\n' <"${password_file}")"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          security import "${p12_file}" -k "${keychain}" \
+            -P "${LINNET_COMMUNITY_CMS_P12_PASSWORD}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "${keychain_password}" "${keychain}"
+          keychains=()
+          while IFS= read -r existing; do keychains+=("${existing}"); done \
+            <"${original_keychains}"
+          security list-keychains -d user -s "${keychains[@]}" "${keychain}"
+          chmod 0600 "${keychain}"
+          {
+            echo "LINNET_CODE_SIGN_KEYCHAIN=${keychain}"
+            echo "LINNET_CODE_SIGN_PASSWORD_FILE=${password_file}"
+          } >>"${GITHUB_ENV}"
+
+      - name: Build, sign and verify the candidate once
+        env:
+          LINNET_CANDIDATE_REVISION: ${{ steps.request.outputs.revision }}
+          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
+        run: |
+          set -euo pipefail
+          test ! -e "${RUNNER_TEMP}/linnet-candidate"
+          mkdir -p "${ARCHIVE_OUTPUT_DIR}"
+          make --no-print-directory archive
+          LINNET_RELEASE_TOOL="${GITHUB_WORKSPACE}/build/linnet-pack" \
+            package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
+              "${{ steps.request.outputs.version }}" \
+              "${LINNET_CANDIDATE_REVISION}"
+
+      - name: Stage exact GitHub Release bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_MODE: ${{ steps.request.outputs.mode }}
+          REQUEST_TAG: ${{ github.ref_name }}
+          RELEASE_DIR: ${{ runner.temp }}/linnet-candidate/release
+          VERSION: ${{ steps.request.outputs.version }}
+          CATALOG_SEQUENCE: ${{ steps.request.outputs.catalog_sequence }}
+          CANDIDATE_REVISION: ${{ steps.request.outputs.revision }}
+        run: |
+          set -euo pipefail
+          identity="$(package/release_candidate_identity \
+            "${RELEASE_DIR}" "${VERSION}" "${CATALOG_SEQUENCE}")"
+          if [[ "${REQUEST_MODE}" == data-seed ]]; then
+            package/stage_github_release stage data \
+              "${RELEASE_DIR}" "${VERSION}" "${CATALOG_SEQUENCE}" \
+              "${CANDIDATE_REVISION}"
+            package/publish_github_release data-seed "${VERSION}" \
+              "${CATALOG_SEQUENCE}" "${CANDIDATE_REVISION}" "${REQUEST_TAG}"
+            {
+              echo "### Linnet Action-built LTS data seed"
+              echo
+              echo "- Source: ${CANDIDATE_REVISION}"
+              echo "- Eight-file build identity: ${identity}"
+              echo "- Published boundary: data prerelease only; Catalog unchanged"
+            } >>"${GITHUB_STEP_SUMMARY}"
+          else
+            for channel in core data public; do
+              package/stage_github_release stage "${channel}" \
+                "${RELEASE_DIR}" "${VERSION}" "${CATALOG_SEQUENCE}" \
+                "${CANDIDATE_REVISION}"
+            done
+            {
+              echo "### Linnet Action-built installation candidate"
+              echo
+              echo "- Source: ${CANDIDATE_REVISION}"
+              echo "- Eight-file identity: ${identity}"
+              echo "- Transport: draft Core, data and public GitHub Releases"
+            } >>"${GITHUB_STEP_SUMMARY}"
+          fi
+      - name: Remove the temporary signing secrets
+        if: always()
+        run: |
+          set -uo pipefail
+          signing_root="${RUNNER_TEMP}/linnet-community-signing"
+          keychain="${signing_root}/community-cms.keychain-db"
+          original_keychains="${signing_root}/original-keychains"
+          cleanup_status=0
+          if [[ -f "${original_keychains}" && ! -L "${original_keychains}" ]]; then
+            keychains=()
+            while IFS= read -r existing; do keychains+=("${existing}"); done \
+              <"${original_keychains}"
+            security list-keychains -d user -s "${keychains[@]}" || cleanup_status=$?
+          fi
+          if [[ -f "${keychain}" && ! -L "${keychain}" &&
+            "${keychain%/*}" == "${signing_root}" ]]; then
+            security delete-keychain "${keychain}" || cleanup_status=$?
+          fi
+          if [[ -e "${signing_root}" ]]; then
+            if [[ -d "${signing_root}" && ! -L "${signing_root}" &&
+              "${signing_root}" == "${RUNNER_TEMP}/linnet-community-signing" ]]; then
+              rm -rf -- "${signing_root}" || cleanup_status=$?
+            else
+              cleanup_status=1
+            fi
+          fi
+          exit "${cleanup_status}"
+
+  publish:
+    if: >-
+      github.event_name == 'push' &&
+      github.event.created == true &&
+      github.event.deleted == false &&
+      github.repository == 'Ares-X/Linnet' &&
+      github.actor == 'Ares-X' &&
+      startsWith(github.ref, 'refs/tags/linnet-publication/')
+    concurrency:
+      group: linnet-release-publication
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the authorized publisher source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Verify authorization and publish staged Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_TAG: ${{ github.ref_name }}
+          CANDIDATE_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = push
+          test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
+          test "${GITHUB_ACTOR}" = Ares-X
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse --verify HEAD^{commit})" = \
+            "${CANDIDATE_REVISION}"
+
+          pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h[0-9a-f]{64}$'
+          [[ "${AUTHORIZATION_TAG}" =~ ${pattern} ]]
+          version="${BASH_REMATCH[1]}"
+          test "${BASH_REMATCH[2]}" = "${CANDIDATE_REVISION}"
+          product_version="$(sed -n \
+            's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+            config/LinnetProduct.xcconfig)"
+          test "${product_version}" = "${version}"
+          package/data_release_metadata validate config/linnet-data-releases.json
+          package/data_release_metadata check-core \
+            config/linnet-data-releases.json "${version}"
+          catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
+            config/linnet-data-releases.json)"
+
+          package/publish_github_release publish "${version}" \
+            "${catalog_sequence}" "${CANDIDATE_REVISION}" \
+            "${AUTHORIZATION_TAG}"

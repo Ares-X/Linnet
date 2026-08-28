@@ -20,10 +20,6 @@ struct LinnetDataChannelTests {
     require(
       LinnetDataChannel.minimumCatalogSequence == 4,
       "Core catalog replay floor drifted from the first public data release")
-    require(
-      LinnetDataChannel.service == .published,
-      "published update channel remained unavailable")
-
     let catalog = makeCatalog()
     let data = try catalogData(catalog)
     let verified = try LinnetDataChannel.verify(data, coreVersion: "1.0.0")
@@ -247,7 +243,7 @@ struct LinnetDataChannelTests {
     artifacts.map { artifact in
       .init(
         packID: artifact.kind.packID,
-        kind: LinnetDataRegistry.PackKind(rawValue: artifact.kind.rawValue)!,
+        kind: artifact.kind,
         version: artifact.version, sequence: artifact.sequence,
         dataABI: artifact.dataABI, contentSHA256: artifact.contentSHA256,
         minCore: artifact.minCore, requirements: [],

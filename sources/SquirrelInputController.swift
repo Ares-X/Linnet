@@ -11,6 +11,9 @@ import InputMethodKit
 final class SquirrelInputController: IMKInputController {
   static let keyRollOver = 50
   static var unknownAppCount: UInt = 0
+  /// Append-only for this Host process: controller teardown is not evidence
+  /// that the client application released its InputMethodKit endpoint.
+  static let coreActivationClientLedger = LinnetInputClientLedger()
 
   weak var activeClient: IMKTextInput?
   let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
@@ -165,6 +168,9 @@ final class SquirrelInputController: IMKInputController {
   override init!(server: IMKServer!, delegate: Any!, client: Any!) {
     self.activeClient = client as? IMKTextInput
     super.init(server: server, delegate: delegate, client: client)
+    Self.coreActivationClientLedger.record(
+      bundleIdentifier: activeClient?.bundleIdentifier()
+    )
     createSession(client: activeClient)
   }
 
@@ -213,7 +219,6 @@ final class SquirrelInputController: IMKInputController {
   }
 
   deinit {
-    NotificationCenter.default.removeObserver(self)
     destroySession()
   }
 }
@@ -294,7 +299,7 @@ extension SquirrelInputController {
       asciiMode: status.is_ascii_mode)
     return applyInputModeIdentity(
       currentIdentity,
-      announcesTransition: false) != nil
+      announcesTransition: false)
   }
 
   /// Owns both the live mode identity and every schema-dependent presentation
@@ -303,7 +308,7 @@ extension SquirrelInputController {
   func applyInputModeIdentity(
     _ currentIdentity: LinnetCandidatePresentation.InputModeIdentity,
     announcesTransition: Bool
-  ) -> Bool? {
+  ) -> Bool {
     let previousIdentity = inputModeIdentity
     let modeLabel = announcesTransition
       ? LinnetCandidatePresentation.inputModeTransitionLabel(
@@ -407,13 +412,9 @@ extension SquirrelInputController {
         let currentIdentity = LinnetCandidatePresentation.InputModeIdentity(
           schemaID: liveSchemaID,
           asciiMode: status.is_ascii_mode)
-        guard let transition = applyInputModeIdentity(
+        let transition = applyInputModeIdentity(
           currentIdentity,
           announcesTransition: true)
-        else {
-          _ = rimeAPI.free_status(&status)
-          return
-        }
         presentsModeTransition = transition
       }
       _ = rimeAPI.free_status(&status)

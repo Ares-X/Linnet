@@ -14,7 +14,8 @@ macOS 14 及以上由用户在系统设置中手动添加并允许一次。Core 
 
 Core 更新只要求 Settings 温和退出，不停止正在服务的 InputMethodKit Host，也不
 触碰输入源注册、启用或选择状态。现有应用继续使用当前 Host；磁盘上的新 Core 在
-macOS 下一次自然启动 Host 时接管。当前候选仍须通过真实安装升级 UAT，才能把
+用户明确请求且所有历史客户端应用都已退出时可安全接管；否则在下次登录或重启后
+接管。当前候选仍须通过真实安装升级 UAT，才能把
 免注销与输入连续性作为发布结论。
 
 日常使用：
@@ -54,7 +55,9 @@ For a first Complete installation:
 
 Core asks only Settings to quit cleanly. It does not stop the live Host or touch
 input-source registration, enablement, or selection. Existing applications keep
-using the current Host; the new Core takes over on the next natural Host launch.
+using the current Host. The new Core can take over after an explicit request once
+every historical client app has exited; otherwise it takes over after the next
+macOS login or restart.
 This candidate still requires installed upgrade UAT before no-logout and input
 continuity are accepted release claims.
 

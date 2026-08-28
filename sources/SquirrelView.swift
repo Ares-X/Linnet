@@ -7,7 +7,6 @@
 
 import AppKit
 
-#sourceLocation(file: "CandidateView.swift", line: 10)
 private class SquirrelLayoutDelegate: NSObject, NSTextLayoutManagerDelegate {
   func textLayoutManager(_ textLayoutManager: NSTextLayoutManager, shouldBreakLineBefore location: any NSTextLocation, hyphenating: Bool) -> Bool {
     let index = textLayoutManager.offset(from: textLayoutManager.documentRange.location, to: location)
@@ -32,6 +31,8 @@ final class SquirrelView: NSView {
   }
 
   let textView: NSTextView
+  let detailTextView: NSTextView
+  let detailDividerView: NSView
 
   private let squirrelLayoutDelegate: SquirrelLayoutDelegate
   var candidateRanges: [NSRange] = []
@@ -51,6 +52,7 @@ final class SquirrelView: NSView {
   private(set) var candidateInteractionFrames: [NSRect] = []
   private var candidateInteractionPaths: [CGPath?] = []
   private var presentationMetrics: LinnetPanelGeometry.PresentationMetrics?
+  private var candidateColumnWidth: CGFloat?
   private var pointerTrackingArea: NSTrackingArea?
 
   var lightTheme = SquirrelTheme()
@@ -58,20 +60,27 @@ final class SquirrelView: NSView {
   private var clientIsDark = false
   var currentTheme: SquirrelTheme { if clientIsDark && darkTheme.available { darkTheme } else { lightTheme } }
 
-  /// The panel and its drawing surface consume one role-specific geometry
-  /// projection. Keeping this state in the view prevents candidate paging or
-  /// corner metrics from reappearing inside a compact status notice.
-  func applyPresentationMetrics(_ metrics: LinnetPanelGeometry.PresentationMetrics) { presentationMetrics = metrics }
-
   override init(frame frameRect: NSRect) {
     squirrelLayoutDelegate = SquirrelLayoutDelegate()
     textView = NSTextView(frame: frameRect)
+    detailTextView = NSTextView(frame: .zero)
+    detailDividerView = NSView(frame: .zero)
     textView.drawsBackground = false
     textView.isEditable = false
     textView.isSelectable = false
     textView.textLayoutManager?.delegate = squirrelLayoutDelegate
+    detailTextView.drawsBackground = false
+    detailTextView.isEditable = false
+    detailTextView.isSelectable = false
+    detailTextView.isHidden = true
+    detailDividerView.isHidden = true
+    detailDividerView.wantsLayer = true
     super.init(frame: frameRect)
     textView.textContainer?.lineFragmentPadding = 0
+    detailTextView.textContainer?.lineFragmentPadding = 0
+    detailTextView.textContainerInset = .zero
+    detailTextView.setAccessibilityElement(false)
+    detailDividerView.setAccessibilityElement(false)
     self.wantsLayer = true
     self.layer?.masksToBounds = true
   }
@@ -90,42 +99,8 @@ final class SquirrelView: NSView {
   }
 
   override var isFlipped: Bool { true }
-  func applyClientAppearance(isDark: Bool) { clientIsDark = isDark }
-
-  func convert(range: NSRange) -> NSTextRange? {
-    guard range != .empty, let textLayoutManager = textView.textLayoutManager else { return nil }
-    guard let startLocation = textLayoutManager.location(textLayoutManager.documentRange.location, offsetBy: range.location) else { return nil }
-    guard let endLocation = textLayoutManager.location(startLocation, offsetBy: range.length) else { return nil }
-    return NSTextRange(location: startLocation, end: endLocation)
-  }
-
-  // Get the rectangle containing entire contents, expensive to calculate
-  var contentRect: NSRect {
-    var ranges = candidateRanges
-    if detailRange.length > 0 { ranges.append(detailRange) }
-    if preeditRange.length > 0 { ranges.append(preeditRange) }
-    var unionRect: NSRect?
-    for range in ranges {
-      if let textRange = convert(range: range) {
-        let rect = contentRect(range: textRange)
-        unionRect = LinnetPanelGeometry.union(unionRect, withFiniteLayoutRect: rect)
-      }
-    }
-    return unionRect ?? .zero
-  }
-  // Get the rectangle containing the range of text, will first convert to glyph range, expensive to calculate
-  func contentRect(range: NSTextRange) -> NSRect {
-    guard let textLayoutManager = textView.textLayoutManager else { return .zero }
-    var unionRect: NSRect?
-    textLayoutManager.enumerateTextSegments(in: range, type: .selection, options: [.rangeNotRequired]) { _, rect, _, _ in
-      unionRect = LinnetPanelGeometry.union(unionRect, withFiniteLayoutRect: rect)
-      return true
-    }
-    return unionRect ?? .zero
-  }
 
   // Will trigger draw(_:) after candidate text and interaction geometry change.
-  // swiftlint:disable:next function_parameter_count
   func drawView(
     candidateRanges: [NSRange], detailRange: NSRange, hilightedIndex: Int, preeditRange: NSRange, highlightedPreeditRange: NSRange,
     controlMode: LinnetCandidatePresentation.CandidateControlMode, usesGridLayout: Bool
@@ -182,7 +157,16 @@ final class SquirrelView: NSView {
       if theme.preeditBackgroundColor != nil { preeditPath = drawSmoothLines(rectVertex(of: preeditRect), straightCorner: Set(), alpha: 0, beta: 0) }
     }
 
+    var candidateBackgroundRect = contentBackgroundRect
+    var candidateContainingRect = containingRect
+    if let candidateColumnWidth {
+      candidateBackgroundRect.size.width = min(
+        candidateBackgroundRect.width, candidateColumnWidth)
+      candidateContainingRect.size.width = min(
+        candidateContainingRect.width, candidateColumnWidth)
+    }
     containingRect = carveInset(rect: containingRect)
+    candidateContainingRect = carveInset(rect: candidateContainingRect)
     // Draw candidate Rects
     if presentationMetrics.role == .candidate {
       for i in 0..<candidateRanges.count {
@@ -191,7 +175,9 @@ final class SquirrelView: NSView {
           ? drawPath(
             highlightedRange: candidate,
             context: CandidatePathContext(
-              backgroundRect: contentBackgroundRect, preeditRect: preeditRect, containingRect: containingRect,
+              backgroundRect: candidateBackgroundRect,
+              preeditRect: preeditRect,
+              containingRect: candidateContainingRect,
               extraExpansion: 0, usesSelectionStyle: false))
           : nil
         var interactionTransform = CGAffineTransform(translationX: contentFrame.minX, y: 0)
@@ -209,7 +195,9 @@ final class SquirrelView: NSView {
               : drawPath(
                 highlightedRange: candidate,
                 context: CandidatePathContext(
-                  backgroundRect: contentBackgroundRect, preeditRect: preeditRect, containingRect: containingRect,
+                  backgroundRect: candidateBackgroundRect,
+                  preeditRect: preeditRect,
+                  containingRect: candidateContainingRect,
                   extraExpansion: 0, usesSelectionStyle: true)))?.mutableCopy()
           }
         } else {
@@ -218,7 +206,9 @@ final class SquirrelView: NSView {
             let candidatePath = drawPath(
               highlightedRange: candidate,
               context: CandidatePathContext(
-                backgroundRect: contentBackgroundRect, preeditRect: preeditRect, containingRect: containingRect,
+                backgroundRect: candidateBackgroundRect,
+                preeditRect: preeditRect,
+                containingRect: candidateContainingRect,
                 extraExpansion: theme.surroundingExtraExpansion, usesSelectionStyle: false))
             if candidatePaths == nil { candidatePaths = CGMutablePath() }
             if let candidatePath = candidatePath { candidatePaths?.addPath(candidatePath) }
@@ -346,6 +336,87 @@ final class SquirrelView: NSView {
 }
 
 extension SquirrelView {
+  /// The panel and its drawing surface consume one role-specific geometry
+  /// projection. Keeping this state in the view prevents candidate paging or
+  /// corner metrics from reappearing inside a compact status notice.
+  func applyPresentationMetrics(_ metrics: LinnetPanelGeometry.PresentationMetrics) {
+    presentationMetrics = metrics
+  }
+
+  func applyClientAppearance(isDark: Bool) { clientIsDark = isDark }
+
+  func convert(range: NSRange) -> NSTextRange? {
+    guard range != .empty, let textLayoutManager = textView.textLayoutManager else { return nil }
+    guard let startLocation = textLayoutManager.location(textLayoutManager.documentRange.location, offsetBy: range.location) else { return nil }
+    guard let endLocation = textLayoutManager.location(startLocation, offsetBy: range.length) else { return nil }
+    return NSTextRange(location: startLocation, end: endLocation)
+  }
+
+  // Get the rectangle containing entire contents, expensive to calculate
+  var contentRect: NSRect {
+    var ranges = candidateRanges
+    if detailRange.length > 0 { ranges.append(detailRange) }
+    if preeditRange.length > 0 { ranges.append(preeditRange) }
+    return contentRect(ranges: ranges)
+  }
+
+  var primaryContentRect: NSRect {
+    var ranges = candidateRanges
+    if preeditRange.length > 0 { ranges.append(preeditRange) }
+    return contentRect(ranges: ranges)
+  }
+
+  private func contentRect(ranges: [NSRange]) -> NSRect {
+    var unionRect: NSRect?
+    for range in ranges {
+      if let textRange = convert(range: range) {
+        let rect = contentRect(range: textRange)
+        unionRect = LinnetPanelGeometry.union(unionRect, withFiniteLayoutRect: rect)
+      }
+    }
+    return unionRect ?? .zero
+  }
+
+  // Get the rectangle containing the range of text, will first convert to glyph range, expensive to calculate
+  func contentRect(range: NSTextRange) -> NSRect {
+    guard let textLayoutManager = textView.textLayoutManager else { return .zero }
+    var unionRect: NSRect?
+    textLayoutManager.enumerateTextSegments(in: range, type: .selection, options: [.rangeNotRequired]) { _, rect, _, _ in
+      unionRect = LinnetPanelGeometry.union(unionRect, withFiniteLayoutRect: rect)
+      return true
+    }
+    return unionRect ?? .zero
+  }
+
+  var detailContentRect: NSRect {
+    guard !detailTextView.isHidden,
+      let textLayoutManager = detailTextView.textLayoutManager,
+      detailTextView.textContentStorage?.attributedString?.length ?? 0 > 0
+    else { return .zero }
+    var unionRect: NSRect?
+    textLayoutManager.enumerateTextSegments(
+      in: textLayoutManager.documentRange,
+      type: .selection,
+      options: [.rangeNotRequired]
+    ) { _, rect, _, _ in
+      unionRect = LinnetPanelGeometry.union(unionRect, withFiniteLayoutRect: rect)
+      return true
+    }
+    return unionRect ?? .zero
+  }
+
+  func publishSidecarDetail(_ detail: NSAttributedString?) {
+    detailTextView.textContentStorage?.attributedString = detail
+      ?? NSAttributedString(string: "")
+    let isEmpty = detail?.length ?? 0 == 0
+    detailTextView.isHidden = isEmpty
+    detailDividerView.isHidden = isEmpty
+  }
+
+  func applyCandidateColumnWidth(_ width: CGFloat?) {
+    candidateColumnWidth = width
+  }
+
   func click(at clickPoint: NSPoint) -> CandidateHit {
     guard presentationMetrics != nil else { return .none }
     if let nextPage = pagingLayout.nextPage, nextPage.cell.contains(clickPoint) {

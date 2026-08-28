@@ -62,6 +62,18 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.selectedDetailText("  short definition  ") == "short definition",
       "short detail was not normalized"
     )
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "/wɜːk/ · n. 工作；职业；v. 运行；奏效；adj. 工作的"
+      ) == "/wɜːk/ · n. 工作；职业\nv. 运行；奏效\nadj. 工作的",
+      "selected English detail did not start each part of speech on its own line"
+    )
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "n. 品牌；name. 林内特；v. 命名；adj. 专有的"
+      ) == "n. 品牌\nname. 林内特\nv. 命名\nadj. 专有的",
+      "name, verb, and adjective detail groups did not receive separate lines"
+    )
     let long = String(repeating: "释", count: 90)
     let bounded = LinnetCandidatePresentation.selectedDetailText(long)
     require(
@@ -70,57 +82,17 @@ struct LinnetCandidatePresentationTests {
     )
     require(bounded.last == "…", "truncated detail has no ellipsis")
 
-    let ranges = [
-      NSRange(location: 0, length: 3),
-      NSRange(location: 5, length: 4),
-      NSRange(location: 11, length: 5),
-    ]
-    guard let insertion = LinnetCandidatePresentation.sidecarInsertion(
-      candidateRanges: ranges, anchorIndex: 1, insertedLength: 7)
-    else { fail("valid selected candidate was rejected") }
-    require(insertion.location == 9, "sidecar did not follow the selected candidate")
-    require(insertion.candidateRanges[0] == ranges[0], "earlier candidate moved")
-    require(insertion.candidateRanges[1] == ranges[1], "selected candidate range changed")
-    require(
-      insertion.candidateRanges[2] == NSRange(location: 18, length: 5),
-      "later candidate did not move with inserted detail"
-    )
-    require(
-      LinnetCandidatePresentation.sidecarInsertion(
-        candidateRanges: ranges, anchorIndex: 3, insertedLength: 2) == nil,
-      "invalid selected candidate was accepted"
-    )
-
-    // A vertical expanded grid is rendered in visual row order, while the
-    // ranges remain indexed by the candidates' absolute order. Inserting a
-    // sidecar must therefore shift ranges by their physical text position,
-    // not by their logical candidate index.
-    let reorderedRanges = [
-      NSRange(location: 0, length: 3),
-      NSRange(location: 20, length: 4),
-      NSRange(location: 5, length: 3),
-    ]
-    guard let reorderedInsertion = LinnetCandidatePresentation.sidecarInsertion(
-      candidateRanges: reorderedRanges, anchorIndex: 2, insertedLength: 4)
-    else { fail("valid expanded-grid sidecar anchor was rejected") }
-    require(
-      reorderedInsertion.location == 8,
-      "expanded-grid sidecar did not follow its visual-row anchor"
-    )
-    require(
-      reorderedInsertion.candidateRanges[1] == NSRange(location: 24, length: 4),
-      "a physically later candidate did not move with expanded-grid detail"
-    )
-    require(
-      reorderedInsertion.candidateRanges[2] == reorderedRanges[2],
-      "the sidecar anchor range changed"
-    )
-
     require(
       LinnetCandidatePresentation.accessibilityAnnouncement(
         candidate: "interface", comment: "  n. 接口  ", page: 2, indexOnPage: 1
       ) == "Page 3, candidate 2, interface, n. 接口",
       "candidate accessibility announcement lost position or definition"
+    )
+    require(
+      LinnetCandidatePresentation.accessibilityAnnouncement(
+        candidate: "work", comment: "n. 工作；v. 运行", page: 0, indexOnPage: 0
+      ) == "Page 1, candidate 1, work, n. 工作, v. 运行",
+      "visual part-of-speech line breaks leaked into accessibility speech"
     )
     require(
       LinnetCandidatePresentation.accessibilityAnnouncement(
@@ -453,14 +425,23 @@ struct LinnetCandidatePresentationTests {
     require(
       footer.placement == .footer &&
         footer.spacing == LinnetCandidatePresentation.candidateRowSpacing &&
-        footer.textSeparator == "\n",
-      "horizontal candidate detail lost its shared footer policy")
+        footer.detailColumnMaximumWidth == 256,
+      "horizontal candidate detail lost its compact footer policy")
     require(
       footerFrames.candidate == CGRect(x: 0, y: 0, width: 100, height: 20) &&
         footerFrames.divider == nil &&
         footerFrames.detail == CGRect(x: 0, y: 26, width: 40, height: 10) &&
         footerFrames.size == CGSize(width: 100, height: 36),
       "footer candidate and detail no longer share one spatial geometry")
+
+    let longFooterFrames = footer.frames(
+      candidateSize: CGSize(width: 72, height: 24),
+      detailSize: CGSize(width: 900, height: 54),
+      dividerSize: CGSize(width: 1, height: 24))
+    require(
+      longFooterFrames.detail.width == 256 &&
+        longFooterFrames.size.width == 256,
+      "a short horizontal candidate can still stretch to the screen width")
 
     let sidecar = LinnetCandidatePresentation.candidateDetailGeometry(
       forLinearLayout: false)
@@ -470,7 +451,7 @@ struct LinnetCandidatePresentationTests {
       dividerSize: CGSize(width: 1, height: 60))
     require(
       sidecar.placement == .sidecar &&
-        sidecar.textSeparator == "\t│\t",
+        sidecar.detailColumnMaximumWidth == 120,
       "vertical candidate detail lost its shared sidecar policy")
     require(
       sidecarFrames.candidate == CGRect(x: 0, y: 0, width: 40, height: 60) &&
@@ -478,6 +459,15 @@ struct LinnetCandidatePresentationTests {
         sidecarFrames.detail == CGRect(x: 53, y: 0, width: 30, height: 12) &&
         sidecarFrames.size == CGSize(width: 83, height: 60),
       "sidecar candidate, divider, and detail no longer share one spatial geometry")
+
+    let longDefinitionFrames = sidecar.frames(
+      candidateSize: CGSize(width: 112, height: 156),
+      detailSize: CGSize(width: 680, height: 18),
+      dividerSize: CGSize(width: 1, height: 156))
+    require(
+      longDefinitionFrames.detail.width <= 120 &&
+        longDefinitionFrames.size.width <= 260,
+      "a long English definition can still stretch the vertical candidate panel")
   }
 
   /// Expansion starts at the current Rime page and may inspect at most three

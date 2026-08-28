@@ -140,8 +140,8 @@ struct RimeUserDataBridge {
       try requireRegularFile(item.file)
     }
 
-    withTraits(user: candidate, shared: shared, product: product) {
-      traits in rime.deployer_initialize(&traits)
+    withTraits(user: candidate, shared: shared, product: product) { traits in
+      rime.deployer_initialize(&traits)
     }
     do {
       defer { rime.finalize() }
@@ -155,8 +155,8 @@ struct RimeUserDataBridge {
       }
     }
 
-    withTraits(user: candidate, shared: shared, product: product) {
-      traits in rime.setup(&traits)
+    withTraits(user: candidate, shared: shared, product: product) { traits in
+      rime.setup(&traits)
     }
     rime.initialize(nil)
     defer { rime.finalize() }
@@ -214,8 +214,8 @@ extension RimeUserDataBridge {
     } else {
       baseline = try Self.inspectUserDirectory(userDirectory)
     }
-    withTraits(user: userDirectory, shared: shared, product: product) {
-      traits in rime.deployer_initialize(&traits)
+    withTraits(user: userDirectory, shared: shared, product: product) { traits in
+      rime.deployer_initialize(&traits)
     }
     defer { rime.finalize() }
     let levers = try leversAPI()
@@ -308,8 +308,8 @@ extension RimeUserDataBridge {
     shared: URL,
     product: String
   ) throws -> Set<String> {
-    withTraits(user: directory, shared: shared, product: product) {
-      traits in rime.deployer_initialize(&traits)
+    withTraits(user: directory, shared: shared, product: product) { traits in
+      rime.deployer_initialize(&traits)
     }
     defer { rime.finalize() }
     return try userDictionaryNames(levers: leversAPI(), directory: directory)

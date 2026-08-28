@@ -363,7 +363,7 @@ struct LinnetPackTests {
     requires: [LinnetPackContract.Requirement] = [],
     trailing: Data = Data(),
     internalTrailing: Data = Data()
-  ) throws -> LinnetPackContract.EncodedPayload {
+  ) throws -> LinnetPackEncoder.EncodedPayload {
     let rawPayload = package.deletingLastPathComponent().appending(
       path: ".raw-payload-\(UUID().uuidString)")
     let storedPayload = package.deletingLastPathComponent().appending(
@@ -373,7 +373,7 @@ struct LinnetPackTests {
       try? FileManager.default.removeItem(at: storedPayload)
     }
     try payload.write(to: rawPayload)
-    let encoded = try LinnetPackContract.compressZlib(source: rawPayload, to: storedPayload)
+    let encoded = try LinnetPackEncoder.compressZlib(source: rawPayload, to: storedPayload)
     if !internalTrailing.isEmpty {
       let handle = try FileHandle(forWritingTo: storedPayload)
       try handle.seekToEnd()
@@ -403,7 +403,7 @@ struct LinnetPackTests {
       try handle.write(contentsOf: trailing)
       try handle.close()
     }
-    try LinnetPackContract.writeContainer(
+    try LinnetPackEncoder.writeContainer(
       manifestData: manifestData, payload: storedPayload, to: package)
     return encoded
   }

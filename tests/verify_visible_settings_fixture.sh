@@ -49,15 +49,13 @@ uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
 uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
 xcode_user_name="$(id -un)"
 settings_ui_source="tests/SettingsUITests/SettingsUITests.swift"
-only_testing=()
+focused_ui_test=""
 if [[ -n "${ui_test_name}" ]]; then
   [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+$ ]] ||
     fail "invalid Settings UI test name: ${ui_test_name}"
   rg -q "^[[:space:]]*func ${ui_test_name}\\(\\) throws \\{" \
     "${settings_ui_source}" || fail "unknown Settings UI test: ${ui_test_name}"
-  only_testing=(
-    "-only-testing:SettingsUITests/SettingsUITests/${ui_test_name}"
-  )
+  focused_ui_test="-only-testing:SettingsUITests/SettingsUITests/${ui_test_name}"
 fi
 xcode_generated_paths=(
   "${repo_root}/Linnet.xcodeproj/project.xcworkspace/xcuserdata/${xcode_user_name}.xcuserdatad/UserInterfaceState.xcuserstate"
@@ -132,6 +130,7 @@ before_fingerprint=""
 before_content_fingerprint=""
 uat_home_created=false
 fixture_settings_stopped=true
+ui_test_completed=false
 
 terminate_fixture_settings() {
   local executable process_id remaining=0
@@ -198,6 +197,10 @@ cleanup() {
   exit_code=$?
   trap - EXIT INT TERM HUP
   if [[ "${run_ui_tests}" == true ]]; then
+    if [[ "${ui_test_completed}" != true && "${exit_code}" -eq 0 ]]; then
+      echo "verify_visible_settings_fixture: UI suite did not reach its completed boundary" >&2
+      exit_code=1
+    fi
     if ! terminate_fixture_settings; then
       echo "verify_visible_settings_fixture: exact fixture Settings process did not stop" >&2
       fixture_settings_stopped=false
@@ -373,15 +376,12 @@ if ! before_content_fingerprint="$(content_fingerprint)"; then
 fi
 
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
-release_tool="${fixture}/linnet-pack"
+release_tool="${repo_root}/build/linnet-pack"
 probe="${fixture}/visible-settings-fixture-probe"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
 xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift tools/LinnetDataCatalogBuilder.swift \
-  tools/LinnetPackTool.swift -o "${release_tool}"
-xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift sources/LinnetSettings/SettingsContract.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift sources/LinnetSettings/SettingsContract.swift \
   tests/LinnetVisibleSettingsFixtureProbe.swift -o "${probe}"
 
 pack_roots=()
@@ -444,18 +444,20 @@ if [[ "${run_ui_tests}" == true ]]; then
   else
     echo "Visible Settings full UI suite: fail-fast after the first failed test"
   fi
-  xcodebuild -project Linnet.xcodeproj -scheme SettingsUITests \
+  xcodebuild_args=(-project Linnet.xcodeproj -scheme SettingsUITests \
     -configuration Debug -destination 'platform=macOS' \
     -derivedDataPath "${fixture}/DerivedData" \
     -resultBundlePath "${fixture}/SettingsUITests.xcresult" \
     LINNET_BUNDLE_IDENTIFIER="${uat_host_identifier}" \
-    CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
-    "${only_testing[@]}" \
-    test
+    CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-")
+  [[ -z "${focused_ui_test}" ]] || xcodebuild_args+=("${focused_ui_test}")
+  xcodebuild_args+=(test)
+  xcodebuild "${xcodebuild_args[@]}"
   [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||
     fail "Settings UI tests changed a protected real-user path"
   [[ "$(content_fingerprint)" == "${before_content_fingerprint}" ]] ||
     fail "Settings UI tests changed protected real-user Settings content"
+  ui_test_completed=true
   echo "Visible Settings isolated UI suite: PASS"
   echo "uat_bundle_identifier=${uat_settings_identifier}"
   exit 0
