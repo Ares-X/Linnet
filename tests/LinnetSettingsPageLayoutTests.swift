@@ -14,7 +14,7 @@ struct LinnetSettingsPageLayoutTests {
         >= LinnetSettingsLayoutMetrics.minimumWindowWidth,
       "the Settings default width is smaller than its supported minimum")
     require(
-      LinnetSettingsLayoutMetrics.windowHeight == 660,
+      LinnetSettingsLayoutMetrics.windowHeight == 600,
       "the Settings window height no longer fits a compact display")
 
     let requiredContentWidth =

@@ -8,7 +8,7 @@ import SwiftUI
 enum LinnetSettingsLayoutMetrics {
   static let minimumWindowWidth: CGFloat = 960
   static let defaultWindowWidth: CGFloat = 1040
-  static let windowHeight: CGFloat = 660
+  static let windowHeight: CGFloat = 600
   static let minimumColumnWidth: CGFloat = 400
   static let columnSpacing: CGFloat = 20
   static let pageHorizontalInset: CGFloat = 28
