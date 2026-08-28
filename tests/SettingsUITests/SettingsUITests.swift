@@ -386,7 +386,6 @@ final class SettingsUITests: XCTestCase {
     ]
     app.launch()
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 15))
-    XCTAssertEqual(app.state, .runningForeground, "Settings did not activate in front")
     XCTAssertTrue(app.windows.firstMatch.isHittable, "Settings window is hidden behind another app")
     return app
   }

@@ -468,6 +468,25 @@ struct LinnetCandidatePresentationTests {
       longDefinitionFrames.detail.width <= 120 &&
         longDefinitionFrames.size.width <= 260,
       "a long English definition can still stretch the vertical candidate panel")
+
+    for (fontPoint, expectedDetailWidth) in [
+      (CGFloat(12), CGFloat(120)),
+      (CGFloat(15), CGFloat(120)),
+      (CGFloat(16), CGFloat(120)),
+      (CGFloat(32), CGFloat(160)),
+    ] {
+      let geometry = LinnetCandidatePresentation.candidateDetailGeometry(
+        forLinearLayout: false,
+        candidateFontPoint: fontPoint)
+      let frames = geometry.frames(
+        candidateSize: CGSize(width: 500, height: 180),
+        detailSize: CGSize(width: 500, height: 180),
+        dividerSize: CGSize(width: 1, height: 180))
+      require(
+        geometry.detailColumnMaximumWidth == expectedDetailWidth &&
+          frames.detail.width == expectedDetailWidth,
+        "\(fontPoint)pt canonical sidecar detail escaped its exact width owner")
+    }
   }
 
   /// Expansion starts at the current Rime page and may inspect at most three
