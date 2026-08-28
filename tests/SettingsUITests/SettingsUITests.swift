@@ -460,10 +460,11 @@ final class SettingsUITests: XCTestCase {
     button.click()
     let panel = app.dialogs.firstMatch
     XCTAssertTrue(panel.waitForExistence(timeout: 3), "Missing panel: \(title)")
+    let cancel = panel.buttons["Cancel"].firstMatch
     XCTAssertTrue(
-      panel.buttons["Cancel"].waitForExistence(timeout: 3),
+      cancel.waitForExistence(timeout: 3),
       "Unexpected file panel for: \(title)")
-    app.typeKey(.escape, modifierFlags: [])
+    cancel.click()
     XCTAssertFalse(panel.waitForExistence(timeout: 3))
   }
 
