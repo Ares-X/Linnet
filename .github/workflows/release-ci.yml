@@ -107,7 +107,7 @@ jobs:
           package/data_release_metadata validate config/linnet-data-releases.json
           package/data_release_metadata check-core \
             config/linnet-data-releases.json "${version}"
-          ruby scripts/upstream-sync report
+          ruby scripts/upstream-sync verify
           catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
             config/linnet-data-releases.json)"
           if [[ "${request_mode}" == data-seed ]]; then
