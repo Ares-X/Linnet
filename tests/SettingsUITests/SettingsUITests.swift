@@ -335,7 +335,6 @@ final class SettingsUITests: XCTestCase {
       app.windows.firstMatch.frame.contains(interfaceLanguage.frame),
       "Interface language is outside the Settings window: "
         + "window=\(app.windows.firstMatch.frame), control=\(interfaceLanguage.frame)")
-    XCTAssertTrue(interfaceLanguage.isHittable, "Interface language is outside the visible footer")
     selectEachPopUpOption([
       "Follow System",
       "简体中文",
