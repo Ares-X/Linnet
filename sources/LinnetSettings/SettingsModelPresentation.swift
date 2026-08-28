@@ -81,8 +81,6 @@ extension SettingsModel {
     return false
   }
 
-  var documentDirty: Bool { configuration.documentDirty }
-  var personalDataDirty: Bool { configuration.personalDataDirty }
   var pendingChanges: Bool { configuration.pendingChanges }
   var canApplyChanges: Bool {
     configuration.canPersist && !personalValidationPending

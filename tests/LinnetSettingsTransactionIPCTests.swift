@@ -73,6 +73,7 @@ struct LinnetSettingsTransactionIPCTests {
       guard let mode = arguments.first,
         [
           "--serve-success", "--serve-reload", "--serve-rejection",
+          "--serve-core-activation",
           "--serve-owner-collision",
           "--serve-timeout-recovery",
         ].contains(mode),
@@ -130,6 +131,10 @@ struct LinnetSettingsTransactionIPCTests {
                 code: .configurationReloadFailed,
                 detail: "owned-file read failed", health: nil))
           }
+        } else if request.command == .activateCore {
+          reply(.init(
+            transactionID: request.transactionID, status: .terminating,
+            code: .coreActivationAccepted, detail: "Core activation accepted", health: nil))
         } else if request.command == .reloadConfiguration {
           reply(.init(
             transactionID: request.transactionID, status: .activated,
@@ -204,6 +209,7 @@ struct LinnetSettingsTransactionIPCTests {
       guard let mode = arguments.first,
         [
           "--request-success", "--request-reload", "--expect-rejection",
+          "--request-core-activation",
           "--request-timeout-recovery",
         ].contains(mode),
         (mode == "--request-timeout-recovery"
@@ -217,12 +223,14 @@ struct LinnetSettingsTransactionIPCTests {
       }
       let forgedRequesterPID = arguments.count == 3 && arguments[2] == "--forged-requester-pid"
       let reload = mode == "--request-reload"
+      let coreActivation = mode == "--request-core-activation"
       let request = LinnetSettingsContract.DataRequest(
-        transactionID: UUID(), command: reload ? .reloadConfiguration : .activate,
+        transactionID: UUID(),
+        command: coreActivation ? .activateCore : (reload ? .reloadConfiguration : .activate),
         candidate:
-          reload
+          coreActivation ? nil : (reload
           ? URL(fileURLWithPath: "/tmp/linnet-ipc-configuration-candidate", isDirectory: true)
-          : URL(fileURLWithPath: "/tmp/linnet-ipc-candidate", isDirectory: true),
+          : URL(fileURLWithPath: "/tmp/linnet-ipc-candidate", isDirectory: true)),
         requesterPID: forgedRequesterPID ? getpid() + 1 : getpid(),
         deadline: Date().addingTimeInterval(10),
         expectedSettingsRevision: reload ? ConfigurationFixture.baseRevision : nil)
@@ -235,6 +243,14 @@ struct LinnetSettingsTransactionIPCTests {
         }
         guard mode != "--expect-rejection" else {
           throw TestFailure.untrustedPeerAccepted
+        }
+        if coreActivation {
+          guard terminal.transactionID == request.transactionID,
+            terminal.status == .terminating,
+            terminal.code == .coreActivationAccepted,
+            progress.snapshot().isEmpty
+          else { throw TestFailure.legitimateFlow }
+          return
         }
         guard terminal.transactionID == request.transactionID,
           terminal.status == .activated,

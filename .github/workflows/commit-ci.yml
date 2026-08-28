@@ -59,7 +59,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [app, settings-ui, swift, rime]
+        profile: [app, swift, rime]
     runs-on: macos-latest
     steps:
       - name: Checkout last commit
@@ -74,6 +74,15 @@ jobs:
         with:
           save: ${{ matrix.profile == 'rime' }}
 
+      - name: Restore and save incremental Swift owner tests
+        if: matrix.profile == 'swift'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        with:
+          path: build/swift-unit-cache
+          key: linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install build tools
         run: scripts/install_ci_build_tools.sh release
 
@@ -86,9 +95,6 @@ jobs:
             app)
               ./action-build.sh release
               tests/verify_development.sh app
-              ;;
-            settings-ui)
-              ./action-build.sh release
               tests/verify_visible_settings_fixture.sh --ui-test
               ;;
             swift|rime)

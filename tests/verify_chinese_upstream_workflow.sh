@@ -8,12 +8,26 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 workflow="${repo_root}/.github/workflows/chinese-upstream-sync.yml"
 reporter="${repo_root}/scripts/upstream-sync"
 retired_relay="${repo_root}/.github/workflows/chinese-upstream-review.yml"
+retired_duplicate_report="${repo_root}/.github/workflows/upstream-check.yml"
 
 [[ ! -e "${retired_relay}" ]] || {
   echo "The retired Chinese update artifact relay still exists." >&2
   exit 1
 }
+[[ ! -e "${retired_duplicate_report}" ]] || {
+  echo "The duplicate scheduled upstream report still exists." >&2
+  exit 1
+}
 ruby -ryaml -e 'YAML.load_file(ARGV.fetch(0))' "${workflow}"
+ruby -e '
+  canonical = File.expand_path(ARGV.fetch(0))
+  owners = Dir.glob(File.join(File.dirname(canonical), "*.{yml,yaml}"))
+    .each_with_object({}) do |path, result|
+      count = File.read(path).scan("ruby scripts/upstream-sync report").length
+      result[File.expand_path(path)] = count if count.positive?
+    end
+  abort "scheduled upstream report owners: #{owners}" unless owners == {canonical => 1}
+' "${workflow}"
 ruby -e '
   workflow = File.read(ARGV.fetch(0))
   abort "a persistent repository update cache returned" if

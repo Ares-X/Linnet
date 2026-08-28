@@ -27,6 +27,16 @@ strict: false
 # implicitly
 line_length: 200
 function_body_length: 200
+cyclomatic_complexity:
+  warning: 10
+  error: 20
+  ignores_case_statements: true
+nesting:
+  type_level:
+    warning: 2
+  function_level:
+    warning: 2
+  ignore_coding_keys: true
 # they can set both implicitly with an array
 type_body_length:
   - 300 # warning
@@ -35,6 +45,9 @@ type_body_length:
 file_length:
   warning: 800
   error: 1200
+function_parameter_count:
+  warning: 7
+  error: 9
 # naming rules can set warnings/errors for min_length and max_length
 # additionally they can set excluded names
 type_name:
@@ -48,9 +61,8 @@ identifier_name:
   min_length: # only min_length
     warning: 3
     error: 2
-  excluded: [i, URL, of, by] # excluded via string array
+  excluded: [i, id, fd, URL, of, by] # excluded via string array
 large_tuple:
   warning: 3
   error: 5
 reporter: "github-actions-logging" # reporter type (xcode, json, csv, checkstyle, codeclimate, junit, html, emoji, sonarqube, markdown, github-actions-logging, summary)
-

@@ -210,7 +210,7 @@ final class SquirrelPanel: NSPanel {
 
 extension SquirrelPanel {
   // Main function to add attributes to text output from librime
-  // swiftlint:disable:next cyclomatic_complexity function_parameter_count
+  // swiftlint:disable:next cyclomatic_complexity
   func update(
     preedit: String,
     selRange: NSRange,
@@ -363,9 +363,7 @@ extension SquirrelPanel {
     if let selectedDetail {
       switch detailGeometry.placement {
       case .footer:
-        text.append(NSAttributedString(
-          string: detailGeometry.textSeparator,
-          attributes: theme.detailAttrs))
+        text.append(NSAttributedString(string: "\n", attributes: theme.detailAttrs))
         detailRange = NSRange(location: text.length, length: selectedDetail.length)
         text.append(selectedDetail)
       case .sidecar:
@@ -402,11 +400,12 @@ extension SquirrelPanel {
     let publishedGeneration = currentPublication
     candidateAccessibility.publish(
       parent: view,
-      geometry: view.candidateAccessibilityGeometry(),
-      candidates: candidates.items,
-      highlightedIndex: index,
-      controlMode: controlMode,
-      shouldAnnounce: update,
+      publication: .init(
+        geometry: view.candidateAccessibilityGeometry(),
+        candidates: candidates.items,
+        highlightedIndex: index,
+        controlMode: controlMode,
+        shouldAnnounce: update),
       selectCandidate: { [weak self, weak publishedController] absoluteIndex in
         guard let self, let publishedController else { return false }
         guard publicationIsCurrent(publishedGeneration) else { return false }

@@ -228,6 +228,48 @@ struct SettingsPresentationStatusTests {
       accessibilityLabel: "Warning: The input runtime is unreachable. Enable and select Linnet, then refresh.",
       locale: english
     )
+    expect(
+      .runtime(.running),
+      en: "Runtime: running",
+      zh: "运行时：正常",
+      english,
+      chinese
+    )
+    expectPresentation(
+      .runtime(.running),
+      severity: .success,
+      systemImage: "checkmark.circle",
+      accessibilityLabel: "Success: Runtime: running",
+      locale: english
+    )
+    expect(
+      .runtime(.paused),
+      en: "Runtime: paused",
+      zh: "运行时：已暂停",
+      english,
+      chinese
+    )
+    expectPresentation(
+      .runtime(.paused),
+      severity: .informational,
+      systemImage: "info.circle",
+      accessibilityLabel: "Status: Runtime: paused",
+      locale: english
+    )
+    expect(
+      .runtime(.degraded),
+      en: "Runtime: degraded",
+      zh: "运行时：降级",
+      english,
+      chinese
+    )
+    expectPresentation(
+      .runtime(.degraded),
+      severity: .warning,
+      systemImage: "exclamationmark.triangle",
+      accessibilityLabel: "Warning: Runtime: degraded",
+      locale: english
+    )
     expectPresentation(
       .runtime(.unreachable),
       severity: .warning,

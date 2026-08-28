@@ -1125,6 +1125,8 @@ ruby -e '
   runtime_builder = File.read(ARGV.fetch(4))
   development_gate = File.read(ARGV.fetch(5))
   product_gate = File.read(ARGV.fetch(6))
+  swift_gate = File.read(ARGV.fetch(7))
+  swift_cache = File.read(ARGV.fetch(8))
   local_cache = "./.github/actions/restore-locked-build-cache"
   pinned_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
   pinned_restore = "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25"
@@ -1137,9 +1139,9 @@ ruby -e '
   }
   abort unless commit_uses.count(local_cache) == 1
   abort unless pull_request_uses.count(local_cache) == 1
+  abort unless commit_uses.count(pinned_cache) == 1
+  abort unless pull_request_uses.count(pinned_restore) == 1
   abort unless cache_uses == [pinned_cache, pinned_restore, pinned_cache, pinned_restore]
-  abort if commit.include?("actions/cache") ||
-    pull_request.include?("actions/cache")
   main_cache_writer = "save: ${{ matrix.profile == \x27rime\x27 }}"
   abort unless commit.scan(main_cache_writer).size == 1
   abort unless pull_request.scan(/^\s*save:\s*false\s*$/).size == 1
@@ -1157,15 +1159,18 @@ ruby -e '
     pull_request.scan(/^\s*cancel-in-progress:\s*true\s*$/).size == 1
   [commit, pull_request].each do |ci|
     abort unless ci.scan(/^\s*needs:\s*quality\s*$/).size == 1
-    abort unless ci.scan(/^\s*profile:\s*\[app, settings-ui, swift, rime\]\s*$/).size == 1
+    abort unless ci.scan(/^\s*profile:\s*\[app, swift, rime\]\s*$/).size == 1
     abort unless ci.scan(/^\s*fail-fast:\s*false\s*$/).size == 1
     abort unless ci.scan(%r{tests/verify_release_automation\.sh && tests/verify_publication_owner\.sh}).size == 1
-    abort unless ci.scan(/^\s*\.\/action-build\.sh release\s*$/).size == 2
+    abort unless ci.scan(/^\s*\.\/action-build\.sh release\s*$/).size == 1
     abort unless ci.scan(/^\s*\.\/action-install\.sh\s*$/).size == 1
     abort unless ci.scan(%r{tests/verify_development\.sh app}).size == 1
     abort unless ci.scan(%r{tests/verify_development\.sh "\$\{LINNET_CI_PROFILE\}"}).size == 1
     abort unless ci.scan(%r{tests/verify_visible_settings_fixture\.sh --ui-test}).size == 1
-    abort unless ci.scan(/^\s*settings-ui\)\s*$/).size == 1
+    abort if ci.match?(/^\s*settings-ui\)\s*$/)
+    abort unless ci.scan(/^\s*if:\s*matrix\.profile == \x27swift\x27\s*$/).size == 1
+    abort unless ci.scan(/^\s*path:\s*build\/swift-unit-cache\s*$/).size == 1
+    abort unless ci.scan(/linnet-swift-units-v1-/).size == 2
   end
   abort unless development_gate.include?("[all|app|swift|rime]")
   abort unless development_gate.scan(/^if \[\[ "\$\{run_app\}" -eq 1 \]\]; then$/).size == 1
@@ -1312,10 +1317,17 @@ ruby -e '
   abort unless publisher.scan(public_gate).size == 1
   abort unless commit.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort unless pull_request.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
+  abort unless swift_gate.scan(/^source tests\/swift_test_cache\.sh$/).size == 1
+  abort unless swift_gate.scan(/linnet_swift_compile/).size >= 4
+  abort unless swift_cache.include?("Cached binaries are acceleration only") &&
+    swift_cache.include?("LINNET_SWIFT_ENVIRONMENT_FINGERPRINT") &&
+    swift_cache.include?("shasum -a 256 -c")
 ' "${commit_workflow}" "${pull_request_workflow}" "${cache_action}" \
     "${publisher}" "${repo_root}/scripts/build-rime-runtime" \
     "${repo_root}/tests/verify_development.sh" \
-    "${repo_root}/tests/verify_product.sh" ||
+    "${repo_root}/tests/verify_product.sh" \
+    "${repo_root}/tests/verify_swift_units.sh" \
+    "${repo_root}/tests/swift_test_cache.sh" ||
   fail "community CI or local publication owner is incomplete"
 
 echo "Linnet unsigned PKG / stable CMS App publication owner: PASS"

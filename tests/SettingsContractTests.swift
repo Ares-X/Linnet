@@ -11,6 +11,7 @@ struct SettingsContractTests {
   static func main() {
     do {
       testPinyinReverseLookupExamples()
+      testCoreActivationGate()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
         testProductIdentity(host: host, settings: settings)
@@ -49,6 +50,125 @@ struct SettingsContractTests {
       }) == expected
     else {
       fail("a Settings reverse-lookup example diverged from its selected profile")
+    }
+  }
+
+  private static func testCoreActivationGate() {
+    let ledger = LinnetInputClientLedger()
+    ledger.record(bundleIdentifier: "com.example.Editor")
+    ledger.record(bundleIdentifier: "com.example.Settings")
+    let history = ledger.snapshot()
+    let requester = LinnetCoreActivationGate.RunningApplication(
+      processIdentifier: 41,
+      bundleIdentifier: "com.example.Settings",
+      displayName: "Settings"
+    )
+    let editor = LinnetCoreActivationGate.RunningApplication(
+      processIdentifier: 42,
+      bundleIdentifier: "com.example.Editor",
+      displayName: "Editor"
+    )
+
+    guard LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: false,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      history: history,
+      runningApplications: [requester],
+      requesterPID: requester.processIdentifier
+    ).isReady else {
+      fail("a closed historical client still blocked explicit Core activation")
+    }
+
+    let connected = LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: false,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      history: history,
+      runningApplications: [requester, editor],
+      requesterPID: requester.processIdentifier
+    )
+    guard connected.blocker == .applicationsStillRunning,
+      connected.applications == ["Editor"]
+    else {
+      fail("a running historical client did not block Core activation")
+    }
+
+    let secondRequesterProcess = LinnetCoreActivationGate.RunningApplication(
+      processIdentifier: 43,
+      bundleIdentifier: requester.bundleIdentifier,
+      displayName: "Settings"
+    )
+    guard LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: false,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      history: history,
+      runningApplications: [requester, secondRequesterProcess],
+      requesterPID: requester.processIdentifier
+    ).blocker == .applicationsStillRunning else {
+      fail("another process of the requester app did not block Core activation")
+    }
+
+    let activeSource = LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: true,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      history: history,
+      runningApplications: [requester],
+      requesterPID: requester.processIdentifier
+    )
+    let activeComposition = LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: false,
+      compositionIsActive: true,
+      dataTransactionIsActive: false,
+      history: history,
+      runningApplications: [requester],
+      requesterPID: requester.processIdentifier
+    )
+    let activeTransaction = LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: false,
+      compositionIsActive: false,
+      dataTransactionIsActive: true,
+      history: history,
+      runningApplications: [requester],
+      requesterPID: requester.processIdentifier
+    )
+    guard activeSource.blocker == .inputSourceActive,
+      activeComposition.blocker == .compositionActive,
+      activeTransaction.blocker == .dataTransactionActive
+    else {
+      fail("Core activation no longer fails closed at every Host mutation boundary")
+    }
+
+    guard LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: false,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      history: history,
+      runningApplications: [editor],
+      requesterPID: requester.processIdentifier
+    ).blocker == .requesterUnavailable else {
+      fail("a missing Settings requester did not block Core activation")
+    }
+
+    let unknownLedger = LinnetInputClientLedger()
+    unknownLedger.record(bundleIdentifier: nil)
+    guard LinnetCoreActivationGate.evaluate(
+      inputSourceIsActive: false,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      history: unknownLedger.snapshot(),
+      runningApplications: [requester],
+      requesterPID: requester.processIdentifier
+    ).blocker == .unknownClient else {
+      fail("an unidentified historical input client did not fail closed")
+    }
+
+    let firstGeneration = history.generation
+    ledger.record(bundleIdentifier: "com.example.Editor")
+    guard ledger.snapshot().generation == firstGeneration + 1 else {
+      fail("a new client session did not invalidate an in-flight activation drain")
     }
   }
 
@@ -138,17 +258,15 @@ struct SettingsContractTests {
       fail("could not reopen the host preference suite")
     }
     defaults.set("all", forKey: backupRetentionPolicyKey)
-    guard defaults.synchronize(),
-      LinnetSettingsContract.backupRetentionPolicy(startingAt: settings) == .keepLatest30
+    guard LinnetSettingsContract.backupRetentionPolicy(startingAt: settings) == .keepLatest30
     else {
       fail("invalid backup retention did not use the product default")
     }
     defaults.removePersistentDomain(forName: hostIdentifier)
-    defaults.synchronize()
   }
 
   private static func testUserDirectoryDerivation(settings: Bundle, productName: String) {
-    guard let actual = LinnetSettingsContract.hostUserDirectory(startingAt: settings)
+    guard let actual = LinnetSettingsContract.dataRegistry(startingAt: settings)?.userDataDirectory
     else {
       fail("the host user directory could not be derived")
     }
@@ -171,15 +289,15 @@ struct SettingsContractTests {
     hostIdentifier _: String,
     productName: String
   ) {
-    guard let userDirectory = LinnetSettingsContract.hostUserDirectory(startingAt: settings),
-      let transactionsRoot = LinnetSettingsContract.dataTransactionsRoot(startingAt: settings),
-      let backupsRoot = LinnetSettingsContract.backupsRoot(startingAt: settings),
-      transactionsRoot == userDirectory.deletingLastPathComponent().appending(
-        component: "Transactions", directoryHint: .isDirectory),
-      backupsRoot == userDirectory.deletingLastPathComponent().appending(
-        component: "Backups", directoryHint: .isDirectory)
+    guard let registry = LinnetSettingsContract.dataRegistry(startingAt: settings) else {
+      fail("the data transaction registry could not be derived")
+    }
+    let userDirectory = registry.userDataDirectory
+    let transactionsRoot = registry.transactionsDirectory
+    guard transactionsRoot == userDirectory.deletingLastPathComponent().appending(
+        component: "Transactions", directoryHint: .isDirectory)
     else {
-      fail("data transaction roots are not derived from the host contract")
+      fail("the data transaction root is not derived from the host contract")
     }
 
     let transactionID = UUID()
@@ -308,13 +426,27 @@ struct SettingsContractTests {
       deadline: deadline,
       expectedSettingsRevision: settingsDigest,
       alternateSettingsRevision: replacementSettingsDigest)
+    let validCoreActivation = LinnetSettingsContract.DataRequest(
+      transactionID: transactionID,
+      command: .activateCore,
+      candidate: nil,
+      requesterPID: requesterPID,
+      deadline: deadline)
+    let invalidCoreActivation = LinnetSettingsContract.DataRequest(
+      transactionID: transactionID,
+      command: .activateCore,
+      candidate: candidate,
+      requesterPID: requesterPID,
+      deadline: deadline)
     guard !LinnetSettingsContract.validDataRequest(missingCandidate),
       !LinnetSettingsContract.validDataRequest(missingCAS),
       !LinnetSettingsContract.validDataRequest(invalidPause),
       !LinnetSettingsContract.validDataRequest(invalidReload),
       !LinnetSettingsContract.validDataRequest(invalidRefreshWithoutCAS),
       LinnetSettingsContract.validDataRequest(validRecoveryReload),
-      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh)
+      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh),
+      LinnetSettingsContract.validDataRequest(validCoreActivation),
+      !LinnetSettingsContract.validDataRequest(invalidCoreActivation)
     else {
       fail("invalid command and candidate combinations were accepted")
     }

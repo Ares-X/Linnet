@@ -128,6 +128,13 @@ enum LinnetPortableJSONBudget {
     mutating func parseNumber() throws {
       let start = index
       _ = consume(0x2D)
+      try parseInteger()
+      try parseFraction()
+      try parseExponent()
+      guard index - start <= 64 else { throw Failure.resourceLimit }
+    }
+
+    mutating func parseInteger() throws {
       guard index < bytes.count else { throw Failure.malformed }
       if consume(0x30) {
         guard index == bytes.count || !(0x30...0x39).contains(bytes[index]) else {
@@ -137,17 +144,22 @@ enum LinnetPortableJSONBudget {
         guard consumeDigit(0x31...0x39) else { throw Failure.malformed }
         while consumeDigit(0x30...0x39) {}
       }
+    }
+
+    mutating func parseFraction() throws {
       if consume(0x2E) {
         guard consumeDigit(0x30...0x39) else { throw Failure.malformed }
         while consumeDigit(0x30...0x39) {}
       }
+    }
+
+    mutating func parseExponent() throws {
       if index < bytes.count, bytes[index] == 0x65 || bytes[index] == 0x45 {
         index += 1
         if index < bytes.count, bytes[index] == 0x2B || bytes[index] == 0x2D { index += 1 }
         guard consumeDigit(0x30...0x39) else { throw Failure.malformed }
         while consumeDigit(0x30...0x39) {}
       }
-      guard index - start <= 64 else { throw Failure.resourceLimit }
     }
 
     mutating func consumeLiteral(_ literal: StaticString) throws {

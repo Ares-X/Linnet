@@ -186,7 +186,7 @@ struct LinnetSettingsAppearancePreviewTests {
   private static func testBundledThemeSourceIsComplete() {
     let catalog = canonicalCatalog()
     require(
-      catalog.linnetSchemeIDs == [
+      Set(catalog.schemes.keys) == [
         "linnet_paper_light", "linnet_paper_dark",
         "linnet_moon_jade_light", "linnet_moon_jade_dark",
         "linnet_sidecar_light", "linnet_sidecar_dark",
@@ -243,7 +243,6 @@ struct LinnetSettingsAppearancePreviewTests {
         guard let source = catalog.scheme(for: appearance, systemIsDark: mode == .dark) else {
           fail("missing source projection for \(family) \(mode)")
         }
-        require(preview.schemeID == source.identifier, "preview must retain the canonical scheme identity")
         require(preview.palette == source.palette, "preview colors must come from the canonical scheme")
         for language in LinnetSettingsAppearancePreview.PreviewLanguage.allCases {
           require(preview.detailGeometry(for: language).placement == .footer,
@@ -352,7 +351,7 @@ struct LinnetSettingsAppearancePreviewTests {
 
   private static func testTranslucentSelectionContrast() {
     let catalog = canonicalCatalog()
-    let materialBaselines: [(Bool, [LinnetSettingsAppearancePreview.RGB])] = [
+    let materialBaselines: [(Bool, [LinnetSettingsAppearancePreview.ColorComponents])] = [
       (false, [.init(0xFFFFFF), .init(0xF4F4F4), .init(0xECECEC)]),
       (true, [.init(0x1C1C1E), .init(0x242426), .init(0x2C2C2E)]),
     ]
@@ -446,7 +445,11 @@ struct LinnetSettingsAppearancePreviewTests {
 
     let light = projected(appearance, systemIsDark: false, catalog: catalog)
     let dark = projected(appearance, systemIsDark: true, catalog: catalog)
-    require(light.schemeID != dark.schemeID, "system mode must select the corresponding source scheme")
+    guard let lightSource = catalog.scheme(for: appearance, systemIsDark: false),
+      let darkSource = catalog.scheme(for: appearance, systemIsDark: true)
+    else { fail("system mode source schemes are missing") }
+    require(light.palette == lightSource.palette && dark.palette == darkSource.palette,
+            "system mode must select the corresponding source palette")
     require(!light.isDark && dark.isDark, "system mode must follow the supplied system appearance")
     require(dark.fontPreset == .editorial, "preview must consume the draft typeface")
     require(dark.candidateFontPoint == 22, "preview must consume the draft candidate size")
@@ -551,14 +554,16 @@ struct LinnetSettingsAppearancePreviewTests {
   }
 
   private static func contrast(
-    _ lhs: LinnetSettingsAppearancePreview.RGB,
-    _ rhs: LinnetSettingsAppearancePreview.RGB
+    _ lhs: LinnetSettingsAppearancePreview.ColorComponents,
+    _ rhs: LinnetSettingsAppearancePreview.ColorComponents
   ) -> Double {
     let values = [relativeLuminance(lhs), relativeLuminance(rhs)].sorted()
     return (values[1] + 0.05) / (values[0] + 0.05)
   }
 
-  private static func relativeLuminance(_ color: LinnetSettingsAppearancePreview.RGB) -> Double {
+  private static func relativeLuminance(
+    _ color: LinnetSettingsAppearancePreview.ColorComponents
+  ) -> Double {
     func linear(_ byte: UInt8) -> Double {
       let value = Double(byte) / 255
       return value <= 0.03928
@@ -571,9 +576,9 @@ struct LinnetSettingsAppearancePreviewTests {
   }
 
   private static func compositedContrast(
-    foreground: LinnetSettingsAppearancePreview.RGB,
-    surface: LinnetSettingsAppearancePreview.RGB,
-    over baseline: LinnetSettingsAppearancePreview.RGB
+    foreground: LinnetSettingsAppearancePreview.ColorComponents,
+    surface: LinnetSettingsAppearancePreview.ColorComponents,
+    over baseline: LinnetSettingsAppearancePreview.ColorComponents
   ) -> Double {
     func channel(_ foreground: UInt8, _ background: UInt8, alpha: UInt8) -> Double {
       let opacity = Double(alpha) / 255

@@ -114,9 +114,14 @@ Secrets 中。它们不是 Apple 开发者凭据，也不会被打包、写入�
 `RestartAction=None`、登录会话不变、个人数据不变、输入源 enabled/selected
 意图不被覆盖，更新期间 Host PID 不变且 `AXHidden=false`；安装脚本不得启动、隐藏或替换
 Host，更新前已连接及更新后新打开的应用都可输入。安装后还须验证 Settings 分别显示
-installed/running version、build 和 revision；Host 在 Linnet 已切走、旧 controller 数为零且
-无数据事务时接受优雅激活，在每一项不满足时拒绝，并由 Settings 从 canonical 路径启动后
-核对精确 revision。每个精确候选的“两轮同 leaf Core”必须使用
+installed/running version、build 和 revision。立即应用的安全 owner 是 Host 的进程生命周期
+客户端历史账本，不是旧 controller 瞬时数量：用户必须先通过系统菜单切走 Linnet；
+所有曾连接的其他
+应用必须已退出；不得有未完成输入、未知客户端或数据事务。任一条件不满足时 Host
+保持运行且 Settings 显示拒绝原因；Settings 不关闭用户应用，也不程序化切换输入源。
+Host 接受后还须在退出前复核账本 generation；Settings 只能从 canonical 路径启动并核对
+精确 revision。
+每个精确候选的“两轮同 leaf Core”必须使用
 同一不可变 artifact：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
 升级，第二轮重装候选原字节；两轮均
 不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、

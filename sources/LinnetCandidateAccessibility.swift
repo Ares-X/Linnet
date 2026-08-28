@@ -14,6 +14,14 @@ struct LinnetCandidateAccessibilityGeometry {
   let nextPageFrame: NSRect?
 }
 
+struct LinnetCandidateAccessibilityPublication {
+  let geometry: LinnetCandidateAccessibilityGeometry
+  let candidates: [SquirrelInputController.CandidateItem]
+  let highlightedIndex: Int
+  let controlMode: LinnetCandidatePresentation.CandidateControlMode
+  let shouldAnnounce: Bool
+}
+
 extension SquirrelView {
   func candidateAccessibilityGeometry() -> LinnetCandidateAccessibilityGeometry {
     return LinnetCandidateAccessibilityGeometry(
@@ -39,14 +47,6 @@ final class LinnetCandidateAccessibility {
     let comment: String
     let page: Int
     let indexOnPage: Int
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-      lhs.absoluteIndex == rhs.absoluteIndex &&
-        lhs.text == rhs.text &&
-        lhs.comment == rhs.comment &&
-        lhs.page == rhs.page &&
-        lhs.indexOnPage == rhs.indexOnPage
-    }
   }
 
   private struct LayoutSignature: Equatable {
@@ -55,14 +55,6 @@ final class LinnetCandidateAccessibility {
     let previousPageFrame: NSRect?
     let nextPageFrame: NSRect?
     let controlMode: LinnetCandidatePresentation.CandidateControlMode
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-      lhs.candidates == rhs.candidates &&
-        lhs.candidateFrames == rhs.candidateFrames &&
-        lhs.previousPageFrame == rhs.previousPageFrame &&
-        lhs.nextPageFrame == rhs.nextPageFrame &&
-        lhs.controlMode == rhs.controlMode
-    }
   }
 
   private struct ControlPublication {
@@ -89,14 +81,15 @@ final class LinnetCandidateAccessibility {
 
   func publish(
     parent: NSView,
-    geometry: LinnetCandidateAccessibilityGeometry,
-    candidates: [SquirrelInputController.CandidateItem],
-    highlightedIndex: Int,
-    controlMode: LinnetCandidatePresentation.CandidateControlMode,
-    shouldAnnounce: Bool,
+    publication: LinnetCandidateAccessibilityPublication,
     selectCandidate: @escaping (Int) -> Bool,
     performControl: @escaping (LinnetCandidatePresentation.CandidateControlAction) -> Bool
   ) {
+    let geometry = publication.geometry
+    let candidates = publication.candidates
+    let highlightedIndex = publication.highlightedIndex
+    let controlMode = publication.controlMode
+    let shouldAnnounce = publication.shouldAnnounce
     guard geometry.candidateFrames.count == candidates.count,
       geometry.candidateFrames.allSatisfy(validFrame),
       Set(candidates.map(\.absoluteIndex)).count == candidates.count

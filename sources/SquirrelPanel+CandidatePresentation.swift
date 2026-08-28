@@ -138,6 +138,32 @@ extension SquirrelPanel {
     return maxWidth
   }
 
+  /// Reflows a horizontal definition inside the width owned by the candidate
+  /// row, allowing only a compact capped expansion when the row is shorter.
+  func fitHorizontalDetail(
+    geometry: LinnetCandidatePresentation.CandidateDetailGeometry,
+    textContainer: NSTextContainer,
+    textLayoutManager: NSTextLayoutManager
+  ) {
+    guard geometry.placement == .footer,
+      view.detailRange.length > 0,
+      let detailWidthLimit = geometry.detailColumnMaximumWidth,
+      let attributed = view.textView.textContentStorage?.attributedString,
+      NSMaxRange(view.detailRange) <= attributed.length
+    else { return }
+    let detail = attributed.attributedSubstring(from: view.detailRange)
+    let measuredDetailWidth = detail.boundingRect(
+      with: NSSize(width: detailWidthLimit, height: .greatestFiniteMagnitude),
+      options: [.usesLineFragmentOrigin, .usesFontLeading]
+    ).width
+    let compactTextWidth = min(
+      textContainer.size.width,
+      max(ceil(view.primaryContentRect.width), ceil(measuredDetailWidth)))
+    guard compactTextWidth < textContainer.size.width else { return }
+    textContainer.size.width = compactTextWidth
+    textLayoutManager.ensureLayout(for: textLayoutManager.documentRange)
+  }
+
   // Get the window size, the windows will be the dirtyRect in
   // SquirrelView.drawRect
   // swiftlint:disable:next cyclomatic_complexity
@@ -146,14 +172,11 @@ extension SquirrelPanel {
     updateUsableScreenRect()
     let theme = view.currentTheme
     let materialAppearance = LinnetClientAppearance.resolveMaterial(
-      mode: theme.materialAppearance,
-      automaticAppearance: resolvedAppearance
-    )
+      mode: theme.materialAppearance, automaticAppearance: resolvedAppearance)
     let metrics = presentationMetrics(theme: theme)
     view.applyPresentationMetrics(metrics)
     guard let textContainer = view.textView.textContainer,
-      let textLayoutManager = view.textView.textLayoutManager
-    else {
+      let textLayoutManager = view.textView.textLayoutManager else {
       orderOut(nil)
       return false
     }
@@ -170,14 +193,16 @@ extension SquirrelPanel {
       ? screenRect.width - metrics.edgeInset.width * 2
       : screenRect.height - metrics.edgeInset.height * 2
     let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
-      forLinearLayout: linear || metrics.vertical,
-      candidateFontPoint: theme.font.pointSize)
+      forLinearLayout: linear || metrics.vertical, candidateFontPoint: theme.font.pointSize)
     let hasSidecar = detailGeometry.placement == .sidecar && !view.detailTextView.isHidden
     let textWidth = hasSidecar
       ? min(maximumTextWidth, detailGeometry.candidateColumnMaximumWidth ?? maximumTextWidth)
       : maximumTextWidth
     textContainer.size = NSSize(width: textWidth, height: maxTextHeight)
     textLayoutManager.ensureLayout(for: textLayoutManager.documentRange)
+    fitHorizontalDetail(
+      geometry: detailGeometry, textContainer: textContainer,
+      textLayoutManager: textLayoutManager)
     guard publicationIsCurrent(publication) else { return false }
     view.textView.scrollToBeginningOfDocument(nil)
     guard publicationIsCurrent(publication) else { return false }
@@ -329,7 +354,8 @@ extension SquirrelPanel {
         y: top - dividerFrame.height,
         width: dividerFrame.width,
         height: dividerFrame.height)
-      let dividerColor = (theme.detailAttrs[.foregroundColor] as? NSColor) ?? .separatorColor
+      let dividerColor = (theme.detailAttrs[.foregroundColor] as? NSColor)
+        ?? .separatorColor
       view.detailDividerView.layer?.backgroundColor =
         dividerColor.withAlphaComponent(0.3).cgColor
       view.applyCandidateColumnWidth(metrics.edgeInset.width + dividerFrame.minX)

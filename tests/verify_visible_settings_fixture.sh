@@ -373,15 +373,12 @@ if ! before_content_fingerprint="$(content_fingerprint)"; then
 fi
 
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
-release_tool="${fixture}/linnet-pack"
+release_tool="${repo_root}/build/linnet-pack"
 probe="${fixture}/visible-settings-fixture-probe"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
 xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift tools/LinnetDataCatalogBuilder.swift \
-  tools/LinnetPackTool.swift -o "${release_tool}"
-xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift sources/LinnetSettings/SettingsContract.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift sources/LinnetSettings/SettingsContract.swift \
   tests/LinnetVisibleSettingsFixtureProbe.swift -o "${probe}"
 
 pack_roots=()

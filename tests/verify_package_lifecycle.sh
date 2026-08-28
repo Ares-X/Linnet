@@ -1208,7 +1208,7 @@ test "$(wc -l <"${receipt_log}" | tr -d ' ')" = 12
 # Packaging must not invoke LaunchServices' private registration utility.
 if rg -n 'LaunchServices\.framework/Support/lsregister|[[:space:]]lsregister[[:space:]]+-[uf]' \
     package/make_package package/make_archive package/verify_package \
-    package/report_size package/uninstall-linnet; then
+    package/uninstall-linnet; then
   echo "A private LaunchServices cleanup path returned." >&2
   exit 1
 fi

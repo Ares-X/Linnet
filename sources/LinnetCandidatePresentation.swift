@@ -9,6 +9,18 @@ import AppKit
 import Foundation
 
 enum LinnetCandidatePresentation {
+  private struct FormatReplacement {
+    let token: String
+    let value: String
+    let attributes: [NSAttributedString.Key: Any]
+    let isCandidate: Bool
+  }
+
+  private struct FormatMatch {
+    let range: Range<String.Index>
+    let replacement: FormatReplacement
+  }
+
   static let maximumDetailCharacterCount = 72
   static let maximumExpandedPageCount = 3
   static let maximumExpandedCandidateCount = 27
@@ -22,7 +34,7 @@ enum LinnetCandidatePresentation {
   static let candidateMaterial = NSVisualEffectView.Material.popover
 
   private static let detailPartOfSpeechBoundary =
-    #/[；;]\s*(n|vt|vi|v|adj|adv|abbr|int|interj|prep|pref|conj|pron|suf|vbl|num|aux|art|det)[.]\s*/#
+    #/[；;]\s*(name|n|vt|vi|v|adj|adv|abbr|int|interj|prep|pref|conj|pron|suf|vbl|num|aux|art|det)[.]\s*/#
 
   struct InputModeIdentity: Equatable {
     let schemaID: String
@@ -178,16 +190,19 @@ enum LinnetCandidatePresentation {
     var labelPrefix: NSAttributedString?
     var remainingFormat = candidateFormat
     while !remainingFormat.isEmpty {
-      let replacements: [(String, String, [NSAttributedString.Key: Any], Bool)] = [
-        ("[label]", label, labelAttributes, false),
-        ("[candidate]", normalizedCandidate, candidateAttributes, true),
-        ("[comment]", normalizedComment, commentAttributes, false)
+      let replacements: [FormatReplacement] = [
+        .init(token: "[label]", value: label, attributes: labelAttributes, isCandidate: false),
+        .init(
+          token: "[candidate]", value: normalizedCandidate,
+          attributes: candidateAttributes, isCandidate: true),
+        .init(
+          token: "[comment]", value: normalizedComment,
+          attributes: commentAttributes, isCandidate: false)
       ]
-      let next = replacements.compactMap { replacement ->
-        (Range<String.Index>, String, [NSAttributedString.Key: Any], Bool)? in
-        guard let range = remainingFormat.range(of: replacement.0) else { return nil }
-        return (range, replacement.1, replacement.2, replacement.3)
-      }.min { $0.0.lowerBound < $1.0.lowerBound }
+      let next = replacements.compactMap { replacement -> FormatMatch? in
+        guard let range = remainingFormat.range(of: replacement.token) else { return nil }
+        return .init(range: range, replacement: replacement)
+      }.min { $0.range.lowerBound < $1.range.lowerBound }
       guard let next else {
         line.append(NSAttributedString(
           string: remainingFormat,
@@ -195,15 +210,18 @@ enum LinnetCandidatePresentation {
         break
       }
 
-      let literal = String(remainingFormat[..<next.0.lowerBound])
+      let literal = String(remainingFormat[..<next.range.lowerBound])
       line.append(NSAttributedString(string: literal, attributes: labelAttributes))
-      let token = String(remainingFormat[next.0])
+      let token = String(remainingFormat[next.range])
       if labelPrefix == nil, token == "[candidate]" || token == "[comment]" {
         labelPrefix = NSAttributedString(attributedString: line)
       }
       let replacementStart = line.length
-      line.append(NSAttributedString(string: next.1, attributes: next.2))
-      if next.3, normalizedCandidate.count <= 5, normalizedCandidate.count > 1 {
+      line.append(NSAttributedString(
+        string: next.replacement.value,
+        attributes: next.replacement.attributes))
+      if next.replacement.isCandidate,
+        normalizedCandidate.count <= 5, normalizedCandidate.count > 1 {
         let firstCharacterEnd = normalizedCandidate.index(after: normalizedCandidate.startIndex)
           .utf16Offset(in: normalizedCandidate)
         line.addAttribute(
@@ -213,7 +231,7 @@ enum LinnetCandidatePresentation {
             location: replacementStart + firstCharacterEnd,
             length: normalizedCandidate.utf16.count - firstCharacterEnd))
       }
-      remainingFormat = String(remainingFormat[next.0.upperBound...])
+      remainingFormat = String(remainingFormat[next.range.upperBound...])
     }
 
     if line.length > 1, line.length <= 10 {
@@ -377,15 +395,6 @@ extension LinnetCandidatePresentation {
     let candidateColumnMaximumWidth: CGFloat?
     let detailColumnMaximumWidth: CGFloat?
 
-    var textSeparator: String {
-      switch placement {
-      case .footer:
-        "\n"
-      case .sidecar:
-        ""
-      }
-    }
-
     func frames(
       candidateSize: CGSize,
       detailSize: CGSize,
@@ -434,13 +443,15 @@ extension LinnetCandidatePresentation {
     candidateFontPoint: CGFloat = 16
   ) -> CandidateDetailGeometry {
     let candidateColumnMaximumWidth = min(240, max(150, candidateFontPoint * 10))
-    let detailColumnMaximumWidth = min(160, max(120, candidateFontPoint * 5))
+    let detailColumnMaximumWidth = linear
+      ? min(360, max(240, candidateFontPoint * 16))
+      : min(160, max(120, candidateFontPoint * 5))
     return CandidateDetailGeometry(
       placement: linear ? .footer : .sidecar,
       spacing: candidateRowSpacing,
       dividerText: "│",
       candidateColumnMaximumWidth: linear ? nil : candidateColumnMaximumWidth,
-      detailColumnMaximumWidth: linear ? nil : detailColumnMaximumWidth)
+      detailColumnMaximumWidth: detailColumnMaximumWidth)
   }
 
   static func usesInlineComments(candidateFormat: String) -> Bool {

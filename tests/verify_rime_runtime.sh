@@ -113,11 +113,11 @@ sdk="$(xcrun --show-sdk-path)"
 "${swiftc}" -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionFixture.swift \
   -o "${scratch}/projection-fixture"

@@ -7,7 +7,6 @@
 
 import AppKit
 
-#sourceLocation(file: "CandidateView.swift", line: 10)
 private class SquirrelLayoutDelegate: NSObject, NSTextLayoutManagerDelegate {
   func textLayoutManager(_ textLayoutManager: NSTextLayoutManager, shouldBreakLineBefore location: any NSTextLocation, hyphenating: Bool) -> Bool {
     let index = textLayoutManager.offset(from: textLayoutManager.documentRange.location, to: location)
@@ -102,7 +101,6 @@ final class SquirrelView: NSView {
   override var isFlipped: Bool { true }
 
   // Will trigger draw(_:) after candidate text and interaction geometry change.
-  // swiftlint:disable:next function_parameter_count
   func drawView(
     candidateRanges: [NSRange], detailRange: NSRange, hilightedIndex: Int, preeditRange: NSRange, highlightedPreeditRange: NSRange,
     controlMode: LinnetCandidatePresentation.CandidateControlMode, usesGridLayout: Bool
@@ -359,6 +357,16 @@ extension SquirrelView {
     var ranges = candidateRanges
     if detailRange.length > 0 { ranges.append(detailRange) }
     if preeditRange.length > 0 { ranges.append(preeditRange) }
+    return contentRect(ranges: ranges)
+  }
+
+  var primaryContentRect: NSRect {
+    var ranges = candidateRanges
+    if preeditRange.length > 0 { ranges.append(preeditRange) }
+    return contentRect(ranges: ranges)
+  }
+
+  private func contentRect(ranges: [NSRange]) -> NSRect {
     var unionRect: NSRect?
     for range in ranges {
       if let textRange = convert(range: range) {

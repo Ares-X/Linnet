@@ -9,7 +9,6 @@
 //
 
 import AppKit
-import Darwin
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -50,7 +49,6 @@ final class SettingsModel: ObservableObject {
   let appVersion: String
   let appBuild: UInt64
   @Published private(set) var dataServicesAvailable: Bool
-  let dataChannelService: LinnetDataChannel.Service
   let updateChecker: LinnetSettingsUpdateChecker
 
   let coordinator: SettingsDataCoordinator
@@ -84,11 +82,9 @@ final class SettingsModel: ObservableObject {
     installedPacks = []
     dataEdition = nil
     dataServicesAvailable = false
-    dataChannelService = LinnetDataChannel.service
     updateChecker = LinnetSettingsUpdateChecker(
       currentVersion: appVersion, currentBuild: appBuild,
-      service: dataChannelService, edition: nil,
-      installedPacks: [], bundle: bundle)
+      edition: nil, installedPacks: [], bundle: bundle)
     let downloadPreference = LinnetSettingsDownloadSource.load()
     downloadSourceMode = downloadPreference.mode
     downloadMirrorPrefix = downloadPreference.mirrorPrefix

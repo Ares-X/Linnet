@@ -17,6 +17,8 @@ trap cleanup EXIT INT TERM
 swiftc="$(xcrun --find swiftc)"
 sdk="$(xcrun --show-sdk-path)"
 target=arm64-apple-macosx13.0
+source tests/swift_test_cache.sh
+linnet_swift_cache_init "${repo_root}" "${scratch}"
 phase_started=0
 
 begin_phase() {
@@ -33,8 +35,8 @@ compile_run() {
   local name="$1"
   shift
   begin_phase "compile and run ${name}"
-  "${swiftc}" -warnings-as-errors -sdk "${sdk}" "$@" -o "${scratch}/${name}"
-  "${scratch}/${name}"
+  linnet_swift_compile "${name}" -warnings-as-errors -sdk "${sdk}" "$@"
+  "${LINNET_SWIFT_COMPILED_BINARY}"
   end_phase "compile and run ${name}"
 }
 
@@ -53,21 +55,21 @@ compile_run stable-row-binding -framework SwiftUI \
 compile_run projection-renderer \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionRendererTests.swift
 compile_run appearance-preview -framework SwiftUI \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetCandidatePresentation.swift \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
   sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift \
@@ -76,6 +78,7 @@ compile_run settings-page-layout -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsPage.swift \
   tests/LinnetSettingsPageLayoutTests.swift
 compile_run presentation-status \
+  sources/LinnetSettings/SettingsRuntimeReachability.swift \
   sources/LinnetSettings/SettingsPresentationStatus.swift \
   tests/SettingsPresentationStatusTests.swift
 compile_run cloud-sync-location \
@@ -87,13 +90,13 @@ compile_run rime-sync-controller \
 compile_run settings-session \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetPortableJSONBudget.swift \
-  sources/LinnetSettings/LinnetBackupStore.swift \
+  sources/LinnetSettings/LinnetBackupStore.swift sources/LinnetSettings/LinnetBackupStoreSupport.swift \
   sources/LinnetSettings/SettingsSessionState.swift \
   tests/SettingsSessionStateTests.swift
 compile_run settings-window-close -framework AppKit -framework SwiftUI \
@@ -102,18 +105,18 @@ compile_run settings-window-close -framework AppKit -framework SwiftUI \
 compile_run backup-store \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetPortableJSONBudget.swift \
-  sources/LinnetSettings/LinnetBackupStore.swift \
+  sources/LinnetSettings/LinnetBackupStore.swift sources/LinnetSettings/LinnetBackupStoreSupport.swift \
   tests/LinnetBackupStoreTests.swift
 compile_run candidate-presentation \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetCandidatePresentation.swift tests/LinnetCandidatePresentationTests.swift
 compile_run macos-keycodes -target "${target}" -framework AppKit \
@@ -142,19 +145,19 @@ compile_run client-appearance -framework AppKit \
   sources/LinnetClientAppearance.swift tests/LinnetClientAppearanceTests.swift
 compile_run settings-contract \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift sources/LinnetSettings/SettingsContract.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift sources/LinnetSettings/SettingsContract.swift \
   tests/SettingsContractTests.swift
 compile_run data-registry \
   tests/LinnetTestFailure.swift sources/LinnetPackContract.swift \
-  sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift \
+  sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   tests/LinnetDataRegistryTests.swift
 compile_run data-channel \
   tests/LinnetTestFailure.swift sources/LinnetPackContract.swift \
-  sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift \
+  sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   tools/LinnetDataCatalogBuilder.swift tests/LinnetDataChannelTests.swift
 compile_run download-transport \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/LinnetSettingsDownloadSource.swift \
   sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift \
   sources/LinnetSettings/LinnetSettingsDownloadTransport.swift \
@@ -164,57 +167,59 @@ compile_run download-source \
   tests/LinnetSettingsDownloadSourceTests.swift
 compile_run pack \
   tests/LinnetTestFailure.swift sources/LinnetPackContract.swift \
-  sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift \
+  sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
+  tools/LinnetPackEncoder.swift \
   tests/LinnetPackTests.swift
 
 begin_phase "Rime filesystem projection"
-"${swiftc}" -parse-as-library -warnings-as-errors -sdk "${sdk}" \
-  tests/RimeFilesystemPathProjectionTests.swift -o "${scratch}/rime-path"
-"${scratch}/rime-path" \
-  sources/SquirrelApplicationDelegate.swift \
+linnet_swift_compile rime-path -parse-as-library -warnings-as-errors -sdk "${sdk}" \
+  tests/RimeFilesystemPathProjectionTests.swift
+"${LINNET_SWIFT_COMPILED_BINARY}" \
+  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift \
   sources/SquirrelApplicationPresentation.swift
 end_phase "Rime filesystem projection"
 
 common_settings_sources=(
   sources/LinnetPackContract.swift
   sources/LinnetDataChannel.swift
-  sources/LinnetDataRegistry.swift
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift
   sources/LinnetSettings/SettingsContract.swift
   sources/LinnetSettings/PersonalDataStore.swift
   sources/LinnetSettings/PersonalDataValidation.swift
-  sources/LinnetSettings/LinnetSettingsDocument.swift
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift
   sources/LinnetSettings/LinnetPortableJSONBudget.swift
-  sources/LinnetSettings/LinnetBackupStore.swift
+  sources/LinnetSettings/LinnetBackupStore.swift sources/LinnetSettings/LinnetBackupStoreSupport.swift
   sources/LinnetSettings/HallelujahSubstitutionImporter.swift
   sources/LinnetSettings/RimeUserDataBridge.swift
 )
 
 begin_phase "Rime user-data bridge"
-"${swiftc}" -warnings-as-errors -sdk "${sdk}" -target "${target}" \
+linnet_swift_compile rime-user-data-bridge \
+  -warnings-as-errors -sdk "${sdk}" -target "${target}" \
   -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
   -I librime/dist/include \
   "${common_settings_sources[@]}" \
-  tests/RimeUserDataBridgeDirectoryTests.swift -L lib -lrime.1 \
-  -o "${scratch}/user-data-bridge"
+  tests/RimeUserDataBridgeDirectoryTests.swift -L lib -lrime.1
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-  "${scratch}/user-data-bridge"
+  "${LINNET_SWIFT_COMPILED_BINARY}"
 end_phase "Rime user-data bridge"
 
 begin_phase "Settings data coordinator"
-"${swiftc}" -warnings-as-errors -sdk "${sdk}" -target "${target}" \
+linnet_swift_compile settings-data-coordinator \
+  -warnings-as-errors -sdk "${sdk}" -target "${target}" \
   -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
   -I librime/dist/include \
   "${common_settings_sources[@]}" \
   sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   sources/LinnetSettings/LinnetSettingsMutationLease.swift \
-  sources/LinnetSettings/SettingsDataCoordinator.swift \
-  tests/SettingsDataCoordinatorTests.swift -L lib -lrime.1 \
-  -o "${scratch}/settings-data-coordinator"
+  sources/LinnetSettings/SettingsRuntimeReachability.swift \
+  sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift \
+  tests/SettingsDataCoordinatorTests.swift -L lib -lrime.1
 mkdir -p "${scratch}/rime-logs"
 if ! RIME_LOG_DIR="${scratch}/rime-logs" \
     DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-    "${scratch}/settings-data-coordinator" \
+    "${LINNET_SWIFT_COMPILED_BINARY}" \
     >"${scratch}/settings-data.out" 2>&1; then
   tail -n 160 "${scratch}/settings-data.out" >&2 || true
   exit 1

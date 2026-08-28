@@ -58,13 +58,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-release_tool="${work_root}/linnet-pack"
-xcrun swiftc -warnings-as-errors \
-  "${repo_root}/sources/LinnetPackContract.swift" \
-  "${repo_root}/sources/LinnetDataChannel.swift" \
-  "${repo_root}/sources/LinnetDataRegistry.swift" \
-  "${repo_root}/tools/LinnetDataCatalogBuilder.swift" \
-  "${repo_root}/tools/LinnetPackTool.swift" -o "${release_tool}"
+release_tool="${repo_root}/build/linnet-pack"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
 [[ -x "${release_tool}" && ! -L "${release_tool}" ]] ||
   fail "verified pack CLI was not produced"
 

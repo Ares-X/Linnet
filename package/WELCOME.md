@@ -20,8 +20,10 @@ After installation:
 
 - A clean Complete first installation registers Linnet but never enables or
   selects it for you. Core neither re-registers the source nor stops the live
-  InputMethodKit Host. Existing applications keep their input connections; the
-  new Core takes over the next time macOS naturally launches the Host.
+  InputMethodKit Host. Existing applications keep their input connections.
+  Settings can apply an installed Core only after you switch away from Linnet
+  and close every other app that used the current Host; otherwise the new Core
+  takes over after the next macOS login or restart.
 - For a first Complete installation, save open work, log out of macOS once,
   and log in again. Complete rejects an existing App or Active state and directs
   it to Core. Core preserves the same input-source identity and current client
@@ -77,8 +79,9 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 
 - 全新首次安装使用 Complete：它只注册 Linnet，不会程序化启用或选择输入源。
   macOS 14 及以上必须在系统设置中手动添加并允许一次。Core 不会重新注册或停止
-  正在服务的 InputMethodKit Host；现有应用保持输入连接，新 Core 在 macOS 下一次
-  自然启动 Host 时接管，也不会再次弹出启用授权。
+  正在服务的 InputMethodKit Host；现有应用保持输入连接。用户先切换到其他输入法并
+  关闭本次登录期间使用过 Linnet 的其他应用后，可在 Settings 中主动应用新 Core；
+  否则新 Core 会在下次登录或重启后接管，也不会再次弹出启用授权。
 - 首次完整安装时，保存工作，注销一次 macOS，再登录同一账户。Complete 会拒绝
   已有 App 或 Active state 并提示使用 Core。Core 保持同一个输入源身份和当前连接
   且不请求注销。若 Core 拒绝现有身份或版本，请停止安装，不要改用 Complete 重试。

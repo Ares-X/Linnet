@@ -31,8 +31,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-swift_compiler="$(xcrun --find swiftc)"
 macos_sdk="$(xcrun --sdk macosx --show-sdk-path)"
+source tests/swift_test_cache.sh
+linnet_swift_cache_init "${repo_root}" "${fixture}"
 host_app="${fixture}/LinnetHostIPC.app"
 settings_app="${fixture}/LinnetSettingsIPC.app"
 host_helper="${host_app}/Contents/MacOS/LinnetHostIPC"
@@ -43,10 +44,12 @@ common_sources=(
   sources/LinnetSettings/LinnetSettingsTransactionIPC.swift
   tests/LinnetSettingsTransactionIPCTests.swift
 )
-"${swift_compiler}" -warnings-as-errors -sdk "${macos_sdk}" \
-  -D LINNET_IPC_HOST_HELPER "${common_sources[@]}" -o "${host_helper}"
-"${swift_compiler}" -warnings-as-errors -sdk "${macos_sdk}" \
-  -D LINNET_IPC_SETTINGS_HELPER "${common_sources[@]}" -o "${settings_helper}"
+linnet_swift_compile settings-ipc-host -warnings-as-errors -sdk "${macos_sdk}" \
+  -D LINNET_IPC_HOST_HELPER "${common_sources[@]}"
+cp "${LINNET_SWIFT_COMPILED_BINARY}" "${host_helper}"
+linnet_swift_compile settings-ipc-settings -warnings-as-errors -sdk "${macos_sdk}" \
+  -D LINNET_IPC_SETTINGS_HELPER "${common_sources[@]}"
+cp "${LINNET_SWIFT_COMPILED_BINARY}" "${settings_helper}"
 
 write_bundle_info() {
   local app="$1"
@@ -182,6 +185,12 @@ start_host --serve-reload "${reload_endpoint}" "${reload_log}"
 run_settings "${reload_endpoint}" --request-reload
 wait_for_host "${reload_log}"
 
+core_activation_endpoint="${fixture}/core-activation.sock"
+core_activation_log="${fixture}/core-activation.host.log"
+start_host --serve-core-activation "${core_activation_endpoint}" "${core_activation_log}"
+run_settings "${core_activation_endpoint}" --request-core-activation
+wait_for_host "${core_activation_log}"
+
 # A Core update atomically replaces the bundle while the InputMethodKit Host
 # stays alive. The old executable vnode can then lose its pathname, but the
 # kernel-authenticated same-user Host still owns the established runtime
@@ -224,4 +233,4 @@ rg -Fq \
 
 run_rejection forged-requester-pid --forged-requester-pid
 
-echo "LinnetSettingsTransactionIPCTwoProcessTests: PASS (activate + reload + active/stale owner classification + live Core replacement + 3s timeout/recovery generation + owner-only socket + peer UID/PID + forged-pid)"
+echo "LinnetSettingsTransactionIPCTwoProcessTests: PASS (activate + Core termination + reload + active/stale owner classification + live Core replacement + 3s timeout/recovery generation + owner-only socket + peer UID/PID + forged-pid)"

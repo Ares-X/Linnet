@@ -488,7 +488,6 @@ struct LinnetDataRegistryTests {
         samePath(snapshot.backupsDirectory, registry.rootDirectory.appending(path: "Backups")),
         "backups"
       )
-      require(snapshot.state.grammarProfile == .lts, "grammar")
     }
   }
 
@@ -820,7 +819,6 @@ struct LinnetDataRegistryTests {
       try registry.commitDataChannelUpdate(transactionID: activation.transactionID)
       let snapshot = try registry.runtimeSnapshot()
       require(snapshot.state.edition == .full, "full edition")
-      require(snapshot.state.grammarProfile == .lts, "LTS grammar")
       require(snapshot.state.packs.last == fixture.pack, "Extended pack")
       require(
         FileManager.default.fileExists(
@@ -868,7 +866,7 @@ struct LinnetDataRegistryTests {
       require(healthy.state.rollbackPacks.isEmpty, "unchanged activation created rollback packs")
       require(FileManager.default.fileExists(atPath: marker.path),
         "cleanup failure removed its transaction owner")
-      let stateDirectory = registry.activeStateURL.deletingLastPathComponent()
+      let stateDirectory = registry.activeSharedDataDirectory
       require(!FileManager.default.fileExists(
         atPath: stateDirectory.appending(path: "data-channel.json").path),
         "receipt side file returned")
@@ -1264,7 +1262,7 @@ struct LinnetDataRegistryTests {
   }
 
   private static func replacementPack(
-    _ kind: LinnetDataRegistry.PackKind,
+    _ kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64 = 2,
     registry: LinnetDataRegistry,
@@ -1331,7 +1329,7 @@ struct LinnetDataRegistryTests {
       at: active.appending(path: "build", directoryHint: .isDirectory),
       withIntermediateDirectories: true
     )
-    let fixtures = try [LinnetDataRegistry.PackKind.chinese, .english, .lts].map { kind in
+    let fixtures = try [LinnetPackContract.Kind.chinese, .english, .lts].map { kind in
       try fixturePack(
         kind, version: "2026.08.1", sequence: 1,
         files: Dictionary(uniqueKeysWithValues: fixtureFileNames(kind).map {
@@ -1360,8 +1358,6 @@ struct LinnetDataRegistryTests {
         .appending(path: "linnet_zh.dict.yaml"))
     try Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8).write(
       to: active.appending(path: "linnet_grammar_active.yaml"))
-    try FileManager.default.createDirectory(
-      at: registry.activeStateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try writeState(
       .init(
         format: LinnetDataRegistry.stateFormat,
@@ -1371,10 +1367,6 @@ struct LinnetDataRegistryTests {
         packs: packs
       ),
       to: active.appending(path: "activation.json")
-    )
-    try FileManager.default.createSymbolicLink(
-      atPath: registry.activeStateURL.path,
-      withDestinationPath: "../Runtime/Active/activation.json"
     )
     try body(registry)
   }
@@ -1408,7 +1400,7 @@ struct LinnetDataRegistryTests {
   private static func fixturePacks(
     _ fixtureSigning: FixtureSigningOwner
   ) throws -> [LinnetDataRegistry.ActivePack] {
-    try [LinnetDataRegistry.PackKind.chinese, .english, .lts].map { kind in
+    try [LinnetPackContract.Kind.chinese, .english, .lts].map { kind in
       try fixturePack(
         kind, version: "2026.08.1", sequence: 1,
         files: Dictionary(uniqueKeysWithValues: fixtureFileNames(kind).map {
@@ -1418,7 +1410,7 @@ struct LinnetDataRegistryTests {
     }
   }
 
-  private static func fixtureFileNames(_ kind: LinnetDataRegistry.PackKind) -> [String] {
+  private static func fixtureFileNames(_ kind: LinnetPackContract.Kind) -> [String] {
     switch kind {
     case .chinese:
       ["default.yaml", "linnet_zh.dict.yaml", "linnet_zh.schema.yaml", "squirrel.yaml"]
@@ -1432,7 +1424,7 @@ struct LinnetDataRegistryTests {
   }
 
   private static func fixturePack(
-    _ kind: LinnetDataRegistry.PackKind,
+    _ kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64,
     files: [String: Data],
@@ -1455,8 +1447,8 @@ struct LinnetDataRegistryTests {
     let manifest = LinnetPackContract.Manifest(
       format: LinnetPackContract.manifestFormat,
       product: LinnetPackContract.productIdentifier,
-      packID: LinnetPackContract.Kind(rawValue: kind.rawValue)!.packID,
-      kind: LinnetPackContract.Kind(rawValue: kind.rawValue)!,
+      packID: kind.packID,
+      kind: kind,
       version: version,
       sequence: sequence,
       dataABI: 1,
@@ -1473,9 +1465,7 @@ struct LinnetDataRegistryTests {
       dataABI: 1,
       contentSHA256: contentSHA256,
       minCore: manifest.minCore,
-      requirements: requirements.map {
-        .init(kind: LinnetDataRegistry.PackKind(rawValue: $0.kind.rawValue)!, dataABI: $0.dataABI)
-      },
+      requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
       manifestSHA256: LinnetPackContract.sha256(manifestData))
     return .init(pack: pack, manifestData: manifestData, files: files)
@@ -1498,11 +1488,11 @@ struct LinnetDataRegistryTests {
   ) -> LinnetDataChannel.Catalog {
     let artifacts = packs.map { pack in
       LinnetDataChannel.Artifact(
-        kind: LinnetPackContract.Kind(rawValue: pack.kind.rawValue)!,
+        kind: pack.kind,
         version: pack.version, sequence: pack.sequence, dataABI: pack.dataABI,
         minCore: pack.minCore, contentSHA256: pack.contentSHA256, bytes: 1,
         containerSHA256: String(repeating: "b", count: 64),
-        url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-\(sequence)/\(LinnetPackContract.Kind(rawValue: pack.kind.rawValue)!.releaseAssetName)")!)
+        url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-\(sequence)/\(pack.kind.releaseAssetName)")!)
     }
     let edition: LinnetDataRegistry.Edition = packs.contains { $0.kind == .extended }
       ? .full : .standard

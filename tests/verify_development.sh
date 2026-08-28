@@ -43,9 +43,9 @@ if [[ "${run_app}" -eq 1 ]]; then
     }
   done
 
-# A local unsigned composite has no clean candidate revision to bind. Refuse
-# the common false-PASS shape instead: each target's source inputs must predate
-# its Release executable, while shared project/resources must predate both.
+# A local unsigned composite has no clean candidate revision to bind. The
+# successful composite build owns one completion marker after Xcode, resource
+# sanitization and local registration cleanup all finish.
   host_executable="${host_app}/Contents/MacOS/Linnet"
   settings_executables=(
     "${standalone_settings}/Contents/MacOS/Settings"
@@ -57,6 +57,12 @@ if [[ "${run_app}" -eq 1 ]]; then
       exit 1
     }
   done
+
+  build_stamp="${repo_root}/build/Build/Products/Release/.linnet-build-complete"
+  [[ -f "${build_stamp}" && ! -L "${build_stamp}" ]] || {
+    echo "verify_development: missing successful Release build marker" >&2
+    exit 1
+  }
 
 verify_inputs_predate() {
   local executable="$1"
@@ -70,36 +76,14 @@ verify_inputs_predate() {
   done
 }
 
-  verify_inputs_predate "${host_executable}" < <(
+  verify_inputs_predate "${build_stamp}" < <(
     {
       git ls-files --cached --others --exclude-standard -- \
-        Linnet.xcodeproj/project.pbxproj resources data/squirrel.yaml
-      git ls-files --cached --others --exclude-standard -- sources data/linnet |
-        grep -v '^sources/LinnetSettings/'
-      git ls-files --cached --others --exclude-standard -- \
-        sources/LinnetSettings/SettingsContract.swift \
-        sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
-        sources/LinnetSettings/PersonalDataStore.swift \
-        sources/LinnetSettings/PersonalDataValidation.swift \
-        sources/LinnetSettings/LinnetSettingsDocument.swift \
-        sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift
+        Makefile Linnet.xcodeproj/project.pbxproj config/LinnetProduct.xcconfig \
+        sources resources data/linnet data/squirrel.yaml
       find data/plum data/opencc lib -type f -print
     } | LC_ALL=C sort -u
   )
-  for executable in "${settings_executables[@]}"; do
-    verify_inputs_predate "${executable}" < <(
-      {
-        git ls-files --cached --others --exclude-standard -- \
-          Linnet.xcodeproj/project.pbxproj resources data/squirrel.yaml \
-          sources/LinnetSettings
-        printf '%s\n' \
-          sources/LinnetPackContract.swift \
-          sources/LinnetDataChannel.swift \
-          sources/LinnetDataRegistry.swift \
-          sources/LinnetCandidatePresentation.swift
-      } | LC_ALL=C sort -u
-    )
-  done
 
   bash -n action-build.sh action-install.sh package/installer-scripts/postinstall
   tests/verify_runtime_footprint.sh

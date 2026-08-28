@@ -100,7 +100,9 @@ enum LinnetSettingsProjectionRenderer {
       }
     }
   }
+}
 
+private extension LinnetSettingsProjectionRenderer {
   private static func requireDirectory(_ directory: URL) throws {
     var info = stat()
     guard lstat(directory.path, &info) == 0,

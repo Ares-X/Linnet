@@ -39,13 +39,38 @@ rg -Fq -- "-name '*.py'" package/stage_language_pack_sources ||
 
 if rg -n 'LINNET_SIGNED_PACKS_ROOT|LINNET_SIGNED_RELEASE_ROOT|manifest\.ed25519|pack-signing-request|signing-request-set' \
     package/build_data_pack package/make_package \
-    tools/LinnetPackTool.swift; then
+    tools/LinnetPackEncoder.swift tools/LinnetPackTool.swift; then
   fail "local packaging or data release regained the retired pack-signing path"
 fi
 if rg -n 'candidate_revision|candidate-revision' \
-    package/build_data_pack tools/LinnetPackTool.swift; then
+    package/build_data_pack tools/LinnetPackEncoder.swift tools/LinnetPackTool.swift; then
   fail "data-pack identity is coupled to an App revision"
 fi
+if rg -n 'compressZlib|writeContainer' sources --glob '*.swift'; then
+  fail "offline pack encoding returned to an App runtime target"
+fi
+rg -Fq 'enum LinnetPackEncoder' tools/LinnetPackEncoder.swift ||
+  fail "the offline pack encoder owner is missing"
+pack_compiler_owners="$(
+  rg -l -F --hidden \
+    -g '!build/**' -g '!librime/**' -g '!vendor/**' -g '!.git/**' \
+    -g '!tests/verify_package_architecture.sh' \
+    -g '!tests/verify_lean_data_trust.sh' \
+    'tools/LinnetPackTool.swift' . | sed 's#^\./##' | LC_ALL=C sort
+)"
+[[ "${pack_compiler_owners}" == "Makefile" ]] ||
+  fail "pack compiler owners: ${pack_compiler_owners:-none}"
+ruby -e '
+  paths = %w[
+    Makefile action-install.sh package/make_package package/make_archive
+    scripts/release-control tests/verify_package_architecture.sh
+    tests/verify_data_channel_release.sh tests/verify_visible_settings_fixture.sh
+  ]
+  sources = paths.to_h { |path| [path, File.read(path)] }
+  callers = paths - ["Makefile", "tests/verify_package_architecture.sh"]
+  abort "a pack-tool caller bypasses the canonical Make target" unless
+    callers.all? { |path| sources.fetch(path).include?("linnet-pack-tool") }
+' || fail "the pack CLI does not have one incremental compiler owner"
 if rg -n 'LINNET_PACK_PRIVATE|private[_-]key|manifest\.ed25519' \
     package tools sources scripts/release-control; then
   fail "candidate-controlled production code can read a Catalog private key"
@@ -73,15 +98,12 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
-tool="${fixture}/linnet-pack"
-xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift tools/LinnetDataCatalogBuilder.swift \
-  tools/LinnetPackTool.swift -o "${tool}"
+tool="${repo_root}/build/linnet-pack"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
 snapshot_test="${fixture}/activation-profile-runtime-snapshot"
 xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift tests/ActivationProfileRuntimeSnapshotTests.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift tests/ActivationProfileRuntimeSnapshotTests.swift \
   -o "${snapshot_test}"
 
 mkdir "${fixture}/sources" "${fixture}/packs" "${fixture}/containers"

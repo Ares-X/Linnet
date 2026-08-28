@@ -41,7 +41,7 @@ enum LinnetSettingsAppearancePreview {
     }
   }
 
-  struct RGB: Equatable {
+  struct ColorComponents: Equatable {
     let red: UInt8
     let green: UInt8
     let blue: UInt8
@@ -75,12 +75,12 @@ enum LinnetSettingsAppearancePreview {
   }
 
   struct Palette: Equatable {
-    let background: RGB
-    let border: RGB
-    let primary: RGB
-    let secondary: RGB
-    let selectedBackground: RGB
-    let selectedPrimary: RGB
+    let background: ColorComponents
+    let border: ColorComponents
+    let primary: ColorComponents
+    let secondary: ColorComponents
+    let selectedBackground: ColorComponents
+    let selectedPrimary: ColorComponents
   }
 
   struct Catalog {
@@ -100,10 +100,6 @@ enum LinnetSettingsAppearancePreview {
     }
 
     let schemes: [String: Scheme]
-
-    var linnetSchemeIDs: Set<String> {
-      Set(schemes.keys)
-    }
 
     init(contents: String) throws {
       var parsed: [String: Scheme] = [:]
@@ -218,13 +214,16 @@ enum LinnetSettingsAppearancePreview {
       )
     }
 
-    private static func color(_ key: String, _ fields: [String: String]) throws -> RGB {
+    private static func color(
+      _ key: String,
+      _ fields: [String: String]
+    ) throws -> ColorComponents {
       guard let raw = fields[key]?.lowercased().replacingOccurrences(of: "0x", with: ""),
         let value = UInt32(raw, radix: 16)
       else {
         throw Failure.malformedThemeData
       }
-      return RGB(value)
+      return ColorComponents(value)
     }
 
     private static func metric(_ key: String, _ fields: [String: String]) throws -> Double {
@@ -247,7 +246,6 @@ enum LinnetSettingsAppearancePreview {
   }
 
   struct Presentation: Equatable {
-    let schemeID: String
     let palette: Palette
     let selectionStyle: SelectionStyle
     let cornerRadius: Double
@@ -294,7 +292,6 @@ enum LinnetSettingsAppearancePreview {
     case .dark: isDark = true
     }
     return .success(Presentation(
-      schemeID: scheme.identifier,
       palette: scheme.palette,
       selectionStyle: scheme.selectionStyle,
       cornerRadius: scheme.cornerRadius,

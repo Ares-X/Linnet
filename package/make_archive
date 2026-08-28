@@ -63,14 +63,8 @@ if [[ -n "${release_tool}" ]]; then
     fail_archive "LINNET_RELEASE_TOOL must name the precompiled pack CLI"
   pack_tool="${release_tool}"
 else
-  command -v xcrun >/dev/null 2>&1 || fail_archive "required tool is unavailable: xcrun"
-  pack_tool="${work_root}/linnet-pack"
-  xcrun swiftc -warnings-as-errors \
-      "${project_root}/sources/LinnetPackContract.swift" \
-      "${project_root}/sources/LinnetDataChannel.swift" \
-      "${project_root}/sources/LinnetDataRegistry.swift" \
-      "${project_root}/tools/LinnetDataCatalogBuilder.swift" \
-      "${project_root}/tools/LinnetPackTool.swift" -o "${pack_tool}"
+  pack_tool="${project_root}/build/linnet-pack"
+  make -C "${project_root}" --no-print-directory linnet-pack-tool
 fi
 signing_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app_path}/Contents/Info.plist" 2>/dev/null || true)"

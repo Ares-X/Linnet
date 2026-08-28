@@ -119,8 +119,68 @@ extension DataTabView {
           Text(verbatim: productIdentityDescription(installed))
         }
         Text(
-          "The current Core keeps its existing app connections. The installed Core will run the next time macOS starts Linnet. You do not need to close apps or log out."
+          "You can keep using the current Core, or apply the installed Core after switching away from Linnet and closing other apps that have used it. No logout is required."
         )
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        HStack {
+          Button("Apply Installed Update…") { confirmCoreActivation() }
+            .disabled(model.pendingChanges || model.operationActive)
+          Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+        }
+      }
+    case .applying(let installed, _):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("Applying installed Core…", systemImage: "arrow.triangle.2.circlepath")
+          .foregroundStyle(.secondary)
+        Text(verbatim: productIdentityDescription(installed))
+          .font(.caption.monospacedDigit())
+        Text("Keep another input source selected until Settings closes.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    case .blocked(let installed, let running, let issue):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("The installed Core is waiting", systemImage: "exclamationmark.triangle")
+          .foregroundStyle(.orange)
+        coreIdentityRows(installed: installed, running: running)
+        Text(coreActivationInstruction(issue))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        HStack {
+          Button("Try Apply Again…") { confirmCoreActivation() }
+            .disabled(model.pendingChanges || model.operationActive)
+          Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+        }
+      }
+    case .applied(let identity):
+      VStack(alignment: .leading, spacing: 2) {
+        Label("Installed Core is now running", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+        Text(verbatim: productIdentityDescription(identity))
+          .font(.caption.monospacedDigit())
+        Text("Settings will close so its own connection can reopen cleanly.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    case .unsupported(let installed, let running):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("This running Core cannot apply the update safely", systemImage: "info.circle")
+          .foregroundStyle(.orange)
+        coreIdentityRows(installed: installed, running: running)
+        Text(
+          "Keep using the current Core. After the next normal macOS login or restart, future Core updates can use Apply Now without another logout."
+        )
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
+    case .failed(let installed, let running):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("The installed Core was not activated", systemImage: "xmark.circle")
+          .foregroundStyle(.red)
+        coreIdentityRows(installed: installed, running: running)
+        Text("The current Host was left in place. Check the runtime before trying again.")
           .font(.caption2)
           .foregroundStyle(.secondary)
         Button("Check Runtime Again") { updateChecker.refreshRuntime() }
@@ -129,7 +189,7 @@ extension DataTabView {
       VStack(alignment: .leading, spacing: 4) {
         Label("Running Core identity is unavailable.", systemImage: "exclamationmark.circle")
         Text(
-          "Updates do not stop the current Core or its app connections. The installed Core will run on the next normal Linnet start."
+          "Updates do not stop the current Core or its app connections. The installed Core will run after the next macOS login or restart."
         )
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -142,6 +202,62 @@ extension DataTabView {
     _ identity: LinnetSettingsContract.ProductIdentity
   ) -> String {
     "\(identity.version) (\(identity.build)) · \(identity.revision.prefix(8))"
+  }
+
+  @ViewBuilder func coreIdentityRows(
+    installed: LinnetSettingsContract.ProductIdentity,
+    running: LinnetSettingsContract.ProductIdentity
+  ) -> some View {
+    LabeledContent("Running") {
+      Text(verbatim: productIdentityDescription(running))
+    }
+    LabeledContent("Installed") {
+      Text(verbatim: productIdentityDescription(installed))
+    }
+  }
+
+  func coreActivationInstruction(
+    _ issue: LinnetSettingsContract.CoreActivationBlocker
+  ) -> LocalizedStringKey {
+    switch issue {
+    case .inputSourceActive:
+      "Use the macOS input menu to select another input source, then try again."
+    case .compositionActive:
+      "Finish or cancel the current composition, then try again."
+    case .dataTransactionActive:
+      "Wait for the current data operation to finish, then try again."
+    case .applicationsStillRunning:
+      "Close every other app that has used Linnet during this login session, then try again."
+    case .unknownClient:
+      "An unidentified app used this Host, so Linnet cannot prove that an immediate restart is safe. The update will remain installed for the next login or restart."
+    case .requesterUnavailable:
+      "Settings could not establish the one safe activation requester. Reopen Settings and try again."
+    }
+  }
+
+  func confirmCoreActivation() {
+    guard !model.pendingChanges, !model.operationActive else { return }
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = String(localized: "Apply the installed Core now?")
+    alert.informativeText = String(localized:
+      "First use the macOS input menu to select another input source and close every other app that has used Linnet during this login session.")
+      + " "
+      + String(localized:
+        "Linnet will never close those apps for you. Settings closes after the new Core is verified.")
+    let apply = alert.addButton(withTitle: String(localized: "Apply Now"))
+    apply.keyEquivalent = "\r"
+    let cancel = alert.addButton(withTitle: String(localized: "Cancel"))
+    cancel.keyEquivalent = "\u{1b}"
+    let completion: (NSApplication.ModalResponse) -> Void = { response in
+      guard response == .alertFirstButtonReturn else { return }
+      updateChecker.activateInstalledCore()
+    }
+    if let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible) {
+      alert.beginSheetModal(for: window, completionHandler: completion)
+    } else {
+      completion(alert.runModal())
+    }
   }
 
   @ViewBuilder var updateCheckRow: some View {
@@ -217,14 +333,14 @@ extension DataTabView {
   }
 
   var orderedInstalledPacks: [LinnetDataRegistry.ActivePack] {
-    let order: [LinnetDataRegistry.PackKind] = [.chinese, .english, .lts, .extended]
+    let order: [LinnetPackContract.Kind] = [.chinese, .english, .lts, .extended]
     return model.installedPacks.sorted {
       (order.firstIndex(of: $0.kind) ?? order.count)
         < (order.firstIndex(of: $1.kind) ?? order.count)
     }
   }
 
-  func packLabel(_ kind: LinnetDataRegistry.PackKind) -> LocalizedStringKey {
+  func packLabel(_ kind: LinnetPackContract.Kind) -> LocalizedStringKey {
     switch kind {
     case .chinese: "Chinese data"
     case .english: "English data"
@@ -398,15 +514,10 @@ extension DataTabView {
 
   var languageDataUpdateDescription: LocalizedStringKey? {
     guard !model.languageDataUpdatesAvailable else { return nil }
-    if model.dataChannelService == .published && !model.downloadSourceConfigured {
+    if !model.downloadSourceConfigured {
       return "Choose and save a valid download source before checking for updates."
     }
-    return switch model.dataChannelService {
-    case .unpublished:
-      "Online language-data updates are not available for this version yet."
-    case .published:
-      "Repair the installation before managing language data."
-    }
+    return "Repair the installation before managing language data."
   }
 
   var legacyDataDescription: LocalizedStringKey {
@@ -508,7 +619,7 @@ extension DataTabView {
     GroupBox("Diagnostics") {
       VStack(alignment: .leading, spacing: 10) {
         if let diagnostics = model.diagnostics {
-          Text(runtimeStatus(diagnostics.reachability).text(locale: locale))
+          Text(SettingsPresentationStatus.runtime(diagnostics.reachability).text(locale: locale))
             .font(.callout.weight(.medium))
           Text(diagnostics.redactedReport)
             .font(.system(.caption, design: .monospaced))
@@ -533,16 +644,6 @@ extension DataTabView {
     }
   }
 
-  func runtimeStatus(
-    _ reachability: SettingsDataCoordinator.Diagnostics.Reachability
-  ) -> SettingsPresentationStatus {
-    switch reachability {
-    case .running: .runtime(.running)
-    case .paused: .runtime(.paused)
-    case .degraded: .runtime(.degraded)
-    case .unreachable: .runtime(.unreachable)
-    }
-  }
 }
 
 // MARK: - Shared helpers

@@ -5,6 +5,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
+ruby tests/verify_pinyin_english_quality.rb
+
 generator=build/linnet-english-data-generator
 cache=build/linnet-english-cache
 installer=action-install.sh

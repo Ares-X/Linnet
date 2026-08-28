@@ -616,17 +616,10 @@ struct LinnetSettingsDownloadTransportTests {
     try (encoder.encode(state) + Data("\n".utf8)).write(
       to: active.appending(path: "activation.json"),
       options: .atomic)
-    try FileManager.default.createDirectory(
-      at: registry.activeStateURL.deletingLastPathComponent(),
-      withIntermediateDirectories: true,
-      attributes: [.posixPermissions: 0o700])
-    try FileManager.default.createSymbolicLink(
-      atPath: registry.activeStateURL.path,
-      withDestinationPath: "../Runtime/Active/activation.json")
   }
 
   private static func writeInstalledPack(
-    _ kind: LinnetDataRegistry.PackKind,
+    _ kind: LinnetPackContract.Kind,
     sequence: UInt64,
     dataABI: UInt32,
     minCore: String,
@@ -658,8 +651,8 @@ struct LinnetSettingsDownloadTransportTests {
     let manifest = LinnetPackContract.Manifest(
       format: LinnetPackContract.manifestFormat,
       product: LinnetPackContract.productIdentifier,
-      packID: LinnetPackContract.Kind(rawValue: kind.rawValue)!.packID,
-      kind: LinnetPackContract.Kind(rawValue: kind.rawValue)!,
+      packID: kind.packID,
+      kind: kind,
       version: version, sequence: sequence, dataABI: dataABI, minCore: minCore,
       contentSHA256: contentSHA256,
       requires: requirements,
@@ -669,9 +662,7 @@ struct LinnetSettingsDownloadTransportTests {
     let pack = LinnetDataRegistry.ActivePack(
       packID: manifest.packID, kind: kind, version: version, sequence: sequence,
       dataABI: dataABI, contentSHA256: contentSHA256, minCore: minCore,
-      requirements: requirements.map {
-        .init(kind: LinnetDataRegistry.PackKind(rawValue: $0.kind.rawValue)!, dataABI: $0.dataABI)
-      },
+      requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
       manifestSHA256: LinnetPackContract.sha256(manifestData))
     return (pack, root, files)

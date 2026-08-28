@@ -68,6 +68,12 @@ struct LinnetCandidatePresentationTests {
       ) == "/wɜːk/ · n. 工作；职业\nv. 运行；奏效\nadj. 工作的",
       "selected English detail did not start each part of speech on its own line"
     )
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "n. 品牌；name. 林内特；v. 命名；adj. 专有的"
+      ) == "n. 品牌\nname. 林内特\nv. 命名\nadj. 专有的",
+      "name, verb, and adjective detail groups did not receive separate lines"
+    )
     let long = String(repeating: "释", count: 90)
     let bounded = LinnetCandidatePresentation.selectedDetailText(long)
     require(
@@ -419,14 +425,23 @@ struct LinnetCandidatePresentationTests {
     require(
       footer.placement == .footer &&
         footer.spacing == LinnetCandidatePresentation.candidateRowSpacing &&
-        footer.textSeparator == "\n",
-      "horizontal candidate detail lost its shared footer policy")
+        footer.detailColumnMaximumWidth == 256,
+      "horizontal candidate detail lost its compact footer policy")
     require(
       footerFrames.candidate == CGRect(x: 0, y: 0, width: 100, height: 20) &&
         footerFrames.divider == nil &&
         footerFrames.detail == CGRect(x: 0, y: 26, width: 40, height: 10) &&
         footerFrames.size == CGSize(width: 100, height: 36),
       "footer candidate and detail no longer share one spatial geometry")
+
+    let longFooterFrames = footer.frames(
+      candidateSize: CGSize(width: 72, height: 24),
+      detailSize: CGSize(width: 900, height: 54),
+      dividerSize: CGSize(width: 1, height: 24))
+    require(
+      longFooterFrames.detail.width == 256 &&
+        longFooterFrames.size.width == 256,
+      "a short horizontal candidate can still stretch to the screen width")
 
     let sidecar = LinnetCandidatePresentation.candidateDetailGeometry(
       forLinearLayout: false)
@@ -436,7 +451,6 @@ struct LinnetCandidatePresentationTests {
       dividerSize: CGSize(width: 1, height: 60))
     require(
       sidecar.placement == .sidecar &&
-        sidecar.textSeparator.isEmpty &&
         sidecar.detailColumnMaximumWidth == 120,
       "vertical candidate detail lost its shared sidecar policy")
     require(

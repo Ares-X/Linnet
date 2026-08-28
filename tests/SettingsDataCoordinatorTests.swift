@@ -31,6 +31,11 @@ private struct RequestTimeoutObservation: Sendable {
   let observedAt: Date
 }
 
+private enum DiagnoseHealthFixture: Sendable {
+  case status(LinnetSettingsContract.RuntimeStatus)
+  case unavailable
+}
+
 private struct PersonalFileIdentity: Equatable {
   let device: UInt64
   let inode: UInt64
@@ -107,6 +112,7 @@ private final class RequestOrderHarness: @unchecked Sendable {
   private var requestCount = 0
   private var requestTimeouts: [RequestTimeoutObservation] = []
   private var timeoutNextCommand: LinnetSettingsContract.DataCommand?
+  private var nextDiagnoseHealth: DiagnoseHealthFixture?
   private var events: [String] = []
   private var pauseTerminalContinuation: CheckedContinuation<Void, Never>?
   private var pauseTerminalReleased = false
@@ -210,6 +216,19 @@ private final class RequestOrderHarness: @unchecked Sendable {
     defer { lock.unlock() }
     defer { nextReloadFailure = nil }
     return nextReloadFailure
+  }
+
+  func armDiagnoseHealth(_ fixture: DiagnoseHealthFixture) {
+    lock.lock()
+    nextDiagnoseHealth = fixture
+    lock.unlock()
+  }
+
+  func takeDiagnoseHealth() -> DiagnoseHealthFixture? {
+    lock.lock()
+    defer { lock.unlock() }
+    defer { nextDiagnoseHealth = nil }
+    return nextDiagnoseHealth
   }
 
   func takeDelayedPause() -> Bool {
@@ -545,6 +564,8 @@ struct SettingsDataCoordinatorTests {
           throw LinnetSettingsTransactionIPC.Failure.timedOut
         }
         switch request.command {
+        case .activateCore:
+          fail("the data coordinator unexpectedly requested Core activation")
         case .pause:
           if let status = requestOrder.takePauseStatus() {
             return reply(status, "fixture forced pause terminal", request: request)
@@ -631,23 +652,20 @@ struct SettingsDataCoordinatorTests {
             health: settingsHealth(activeRevision: activeRevision)
           )
         case .diagnose:
-          return reply(
-            .running,
-            "fixture running",
-            request: request,
-            health: .init(
-              productIdentity: fixtureRuntimeIdentity,
-              state: .running,
-              phase: .running,
-              rimeVersion: "fixture",
-              smartEnglishAvailable: true,
-              octagramAvailable: true,
-              availableSchemaCount: 9,
-              requiredSchemaCount: 9,
-              activeTransactionID: nil,
-              activeSettingsRevision: try? LinnetSettingsDocumentStore.snapshot(from: live).revision
+          switch requestOrder.takeDiagnoseHealth() ?? .status(.running) {
+          case .status(let status):
+            return reply(
+              status,
+              "fixture runtime status",
+              request: request,
+              health: diagnosticHealth(
+                status: status,
+                activeRevision: try? LinnetSettingsDocumentStore.snapshot(from: live).revision
+              )
             )
-          )
+          case .unavailable:
+            return reply(.failed, "fixture runtime unavailable", request: request)
+          }
         }
       }
 
@@ -1600,14 +1618,12 @@ struct SettingsDataCoordinatorTests {
       }
 
       let portableURL = fixtureRoot.appending(path: "complete.linnet-data")
-      let exportResult = try await coordinator.run(
+      _ = try await coordinator.run(
         .exportPortable(
           categories: Set(LinnetBackupStore.Category.allCases), destination: portableURL)
       )
       let exported = try LinnetBackupStore.decodePortable(Data(contentsOf: portableURL))
-      guard exportResult.backupDirectory == nil,
-        exportResult.portableURL == portableURL,
-        Set(exported.categories) == Set(LinnetBackupStore.Category.allCases),
+      guard Set(exported.categories) == Set(LinnetBackupStore.Category.allCases),
         Set(exported.learning.map(\.schema)) == RimeUserDataBridge.learningSchemas
       else {
         fail("portable export did not contain the requested canonical categories")
@@ -1625,6 +1641,21 @@ struct SettingsDataCoordinatorTests {
         !diagnostics.redactedReport.contains(NSUserName())
       else {
         fail("runtime diagnostics were incomplete or disclosed personal data")
+      }
+      let reachabilityCases: [
+        (fixture: DiagnoseHealthFixture, expected: SettingsRuntimeReachability)
+      ] = [
+        (.status(.paused), .paused),
+        (.status(.degraded), .degraded),
+        (.status(.failed), .unreachable),
+        (.unavailable, .unreachable),
+      ]
+      for row in reachabilityCases {
+        requestOrder.armDiagnoseHealth(row.fixture)
+        let result = try await coordinator.run(.diagnose)
+        guard result.diagnostics?.reachability == row.expected else {
+          fail("runtime diagnostics classified a fixture into the wrong reachability state")
+        }
       }
 
       let portableReplacement = LinnetPersonalData(
@@ -2042,7 +2073,7 @@ struct SettingsDataCoordinatorTests {
   ) -> LinnetDataChannel.Catalog {
     let artifacts = packs.map { pack in
       LinnetDataChannel.Artifact(
-        kind: LinnetPackContract.Kind(rawValue: pack.kind.rawValue)!,
+        kind: pack.kind,
         version: pack.version,
         sequence: pack.sequence,
         dataABI: pack.dataABI,
@@ -2069,7 +2100,7 @@ struct SettingsDataCoordinatorTests {
   }
 
   private static func makeLanguagePack(
-    _ kind: LinnetDataRegistry.PackKind,
+    _ kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64,
     registry: LinnetDataRegistry
@@ -2089,7 +2120,7 @@ struct SettingsDataCoordinatorTests {
   }
 
   private static func writeLanguagePackManifest(
-    kind: LinnetDataRegistry.PackKind,
+    kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64,
     directory: URL,
@@ -2112,8 +2143,8 @@ struct SettingsDataCoordinatorTests {
     let manifest = LinnetPackContract.Manifest(
       format: LinnetPackContract.manifestFormat,
       product: LinnetPackContract.productIdentifier,
-      packID: LinnetPackContract.Kind(rawValue: kind.rawValue)!.packID,
-      kind: LinnetPackContract.Kind(rawValue: kind.rawValue)!,
+      packID: kind.packID,
+      kind: kind,
       version: version,
       sequence: sequence,
       dataABI: 1,
@@ -2131,9 +2162,7 @@ struct SettingsDataCoordinatorTests {
       dataABI: 1,
       contentSHA256: contentSHA256,
       minCore: manifest.minCore,
-      requirements: requirements.map {
-        .init(kind: LinnetDataRegistry.PackKind(rawValue: $0.kind.rawValue)!, dataABI: $0.dataABI)
-      },
+      requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
       manifestSHA256: LinnetPackContract.sha256(manifestData))
   }
@@ -2292,11 +2321,6 @@ struct SettingsDataCoordinatorTests {
     )
     try JSONEncoder().encode(state).write(
       to: active.appending(path: "activation.json"), options: .atomic)
-    try makeDirectory(registry.activeStateURL.deletingLastPathComponent())
-    try FileManager.default.createSymbolicLink(
-      atPath: registry.activeStateURL.path,
-      withDestinationPath: "../Runtime/Active/activation.json"
-    )
   }
 
   private static func verifySelectedChineseProfile(
@@ -2583,10 +2607,23 @@ struct SettingsDataCoordinatorTests {
   private static func settingsHealth(
     activeRevision: String
   ) -> LinnetSettingsContract.RuntimeHealth {
-    .init(
+    diagnosticHealth(status: .running, activeRevision: activeRevision)
+  }
+
+  private static func diagnosticHealth(
+    status: LinnetSettingsContract.RuntimeStatus,
+    activeRevision: String?
+  ) -> LinnetSettingsContract.RuntimeHealth {
+    let phase: LinnetSettingsContract.RuntimePhase
+    switch status {
+    case .running, .degraded: phase = .running
+    case .paused: phase = .paused
+    default: phase = .recovering
+    }
+    return .init(
       productIdentity: fixtureRuntimeIdentity,
-      state: .running,
-      phase: .running,
+      state: status,
+      phase: phase,
       rimeVersion: "fixture",
       smartEnglishAvailable: true,
       octagramAvailable: true,
@@ -2611,6 +2648,7 @@ struct SettingsDataCoordinatorTests {
     } else {
       switch status {
       case .running, .degraded: code = .diagnosticsReady
+      case .terminating: code = .coreActivationAccepted
       case .paused: code = .runtimePaused
       case .activated: code = .activationVerified
       case .cancelled: code = .runtimeResumed

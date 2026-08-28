@@ -1,15 +1,32 @@
 import AppKit
 import Foundation
 
-/// Settings-only owner for update visibility. Package installation replaces
-/// files on disk; the running InputMethodKit Host and its client connections
-/// remain untouched until macOS next starts Linnet normally.
+/// Settings owns update visibility and the user-requested Core activation
+/// orchestration. The running Host remains the sole exit-safety authority.
 @MainActor
 final class LinnetSettingsUpdateChecker: ObservableObject {
   enum RuntimeVersionState: Equatable {
     case checking
     case current(LinnetSettingsContract.ProductIdentity)
     case pending(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )
+    case applying(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )
+    case blocked(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity,
+      issue: LinnetSettingsContract.CoreActivationBlocker
+    )
+    case applied(LinnetSettingsContract.ProductIdentity)
+    case unsupported(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )
+    case failed(
       installed: LinnetSettingsContract.ProductIdentity,
       running: LinnetSettingsContract.ProductIdentity
     )
@@ -24,8 +41,9 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   private let currentVersion: String
   private let currentBuild: UInt64
   private let installedIdentity: LinnetSettingsContract.ProductIdentity?
+  private let hostBundleURL: URL?
+  private let hostBundleIdentifier: String?
   private let transactionRequester: LinnetSettingsTransactionRequesting
-  private let service: LinnetDataChannel.Service
   private var edition: LinnetDataRegistry.Edition?
   private var installedPacks: [LinnetDataRegistry.ActivePack]
   private var task: Task<Void, Never>?
@@ -36,7 +54,6 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   init(
     currentVersion: String,
     currentBuild: UInt64,
-    service: LinnetDataChannel.Service,
     edition: LinnetDataRegistry.Edition?,
     installedPacks: [LinnetDataRegistry.ActivePack],
     bundle: Bundle = .main,
@@ -44,10 +61,12 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   ) {
     self.currentVersion = currentVersion
     self.currentBuild = currentBuild
-    self.service = service
     self.edition = edition
     self.installedPacks = installedPacks
+    let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
     installedIdentity = LinnetSettingsContract.productIdentity(startingAt: bundle)
+    hostBundleURL = host?.bundleURL
+    hostBundleIdentifier = host?.bundleIdentifier
     self.transactionRequester = transactionRequester
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
   }
@@ -75,9 +94,73 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
       }
     }
   }
+}
+
+extension LinnetSettingsUpdateChecker {
+  func activateInstalledCore() {
+    guard let identities = activationIdentities,
+      installedIdentity != nil,
+      hostBundleURL != nil,
+      hostBundleIdentifier != nil
+    else { return }
+    runtimeTask?.cancel()
+    runtimeCycle &+= 1
+    let activeCycle = runtimeCycle
+    runtimeVersionState = .applying(
+      installed: identities.installed,
+      running: identities.running
+    )
+    runtimeTask = Task { [weak self] in
+      guard let self else { return }
+      var hostAcceptedActivation = false
+      do {
+        let reply = try await request(.activateCore, timeout: 4)
+        guard !Task.isCancelled else { return }
+        if let issue = coreActivationIssue(for: reply.code) {
+          finishRuntimeTransition(
+            .blocked(
+              installed: identities.installed,
+              running: identities.running,
+              issue: issue
+            ),
+            cycle: activeCycle
+          )
+          return
+        }
+        guard reply.status == .terminating,
+          reply.code == .coreActivationAccepted
+        else {
+          finishRuntimeTransition(
+            .unsupported(installed: identities.installed, running: identities.running),
+            cycle: activeCycle
+          )
+          return
+        }
+        hostAcceptedActivation = true
+        try await awaitHostExit()
+        try await launchCanonicalHost()
+        let health = try await awaitInstalledHost()
+        finishRuntimeApplied(health, cycle: activeCycle)
+      } catch is CancellationError {
+        return
+      } catch {
+        if hostAcceptedActivation {
+          finishRuntimeTransition(
+            .failed(installed: identities.installed, running: identities.running),
+            cycle: activeCycle
+          )
+        } else {
+          finishRuntimeTransition(
+            .unsupported(installed: identities.installed, running: identities.running),
+            cycle: activeCycle
+          )
+        }
+      }
+    }
+  }
 
   private func startCheck(replacingCurrent: Bool) {
-    guard service == .published, replacingCurrent || !active else { return }
+    guard replacingCurrent || !active else { return }
     task?.cancel()
     cycle &+= 1
     let activeCycle = cycle
@@ -139,6 +222,54 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     )
   }
 
+  private func awaitHostExit() async throws {
+    guard let hostBundleIdentifier else { throw ActivationFailure.missingInstalledHost }
+    for _ in 0..<50 {
+      try Task.checkCancellation()
+      let running = NSRunningApplication.runningApplications(
+        withBundleIdentifier: hostBundleIdentifier)
+      if running.isEmpty { return }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    throw ActivationFailure.hostDidNotExit
+  }
+
+  private func launchCanonicalHost() async throws {
+    guard let hostBundleURL else { throw ActivationFailure.missingInstalledHost }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = false
+    configuration.addsToRecentItems = false
+    configuration.allowsRunningApplicationSubstitution = false
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      NSWorkspace.shared.openApplication(
+        at: hostBundleURL,
+        configuration: configuration
+      ) { application, error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else if application == nil {
+          continuation.resume(throwing: ActivationFailure.hostDidNotLaunch)
+        } else {
+          continuation.resume(returning: ())
+        }
+      }
+    }
+  }
+
+  private func awaitInstalledHost() async throws -> LinnetSettingsContract.RuntimeHealth {
+    guard let installedIdentity else { throw ActivationFailure.missingInstalledHost }
+    for _ in 0..<80 {
+      try Task.checkCancellation()
+      if let reply = try? await request(.diagnose, timeout: 1),
+        let health = reply.health,
+        health.productIdentity == installedIdentity {
+        return health
+      }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    throw ActivationFailure.hostDidNotLaunch
+  }
+
   private func finish(
     _ result: LinnetDataChannel.UpdateAvailability,
     cycle activeCycle: UInt64
@@ -185,5 +316,62 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     guard activeCycle == runtimeCycle else { return }
     runtimeVersionState = .unavailable
     runtimeTask = nil
+  }
+
+  private var activationIdentities: (
+    installed: LinnetSettingsContract.ProductIdentity,
+    running: LinnetSettingsContract.ProductIdentity
+  )? {
+    switch runtimeVersionState {
+    case .pending(let installed, let running),
+      .blocked(let installed, let running, _),
+      .failed(let installed, let running):
+      return (installed, running)
+    default:
+      return nil
+    }
+  }
+
+  private func coreActivationIssue(
+    for code: LinnetSettingsContract.RuntimeReplyCode
+  ) -> LinnetSettingsContract.CoreActivationBlocker? {
+    switch code {
+    case .coreActivationInputSourceActive: .inputSourceActive
+    case .coreActivationCompositionActive: .compositionActive
+    case .coreActivationDataTransactionActive: .dataTransactionActive
+    case .coreActivationApplicationsRunning: .applicationsStillRunning
+    case .coreActivationUnknownClient: .unknownClient
+    case .coreActivationRequesterUnavailable: .requesterUnavailable
+    default: nil
+    }
+  }
+
+  @discardableResult
+  private func finishRuntimeTransition(
+    _ state: RuntimeVersionState,
+    cycle activeCycle: UInt64
+  ) -> Bool {
+    guard activeCycle == runtimeCycle else { return false }
+    runtimeVersionState = state
+    runtimeTask = nil
+    return true
+  }
+
+  private func finishRuntimeApplied(
+    _ health: LinnetSettingsContract.RuntimeHealth,
+    cycle activeCycle: UInt64
+  ) {
+    guard let identity = health.productIdentity,
+      finishRuntimeTransition(.applied(identity), cycle: activeCycle)
+    else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+      NSApp.terminate(nil)
+    }
+  }
+
+  private enum ActivationFailure: Error {
+    case missingInstalledHost
+    case hostDidNotExit
+    case hostDidNotLaunch
   }
 }

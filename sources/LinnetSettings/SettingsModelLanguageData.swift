@@ -22,8 +22,7 @@ extension SettingsModel {
   }
 
   var languageDataUpdatesAvailable: Bool {
-    dataServicesAvailable && dataChannelService == .published
-      && configuredDownloadSource != nil
+    dataServicesAvailable && configuredDownloadSource != nil
   }
 
   var downloadSourceConfigured: Bool { configuredDownloadSource != nil }
@@ -127,9 +126,7 @@ extension SettingsModel {
       if !languageDataUpdatesAvailable { finishLanguageDataUpdate(target, failure: .unavailable) }
       return
     }
-    guard let registry = dataRegistry, let downloadSource = configuredDownloadSource,
-      dataChannelService == .published
-    else {
+    guard let registry = dataRegistry, let downloadSource = configuredDownloadSource else {
       finishLanguageDataUpdate(target, failure: .unavailable)
       return
     }

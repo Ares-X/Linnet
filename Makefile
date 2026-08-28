@@ -34,6 +34,15 @@ SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
 ENGLISH_DATA_GENERATOR = build/linnet-english-data-generator
 ENGLISH_DATA_GENERATOR_SOURCES = tools/LinnetEnglishDataSources.swift \
 	tools/LinnetEnglishDataGenerator.swift
+LINNET_PACK_TOOL = build/linnet-pack
+LINNET_PACK_TOOL_SOURCES = sources/LinnetPackContract.swift \
+	sources/LinnetDataChannel.swift \
+	sources/LinnetDataRegistry.swift \
+	sources/LinnetDataRegistryTransactions.swift \
+	sources/LinnetDataRegistryStorage.swift \
+	tools/LinnetDataCatalogBuilder.swift \
+	tools/LinnetPackEncoder.swift \
+	tools/LinnetPackTool.swift
 PLUM_DATA = data/plum/default.yaml \
 	data/plum/linnet_algebra.yaml \
 	data/plum/linnet_zh.schema.yaml \
@@ -94,7 +103,7 @@ PRIVATE_CXX_FLAGS = "-ffile-prefix-map=$(abspath .)=Linnet/Workspace" \
 	-fdebug-compilation-dir=.
 
 .PHONY: copy-rime-binaries verify-rime-binaries smart-english-plugin \
-	english-data-generator
+	english-data-generator linnet-pack-tool
 
 copy-rime-binaries:
 	@set -e; \
@@ -139,11 +148,18 @@ smart-english-plugin: $(SMART_ENGLISH_PLUGIN)
 
 english-data-generator: $(ENGLISH_DATA_GENERATOR)
 
+linnet-pack-tool: $(LINNET_PACK_TOOL)
+
 $(ENGLISH_DATA_GENERATOR): $(ENGLISH_DATA_GENERATOR_SOURCES)
 	@mkdir -p $(@D)
 	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
 		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 \
 		$(ENGLISH_DATA_GENERATOR_SOURCES) -o $(ENGLISH_DATA_GENERATOR)
+
+$(LINNET_PACK_TOOL): $(LINNET_PACK_TOOL_SOURCES)
+	@mkdir -p $(@D)
+	$(SWIFTC) -warnings-as-errors -sdk "$(MACOS_SDK)" \
+		$(LINNET_PACK_TOOL_SOURCES) -o $(LINNET_PACK_TOOL)
 
 $(SMART_ENGLISH_PLUGIN): $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
 		$(SMART_ENGLISH_SDK_HEADERS) \
@@ -205,7 +221,10 @@ define build-linnet-app
 	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app)"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
 	products_root="$(abspath $(DERIVED_DATA_PATH)/Build/Products)"; \
+	build_stamp="$${products_root}/$(1)/.linnet-build-complete"; \
 	local_app_cleanup='scripts/unregister-local-apps'; \
+	if [ -L "$${build_stamp}" ]; then unlink "$${build_stamp}"; \
+	else /bin/rm -f -- "$${build_stamp}"; fi; \
 	trap '"$${local_app_cleanup}" "$${products_root}" "$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}" >/dev/null 2>&1 || true' EXIT INT TERM HUP; \
 		xcodebuild -project Linnet.xcodeproj -configuration $(1) -scheme Linnet \
 			-destination '$(XCODE_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) \
@@ -215,6 +234,7 @@ define build-linnet-app
 		"$${app_path}" "$${embedded_settings_app_path}" "$${settings_app_path}"; \
 	"$${local_app_cleanup}" "$${products_root}" \
 		"$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}"; \
+	/usr/bin/touch "$${build_stamp}"; \
 	trap - EXIT INT TERM HUP; \
 	echo "Linnet $(1) App: BUILT (local, unsigned)"
 endef

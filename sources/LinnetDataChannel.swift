@@ -13,17 +13,6 @@ enum LinnetDataChannel {
   /// catalogs before it creates a transaction or downloads any pack.
   static let minimumCatalogSequence: UInt64 = 4
 
-  /// One release-owned switch separates a build that can only use embedded
-  /// data from a build whose online catalog has actually been
-  /// published. Settings consumes this state; it never guesses publication
-  /// from the presence of a local public key or Active directory.
-  enum Service: Equatable, Sendable {
-    case unpublished
-    case published
-  }
-
-  static let service: Service = .published
-
   enum Failure: LocalizedError, Equatable {
     case invalidCatalog(String)
     case invalidArtifact(String)
@@ -56,7 +45,7 @@ enum LinnetDataChannel {
     }
 
     func matches(_ pack: LinnetDataRegistry.ActivePack) -> Bool {
-      kind.rawValue == pack.kind.rawValue
+      kind == pack.kind
         && version == pack.version
         && sequence == pack.sequence
         && dataABI == pack.dataABI
@@ -142,7 +131,7 @@ enum LinnetDataChannel {
       guard let edition, let selected = activationSet(for: edition) else { return .current }
       let updates = selected.packs.compactMap { artifact -> LanguageDataUpdate? in
         let installed = installedPacks.first {
-          $0.kind.rawValue == artifact.kind.rawValue
+          $0.kind == artifact.kind
         }
         guard installed.map({ artifact.matches($0) }) != true else { return nil }
         return .init(

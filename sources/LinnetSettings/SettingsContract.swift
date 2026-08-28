@@ -73,6 +73,10 @@ enum LinnetSettingsContract {
     case activateLanguage = "activate_language"
     case cancel
     case diagnose
+    /// User-requested replacement of an installed Core. The running Host may
+    /// accept only after its process-lifetime client ledger proves that every
+    /// prior input application except the Settings requester has exited.
+    case activateCore = "activate_core"
     /// Atomically publishes a candidate settings document whose differences
     /// are limited to the panel-live appearance subset, then reconciles and
     /// redeploys squirrel.yaml without rebuilding dictionaries.
@@ -92,6 +96,7 @@ enum LinnetSettingsContract {
     case rolledBack
     case rejected
     case failed
+    case terminating
   }
 
   enum RuntimePhase: String, Codable, Equatable, Sendable {
@@ -127,6 +132,22 @@ enum LinnetSettingsContract {
     case rollbackFailed = "rollback_failed"
     case deadlineExpired = "deadline_expired"
     case requesterExited = "requester_exited"
+    case coreActivationAccepted = "core_activation_accepted"
+    case coreActivationInputSourceActive = "core_activation_input_source_active"
+    case coreActivationCompositionActive = "core_activation_composition_active"
+    case coreActivationDataTransactionActive = "core_activation_data_transaction_active"
+    case coreActivationApplicationsRunning = "core_activation_applications_running"
+    case coreActivationUnknownClient = "core_activation_unknown_client"
+    case coreActivationRequesterUnavailable = "core_activation_requester_unavailable"
+  }
+
+  enum CoreActivationBlocker: String, Codable, Equatable, Sendable {
+    case inputSourceActive = "input_source_active"
+    case compositionActive = "composition_active"
+    case dataTransactionActive = "data_transaction_active"
+    case applicationsStillRunning = "applications_still_running"
+    case unknownClient = "unknown_client"
+    case requesterUnavailable = "requester_unavailable"
   }
 
   struct ProductIdentity: Codable, Equatable, Sendable {
@@ -251,7 +272,6 @@ enum LinnetSettingsContract {
     }
     defaults.set(true, forKey: cloudSyncEnabledKey)
     defaults.removeObject(forKey: legacyCloudSyncFolderBookmarkKey)
-    _ = defaults.synchronize()
     return true
   }
 
@@ -263,7 +283,7 @@ enum LinnetSettingsContract {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
     defaults.set(enabled, forKey: cloudSyncEnabledKey)
     defaults.removeObject(forKey: legacyCloudSyncFolderBookmarkKey)
-    return defaults.synchronize()
+    return true
   }
 
   static func cloudSyncLastAttempt(startingAt bundle: Bundle = .main) -> Date? {
@@ -277,7 +297,7 @@ enum LinnetSettingsContract {
   ) -> Bool {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
     defaults.set(date, forKey: cloudSyncLastAttemptKey)
-    return defaults.synchronize()
+    return true
   }
 
   static func dataRegistry(startingAt bundle: Bundle = .main) -> LinnetDataRegistry? {
@@ -293,18 +313,6 @@ enum LinnetSettingsContract {
       !coreVersion.isEmpty
     else { return nil }
     return try? LinnetDataRegistry(productName: productName, coreVersion: coreVersion)
-  }
-
-  static func hostUserDirectory(startingAt bundle: Bundle = .main) -> URL? {
-    dataRegistry(startingAt: bundle)?.userDataDirectory
-  }
-
-  static func dataTransactionsRoot(startingAt bundle: Bundle = .main) -> URL? {
-    dataRegistry(startingAt: bundle)?.transactionsDirectory
-  }
-
-  static func backupsRoot(startingAt bundle: Bundle = .main) -> URL? {
-    dataRegistry(startingAt: bundle)?.backupsDirectory
   }
 
   static func validDataRequest(_ request: DataRequest) -> Bool {
@@ -326,6 +334,108 @@ enum LinnetSettingsContract {
 
   static func requestCanContinue(_ request: DataRequest, now: Date = Date()) -> Bool {
     request.deadline > now && requesterIsAlive(request.requesterPID)
+  }
+}
+
+/// Process-lifetime evidence owner for InputMethodKit clients. A controller's
+/// deinit does not prove that its application released the old IMKServer
+/// endpoint, so history is deliberately append-only until the Host exits.
+final class LinnetInputClientLedger: @unchecked Sendable {
+  struct Snapshot: Equatable, Sendable {
+    let bundleIdentifiers: Set<String>
+    let hasUnknownClient: Bool
+    let generation: UInt64
+  }
+
+  private let lock = NSLock()
+  private var bundleIdentifiers = Set<String>()
+  private var hasUnknownClient = false
+  private var generation: UInt64 = 0
+
+  func record(bundleIdentifier: String?) {
+    lock.lock()
+    defer { lock.unlock() }
+    generation &+= 1
+    guard let bundleIdentifier,
+      !bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      hasUnknownClient = true
+      return
+    }
+    bundleIdentifiers.insert(bundleIdentifier)
+  }
+
+  func snapshot() -> Snapshot {
+    lock.lock()
+    defer { lock.unlock() }
+    return .init(
+      bundleIdentifiers: bundleIdentifiers,
+      hasUnknownClient: hasUnknownClient,
+      generation: generation
+    )
+  }
+}
+
+/// Pure fail-closed decision owner for the explicit Core activation boundary.
+/// Callers supply current macOS process evidence; this owner never infers that
+/// controller teardown means an application endpoint has disconnected.
+enum LinnetCoreActivationGate {
+  struct RunningApplication: Equatable, Sendable {
+    let processIdentifier: Int32
+    let bundleIdentifier: String?
+    let displayName: String
+  }
+
+  struct Decision: Equatable, Sendable {
+    let blocker: LinnetSettingsContract.CoreActivationBlocker?
+    let applications: [String]
+
+    var isReady: Bool { blocker == nil }
+  }
+
+  static func evaluate(
+    inputSourceIsActive: Bool,
+    compositionIsActive: Bool,
+    dataTransactionIsActive: Bool,
+    history: LinnetInputClientLedger.Snapshot,
+    runningApplications: [RunningApplication],
+    requesterPID: Int32
+  ) -> Decision {
+    if dataTransactionIsActive {
+      return .init(blocker: .dataTransactionActive, applications: [])
+    }
+    if inputSourceIsActive {
+      return .init(blocker: .inputSourceActive, applications: [])
+    }
+    if compositionIsActive {
+      return .init(blocker: .compositionActive, applications: [])
+    }
+    if history.hasUnknownClient {
+      return .init(blocker: .unknownClient, applications: [])
+    }
+    guard let requester = runningApplications.first(where: {
+      $0.processIdentifier == requesterPID
+    }), let requesterBundleIdentifier = requester.bundleIdentifier else {
+      return .init(blocker: .requesterUnavailable, applications: [])
+    }
+
+    var blockingNames = Set<String>()
+    for bundleIdentifier in history.bundleIdentifiers {
+      let matching = runningApplications.filter { $0.bundleIdentifier == bundleIdentifier }
+      guard !matching.isEmpty else { continue }
+      if bundleIdentifier == requesterBundleIdentifier,
+        matching.allSatisfy({ $0.processIdentifier == requesterPID }) {
+        continue
+      }
+      blockingNames.formUnion(matching.map(\.displayName))
+    }
+    guard blockingNames.isEmpty else {
+      return .init(
+        blocker: .applicationsStillRunning,
+        applications: blockingNames.sorted()
+      )
+    }
+    return .init(blocker: nil, applications: [])
   }
 }
 
