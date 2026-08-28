@@ -1430,25 +1430,31 @@ ruby -e '
   lifecycle = File.read("sources/SquirrelApplicationPresentation.swift")
   controller = File.read("sources/SquirrelInputController.swift")
   settings = File.read("sources/LinnetSettings/LinnetSettingsUpdateChecker.swift")
-  activation = lifecycle[/func activateInstalledCore\(.*?\n  \}/m]
-  abort "the Core activation owner is missing" unless activation
-  abort "Core activation can bypass Host readiness" unless
-    activation.scan("coreActivationReadiness == .ready").length == 2 &&
-      activation.scan("requestCanContinue(request)").length == 2 &&
-      activation.scan("NSApp.terminate(nil)").length == 1 &&
-      !activation.include?("forceTerminate")
-  abort "connected InputMethodKit clients lost their lifecycle owner" unless
-    controller.scan("markInputClientConnected()").length == 2 &&
-      controller.scan("markInputClientDisconnected()").length == 2 &&
-      controller.include?("connectedInputClientCount")
-  abort "Settings can activate an unverified or substituted Host" unless
-    settings.include?("health.productIdentity == installedIdentity") &&
-      settings.include?("allowsRunningApplicationSubstitution = false") &&
-      settings.include?("reply.code == .coreActivationAccepted")
   combined = contract + host + lifecycle + controller + settings
+  retired = [
+    "activateCore", "activate_core", "activateInstalledCore",
+    "CoreActivationReadiness", "coreActivationReadiness",
+    "connectedInputClientCount", "markInputClientConnected",
+    "markInputClientDisconnected", "coreActivationAccepted",
+    "coreActivationBlocked"
+  ]
+  returned = retired.select { |name| combined.include?(name) }
+  abort "retired immediate Core activation paths returned: #{returned.join(", ")}" unless
+    returned.empty?
+  abort "a Core update can still terminate or launch the InputMethodKit Host" if
+    lifecycle.include?("NSApp.terminate") ||
+      settings.include?("openApplication") ||
+      settings.include?("runningApplications")
+  abort "the running Core identity is not captured at Host process start" unless
+    host.include?("processProductIdentity") &&
+      host.scan("productIdentity: processProductIdentity").length == 3
+  abort "Settings lost the passive installed-versus-running identity comparison" unless
+    settings.include?("installedIdentity == running") &&
+      settings.include?("case pending(") &&
+      settings.include?("installed: LinnetSettingsContract.ProductIdentity")
   abort "Core activation gained a second input-source mutation path" if
     combined.match?(/TIS(Register|Enable|Select|Disable)InputSource/)
-' || fail "safe installed-Core activation ownership regressed"
+' || fail "zero-disruption Core update ownership regressed"
 retired_catalog_url='https://github.com/Ares-X/Linnet/releases/download/'\
 'data-channel/Linnet-Data-Channel.json'
 if rg -nF "${retired_catalog_url}" \

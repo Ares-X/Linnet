@@ -73,9 +73,6 @@ enum LinnetSettingsContract {
     case activateLanguage = "activate_language"
     case cancel
     case diagnose
-    /// Gracefully exits an inactive Host so the already-installed Core can be
-    /// launched from its canonical bundle. The Host alone decides readiness.
-    case activateCore = "activate_core"
     /// Atomically publishes a candidate settings document whose differences
     /// are limited to the panel-live appearance subset, then reconciles and
     /// redeploys squirrel.yaml without rebuilding dictionaries.
@@ -95,7 +92,6 @@ enum LinnetSettingsContract {
     case rolledBack
     case rejected
     case failed
-    case terminating
   }
 
   enum RuntimePhase: String, Codable, Equatable, Sendable {
@@ -131,8 +127,6 @@ enum LinnetSettingsContract {
     case rollbackFailed = "rollback_failed"
     case deadlineExpired = "deadline_expired"
     case requesterExited = "requester_exited"
-    case coreActivationAccepted = "core_activation_accepted"
-    case coreActivationBlocked = "core_activation_blocked"
   }
 
   struct ProductIdentity: Codable, Equatable, Sendable {
@@ -141,17 +135,8 @@ enum LinnetSettingsContract {
     let revision: String
   }
 
-  enum CoreActivationReadiness: String, Codable, Equatable, Sendable {
-    case ready
-    case inputSourceActive = "input_source_active"
-    case inputClientConnected = "input_client_connected"
-    case dataTransactionActive = "data_transaction_active"
-  }
-
   struct RuntimeHealth: Codable, Equatable, Sendable {
     let productIdentity: ProductIdentity?
-    let coreActivationReadiness: CoreActivationReadiness
-    let connectedInputClientCount: Int
     let state: RuntimeStatus
     let phase: RuntimePhase
     let rimeVersion: String
@@ -363,17 +348,6 @@ extension LinnetSettingsContract {
     return .init(version: version, build: build, revision: revision)
   }
 
-  static func coreActivationReadiness(
-    inputSourceIsActive: Bool,
-    connectedInputClientCount: Int,
-    dataTransactionActive: Bool
-  ) -> CoreActivationReadiness {
-    if dataTransactionActive { return .dataTransactionActive }
-    if inputSourceIsActive { return .inputSourceActive }
-    if connectedInputClientCount > 0 { return .inputClientConnected }
-    return .ready
-  }
-
   static func validRuntimeReply(_ reply: RuntimeReply) -> Bool {
     guard !reply.detail.isEmpty else { return false }
     guard let health = reply.health else { return true }
@@ -391,7 +365,6 @@ extension LinnetSettingsContract {
     }
     return [.running, .paused, .degraded].contains(health.state)
       && validProductIdentity
-      && health.connectedInputClientCount >= 0
       && !health.rimeVersion.isEmpty
       && health.availableSchemaCount >= 0
       && health.requiredSchemaCount > 0
@@ -433,9 +406,6 @@ extension LinnetSettingsContract {
     }
     let requiresCandidate = command == .activate || command == .activateLanguage
     guard requiresCandidate == (candidate != nil) else { return false }
-    if command == .activateCore {
-      return expectedGeneration == nil && expectedDigest == nil
-    }
     return command == .activateLanguage
       ? expectedGeneration != nil
       : (command == .pause || expectedGeneration == nil)

@@ -59,6 +59,9 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
   private let warmRimeSession = LinnetRimeWarmSession()
   private var workspacePowerOffObserver: NSObjectProtocol?
   private var settingsTransactionHost: LinnetSettingsTransactionIPC.Host?
+  /// The running identity belongs to this process lifetime. Reading the bundle
+  /// again after a Core install would mix old executable state with new files.
+  private let processProductIdentity = LinnetSettingsContract.productIdentity()
   private var currentTransactionReply:
     (UUID, LinnetSettingsTransactionIPC.Reply)?
   private var lastLoadedSchemaID: String?
@@ -452,8 +455,6 @@ extension SquirrelApplicationDelegate {
         detail: "Runtime diagnostics are available.",
         health: health
       )
-    case .activateCore:
-      activateInstalledCore(request)
     case .refresh:
       publishSettingsCandidate(request, scope: .appearance)
     case .reloadConfiguration:
@@ -1015,12 +1016,9 @@ extension SquirrelApplicationDelegate {
   }
 
   func runtimeHealth() -> LinnetSettingsContract.RuntimeHealth {
-    let activation = coreActivationState(dataTransactionActive: activeDataTransaction != nil)
     if let active = activeDataTransaction, active.phase == .paused {
       return .init(
-        productIdentity: LinnetSettingsContract.productIdentity(),
-        coreActivationReadiness: activation.readiness,
-        connectedInputClientCount: activation.connectedClientCount,
+        productIdentity: processProductIdentity,
         state: .paused,
         phase: .paused,
         rimeVersion: rimeVersion(),
@@ -1058,9 +1056,7 @@ extension SquirrelApplicationDelegate {
       && smartEnglishLoaded && octagramLoaded && available == requiredSchemas.count
       && activeSettingsRevision != nil
     return .init(
-      productIdentity: LinnetSettingsContract.productIdentity(),
-      coreActivationReadiness: activation.readiness,
-      connectedInputClientCount: activation.connectedClientCount,
+      productIdentity: processProductIdentity,
       state: healthy ? .running : .degraded,
       phase: activeDataTransaction?.phase ?? .running,
       rimeVersion: rimeVersion(),
@@ -1080,11 +1076,8 @@ extension SquirrelApplicationDelegate {
   fileprivate func degradedHealth(
     phase: LinnetSettingsContract.RuntimePhase
   ) -> LinnetSettingsContract.RuntimeHealth {
-    let activation = coreActivationState(dataTransactionActive: activeDataTransaction != nil)
     return .init(
-      productIdentity: LinnetSettingsContract.productIdentity(),
-      coreActivationReadiness: activation.readiness,
-      connectedInputClientCount: activation.connectedClientCount,
+      productIdentity: processProductIdentity,
       state: .degraded,
       phase: phase,
       rimeVersion: rimeVersion(),

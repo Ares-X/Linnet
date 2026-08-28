@@ -637,8 +637,6 @@ struct SettingsDataCoordinatorTests {
             request: request,
             health: .init(
               productIdentity: fixtureRuntimeIdentity,
-              coreActivationReadiness: .ready,
-              connectedInputClientCount: 0,
               state: .running,
               phase: .running,
               rimeVersion: "fixture",
@@ -650,8 +648,6 @@ struct SettingsDataCoordinatorTests {
               activeSettingsRevision: try? LinnetSettingsDocumentStore.snapshot(from: live).revision
             )
           )
-        case .activateCore:
-          fail("the data coordinator requested Core activation")
         }
       }
 
@@ -2589,8 +2585,6 @@ struct SettingsDataCoordinatorTests {
   ) -> LinnetSettingsContract.RuntimeHealth {
     .init(
       productIdentity: fixtureRuntimeIdentity,
-      coreActivationReadiness: .ready,
-      connectedInputClientCount: 0,
       state: .running,
       phase: .running,
       rimeVersion: "fixture",
@@ -2619,7 +2613,6 @@ struct SettingsDataCoordinatorTests {
       case .running, .degraded: code = .diagnosticsReady
       case .paused: code = .runtimePaused
       case .activated: code = .activationVerified
-      case .terminating: code = .coreActivationAccepted
       case .cancelled: code = .runtimeResumed
       case .rolledBack: code = .activationRolledBack
       case .rejected: code = .invalidCandidate

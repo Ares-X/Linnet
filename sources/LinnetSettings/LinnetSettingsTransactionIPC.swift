@@ -455,7 +455,6 @@ extension LinnetSettingsTransactionIPC {
     case .refresh, .reloadConfiguration:
       return [.activated, .rejected, .failed].contains(status)
     case .diagnose: return [.running, .paused, .degraded, .failed].contains(status)
-    case .activateCore: return [.terminating, .rejected, .failed].contains(status)
     }
   }
 }

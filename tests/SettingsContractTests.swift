@@ -14,7 +14,6 @@ struct SettingsContractTests {
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
         testProductIdentity(host: host, settings: settings)
-        testCoreActivationReadiness()
         testSuitePersistence(host: host, settings: settings, hostIdentifier: hostIdentifier)
         testInvalidStoredValueFallsBack(
           settings: settings,
@@ -73,32 +72,6 @@ struct SettingsContractTests {
       LinnetSettingsContract.productIdentity(startingAt: settings) == expected
     else {
       fail("installed and running product identity did not share one bundle owner")
-    }
-  }
-
-  private static func testCoreActivationReadiness() {
-    guard LinnetSettingsContract.coreActivationReadiness(
-      inputSourceIsActive: false,
-      connectedInputClientCount: 0,
-      dataTransactionActive: false
-    ) == .ready,
-      LinnetSettingsContract.coreActivationReadiness(
-        inputSourceIsActive: true,
-        connectedInputClientCount: 0,
-        dataTransactionActive: false
-      ) == .inputSourceActive,
-      LinnetSettingsContract.coreActivationReadiness(
-        inputSourceIsActive: false,
-        connectedInputClientCount: 1,
-        dataTransactionActive: false
-      ) == .inputClientConnected,
-      LinnetSettingsContract.coreActivationReadiness(
-        inputSourceIsActive: false,
-        connectedInputClientCount: 0,
-        dataTransactionActive: true
-      ) == .dataTransactionActive
-    else {
-      fail("Core activation readiness no longer fails closed at its Host boundaries")
     }
   }
 
@@ -260,8 +233,6 @@ struct SettingsContractTests {
       health: .init(
         productIdentity: .init(
           version: "1.0.0", build: 7, revision: String(repeating: "a", count: 40)),
-        coreActivationReadiness: .ready,
-        connectedInputClientCount: 0,
         state: .running,
         phase: .running,
         rimeVersion: "1.16.0",
@@ -337,27 +308,13 @@ struct SettingsContractTests {
       deadline: deadline,
       expectedSettingsRevision: settingsDigest,
       alternateSettingsRevision: replacementSettingsDigest)
-    let validCoreActivation = LinnetSettingsContract.DataRequest(
-      transactionID: transactionID,
-      command: .activateCore,
-      candidate: nil,
-      requesterPID: requesterPID,
-      deadline: deadline)
-    let invalidCoreActivation = LinnetSettingsContract.DataRequest(
-      transactionID: transactionID,
-      command: .activateCore,
-      candidate: candidate,
-      requesterPID: requesterPID,
-      deadline: deadline)
     guard !LinnetSettingsContract.validDataRequest(missingCandidate),
       !LinnetSettingsContract.validDataRequest(missingCAS),
       !LinnetSettingsContract.validDataRequest(invalidPause),
       !LinnetSettingsContract.validDataRequest(invalidReload),
       !LinnetSettingsContract.validDataRequest(invalidRefreshWithoutCAS),
       LinnetSettingsContract.validDataRequest(validRecoveryReload),
-      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh),
-      LinnetSettingsContract.validDataRequest(validCoreActivation),
-      !LinnetSettingsContract.validDataRequest(invalidCoreActivation)
+      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh)
     else {
       fail("invalid command and candidate combinations were accepted")
     }
