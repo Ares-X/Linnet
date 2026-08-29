@@ -434,7 +434,7 @@ expected_install_mode="core-update"
 [[ "${edition}" != complete ]] || expected_install_mode=complete
 [[ "$(cat "${core_component}/Scripts/install-mode")" == "${expected_install_mode}" ]] ||
   fail_verification "Core component installation mode mismatch"
-grep -Fq 'check_active_core' "${core_component}/Scripts/preinstall" ||
+grep -Fq 'inspect_runtime || {' "${core_component}/Scripts/preinstall" ||
   fail_verification "Core compatibility preflight is incomplete"
 grep -Fq '"${identity_helper}" existing' "${core_component}/Scripts/preinstall" ||
   fail_verification "Core candidate identity preflight is incomplete"
