@@ -8,6 +8,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   enum RuntimeVersionState: Equatable {
     case checking
     case current(LinnetSettingsContract.ProductIdentity)
+    case restartRequired(LinnetSettingsContract.ProductIdentity)
     case pending(
       installed: LinnetSettingsContract.ProductIdentity,
       running: LinnetSettingsContract.ProductIdentity
@@ -31,6 +32,33 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
       running: LinnetSettingsContract.ProductIdentity
     )
     case unavailable
+
+    static func resolved(
+      installed: LinnetSettingsContract.ProductIdentity?,
+      health: LinnetSettingsContract.RuntimeHealth?
+    ) -> Self {
+      guard let installed, let health else { return .unavailable }
+      guard let running = health.productIdentity else {
+        return .restartRequired(installed)
+      }
+      return installed == running
+        ? .current(running)
+        : .pending(installed: installed, running: running)
+    }
+
+    var activationIdentities: (
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )? {
+      switch self {
+      case .pending(let installed, let running),
+        .blocked(let installed, let running, _),
+        .failed(let installed, let running):
+        (installed, running)
+      default:
+        nil
+      }
+    }
   }
 
   @Published private(set) var availability: LinnetDataChannel.UpdateAvailability?
@@ -98,7 +126,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
 
 extension LinnetSettingsUpdateChecker {
   func activateInstalledCore() {
-    guard let identities = activationIdentities,
+    guard let identities = runtimeVersionState.activationIdentities,
       installedIdentity != nil,
       hostBundleURL != nil,
       hostBundleIdentifier != nil
@@ -301,35 +329,13 @@ extension LinnetSettingsUpdateChecker {
   ) {
     guard activeCycle == runtimeCycle else { return }
     runtimeTask = nil
-    guard let installedIdentity, let health, let running = health.productIdentity else {
-      runtimeVersionState = .unavailable
-      return
-    }
-    if installedIdentity == running {
-      runtimeVersionState = .current(running)
-    } else {
-      runtimeVersionState = .pending(installed: installedIdentity, running: running)
-    }
+    runtimeVersionState = .resolved(installed: installedIdentity, health: health)
   }
 
   private func finishRuntimeUnavailable(cycle activeCycle: UInt64) {
     guard activeCycle == runtimeCycle else { return }
     runtimeVersionState = .unavailable
     runtimeTask = nil
-  }
-
-  private var activationIdentities: (
-    installed: LinnetSettingsContract.ProductIdentity,
-    running: LinnetSettingsContract.ProductIdentity
-  )? {
-    switch runtimeVersionState {
-    case .pending(let installed, let running),
-      .blocked(let installed, let running, _),
-      .failed(let installed, let running):
-      return (installed, running)
-    default:
-      return nil
-    }
   }
 
   private func coreActivationIssue(

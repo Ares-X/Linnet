@@ -108,16 +108,25 @@ extension DataTabView {
       LabeledContent("Running Core") {
         Text(verbatim: productIdentityDescription(identity))
       }
+    case .restartRequired(let installed):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("Installed Core will start after one normal login", systemImage: "info.circle")
+          .foregroundStyle(.orange)
+        LabeledContent("Installed") {
+          Text(verbatim: productIdentityDescription(installed))
+        }
+        Text(
+          "This running Core cannot prove that every app released its old input connection. Apply Installed Update is therefore unavailable for this transition. After one normal macOS login or restart, later updates can be applied without another logout."
+        )
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
     case .pending(let installed, let running):
       VStack(alignment: .leading, spacing: 4) {
         Label("Installed Core update is ready", systemImage: "checkmark.circle")
           .foregroundStyle(.orange)
-        LabeledContent("Running") {
-          Text(verbatim: productIdentityDescription(running))
-        }
-        LabeledContent("Installed") {
-          Text(verbatim: productIdentityDescription(installed))
-        }
+        coreIdentityRows(installed: installed, running: running)
         Text(
           "You can keep using the current Core, or apply the installed Core after switching away from Linnet and closing other apps that have used it. No logout is required."
         )

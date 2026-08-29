@@ -102,6 +102,17 @@ compile_run settings-session \
 compile_run settings-window-close -framework AppKit -framework SwiftUI \
   sources/LinnetSettings/SettingsWindowCloseGuard.swift \
   tests/SettingsWindowCloseCoordinatorTests.swift
+compile_run settings-update-checker -framework AppKit \
+  sources/LinnetPackContract.swift \
+  sources/LinnetDataChannel.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
+  sources/LinnetSettings/SettingsContract.swift \
+  sources/LinnetSettings/LinnetSettingsDownloadSource.swift \
+  sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift \
+  sources/LinnetSettings/LinnetSettingsDownloadTransport.swift \
+  sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
+  sources/LinnetSettings/LinnetSettingsUpdateChecker.swift \
+  tests/LinnetSettingsUpdateCheckerStateTests.swift
 compile_run backup-store \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
