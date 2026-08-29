@@ -1476,9 +1476,8 @@ ruby -e '
       preparation.include?("Task.detached(priority: .userInitiated)")
   abort "UpdateChecker init regained an implicit network or runtime check" if
     update_initializer.match?(/\b(?:check|refreshRuntime|startCheck)\(\)/)
-  abort "Host can launch Settings without activation or exact-copy guards" unless
-    settings_launch.include?("configuration.activates = true") &&
-      settings_launch.include?("allowsRunningApplicationSubstitution = false") &&
+  abort "Host can launch a substituted Settings copy" unless
+    settings_launch.include?("allowsRunningApplicationSubstitution = false") &&
       settings_launch.include?("addsToRecentItems = false")
 ' || fail "Settings first-screen work escaped its deferred owner"
 if rg -n 'Timer|LaunchAgent|UNUserNotification|startMonitoring' \
@@ -2634,22 +2633,32 @@ rg -Fq 'else if statusTimer == nil {' sources/SquirrelPanel.swift ||
 rg -Fq 'func handlePassiveEmptyUpdate(' sources/SquirrelPanel.swift ||
   fail "passive empty updates no longer defer to the candidate panel"
 
-# The Settings process owns activation of its own window. Reopening Settings
-# must never depend on cross-process window inference in the input-method host.
+# The Host owns the explicit cross-process activation request after opening the
+# embedded Settings app. Settings owns only ordering its own key window once
+# AppKit delivers activation/reopen; neither side may infer another window.
 ruby -e '
   source = File.read(ARGV.fetch(0))
+  host = File.read(ARGV.fetch(1))
   owner = source[/private func presentSettingsWindow\(.*?\n  \}/m]
+  opener = host[/@objc func openSettings\(\) \{.*?\n  \}\n\n  static func showMessage/m]
   abort "Settings lost its reopen activation owner" unless owner &&
-    source.include?("applicationShouldHandleReopen")
-  activate = owner.index("application.activate(ignoringOtherApps: true)")
-  front = owner.index("window.makeKeyAndOrderFront(nil)")
-  abort "Settings no longer activates itself before presenting its window" unless
-    activate && front && activate < front &&
-      owner.scan("activate(ignoringOtherApps: true)").length == 1 &&
-      owner.scan("makeKeyAndOrderFront(nil)").length == 1
+    source.include?("applicationShouldHandleReopen") && opener
+  abort "Settings no longer orders exactly its own key window" unless
+    owner.scan("window.makeKeyAndOrderFront(nil)").length == 1
+  abort "Settings regained a duplicate in-process activation owner" if
+    owner.include?("application.activate(")
+  abort "the Host does not activate the exact opened Settings process" unless
+    opener.include?(") { runningApplication, error in") &&
+      opener.include?("guard error == nil, let runningApplication else") &&
+      opener.scan("runningApplication.activate(").length == 1 &&
+      opener.include?(".activateAllWindows") &&
+      opener.include?(".activateIgnoringOtherApps")
+  abort "the unreliable implicit Settings activation path returned" if
+    opener.include?("configuration.activates = true")
   abort "Settings gained a competing floating or unconditional window owner" if
     source.match?(/orderFrontRegardless|\.level\s*=|setActivationPolicy|asyncAfter/)
-' sources/LinnetSettings/SettingsApplication.swift ||
+' sources/LinnetSettings/SettingsApplication.swift \
+  sources/SquirrelApplicationPresentation.swift ||
   fail "Settings window activation ownership regressed"
 
 # Per-application Rime options remain in Squirrel's canonical session owner.

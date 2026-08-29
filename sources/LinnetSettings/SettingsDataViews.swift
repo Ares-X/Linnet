@@ -116,7 +116,7 @@ extension DataTabView {
           Text(verbatim: productIdentityDescription(installed))
         }
         Text(
-          "This running Core cannot prove that every app released its old input connection. Apply Installed Update is therefore unavailable for this transition. After one normal macOS login or restart, later updates can be applied without another logout."
+          "This Core cannot verify every app released its old input connection, so this update cannot be applied now. After one normal macOS login or restart, later updates need no logout."
         )
         .font(.caption2)
         .foregroundStyle(.secondary)

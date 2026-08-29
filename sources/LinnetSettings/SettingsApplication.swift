@@ -53,7 +53,6 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
 
   private func presentSettingsWindow(in application: NSApplication) {
     guard let window = application.windows.first(where: { $0.canBecomeKey }) else { return }
-    application.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
   }
 }
