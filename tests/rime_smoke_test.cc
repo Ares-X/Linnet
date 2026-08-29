@@ -340,6 +340,20 @@ void ExpectFirstCandidate(RimeApi_stdbool* api,
   if (candidates.empty() || candidates.front().text != expected) {
     const std::string actual =
         candidates.empty() ? "<none>" : candidates.front().text;
+    const auto live = rime::Service::instance().GetSession(session);
+    if (live && live->context()) {
+      std::cerr << "Composition for '" << input << "': "
+                << live->context()->composition().GetDebugText() << '\n';
+    }
+    std::cerr << "Candidate origins for '" << input << "':";
+    std::size_t shown = 0;
+    for (const auto& candidate : CandidateOrigins(session)) {
+      if (shown++ == 20) break;
+      std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                << candidate.genuine_type << ":q=" << candidate.quality
+                << ":weight=" << candidate.phrase_system_lexical_weight << "]";
+    }
+    std::cerr << '\n';
     Fail("expected first candidate '" + expected + "' for input '" + input +
          "', got '" + actual + "'");
   }
@@ -771,6 +785,25 @@ void ExpectModelessMixedInput(RimeApi_stdbool* api) {
     Fail("standalone cs did not preserve Chinese/English ambiguity");
   }
   api->destroy_session(ambiguous);
+}
+
+void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
+  constexpr char kExpected[] = "希尔瓦娜斯";
+  constexpr std::array<std::pair<const char*, const char*>, 8> kProfiles = {{
+      {"linnet_zh_pinyin", "xi'er'wa'na'si"},
+      {"linnet_zh", "xierwanasi"},
+      {"linnet_zh_flypy", "xierwanasi"},
+      {"linnet_zh_mspy", "xiorwanasi"},
+      {"linnet_zh_sogou", "xiorwanasi"},
+      {"linnet_zh_abc", "xiorwanasi"},
+      {"linnet_zh_ziguang", "xiojwanasi"},
+      {"linnet_zh_jiajia", "xieqwanasi"},
+  }};
+  for (const auto& profile : kProfiles) {
+    const RimeSessionId session = CreateSchemaSession(api, profile.first);
+    ExpectFirstCandidate(api, session, profile.second, kExpected);
+    api->destroy_session(session);
+  }
 }
 
 void ExpectModelessMixedLearningEnabled(RimeApi_stdbool* api) {
@@ -1213,6 +1246,44 @@ void ExpectNineCandidateSelectKeys(RimeApi_stdbool* api,
          " swallowed zero despite a nine-candidate page");
   }
   api->destroy_session(session);
+}
+
+int CurrentCandidatePage(RimeApi_stdbool* api,
+                         RimeSessionId session,
+                         const std::string& reason) {
+  RimeContext_stdbool context = {};
+  RIME_STRUCT_INIT(RimeContext_stdbool, context);
+  if (!api->get_context(session, &context)) {
+    Fail("could not inspect candidate page for " + reason);
+  }
+  const int page = context.menu.page_no;
+  api->free_context(&context);
+  return page;
+}
+
+void ExpectCandidatePagingShortcuts(RimeApi_stdbool* api,
+                                    const char* schema_id,
+                                    const std::string& input) {
+  for (const auto& key_case :
+       std::array<std::tuple<int, const char*, int, const char*>, 2>{{
+           {XK_bracketright, "right bracket", XK_bracketleft, "left bracket"},
+           {XK_equal, "equal", XK_minus, "minus"},
+       }}) {
+    const RimeSessionId session = CreateSchemaSession(api, schema_id);
+    Enter(api, session, input);
+    if (CurrentCandidatePage(api, session, "initial page") != 0 ||
+        !api->process_key(session, std::get<0>(key_case), 0) ||
+        CurrentCandidatePage(api, session, std::get<1>(key_case)) != 1) {
+      Fail(std::string(schema_id) + " " + std::get<1>(key_case) +
+           " did not move to the next candidate page");
+    }
+    if (!api->process_key(session, std::get<2>(key_case), 0) ||
+        CurrentCandidatePage(api, session, std::get<3>(key_case)) != 0) {
+      Fail(std::string(schema_id) + " " + std::get<3>(key_case) +
+           " did not return to the previous candidate page");
+    }
+    api->destroy_session(session);
+  }
 }
 
 LatencySample MeasureKey(RimeApi_stdbool* api,
@@ -2618,65 +2689,73 @@ void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
   }};
 
   for (const auto& punctuation : punctuation_cases) {
-    const std::string english_reason =
-        std::string("English active hello+") + punctuation.name;
-    const RimeSessionId english = CreateSchemaSession(api, "linnet_en");
-    Enter(api, english, "hello");
-    const auto english_candidates = Candidates(api, english);
-    const int english_selected = HighlightedCandidateIndex(api, english);
-    if (english_selected < 0 ||
-        static_cast<size_t>(english_selected) >= english_candidates.size()) {
-      Fail(english_reason + " has no selected candidate");
-    }
-    const std::string expected_word = english_candidates[english_selected].text;
-    if (api->process_key(english, punctuation.keycode,
-                         punctuation.modifiers)) {
-      Fail(english_reason +
-           " was captured instead of returning punctuation to the host");
-    }
-    const std::string actual_word = TakeCommit(api, english, english_reason);
-    if (actual_word != expected_word) {
-      Fail(english_reason + " committed '" + actual_word + "' instead of '" +
-           expected_word + "'");
-    }
-    const char* english_input = api->get_input(english);
-    if ((english_input && *english_input != '\0') ||
-        !Candidates(api, english).empty()) {
-      Fail(english_reason +
-           " did not clear input and menu on the same key event");
-    }
-    api->destroy_session(english);
+    const bool pages_candidates =
+        punctuation.modifiers == 0 &&
+        (punctuation.keycode == '-' || punctuation.keycode == '=' ||
+         punctuation.keycode == '[' || punctuation.keycode == ']');
+    if (!pages_candidates) {
+      const std::string english_reason =
+          std::string("English active hello+") + punctuation.name;
+      const RimeSessionId english = CreateSchemaSession(api, "linnet_en");
+      Enter(api, english, "hello");
+      const auto english_candidates = Candidates(api, english);
+      const int english_selected = HighlightedCandidateIndex(api, english);
+      if (english_selected < 0 ||
+          static_cast<size_t>(english_selected) >= english_candidates.size()) {
+        Fail(english_reason + " has no selected candidate");
+      }
+      const std::string expected_word =
+          english_candidates[english_selected].text;
+      if (api->process_key(english, punctuation.keycode,
+                           punctuation.modifiers)) {
+        Fail(english_reason +
+             " was captured instead of returning punctuation to the host");
+      }
+      const std::string actual_word = TakeCommit(api, english, english_reason);
+      if (actual_word != expected_word) {
+        Fail(english_reason + " committed '" + actual_word + "' instead of '" +
+             expected_word + "'");
+      }
+      const char* english_input = api->get_input(english);
+      if ((english_input && *english_input != '\0') ||
+          !Candidates(api, english).empty()) {
+        Fail(english_reason +
+             " did not clear input and menu on the same key event");
+      }
+      api->destroy_session(english);
 
-    const std::string reason =
-        std::string("Chinese active shi+") + punctuation.name;
-    const RimeSessionId session =
-        CreateSchemaSession(api, "linnet_zh_pinyin");
-    Enter(api, session, "shi");
-    const auto candidates = Candidates(api, session);
-    const int selected = HighlightedCandidateIndex(api, session);
-    if (selected < 0 || static_cast<size_t>(selected) >= candidates.size()) {
-      Fail(reason + " has no selected candidate");
+      const std::string reason =
+          std::string("Chinese active shi+") + punctuation.name;
+      const RimeSessionId session =
+          CreateSchemaSession(api, "linnet_zh_pinyin");
+      Enter(api, session, "shi");
+      const auto candidates = Candidates(api, session);
+      const int selected = HighlightedCandidateIndex(api, session);
+      if (selected < 0 || static_cast<size_t>(selected) >= candidates.size()) {
+        Fail(reason + " has no selected candidate");
+      }
+      const bool handled =
+          api->process_key(session, punctuation.keycode, punctuation.modifiers);
+      if (handled == punctuation.identity_mapping) {
+        Fail(reason + (punctuation.identity_mapping
+                           ? " captured an identity symbol instead of "
+                             "returning it to the host"
+                           : " did not commit through the Chinese punctuator"));
+      }
+      const std::string expected =
+          candidates[selected].text +
+          (punctuation.identity_mapping ? "" : punctuation.chinese_commit);
+      const std::string actual = TakeCommit(api, session, reason);
+      if (actual != expected) {
+        Fail(reason + " committed '" + actual + "' instead of '" + expected +
+             "'");
+      }
+      const char* input = api->get_input(session);
+      if ((input && *input != '\0') || !Candidates(api, session).empty()) {
+        Fail(reason + " did not clear input and menu on the same key event");
+      }
+      api->destroy_session(session);
     }
-    const bool handled = api->process_key(
-        session, punctuation.keycode, punctuation.modifiers);
-    if (handled == punctuation.identity_mapping) {
-      Fail(reason +
-           (punctuation.identity_mapping
-                ? " captured an identity symbol instead of returning it to the host"
-                : " did not commit through the Chinese punctuator"));
-    }
-    const std::string expected = candidates[selected].text +
-        (punctuation.identity_mapping ? "" : punctuation.chinese_commit);
-    const std::string actual = TakeCommit(api, session, reason);
-    if (actual != expected) {
-      Fail(reason + " committed '" + actual + "' instead of '" + expected +
-           "'");
-    }
-    const char* input = api->get_input(session);
-    if ((input && *input != '\0') || !Candidates(api, session).empty()) {
-      Fail(reason + " did not clear input and menu on the same key event");
-    }
-    api->destroy_session(session);
 
     // A leading semicolon is the Settings-owned pinyin reverse-lookup prefix;
     // its idle lifecycle and every profile projection have dedicated probes.
@@ -2749,21 +2828,20 @@ void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
       CreateSchemaSession(api, "linnet_zh_pinyin");
   api->set_option(full_shape, "full_shape", true);
   Enter(api, full_shape, "shi");
-  const auto full_shape_candidates = Candidates(api, full_shape);
-  const int full_shape_selected = HighlightedCandidateIndex(api, full_shape);
-  if (full_shape_selected < 0 ||
-      static_cast<size_t>(full_shape_selected) >=
-          full_shape_candidates.size()) {
-    Fail("full-shape punctuation fixture has no selected candidate");
+  if (!api->process_key(full_shape, '=', 0) ||
+      CurrentCandidatePage(api, full_shape, "full-shape next page") != 1) {
+    Fail("full-shape mode displaced candidate paging");
   }
   if (!api->process_key(full_shape, '-', 0)) {
-    Fail("full-shape punctuation was not accepted");
+    Fail("full-shape mode did not accept previous-page navigation");
   }
-  const std::string expected_full_shape =
-      full_shape_candidates[full_shape_selected].text + "－";
-  if (TakeCommit(api, full_shape, "full-shape punctuation") !=
-      expected_full_shape) {
-    Fail("full-shape punctuation did not use the canonical mapping");
+  if (CurrentCandidatePage(api, full_shape, "full-shape previous page") != 0) {
+    Fail("full-shape mode did not return to the previous candidate page");
+  }
+  api->clear_composition(full_shape);
+  if (!api->process_key(full_shape, '-', 0) ||
+      TakeCommit(api, full_shape, "idle full-shape punctuation") != "－") {
+    Fail("idle full-shape punctuation lost the canonical mapping");
   }
   api->destroy_session(full_shape);
 }
@@ -5471,6 +5549,9 @@ int main(int argc, char** argv) {
     ExpectNaturalSingleKeyDefaultRanking(api);
     ExpectSingleSyllablePreferenceLearning(api);
     std::cout << "rime_smoke_test: single-syllable preference learning: PASS\n";
+    ExpectSupplementalExtendedChineseCoverage(api);
+    ExpectCandidatePagingShortcuts(api, "linnet_zh_pinyin", "shi");
+    ExpectCandidatePagingShortcuts(api, "linnet_en", "a");
     ExpectModelessMixedInput(api);
     BenchmarkSchema(api, "linnet_zh_pinyin", "xuexicsjiting");
     api->finalize();

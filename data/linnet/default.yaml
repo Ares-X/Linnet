@@ -41,6 +41,16 @@ ascii_composer:
     Control_L: noop
     Control_R: noop
 
+# Candidate paging has one Rime-owned contract shared by Chinese and Smart
+# English.  Keep these keys out of the macOS frontend and the native bilingual
+# interaction processor so every profile follows the same menu state.
+key_binder:
+  bindings:
+    - { when: has_menu, accept: minus, send: Page_Up }
+    - { when: has_menu, accept: equal, send: Page_Down }
+    - { when: has_menu, accept: bracketleft, send: Page_Up }
+    - { when: has_menu, accept: bracketright, send: Page_Down }
+
 # ── Punctuator ──────────────────────────────────────────────────────────────
 punctuator:
   digit_separators: ",.:"

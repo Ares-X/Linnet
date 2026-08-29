@@ -466,10 +466,19 @@ rg -Fq 'candidateRanges[itemIndex] =' sources/SquirrelPanel.swift ||
   fail "visual candidate reordering stopped writing geometry back by item offset"
 rg -Fq 'candidate.absoluteIndex' sources/LinnetCandidateAccessibility.swift ||
   fail "candidate accessibility stopped selecting absolute Rime indices"
-if rg -n 'accept: (minus|equal|bracketleft|bracketright), send: Page_(Up|Down)' \
-    data/linnet/default.yaml; then
-  fail "printable paging keys regained unconditional Rime bindings"
-fi
+ruby -e '
+  expected = [
+    "- { when: has_menu, accept: minus, send: Page_Up }",
+    "- { when: has_menu, accept: equal, send: Page_Down }",
+    "- { when: has_menu, accept: bracketleft, send: Page_Up }",
+    "- { when: has_menu, accept: bracketright, send: Page_Down }",
+  ]
+  actual = File.readlines(ARGV.fetch(0), chomp: true).map(&:strip).select do |line|
+    line.match?(/accept: (minus|equal|bracketleft|bracketright),/)
+  end
+  abort "printable paging bindings are not the exact has-menu owner" unless actual == expected
+' data/linnet/default.yaml ||
+  fail "printable paging bindings are not exact or menu-scoped"
 if rg -n 'accept: Control\+Shift\+[34], toggle: (ascii_punct|traditionalization)' \
     data/linnet/default.yaml; then
   fail "Settings-owned punctuation or traditional-output defaults regained hidden session shortcuts"

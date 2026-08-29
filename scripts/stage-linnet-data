@@ -56,6 +56,7 @@ done
 ice_root="${repo_root}/upstreams/rime-ice"
 wanxiang_root="${repo_root}/upstreams/rime-wanxiang"
 grammar_root="${repo_root}/upstreams/rime-octagram-data"
+ice_extended_dictionary="${ice_root}/cn_dicts/ext.dict.yaml"
 wanxiang_dictionary_paths=(
   dicts/zi.dict.yaml
   dicts/jichu.dict.yaml
@@ -75,6 +76,7 @@ wanxiang_dictionary_paths=(
   dicts/fangyan.dict.yaml
 )
 test -f "${ice_root}/default.yaml"
+test -f "${ice_extended_dictionary}"
 test -f data/linnet/default.yaml
 test -f upstreams.lock.json
 for product_target in data/plum data/opencc; do
@@ -93,10 +95,12 @@ stage_fingerprint="$({
   printf '%s\n' 'linnet-stage-fingerprint-v5-direct-upstream'
   for source in \
       scripts/stage-linnet-data \
+      scripts/project-rime-ice-ext \
       patches/rime-wanxiang-linnet-reviewed.patch \
       data/linnet/linnet_reviewed.dict.yaml \
       data/linnet/linnet_zh.dict.yaml \
       data/linnet/linnet_zh_full.dict.yaml \
+      "${ice_extended_dictionary}" \
       data/chinese/grammar/wanxiang-lts-zh-hans.gram \
       upstreams/rime-octagram-data/zh-hans-t-essay-bgw.gram \
       "${english_root}/linnet_en.dict.yaml" \
@@ -189,6 +193,15 @@ for relative in "${wanxiang_dictionary_paths[@]}"; do
   }
   cp -X "${source}" "${plum_stage}/${relative}"
 done
+# rime-ice ext is intentionally the only Chinese supplement. Its plain-pinyin
+# source is incompatible with Wanxiang's tone-coded graph, so one build-time
+# external-format boundary resolves tones and conservatively maps weights.
+# Runtime dictionary assembly and ranking remain owned solely by Rime.
+scripts/project-rime-ice-ext \
+  "${ice_extended_dictionary}" \
+  "${wanxiang_root}/dicts" \
+  "${plum_stage}/dicts/ext.dict.yaml" \
+  150000
 /usr/bin/patch --batch --forward --fuzz=0 -s \
   -d "${plum_stage}" -p1 \
   < patches/rime-wanxiang-linnet-reviewed.patch
@@ -260,7 +273,7 @@ assert_file_set "${plum_stage}/dicts" \
   duoyin.dict.yaml shici.dict.yaml diming.dict.yaml \
   yixue.dict.yaml huaxue.dict.yaml yaopin.dict.yaml mingren.dict.yaml \
   yiren.dict.yaml wuzhong.dict.yaml renming.dict.yaml taifeng.dict.yaml \
-  fangyan.dict.yaml
+  fangyan.dict.yaml ext.dict.yaml
 assert_file_set "${opencc_stage}" \
   HKVariants.ocd2 HKVariantsRev.ocd2 HKVariantsRevPhrases.ocd2 \
   JPShinjitaiCharacters.ocd2 JPShinjitaiPhrases.ocd2 JPVariants.ocd2 \

@@ -83,6 +83,21 @@ enum LinnetCandidatePresentation {
     let highlighted: Int
   }
 
+  /// Rime's selection keys are the single label owner for every selectable
+  /// current-page candidate, including zero-input Smart English predictions.
+  /// A missing custom label falls back to the same one-based page index used
+  /// by direct numeric selection.
+  static func candidateSelectionLabel(at index: Int, labels: [String]) -> String {
+    if labels.count > 1, labels.indices.contains(index) {
+      return labels[index]
+    }
+    if let customLabels = labels.first, labels.count == 1,
+      index >= 0, index < customLabels.count {
+      return String(customLabels[customLabels.index(customLabels.startIndex, offsetBy: index)])
+    }
+    return String(index + 1)
+  }
+
   /// Rime legitimately exposes an all-zero menu while the input session is
   /// idle. Keep that state presentable so schema-transition feedback can use
   /// the normal caret-anchored panel without treating missing menu data as an

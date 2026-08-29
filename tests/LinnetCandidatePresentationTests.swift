@@ -27,6 +27,7 @@ struct LinnetCandidatePresentationTests {
     testInputModeTransitions()
     testIdleMenuPresentationState()
     testHighlightedCandidateBounds()
+    testCandidateSelectionLabels()
 
     var accessibilitySurface =
       LinnetCandidatePresentation.AccessibilitySurface.candidates
@@ -108,6 +109,34 @@ struct LinnetCandidatePresentationTests {
     )
 
     print("LinnetCandidatePresentationTests: PASS")
+  }
+
+  private static func testCandidateSelectionLabels() {
+    for (index, expected) in ["1", "2", "3", "4", "5", "6", "7", "8", "9"].enumerated() {
+      require(
+        LinnetCandidatePresentation.candidateSelectionLabel(
+          at: index, labels: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        ) == expected,
+        "Rime's 1-9 candidate labels were not preserved"
+      )
+    }
+    require(
+      LinnetCandidatePresentation.candidateSelectionLabel(at: 1, labels: ["asdf"]) == "s",
+      "single-string custom selection labels were not preserved"
+    )
+    require(
+      LinnetCandidatePresentation.candidateSelectionLabel(at: 2, labels: []) == "3",
+      "missing custom labels did not use the visible one-based candidate index"
+    )
+    guard let builder = try? String(
+      contentsOfFile: "sources/LinnetRimeCandidateSnapshotBuilder.swift",
+      encoding: .utf8)
+    else { fail("candidate snapshot builder source could not be read") }
+    require(
+      !builder.contains("context.composition.length") &&
+        builder.contains("LinnetCandidatePresentation.candidateSelectionLabel("),
+      "zero-input Smart English predictions can still lose their selection labels"
+    )
   }
 
   private static func testInputModeTransitions() {

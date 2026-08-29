@@ -62,6 +62,8 @@ recognizer:
 # ── Key binder ──────────────────────────────────────────────────────────────
 key_binder:
   search: "`"
+  bindings:
+    __include: default.yaml:/key_binder/bindings
 
 # ── Punctuator ──────────────────────────────────────────────────────────────
 punctuator:

@@ -93,7 +93,7 @@ standard_root="${project_root}/data/linnet/linnet_zh.dict.yaml"
 [[ -f "${standard_root}" && ! -L "${standard_root}" ]] ||
   fail "missing Standard Chinese dictionary root"
 cp -X "${standard_root}" "${chinese}/linnet_zh.dict.yaml"
-for name in zi jichu lianxiang cuoyin duoyin shici diming; do
+for name in zi jichu lianxiang cuoyin duoyin shici diming ext; do
   source="${plum_root}/dicts/${name}.dict.yaml"
   [[ -f "${source}" && ! -L "${source}" ]] ||
     fail "missing direct Core dictionary source: ${name}"
@@ -128,13 +128,13 @@ done
 # edition from data/plum: that source-build view is intentionally Complete.
 verify_dictionary_root "${chinese}/linnet_zh.dict.yaml" "${chinese}" -- \
   linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
-  dicts/duoyin dicts/shici dicts/diming
+  dicts/duoyin dicts/shici dicts/diming dicts/ext
 verify_dictionary_root "${extended}/linnet_zh_full.dict.yaml" \
   "${chinese}" "${extended}" -- \
   linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
   dicts/duoyin dicts/shici dicts/diming dicts/yixue dicts/huaxue \
   dicts/yaopin dicts/mingren dicts/yiren dicts/wuzhong dicts/renming \
-  dicts/taifeng dicts/fangyan
+  dicts/taifeng dicts/fangyan dicts/ext
 
 if find "${output_root}" \( -type f -o -type l \) \
     \( -name '*.dSYM' -o -name '*.o' -o -name '*.a' -o \

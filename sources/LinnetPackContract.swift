@@ -344,7 +344,7 @@ extension LinnetPackContract {
         "dicts/zi.dict.yaml", "dicts/jichu.dict.yaml",
         "dicts/lianxiang.dict.yaml", "dicts/cuoyin.dict.yaml",
         "dicts/duoyin.dict.yaml", "dicts/shici.dict.yaml",
-        "dicts/diming.dict.yaml"
+        "dicts/diming.dict.yaml", "dicts/ext.dict.yaml"
       ]
       return names.contains(path) || dictionaries.contains(path)
         || ["linnet_zh", "radical_pinyin"].contains(where: path.hasPrefix)

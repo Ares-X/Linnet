@@ -66,7 +66,7 @@ Linnet 差异只有两个人工 owner：
 - `reviewed_pronunciations.tsv`：已接受的读音替换；
 - `reviewed_rankings.tsv`：已接受的精确排序行。
 
-精确 source patch 删除被拒绝的 `(text, code)`，`linnet_reviewed` 表添加接受行。不存在 Python composer、自动 tone inference、L1/L2/L3 重分层、rime-ice 中文候选 merge 或运行时 fallback。
+精确 source patch 删除被拒绝的 `(text, code)`，`linnet_reviewed` 表添加接受行。锁定的 `rime-ice/cn_dicts/ext.dict.yaml` 是唯一中文补充输入：构建期投影器只接收万象核心尚未拥有的三字及以上行，使用万象 `zi` 表转换声调编码，拒绝歧义或无法验证的读音，再以低权重导入同一个 Rime dictionary graph。不存在提交进仓库的生成词典、第二个运行时 translator、自动猜音或运行时 fallback。
 
 维护更新必须修改唯一 review ledger/source patch，而不是生成第二份中文词典或运行时修正规则。
 
@@ -104,7 +104,7 @@ Core App 不携带语言数据。Chinese、English、LTS 和 Extended 各有独�
 
 公开源码以一个独立根快照发布，不继承 Squirrel 的 Git 父链。Squirrel 来源由 lock 中的精确 tag/commit 和发布 SBOM 的 `VARIANT_OF` 关系共同证明；构建不得从当前分支的祖先关系推断来源。
 
-rime-ice 只提供锁定的英文补充、OpenCC/符号/部件数据和选择的 Lua 源；不提供 Linnet 中文候选或 runtime schema。Hallelujah 原始应用、localhost UI、JavaScriptCore 和运行时 SQLite 不进入产品。
+rime-ice 提供锁定的英文补充、OpenCC/符号/部件数据、选择的 Lua 源，以及唯一选中的中文扩展输入 `cn_dicts/ext.dict.yaml`；后者只在构建期通过上述投影边界补充万象缺词，不提供 runtime schema 或第二套中文候选 owner。Hallelujah 原始应用、localhost UI、JavaScriptCore 和运行时 SQLite 不进入产品。
 
 查看候选更新：
 

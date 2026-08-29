@@ -136,7 +136,7 @@ fi
 
 if rg -n '"(delta_dictionaries|longtail_dictionary)"' \
     upstreams.lock.json scripts/upstream-sync tests/verify_product.sh; then
-  fail "rime-ice Chinese dictionaries returned to the locked product inputs"
+  fail "the retired generated rime-ice delta owners returned"
 fi
 
 dictionary_imports() {
@@ -147,8 +147,9 @@ dictionary_imports() {
   ' "$1"
 }
 
-expected_core=$'linnet_reviewed\ndicts/zi\ndicts/jichu\ndicts/lianxiang\ndicts/cuoyin\ndicts/duoyin\ndicts/shici\ndicts/diming'
-expected_complete="${expected_core}"$'\ndicts/yixue\ndicts/huaxue\ndicts/yaopin\ndicts/mingren\ndicts/yiren\ndicts/wuzhong\ndicts/renming\ndicts/taifeng\ndicts/fangyan'
+expected_wanxiang_core=$'linnet_reviewed\ndicts/zi\ndicts/jichu\ndicts/lianxiang\ndicts/cuoyin\ndicts/duoyin\ndicts/shici\ndicts/diming'
+expected_core="${expected_wanxiang_core}"$'\ndicts/ext'
+expected_complete="${expected_wanxiang_core}"$'\ndicts/yixue\ndicts/huaxue\ndicts/yaopin\ndicts/mingren\ndicts/yiren\ndicts/wuzhong\ndicts/renming\ndicts/taifeng\ndicts/fangyan\ndicts/ext'
 [[ "$(dictionary_imports data/linnet/linnet_zh.dict.yaml)" == "${expected_core}" ]] ||
   fail "the Core dictionary does not import the canonical direct tables"
 [[ "$(dictionary_imports data/linnet/linnet_zh_full.dict.yaml)" == "${expected_complete}" ]] ||
@@ -218,6 +219,34 @@ for table in zi jichu lianxiang cuoyin duoyin shici diming \
   rg -Fq "dicts/${table}.dict.yaml" scripts/stage-linnet-data ||
     fail "staging does not project the locked table: ${table}"
 done
+ice_extended_dictionary="upstreams/rime-ice/cn_dicts/ext.dict.yaml"
+[[ -f "${ice_extended_dictionary}" && ! -L "${ice_extended_dictionary}" ]] ||
+  fail "the locked rime-ice extended dictionary is missing"
+[[ "$(rg -F -c 'cn_dicts/ext.dict.yaml' scripts/stage-linnet-data)" -eq 1 ]] ||
+  fail "staging must project exactly one rime-ice Chinese supplement"
+[[ -x scripts/project-rime-ice-ext ]] ||
+  fail "the rime-ice external-format projector is missing or not executable"
+projected_ext="${scratch}/dicts/ext.dict.yaml"
+scripts/project-rime-ice-ext \
+  "${ice_extended_dictionary}" \
+  upstreams/rime-wanxiang/dicts \
+  "${projected_ext}" \
+  150000 >/dev/null
+rg -Fq $'希尔瓦娜斯\txī ěr wǎ nà sī\t' "${projected_ext}" ||
+  fail "the systematic extended-name projection lost 希尔瓦娜斯"
+rg -Fq '"dicts/diming.dict.yaml", "dicts/ext.dict.yaml"' \
+  sources/LinnetPackContract.swift ||
+  fail "the Chinese pack contract does not own the projected supplement"
+rg -Fq 'for name in zi jichu lianxiang cuoyin duoyin shici diming ext; do' \
+  package/stage_language_pack_sources ||
+  fail "the Chinese pack staging owner omits the projected supplement"
+if rg -n $'^.{1,2}\t' "${projected_ext}"; then
+  fail "the extended supplement admitted a one- or two-character row"
+fi
+if rg -n 'cn_dicts/(base|tencent|41448|8105|others)[.]dict[.]yaml' \
+    scripts/stage-linnet-data data/linnet/linnet_zh*.dict.yaml; then
+  fail "an undeclared rime-ice Chinese table entered the product graph"
+fi
 rg -Fq "${source_patch}" scripts/stage-linnet-data ||
   fail "staging does not apply the reviewed source patch"
 rg -Fq "${reviewed_dictionary}" scripts/stage-linnet-data ||

@@ -511,6 +511,11 @@ struct SettingsDataCoordinatorTests {
       let settings = try makeBundleFixture(at: fixtureRoot, productName: productName)
       try makeDirectory(fixtureRoot)
       try makeRegistryFixture(registry)
+      do {
+        _ = try registry.runtimeSnapshot()
+      } catch {
+        fail("data registry runtime fixture is invalid: \(error)")
+      }
       try makeDirectory(live)
       try "# fixture\n".write(
         to: live.appending(path: "user.yaml"),

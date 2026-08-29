@@ -27,7 +27,7 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 
 Linnet 复用 Squirrel、librime、万象、RIME-LMDG、rime-ice 与 Hallelujah 的成熟能力，但不把上游直接拼装成产品。上游版本和输入摘要会被锁定；每次更新先在本地生成、比较并通过候选、数据和交互测试，再进入发布版本。Linnet 目前在这些基础上完成了：
 
-- **中文精校**：以万象词表和 LTS 语法模型为核心，保留八种全拼/双拼的一致词库与学习数据；通过可审计的审核表修正已确认的读音、错码与候选顺序，而不是运行时猜测或无差别合并其他中文词库。
+- **中文精校与补充**：以万象词表和 LTS 语法模型为核心，保留八种全拼/双拼的一致词库与学习数据；通过可审计的审核表修正已确认的读音、错码与候选顺序，并从锁定的 rime-ice 扩展表中补充万象尚未覆盖的三字及以上词条。补充词会先转换到万象的声调编码与权重空间，重复、歧义或无法验证读音的行不会进入产品。
 - **英文数据整理**：从 Hallelujah 与 rime-ice 的锁定输入中选择词频、发音、中文释义和补充词条，经过确定性归一化、去重、格式检查和人工质量审核后生成 Linnet 的英文数据。
 - **双语排序与输入语义**：在中文候选与明确英文单词发生碰撞时，结合当前拼音方案、完整编码、静态词频与学习结果决定顺序；补全、纠错、预测、大小写、Space/Return、数字键、方向键和原始输入都由 Linnet 的同一交互合同约束。
 - **macOS 产品增强**：在 Squirrel/librime 运行时之上提供单输入源三状态、光标旁状态提示、候选详情、七套主题、原生 Settings、个人数据管理，以及首次注销后无需再次注销的 Core 更新路径。
@@ -55,7 +55,7 @@ _由当前 `SquirrelPanel` / `SquirrelView` 生成的真实光标旁状态提示
 
 Linnet 首次使用默认全拼，也可以在 Settings 中选择自然码、小鹤、微软、搜狗、智能 ABC、紫光或拼音加加。八种方案共享中文词库与学习数据，切换方案不需要重新建立个人词频。
 
-中文候选支持横排或竖排、每页 3/5/7/9 项以及滚动或临时展开浏览。数字键可直接选择候选，鼠标、方向键、Page Up / Page Down 与候选窗按钮负责浏览；逗号、句号等遵循中英文标点状态，`/`、`+`、`=` 等普通运算符直接交给当前应用。
+中文候选支持横排或竖排、每页 3/5/7/9 项以及滚动或临时展开浏览。数字键可直接选择候选，鼠标、方向键、Page Up / Page Down、`[` / `]`、`-` / `=` 与候选窗按钮负责翻页；没有候选菜单时，这些按键仍按当前标点规则输入，`/`、`+` 等普通运算符直接交给当前应用。
 
 常用辅助入口包括：
 
@@ -69,7 +69,7 @@ Linnet 首次使用默认全拼，也可以在 Settings 中选择自然码、小
 
 Smart English 适合连续英文写作，也适合在中文工作流中临时输入术语：
 
-- 前缀补全、拼写建议与下一词预测；
+- 前缀补全、拼写建议与下一词预测；预测候选同样显示 `1–9` 序号，可直接用数字键选择；
 - 可选 IPA 和中文释义；
 - 保留首字母大写或全大写；
 - Space、Return、数字键和方向键均可按当前候选状态提交；Space 上屏时是否自动附加空格可在 Settings 中配置；
@@ -280,7 +280,7 @@ Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上
 | [Squirrel](https://github.com/rime/squirrel) / [librime](https://github.com/rime/librime) | macOS 输入法与 Rime 运行时基础；修改了产品身份、单输入源双语工作流、候选交互、原生 Settings 与发行打包 | GPL-3.0-only（Squirrel）；BSD-3-Clause（librime） |
 | [Rime Wanxiang](https://github.com/amzxyz/rime-wanxiang) | 中文词典核心与八种全拼/双拼布局；锁定上游表，并应用经过审核的读音、错码与排序修正 | CC BY 4.0 |
 | [RIME-LMDG](https://github.com/amzxyz/RIME-LMDG) | 锁定并离线打包 Wanxiang LTS 语法模型 | CC BY 4.0 |
-| [rime-ice](https://github.com/iDvel/rime-ice) / [HallelujahIM](https://github.com/dongyuwei/hallelujahIM) | 选取英文、部件、符号、Emoji/OpenCC、Lua、词频、发音与释义输入；经确定性归一化和人工审核生成 Linnet 数据 | GPL-3.0-only；精确适用范围见第三方声明 |
+| [rime-ice](https://github.com/iDvel/rime-ice) / [HallelujahIM](https://github.com/dongyuwei/hallelujahIM) | 选取 rime-ice 三字及以上中文扩展词及英文、部件、符号、Emoji/OpenCC、Lua 输入，并选取 Hallelujah 词频、发音与释义输入；经确定性投影、归一化和人工审核生成 Linnet 数据 | GPL-3.0-only；精确适用范围见第三方声明 |
 | librime-lua、librime-octagram、librime-predict 及其他运行时依赖 | 随 App 静态集成或嵌入，未作为第二套产品来源 | 以第三方声明、发行 NOTICE 与 SBOM 为准 |
 
 完整的来源范围、修改说明和许可证关系见[第三方来源、修改与许可证](THIRD_PARTY_NOTICES.md)，许可证文本见 [`LICENSES/`](LICENSES/)。正式发行包还会携带绑定到精确版本与提交的 `NOTICE.md`、`SBOM.spdx.json`、`VERSION.json` 和许可证文件，避免 README 摘要与实际交付内容漂移。
