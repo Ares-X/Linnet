@@ -1536,9 +1536,15 @@ ruby -e '
     host.include?("processProductIdentity") &&
       host.scan("productIdentity: processProductIdentity").length == 3
   abort "Settings lost the passive installed-versus-running identity comparison" unless
-    settings.include?("installedIdentity == running") &&
+    settings.include?("installed == running") &&
       settings.include?("case pending(") &&
       settings.include?("installed: LinnetSettingsContract.ProductIdentity")
+  abort "an identity-free Host regained the unsafe immediate-exit path" unless
+    settings.include?("guard let installed, let health else { return .unavailable }") &&
+      settings.include?("return .restartRequired(installed)") &&
+      settings.include?("runtimeVersionState.activationIdentities")
+  abort "unknown running identity can be inferred from installed files" if
+    settings.match?(/running\s*\?\?\s*installed/)
   abort "Core activation gained a second input-source mutation path" if
     combined.match?(/TIS(Register|Enable|Select|Disable)InputSource/)
 ' || fail "explicit installed-Core activation ownership regressed"
@@ -2630,11 +2636,21 @@ rg -Fq 'func handlePassiveEmptyUpdate(' sources/SquirrelPanel.swift ||
 
 # The Settings process owns activation of its own window. Reopening Settings
 # must never depend on cross-process window inference in the input-method host.
-rg -Fq 'applicationShouldHandleReopen' \
-  sources/LinnetSettings/SettingsApplication.swift ||
-  fail "Settings lost its reopen activation owner"
-rg -Fq 'makeKeyAndOrderFront' sources/LinnetSettings/SettingsApplication.swift ||
-  fail "Settings no longer brings its window to the front"
+ruby -e '
+  source = File.read(ARGV.fetch(0))
+  owner = source[/private func presentSettingsWindow\(.*?\n  \}/m]
+  abort "Settings lost its reopen activation owner" unless owner &&
+    source.include?("applicationShouldHandleReopen")
+  activate = owner.index("application.activate(ignoringOtherApps: true)")
+  front = owner.index("window.makeKeyAndOrderFront(nil)")
+  abort "Settings no longer activates itself before presenting its window" unless
+    activate && front && activate < front &&
+      owner.scan("activate(ignoringOtherApps: true)").length == 1 &&
+      owner.scan("makeKeyAndOrderFront(nil)").length == 1
+  abort "Settings gained a competing floating or unconditional window owner" if
+    source.match?(/orderFrontRegardless|\.level\s*=|setActivationPolicy|asyncAfter/)
+' sources/LinnetSettings/SettingsApplication.swift ||
+  fail "Settings window activation ownership regressed"
 
 # Per-application Rime options remain in Squirrel's canonical session owner.
 # Do not defer or reinterpret that lifecycle through a Linnet transition layer.

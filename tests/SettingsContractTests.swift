@@ -12,6 +12,7 @@ struct SettingsContractTests {
     do {
       testPinyinReverseLookupExamples()
       testCoreActivationGate()
+      try testLegacyRuntimeHealthWithoutIdentity()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
         testProductIdentity(host: host, settings: settings)
@@ -169,6 +170,39 @@ struct SettingsContractTests {
     ledger.record(bundleIdentifier: "com.example.Editor")
     guard ledger.snapshot().generation == firstGeneration + 1 else {
       fail("a new client session did not invalidate an in-flight activation drain")
+    }
+  }
+
+  private static func testLegacyRuntimeHealthWithoutIdentity() throws {
+    let transactionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    let document: [String: Any] = [
+      "transactionID": transactionID.uuidString,
+      "status": "running",
+      "code": "diagnostics_ready",
+      "detail": "Runtime diagnostics are available.",
+      "health": [
+        "productIdentity": NSNull(),
+        "coreActivationReadiness": "ready",
+        "connectedInputClientCount": 0,
+        "state": "running",
+        "phase": "running",
+        "rimeVersion": "1.17.0",
+        "smartEnglishAvailable": true,
+        "octagramAvailable": true,
+        "availableSchemaCount": 9,
+        "requiredSchemaCount": 9,
+        "activeTransactionID": NSNull(),
+        "activeSettingsRevision": String(repeating: "a", count: 64),
+      ],
+    ]
+    let data = try JSONSerialization.data(withJSONObject: document)
+    let reply = try JSONDecoder().decode(
+      LinnetSettingsContract.RuntimeReply.self, from: data)
+    guard reply.transactionID == transactionID,
+      reply.health?.productIdentity == nil,
+      LinnetSettingsContract.validRuntimeReply(reply)
+    else {
+      fail("the shipped build60 identity-free health shape is no longer valid")
     }
   }
 
