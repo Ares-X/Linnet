@@ -148,12 +148,41 @@ abort unless historical_signing.fetch("certificate_sha256") ==
 
 contract = acceptance.fetch("contract")
 abort unless contract.keys.sort == %w[algorithm paths sha256]
-abort unless contract.fetch("algorithm") == "sha256-git-mode-content-path-v1"
+abort unless contract.fetch("algorithm") == "sha256-legacy-migration-projection-v1"
 expected_paths = %w[
   package/installer-scripts/candidate-app-identity.sh
 ]
 paths = contract.fetch("paths")
 abort unless paths == expected_paths && paths == paths.sort && paths.uniq == paths
+
+# The accepted legacy migration ends below build 29. A fixed-CMS candidate may
+# replace an unaccepted candidate with the same product build, so that
+# fixed-CMS-only conflict branch is deliberately outside the historical
+# migration fingerprint. Every byte that can govern the admitted ad-hoc edge
+# remains identical to the accepted source revision.
+fixed_cms_candidate_conflict = <<~'BASH'
+  if (( version_comparison == 0 )) && [[ "${actual_build}" == "${expected_build}" &&
+    "${embedded_revision}" != "${expected_revision}" ]]; then
+    fail_identity "installed App revision conflicts with this Core candidate"
+  fi
+BASH
+legacy_projection = lambda do |content|
+  occurrences = content.scan(fixed_cms_candidate_conflict).size
+  abort unless occurrences <= 1
+  content.sub(fixed_cms_candidate_conflict, "")
+end
+current_identity = File.binread(File.join(root, paths.fetch(0)))
+historical_identity, historical_identity_status = Open3.capture2(
+  "git", "-C", root, "show", "#{source_revision}:#{paths.fetch(0)}")
+abort unless historical_identity_status.success? &&
+  historical_identity.scan(fixed_cms_candidate_conflict).size == 1 &&
+  current_identity.scan(fixed_cms_candidate_conflict).empty?
+legacy_max_build = current_identity[/^readonly legacy_max_build='(\d+)'$/, 1]
+historical_legacy_max_build = historical_identity[/^readonly legacy_max_build='(\d+)'$/, 1]
+current_build = product[/^CURRENT_PROJECT_VERSION = (\d+)$/, 1]
+abort unless legacy_max_build && legacy_max_build == historical_legacy_max_build &&
+  artifact.fetch("build").to_i > legacy_max_build.to_i &&
+  current_build && current_build.to_i > legacy_max_build.to_i
 entries = paths.map do |path|
   absolute = File.join(root, path)
   abort unless File.file?(absolute) && !File.symlink?(absolute)
@@ -161,7 +190,8 @@ entries = paths.map do |path|
   abort unless status.success?
   match = index.match(/\A(\d{6}) [0-9a-f]{40,64} 0\t/)
   abort unless match
-  "#{match[1]}\t#{Digest::SHA256.file(absolute).hexdigest}\t#{path}\n"
+  projected = legacy_projection.call(File.binread(absolute))
+  "#{match[1]}\t#{Digest::SHA256.hexdigest(projected)}\t#{path}\n"
 end
 historical_entries = paths.map do |path|
   tree, tree_status = Open3.capture2(
@@ -170,7 +200,8 @@ historical_entries = paths.map do |path|
   content, content_status = Open3.capture2(
     "git", "-C", root, "show", "#{source_revision}:#{path}")
   abort unless tree_status.success? && content_status.success? && match
-  "#{match[1]}\t#{Digest::SHA256.hexdigest(content)}\t#{path}\n"
+  projected = legacy_projection.call(content)
+  "#{match[1]}\t#{Digest::SHA256.hexdigest(projected)}\t#{path}\n"
 end
 contract_sha256 = contract.fetch("sha256")
 abort unless contract_sha256.match?(/\A[0-9a-f]{64}\z/) &&
@@ -199,7 +230,7 @@ abort unless Time.iso8601(runtime.fetch("same_artifact_reinstall_time")) >
 policy_paths.each do |path|
   text = File.read(path)
   abort unless text.include?("config/linnet-community-signing.json") &&
-    text.include?("迁移契约指纹") && text.include?("两轮同 leaf Core")
+    text.include?("旧迁移投影指纹") && text.include?("两轮同 leaf Core")
 end
 release = File.read(policy_paths.find { |path| path.end_with?("release.md") })
 abort if release.include?("完成旧 ad-hoc → 固定 CMS 升级和第二次同 leaf Core 升级")

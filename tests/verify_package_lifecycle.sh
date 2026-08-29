@@ -455,9 +455,14 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     wrong_revision="2${candidate_revision:1}"
   write_candidate_identity "${candidate_version}" "${candidate_build}" \
     "${wrong_revision}" "${candidate_leaf}"
-  if HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" existing \
+  if ! HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" existing \
+      >/dev/null; then
+    echo "Candidate identity owner rejected a corrected same-version candidate." >&2
+    exit 1
+  fi
+  if HOME="${identity_home}" "${scripts_root}/candidate-app-identity.sh" installed \
       >/dev/null 2>&1; then
-    echo "Candidate identity owner accepted a same-build conflicting revision." >&2
+    echo "Installed identity gate accepted bytes from the replaced candidate." >&2
     exit 1
   fi
 

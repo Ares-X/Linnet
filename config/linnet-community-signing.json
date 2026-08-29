@@ -19,11 +19,11 @@
       "certificate_sha256": "8e5e1668860c8f3ebc659cce091a96bc67359f2b09946af80f8c97c9cb542a71"
     },
     "contract": {
-      "algorithm": "sha256-git-mode-content-path-v1",
+      "algorithm": "sha256-legacy-migration-projection-v1",
       "paths": [
         "package/installer-scripts/candidate-app-identity.sh"
       ],
-      "sha256": "3fbe8f1cb67a0ee56237283ee2d5fd033315d622dc16b95270811d8892351d31"
+      "sha256": "0d239ca74aaae91418e5acc1db4a6d3dde2822dd410e53bc61b6de80cf671423"
     },
     "runtime": {
       "architecture": "arm64",

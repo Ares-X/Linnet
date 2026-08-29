@@ -264,7 +264,7 @@ revision、Draft Release SHA-256 和候选 metadata 后，才可以使用 macOS 
 
 旧 ad-hoc → 固定 CMS 是一次性的历史 Core lifecycle 验收，唯一记录在
 `config/linnet-community-signing.json`。其固定 leaf、bundle ID、macOS major 和
-identity classifier 的“迁移契约指纹”是完整失效键：任一项与当前候选失配，才在
+identity classifier 的“旧迁移投影指纹”是完整失效键：任一项与当前候选失配，才在
 隔离的 legacy-seeded 账号或虚拟机中重做；四项全部匹配时不得为每个候选重复迁移。
 Host 连续性和 TIS 不变性不从这份历史指纹推断，统一由当前 package lifecycle matrix
 验证。该历史记录只闭合 legacy identity edge，不是当前候选菜单、Settings、真实输入

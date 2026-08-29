@@ -58,7 +58,7 @@ current evidence from the same candidate revision and artifact set.
 
 `config/linnet-community-signing.json` is the sole record for the one-time
 historical legacy ad-hoc-to-fixed-CMS Core lifecycle acceptance. Its fixed leaf,
-bundle ID, macOS major and identity-classifier `迁移契约指纹` are the complete
+bundle ID, macOS major and identity-classifier `旧迁移投影指纹` are the complete
 invalidation key: if any value differs from the current candidate, the legacy
 transition must be repeated in an isolated legacy-seeded account or VM; while
 all four match, it must not be repeated for every candidate. Host continuity and
