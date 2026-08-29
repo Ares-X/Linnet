@@ -97,13 +97,14 @@ Core/Public，也不得推进 Catalog。随后只有同一 revision 可快进到
 manual CI 和 candidate 流程。正常版本不运行 seed 模式。
 
 任一项失败都停止在当前幂等边界；不能覆盖、删除或 `--clobber` 已公开资产。候选
-字节本身有误时，修复必须形成新的 revision、build 和必要的数据 sequence，再由
+字节本身有误时，修复必须形成新的 revision；只有已验收版本推进时才增加 build，
+数据内容变化时才增加必要的数据 sequence，再由
 macOS Action 生成新候选。`v<VERSION>` 只标识公开版本，两个控制标签分别只授权
 显式 data seed 或已验收的八文件集合。
 
 旧 ad-hoc → 固定 CMS 只是一条一次性的历史 Core lifecycle 验收边；唯一记录在
 `config/linnet-community-signing.json`。其中固定 leaf、bundle ID、macOS major 和
-identity classifier 的“迁移契约指纹”共同决定该历史证据能否继续复用：任一项与
+identity classifier 的“旧迁移投影指纹”共同决定该历史证据能否继续复用：任一项与
 当前候选失配，才必须在隔离的 legacy-seeded 账号或虚拟机中重做迁移；全部匹配时
 不得要求每个候选重复该迁移。Host 连续性和 TIS 不变性由当前 package lifecycle
 matrix 独立验证。该记录只闭合 legacy identity edge，不能冒充当前候选的菜单、
@@ -138,7 +139,7 @@ Host 接受后还须在退出前复核账本 generation；Settings 只能从 can
 不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、
 输入菜单、Settings 和真实输入。旧 ad-hoc 身份迁移的复用与失效条件只由
 `config/linnet-community-signing.json` 中的固定 leaf、bundle ID、macOS major 和
-“迁移契约指纹”决定，不是逐候选步骤。只有 App 与系统登记都明确缺失时才走未注册
+“旧迁移投影指纹”决定，不是逐候选步骤。只有 App 与系统登记都明确缺失时才走未注册
 修复；App 缺失但系统仍残留 enabled/disabled 身份会在 payload 前失败，不能猜测或
 覆盖用户状态。发布 Keychain 密码永远不属于用户安装流程；历史首次身份迁移若由
 macOS 显示输入源安全确认，它是一次系统授权，不是 Keychain 密码。

@@ -325,10 +325,6 @@ fi
 if (( 10#${actual_build} > 10#${expected_build} )); then
   fail_identity "installed App build is newer than this Core candidate"
 fi
-if (( version_comparison == 0 )) && [[ "${actual_build}" == "${expected_build}" &&
-  "${embedded_revision}" != "${expected_revision}" ]]; then
-  fail_identity "installed App revision conflicts with this Core candidate"
-fi
 
 printf '%s\n' "${identity_transition}"
 exit 0
