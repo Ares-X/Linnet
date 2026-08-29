@@ -55,85 +55,32 @@ struct SettingsContractTests {
   }
 
   private static func testCoreActivationGate() {
-    let ledger = LinnetInputClientLedger()
-    ledger.record(bundleIdentifier: "com.example.Editor")
-    ledger.record(bundleIdentifier: "com.example.Settings")
-    let history = ledger.snapshot()
-    let requester = LinnetCoreActivationGate.RunningApplication(
-      processIdentifier: 41,
-      bundleIdentifier: "com.example.Settings",
-      displayName: "Settings"
-    )
-    let editor = LinnetCoreActivationGate.RunningApplication(
-      processIdentifier: 42,
-      bundleIdentifier: "com.example.Editor",
-      displayName: "Editor"
-    )
-
     guard LinnetCoreActivationGate.evaluate(
       inputSourceIsActive: false,
       compositionIsActive: false,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: true
     ).isReady else {
-      fail("a closed historical client still blocked explicit Core activation")
-    }
-
-    let connected = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
-      compositionIsActive: false,
-      dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester, editor],
-      requesterPID: requester.processIdentifier
-    )
-    guard connected.blocker == .applicationsStillRunning,
-      connected.applications == ["Editor"]
-    else {
-      fail("a running historical client did not block Core activation")
-    }
-
-    let secondRequesterProcess = LinnetCoreActivationGate.RunningApplication(
-      processIdentifier: 43,
-      bundleIdentifier: requester.bundleIdentifier,
-      displayName: "Settings"
-    )
-    guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
-      compositionIsActive: false,
-      dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester, secondRequesterProcess],
-      requesterPID: requester.processIdentifier
-    ).blocker == .applicationsStillRunning else {
-      fail("another process of the requester app did not block Core activation")
+      fail("inactive clients still blocked explicit Core activation")
     }
 
     let activeSource = LinnetCoreActivationGate.evaluate(
       inputSourceIsActive: true,
       compositionIsActive: false,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: true
     )
     let activeComposition = LinnetCoreActivationGate.evaluate(
       inputSourceIsActive: false,
       compositionIsActive: true,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: true
     )
     let activeTransaction = LinnetCoreActivationGate.evaluate(
       inputSourceIsActive: false,
       compositionIsActive: false,
       dataTransactionIsActive: true,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: true
     )
     guard activeSource.blocker == .inputSourceActive,
       activeComposition.blocker == .compositionActive,
@@ -146,30 +93,9 @@ struct SettingsContractTests {
       inputSourceIsActive: false,
       compositionIsActive: false,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [editor],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: false
     ).blocker == .requesterUnavailable else {
       fail("a missing Settings requester did not block Core activation")
-    }
-
-    let unknownLedger = LinnetInputClientLedger()
-    unknownLedger.record(bundleIdentifier: nil)
-    guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
-      compositionIsActive: false,
-      dataTransactionIsActive: false,
-      history: unknownLedger.snapshot(),
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
-    ).blocker == .unknownClient else {
-      fail("an unidentified historical input client did not fail closed")
-    }
-
-    let firstGeneration = history.generation
-    ledger.record(bundleIdentifier: "com.example.Editor")
-    guard ledger.snapshot().generation == firstGeneration + 1 else {
-      fail("a new client session did not invalidate an in-flight activation drain")
     }
   }
 

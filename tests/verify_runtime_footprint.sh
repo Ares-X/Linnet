@@ -1505,20 +1505,14 @@ ruby -e '
   ui = File.read("sources/LinnetSettings/SettingsDataViews.swift")
   combined = contract + host + controller + settings + ui
   activation = host[/private func activateInstalledCore\(.*?\n  \}/m]
-  ledger = contract[/final class LinnetInputClientLedger.*?\n\}/m]
   abort "the explicit Core activation owner is missing" unless activation
-  abort "the process-lifetime input-client ledger is missing" unless ledger
+  abort "the retired process-lifetime client ledger returned" if
+    combined.include?("LinnetInputClientLedger") ||
+      combined.include?("coreActivationClientLedger")
   abort "the retired transient Controller-count readiness path returned" if
     combined.match?(/connectedInputClientCount|markInputClient(?:Connected|Disconnected)/)
-  abort "the client ledger can forget a live-process historical endpoint" unless
-    ledger.include?("bundleIdentifiers.insert") &&
-      !ledger.match?(/bundleIdentifiers\.(?:remove|subtract)/)
-  abort "InputMethodKit controller creation no longer records client history" unless
-    controller.scan("coreActivationClientLedger.record").length == 1 &&
-      !controller.include?("coreActivationClientLedger.remove")
   abort "Host activation can bypass its connection or mutation boundaries" unless
     activation.scan("requestCanContinue(request)").length == 2 &&
-      activation.include?("history.generation") &&
       activation.scan("coreActivationDecision(").length == 2 &&
       activation.scan("NSApp.terminate(nil)").length == 1 &&
       !activation.include?("forceTerminate")
@@ -1528,7 +1522,8 @@ ruby -e '
       decision.include?("currentInputSourceID") &&
       decision.include?("hasPendingRimeInput") &&
       decision.include?("activeDataTransaction != nil") &&
-      decision.include?("runningApplications")
+      decision.include?("requesterIsAlive") &&
+      !decision.include?("runningApplications")
   abort "Settings can activate an unverified or substituted Host" unless
     settings.include?("reply.code == .coreActivationAccepted") &&
       settings.include?("health.productIdentity == installedIdentity") &&
@@ -1539,6 +1534,8 @@ ruby -e '
   abort "Core activation is no longer explicitly user initiated" unless
     ui.include?(%q{Button("Apply Installed Update…")}) &&
       ui.include?("confirmCoreActivation()") &&
+      ui.include?("Your apps stay open") &&
+      !ui.include?("close every other app") &&
       [initializer, check, refresh].compact.none? { |method| method.include?("activateInstalledCore") }
   abort "the running Core identity is not captured at Host process start" unless
     host.include?("processProductIdentity") &&

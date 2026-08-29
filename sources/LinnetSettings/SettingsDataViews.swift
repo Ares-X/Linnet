@@ -128,7 +128,7 @@ extension DataTabView {
           .foregroundStyle(.orange)
         coreIdentityRows(installed: installed, running: running)
         Text(
-          "You can keep using the current Core, or apply the installed Core after switching away from Linnet and closing other apps that have used it. No logout is required."
+          "You can keep using the current Core, or apply the installed Core after switching away from Linnet. Other apps stay open and no logout is required."
         )
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -236,9 +236,9 @@ extension DataTabView {
     case .dataTransactionActive:
       "Wait for the current data operation to finish, then try again."
     case .applicationsStillRunning:
-      "Close every other app that has used Linnet during this login session, then try again."
+      "This older running Core cannot replace itself in this session. The installed update remains ready for the next normal login."
     case .unknownClient:
-      "An unidentified app used this Host, so Linnet cannot prove that an immediate restart is safe. The update will remain installed for the next login or restart."
+      "This older running Core cannot verify its inactive clients. The installed update remains ready for the next normal login."
     case .requesterUnavailable:
       "Settings could not establish the one safe activation requester. Reopen Settings and try again."
     }
@@ -250,10 +250,10 @@ extension DataTabView {
     alert.alertStyle = .warning
     alert.messageText = String(localized: "Apply the installed Core now?")
     alert.informativeText = String(localized:
-      "First use the macOS input menu to select another input source and close every other app that has used Linnet during this login session.")
+      "First use the macOS input menu to select another input source.")
       + " "
       + String(localized:
-        "Linnet will never close those apps for you. Settings closes after the new Core is verified.")
+        "Your apps stay open. Settings closes after the new Core is verified.")
     let apply = alert.addButton(withTitle: String(localized: "Apply Now"))
     apply.keyEquivalent = "\r"
     let cancel = alert.addButton(withTitle: String(localized: "Cancel"))

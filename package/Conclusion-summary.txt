@@ -56,8 +56,8 @@ For a first Complete installation:
 Core asks only Settings to quit cleanly. It does not stop the live Host or touch
 input-source registration, enablement, or selection. Existing applications keep
 using the current Host. The new Core can take over after an explicit request once
-every historical client app has exited; otherwise it takes over after the next
-macOS login or restart.
+Linnet is inactive and no composition or data transaction is in progress;
+other applications stay open while Settings starts and verifies the new Core.
 This candidate still requires installed upgrade UAT before no-logout and input
 continuity are accepted release claims.
 

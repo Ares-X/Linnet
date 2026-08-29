@@ -363,9 +363,8 @@ extension SquirrelApplicationDelegate {
   }
 
   /// The user may request an immediate Core replacement, but the Host alone
-  /// owns the exit decision. Historical client applications must have really
-  /// terminated; controller deinit and input-source switching are not accepted
-  /// as connection-release evidence.
+  /// owns the exit decision. Switching away from Linnet releases active input
+  /// ownership; inactive client applications remain open and reconnect later.
   private func activateInstalledCore(_ request: LinnetSettingsContract.DataRequest) {
     guard LinnetSettingsContract.requestCanContinue(request) else {
       reply(
@@ -376,17 +375,13 @@ extension SquirrelApplicationDelegate {
       )
       return
     }
-    let history = SquirrelInputController.coreActivationClientLedger.snapshot()
-    let decision = coreActivationDecision(
-      requesterPID: request.requesterPID,
-      history: history
-    )
+    let decision = coreActivationDecision(requesterPID: request.requesterPID)
     guard decision.isReady else {
       reply(
         to: request.transactionID,
         status: .rejected,
         code: coreActivationReplyCode(for: decision.blocker),
-        detail: coreActivationDiagnostic(decision)
+        detail: coreActivationDiagnostic(decision.blocker)
       )
       return
     }
@@ -399,40 +394,23 @@ extension SquirrelApplicationDelegate {
     )
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       guard let self else { return }
-      let finalHistory = SquirrelInputController.coreActivationClientLedger.snapshot()
       guard LinnetSettingsContract.requestCanContinue(request),
-        finalHistory.generation == history.generation,
-        coreActivationDecision(
-          requesterPID: request.requesterPID,
-          history: finalHistory
-        ).isReady
+        coreActivationDecision(requesterPID: request.requesterPID).isReady
       else { return }
       NSApp.terminate(nil)
     }
   }
 
   private func coreActivationDecision(
-    requesterPID: Int32,
-    history: LinnetInputClientLedger.Snapshot
+    requesterPID: Int32
   ) -> LinnetCoreActivationGate.Decision {
-    let runningApplications = NSWorkspace.shared.runningApplications
-      .filter { !$0.isTerminated }
-      .map {
-        LinnetCoreActivationGate.RunningApplication(
-          processIdentifier: $0.processIdentifier,
-          bundleIdentifier: $0.bundleIdentifier,
-          displayName: $0.localizedName ?? $0.bundleIdentifier ?? "Unknown application"
-        )
-      }
     return LinnetCoreActivationGate.evaluate(
       inputSourceIsActive:
         SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier,
       compositionIsActive:
         panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true,
       dataTransactionIsActive: activeDataTransaction != nil,
-      history: history,
-      runningApplications: runningApplications,
-      requesterPID: requesterPID
+      requesterIsAlive: LinnetSettingsContract.requesterIsAlive(requesterPID)
     )
   }
 
@@ -450,13 +428,9 @@ extension SquirrelApplicationDelegate {
   }
 
   private func coreActivationDiagnostic(
-    _ decision: LinnetCoreActivationGate.Decision
+    _ blocker: LinnetSettingsContract.CoreActivationBlocker?
   ) -> String {
-    guard !decision.applications.isEmpty else {
-      return "The explicit Core activation drain is not safe."
-    }
-    return "Applications still connected during Core activation: "
-      + decision.applications.joined(separator: ", ")
+    "The explicit Core activation drain is not safe: \(blocker?.rawValue ?? "unknown")."
   }
 
   private enum SettingsPublicationScope: Equatable {

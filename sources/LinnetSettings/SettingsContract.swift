@@ -74,8 +74,8 @@ enum LinnetSettingsContract {
     case cancel
     case diagnose
     /// User-requested replacement of an installed Core. The running Host may
-    /// accept only after its process-lifetime client ledger proves that every
-    /// prior input application except the Settings requester has exited.
+    /// accept only after Linnet is inactive, composition and data mutation are
+    /// idle, and the requesting Settings process is still alive.
     case activateCore = "activate_core"
     /// Atomically publishes a candidate settings document whose differences
     /// are limited to the panel-live appearance subset, then reconciles and
@@ -337,58 +337,12 @@ enum LinnetSettingsContract {
   }
 }
 
-/// Process-lifetime evidence owner for InputMethodKit clients. A controller's
-/// deinit does not prove that its application released the old IMKServer
-/// endpoint, so history is deliberately append-only until the Host exits.
-final class LinnetInputClientLedger: @unchecked Sendable {
-  struct Snapshot: Equatable, Sendable {
-    let bundleIdentifiers: Set<String>
-    let hasUnknownClient: Bool
-    let generation: UInt64
-  }
-
-  private let lock = NSLock()
-  private var bundleIdentifiers = Set<String>()
-  private var hasUnknownClient = false
-  private var generation: UInt64 = 0
-
-  func record(bundleIdentifier: String?) {
-    lock.lock()
-    defer { lock.unlock() }
-    generation &+= 1
-    guard let bundleIdentifier,
-      !bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    else {
-      hasUnknownClient = true
-      return
-    }
-    bundleIdentifiers.insert(bundleIdentifier)
-  }
-
-  func snapshot() -> Snapshot {
-    lock.lock()
-    defer { lock.unlock() }
-    return .init(
-      bundleIdentifiers: bundleIdentifiers,
-      hasUnknownClient: hasUnknownClient,
-      generation: generation
-    )
-  }
-}
-
 /// Pure fail-closed decision owner for the explicit Core activation boundary.
-/// Callers supply current macOS process evidence; this owner never infers that
-/// controller teardown means an application endpoint has disconnected.
+/// Switching away from Linnet ends active input ownership; inactive client
+/// processes do not need to exit before the Host replaces itself.
 enum LinnetCoreActivationGate {
-  struct RunningApplication: Equatable, Sendable {
-    let processIdentifier: Int32
-    let bundleIdentifier: String?
-    let displayName: String
-  }
-
   struct Decision: Equatable, Sendable {
     let blocker: LinnetSettingsContract.CoreActivationBlocker?
-    let applications: [String]
 
     var isReady: Bool { blocker == nil }
   }
@@ -397,45 +351,21 @@ enum LinnetCoreActivationGate {
     inputSourceIsActive: Bool,
     compositionIsActive: Bool,
     dataTransactionIsActive: Bool,
-    history: LinnetInputClientLedger.Snapshot,
-    runningApplications: [RunningApplication],
-    requesterPID: Int32
+    requesterIsAlive: Bool
   ) -> Decision {
     if dataTransactionIsActive {
-      return .init(blocker: .dataTransactionActive, applications: [])
+      return .init(blocker: .dataTransactionActive)
     }
     if inputSourceIsActive {
-      return .init(blocker: .inputSourceActive, applications: [])
+      return .init(blocker: .inputSourceActive)
     }
     if compositionIsActive {
-      return .init(blocker: .compositionActive, applications: [])
+      return .init(blocker: .compositionActive)
     }
-    if history.hasUnknownClient {
-      return .init(blocker: .unknownClient, applications: [])
+    guard requesterIsAlive else {
+      return .init(blocker: .requesterUnavailable)
     }
-    guard let requester = runningApplications.first(where: {
-      $0.processIdentifier == requesterPID
-    }), let requesterBundleIdentifier = requester.bundleIdentifier else {
-      return .init(blocker: .requesterUnavailable, applications: [])
-    }
-
-    var blockingNames = Set<String>()
-    for bundleIdentifier in history.bundleIdentifiers {
-      let matching = runningApplications.filter { $0.bundleIdentifier == bundleIdentifier }
-      guard !matching.isEmpty else { continue }
-      if bundleIdentifier == requesterBundleIdentifier,
-        matching.allSatisfy({ $0.processIdentifier == requesterPID }) {
-        continue
-      }
-      blockingNames.formUnion(matching.map(\.displayName))
-    }
-    guard blockingNames.isEmpty else {
-      return .init(
-        blocker: .applicationsStillRunning,
-        applications: blockingNames.sorted()
-      )
-    }
-    return .init(blocker: nil, applications: [])
+    return .init(blocker: nil)
   }
 }
 

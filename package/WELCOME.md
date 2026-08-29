@@ -21,9 +21,9 @@ After installation:
 - A clean Complete first installation registers Linnet but never enables or
   selects it for you. Core neither re-registers the source nor stops the live
   InputMethodKit Host. Existing applications keep their input connections.
-  Settings can apply an installed Core only after you switch away from Linnet
-  and close every other app that used the current Host; otherwise the new Core
-  takes over after the next macOS login or restart.
+  Settings can apply an installed Core after you switch away from Linnet and
+  finish the current composition or data operation. Other applications stay
+  open; Settings starts and verifies the new Core without another logout.
 - For a first Complete installation, save open work, log out of macOS once,
   and log in again. Complete rejects an existing App or Active state and directs
   it to Core. Core preserves the same input-source identity and current client
