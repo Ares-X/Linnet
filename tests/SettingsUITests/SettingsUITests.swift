@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import XCTest
 
@@ -17,14 +18,114 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
-  func testFiveSettingsPagesRemainAlive() throws {
+  func testFourSettingsPagesRemainAlive() throws {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    for name in ["Appearance", "Chinese Input", "Smart English", "Dictionary", "Data"] {
+    for name in ["Appearance", "Input", "Dictionary", "Data & Updates"] {
       clickTab(name, in: app)
       XCTAssertNotEqual(app.state, .notRunning, "Settings exited after opening \(name)")
     }
+  }
+
+  @MainActor
+  func testColdHostOpenBringsSettingsToForeground() async throws {
+    let settingsURL = settingsApplicationURL().resolvingSymlinksInPath().standardizedFileURL
+    try await terminateIsolatedSettings(at: settingsURL)
+    let runningApplication = try await openSettingsWithoutActivation(
+      at: settingsURL)
+    let app = XCUIApplication(bundleIdentifier: isolatedBundleIdentifier)
+    defer { _ = runningApplication.terminate() }
+
+    XCTAssertEqual(
+      runningApplication.bundleURL?.resolvingSymlinksInPath().standardizedFileURL,
+      settingsURL,
+      "Host-like open substituted a different Settings bundle")
+
+    for _ in 0..<50 where !runningApplication.isActive {
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    XCTAssertTrue(
+      runningApplication.isActive,
+      "Settings did not activate itself after the Host opened it without activation")
+    XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertTrue(
+      app.windows.firstMatch.isHittable,
+      "Cold-opened Settings window is hidden behind another app")
+  }
+
+  @MainActor
+  func testReopenRestoresMinimizedSettingsWindow() async throws {
+    let app = try launchSettings()
+    defer { app.terminate() }
+
+    let window = app.windows.firstMatch
+    let minimize = window.buttons["_XCUI:MinimizeWindow"]
+    XCTAssertTrue(minimize.waitForExistence(timeout: 3))
+    minimize.click()
+    let minimized = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "isHittable == false"),
+      object: window)
+    XCTAssertEqual(XCTWaiter.wait(for: [minimized], timeout: 3), .completed)
+
+    try await reopenSettings(at: settingsApplicationURL())
+    let restored = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "isHittable == true"),
+      object: window)
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [restored], timeout: 5),
+      .completed,
+      "Reopening Settings did not restore its minimized window to the foreground")
+  }
+
+  @MainActor
+  func testReopenRaisesSettingsAboveControlledForegroundWindow() async throws {
+    let app = try launchSettings()
+    defer { app.terminate() }
+
+    let coveringWindow = NSPanel(
+      contentRect: NSRect(x: 120, y: 120, width: 480, height: 320),
+      styleMask: [.titled, .closable],
+      backing: .buffered,
+      defer: false
+    )
+    coveringWindow.title = "Settings UI foreground fixture"
+    coveringWindow.makeKeyAndOrderFront(nil)
+    defer { coveringWindow.close() }
+    XCTAssertTrue(
+      NSRunningApplication.current.activate(options: [.activateAllWindows]),
+      "The controlled foreground fixture could not be activated"
+    )
+
+    let settings = try XCTUnwrap(
+      NSRunningApplication.runningApplications(
+        withBundleIdentifier: isolatedBundleIdentifier
+      ).first
+    )
+    let covered = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "isActive == false"),
+      object: settings
+    )
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [covered], timeout: 3),
+      .completed,
+      "The controlled fixture did not cover Settings"
+    )
+
+    try await reopenSettings(at: settingsApplicationURL())
+    let raised = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "isActive == true"),
+      object: settings
+    )
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [raised], timeout: 5),
+      .completed,
+      "Reopening Settings did not activate it above another application"
+    )
+    XCTAssertTrue(
+      app.windows.firstMatch.isHittable,
+      "Reopened Settings remained hidden behind the controlled foreground window"
+    )
   }
 
   @MainActor
@@ -143,7 +244,7 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    clickTab("Chinese Input", in: app)
+    clickTab("Input", in: app)
     selectEachPopUpOption([
       "Natural Code",
       "Full Pinyin",
@@ -171,7 +272,6 @@ final class SettingsUITests: XCTestCase {
       "Prefer single characters in auxiliary-code lookup by default",
       in: app)
 
-    clickTab("Smart English", in: app)
     for label in [
       "Show IPA pronunciation",
       "Show Chinese definitions",
@@ -196,7 +296,7 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    clickTab("Chinese Input", in: app)
+    clickTab("Input", in: app)
     try clickCheckBox("Suggest emoji candidates", in: app)
 
     let close = app.buttons["_XCUI:CloseWindow"]
@@ -223,7 +323,24 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    clickTab("Data", in: app)
+    clickTab("Data & Updates", in: app)
+
+    let coreUpdate = app.descendants(matching: .any)["settings.data.coreUpdate"]
+    try reveal(coreUpdate, named: "Core update", in: app)
+    XCTAssertTrue(coreUpdate.exists, "The always-present Core update card is missing")
+    let activationActions = app.buttons.matching(NSPredicate(
+      format: "label IN %@",
+      ["Apply Installed Update…", "Try Apply Again…"]))
+    XCTAssertEqual(
+      activationActions.count,
+      1,
+      "Core update must expose exactly one stable activation action")
+    XCTAssertTrue(
+      app.descendants(matching: .any)["settings.data.core.running"].exists,
+      "Core update did not explicitly expose the running Core identity")
+    XCTAssertTrue(
+      app.descendants(matching: .any)["settings.data.core.installed"].exists,
+      "Core update did not explicitly expose the installed Core identity")
 
     let checkAgain = app.buttons["Check Again"]
     try reveal(checkAgain, named: "Check Again", in: app)
@@ -272,6 +389,8 @@ final class SettingsUITests: XCTestCase {
       identifier: "settings.data.downloadSource",
       in: app)
 
+    try expandDisclosure("Manual recovery & transfer", in: app)
+
     selectEachPopUpOption([
       "Keep latest 10 verified backups",
       "Keep latest 30 verified backups",
@@ -317,6 +436,7 @@ final class SettingsUITests: XCTestCase {
       try cancelConfirmation("Restore this verified backup?", in: app)
     }
 
+    try expandDisclosure("Diagnostics", in: app)
     let refresh = app.buttons["Refresh"]
     try reveal(refresh, named: "Refresh", in: app)
     refresh.click()
@@ -324,6 +444,7 @@ final class SettingsUITests: XCTestCase {
     try openAndCancelPanel(button: "Save…", title: "Export Linnet Diagnostics", in: app)
 
     XCTAssertTrue(app.buttons["Update Language Data"].exists)
+    try expandDisclosure("iCloud Drive sync", in: app)
     XCTAssertTrue(app.checkBoxes["Sync learned words with iCloud Drive"].exists)
     XCTAssertTrue(app.buttons["Sync Learning Now"].exists)
     XCTAssertTrue(app.buttons["Open Data Folder"].exists)
@@ -344,6 +465,35 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
+  func testDataPageKeepsUpdatesVisibleAndProgressivelyDisclosesDataTools() throws {
+    let app = try launchSettings()
+    defer { app.terminate() }
+
+    clickTab("Data & Updates", in: app)
+
+    let coreUpdate = app.descendants(matching: .any)["settings.data.coreUpdate"]
+    try reveal(coreUpdate, named: "Core update", in: app)
+    XCTAssertTrue(coreUpdate.exists, "The version and update controls are not always present")
+
+    let rows: [(group: String, hiddenControl: XCUIElement)] = [
+      ("iCloud Drive sync", app.buttons["Sync Learning Now"]),
+      ("Manual recovery & transfer", app.buttons["Import Existing"]),
+      ("Diagnostics", app.buttons["Copy Report"]),
+    ]
+    for row in rows {
+      let disclosure = disclosure(row.group, in: app)
+      try reveal(disclosure, named: row.group, in: app)
+      XCTAssertFalse(
+        row.hiddenControl.exists,
+        "\(row.group) was expanded before the user requested it")
+      disclosure.click()
+      XCTAssertTrue(
+        row.hiddenControl.waitForExistence(timeout: 3),
+        "\(row.group) did not reveal its existing controls")
+    }
+  }
+
+  @MainActor
   private func launchSettings() throws -> XCUIApplication {
     let isolatedHome = "/private/tmp/linnet-settings-ui-uat-active-\(getuid())"
     let isolatedHomeURL = URL(fileURLWithPath: isolatedHome, isDirectory: true)
@@ -359,14 +509,7 @@ final class SettingsUITests: XCTestCase {
       atPath: isolatedHomeURL.appending(
         path: "Library/Application Support/Linnet/UserData/linnet_settings.json").path))
 
-    let productsDirectory = Bundle(for: SettingsUITests.self).bundleURL
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-    let settingsURL = productsDirectory
-      .appending(path: "Linnet.app", directoryHint: .isDirectory)
-      .appending(path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
+    let settingsURL = settingsApplicationURL()
     let path = settingsURL.path
     XCTAssertTrue(
       FileManager.default.fileExists(atPath: path),
@@ -389,19 +532,118 @@ final class SettingsUITests: XCTestCase {
     return app
   }
 
+  private func settingsApplicationURL() -> URL {
+    let productsDirectory = Bundle(for: SettingsUITests.self).bundleURL
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+    return productsDirectory
+      .appending(path: "Linnet.app", directoryHint: .isDirectory)
+      .appending(path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
+  }
+
+  private func reopenSettings(at settingsURL: URL) async throws {
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = false
+    configuration.addsToRecentItems = false
+    configuration.allowsRunningApplicationSubstitution = false
+    try await withCheckedThrowingContinuation {
+      (continuation: CheckedContinuation<Void, Error>) in
+      NSWorkspace.shared.openApplication(
+        at: settingsURL,
+        configuration: configuration
+      ) { application, error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else if application == nil {
+          continuation.resume(throwing: SettingsUIFailure.reopenFailed)
+        } else {
+          continuation.resume(returning: ())
+        }
+      }
+    }
+  }
+
+  private func openSettingsWithoutActivation(
+    at settingsURL: URL
+  ) async throws -> NSRunningApplication {
+    let isolatedHome = "/private/tmp/linnet-settings-ui-uat-active-\(getuid())"
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = false
+    configuration.addsToRecentItems = false
+    configuration.allowsRunningApplicationSubstitution = false
+    configuration.environment = [
+      "HOME": isolatedHome,
+      "CFFIXED_USER_HOME": isolatedHome,
+    ]
+    configuration.arguments = [
+      "-AppleLanguages", "(en)",
+      "-AppleLocale", "en_US",
+    ]
+    return try await withCheckedThrowingContinuation {
+      (continuation: CheckedContinuation<NSRunningApplication, Error>) in
+      NSWorkspace.shared.openApplication(
+        at: settingsURL,
+        configuration: configuration
+      ) { application, error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else if let application {
+          continuation.resume(returning: application)
+        } else {
+          continuation.resume(throwing: SettingsUIFailure.reopenFailed)
+        }
+      }
+    }
+  }
+
+  private func terminateIsolatedSettings(at settingsURL: URL) async throws {
+    let exactApplications = {
+      NSRunningApplication.runningApplications(
+        withBundleIdentifier: self.isolatedBundleIdentifier
+      ).filter {
+        $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL == settingsURL
+      }
+    }
+    for application in exactApplications() {
+      _ = application.terminate()
+    }
+    for _ in 0..<50 {
+      if exactApplications().isEmpty {
+        return
+      }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    XCTFail("The isolated Settings fixture was already running and did not terminate")
+  }
+
   @MainActor
   private func clickTab(_ name: String, in app: XCUIApplication) {
-    let tabLabel = name == "Smart English" ? "ABC" : name
     let candidates = [
-      app.tabBars.buttons[tabLabel],
-      app.radioButtons[tabLabel],
-      app.buttons[tabLabel],
+      app.tabBars.buttons[name],
+      app.radioButtons[name],
+      app.buttons[name],
     ]
     for candidate in candidates where candidate.waitForExistence(timeout: 2) {
       candidate.click()
       return
     }
     XCTFail("Settings tab is unavailable: \(name)")
+  }
+
+  @MainActor
+  private func disclosure(_ name: String, in app: XCUIApplication) -> XCUIElement {
+    let triangle = app.disclosureTriangles[name]
+    if triangle.exists { return triangle }
+    return app.buttons[name]
+  }
+
+  @MainActor
+  private func expandDisclosure(_ name: String, in app: XCUIApplication) throws {
+    let control = disclosure(name, in: app)
+    try reveal(control, named: name, in: app)
+    control.click()
   }
 
   @MainActor
@@ -613,14 +855,22 @@ final class SettingsUITests: XCTestCase {
         if element.exists, scrollView.exists {
           let viewport = scrollView.frame.insetBy(dx: 0, dy: 12)
           if element.isHittable, viewport.contains(element.frame) { return }
-          scrollView.scroll(
-            byDeltaX: 0,
-            deltaY: element.frame.midY > viewport.midY ? -300 : 300)
-        } else if scrollView.exists {
-          scrollView.scroll(byDeltaX: 0, deltaY: deltaY)
         }
+        guard scrollView.exists else { break }
+        scrollView.scroll(byDeltaX: 0, deltaY: deltaY)
       }
     }
-    XCTFail("Settings control is unavailable: \(name)")
+    let viewport = scrollView.exists
+      ? scrollView.frame.insetBy(dx: 0, dy: 12)
+      : CGRect.null
+    XCTFail(
+      "Settings control is unavailable: \(name); "
+        + "exists=\(element.exists), isEnabled=\(element.isEnabled), "
+        + "isHittable=\(element.isHittable), frame=\(element.frame), "
+        + "viewport=\(viewport)")
+  }
+
+  private enum SettingsUIFailure: Error {
+    case reopenFailed
   }
 }

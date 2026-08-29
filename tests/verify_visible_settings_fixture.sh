@@ -41,6 +41,11 @@ if [[ "${run_ui_tests}" == true && "${CI:-}" != true &&
       "${LINNET_ISOLATED_UI_TEST_DESKTOP:-}" != 1 ]]; then
   fail "Settings UI tests require a CI runner or an explicitly isolated macOS desktop"
 fi
+if [[ "${run_ui_tests}" == true ]]; then
+  developer_mode_status="$(DevToolsSecurity -status 2>&1 || true)"
+  [[ "${developer_mode_status}" == *"enabled"* ]] ||
+    fail "Settings UI tests require macOS Developer Mode; run DevToolsSecurity -enable first"
+fi
 
 uat_host_identifier="io.github.ares-x.inputmethod.Linnet.settings-ui-uat"
 uat_settings_identifier="${uat_host_identifier}.settings"
@@ -53,7 +58,7 @@ focused_ui_test=""
 if [[ -n "${ui_test_name}" ]]; then
   [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+$ ]] ||
     fail "invalid Settings UI test name: ${ui_test_name}"
-  rg -q "^[[:space:]]*func ${ui_test_name}\\(\\) throws \\{" \
+  rg -q "^[[:space:]]*func ${ui_test_name}\\(\\) (async )?throws \\{" \
     "${settings_ui_source}" || fail "unknown Settings UI test: ${ui_test_name}"
   focused_ui_test="-only-testing:SettingsUITests/SettingsUITests/${ui_test_name}"
 fi
@@ -215,9 +220,17 @@ cleanup() {
       exit_code=1
     fi
     if [[ -n "${before_fingerprint}" && -n "${before_content_fingerprint}" ]]; then
-      if [[ "$(metadata_fingerprint)" != "${before_fingerprint}" || \
-          "$(content_fingerprint)" != "${before_content_fingerprint}" ]]; then
-        echo "verify_visible_settings_fixture: UI test changed a protected real-user path" >&2
+      after_fingerprint="$(metadata_fingerprint)"
+      after_content_fingerprint="$(content_fingerprint)"
+      if [[ "${after_fingerprint}" != "${before_fingerprint}" ]]; then
+        echo "verify_visible_settings_fixture: protected path metadata changed:" >&2
+        diff -u \
+          <(printf '%s\n' "${before_fingerprint}") \
+          <(printf '%s\n' "${after_fingerprint}") >&2 || true
+        exit_code=1
+      fi
+      if [[ "${after_content_fingerprint}" != "${before_content_fingerprint}" ]]; then
+        echo "verify_visible_settings_fixture: protected Settings bytes changed" >&2
         exit_code=1
       fi
     fi
@@ -334,6 +347,7 @@ protected_content_paths=(
 metadata_fingerprint() {
   local path
   for path in "${protected_paths[@]}"; do
+    printf '%s\t' "${path}"
     if [[ -e "${path}" || -L "${path}" ]]; then
       stat -f '%d:%i:%p:%u:%g:%z:%m:%c:%HT' "${path}"
     else

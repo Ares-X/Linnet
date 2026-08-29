@@ -163,9 +163,16 @@ struct LinnetSettingsProjectionRendererTests {
       LinnetSettingsDocument.CandidateBrowsingMode.allCases == [.scrollingOnly, .expandable],
       LinnetSettingsDocument.Appearance.default.candidateBrowsingMode == .expandable,
       LinnetSettingsDocument.Appearance.default.pageSize == 9,
-      LinnetSettingsDocument.Input.default.pinyinReverseTrigger == .semicolon
+      LinnetSettingsDocument.Input.default.pinyinReverseTrigger == .verticalBar
     else {
       fail("candidate font bounds or the bilingual layout defaults drifted")
+    }
+    let bundledDefaults = try? String(
+      contentsOfFile: "data/linnet/default.yaml", encoding: .utf8)
+    guard bundledDefaults?.contains("pinyin_reverse_lookup: \"^[|][a-z;']*$\"") == true,
+      bundledDefaults?.contains("prefix: \"|\"") == true
+    else {
+      fail("the bundled reverse-lookup base no longer matches the document-owned | default")
     }
     let projections = LinnetSettingsProjectionRenderer.renderProjections(
       document: .default
@@ -190,7 +197,9 @@ struct LinnetSettingsProjectionRendererTests {
       guard contents.contains(
         "\"linnet_english_interaction/sentence_capitalization\": false"),
         contents.contains("\"linnet_english_interaction/tab_behavior\": \"smart_complete\""),
-        contents.contains("\"linnet_english_interaction/space_adds_trailing_space\": true")
+        contents.contains("\"linnet_english_interaction/space_adds_trailing_space\": true"),
+        !contents.contains("recognizer/patterns/linnet_pinyin"),
+        !contents.contains("linnet_pinyin/prefix")
       else {
         fail("the default interaction settings were not authoritative in \(name)")
       }
@@ -199,7 +208,7 @@ struct LinnetSettingsProjectionRendererTests {
 
   private static func testPinyinReverseTriggerProjection() {
     var document = LinnetSettingsDocument.default
-    document.input.pinyinReverseTrigger = .verticalBar
+    document.input.pinyinReverseTrigger = .semicolon
     let projections = LinnetSettingsProjectionRenderer.renderProjections(
       document: document)
     let reverseLookupFiles =
@@ -213,8 +222,8 @@ struct LinnetSettingsProjectionRendererTests {
     for file in reverseLookupFiles {
       guard let contents = projections[file],
         contents.contains(
-          "\"recognizer/patterns/linnet_pinyin\": \"^[|][a-z;']*$\""),
-        contents.contains("\"linnet_pinyin/prefix\": \"|\"")
+          "\"recognizer/patterns/linnet_pinyin\": \"^;[a-z;']*$\""),
+        contents.contains("\"linnet_pinyin/prefix\": \";\"")
       else {
         fail("the reverse-lookup recognizer and affix prefix diverged in \(file)")
       }
@@ -224,20 +233,20 @@ struct LinnetSettingsProjectionRendererTests {
       let encoded = try JSONEncoder().encode(document)
       let decoded = try JSONDecoder().decode(
         LinnetSettingsDocument.self, from: encoded)
-      guard decoded.input.pinyinReverseTrigger == .verticalBar else {
+      guard decoded.input.pinyinReverseTrigger == .semicolon else {
         fail("the reverse-lookup trigger did not survive the document codec")
       }
     } catch {
       fail("the reverse-lookup trigger codec failed: \(error)")
     }
 
-    document.input.pinyinReverseTrigger = .semicolon
+    document.input.pinyinReverseTrigger = .verticalBar
     let restored = LinnetSettingsProjectionRenderer.renderProjections(document: document)
     guard restored.values.allSatisfy({
       !$0.contains("recognizer/patterns/linnet_pinyin")
         && !$0.contains("linnet_pinyin/prefix")
     }) else {
-      fail("restoring the bundled reverse-lookup trigger left a projection")
+      fail("restoring the bundled | reverse-lookup trigger left a projection")
     }
 
     let invalid = Data("""
@@ -246,7 +255,7 @@ struct LinnetSettingsProjectionRendererTests {
     do {
       let decoded = try JSONDecoder().decode(
         LinnetSettingsDocument.self, from: invalid)
-      guard decoded.input.pinyinReverseTrigger == .semicolon else {
+      guard decoded.input.pinyinReverseTrigger == .verticalBar else {
         fail("an invalid reverse-lookup trigger did not fail closed to the bundled key")
       }
     } catch {
@@ -646,7 +655,8 @@ struct LinnetSettingsProjectionRendererTests {
           LinnetSettingsDocument.self, from: previousDefaults)
         guard decoded.schemaVersion == LinnetSettingsDocument.currentSchemaVersion,
           decoded.appearance.englishCandidateLayout == .horizontal,
-          decoded.appearance.pageSize == 9
+          decoded.appearance.pageSize == 9,
+          decoded.input.pinyinReverseTrigger == .verticalBar
         else {
           fail("v\(previousVersion) shipped layout and page defaults were not migrated")
         }
@@ -664,7 +674,7 @@ struct LinnetSettingsProjectionRendererTests {
       guard decoded.schemaVersion == LinnetSettingsDocument.currentSchemaVersion,
         decoded.appearance.englishCandidateLayout == .vertical,
         decoded.appearance.pageSize == 5,
-        decoded.input.pinyinReverseTrigger == .semicolon
+        decoded.input.pinyinReverseTrigger == .verticalBar
       else {
         fail("the v4 trigger migration changed an explicit vertical/five choice")
       }

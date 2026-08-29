@@ -4,21 +4,27 @@ import Foundation
 @main
 struct LinnetSettingsUpdateCheckerStateTests {
   @MainActor static func main() async {
-    let installed = identity(version: "0.1.9", build: 68, revision: "a")
-    let older = identity(version: "0.1.8", build: 60, revision: "b")
+    let installed = identity(version: "0.1.10", build: 69, revision: "a")
+    let older = identity(version: "0.1.9", build: 68, revision: "b")
+    let later = identity(version: "0.1.11", build: 70, revision: "c")
 
+    let unavailableHost = LinnetSettingsUpdateChecker.RuntimeVersionState.resolved(
+      installed: installed,
+      health: nil
+    )
     require(
-      LinnetSettingsUpdateChecker.RuntimeVersionState.resolved(
-        installed: installed,
-        health: nil
-      ) == .unavailable,
+      unavailableHost == .unavailable(installed: installed),
       "a missing Host health response became activatable"
+    )
+    require(
+      unavailableHost.activationIdentities == nil,
+      "an unavailable Host exposed Core activation identities"
     )
     require(
       LinnetSettingsUpdateChecker.RuntimeVersionState.resolved(
         installed: nil,
         health: health(productIdentity: older)
-      ) == .unavailable,
+      ) == .unavailable(installed: nil),
       "a missing installed product identity became activatable"
     )
 
@@ -33,6 +39,13 @@ struct LinnetSettingsUpdateCheckerStateTests {
     require(
       unidentified.activationIdentities == nil,
       "an identity-free Host became eligible for immediate activation"
+    )
+    require(
+      LinnetSettingsUpdateChecker.RuntimeVersionState.resolved(
+        installed: later,
+        health: health(productIdentity: nil)
+      ) == .unavailable(installed: later),
+      "the one-release identity-free Host bridge leaked into 0.1.11"
     )
 
     require(
@@ -55,12 +68,15 @@ struct LinnetSettingsUpdateCheckerStateTests {
       defer { try? FileManager.default.removeItem(at: fixture.root) }
       let requester = RuntimeRequester(health: health(productIdentity: nil))
       let checker = LinnetSettingsUpdateChecker(
-        currentVersion: installed.version,
-        currentBuild: installed.build,
         edition: nil,
         installedPacks: [],
         bundle: fixture.settings,
         transactionRequester: requester
+      )
+      require(
+        checker.installedIdentity == installed
+          && checker.runtimeVersionState == .checking(installed: installed),
+        "the strict installed Core identity is not the sole initial update owner"
       )
 
       checker.refreshRuntime()
@@ -78,6 +94,62 @@ struct LinnetSettingsUpdateCheckerStateTests {
           && requester.commands == [.diagnose],
         "identity-free Host received an unsafe Core activation request"
       )
+
+      let unavailableRequester = UnavailableRuntimeRequester()
+      let unavailableChecker = LinnetSettingsUpdateChecker(
+        edition: nil,
+        installedPacks: [],
+        bundle: fixture.settings,
+        transactionRequester: unavailableRequester
+      )
+      unavailableChecker.refreshRuntime()
+      await waitUntil("a failed Host request discarded the installed identity") {
+        unavailableChecker.runtimeVersionState == .unavailable(installed: installed)
+      }
+      require(
+        unavailableChecker.runtimeVersionState.activationIdentities == nil,
+        "a failed Host request became eligible for immediate activation"
+      )
+
+      // Remove this table with the 0.1.9 blocker wire cases when the minimum
+      // Core becomes 0.1.10 for the public 0.1.11 release.
+      let legacyBlockers: [(
+        code: LinnetSettingsContract.RuntimeReplyCode,
+        issue: LinnetSettingsContract.CoreActivationBlocker
+      )] = [
+        (.coreActivationApplicationsRunning, .applicationsStillRunning),
+        (.coreActivationUnknownClient, .unknownClient),
+      ]
+      for legacy in legacyBlockers {
+        let legacyRequester = RuntimeRequester(
+          health: health(productIdentity: older),
+          activationReplyCode: legacy.code)
+        let legacyChecker = LinnetSettingsUpdateChecker(
+          edition: nil,
+          installedPacks: [],
+          bundle: fixture.settings,
+          transactionRequester: legacyRequester)
+        legacyChecker.refreshRuntime()
+        await waitUntil("0.1.9 Host identity did not expose the installed Core update") {
+          legacyChecker.runtimeVersionState == .pending(
+            installed: installed,
+            running: older)
+        }
+        legacyChecker.activateInstalledCore()
+        let expected = LinnetSettingsUpdateChecker.RuntimeVersionState.blocked(
+          installed: installed,
+          running: older,
+          issue: legacy.issue)
+        await waitUntil("0.1.9 blocker did not map to a fail-closed Settings prompt") {
+          legacyChecker.runtimeVersionState == expected
+        }
+        require(
+          legacyChecker.runtimeVersionState == expected &&
+            legacyChecker.runtimeVersionState != .applied(installed) &&
+            legacyRequester.commands == [.diagnose, .activateCore],
+          "0.1.9 blocker \(legacy.code.rawValue) entered Host lifecycle or success"
+        )
+      }
     } catch {
       fail("unexpected fixture error: \(error)")
     }
@@ -90,9 +162,17 @@ struct LinnetSettingsUpdateCheckerStateTests {
   {
     private let lock = NSLock()
     private let health: LinnetSettingsContract.RuntimeHealth
+    private let activationReplyCode: LinnetSettingsContract.RuntimeReplyCode
     private var recordedCommands: [LinnetSettingsContract.DataCommand] = []
 
-    init(health: LinnetSettingsContract.RuntimeHealth) { self.health = health }
+    init(
+      health: LinnetSettingsContract.RuntimeHealth,
+      activationReplyCode: LinnetSettingsContract.RuntimeReplyCode =
+        .coreActivationInputSourceActive
+    ) {
+      self.health = health
+      self.activationReplyCode = activationReplyCode
+    }
 
     var commands: [LinnetSettingsContract.DataCommand] {
       lock.withLock { recordedCommands }
@@ -116,11 +196,25 @@ struct LinnetSettingsUpdateCheckerStateTests {
       return .init(
         transactionID: request.transactionID,
         status: .rejected,
-        code: .coreActivationInputSourceActive,
-        detail: "Another input source must be selected.",
+        code: activationReplyCode,
+        detail: "Core activation remains blocked.",
         health: nil
       )
     }
+  }
+
+  private final class UnavailableRuntimeRequester:
+    LinnetSettingsTransactionRequesting, @unchecked Sendable
+  {
+    func request(
+      _: LinnetSettingsContract.DataRequest,
+      timeout _: TimeInterval,
+      onProgress _: @escaping @Sendable (LinnetSettingsContract.RuntimeReply) -> Void
+    ) async throws -> LinnetSettingsContract.RuntimeReply {
+      throw Failure.unavailable
+    }
+
+    private enum Failure: Error { case unavailable }
   }
 
   private struct BundleFixture {

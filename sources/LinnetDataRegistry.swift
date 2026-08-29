@@ -142,6 +142,11 @@ struct LinnetDataRegistry: Sendable {
     let activeRevision: ActiveRevision
   }
 
+  enum InstalledRuntimeState: String, Equatable, Sendable {
+    case healthy
+    case missing
+  }
+
   struct ActiveRevision: Codable, Equatable, Sendable {
     let generation: Int
     let stateSHA256: String
@@ -246,6 +251,7 @@ struct LinnetDataRegistry: Sendable {
   enum Failure: LocalizedError, Equatable {
     case applicationSupportUnavailable
     case invalidProductName
+    case missingRegistryRoot
     case missingActiveState
     case invalidActiveState
     case staleDataChannel
@@ -258,6 +264,8 @@ struct LinnetDataRegistry: Sendable {
         "Application Support is unavailable."
       case .invalidProductName:
         "The product name is invalid."
+      case .missingRegistryRoot:
+        "Linnet data is not installed."
       case .missingActiveState:
         "Language data is not installed."
       case .invalidActiveState:
@@ -277,10 +285,16 @@ struct LinnetDataRegistry: Sendable {
   let rootDevice: dev_t
   let rootInode: ino_t
 
+  enum RootAccess {
+    case createIfMissing
+    case existing
+  }
+
   init(
     productName: String,
     coreVersion: String,
-    applicationSupportDirectory: URL? = nil
+    applicationSupportDirectory: URL? = nil,
+    rootAccess: RootAccess = .createIfMissing
   ) throws {
     guard !productName.isEmpty,
       productName != ".", productName != "..",
@@ -292,8 +306,15 @@ struct LinnetDataRegistry: Sendable {
       throw Failure.invalidActiveState
     }
     let support = try applicationSupportDirectory ?? Self.applicationSupportDirectory()
-    let boundary = try Self.openOrCreateCanonicalRoot(
-      applicationSupportDirectory: support, productName: productName)
+    let boundary: (url: URL, device: dev_t, inode: ino_t)
+    switch rootAccess {
+    case .createIfMissing:
+      boundary = try Self.openOrCreateCanonicalRoot(
+        applicationSupportDirectory: support, productName: productName)
+    case .existing:
+      boundary = try Self.openExistingCanonicalRoot(
+        applicationSupportDirectory: support, productName: productName)
+    }
     rootDirectory = boundary.url
     rootDevice = boundary.device
     rootInode = boundary.inode
@@ -326,6 +347,14 @@ extension LinnetDataRegistry {
     rootDirectory.appending(path: "Runtime/Active", directoryHint: .isDirectory)
   }
 
+  private var runtimeDirectory: URL {
+    rootDirectory.appending(path: "Runtime", directoryHint: .isDirectory)
+  }
+
+  private var runtimeLogDirectory: URL {
+    runtimeDirectory.appending(path: "Logs", directoryHint: .isDirectory)
+  }
+
   var packsDirectory: URL {
     rootDirectory.appending(path: "Data/Packs", directoryHint: .isDirectory)
   }
@@ -355,6 +384,22 @@ extension LinnetDataRegistry {
         throw Failure.unsafePath(directory.path)
       }
     }
+  }
+
+  /// The Registry owns the only persistent runtime-log path. The read-only
+  /// runtime inspector never calls this mutating preparation boundary.
+  func prepareRuntimeLogDirectory() throws -> URL {
+    try verifyCanonicalRoot()
+    let runtimeInfo = try Self.existingOwnedDirectory(runtimeDirectory)
+    guard runtimeInfo.st_dev == rootDevice else {
+      throw Failure.unsafePath(runtimeDirectory.path)
+    }
+    let logInfo = try Self.ensureOwnedDirectory(
+      runtimeLogDirectory, withIntermediateDirectories: false)
+    guard logInfo.st_dev == rootDevice else {
+      throw Failure.unsafePath(runtimeLogDirectory.path)
+    }
+    return runtimeLogDirectory
   }
 
   /// Creates and marks Settings-owned personal mutation scratch for

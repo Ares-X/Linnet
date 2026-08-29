@@ -13,6 +13,7 @@ struct SettingsContractTests {
       testPinyinReverseLookupExamples()
       testCoreActivationGate()
       try testLegacyRuntimeHealthWithoutIdentity()
+      try testLegacyCoreActivationBlockerWireCodes()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
         testProductIdentity(host: host, settings: settings)
@@ -55,8 +56,24 @@ struct SettingsContractTests {
   }
 
   private static func testCoreActivationGate() {
+    guard LinnetInputSourceSelection.classify(
+      currentIdentifier: "io.github.ares-x.inputmethod.Linnet",
+      linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .linnet,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: "unrelated.example",
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .other,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: nil,
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .unknown,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: "",
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .unknown
+    else {
+      fail("optional HIToolbox evidence no longer preserves an unknown state")
+    }
+
     guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: false,
       dataTransactionIsActive: false,
       requesterIsAlive: true
@@ -65,32 +82,39 @@ struct SettingsContractTests {
     }
 
     let activeSource = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: true,
+      selectedInputSource: .linnet,
       compositionIsActive: false,
       dataTransactionIsActive: false,
       requesterIsAlive: true
     )
     let activeComposition = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: true,
       dataTransactionIsActive: false,
       requesterIsAlive: true
     )
     let activeTransaction = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: false,
       dataTransactionIsActive: true,
       requesterIsAlive: true
     )
+    let unknownSource = LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .unknown,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      requesterIsAlive: true
+    )
     guard activeSource.blocker == .inputSourceActive,
       activeComposition.blocker == .compositionActive,
-      activeTransaction.blocker == .dataTransactionActive
+      activeTransaction.blocker == .dataTransactionActive,
+      unknownSource.blocker == .unknownClient
     else {
       fail("Core activation no longer fails closed at every Host mutation boundary")
     }
 
     guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: false,
       dataTransactionIsActive: false,
       requesterIsAlive: false
@@ -129,6 +153,38 @@ struct SettingsContractTests {
       LinnetSettingsContract.validRuntimeReply(reply)
     else {
       fail("the shipped build60 identity-free health shape is no longer valid")
+    }
+  }
+
+  /// Remove with the two 0.1.9 RuntimeReplyCode cases when the minimum Core
+  /// becomes 0.1.10 for the public 0.1.11 release.
+  private static func testLegacyCoreActivationBlockerWireCodes() throws {
+    let fixtures: [(wireCode: String, code: LinnetSettingsContract.RuntimeReplyCode)] = [
+      ("core_activation_applications_running", .coreActivationApplicationsRunning),
+      ("core_activation_unknown_client", .coreActivationUnknownClient),
+    ]
+    for (index, fixture) in fixtures.enumerated() {
+      let transactionID = UUID(
+        uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 2))!
+      let document: [String: Any] = [
+        "transactionID": transactionID.uuidString,
+        "status": "rejected",
+        "code": fixture.wireCode,
+        "detail": "Published 0.1.9 Host blocked Core activation.",
+        "health": NSNull(),
+      ]
+      let data = try JSONSerialization.data(withJSONObject: document)
+      let reply = try JSONDecoder().decode(
+        LinnetSettingsContract.RuntimeReply.self,
+        from: data)
+      guard reply.transactionID == transactionID,
+        reply.status == .rejected,
+        reply.code == fixture.code,
+        reply.health == nil,
+        LinnetSettingsContract.validRuntimeReply(reply)
+      else {
+        fail("published 0.1.9 blocker wire code \(fixture.wireCode) changed meaning")
+      }
     }
   }
 

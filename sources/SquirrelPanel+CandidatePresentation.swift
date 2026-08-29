@@ -7,6 +7,91 @@
 
 import AppKit
 
+extension LinnetPanelGeometry {
+  /// One App-panel owner sizes, places, flips, and clamps candidate/status
+  /// windows. Shared Settings presentation code does not depend on this IMK
+  /// placement boundary.
+  static func panelFrame(
+    contentSize: CGSize,
+    caret: CGRect,
+    screen: CGRect,
+    metrics: PresentationMetrics,
+    offsetHeight: CGFloat,
+    verticalPreeditExtent: CGFloat = 0
+  ) -> CGRect? {
+    guard contentSize.width.isFinite,
+      contentSize.height.isFinite,
+      contentSize.width >= 0,
+      contentSize.height >= 0,
+      caret.minX.isFinite,
+      caret.minY.isFinite,
+      caret.maxX.isFinite,
+      caret.maxY.isFinite,
+      screen.minX.isFinite,
+      screen.minY.isFinite,
+      screen.width.isFinite,
+      screen.height.isFinite,
+      screen.width > 0,
+      screen.height > 0,
+      offsetHeight.isFinite,
+      verticalPreeditExtent.isFinite
+    else { return nil }
+
+    let relativeCaretY = relativeVerticalPosition(caret: caret, screen: screen) ?? 0.5
+    var frame = CGRect.zero
+    if metrics.vertical {
+      frame.size = CGSize(
+        width: max(
+          metrics.paging.axisExtent,
+          min(0.95 * screen.width, contentSize.height + metrics.edgeInset.height * 2)
+        ),
+        height: min(
+          0.95 * screen.height,
+          contentSize.width + metrics.edgeInset.width * 2 + metrics.paging.stripWidth
+        )
+      )
+      let layout = pagingLayout(
+        configuration: metrics.paging,
+        in: CGRect(origin: .zero, size: frame.size),
+        preferredAxisCenter: .nan,
+        vertical: true)
+      frame.origin.y = relativeCaretY >= 0.5
+        ? caret.minY - offsetHeight - frame.height + layout.contentFrame.minX
+        : caret.maxY + offsetHeight
+      frame.origin.x = caret.minX - frame.width - offsetHeight + verticalPreeditExtent
+    } else {
+      frame.size = CGSize(
+        width: min(
+          0.95 * screen.width,
+          contentSize.width + metrics.edgeInset.width * 2 + metrics.paging.stripWidth
+        ),
+        height: max(
+          metrics.paging.axisExtent,
+          min(0.95 * screen.height, contentSize.height + metrics.edgeInset.height * 2)
+        )
+      )
+      let layout = pagingLayout(
+        configuration: metrics.paging,
+        in: CGRect(origin: .zero, size: frame.size),
+        preferredAxisCenter: .nan)
+      frame.origin = CGPoint(
+        x: caret.minX - layout.contentFrame.minX,
+        y: caret.minY - offsetHeight - frame.height)
+      if frame.minY < screen.minY {
+        frame.origin.y = caret.maxY + offsetHeight
+      }
+    }
+
+    frame.origin.x = min(
+      max(frame.origin.x, screen.minX),
+      screen.maxX - frame.width)
+    frame.origin.y = min(
+      max(frame.origin.y, screen.minY),
+      screen.maxY - frame.height)
+    return frame
+  }
+}
+
 extension SquirrelPanel {
   func beginPublication(controller: SquirrelInputController) -> Publication? {
     guard inputController === controller else { return nil }
@@ -138,30 +223,38 @@ extension SquirrelPanel {
     return maxWidth
   }
 
-  /// Reflows a horizontal definition inside the width owned by the candidate
-  /// row, allowing only a compact capped expansion when the row is shorter.
-  func fitHorizontalDetail(
+  /// The existing detached TextKit surface renders both footer and sidecar
+  /// details. CandidateDetailGeometry owns its width and frame; this boundary
+  /// owns only TextKit line fitting and trailing truncation.
+  func fitSelectedDetailText(
     geometry: LinnetCandidatePresentation.CandidateDetailGeometry,
+    candidateSize: NSSize,
+    theme: SquirrelTheme,
     textContainer: NSTextContainer,
     textLayoutManager: NSTextLayoutManager
-  ) {
-    guard geometry.placement == .footer,
-      view.detailRange.length > 0,
-      let detailWidthLimit = geometry.detailColumnMaximumWidth,
-      let attributed = view.textView.textContentStorage?.attributedString,
-      NSMaxRange(view.detailRange) <= attributed.length
-    else { return }
-    let detail = attributed.attributedSubstring(from: view.detailRange)
-    let measuredDetailWidth = detail.boundingRect(
-      with: NSSize(width: detailWidthLimit, height: .greatestFiniteMagnitude),
-      options: [.usesLineFragmentOrigin, .usesFontLeading]
-    ).width
-    let compactTextWidth = min(
-      textContainer.size.width,
-      max(ceil(view.primaryContentRect.width), ceil(measuredDetailWidth)))
-    guard compactTextWidth < textContainer.size.width else { return }
-    textContainer.size.width = compactTextWidth
+  ) -> NSRect {
+    let detailFont = (theme.detailAttrs[.font] as? NSFont) ?? theme.font
+    let lineHeight = max(
+      1, ceil(detailFont.ascender - detailFont.descender + detailFont.leading))
+    let maximumLines: Int
+    let detailHeight: CGFloat
+    switch geometry.placement {
+    case .footer:
+      maximumLines = LinnetCandidatePresentation.maximumFooterDetailLineCount
+      detailHeight = lineHeight * CGFloat(maximumLines)
+    case .sidecar:
+      maximumLines = max(1, Int(floor(candidateSize.height / lineHeight)))
+      detailHeight = candidateSize.height
+    }
+    let detailWidth = geometry.fittedDetailWidth(
+      candidateWidth: candidateSize.width,
+      detailWidth: geometry.detailColumnMaximumWidth ?? candidateSize.width)
+    guard detailWidth > 0, detailHeight > 0 else { return .zero }
+    textContainer.maximumNumberOfLines = maximumLines
+    textContainer.lineBreakMode = .byTruncatingTail
+    textContainer.size = NSSize(width: detailWidth, height: detailHeight)
     textLayoutManager.ensureLayout(for: textLayoutManager.documentRange)
+    return view.detailContentRect
   }
 
   // Get the window size, the windows will be the dirtyRect in
@@ -193,38 +286,37 @@ extension SquirrelPanel {
       ? screenRect.width - metrics.edgeInset.width * 2
       : screenRect.height - metrics.edgeInset.height * 2
     let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
-      forLinearLayout: linear || metrics.vertical, candidateFontPoint: theme.font.pointSize)
-    let hasSidecar = detailGeometry.placement == .sidecar && !view.detailTextView.isHidden
+      forLinearLayout: linear || metrics.vertical,
+      candidateFontPoint: theme.font.pointSize)
+    let hasDetail = !view.detailTextView.isHidden
+    let hasSidecar = hasDetail && detailGeometry.placement == .sidecar
     let textWidth = hasSidecar
       ? min(maximumTextWidth, detailGeometry.candidateColumnMaximumWidth ?? maximumTextWidth)
       : maximumTextWidth
     textContainer.size = NSSize(width: textWidth, height: maxTextHeight)
     textLayoutManager.ensureLayout(for: textLayoutManager.documentRange)
-    fitHorizontalDetail(
-      geometry: detailGeometry, textContainer: textContainer,
-      textLayoutManager: textLayoutManager)
     guard publicationIsCurrent(publication) else { return false }
     view.textView.scrollToBeginningOfDocument(nil)
     guard publicationIsCurrent(publication) else { return false }
 
-    var panelRect = NSRect.zero
-    // in vertical mode, the width and height are interchanged
     var contentRect = view.contentRect
-    var sidecarFrames: LinnetCandidatePresentation.CandidateDetailFrames?
-    if hasSidecar, let detailTextContainer = view.detailTextView.textContainer,
+    var detailFrames: LinnetCandidatePresentation.CandidateDetailFrames?
+    if hasDetail, let detailTextContainer = view.detailTextView.textContainer,
       let detailTextLayoutManager = view.detailTextView.textLayoutManager {
-      let detailWidth = detailGeometry.detailColumnMaximumWidth ?? maximumTextWidth
-      detailTextContainer.size = NSSize(width: detailWidth, height: maxTextHeight)
-      detailTextLayoutManager.ensureLayout(for: detailTextLayoutManager.documentRange)
-      let detailRect = view.detailContentRect
-      sidecarFrames = detailGeometry.frames(
+      let detailRect = fitSelectedDetailText(
+        geometry: detailGeometry,
+        candidateSize: contentRect.size,
+        theme: theme,
+        textContainer: detailTextContainer,
+        textLayoutManager: detailTextLayoutManager)
+      detailFrames = detailGeometry.frames(
         candidateSize: contentRect.size,
         detailSize: NSSize(
-          width: min(detailWidth, ceil(detailRect.width)),
-          height: detailRect.height),
-        dividerSize: NSSize(width: 1, height: max(contentRect.height, detailRect.height)))
-      if let sidecarFrames {
-        contentRect = NSRect(origin: .zero, size: sidecarFrames.size)
+          width: ceil(detailRect.width),
+          height: ceil(detailRect.height)),
+        dividerSize: NSSize(width: 1, height: contentRect.height))
+      if let detailFrames {
+        contentRect = NSRect(origin: .zero, size: detailFrames.size)
       }
     }
     let relativeCaretY = LinnetPanelGeometry.relativeVerticalPosition(
@@ -243,77 +335,23 @@ extension SquirrelPanel {
       }
     }
 
-    if metrics.vertical {
-      panelRect.size = NSSize(
-        width: max(
-          metrics.paging.axisExtent,
-          min(0.95 * screenRect.width, contentRect.height + metrics.edgeInset.height * 2)
-        ),
-        height: min(
-          0.95 * screenRect.height,
-          contentRect.width + metrics.edgeInset.width * 2 +
-            metrics.paging.stripWidth
-        )
-      )
-      let logicalLayout = LinnetPanelGeometry.pagingLayout(
-        configuration: metrics.paging,
-        in: NSRect(origin: .zero, size: panelRect.size),
-        preferredAxisCenter: .nan,
-        vertical: true)
-
-      // To avoid jumping up and down while typing, use the lower screen when
-      // typing on upper, and vice versa
-      if relativeCaretY >= 0.5 {
-        panelRect.origin.y = position.minY - SquirrelTheme.offsetHeight
-          - panelRect.height + logicalLayout.contentFrame.minX
-      } else {
-        panelRect.origin.y = position.maxY + SquirrelTheme.offsetHeight
-      }
-      // Make the first candidate fixed at the left of cursor
-      panelRect.origin.x = position.minX - panelRect.width - SquirrelTheme.offsetHeight
-      if view.preeditRange.length > 0, let preeditTextRange = view.convert(range: view.preeditRange) {
-        let preeditRect = view.contentRect(range: preeditTextRange)
-        panelRect.origin.x += preeditRect.height + metrics.edgeInset.width
-      }
-    } else {
-      panelRect.size = NSSize(
-        width: min(
-          0.95 * screenRect.width,
-          contentRect.width + metrics.edgeInset.width * 2 +
-            metrics.paging.stripWidth
-        ),
-        height: max(
-          metrics.paging.axisExtent,
-          min(0.95 * screenRect.height, contentRect.height + metrics.edgeInset.height * 2)
-        )
-      )
-      let logicalLayout = LinnetPanelGeometry.pagingLayout(
-        configuration: metrics.paging,
-        in: NSRect(origin: .zero, size: panelRect.size),
-        preferredAxisCenter: .nan)
-      panelRect.origin = NSPoint(
-        x: position.minX - logicalLayout.contentFrame.minX,
-        y: position.minY - SquirrelTheme.offsetHeight - panelRect.height
-      )
+    var verticalPreeditExtent: CGFloat = 0
+    if metrics.vertical,
+      view.preeditRange.length > 0,
+      let preeditTextRange = view.convert(range: view.preeditRange) {
+      let preeditRect = view.contentRect(range: preeditTextRange)
+      verticalPreeditExtent = preeditRect.height + metrics.edgeInset.width
     }
-    if panelRect.maxX > screenRect.maxX {
-      panelRect.origin.x = screenRect.maxX - panelRect.width
-    }
-    if panelRect.minX < screenRect.minX {
-      panelRect.origin.x = screenRect.minX
-    }
-    if panelRect.minY < screenRect.minY {
-      if metrics.vertical {
-        panelRect.origin.y = screenRect.minY
-      } else {
-        panelRect.origin.y = position.maxY + SquirrelTheme.offsetHeight
-      }
-    }
-    if panelRect.maxY > screenRect.maxY {
-      panelRect.origin.y = screenRect.maxY - panelRect.height
-    }
-    if panelRect.minY < screenRect.minY {
-      panelRect.origin.y = screenRect.minY
+    guard let panelRect = LinnetPanelGeometry.panelFrame(
+      contentSize: contentRect.size,
+      caret: position,
+      screen: screenRect,
+      metrics: metrics,
+      offsetHeight: SquirrelTheme.offsetHeight,
+      verticalPreeditExtent: verticalPreeditExtent)
+    else {
+      orderOut(nil)
+      return false
     }
     self.setFrame(panelRect, display: false)
     guard publicationIsCurrent(publication) else { return false }
@@ -341,26 +379,33 @@ extension SquirrelPanel {
       vertical: metrics.vertical).contentFrame
     view.textView.frame = contentFrame
     view.textView.textContainerInset = metrics.edgeInset
-    if let sidecarFrames,
-      let dividerFrame = sidecarFrames.divider {
+    if let detailFrames {
       let top = contentFrame.maxY - metrics.edgeInset.height
       view.detailTextView.frame = NSRect(
-        x: contentFrame.minX + metrics.edgeInset.width + sidecarFrames.detail.minX,
-        y: top - sidecarFrames.detail.height,
-        width: sidecarFrames.detail.width,
-        height: sidecarFrames.detail.height)
-      view.detailDividerView.frame = NSRect(
-        x: contentFrame.minX + metrics.edgeInset.width + dividerFrame.minX,
-        y: top - dividerFrame.height,
-        width: dividerFrame.width,
-        height: dividerFrame.height)
-      let dividerColor = (theme.detailAttrs[.foregroundColor] as? NSColor)
-        ?? .separatorColor
-      view.detailDividerView.layer?.backgroundColor =
-        dividerColor.withAlphaComponent(0.3).cgColor
-      view.applyCandidateColumnWidth(metrics.edgeInset.width + dividerFrame.minX)
+        x: contentFrame.minX + metrics.edgeInset.width + detailFrames.detail.minX,
+        y: top - detailFrames.detail.maxY,
+        width: detailFrames.detail.width,
+        height: detailFrames.detail.height)
+      if let dividerFrame = detailFrames.divider {
+        view.detailDividerView.isHidden = false
+        view.detailDividerView.frame = NSRect(
+          x: contentFrame.minX + metrics.edgeInset.width + dividerFrame.minX,
+          y: top - dividerFrame.maxY,
+          width: dividerFrame.width,
+          height: dividerFrame.height)
+        let dividerColor = (theme.detailAttrs[.foregroundColor] as? NSColor)
+          ?? .separatorColor
+        view.detailDividerView.layer?.backgroundColor =
+          dividerColor.withAlphaComponent(0.3).cgColor
+        view.applyCandidateColumnWidth(metrics.edgeInset.width + dividerFrame.minX)
+      } else {
+        view.detailDividerView.isHidden = true
+        view.detailDividerView.frame = .zero
+        view.applyCandidateColumnWidth(nil)
+      }
     } else {
       view.detailTextView.frame = .zero
+      view.detailDividerView.isHidden = true
       view.detailDividerView.frame = .zero
       view.applyCandidateColumnWidth(nil)
     }

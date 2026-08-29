@@ -225,10 +225,6 @@ extension SquirrelInputController {
       updateChordState(
         keycode: effectiveKeycode,
         modifiers: rimeModifiers)
-    } else {
-      enterVimCommandModeIfNeeded(
-        keycode: effectiveKeycode,
-        modifiers: rimeModifiers)
     }
     return handled
   }
@@ -249,21 +245,6 @@ extension SquirrelInputController {
       hasPendingRimeInput
     else { return keycode }
     return keypadEquivalent
-  }
-
-  private func enterVimCommandModeIfNeeded(
-    keycode: UInt32,
-    modifiers: UInt32
-  ) {
-    let isEscape = keycode == XK_Escape
-    let rimeKeycode = Int32(keycode)
-    let isControlCommand = modifiers & kControlMask.rawValue != 0 &&
-      [XK_c, XK_C, XK_bracketleft].contains(rimeKeycode)
-    guard isEscape || isControlCommand,
-      rimeAPI.get_option(session, "vim_mode"),
-      !rimeAPI.get_option(session, "ascii_mode")
-    else { return }
-    rimeAPI.set_option(session, "ascii_mode", true)
   }
 
   private func updateChordState(

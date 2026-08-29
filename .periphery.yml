@@ -1,5 +1,6 @@
-project: Linnet.xcodeproj
-schemes:
-- Linnet
-- Settings
 format: github-actions
+relative_results: true
+retain_codable_properties: true
+retain_equatable_properties: true
+retain_objc_accessible: true
+strict: true

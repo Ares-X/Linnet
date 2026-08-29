@@ -40,14 +40,18 @@ struct RimeFilesystemPathProjectionTests {
         "setCString(snapshot.userDataDirectory.path, to: \\.user_data_dir)",
         "setCString(snapshot.prebuiltDataDirectory.path, to: \\.prebuilt_data_dir)",
         "setCString(snapshot.stagingDirectory.path, to: \\.staging_dir)",
-        "setCString(SquirrelApp.logDir.path, to: \\.log_dir)",
-        "at: SquirrelApp.logDir,"
+        "let logDirectory = try? SquirrelApp.dataRegistry.prepareRuntimeLogDirectory()",
+        "setCString(logDirectory.path, to: \\.log_dir)"
       ]
       for required in requiredNativePaths {
         try require(
           source.components(separatedBy: required).count == 2,
           "missing unique native filesystem projection: \(required)")
       }
+      try require(
+        !source.contains("SquirrelApp.logDir")
+          && !source.contains("FileManager.default.createDirectory(\n        at: logDirectory"),
+        "Host regained a second runtime-log path or creation owner")
       print("RimeFilesystemPathProjectionTests: PASS")
     } catch {
       FileHandle.standardError.write(

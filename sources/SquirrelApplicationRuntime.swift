@@ -29,17 +29,15 @@ extension SquirrelApplicationDelegate {
       runtimeDataSnapshot = nil
       return false
     }
+    guard let logDirectory = try? SquirrelApp.dataRegistry.prepareRuntimeLogDirectory() else {
+      runtimeDataSnapshot = nil
+      print("Linnet runtime log directory is unavailable.")
+      return false
+    }
     runtimeDataSnapshot = snapshot
     // OpenCC resolves dictionary paths relative to the one activated data
     // view. A runtime restart repeats this after Settings repairs or updates.
     FileManager.default.changeCurrentDirectoryPath(snapshot.sharedDataDirectory.path)
-    do {
-      try FileManager.default.createDirectory(
-        at: SquirrelApp.logDir,
-        withIntermediateDirectories: true)
-    } catch {
-      print("Error creating user data directory: \(SquirrelApp.logDir.path)")
-    }
     // swiftlint:disable identifier_name
     let notification_handler:
       @convention(c) (
@@ -54,7 +52,7 @@ extension SquirrelApplicationDelegate {
     rimeDuoTraits.setCString(snapshot.userDataDirectory.path, to: \.user_data_dir)
     rimeDuoTraits.setCString(snapshot.prebuiltDataDirectory.path, to: \.prebuilt_data_dir)
     rimeDuoTraits.setCString(snapshot.stagingDirectory.path, to: \.staging_dir)
-    rimeDuoTraits.setCString(SquirrelApp.logDir.path, to: \.log_dir)
+    rimeDuoTraits.setCString(logDirectory.path, to: \.log_dir)
     rimeDuoTraits.setCString(SquirrelApp.productName, to: \.distribution_code_name)
     rimeDuoTraits.setCString(SquirrelApp.productName, to: \.distribution_name)
     rimeDuoTraits.setCString(SquirrelApp.productVersion, to: \.distribution_version)
@@ -405,8 +403,9 @@ extension SquirrelApplicationDelegate {
     requesterPID: Int32
   ) -> LinnetCoreActivationGate.Decision {
     return LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive:
-        SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier,
+      selectedInputSource: LinnetInputSourceSelection.classify(
+        currentIdentifier: LinnetInputSourceRegistration.currentInputSourceID(),
+        linnetIdentifier: SquirrelApp.bundleIdentifier),
       compositionIsActive:
         panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true,
       dataTransactionIsActive: activeDataTransaction != nil,

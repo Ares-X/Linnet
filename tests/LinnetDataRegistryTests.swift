@@ -141,6 +141,7 @@ struct LinnetDataRegistryTests {
       LinnetTestFailure.fail("fixture signing owner: \(error)")
     }
     run("valid snapshot", fixtureSigning, validSnapshotUsesOneCanonicalRoot)
+    run("runtime log directory", fixtureSigning, runtimeLogDirectoryIsRegistryOwned)
     run("descriptor-canonical temporary root", fixtureSigning,
       descriptorCanonicalTemporaryRootSupportsAtomicSwap)
     run("canonical root symlink", fixtureSigning, canonicalRootSymlinkFailsClosed)
@@ -488,6 +489,31 @@ struct LinnetDataRegistryTests {
         samePath(snapshot.backupsDirectory, registry.rootDirectory.appending(path: "Backups")),
         "backups"
       )
+    }
+  }
+
+  private static func runtimeLogDirectoryIsRegistryOwned(
+    _ fixtureSigning: FixtureSigningOwner
+  ) throws {
+    try withFixture(fixtureSigning) { registry in
+      let expected = registry.rootDirectory.appending(
+        path: "Runtime/Logs", directoryHint: .isDirectory)
+      let logs = try registry.prepareRuntimeLogDirectory()
+      require(samePath(logs, expected), "runtime logs escaped the Registry root")
+
+      try FileManager.default.removeItem(at: logs)
+      let outside = registry.rootDirectory.appending(
+        path: "outside-runtime-logs", directoryHint: .isDirectory)
+      try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: false)
+      let sentinel = outside.appending(path: "sentinel")
+      try Data("outside\n".utf8).write(to: sentinel)
+      try FileManager.default.createSymbolicLink(at: logs, withDestinationURL: outside)
+      requireFailure(.unsafePath(logs.path)) {
+        _ = try registry.prepareRuntimeLogDirectory()
+      }
+      require(
+        (try? String(contentsOf: sentinel, encoding: .utf8)) == "outside\n",
+        "runtime log validation touched a symlink target")
     }
   }
 

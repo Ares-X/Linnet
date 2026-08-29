@@ -13,6 +13,7 @@ sort: by_weight
 use_preset_vocabulary: false
 import_tables:
   - linnet_reviewed
+  - linnet_english_entities
   - dicts/zi
   - dicts/jichu
   - dicts/lianxiang

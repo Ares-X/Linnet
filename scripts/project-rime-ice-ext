@@ -109,14 +109,9 @@ def resolve_tones(text: str, plain_code: str, readings) -> tuple[str, str]:
             chosen[index] = "bú" if following_tone == 4 else "bù"
             continue
 
-        ranked = sorted(candidates[index], key=lambda candidate: -candidate[1])
-        if len(ranked) == 1:
-            chosen[index] = ranked[0][0]
-        elif ranked[0][1] >= 10 * ranked[1][1]:
-            chosen[index] = ranked[0][0]
-            status = "best_guess"
-        else:
+        if len(candidates[index]) != 1:
             return "", "ambiguous"
+        chosen[index] = candidates[index][0][0]
     return " ".join(value or "" for value in chosen), status
 
 
@@ -149,15 +144,20 @@ def main() -> None:
         fail("locked ext source is empty")
     ext_texts = {text for _, text, _, _ in ext_rows}
     wanxiang_owned = set()
+    wanxiang_weights_by_plain_code = defaultdict(int)
     weights_by_length = defaultdict(list)
     for table in CORE_TABLES:
         path = wanxiang_dir / f"{table}.dict.yaml"
         if not path.is_file() or path.is_symlink():
             fail(f"unsafe or missing Wanxiang table: {path}")
-        for _, text, _, weight in dictionary_rows(path):
+        for _, text, code, weight in dictionary_rows(path):
             weights_by_length[len(text)].append(weight)
             if text in ext_texts:
                 wanxiang_owned.add(text)
+            plain_code = " ".join(tone_to_plain(code).split())
+            wanxiang_weights_by_plain_code[plain_code] = max(
+                wanxiang_weights_by_plain_code[plain_code], weight
+            )
     medians = {
         length: statistics.median(weights)
         for length, weights in weights_by_length.items()
@@ -173,10 +173,17 @@ def main() -> None:
             continue
         plain_code = " ".join(tone_to_plain(code).split())
         resolved, status = resolve_tones(text, plain_code, readings)
-        if status not in ("verified", "best_guess"):
+        if status != "verified":
             counts[status] += 1
             continue
-        projected.append((text, resolved, calibrated_weight(text, weight, medians)))
+        projected_weight = calibrated_weight(text, weight, medians)
+        wanxiang_weight = wanxiang_weights_by_plain_code.get(plain_code)
+        if wanxiang_weight is not None:
+            if wanxiang_weight <= 1:
+                counts["wanxiang_code_floor"] += 1
+                continue
+            projected_weight = min(projected_weight, wanxiang_weight - 1)
+        projected.append((text, resolved, projected_weight))
         counts[status] += 1
 
     if len(projected) < expected_minimum:
@@ -193,8 +200,10 @@ def main() -> None:
             stream.write(f"{text}\t{code}\t{weight}\n")
     print(
         "project-rime-ice-ext: "
-        f"{len(projected)} accepted, {counts['wanxiang_owned']} Wanxiang-owned, "
-        f"{counts['ambiguous']} ambiguous, {counts['unverified']} unverified"
+        f"{len(projected)} verified accepted; skipped "
+        f"{counts['wanxiang_owned']} Wanxiang-owned, "
+        f"{counts['ambiguous']} ambiguous, {counts['unverified']} unverified, "
+        f"{counts['wanxiang_code_floor']} Wanxiang-code floors"
     )
 
 

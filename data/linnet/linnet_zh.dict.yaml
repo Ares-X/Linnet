@@ -3,8 +3,9 @@
 #
 # Linnet's reviewed decisions have the highest table priority. Locked Wanxiang
 # tables remain the core; rime-ice's three-character-and-longer ext table is a
-# final low-weight coverage supplement. Rime compiles these direct sources
-# without an offline merge, tier, or calibration owner.
+# final low-weight coverage supplement. Linnet's build-time projector verifies
+# pronunciations, rejects duplicate/ambiguous rows, and calibrates weight before
+# Rime compiles every accepted row into this one dictionary graph.
 
 ---
 name: linnet_zh
@@ -13,6 +14,7 @@ sort: by_weight
 use_preset_vocabulary: false
 import_tables:
   - linnet_reviewed
+  - linnet_english_entities
   - dicts/zi
   - dicts/jichu
   - dicts/lianxiang

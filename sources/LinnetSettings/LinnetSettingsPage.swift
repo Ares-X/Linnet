@@ -6,44 +6,18 @@
 import SwiftUI
 
 enum LinnetSettingsLayoutMetrics {
-  static let minimumWindowWidth: CGFloat = 960
-  static let defaultWindowWidth: CGFloat = 1040
-  static let windowHeight: CGFloat = 600
+  static let minimumWindowWidth: CGFloat = 760
+  static let defaultWindowWidth: CGFloat = 960
+  static let minimumWindowHeight: CGFloat = 520
+  static let defaultWindowHeight: CGFloat = 640
   static let minimumColumnWidth: CGFloat = 400
   static let columnSpacing: CGFloat = 20
   static let pageHorizontalInset: CGFloat = 28
 }
 
-enum LinnetSettingsPageMark {
-  case systemSymbol(String)
-  case latinABC
-}
-
-struct LinnetSettingsPageMarkView: View {
-  enum Context {
-    case pageHeader
-    case tab
-  }
-
-  let mark: LinnetSettingsPageMark
-  let context: Context
-
-  @ViewBuilder
-  var body: some View {
-    switch mark {
-    case .systemSymbol(let name):
-      Image(systemName: name)
-        .symbolRenderingMode(.hierarchical)
-    case .latinABC:
-      Text(verbatim: "ABC")
-        .tracking(context == .pageHeader ? -0.7 : -0.4)
-    }
-  }
-}
-
-/// The single content grid used by Settings pages that have two peer groups.
-/// The Settings window minimum is sized to preserve these columns, so
-/// localized copy wraps inside a column instead of changing page topology.
+/// The single adaptive content grid used by Settings pages with two peer
+/// groups. The default window keeps both columns visible; the compact minimum
+/// stacks them without shrinking controls or localized text.
 struct LinnetSettingsTwoColumnLayout<Leading: View, Trailing: View>: View {
   private let leading: Leading
   private let trailing: Trailing
@@ -57,23 +31,30 @@ struct LinnetSettingsTwoColumnLayout<Leading: View, Trailing: View>: View {
   }
 
   var body: some View {
-    HStack(alignment: .top, spacing: LinnetSettingsLayoutMetrics.columnSpacing) {
-      leading.frame(
-        minWidth: LinnetSettingsLayoutMetrics.minimumColumnWidth,
-        maxWidth: .infinity,
-        alignment: .topLeading)
-      trailing.frame(
-        minWidth: LinnetSettingsLayoutMetrics.minimumColumnWidth,
-        maxWidth: .infinity,
-        alignment: .topLeading)
+    ViewThatFits(in: .horizontal) {
+      HStack(alignment: .top, spacing: LinnetSettingsLayoutMetrics.columnSpacing) {
+        column(leading)
+        column(trailing)
+      }
+      VStack(alignment: .leading, spacing: LinnetSettingsLayoutMetrics.columnSpacing) {
+        column(leading)
+        column(trailing)
+      }
     }
+  }
+
+  private func column(_ content: some View) -> some View {
+    content.frame(
+      minWidth: LinnetSettingsLayoutMetrics.minimumColumnWidth,
+      maxWidth: .infinity,
+      alignment: .topLeading)
   }
 }
 
 struct LinnetSettingsPage<Content: View>: View {
   let title: LocalizedStringKey
   let summary: LocalizedStringKey
-  private let mark: LinnetSettingsPageMark
+  private let systemImage: String
   @ViewBuilder let content: Content
 
   init(
@@ -84,19 +65,7 @@ struct LinnetSettingsPage<Content: View>: View {
   ) {
     self.title = title
     self.summary = summary
-    self.mark = .systemSymbol(systemImage)
-    self.content = content()
-  }
-
-  init(
-    _ title: LocalizedStringKey,
-    summary: LocalizedStringKey,
-    mark: LinnetSettingsPageMark,
-    @ViewBuilder content: () -> Content
-  ) {
-    self.title = title
-    self.summary = summary
-    self.mark = mark
+    self.systemImage = systemImage
     self.content = content()
   }
 
@@ -117,7 +86,8 @@ struct LinnetSettingsPage<Content: View>: View {
 
   private var header: some View {
     HStack(alignment: .center, spacing: 12) {
-      LinnetSettingsPageMarkView(mark: mark, context: .pageHeader)
+      Image(systemName: systemImage)
+        .symbolRenderingMode(.hierarchical)
         .font(.system(size: 19, weight: .semibold))
         .foregroundStyle(.tint)
         .frame(width: 28, height: 28)

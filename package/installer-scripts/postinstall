@@ -18,6 +18,8 @@ script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 mode_file="${script_root}/install-mode"
 identity_helper="${script_root}/candidate-app-identity.sh"
 identity_metadata="${script_root}/candidate-app-identity.json"
+candidate_file="${script_root}/candidate-core-version"
+runtime_inspector="${script_root}/linnet-runtime-inspector"
 current_uid="$(/usr/bin/id -u)"
 
 secure_owned_path() {
@@ -41,11 +43,15 @@ secure_owned_path() {
 [[ -f "${mode_file}" && ! -L "${mode_file}" &&
   -f "${identity_helper}" && ! -L "${identity_helper}" &&
   -x "${identity_helper}" &&
-  -f "${identity_metadata}" && ! -L "${identity_metadata}" ]] || {
+  -f "${identity_metadata}" && ! -L "${identity_metadata}" &&
+  -f "${candidate_file}" && ! -L "${candidate_file}" &&
+  -f "${runtime_inspector}" && ! -L "${runtime_inspector}" &&
+  -x "${runtime_inspector}" ]] || {
   echo "Linnet postinstall: package installation mode is unavailable" >&2
   exit 1
 }
 IFS= read -r install_mode <"${mode_file}"
+IFS= read -r candidate_core_version <"${candidate_file}"
 case "${install_mode}" in
   complete|core-update) ;;
   *)
@@ -85,11 +91,17 @@ secure_owned_path "${active_state}" file && \
 }
 
 "${identity_helper}" installed
+[[ "$("${runtime_inspector}" probe "${candidate_core_version}" \
+  "${application_support_root}")" == healthy ]] || {
+  echo "Linnet postinstall: installed language runtime is invalid" >&2
+  exit 1
+}
 
-# Registration is exclusively a Complete first-install boundary. A Core update
-# must not touch the existing TIS identity or stop the live InputMethodKit Host:
-# connected applications continue using that process, and the new executable
-# becomes active at the next natural Host launch.
+# Registration mutation is exclusively a Complete clean-install or
+# supported-repair boundary. register() is idempotent for the one verified
+# source. A Core update must not touch TIS or stop the live InputMethodKit Host:
+# connected applications keep
+# their process, and the new executable activates at a natural Host launch.
 if [[ "${install_mode}" == complete ]]; then
   "${executable}" --register-input-source
 fi

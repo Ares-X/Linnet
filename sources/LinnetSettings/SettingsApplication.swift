@@ -5,19 +5,25 @@ import SwiftUI
 final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   weak var model: SettingsModel?
   var interfaceLocale = Locale.autoupdatingCurrent
+  private var settingsWindowPresentationPending = false
 
   func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool { true }
 
-  func applicationDidBecomeActive(_ notification: Notification) {
+  func applicationDidFinishLaunching(_ notification: Notification) {
     guard let application = notification.object as? NSApplication else { return }
-    presentSettingsWindow(in: application)
+    requestSettingsWindowPresentation(in: application)
+  }
+
+  func applicationDidUpdate(_ notification: Notification) {
+    guard let application = notification.object as? NSApplication else { return }
+    presentSettingsWindowIfReady(in: application)
   }
 
   func applicationShouldHandleReopen(
     _ sender: NSApplication,
     hasVisibleWindows _: Bool
   ) -> Bool {
-    presentSettingsWindow(in: sender)
+    requestSettingsWindowPresentation(in: sender)
     return true
   }
 
@@ -51,8 +57,22 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
     return .terminateLater
   }
 
-  private func presentSettingsWindow(in application: NSApplication) {
-    guard let window = application.windows.first(where: { $0.canBecomeKey }) else { return }
+  private func requestSettingsWindowPresentation(in application: NSApplication) {
+    settingsWindowPresentationPending = true
+    presentSettingsWindowIfReady(in: application)
+  }
+
+  private func presentSettingsWindowIfReady(in application: NSApplication) {
+    guard settingsWindowPresentationPending,
+          let window = application.windows.first(where: { $0.canBecomeKey })
+    else { return }
+
+    settingsWindowPresentationPending = false
+    window.collectionBehavior.insert(.moveToActiveSpace)
+    application.activate(ignoringOtherApps: true)
+    if window.isMiniaturized {
+      window.deminiaturize(nil)
+    }
     window.makeKeyAndOrderFront(nil)
   }
 }
@@ -68,11 +88,12 @@ struct LinnetSettingsApp: App {
         .frame(
           minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth,
           idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth,
-          minHeight: LinnetSettingsLayoutMetrics.windowHeight)
+          minHeight: LinnetSettingsLayoutMetrics.minimumWindowHeight,
+          idealHeight: LinnetSettingsLayoutMetrics.defaultWindowHeight)
     }
     .defaultSize(
       width: LinnetSettingsLayoutMetrics.defaultWindowWidth,
-      height: LinnetSettingsLayoutMetrics.windowHeight)
+      height: LinnetSettingsLayoutMetrics.defaultWindowHeight)
     .windowResizability(.contentMinSize)
     .commands { CommandGroup(replacing: .newItem) {} }
   }

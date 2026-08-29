@@ -360,12 +360,6 @@ extension SquirrelView {
     return contentRect(ranges: ranges)
   }
 
-  var primaryContentRect: NSRect {
-    var ranges = candidateRanges
-    if preeditRange.length > 0 { ranges.append(preeditRange) }
-    return contentRect(ranges: ranges)
-  }
-
   private func contentRect(ranges: [NSRange]) -> NSRect {
     var unionRect: NSRect?
     for range in ranges {

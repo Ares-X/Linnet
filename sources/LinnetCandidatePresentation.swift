@@ -22,6 +22,7 @@ enum LinnetCandidatePresentation {
   }
 
   static let maximumDetailCharacterCount = 72
+  static let maximumFooterDetailLineCount = 3
   static let maximumExpandedPageCount = 3
   static let maximumExpandedCandidateCount = 27
 
@@ -34,7 +35,7 @@ enum LinnetCandidatePresentation {
   static let candidateMaterial = NSVisualEffectView.Material.popover
 
   private static let detailPartOfSpeechBoundary =
-    #/[；;]\s*(name|n|vt|vi|v|adj|adv|abbr|int|interj|prep|pref|conj|pron|suf|vbl|num|aux|art|det)[.]\s*/#
+    #/[；;]\s*(name|n|vt|vi|v|adj|adv|abbr|int|interj|prep|pref|conj|pron|suf|vbl|num|aux|art|det|fig|lit)[.]\s*/#
 
   struct InputModeIdentity: Equatable {
     let schemaID: String
@@ -410,6 +411,15 @@ extension LinnetCandidatePresentation {
     let candidateColumnMaximumWidth: CGFloat?
     let detailColumnMaximumWidth: CGFloat?
 
+    func fittedDetailWidth(candidateWidth: CGFloat, detailWidth: CGFloat) -> CGFloat {
+      let boundedDetailWidth = min(
+        detailWidth,
+        detailColumnMaximumWidth ?? detailWidth)
+      return placement == .footer
+        ? min(max(0, candidateWidth), boundedDetailWidth)
+        : boundedDetailWidth
+    }
+
     func frames(
       candidateSize: CGSize,
       detailSize: CGSize,
@@ -419,8 +429,12 @@ extension LinnetCandidatePresentation {
         width: min(candidateSize.width, candidateColumnMaximumWidth ?? candidateSize.width),
         height: candidateSize.height)
       let fittedDetailSize = CGSize(
-        width: min(detailSize.width, detailColumnMaximumWidth ?? detailSize.width),
-        height: detailSize.height)
+        width: fittedDetailWidth(
+          candidateWidth: fittedCandidateSize.width,
+          detailWidth: detailSize.width),
+        height: placement == .sidecar
+          ? min(detailSize.height, max(0, fittedCandidateSize.height))
+          : detailSize.height)
       let candidate = CGRect(origin: .zero, size: fittedCandidateSize)
       switch placement {
       case .footer:
@@ -437,7 +451,7 @@ extension LinnetCandidatePresentation {
       case .sidecar:
         let divider = CGRect(
           origin: CGPoint(x: fittedCandidateSize.width + spacing, y: 0),
-          size: dividerSize)
+          size: CGSize(width: dividerSize.width, height: fittedCandidateSize.height))
         let detail = CGRect(
           origin: CGPoint(x: divider.maxX + spacing, y: 0),
           size: fittedDetailSize)
@@ -447,8 +461,7 @@ extension LinnetCandidatePresentation {
           detail: detail,
           size: CGSize(
             width: detail.maxX,
-            height: max(
-              fittedCandidateSize.height, dividerSize.height, fittedDetailSize.height)))
+            height: fittedCandidateSize.height))
       }
     }
   }
@@ -460,7 +473,7 @@ extension LinnetCandidatePresentation {
     let candidateColumnMaximumWidth = min(240, max(150, candidateFontPoint * 10))
     let detailColumnMaximumWidth = linear
       ? min(360, max(240, candidateFontPoint * 16))
-      : min(160, max(120, candidateFontPoint * 5))
+      : min(136, max(104, candidateFontPoint * 4.25))
     return CandidateDetailGeometry(
       placement: linear ? .footer : .sidecar,
       spacing: candidateRowSpacing,

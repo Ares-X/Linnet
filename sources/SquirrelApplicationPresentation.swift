@@ -70,6 +70,7 @@ extension SquirrelApplicationDelegate {
 
   private func setupStatusItem() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    item.isVisible = false
     if let button = item.button {
       button.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
       button.toolTip = SquirrelApp.productName
@@ -96,9 +97,23 @@ extension SquirrelApplicationDelegate {
   }
 
   private func updateStatusItemVisibility() {
-    setStatusItemVisibility(
-      inputSourceIsActive:
-        SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier)
+    updateStatusItemVisibility(
+      for: LinnetInputSourceSelection.classify(
+        currentIdentifier: LinnetInputSourceRegistration.currentInputSourceID(),
+        linnetIdentifier: SquirrelApp.bundleIdentifier))
+  }
+
+  private func updateStatusItemVisibility(
+    for selectedSource: LinnetInputSourceSelection
+  ) {
+    switch selectedSource {
+    case .linnet:
+      setStatusItemVisibility(inputSourceIsActive: true)
+    case .other:
+      setStatusItemVisibility(inputSourceIsActive: false)
+    case .unknown:
+      break
+    }
   }
 
   private func setStatusItemVisibility(inputSourceIsActive: Bool) {
@@ -107,8 +122,12 @@ extension SquirrelApplicationDelegate {
 
   @objc func inputSourceChanged(_: Notification) {
     DispatchQueue.main.async { [weak self] in
-      self?.updateStatusItemVisibility()
-      self?.finalizeStrandedComposition()
+      guard let self else { return }
+      let selectedSource = LinnetInputSourceSelection.classify(
+        currentIdentifier: LinnetInputSourceRegistration.currentInputSourceID(),
+        linnetIdentifier: SquirrelApp.bundleIdentifier)
+      updateStatusItemVisibility(for: selectedSource)
+      finalizeStrandedComposition(selectedSource: selectedSource)
     }
   }
 
@@ -116,10 +135,10 @@ extension SquirrelApplicationDelegate {
   // source through TIS. Defer until the native transition settles, then close
   // only the token that was active before the switch. Native activateServer
   // remains the sole authority for admitting the returned input source.
-  private func finalizeStrandedComposition() {
-    guard SquirrelInstaller.currentInputSourceID() != SquirrelApp.bundleIdentifier else {
-      return
-    }
+  private func finalizeStrandedComposition(
+    selectedSource: LinnetInputSourceSelection
+  ) {
+    guard selectedSource == .other else { return }
     guard let inputController = panel?.inputController,
       let activeClient = inputController.activeClient
     else { return }
@@ -159,18 +178,16 @@ extension SquirrelApplicationDelegate {
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.addsToRecentItems = false
     configuration.allowsRunningApplicationSubstitution = false
+    // Settings owns activation and key-window ordering after launch or reopen.
+    // Suppress LaunchServices' default activation so there is only one owner.
+    configuration.activates = false
     NSWorkspace.shared.openApplication(
       at: settingsURL,
       configuration: configuration
-    ) { runningApplication, error in
-      guard error == nil, let runningApplication else {
+    ) { _, error in
+      guard error == nil else {
         Self.showMessage(msgText: "Settings could not be opened.")
         return
-      }
-      if !runningApplication.activate(
-        options: [.activateAllWindows, .activateIgnoringOtherApps]
-      ) {
-        Self.showMessage(msgText: "Settings could not be brought to the front.")
       }
     }
   }

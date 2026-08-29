@@ -42,6 +42,7 @@
 		B397712B2BEE4C160093A49B /* SquirrelPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B397712A2BEE4C160093A49B /* SquirrelPanel.swift */; };
 		A11E55070000000000000002 /* SquirrelPanel+CandidatePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E55070000000000000001 /* SquirrelPanel+CandidatePresentation.swift */; };
 		B397712D2BEEB39D0093A49B /* InputSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B397712C2BEEB39D0093A49B /* InputSource.swift */; };
+		C0DE10000000000000000001 /* LinnetInputSourceRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10000000000000000002 /* LinnetInputSourceRegistration.swift */; };
 		B397712F2BEECBED0093A49B /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B397712E2BEECBED0093A49B /* Main.swift */; };
 		B39771332BEEE4540093A49B /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B39771322BEEE4540093A49B /* Localizable.xcstrings */; };
 		D3000000000000000000000E /* Localizable.xcstrings in Settings Resources */ = {isa = PBXBuildFile; fileRef = B39771322BEEE4540093A49B /* Localizable.xcstrings */; };
@@ -210,6 +211,7 @@
 		B397712A2BEE4C160093A49B /* SquirrelPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SquirrelPanel.swift; path = sources/SquirrelPanel.swift; sourceTree = "<group>"; };
 		A11E55070000000000000001 /* SquirrelPanel+CandidatePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SquirrelPanel+CandidatePresentation.swift"; path = "sources/SquirrelPanel+CandidatePresentation.swift"; sourceTree = "<group>"; };
 		B397712C2BEEB39D0093A49B /* InputSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InputSource.swift; path = sources/InputSource.swift; sourceTree = "<group>"; };
+		C0DE10000000000000000002 /* LinnetInputSourceRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetInputSourceRegistration.swift; path = sources/LinnetInputSourceRegistration.swift; sourceTree = "<group>"; };
 		B397712E2BEECBED0093A49B /* Main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Main.swift; path = sources/Main.swift; sourceTree = "<group>"; };
 		B39771322BEEE4540093A49B /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; name = Localizable.xcstrings; path = resources/Localizable.xcstrings; sourceTree = "<group>"; };
 		B3EF08E92F17125E00433A45 /* Linnet.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Linnet.xcassets; sourceTree = "<group>"; };
@@ -323,6 +325,7 @@
 				A70000000000000000000002 /* LinnetClientAppearance.swift */,
 				B39771222BECEA150093A49B /* MacOSKeyCodes.swift */,
 				B397712C2BEEB39D0093A49B /* InputSource.swift */,
+				C0DE10000000000000000002 /* LinnetInputSourceRegistration.swift */,
 				B397712E2BEECBED0093A49B /* Main.swift */,
 				B39771262BED9B250093A49B /* SquirrelTheme.swift */,
 				B397712A2BEE4C160093A49B /* SquirrelPanel.swift */,
@@ -728,6 +731,7 @@
 				B39771252BED899F0093A49B /* SquirrelConfig.swift in Sources */,
 				B397712F2BEECBED0093A49B /* Main.swift in Sources */,
 				B397712D2BEEB39D0093A49B /* InputSource.swift in Sources */,
+				C0DE10000000000000000001 /* LinnetInputSourceRegistration.swift in Sources */,
 				B397712B2BEE4C160093A49B /* SquirrelPanel.swift in Sources */,
 				A11E55070000000000000002 /* SquirrelPanel+CandidatePresentation.swift in Sources */,
 				B38E9B912BE9AE1E0036ABEF /* SquirrelApplicationDelegate.swift in Sources */,

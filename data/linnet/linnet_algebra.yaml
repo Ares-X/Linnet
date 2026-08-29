@@ -73,6 +73,7 @@ full_pinyin:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 ziranma:
     - xform/^([a-z]+)$/$1④/
@@ -166,6 +167,7 @@ ziranma:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 flypy:
     - xform/^([a-z]+)$/$1④/
@@ -259,6 +261,7 @@ flypy:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 sogou:
     - xform/^([a-z]+)$/$1④/
@@ -353,6 +356,7 @@ sogou:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 mspy:
     - xform/^([a-z]+)$/$1④/
@@ -448,6 +452,7 @@ mspy:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 abc:
     - xform/^([a-z]+)$/$1④/
@@ -539,6 +544,7 @@ abc:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 ziguang:
     - xform/^([a-z]+)$/$1④/
@@ -632,6 +638,7 @@ ziguang:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 jiajia:
     - xform/^([a-z]+)$/$1④/
@@ -725,3 +732,4 @@ jiajia:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/

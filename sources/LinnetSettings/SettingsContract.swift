@@ -136,6 +136,9 @@ enum LinnetSettingsContract {
     case coreActivationInputSourceActive = "core_activation_input_source_active"
     case coreActivationCompositionActive = "core_activation_composition_active"
     case coreActivationDataTransactionActive = "core_activation_data_transaction_active"
+    /// Decode-only compatibility for the published 0.1.9 Host. Remove these
+    /// two wire cases and their cross-version fixtures when the minimum Core
+    /// becomes 0.1.10 for the public 0.1.11 release.
     case coreActivationApplicationsRunning = "core_activation_applications_running"
     case coreActivationUnknownClient = "core_activation_unknown_client"
     case coreActivationRequesterUnavailable = "core_activation_requester_unavailable"
@@ -337,38 +340,6 @@ enum LinnetSettingsContract {
   }
 }
 
-/// Pure fail-closed decision owner for the explicit Core activation boundary.
-/// Switching away from Linnet ends active input ownership; inactive client
-/// processes do not need to exit before the Host replaces itself.
-enum LinnetCoreActivationGate {
-  struct Decision: Equatable, Sendable {
-    let blocker: LinnetSettingsContract.CoreActivationBlocker?
-
-    var isReady: Bool { blocker == nil }
-  }
-
-  static func evaluate(
-    inputSourceIsActive: Bool,
-    compositionIsActive: Bool,
-    dataTransactionIsActive: Bool,
-    requesterIsAlive: Bool
-  ) -> Decision {
-    if dataTransactionIsActive {
-      return .init(blocker: .dataTransactionActive)
-    }
-    if inputSourceIsActive {
-      return .init(blocker: .inputSourceActive)
-    }
-    if compositionIsActive {
-      return .init(blocker: .compositionActive)
-    }
-    guard requesterIsAlive else {
-      return .init(blocker: .requesterUnavailable)
-    }
-    return .init(blocker: nil)
-  }
-}
-
 extension LinnetSettingsContract {
   static func productIdentity(startingAt bundle: Bundle = .main) -> ProductIdentity? {
     guard let host = hostBundle(startingAt: bundle),
@@ -476,4 +447,59 @@ extension LinnetSettingsContract {
     return UserDefaults(suiteName: identifier)
   }
 
+}
+
+/// The single interpretation owner for optional HIToolbox selection evidence.
+/// A missing or empty identifier is unknown, never proof that Linnet is inactive.
+enum LinnetInputSourceSelection: Equatable, Sendable {
+  case linnet
+  case other
+  case unknown
+
+  static func classify(
+    currentIdentifier: String?,
+    linnetIdentifier: String
+  ) -> Self {
+    guard let currentIdentifier, !currentIdentifier.isEmpty else {
+      return .unknown
+    }
+    return currentIdentifier == linnetIdentifier ? .linnet : .other
+  }
+}
+
+/// Pure fail-closed decision owner for the explicit Core activation boundary.
+/// Switching away from Linnet ends active input ownership; inactive client
+/// processes do not need to exit before the Host replaces itself.
+enum LinnetCoreActivationGate {
+  struct Decision: Equatable, Sendable {
+    let blocker: LinnetSettingsContract.CoreActivationBlocker?
+
+    var isReady: Bool { blocker == nil }
+  }
+
+  static func evaluate(
+    selectedInputSource: LinnetInputSourceSelection,
+    compositionIsActive: Bool,
+    dataTransactionIsActive: Bool,
+    requesterIsAlive: Bool
+  ) -> Decision {
+    if dataTransactionIsActive {
+      return .init(blocker: .dataTransactionActive)
+    }
+    switch selectedInputSource {
+    case .linnet:
+      return .init(blocker: .inputSourceActive)
+    case .unknown:
+      return .init(blocker: .unknownClient)
+    case .other:
+      break
+    }
+    if compositionIsActive {
+      return .init(blocker: .compositionActive)
+    }
+    guard requesterIsAlive else {
+      return .init(blocker: .requesterUnavailable)
+    }
+    return .init(blocker: nil)
+  }
 }

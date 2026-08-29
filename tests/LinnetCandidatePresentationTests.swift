@@ -75,6 +75,12 @@ struct LinnetCandidatePresentationTests {
       ) == "n. 品牌\nname. 林内特\nv. 命名\nadj. 专有的",
       "name, verb, and adjective detail groups did not receive separate lines"
     )
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "n. 光；lit. 字面义；fig. 比喻义"
+      ) == "n. 光\nlit. 字面义\nfig. 比喻义",
+      "literal and figurative definition groups did not receive separate lines"
+    )
     let long = String(repeating: "释", count: 90)
     let bounded = LinnetCandidatePresentation.selectedDetailText(long)
     require(
@@ -127,15 +133,6 @@ struct LinnetCandidatePresentationTests {
     require(
       LinnetCandidatePresentation.candidateSelectionLabel(at: 2, labels: []) == "3",
       "missing custom labels did not use the visible one-based candidate index"
-    )
-    guard let builder = try? String(
-      contentsOfFile: "sources/LinnetRimeCandidateSnapshotBuilder.swift",
-      encoding: .utf8)
-    else { fail("candidate snapshot builder source could not be read") }
-    require(
-      !builder.contains("context.composition.length") &&
-        builder.contains("LinnetCandidatePresentation.candidateSelectionLabel("),
-      "zero-input Smart English predictions can still lose their selection labels"
     )
   }
 
@@ -258,19 +255,6 @@ struct LinnetCandidatePresentationTests {
         currentPage: 0, pageSize: 9, candidateCount: 0, highlighted: 1
       ) == nil,
       "an empty candidate page accepted a nonzero highlight"
-    )
-
-    guard let builder = try? String(
-      contentsOfFile: "sources/LinnetRimeCandidateSnapshotBuilder.swift",
-      encoding: .utf8)
-    else { fail("candidate snapshot builder source could not be read") }
-    require(
-      !builder.contains("let compactHighlighted = min("),
-      "candidate snapshot builder still clamps an invalid Rime highlight"
-    )
-    require(
-      builder.contains("highlightedItemIndex: highlightedOnPage"),
-      "candidate snapshot builder does not consume the validated highlight directly"
     )
   }
 
@@ -468,9 +452,9 @@ struct LinnetCandidatePresentationTests {
       detailSize: CGSize(width: 900, height: 54),
       dividerSize: CGSize(width: 1, height: 24))
     require(
-      longFooterFrames.detail.width == 256 &&
-        longFooterFrames.size.width == 256,
-      "a short horizontal candidate can still stretch to the screen width")
+      longFooterFrames.detail.width == 72 &&
+        longFooterFrames.size.width == 72,
+      "a horizontal definition can still widen its candidate row")
 
     let sidecar = LinnetCandidatePresentation.candidateDetailGeometry(
       forLinearLayout: false)
@@ -480,7 +464,7 @@ struct LinnetCandidatePresentationTests {
       dividerSize: CGSize(width: 1, height: 60))
     require(
       sidecar.placement == .sidecar &&
-        sidecar.detailColumnMaximumWidth == 120,
+        sidecar.detailColumnMaximumWidth == 104,
       "vertical candidate detail lost its shared sidecar policy")
     require(
       sidecarFrames.candidate == CGRect(x: 0, y: 0, width: 40, height: 60) &&
@@ -488,6 +472,20 @@ struct LinnetCandidatePresentationTests {
         sidecarFrames.detail == CGRect(x: 53, y: 0, width: 30, height: 12) &&
         sidecarFrames.size == CGSize(width: 83, height: 60),
       "sidecar candidate, divider, and detail no longer share one spatial geometry")
+    let tallSidecarFrames = sidecar.frames(
+      candidateSize: CGSize(width: 40, height: 60),
+      detailSize: CGSize(width: 104, height: 240),
+      dividerSize: CGSize(width: 1, height: 240))
+    let nextPageSidecarFrames = sidecar.frames(
+      candidateSize: CGSize(width: 40, height: 60),
+      detailSize: CGSize(width: 80, height: 20),
+      dividerSize: CGSize(width: 1, height: 20))
+    require(
+      tallSidecarFrames.detail.height == 60 &&
+        tallSidecarFrames.divider?.height == 60 &&
+        tallSidecarFrames.size.height == 60 &&
+        nextPageSidecarFrames.size.height == tallSidecarFrames.size.height,
+      "sidecar detail can still grow or destabilize candidate-owned page height")
 
     let longDefinitionFrames = sidecar.frames(
       candidateSize: CGSize(width: 112, height: 156),
@@ -495,14 +493,14 @@ struct LinnetCandidatePresentationTests {
       dividerSize: CGSize(width: 1, height: 156))
     require(
       longDefinitionFrames.detail.width <= 120 &&
-        longDefinitionFrames.size.width <= 260,
+        longDefinitionFrames.size.width <= 245,
       "a long English definition can still stretch the vertical candidate panel")
 
     for (fontPoint, expectedDetailWidth) in [
-      (CGFloat(12), CGFloat(120)),
-      (CGFloat(15), CGFloat(120)),
-      (CGFloat(16), CGFloat(120)),
-      (CGFloat(32), CGFloat(160)),
+      (CGFloat(12), CGFloat(104)),
+      (CGFloat(15), CGFloat(104)),
+      (CGFloat(16), CGFloat(104)),
+      (CGFloat(32), CGFloat(136))
     ] {
       let geometry = LinnetCandidatePresentation.candidateDetailGeometry(
         forLinearLayout: false,

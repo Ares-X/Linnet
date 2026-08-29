@@ -45,6 +45,35 @@ require_owned_directory_boundary() {
   fi
 }
 
+require_recursive_delete_target() {
+  local path="$1"
+  local parent="$2"
+  local label="$3"
+  local identity owner device parent_identity parent_owner parent_device
+  require_owned_directory_boundary "${parent}" "${label} parent"
+  require_owned_directory_boundary "${path}" "${label}"
+  [[ -e "${path}" ]] || return 0
+  [[ -d "${parent}" && ! -L "${parent}" ]] || {
+    echo "Uninstall Linnet: ${label} parent is unavailable" >&2
+    return 1
+  }
+  identity="$(/usr/bin/stat -f '%u %d' "${path}")" || {
+    echo "Uninstall Linnet: cannot inspect ${label}" >&2
+    return 1
+  }
+  parent_identity="$(/usr/bin/stat -f '%u %d' "${parent}")" || {
+    echo "Uninstall Linnet: cannot inspect ${label} parent" >&2
+    return 1
+  }
+  read -r owner device <<<"${identity}"
+  read -r parent_owner parent_device <<<"${parent_identity}"
+  [[ "${owner}" == "${current_uid}" && "${parent_owner}" == "${current_uid}" && \
+    "${device}" == "${parent_device}" ]] || {
+    echo "Uninstall Linnet: unsafe filesystem boundary for ${label}" >&2
+    return 1
+  }
+}
+
 require_owned_preferences_boundary() {
   require_owned_directory_boundary "${preferences_root}" "Preferences directory"
   if [[ -e "${preferences_root}" && \
@@ -99,9 +128,10 @@ purge_preference_domain() {
 
 make_owned_tree_removable() {
   local path="$1"
-  local label="$2"
+  local parent="$2"
+  local label="$3"
   local root_identity root_owner root_device
-  require_owned_directory_boundary "${path}" "${label}"
+  require_recursive_delete_target "${path}" "${parent}" "${label}"
   root_identity="$(/usr/bin/stat -f '%u %d' "${path}")" || {
     echo "Uninstall Linnet: cannot inspect ${label}" >&2
     return 1
@@ -125,6 +155,39 @@ make_owned_tree_removable() {
     fi
     /bin/chmod -h u+wx "${directory}"
   done
+}
+
+product_process_state() {
+  local host_path="$1"
+  local settings_path="$2"
+  local commands
+  commands="$(/bin/ps -axo command=)" || return 2
+  /usr/bin/awk -v host="${host_path}" -v settings="${settings_path}" '
+    {
+      command = $0
+      sub(/^[[:space:]]+/, "", command)
+      if (command == host || index(command, host " ") == 1 ||
+          command == settings || index(command, settings " ") == 1) {
+        found = 1
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' <<<"${commands}"
+}
+
+require_product_processes_absent() {
+  local host_path="$1"
+  local settings_path="$2"
+  if product_process_state "${host_path}" "${settings_path}"; then
+    echo "Uninstall Linnet: Linnet is still running. Switch to another input source, sign out and back in, then rerun the uninstaller." >&2
+    return 1
+  else
+    local process_status=$?
+    if [[ "${process_status}" != 1 ]]; then
+      echo "Uninstall Linnet: running product processes could not be inspected" >&2
+      return 1
+    fi
+  fi
 }
 
 while (( "$#" > 0 )); do
@@ -157,7 +220,6 @@ done
 if (( purge_user_data )); then
   echo "Erase all remaining Linnet data: ${support_root}"
   echo "Erase preferences: ${host_bundle_id}, ${settings_bundle_id}"
-  echo "Erase Host-owned temporary logs"
 else
   echo "Keep personal data if present: ${support_root}/UserData"
   echo "Keep backups if present: ${support_root}/Backups"
@@ -182,37 +244,44 @@ if (( purge_user_data )); then
   done
 fi
 
-removal_requires_host=0
-[[ -e "${app_path}" ]] && removal_requires_host=1
+# Validate every recursive mutation root before changing the App, receipts,
+# generated data, preferences or temporary logs. `-x` below protects nested
+# traversal; this preflight separately rejects a target that is itself a mount.
+require_recursive_delete_target \
+  "${app_path}" "${user_home}/Library/Input Methods" "App path"
+require_recursive_delete_target \
+  "${support_root}" "${user_home}/Library/Application Support" \
+  "Application Support root"
 for generated_name in "${generated_names[@]}"; do
-  [[ -e "${support_root}/${generated_name}" ]] && removal_requires_host=1
+  generated_path="${support_root}/${generated_name}"
+  [[ "${generated_path}" == "${support_root}/"* ]] || exit 1
+  require_recursive_delete_target \
+    "${generated_path}" "${support_root}" "generated ${generated_name} path"
+done
+removal_requires_quiescence=0
+[[ -e "${app_path}" ]] && removal_requires_quiescence=1
+for generated_name in "${generated_names[@]}"; do
+  [[ -e "${support_root}/${generated_name}" ]] && removal_requires_quiescence=1
 done
 if (( purge_user_data )); then
   if [[ -e "${support_root}" ]] || \
     /usr/bin/defaults read "${host_bundle_id}" >/dev/null 2>&1 || \
     /usr/bin/defaults read "${settings_bundle_id}" >/dev/null 2>&1; then
-    removal_requires_host=1
+    removal_requires_quiescence=1
   fi
 fi
 
 host_cli="${app_path}/Contents/MacOS/Linnet"
-if (( removal_requires_host )); then
-  if [[ ! -d "${app_path}" || -L "${app_path}" || ! -x "${host_cli}" ]]; then
-    echo "Uninstall Linnet: the Host lifecycle owner is missing; repair or reinstall Linnet before removing remaining data" >&2
-    exit 1
-  fi
-  # Main owns the exact Host + embedded Settings bundle-ID set. A failed quit
-  # aborts before any App or data removal; never delete a live Settings runtime.
-  # Do not call the TIS disable command here: changing the selected source may
-  # reactivate the Host and rewrite librime's preserved user database. The
-  # required fresh login session owns removal from the effective source list.
-  "${host_cli}" --quit
-  if (( purge_user_data )); then
-    "${host_cli}" --purge-owned-temporary-state
-  fi
+settings_cli="${app_path}/Contents/Applications/Settings.app/Contents/MacOS/Settings"
+if (( removal_requires_quiescence )); then
+  # User-owned installed bytes are never executable authority for their own
+  # deletion. The exact process paths must already be absent.
+  require_product_processes_absent "${host_cli}" "${settings_cli}"
 fi
 if [[ -e "${app_path}" || -L "${app_path}" ]]; then
-  /bin/rm -rf -- "${app_path}"
+  require_recursive_delete_target \
+    "${app_path}" "${user_home}/Library/Input Methods" "App path"
+  /bin/rm -rf -x -- "${app_path}"
 fi
 for receipt in "${receipts[@]}"; do
   if /usr/sbin/pkgutil --volume "${user_home}" --pkg-info "${receipt}" >/dev/null 2>&1; then
@@ -225,13 +294,24 @@ for generated_name in "${generated_names[@]}"; do
   [[ "${generated_path}" == "${support_root}/"* ]] || exit 1
   require_owned_directory_boundary "${generated_path}" "generated ${generated_name} path"
   if [[ -e "${generated_path}" ]]; then
-    make_owned_tree_removable "${generated_path}" "generated ${generated_name} tree"
-    /bin/rm -rf -- "${generated_path}"
+    make_owned_tree_removable \
+      "${generated_path}" "${support_root}" "generated ${generated_name} tree"
+    require_recursive_delete_target \
+      "${generated_path}" "${support_root}" "generated ${generated_name} path"
+    /bin/rm -rf -x -- "${generated_path}"
   fi
 done
 
 if (( purge_user_data )); then
-  /bin/rm -rf -- "${support_root}"
+  if [[ -e "${support_root}" ]]; then
+    make_owned_tree_removable \
+      "${support_root}" "${user_home}/Library/Application Support" \
+      "Application Support tree"
+    require_recursive_delete_target \
+      "${support_root}" "${user_home}/Library/Application Support" \
+      "Application Support root"
+    /bin/rm -rf -x -- "${support_root}"
+  fi
   for preference_domain in "${host_bundle_id}" "${settings_bundle_id}"; do
     purge_preference_domain "${preference_domain}"
   done

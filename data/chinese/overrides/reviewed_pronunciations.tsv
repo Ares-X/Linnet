@@ -42,3 +42,5 @@ wanxiang	更深入点	gēng shēn rù diǎn	gèng shēn rù diǎn	程度比较�
 wanxiang	乂	aì	ài	声调符号错标在i上（标调规则a优先）；zi表与L1同源	full=ai; old-code-absent
 wanxiang	温庭筠	wēn tíng jūn	wēn tíng yún	“筠”在温庭筠姓名中应读yún；锁定cuoyin源误标jūn	full=wentingyun; old-code-absent
 rime_ice	丙泊酚注射液	bǐng pō fēn zhù shè yè	bǐng bó fēn zhù shè yè	药名“丙泊酚”的“泊”应读bó；锁定rime-ice源误标pō	full=bingbofenzhusheye; old-code-absent
+rime_ice	希尔瓦娜斯	xi er wa na si	xī ěr wǎ nà sī	锁定ext源只有无声调拼音；逐字多音统计推断不作为接纳证据	full=xierwanasi; reviewed-only
+rime_ice	希尔瓦娜斯风行者	xi er wa na si feng xing zhe	xī ěr wǎ nà sī fēng xíng zhě	锁定ext源只有无声调拼音；专名扩展必须沿用人工审读读音	full=xierwanasifengxingzhe; reviewed-only

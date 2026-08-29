@@ -6,7 +6,13 @@ import Foundation
 @MainActor
 final class LinnetSettingsUpdateChecker: ObservableObject {
   enum RuntimeVersionState: Equatable {
-    case checking
+    /// One public compatibility bridge: an identity-free 0.1.9 Host can only
+    /// defer to the installed 0.1.10 Core. Remove this constant, the
+    /// `restartRequired` resolution branch, and its tests when 0.1.11 becomes
+    /// the public update target.
+    private static let identityFreeBridgeTargetVersion = "0.1.10"
+
+    case checking(installed: LinnetSettingsContract.ProductIdentity?)
     case current(LinnetSettingsContract.ProductIdentity)
     case restartRequired(LinnetSettingsContract.ProductIdentity)
     case pending(
@@ -31,15 +37,18 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
       installed: LinnetSettingsContract.ProductIdentity,
       running: LinnetSettingsContract.ProductIdentity
     )
-    case unavailable
+    case unavailable(installed: LinnetSettingsContract.ProductIdentity?)
 
     static func resolved(
       installed: LinnetSettingsContract.ProductIdentity?,
       health: LinnetSettingsContract.RuntimeHealth?
     ) -> Self {
-      guard let installed, let health else { return .unavailable }
+      guard let installed else { return .unavailable(installed: nil) }
+      guard let health else { return .unavailable(installed: installed) }
       guard let running = health.productIdentity else {
-        return .restartRequired(installed)
+        return installed.version == identityFreeBridgeTargetVersion
+          ? .restartRequired(installed)
+          : .unavailable(installed: installed)
       }
       return installed == running
         ? .current(running)
@@ -64,11 +73,11 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   @Published private(set) var availability: LinnetDataChannel.UpdateAvailability?
   @Published private(set) var active = false
   @Published private(set) var failed = false
-  @Published private(set) var runtimeVersionState: RuntimeVersionState = .checking
+  @Published private(set) var installedIdentity: LinnetSettingsContract.ProductIdentity?
+  @Published private(set) var runtimeVersionState: RuntimeVersionState =
+    .checking(installed: nil)
 
-  private let currentVersion: String
-  private let currentBuild: UInt64
-  private let installedIdentity: LinnetSettingsContract.ProductIdentity?
+  private let identityBundle: Bundle
   private let hostBundleURL: URL?
   private let hostBundleIdentifier: String?
   private let transactionRequester: LinnetSettingsTransactionRequesting
@@ -80,23 +89,22 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   private var runtimeCycle: UInt64 = 0
 
   init(
-    currentVersion: String,
-    currentBuild: UInt64,
     edition: LinnetDataRegistry.Edition?,
     installedPacks: [LinnetDataRegistry.ActivePack],
     bundle: Bundle = .main,
     transactionRequester: LinnetSettingsTransactionRequesting? = nil
   ) {
-    self.currentVersion = currentVersion
-    self.currentBuild = currentBuild
+    identityBundle = bundle
+    installedIdentity = nil
     self.edition = edition
     self.installedPacks = installedPacks
     let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
-    installedIdentity = LinnetSettingsContract.productIdentity(startingAt: bundle)
     hostBundleURL = host?.bundleURL
     hostBundleIdentifier = host?.bundleIdentifier
     self.transactionRequester = transactionRequester
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
+    refreshInstalledIdentity()
+    runtimeVersionState = .checking(installed: installedIdentity)
   }
 
   func check() {
@@ -105,10 +113,11 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   }
 
   func refreshRuntime() {
+    refreshInstalledIdentity()
     runtimeTask?.cancel()
     runtimeCycle &+= 1
     let activeCycle = runtimeCycle
-    runtimeVersionState = .checking
+    runtimeVersionState = .checking(installed: installedIdentity)
     runtimeTask = Task { [weak self] in
       guard let self else { return }
       do {
@@ -126,8 +135,9 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
 
 extension LinnetSettingsUpdateChecker {
   func activateInstalledCore() {
+    refreshInstalledIdentity()
     guard let identities = runtimeVersionState.activationIdentities,
-      installedIdentity != nil,
+      installedIdentity == identities.installed,
       hostBundleURL != nil,
       hostBundleIdentifier != nil
     else { return }
@@ -189,14 +199,20 @@ extension LinnetSettingsUpdateChecker {
 
   private func startCheck(replacingCurrent: Bool) {
     guard replacingCurrent || !active else { return }
+    refreshInstalledIdentity()
     task?.cancel()
     cycle &+= 1
     let activeCycle = cycle
     active = true
     failed = false
     availability = nil
-    let currentVersion = currentVersion
-    let currentBuild = currentBuild
+    guard let installedIdentity else {
+      active = false
+      task = nil
+      return
+    }
+    let currentVersion = installedIdentity.version
+    let currentBuild = installedIdentity.build
     let edition = edition
     let installedPacks = installedPacks
     task = Task.detached { [weak self] in
@@ -217,6 +233,14 @@ extension LinnetSettingsUpdateChecker {
         await self?.finishFailure(cycle: activeCycle)
       }
     }
+  }
+
+  @discardableResult
+  private func refreshInstalledIdentity()
+    -> LinnetSettingsContract.ProductIdentity? {
+    let identity = LinnetSettingsContract.productIdentity(startingAt: identityBundle)
+    installedIdentity = identity
+    return identity
   }
 
   func refreshInstalledData(
@@ -334,13 +358,17 @@ extension LinnetSettingsUpdateChecker {
 
   private func finishRuntimeUnavailable(cycle activeCycle: UInt64) {
     guard activeCycle == runtimeCycle else { return }
-    runtimeVersionState = .unavailable
+    runtimeVersionState = .unavailable(installed: installedIdentity)
     runtimeTask = nil
   }
 
   private func coreActivationIssue(
     for code: LinnetSettingsContract.RuntimeReplyCode
   ) -> LinnetSettingsContract.CoreActivationBlocker? {
+    // The two 0.1.9 legacy blockers below are consumed before Host acceptance,
+    // so they cannot enter process observation, Host exit, launch, or success.
+    // Remove both mappings with their wire cases when 0.1.11 raises the
+    // minimum Core to 0.1.10.
     switch code {
     case .coreActivationInputSourceActive: .inputSourceActive
     case .coreActivationCompositionActive: .compositionActive

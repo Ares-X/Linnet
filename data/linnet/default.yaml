@@ -41,20 +41,16 @@ ascii_composer:
     Control_L: noop
     Control_R: noop
 
-# Candidate paging has one Rime-owned contract shared by Chinese and Smart
-# English.  Keep these keys out of the macOS frontend and the native bilingual
-# interaction processor so every profile follows the same menu state.
+# Printable paging is owned by LinnetInteractionProcessor because key_binder
+# cannot reject a previous/next key at the corresponding menu boundary.
 key_binder:
-  bindings:
-    - { when: has_menu, accept: minus, send: Page_Up }
-    - { when: has_menu, accept: equal, send: Page_Down }
-    - { when: has_menu, accept: bracketleft, send: Page_Up }
-    - { when: has_menu, accept: bracketright, send: Page_Down }
+  bindings: []
 
 # ── Punctuator ──────────────────────────────────────────────────────────────
 punctuator:
-  digit_separators: ",.:"
-  digit_separator_action: commit
+  # librime defaults this field to ".:" when absent; an explicit empty value
+  # keeps numeric separators and ordinary punctuation host-owned.
+  digit_separators: ""
   full_shape:
     ' ' : { commit: '　' }
     '!' : { commit: '！' }
@@ -93,19 +89,12 @@ punctuator:
     '!' : { commit: '！' }
     '"' : { pair: ['“', '”'] }
     '$' : { commit: '¥' }
-    '''' : { pair: ['‘', '’'] }
     '(' : { commit: '（' }
     ')' : { commit: '）' }
-    ',' : { commit: '，' }
-    '.' : { commit: '。' }
-    ':' : { commit: '：' }
-    ';' : { commit: '；' }
     '<' : { commit: '《' }
     '>' : { commit: '》' }
     '?' : { commit: '？' }
-    '[' : { commit: '【' }
     '\' : { commit: '、' }
-    ']' : { commit: '】' }
     '^' : { commit: '……' }
     '_' : { commit: '——' }
     '`' : { commit: '·' }
@@ -123,11 +112,11 @@ linnet:
     # through the Core-owned default.custom projection.
     zz_code_token: "^$"
     text_expander: "^x;[-0-9A-Za-z_]*$"
-    pinyin_reverse_lookup: "^;[a-z;']*$"
+    pinyin_reverse_lookup: "^[|][a-z;']*$"
 
   pinyin_reverse_lookup:
     tag: linnet_pinyin
-    prefix: ";"
+    prefix: "|"
     tips: "〔拼音反查英文〕"
     # Wanxiang dictionary syllables carry tone marks. This standard Rime
     # projection is the only runtime formatter from those syllables to the

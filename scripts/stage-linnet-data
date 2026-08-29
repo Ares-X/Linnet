@@ -32,7 +32,8 @@ assert_file_set() {
 
 expected_english_entries="$(printf '%s\n' \
   linnet.english-data-manifest.json linnet.smart-index.tsv \
-  linnet.smart.db linnet_en.dict.yaml | LC_ALL=C sort)"
+  linnet.smart.db linnet_en.dict.yaml \
+  linnet_english_entities.dict.yaml | LC_ALL=C sort)"
 actual_english_entries="$(find "${english_root}" -mindepth 1 -maxdepth 1 \
   -exec basename {} \; | LC_ALL=C sort)"
 if [[ "${actual_english_entries}" != "${expected_english_entries}" ]]; then
@@ -41,7 +42,8 @@ if [[ "${actual_english_entries}" != "${expected_english_entries}" ]]; then
 fi
 for english_file in \
   linnet.english-data-manifest.json linnet.smart-index.tsv \
-  linnet.smart.db linnet_en.dict.yaml; do
+  linnet.smart.db linnet_en.dict.yaml \
+  linnet_english_entities.dict.yaml; do
   if [[ ! -f "${english_root}/${english_file}" || \
         -L "${english_root}/${english_file}" ]]; then
     echo "Linnet generated English data is missing or unsafe." >&2
@@ -92,7 +94,7 @@ done
 # writes this stamp, while any source or staging-script change rebuilds once.
 stage_fingerprint_stamp="${repo_root}/build/linnet-stage.fingerprint"
 stage_fingerprint="$({
-  printf '%s\n' 'linnet-stage-fingerprint-v5-direct-upstream'
+  printf '%s\n' 'linnet-stage-fingerprint-v6-english-entities'
   for source in \
       scripts/stage-linnet-data \
       scripts/project-rime-ice-ext \
@@ -104,6 +106,7 @@ stage_fingerprint="$({
       data/chinese/grammar/wanxiang-lts-zh-hans.gram \
       upstreams/rime-octagram-data/zh-hans-t-essay-bgw.gram \
       "${english_root}/linnet_en.dict.yaml" \
+      "${english_root}/linnet_english_entities.dict.yaml" \
       "${english_root}/linnet.smart.db" \
       "${english_root}/linnet.english-data-manifest.json"; do
     printf '%s\t%s\n' "${source#"${repo_root}/"}" \
@@ -134,6 +137,7 @@ if [[ -f "${stage_fingerprint_stamp}" && \
       ! -e data/plum/lua && ! -L data/plum/lua && \
       -s data/plum/linnet_zh.schema.yaml && -s data/plum/linnet_en.schema.yaml && \
       -s data/plum/linnet_reviewed.dict.yaml && \
+      -s data/plum/linnet_english_entities.dict.yaml && \
       -s data/plum/dicts/jichu.dict.yaml && \
       -s data/plum/linnet.smart.db && -s data/plum/wanxiang-lts-zh-hans.gram ]]; then
   echo "stage-linnet-data: SKIP (projection inputs unchanged)"
@@ -201,7 +205,7 @@ scripts/project-rime-ice-ext \
   "${ice_extended_dictionary}" \
   "${wanxiang_root}/dicts" \
   "${plum_stage}/dicts/ext.dict.yaml" \
-  150000
+  100000
 /usr/bin/patch --batch --forward --fuzz=0 -s \
   -d "${plum_stage}" -p1 \
   < patches/rime-wanxiang-linnet-reviewed.patch
@@ -214,6 +218,7 @@ cp -X "${repo_root}/data/chinese/grammar/wanxiang-lts-zh-hans.gram" "${plum_stag
 cp -X "${repo_root}/upstreams/rime-octagram-data/zh-hans-t-essay-bgw.gram" "${plum_stage}/"
 cp -X \
   "${english_root}/linnet_en.dict.yaml" \
+  "${english_root}/linnet_english_entities.dict.yaml" \
   "${english_root}/linnet.smart.db" \
   "${english_root}/linnet.english-data-manifest.json" \
   "${plum_stage}/"
@@ -260,6 +265,7 @@ assert_file_set "${plum_stage}" \
   linnet_grammar_active.yaml \
   linnet_algebra.yaml \
   linnet.english-data-manifest.json linnet.smart.db linnet_en.dict.yaml \
+  linnet_english_entities.dict.yaml \
   linnet_en.schema.yaml linnet_user.yaml \
   linnet_zh.dict.yaml linnet_zh.schema.yaml \
   linnet_zh_pinyin.schema.yaml linnet_zh_flypy.schema.yaml \

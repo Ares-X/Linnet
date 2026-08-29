@@ -1,8 +1,10 @@
 双韵（Linnet）安装完成。
 
-首次 Complete 只注册 Linnet，不会程序化启用或选择输入源。
-macOS 14 及以上由用户在系统设置中手动添加并允许一次。Core 不重新注册输入源，
-并保留系统状态与现有应用的输入连接，不会再次请求启用授权。
+Complete 是全新首次安装或受支持、已验证签名 App 修复的
+唯一输入源注册责任方。
+它会幂等注册缺失的输入源，但不会程序化启用或选择输入源。
+健康安装的常规升级只使用 Core。Core 不重新注册输入源，并保留系统状态与现有
+应用的输入连接，不会再次请求启用授权。
 
 如果这是首次完整安装：
 
@@ -12,10 +14,20 @@ macOS 14 及以上由用户在系统设置中手动添加并允许一次。Core 
    允许 Linnet，请选择“允许”。
 3. 确认 Linnet 已在启用列表中，再从菜单栏输入菜单选择 Linnet。
 
-Core 更新只要求 Settings 温和退出，不停止正在服务的 InputMethodKit Host，也不
-触碰输入源注册、启用或选择状态。现有应用继续使用当前 Host；磁盘上的新 Core 在
-用户明确请求且所有历史客户端应用都已退出时可安全接管；否则在下次登录或重启后
-接管。当前候选仍须通过真实安装升级 UAT，才能把
+若 Core 仅报告输入源未注册，请运行 Complete 修复。
+若 Core 报告重复、冲突或无法验证的注册残留，
+请先运行官方卸载器，再安装 Complete。
+不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。
+
+卸载前先切换到其他输入法。卸载器不会执行已安装的 Host；若精确 Host 或
+Settings 进程仍在运行，请注销并重新登录后重试。运行日志固定存放在
+`Application Support/Linnet/Runtime/Logs`，会随默认卸载的 Runtime 一起删除。
+默认卸载保留个人数据；完整清理还会删除偏好与剩余个人数据，不推断系统临时路径。
+
+Core 安装时，macOS Installer 只关闭正在被替换的 Linnet Settings 自身窗口；它不停止
+正在服务的 InputMethodKit Host 或任何其他用户应用，也不触碰输入源注册、启用或选择状态。现有应用继续使用当前 Host；用户切换到其他输入法，
+且没有未完成组合或数据事务时，可在 Settings 中明确请求新 Core 接管。其他应用保持打开；
+否则新 Core 在下次正常登录或重启后接管。当前候选仍须通过真实安装升级 UAT，才能把
 免注销与输入连续性作为发布结论。
 
 日常使用：
@@ -41,9 +53,12 @@ Core 更新只要求 Settings 温和退出，不停止正在服务的 InputMetho
 
 双韵 (Linnet) installation is complete.
 
-A first Complete installation registers Linnet but does not enable or select
-the input source for you. Core does not re-register it or stop the live
-InputMethodKit Host, so existing applications keep their input connections.
+Complete is the sole registration owner for a clean first installation or a
+supported, signature-verified App repair.
+It registers a missing source idempotently but does not enable or select it for
+you. Healthy installations use Core for routine updates. Core does not
+re-register the source or stop the live InputMethodKit Host, so existing
+applications keep their input connections.
 
 For a first Complete installation:
 
@@ -53,11 +68,26 @@ For a first Complete installation:
    Allow if macOS asks for permission.
 3. Confirm that Linnet is enabled, then select it from the menu-bar input menu.
 
-Core asks only Settings to quit cleanly. It does not stop the live Host or touch
-input-source registration, enablement, or selection. Existing applications keep
-using the current Host. The new Core can take over after an explicit request once
-Linnet is inactive and no composition or data transaction is in progress;
-other applications stay open while Settings starts and verifies the new Core.
+If Core reports only a missing registration, run Complete to repair it.
+If Core reports duplicate, conflicting, or unverifiable registration remnants,
+run the official uninstaller first, then install Complete.
+Do not use Complete for a routine healthy upgrade or to bypass a rejected App
+identity or version.
+
+Before uninstalling, switch to another input source. The uninstaller never runs
+the installed Host; if the exact Host or Settings process remains active, sign
+out and back in, then retry. Runtime logs live in the fixed product path
+`Application Support/Linnet/Runtime/Logs` and leave with the default Runtime
+removal. Default uninstall keeps personal data; purge additionally removes
+preferences and remaining personal data without inferring a system temporary path.
+
+During a Core installation, macOS Installer closes only Linnet's own Settings
+window whose files are being replaced. It does not stop the live Host or any
+other user application, and does not touch input-source registration,
+enablement, or selection. Existing
+applications keep using the current Host. The new Core can take over after an explicit request once
+Linnet is inactive and no composition or data transaction is in progress.
+Other applications stay open while Settings starts and verifies the new Core.
 This candidate still requires installed upgrade UAT before no-logout and input
 continuity are accepted release claims.
 

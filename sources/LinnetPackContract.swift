@@ -332,6 +332,7 @@ extension LinnetPackContract {
     case .english:
       return path == "linnet.smart.db"
         || path == "linnet.english-data-manifest.json"
+        || path == "linnet_english_entities.dict.yaml"
         || path.hasPrefix("linnet_en.")
         || path.hasPrefix("build/linnet_en.")
     case .chinese:

@@ -282,7 +282,6 @@ struct LinnetEnglishWord {
 }
 
 struct LinnetEnglishNGram {
-  let order: Int
   let context: String
   let nextWord: String
   let frequency: Int
@@ -419,8 +418,7 @@ struct LinnetEnglishSourceSnapshot {
           && joined.utf8.allSatisfy { (32...126).contains($0) }
           && joined.lowercased() == joined && context.split(separator: " ").count + 1 == order
           && frequency > 0, "invalid Hallelujah ngram")
-      ngrams.append(.init(
-        order: order, context: context, nextWord: nextWord, frequency: frequency))
+      ngrams.append(.init(context: context, nextWord: nextWord, frequency: frequency))
       ngramCounts[order, default: 0] += 1
     }
     sqlite3_finalize(statement)

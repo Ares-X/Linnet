@@ -65,7 +65,7 @@ extended="${output_root}/extended"
 mkdir -p "${chinese}/build" "${chinese}/dicts" "${english}/build" \
   "${lts}" "${extended}/dicts"
 
-for name in linnet_en.dict.yaml linnet.smart.db \
+for name in linnet_en.dict.yaml linnet_english_entities.dict.yaml linnet.smart.db \
     linnet.english-data-manifest.json linnet_en.schema.yaml; do
   [[ -f "${plum_root}/${name}" && ! -L "${plum_root}/${name}" ]] ||
     fail "missing English pack input: ${name}"
@@ -82,7 +82,8 @@ while IFS= read -r -d '' entry; do
   name="${entry##*/}"
   case "${name}" in
     build|wanxiang-lts-zh-hans.gram|zh-hans-t-essay-bgw.gram|linnet_grammar_active.yaml|\
-      linnet_en.dict.yaml|linnet.smart.db|linnet.english-data-manifest.json|linnet_en.schema.yaml|\
+      linnet_en.dict.yaml|linnet_english_entities.dict.yaml|linnet.smart.db|\
+      linnet.english-data-manifest.json|linnet_en.schema.yaml|\
       linnet_zh.dict.yaml|dicts)
       continue
       ;;
@@ -126,12 +127,15 @@ done
 
 # Standard and Complete select different explicit roots. Do not infer either
 # edition from data/plum: that source-build view is intentionally Complete.
-verify_dictionary_root "${chinese}/linnet_zh.dict.yaml" "${chinese}" -- \
-  linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
+verify_dictionary_root "${chinese}/linnet_zh.dict.yaml" \
+  "${chinese}" "${english}" -- \
+  linnet_reviewed linnet_english_entities \
+  dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
   dicts/duoyin dicts/shici dicts/diming dicts/ext
 verify_dictionary_root "${extended}/linnet_zh_full.dict.yaml" \
-  "${chinese}" "${extended}" -- \
-  linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
+  "${chinese}" "${english}" "${extended}" -- \
+  linnet_reviewed linnet_english_entities \
+  dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
   dicts/duoyin dicts/shici dicts/diming dicts/yixue dicts/huaxue \
   dicts/yaopin dicts/mingren dicts/yiren dicts/wuzhong dicts/renming \
   dicts/taifeng dicts/fangyan dicts/ext

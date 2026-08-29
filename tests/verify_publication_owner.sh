@@ -133,11 +133,17 @@ abort unless periphery.include?(
   periphery.scan(build_name).size == 1 &&
   periphery.scan(registration_cleanup).size == 1 &&
   periphery.scan("cleanup_local_registrations").size == 3 &&
-  periphery.include?("com.github.peripheryapp") &&
-  periphery.include?("WorkspacePath") &&
+  periphery.include?(%q{-derivedDataPath "${derived_data}"}) &&
+  periphery.include?(%q{--generic-project-config "${generic_config}"}) &&
+  periphery.include?(%q{"test_targets": []}) &&
+  periphery.include?(%q{SWIFTC="${indexed_swiftc}" linnet-runtime-inspector}) &&
+  periphery.include?(%q{SWIFTC="${indexed_swiftc}" linnet-pack-tool}) &&
+  periphery.include?(%q{SWIFTC="${indexed_swiftc}" input-source-registration-inspector}) &&
+  periphery.include?(%q{SWIFTC="${indexed_swiftc}" english-data-generator}) &&
+  !periphery.include?("com.github.peripheryapp") &&
+  !periphery.include?("WorkspacePath") &&
   periphery.index(analysis_identity) < periphery.index(build_identity) &&
   periphery.index(analysis_name) < periphery.index(build_name) &&
-  !periphery.include?("-derivedDataPath") &&
   !periphery.include?(bundle_identifier)
 historical_signing_text, historical_signing_status = Open3.capture2(
   "git", "-C", root, "show", "#{source_revision}:config/linnet-community-signing.json")
@@ -166,17 +172,22 @@ fixed_cms_candidate_conflict = <<~'BASH'
     fail_identity "installed App revision conflicts with this Core candidate"
   fi
 BASH
+clean_complete_transition = "    printf '%s\\n' clean-complete-install\n"
+historical_missing_transition = "    printf '%s\\n' missing-app-install\n"
 legacy_projection = lambda do |content|
   occurrences = content.scan(fixed_cms_candidate_conflict).size
   abort unless occurrences <= 1
   content.sub(fixed_cms_candidate_conflict, "")
+    .sub(clean_complete_transition, historical_missing_transition)
 end
 current_identity = File.binread(File.join(root, paths.fetch(0)))
 historical_identity, historical_identity_status = Open3.capture2(
   "git", "-C", root, "show", "#{source_revision}:#{paths.fetch(0)}")
 abort unless historical_identity_status.success? &&
   historical_identity.scan(fixed_cms_candidate_conflict).size == 1 &&
-  current_identity.scan(fixed_cms_candidate_conflict).empty?
+  current_identity.scan(fixed_cms_candidate_conflict).empty? &&
+  historical_identity.scan(clean_complete_transition).empty? &&
+  current_identity.scan(clean_complete_transition).size == 1
 legacy_max_build = current_identity[/^readonly legacy_max_build='(\d+)'$/, 1]
 historical_legacy_max_build = historical_identity[/^readonly legacy_max_build='(\d+)'$/, 1]
 current_build = product[/^CURRENT_PROJECT_VERSION = (\d+)$/, 1]
@@ -246,13 +257,13 @@ then
   fail "the durable legacy-to-CMS migration acceptance contract is invalid"
 fi
 
-if printf '%s\n' config/LinnetProduct.xcconfig |
+printf '%s\n' config/LinnetProduct.xcconfig |
+  "${repo_root}/package/data_release_metadata" check-source-change >/dev/null
+if printf '%s\n' data/linnet/default.yaml |
     "${repo_root}/package/data_release_metadata" check-source-change \
       >/dev/null 2>&1; then
-  fail "a Core identity change can still reuse an already-published Catalog sequence"
+  fail "a pack source change can still reuse unchanged pack metadata"
 fi
-printf '%s\n' config/LinnetProduct.xcconfig config/linnet-data-releases.json |
-  "${repo_root}/package/data_release_metadata" check-source-change >/dev/null
 
 version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
   "${repo_root}/config/LinnetProduct.xcconfig")"
@@ -295,11 +306,11 @@ candidate_expected="$(printf '%s\n' \
 public_expected=Linnet.pkg
 core_expected="$(printf '%s\n' \
   "Linnet-${version}-arm64-Core-community-beta.pkg" \
-  "Linnet-${version}-Uninstall.command" | LC_ALL=C sort)"
+  "Linnet-${version}-Uninstall.command" \
+  Linnet-Data-Channel.json | LC_ALL=C sort)"
 data_expected="$(printf '%s\n' \
   Linnet-Chinese.linnetpack Linnet-English.linnetpack \
-  Linnet-LTS.linnetpack Linnet-Extended.linnetpack \
-  Linnet-Data-Channel.json | LC_ALL=C sort)"
+  Linnet-LTS.linnetpack Linnet-Extended.linnetpack | LC_ALL=C sort)"
 for spec in \
     "candidate:${candidate_expected}" \
     "public:${public_expected}" \
@@ -366,16 +377,16 @@ ruby -e '
   abort unless release_uses.count(local_cache) == 1
   abort unless commit_uses.count(pinned_cache) == 1
   abort unless pull_request_uses.count(pinned_restore) == 1
+  abort unless release_uses.count(pinned_cache) == 1
   abort unless cache_uses == [pinned_cache, pinned_restore, pinned_cache, pinned_restore]
-  abort if release.include?("actions/cache")
-  main_cache_writer = "save: ${{ matrix.profile == \x27rime\x27 }}"
-  abort unless commit.scan(main_cache_writer).size == 1
+  abort unless commit.scan(/^\s*save:\s*true\s*$/).size == 1
   abort unless pull_request.scan(/^\s*save:\s*false\s*$/).size == 1
+  abort unless release.scan(/^\s*save:\s*false\s*$/).size == 1
   abort unless cache.include?("if: inputs.save == \x27true\x27") &&
     cache.include?("if: inputs.save == \x27false\x27")
   abort unless cache.match?(/inputs:\s*\n\s*save:.*?required:\s*true/m)
-  abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 2
-  abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 2
+  abort unless commit.scan(/^\s*submodules:\s*false\s*$/).size == 1
+  abort unless pull_request.scan(/^\s*submodules:\s*false\s*$/).size == 1
   abort unless release.scan(/^\s*submodules:\s*false\s*$/).size == 2
   abort unless commit.match?(/^name:\s*Linnet manual full CI\s*$/)
   abort unless commit.match?(/^on:\s*\n\s*workflow_dispatch:\s*$/m)
@@ -385,22 +396,56 @@ ruby -e '
     pull_request.include?(%q{group: linnet-pr-${{ github.event.pull_request.number }}})
   abort unless commit.scan(/^\s*cancel-in-progress:\s*true\s*$/).size == 1 &&
     pull_request.scan(/^\s*cancel-in-progress:\s*true\s*$/).size == 1
+  ordered = lambda do |source, *markers|
+    offsets = markers.map { |marker| source.index(marker) }
+    abort unless offsets.all? && offsets.each_cons(2).all? { |left, right| left < right }
+  end
   [commit, pull_request].each do |ci|
-    abort unless ci.scan(/^\s*needs:\s*quality\s*$/).size == 1
-    abort unless ci.scan(/^\s*profile:\s*\[app, swift, rime\]\s*$/).size == 1
-    abort unless ci.scan(/^\s*fail-fast:\s*false\s*$/).size == 1
+    abort if ci.match?(/^\s*(?:needs|strategy|matrix):/)
+    abort unless ci.scan(/^\s{2}product:\s*$/).size == 1
+    abort unless ci.scan(/^\s*runs-on:\s*macos-latest\s*$/).size == 1
     abort unless ci.scan(%r{tests/verify_release_automation\.sh && tests/verify_publication_owner\.sh}).size == 1
-    abort unless ci.scan(/^\s*\.\/action-build\.sh release\s*$/).size == 1
-    abort unless ci.scan(/^\s*\.\/action-install\.sh\s*$/).size == 1
+    abort if ci.include?("./action-build.sh")
+    abort unless ci.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 1
+    abort unless ci.scan(/^\s*run:\s*make --no-print-directory release\s*$/).size == 1
     abort unless ci.scan(%r{tests/verify_development\.sh app}).size == 1
-    abort unless ci.scan(%r{tests/verify_development\.sh "\$\{LINNET_CI_PROFILE\}"}).size == 1
+    abort unless ci.scan(%r{tests/verify_development\.sh swift}).size == 1
+    abort unless ci.scan(%r{tests/verify_development\.sh rime}).size == 1
     abort unless ci.scan(%r{tests/verify_visible_settings_fixture\.sh --ui-test}).size == 1
-    abort if ci.match?(/^\s*settings-ui\)\s*$/)
-    abort unless ci.scan(/^\s*if:\s*matrix\.profile == \x27swift\x27\s*$/).size == 1
+    abort unless ci.scan(%r{scripts/run_periphery\.sh}).size == 1
     abort unless ci.scan(/^\s*path:\s*build\/swift-unit-cache\s*$/).size == 1
     abort unless ci.scan(/linnet-swift-units-v1-/).size == 2
-    abort unless ci.match?(%r{app\)\s*\n\s*\.\/action-build\.sh release\s*\n\s*tests/verify_development\.sh app\s*\n\s*tests/verify_visible_settings_fixture\.sh --ui-test}m)
+    ordered.call(ci,
+      "./action-install.sh",
+      "make --no-print-directory release",
+      "tests/verify_development.sh app",
+      "tests/verify_visible_settings_fixture.sh --ui-test",
+      "tests/verify_development.sh swift",
+      "tests/verify_development.sh rime",
+      "scripts/run_periphery.sh")
   end
+  abort if release.include?("workflow_dispatch") ||
+    release.include?("workflow_run") || release.match?(/\bgh run\b/)
+  abort unless release.scan(/^\s{2}build-candidate:\s*$/).size == 1
+  abort unless release.scan(/^\s{2}publish:\s*$/).size == 1
+  abort unless release.scan(/^\s*runs-on:\s*macos-latest\s*$/).size == 1
+  abort unless release.scan(/^\s*runs-on:\s*ubuntu-latest\s*$/).size == 1
+  abort unless release.scan(/^\s*run:\s*\.\/action-install\.sh\s*$/).size == 1
+  abort unless release.scan(%r{scripts/run_swiftlint\.sh}).size == 1
+  abort unless release.scan(%r{tests/verify_release_automation\.sh}).size == 1
+  abort unless release.scan(%r{tests/verify_publication_owner\.sh}).size == 1
+  abort unless release.scan(%r{tests/verify_development\.sh swift}).size == 1
+  abort unless release.scan(%r{tests/verify_development\.sh rime}).size == 1
+  abort unless release.scan(%r{scripts/run_periphery\.sh}).size == 1
+  abort unless release.scan(/^\s*make --no-print-directory archive\s*$/).size == 1
+  ordered.call(release,
+    "./action-install.sh",
+    "scripts/run_swiftlint.sh",
+    "tests/verify_publication_owner.sh",
+    "tests/verify_development.sh swift",
+    "tests/verify_development.sh rime",
+    "scripts/run_periphery.sh",
+    "make --no-print-directory archive")
   abort unless development_gate.include?("[all|app|swift|rime]")
   abort unless development_gate.scan(/^if \[\[ "\$\{run_app\}" -eq 1 \]\]; then$/).size == 1
   abort unless development_gate.scan(/^if \[\[ "\$\{run_swift\}" -eq 1 \]\]; then$/).size == 1

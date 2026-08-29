@@ -1130,12 +1130,12 @@ struct SettingsDataCoordinatorTests {
         configuredChinese.contains("\"switches/@2/reset\": 1"),
         configuredChinese.contains("\"linnet_english_interaction/sentence_capitalization\": false"),
         configuredChinese.contains("\"linnet_english_interaction/tab_behavior\": \"pass\""),
-        configuredChinese.contains("\"linnet_pinyin/prefix\": \"|\""),
+        !configuredChinese.contains("linnet_pinyin/prefix"),
         configuredEnglishSchema.contains(
           "\"linnet_english_interaction/sentence_capitalization\": false"),
         configuredEnglishSchema.contains(
           "\"linnet_english_interaction/tab_behavior\": \"pass\""),
-        configuredEnglishSchema.contains("\"linnet_pinyin/prefix\": \"|\""),
+        !configuredEnglishSchema.contains("linnet_pinyin/prefix"),
         !FileManager.default.fileExists(
           atPath: live.appending(path: LinnetPersonalDataStore.legacyUserSettingsFile).path)
       else {
@@ -2278,6 +2278,7 @@ struct SettingsDataCoordinatorTests {
       if relative == "linnet_grammar_active.yaml" || extendedOnly.contains(relative) { continue }
       let isEnglish = relative == "linnet.smart.db"
         || relative == "linnet.english-data-manifest.json"
+        || relative == "linnet_english_entities.dict.yaml"
         || relative.hasPrefix("linnet_en.")
         || relative.hasPrefix("build/linnet_en.")
       let destinationRoot = isEnglish ? englishPack : chinesePack

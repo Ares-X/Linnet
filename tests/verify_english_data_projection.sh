@@ -27,7 +27,7 @@ ruby -e '
     source.index(miss) < source.index(compile) &&
       source.index(compile) < source.index(execute)
 ' "${installer}"
-expected=$'linnet.english-data-manifest.json\nlinnet.smart-index.tsv\nlinnet.smart.db\nlinnet_en.dict.yaml'
+expected=$'linnet.english-data-manifest.json\nlinnet.smart-index.tsv\nlinnet.smart.db\nlinnet_en.dict.yaml\nlinnet_english_entities.dict.yaml'
 actual="$(find "${cache}" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)"
 [[ "${actual}" == "${expected}" ]] || {
   echo "verify_english_data_projection: cache inventory changed" >&2
@@ -40,8 +40,8 @@ ruby -rjson -rdigest -e '
   manifest = JSON.parse(File.read(manifest_path))
   lock = JSON.parse(File.read(File.join(root, "upstreams.lock.json"))).fetch("sources")
   abort "native generator identity changed" unless
-    manifest.fetch("format") == 4 &&
-      manifest.fetch("generator") == {"name" => "LinnetEnglishDataGenerator", "version" => 1}
+    manifest.fetch("format") == 5 &&
+      manifest.fetch("generator") == {"name" => "LinnetEnglishDataGenerator", "version" => 2}
   %w[hallelujah rime_ice].each do |name|
     source = manifest.fetch("sources").fetch(name)
     expected = lock.fetch(name)
@@ -68,7 +68,10 @@ ruby -rjson -rdigest -e '
       Digest::SHA256.file(input).hexdigest == source.fetch("sha256")
   end
   outputs = manifest.fetch("outputs")
-  expected_outputs = %w[linnet.smart-index.tsv linnet.smart.db linnet_en.dict.yaml]
+  expected_outputs = %w[
+    linnet.smart-index.tsv linnet.smart.db linnet_en.dict.yaml
+    linnet_english_entities.dict.yaml
+  ]
   abort "projection output set changed" unless outputs.keys.sort == expected_outputs.sort
   outputs.each do |name, contract|
     path = File.join(cache, name)
@@ -78,6 +81,7 @@ ruby -rjson -rdigest -e '
       Digest::SHA256.file(path).hexdigest == contract.fetch("sha256")
   end
   counts = manifest.fetch("projection_counts")
+  abort "mixed entity count changed" unless counts.fetch("mixed_entities") == 429
   namespaces = counts.fetch("namespace_rows")
   abort "smart namespace set changed" unless namespaces.keys.sort == %w[f m/ipa m/skip m/zh n p].sort
   abort "smart row total is inconsistent" unless namespaces.values.sum == counts.fetch("smart_index_rows")
@@ -85,10 +89,41 @@ ruby -rjson -rdigest -e '
     counts.fetch("dictionary_entries") >= 140_000 &&
       counts.fetch("smart_index_rows") >= 4_000_000 &&
       counts.fetch("pinyin_edges") == namespaces.fetch("p")
+
+  entity_path = File.join(cache, "linnet_english_entities.dict.yaml")
+  lines = File.readlines(entity_path, chomp: true)
+  marker = lines.index("...")
+  abort "entity dictionary body marker is missing" unless marker
+  entities = lines.drop(marker + 1).reject { |line| line.empty? || line.start_with?("#") }.map do |line|
+    fields = line.split("\t", -1)
+    abort "invalid entity dictionary row: #{line}" unless
+      fields.length == 3 && fields[0] == fields[1] &&
+        fields[0].match?(/\A[A-Z]{2,6}\z/) && fields[2] == "1"
+    fields[0]
+  end
+  abort "entity dictionary count changed" unless entities.length == 429
+  abort "entity dictionary order or uniqueness changed" unless
+    entities == entities.uniq.sort
+  %w[AI CPU CS HTTPS].each do |entity|
+    abort "representative mixed entity is missing: #{entity}" unless entities.include?(entity)
+  end
   puts "English data projection: PASS (#{counts.fetch("dictionary_entries")} words, #{counts.fetch("smart_index_rows")} smart rows)"
 ' "${repo_root}" "${cache}"
 
+ruby -e '
+  stage = File.binread("scripts/stage-linnet-data")
+  abort "English entity staging fingerprint owner changed" unless
+    stage.scan("linnet-stage-fingerprint-v6-english-entities").length == 1 &&
+      stage.include?(%q{"${english_root}/linnet_english_entities.dict.yaml"}) &&
+      stage.include?(%q{-s data/plum/linnet_english_entities.dict.yaml})
+  pack = File.binread("package/stage_language_pack_sources")
+  abort "English entity pack owner changed" unless
+    pack.include?("for name in linnet_en.dict.yaml linnet_english_entities.dict.yaml")
+'
+
 rg -Fq 'name: linnet_en' "${cache}/linnet_en.dict.yaml"
+rg -Fq 'name: linnet_english_entities' \
+  "${cache}/linnet_english_entities.dict.yaml"
 rg -q $'^deserialization\tdeserialization\t45364$' \
   "${cache}/linnet_en.dict.yaml"
 rg -q $'^m/zh/serialization\tn. 序列化\t' \

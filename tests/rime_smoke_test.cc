@@ -59,6 +59,7 @@ constexpr char kSentenceBoundaryProperty[] =
 constexpr char kModeReturnSchemaProperty[] =
     "linnet/mode_return_schema_v1";
 constexpr char kForcedRawCandidateType[] = "linnet_forced_raw";
+constexpr char kDefaultPinyinReversePrefix[] = "|";
 constexpr std::array<const char*, 9> kProductSchemaIDs = {
     "linnet_zh_pinyin",  "linnet_zh",         "linnet_zh_flypy",
     "linnet_zh_mspy",    "linnet_zh_sogou",   "linnet_zh_abc",
@@ -96,6 +97,9 @@ struct CandidateOriginView {
   double phrase_system_lexical_weight;
   int phrase_spelling_type;
   std::string preedit;
+  std::string sentence_components;
+  size_t sentence_uppercase_entity_count;
+  bool sentence_components_follow_mixed_contract;
 };
 
 struct AcceptanceCase {
@@ -112,6 +116,52 @@ struct AcceptanceCase {
   // intended nonzero process result without executing that unsafe teardown.
   std::cerr.flush();
   std::_Exit(1);
+}
+
+bool ContainsAscii(const std::string& text) {
+  return std::any_of(text.begin(), text.end(),
+                     [](unsigned char byte) { return byte < 0x80; });
+}
+
+bool IsUppercaseEntityText(const std::string& text) {
+  return text.size() >= 2 && text.size() <= 6 &&
+         std::all_of(text.begin(), text.end(), [](unsigned char byte) {
+           return byte >= 'A' && byte <= 'Z';
+         });
+}
+
+std::vector<std::string> RuntimeProductSchemaIDs(RimeApi_stdbool* api) {
+  RimeSchemaList list = {};
+  if (!api->get_schema_list(&list)) {
+    Fail("could not read the deployed product schema list");
+  }
+  std::vector<std::string> result;
+  result.reserve(list.size);
+  for (size_t index = 0; index < list.size; ++index) {
+    if (!list.list[index].schema_id) {
+      api->free_schema_list(&list);
+      Fail("the deployed product schema list contains an empty identity");
+    }
+    result.emplace_back(list.list[index].schema_id);
+  }
+  api->free_schema_list(&list);
+  return result;
+}
+
+std::vector<std::string> RuntimeChineseSchemaIDs(RimeApi_stdbool* api) {
+  std::vector<std::string> result;
+  for (const auto& schema_id : RuntimeProductSchemaIDs(api)) {
+    if (schema_id == "linnet_en") continue;
+    if (schema_id.rfind("linnet_zh", 0) != 0) {
+      Fail("the deployed Chinese profile set contains an undeclared identity: " +
+           schema_id);
+    }
+    result.push_back(schema_id);
+  }
+  if (result.size() != 8) {
+    Fail("the deployed product no longer exposes exactly eight Chinese profiles");
+  }
+  return result;
 }
 
 std::vector<CandidateView> Candidates(RimeApi_stdbool* api,
@@ -146,6 +196,21 @@ std::vector<CandidateOriginView> CandidateOrigins(RimeSessionId session_id,
     const auto candidate = segment.menu->GetCandidateAt(index);
     const auto genuine = rime::Candidate::GetGenuineCandidate(candidate);
     const auto phrase = rime::As<rime::Phrase>(genuine);
+    std::ostringstream sentence_components;
+    size_t sentence_uppercase_entity_count = 0;
+    bool sentence_components_follow_mixed_contract = true;
+    if (const auto sentence = rime::As<rime::Sentence>(genuine)) {
+      for (const auto& component : sentence->components()) {
+        if (sentence_components.tellp() > 0) sentence_components << '|';
+        sentence_components << component.text;
+        if (!ContainsAscii(component.text)) continue;
+        if (IsUppercaseEntityText(component.text)) {
+          ++sentence_uppercase_entity_count;
+        } else {
+          sentence_components_follow_mixed_contract = false;
+        }
+      }
+    }
     values.push_back({candidate ? candidate->text() : "",
                       candidate ? candidate->type() : "",
                       genuine ? genuine->type() : "",
@@ -161,13 +226,36 @@ std::vector<CandidateOriginView> CandidateOrigins(RimeSessionId session_id,
                           ? *phrase->system_lexical_weight()
                           : 0.0,
                       phrase ? static_cast<int>(phrase->spelling_type()) : -1,
-                      candidate ? candidate->preedit() : ""});
+                      candidate ? candidate->preedit() : "",
+                      sentence_components.str(),
+                      sentence_uppercase_entity_count,
+                      sentence_components_follow_mixed_contract});
   }
   return values;
 }
 
 std::string BaseText(const std::string& value) {
   return !value.empty() && value.front() == ' ' ? value.substr(1) : value;
+}
+
+bool IsFullSpanUnprojectedMixed(const CandidateOriginView& candidate,
+                                size_t input_size) {
+  return candidate.genuine_language == "linnet_zh" &&
+         candidate.type != "linnet_mixed" && candidate.start == 0 &&
+         candidate.end == input_size && ContainsAscii(BaseText(candidate.text));
+}
+
+void ExpectNoFullSpanUnprojectedMixed(
+    const std::vector<CandidateOriginView>& candidates,
+    size_t input_size,
+    const std::string& reason) {
+  const auto invalid = std::find_if(
+      candidates.begin(), candidates.end(), [&](const auto& candidate) {
+        return IsFullSpanUnprojectedMixed(candidate, input_size);
+      });
+  if (invalid == candidates.end()) return;
+  Fail(reason + "; full-span ASCII-bearing Chinese candidate '" +
+       BaseText(invalid->text) + "' retained outer type " + invalid->type);
 }
 
 void ExpectCurrentSchema(RimeApi_stdbool* api,
@@ -560,22 +648,31 @@ bool ExpectSingleLetterChinesePriority(RimeApi_stdbool* api,
         return candidate.genuine_language == "linnet_zh" &&
                candidate.start == 0 && candidate.end == input.size();
       });
-  if (chinese == candidates.end()) {
-    return false;
-  }
   const auto english = std::find_if(
       candidates.begin(), candidates.end(), [&](const auto& candidate) {
-        return candidate.genuine_language == "linnet_en" &&
-               candidate.genuine_type == "table" && candidate.phrase_exact &&
+        std::string text = BaseText(candidate.text);
+        std::transform(text.begin(), text.end(), text.begin(),
+                       [](unsigned char byte) {
+                         return byte >= 'A' && byte <= 'Z' ? byte + 32 : byte;
+                       });
+        const bool english_origin =
+            candidate.genuine_language == "linnet_en" ||
+            candidate.type == "raw" || candidate.genuine_type == "raw" ||
+            candidate.type == kForcedRawCandidateType ||
+            candidate.genuine_type == kForcedRawCandidateType;
+        return english_origin && text == input &&
                candidate.start == 0 && candidate.end == input.size();
       });
   if (english == candidates.end()) {
     Fail("single-letter English candidate became unreachable for input '" +
          input + "' in " + schema_id);
   }
-  if (candidates.front().genuine_language == "linnet_zh" &&
-      candidates.front().start == 0 &&
-      candidates.front().end == input.size()) {
+  if (chinese == candidates.end()) {
+    if (english == candidates.begin()) return false;
+    Fail("single-letter English was not first when no same-span Chinese "
+         "candidate exists for input '" + input + "' in " + schema_id);
+  }
+  if (chinese == candidates.begin()) {
     return true;
   }
   std::cerr << "Origins for single-letter Chinese input '" << input
@@ -615,6 +712,19 @@ void ExpectGlobalAmbiguousEnglishFirstWithoutChinese(RimeApi_stdbool* api,
 RimeSessionId CreateSchemaSession(RimeApi_stdbool* api,
                                   const char* schema_id);
 std::string TakeCommit(RimeApi_stdbool* api, RimeSessionId session);
+std::string TakeCommit(RimeApi_stdbool* api,
+                       RimeSessionId session,
+                       const std::string& reason);
+void ExpectNoCommit(RimeApi_stdbool* api,
+                    RimeSessionId session,
+                    const std::string& reason);
+std::map<std::string, std::string> LoadFormalProfileReviewedInputs();
+std::string PagingInputForProfile(RimeApi_stdbool* api,
+                                  const std::string& schema_id,
+                                  const std::string& reviewed);
+void ExpectNineCandidateSelectKeys(RimeApi_stdbool* api,
+                                   const char* schema_id,
+                                   const std::string& input);
 
 void ExpectNaturalSingleKeyDefaultRanking(RimeApi_stdbool* api) {
   const RimeSessionId session = CreateSchemaSession(api, "linnet_zh");
@@ -694,7 +804,7 @@ void ExpectSingleSyllablePreferenceLearning(RimeApi_stdbool* api) {
   api->destroy_session(learned);
 }
 
-void ExpectModelessMixedInput(RimeApi_stdbool* api) {
+void ExpectNativeMixedInput(RimeApi_stdbool* api) {
   struct MixedCase {
     const char* input;
     const char* expected;
@@ -705,6 +815,202 @@ void ExpectModelessMixedInput(RimeApi_stdbool* api) {
       {"shiyongcpuxingneng", "使用CPU性能"},
   }};
 
+  bool verified_mixed_learning_round_trip = false;
+
+  const auto expect_mixed = [&](const std::string& schema_id,
+                                const std::string& input,
+                                const std::string& expected,
+                                const std::string& reason,
+                                bool verify_digit_commit) {
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, session, input);
+    const auto candidates = CandidateOrigins(session);
+    ExpectNoFullSpanUnprojectedMixed(candidates, input.size(), reason);
+    const auto mixed = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return BaseText(candidate.text) == expected &&
+                 candidate.type == "linnet_mixed" &&
+                 candidate.genuine_language == "linnet_zh" &&
+                 candidate.start == 0 && candidate.end == input.size() &&
+                 (candidate.genuine_type == "sentence" ||
+                  candidate.genuine_type == "user_phrase");
+        });
+    const auto same_span_chinese = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return candidate.genuine_language == "linnet_zh" &&
+                 candidate.type != "linnet_mixed" &&
+                 !ContainsAscii(BaseText(candidate.text)) &&
+                 candidate.start == 0 && candidate.end == input.size();
+        });
+    const bool valid_position =
+        mixed != candidates.end() &&
+        static_cast<size_t>(std::distance(candidates.begin(), mixed)) < 9;
+    const bool valid_collision =
+        same_span_chinese == candidates.end()
+            ? mixed == candidates.begin()
+            : same_span_chinese < mixed;
+    if (!valid_position || !valid_collision) {
+      const char* retained = api->get_input(session);
+      std::ostringstream observed;
+      observed << " input=" << (retained ? retained : "") << " candidates=";
+      for (size_t index = 0; index < (std::min)(candidates.size(), size_t{8});
+           ++index) {
+        observed << " [" << BaseText(candidates[index].text) << ":"
+                 << candidates[index].type << ":"
+                 << candidates[index].genuine_type << ":components="
+                 << candidates[index].sentence_components << "]";
+      }
+      api->destroy_session(session);
+      Fail(reason + observed.str());
+    }
+    if (verify_digit_commit) {
+      if (mixed->genuine_type == "sentence" &&
+          (mixed->sentence_uppercase_entity_count != 1 ||
+           !mixed->sentence_components_follow_mixed_contract)) {
+        api->destroy_session(session);
+        Fail(reason + "; system mixed sentence did not contain exactly one "
+             "pure-uppercase 2-6 byte entity component: " +
+             mixed->sentence_components);
+      }
+      const bool verify_learning = !verified_mixed_learning_round_trip;
+      if (verify_learning && mixed->genuine_type != "sentence") {
+        api->destroy_session(session);
+        Fail(reason +
+             "; initial mixed learning fixture was not a system sentence");
+      }
+      const size_t mixed_index =
+          static_cast<size_t>(std::distance(candidates.begin(), mixed));
+      if (!api->process_key(session, '1' + static_cast<int>(mixed_index), 0) ||
+          BaseText(TakeCommit(api, session)) != expected) {
+        api->destroy_session(session);
+        Fail(reason + "; its 1-9 selection key did not commit the candidate");
+      }
+      api->destroy_session(session);
+      if (verify_learning) {
+        const RimeSessionId learned =
+            CreateSchemaSession(api, schema_id.c_str());
+        Enter(api, learned, input);
+        const auto learned_candidates = CandidateOrigins(learned);
+        ExpectNoFullSpanUnprojectedMixed(learned_candidates, input.size(),
+                                         reason + " after learning");
+        const auto learned_mixed = std::find_if(
+            learned_candidates.begin(), learned_candidates.end(),
+            [&](const auto& candidate) {
+              return BaseText(candidate.text) == expected &&
+                     candidate.type == "linnet_mixed" &&
+                     candidate.genuine_language == "linnet_zh" &&
+                     candidate.start == 0 && candidate.end == input.size() &&
+                     (candidate.genuine_type == "sentence" ||
+                      candidate.genuine_type == "user_phrase");
+            });
+        const bool learned_without_demotion =
+            learned_mixed != learned_candidates.end() &&
+            static_cast<size_t>(
+                std::distance(learned_candidates.begin(), learned_mixed)) <=
+                mixed_index;
+        if (!learned_without_demotion) {
+          std::cerr << "Learned mixed origins for " << schema_id << ":";
+          for (const auto& candidate : learned_candidates) {
+            std::cerr << " [" << BaseText(candidate.text) << ":"
+                      << candidate.type << ":" << candidate.genuine_type
+                      << ":" << candidate.genuine_language << ":"
+                      << candidate.start << "-" << candidate.end << "]";
+          }
+          std::cerr << '\n';
+          api->destroy_session(learned);
+          Fail(reason + "; committed mixed sentence did not reopen as a "
+               "full-span linnet_mixed candidate without ranking demotion");
+        }
+        api->destroy_session(learned);
+        verified_mixed_learning_round_trip = true;
+      }
+      return;
+    }
+    api->destroy_session(session);
+  };
+
+  for (const auto& profile : LoadFormalProfileReviewedInputs()) {
+    for (const auto& entity :
+         std::array<std::pair<const char*, const char*>, 2>{{
+             {"cs", "CS"},
+             {"cpu", "CPU"},
+         }}) {
+      expect_mixed(
+          profile.first, std::string(entity.first) + profile.second,
+          std::string(entity.second) + "你好",
+          profile.first + " did not preserve sentence-initial " +
+              entity.first + " before its reviewed remaining syllables",
+          std::strcmp(entity.first, "cs") == 0);
+      expect_mixed(
+          profile.first, profile.second + entity.first,
+          "你好" + std::string(entity.second),
+          profile.first + " did not preserve sentence-final " + entity.first,
+          false);
+      expect_mixed(
+          profile.first, profile.second + entity.first + profile.second,
+          "你好" + std::string(entity.second) + "你好",
+          profile.first + " did not preserve sentence-middle " +
+              entity.first,
+          false);
+    }
+    const RimeSessionId ai_collision =
+        CreateSchemaSession(api, profile.first.c_str());
+    Enter(api, ai_collision, profile.second + "ai");
+    const auto ai_candidates = CandidateOrigins(ai_collision);
+    ExpectNoFullSpanUnprojectedMixed(
+        ai_candidates, profile.second.size() + 2,
+        profile.first + " AI collision");
+    const auto ai_mixed = std::find_if(
+        ai_candidates.begin(), ai_candidates.end(), [&](const auto& candidate) {
+          return candidate.type == "linnet_mixed" &&
+                 BaseText(candidate.text) == "你好AI" &&
+                 candidate.start == 0 &&
+                 candidate.end == profile.second.size() + 2;
+        });
+    const auto same_span_chinese = std::find_if(
+        ai_candidates.begin(), ai_candidates.end(), [&](const auto& candidate) {
+          return candidate.genuine_language == "linnet_zh" &&
+                 candidate.type != "linnet_mixed" &&
+                 !ContainsAscii(BaseText(candidate.text)) &&
+                 candidate.start == 0 &&
+                 candidate.end == profile.second.size() + 2;
+        });
+    const bool valid_collision_order =
+        same_span_chinese == ai_candidates.end()
+            ? ai_mixed == ai_candidates.begin()
+            : same_span_chinese < ai_mixed;
+    if (ai_mixed == ai_candidates.end() || !valid_collision_order) {
+      std::cerr << "AI collision origins for " << profile.first << ":";
+      for (const auto& candidate : ai_candidates) {
+        std::cerr << " [" << BaseText(candidate.text) << ":"
+                  << candidate.type << ":" << candidate.genuine_type << "]";
+      }
+      std::cerr << '\n';
+      api->destroy_session(ai_collision);
+      Fail(profile.first +
+           " did not preserve both ordinary Chinese and the explicit AI alternative");
+    }
+    api->destroy_session(ai_collision);
+    for (const char* input : {"ai", "cpu"}) {
+      const RimeSessionId standalone_entity =
+          CreateSchemaSession(api, profile.first.c_str());
+      Enter(api, standalone_entity, input);
+      const auto candidates = CandidateOrigins(standalone_entity);
+      if (std::any_of(candidates.begin(), candidates.end(),
+                      [](const auto& candidate) {
+                        return candidate.type == "linnet_mixed";
+                      })) {
+        api->destroy_session(standalone_entity);
+        Fail(profile.first +
+             " synthesized mixed text for standalone English entity " + input);
+      }
+      api->destroy_session(standalone_entity);
+    }
+    ExpectNineCandidateSelectKeys(
+        api, profile.first.c_str(),
+        PagingInputForProfile(api, profile.first, profile.second));
+  }
+
   for (const auto& ordinary_case :
        std::array<std::pair<const char*, const char*>, 2>{{
            {"xuexihejishu", "学习和技术"},
@@ -714,6 +1020,9 @@ void ExpectModelessMixedInput(RimeApi_stdbool* api) {
         CreateSchemaSession(api, "linnet_zh_pinyin");
     Enter(api, ordinary, ordinary_case.first);
     const auto ordinary_candidates = CandidateOrigins(ordinary);
+    ExpectNoFullSpanUnprojectedMixed(
+        ordinary_candidates, std::strlen(ordinary_case.first),
+        std::string("ordinary Chinese input ") + ordinary_case.first);
     if (ordinary_candidates.empty() ||
         BaseText(ordinary_candidates.front().text) != ordinary_case.second ||
         ordinary_candidates.front().type == "linnet_mixed") {
@@ -723,18 +1032,38 @@ void ExpectModelessMixedInput(RimeApi_stdbool* api) {
     api->destroy_session(ordinary);
   }
 
+  expect_mixed("linnet_zh_pinyin", "csjiting", "CS急停",
+               "a leading letter-only entity did not compose", false);
+  expect_mixed("linnet_zh_pinyin", "xuexihttpsjishu",
+               "学习HTTPS技术",
+               "overlapping HTTP/HTTPS entities did not select HTTPS", false);
+
   for (const auto& test : kCases) {
     const RimeSessionId session =
         CreateSchemaSession(api, "linnet_zh_pinyin");
     Enter(api, session, test.input);
     const auto candidates = CandidateOrigins(session);
+    ExpectNoFullSpanUnprojectedMixed(
+        candidates, std::strlen(test.input),
+        std::string("mixed input ") + test.input);
     const auto mixed = std::find_if(
         candidates.begin(), candidates.end(), [&](const auto& candidate) {
           return candidate.type == "linnet_mixed" &&
                  BaseText(candidate.text) == test.expected &&
                  candidate.start == 0 && candidate.end == std::strlen(test.input);
         });
-    if (mixed == candidates.end() || mixed != candidates.begin()) {
+    const auto same_span_chinese = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return candidate.genuine_language == "linnet_zh" &&
+                 candidate.type != "linnet_mixed" &&
+                 !ContainsAscii(BaseText(candidate.text)) &&
+                 candidate.start == 0 &&
+                 candidate.end == std::strlen(test.input);
+        });
+    const bool valid_collision =
+        same_span_chinese == candidates.end() ? mixed == candidates.begin()
+                                              : same_span_chinese < mixed;
+    if (mixed == candidates.end() || !valid_collision) {
       std::cerr << "Mixed origins for '" << test.input << "':";
       for (const auto& candidate : candidates) {
         std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
@@ -746,7 +1075,10 @@ void ExpectModelessMixedInput(RimeApi_stdbool* api) {
       Fail("modeless mixed input did not rank '" +
            std::string(test.expected) + "' first");
     }
-    if (!api->process_key(session, '1', 0) ||
+    const size_t mixed_index =
+        static_cast<size_t>(std::distance(candidates.begin(), mixed));
+    if (mixed_index >= 9 ||
+        !api->process_key(session, '1' + static_cast<int>(mixed_index), 0) ||
         BaseText(TakeCommit(api, session)) != test.expected) {
       Fail("digit selection did not commit modeless mixed candidate " +
            std::string(test.expected));
@@ -785,6 +1117,64 @@ void ExpectModelessMixedInput(RimeApi_stdbool* api) {
     Fail("standalone cs did not preserve Chinese/English ambiguity");
   }
   api->destroy_session(ambiguous);
+
+  const RimeSessionId adjacent_entities =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, adjacent_entities, "csai");
+  const auto adjacent_candidates = CandidateOrigins(adjacent_entities);
+  ExpectNoFullSpanUnprojectedMixed(adjacent_candidates, 4,
+                                   "adjacent entity input csai");
+  const auto adjacent_mixed = std::find_if(
+      adjacent_candidates.begin(), adjacent_candidates.end(),
+      [](const auto& candidate) { return candidate.type == "linnet_mixed"; });
+  const bool invalid_mixed_text = std::any_of(
+      adjacent_candidates.begin(), adjacent_candidates.end(),
+      [](const auto& candidate) {
+        const std::string text = BaseText(candidate.text);
+        if (candidate.genuine_language == "linnet_zh" &&
+            text.find("CSAI") != std::string::npos) {
+          return true;
+        }
+        if (candidate.type != "linnet_mixed") return false;
+        const bool has_ascii_letter =
+            std::any_of(text.begin(), text.end(), [](unsigned char byte) {
+              return (byte >= 'a' && byte <= 'z') ||
+                     (byte >= 'A' && byte <= 'Z');
+            });
+        const bool has_non_ascii =
+            std::any_of(text.begin(), text.end(),
+                        [](unsigned char byte) { return byte >= 0x80; });
+        const bool multiple_entities =
+            candidate.genuine_type == "sentence" &&
+            candidate.sentence_uppercase_entity_count > 1;
+        return !has_ascii_letter || !has_non_ascii || multiple_entities ||
+               !candidate.sentence_components_follow_mixed_contract;
+      });
+  const auto same_span_chinese = std::find_if(
+      adjacent_candidates.begin(), adjacent_candidates.end(),
+      [](const auto& candidate) {
+        return candidate.genuine_language == "linnet_zh" &&
+               candidate.type != "linnet_mixed" &&
+               !ContainsAscii(BaseText(candidate.text)) &&
+               candidate.start == 0 && candidate.end == 4;
+      });
+  const bool chinese_precedes_mixed =
+      adjacent_mixed == adjacent_candidates.end() ||
+      same_span_chinese == adjacent_candidates.end() ||
+      same_span_chinese < adjacent_mixed;
+  if (invalid_mixed_text || !chinese_precedes_mixed) {
+    std::cerr << "Adjacent origins for 'csai':";
+    for (const auto& candidate : adjacent_candidates) {
+      std::cerr << " [" << BaseText(candidate.text) << ":"
+                << candidate.type << ":" << candidate.genuine_type << ":"
+                << candidate.genuine_language << ":" << candidate.start
+                << "-" << candidate.end << "]";
+    }
+    std::cerr << '\n';
+    api->destroy_session(adjacent_entities);
+    Fail("adjacent English entities synthesized pure English or displaced Chinese");
+  }
+  api->destroy_session(adjacent_entities);
 }
 
 void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
@@ -804,25 +1194,57 @@ void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
     ExpectFirstCandidate(api, session, profile.second, kExpected);
     api->destroy_session(session);
   }
+
+  struct ReviewedLongTailCase {
+    const char* input;
+    const char* expected;
+  };
+  // Source projection separately proves these rows are verified-only,
+  // absent from the product's Wanxiang core tables, and span the reviewed
+  // length/domain/rank strata. This native row proves that the compiled
+  // supplement contributes reachable product candidates rather than dead
+  // package bytes.
+  constexpr std::array<ReviewedLongTailCase, 5> kLongTailCases{{
+      {"a'dai'er", "阿黛尔"},
+      {"a'bei'er'jiang", "阿贝尔奖"},
+      {"a'er'ci'hai'mo", "阿尔茨海默"},
+      {"a'heng'ke'ji'da'xue", "阿亨科技大学"},
+      {"sheng'cheng'shi'ren'gong'zhi'neng", "生成式人工智能"},
+  }};
+  const RimeSessionId long_tail =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  for (const auto& sample : kLongTailCases) {
+    ExpectCandidate(api, long_tail, sample.input, sample.expected);
+  }
+  api->destroy_session(long_tail);
 }
 
-void ExpectModelessMixedLearningEnabled(RimeApi_stdbool* api) {
+void ExpectNativeMixedLearningEnabled(RimeApi_stdbool* api) {
   constexpr char kInput[] = "shuanghezhancsjiting";
   constexpr char kLearnedText[] = "霜河栈CS急停";
   const RimeSessionId session =
       CreateSchemaSession(api, "linnet_zh_pinyin");
   Enter(api, session, kInput);
   const auto candidates = CandidateOrigins(session);
-  if (std::none_of(candidates.begin(), candidates.end(), [&](const auto& candidate) {
-        return candidate.type == "linnet_mixed" &&
-               BaseText(candidate.text) == kLearnedText;
-      })) {
-    Fail("enabled Chinese learning did not expose the seeded user phrase through mixed input");
+  if (candidates.empty() || candidates.front().type != "linnet_mixed" ||
+      candidates.front().genuine_type != "sentence" ||
+      candidates.front().genuine_language != "linnet_zh" ||
+      BaseText(candidates.front().text) != kLearnedText) {
+    std::cerr << "Mixed learning-on origins:";
+    for (const auto& candidate : candidates) {
+      std::cerr << " [" << BaseText(candidate.text) << ":"
+                << candidate.type << ":" << candidate.genuine_type << ":"
+                << candidate.genuine_language << ":" << candidate.start
+                << "-" << candidate.end << "]";
+    }
+    std::cerr << '\n';
+    Fail("enabled Chinese learning did not preserve the seeded phrase inside "
+         "the preferred mixed sentence");
   }
   api->destroy_session(session);
 }
 
-void ExpectModelessMixedLearningDisabled(RimeApi_stdbool* api) {
+void ExpectNativeMixedLearningDisabled(RimeApi_stdbool* api) {
   constexpr char kInput[] = "shuanghezhancsjiting";
   constexpr char kLearnedText[] = "霜河栈CS急停";
   const RimeSessionId session =
@@ -844,6 +1266,8 @@ void ExpectModelessMixedLearningDisabled(RimeApi_stdbool* api) {
   if (std::none_of(
           static_candidates.begin(), static_candidates.end(), [](const auto& candidate) {
             return candidate.type == "linnet_mixed" &&
+                   candidate.genuine_type == "sentence" &&
+                   candidate.genuine_language == "linnet_zh" &&
                    BaseText(candidate.text) == "学习CS急停";
           })) {
     Fail("disabling Chinese learning also disabled static mixed input");
@@ -874,7 +1298,7 @@ void ExpectCandidateAbsent(RimeApi_stdbool* api,
 void ExpectPinyinEchoFallbackRemoved(RimeApi_stdbool* api,
                                      RimeSessionId session,
                                      const std::string& expected_first) {
-  Enter(api, session, ";yun");
+  Enter(api, session, "|yun");
   const auto live_session = rime::Service::instance().GetSession(session);
   if (!live_session || !live_session->schema() || !live_session->context() ||
       live_session->context()->composition().empty()) {
@@ -1157,18 +1581,17 @@ std::string AbbreviatedModeLabel(RimeApi_stdbool* api,
 }
 
 void ExpectModeStatusLabels(RimeApi_stdbool* api) {
-  for (const char* schema_id : kProductSchemaIDs) {
-    const RimeSessionId session = CreateSchemaSession(api, schema_id);
+  for (const auto& schema_id : RuntimeProductSchemaIDs(api)) {
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
     const std::string expected_input =
-        std::strcmp(schema_id, "linnet_en") == 0
+        schema_id == "linnet_en"
             ? "En"
-            : (std::strcmp(schema_id, "linnet_zh_pinyin") == 0 ? "中"
-                                                                 : "双");
+            : (schema_id == "linnet_zh_pinyin" ? "中" : "双");
     const std::string input = AbbreviatedModeLabel(api, session, false);
     const std::string ascii = AbbreviatedModeLabel(api, session, true);
     api->destroy_session(session);
     if (input != expected_input || ascii != "A") {
-      Fail(std::string(schema_id) + " status labels were '" + input +
+      Fail(schema_id + " status labels were '" + input +
            "'/'" + ascii + "', expected '" + expected_input + "'/'A'");
     }
   }
@@ -1227,6 +1650,22 @@ void ExpectDeployedMenuPageSize(RimeApi_stdbool* api,
 void ExpectNineCandidateSelectKeys(RimeApi_stdbool* api,
                                    const char* schema_id,
                                    const std::string& input) {
+  for (int keycode = XK_0; keycode <= XK_9; ++keycode) {
+    const std::string reason =
+        std::string(schema_id) + " idle digit " +
+        static_cast<char>(keycode);
+    const RimeSessionId idle = CreateSchemaSession(api, schema_id);
+    if (api->process_key(idle, keycode, 0)) {
+      Fail(reason + " was captured instead of reaching the host");
+    }
+    ExpectNoCommit(api, idle, reason);
+    const char* retained = api->get_input(idle);
+    if ((retained && *retained != '\0') || !Candidates(api, idle).empty()) {
+      Fail(reason + " retained hidden input-method state");
+    }
+    api->destroy_session(idle);
+  }
+
   const RimeSessionId session = CreateSchemaSession(api, schema_id);
   Enter(api, session, input);
   RimeContext_stdbool context = {};
@@ -1241,11 +1680,46 @@ void ExpectNineCandidateSelectKeys(RimeApi_stdbool* api,
     Fail(std::string(schema_id) + " exposed candidate selection keys '" +
          select_keys + "' instead of 1-9");
   }
+  const auto before_zero = Candidates(api, session);
+  if (before_zero.empty()) {
+    api->destroy_session(session);
+    Fail(std::string(schema_id) + " zero pass-through fixture has no candidate");
+  }
+  const std::string expected_before_zero = before_zero.front().text;
   if (api->process_key(session, XK_0, 0)) {
     Fail(std::string(schema_id) +
          " swallowed zero despite a nine-candidate page");
   }
+  if (TakeCommit(api, session,
+                 std::string(schema_id) + " active zero pass-through") !=
+      expected_before_zero) {
+    Fail(std::string(schema_id) +
+         " did not commit the current candidate before zero reached the host");
+  }
+  const char* after_zero = api->get_input(session);
+  if ((after_zero && *after_zero != '\0') || !Candidates(api, session).empty()) {
+    Fail(std::string(schema_id) +
+         " retained input-method state after zero reached the host");
+  }
   api->destroy_session(session);
+
+  for (int keycode = XK_1; keycode <= XK_9; ++keycode) {
+    const std::string reason =
+        std::string(schema_id) + " direct candidate selection " +
+        static_cast<char>(keycode);
+    const RimeSessionId selection = CreateSchemaSession(api, schema_id);
+    Enter(api, selection, input);
+    const auto candidates = Candidates(api, selection);
+    const size_t target = static_cast<size_t>(keycode - XK_1);
+    if (target >= candidates.size()) {
+      Fail(reason + " fixture has no target candidate");
+    }
+    if (!api->process_key(selection, keycode, 0) ||
+        TakeCommit(api, selection) != candidates[target].text) {
+      Fail(reason + " did not commit its matching visible candidate");
+    }
+    api->destroy_session(selection);
+  }
 }
 
 int CurrentCandidatePage(RimeApi_stdbool* api,
@@ -1264,6 +1738,23 @@ int CurrentCandidatePage(RimeApi_stdbool* api,
 void ExpectCandidatePagingShortcuts(RimeApi_stdbool* api,
                                     const char* schema_id,
                                     const std::string& input) {
+  const auto read_state = [&](RimeSessionId session,
+                              const std::string& reason) {
+    RimeContext_stdbool context = {};
+    RIME_STRUCT_INIT(RimeContext_stdbool, context);
+    if (!api->get_context(session, &context)) {
+      Fail("could not inspect rejected paging state for " + reason);
+    }
+    const char* active_input = api->get_input(session);
+    const auto state = std::make_tuple(
+        std::string(active_input ? active_input : ""),
+        std::string(context.composition.preedit
+                        ? context.composition.preedit
+                        : ""),
+        context.menu.page_no, context.menu.highlighted_candidate_index);
+    api->free_context(&context);
+    return state;
+  };
   for (const auto& key_case :
        std::array<std::tuple<int, const char*, int, const char*>, 2>{{
            {XK_bracketright, "right bracket", XK_bracketleft, "left bracket"},
@@ -1271,16 +1762,49 @@ void ExpectCandidatePagingShortcuts(RimeApi_stdbool* api,
        }}) {
     const RimeSessionId session = CreateSchemaSession(api, schema_id);
     Enter(api, session, input);
-    if (CurrentCandidatePage(api, session, "initial page") != 0 ||
-        !api->process_key(session, std::get<0>(key_case), 0) ||
-        CurrentCandidatePage(api, session, std::get<1>(key_case)) != 1) {
-      Fail(std::string(schema_id) + " " + std::get<1>(key_case) +
-           " did not move to the next candidate page");
+    if (CurrentCandidatePage(api, session, "initial page") != 0) {
+      Fail(std::string(schema_id) + " paging fixture did not start on page zero");
     }
-    if (!api->process_key(session, std::get<2>(key_case), 0) ||
-        CurrentCandidatePage(api, session, std::get<3>(key_case)) != 0) {
+    const auto first_page_state =
+        read_state(session, "unavailable previous page");
+    if (api->process_key(session, std::get<2>(key_case), 0) ||
+        read_state(session, "rejected previous page") != first_page_state) {
       Fail(std::string(schema_id) + " " + std::get<3>(key_case) +
-           " did not return to the previous candidate page");
+           " was consumed or mutated composition without a previous page");
+    }
+    ExpectNoCommit(api, session, "rejected previous candidate page");
+
+    int final_page = 0;
+    while (true) {
+      RimeContext_stdbool context = {};
+      RIME_STRUCT_INIT(RimeContext_stdbool, context);
+      if (!api->get_context(session, &context)) {
+        Fail(std::string(schema_id) + " could not inspect the paging boundary");
+      }
+      const bool is_last_page = context.menu.is_last_page;
+      final_page = context.menu.page_no;
+      api->free_context(&context);
+      if (is_last_page) break;
+      if (!api->process_key(session, std::get<0>(key_case), 0)) {
+        Fail(std::string(schema_id) + " " + std::get<1>(key_case) +
+             " did not move to the next candidate page");
+      }
+    }
+    if (final_page == 0) {
+      Fail(std::string(schema_id) + " paging fixture has no next candidate page");
+    }
+    const auto last_page_state = read_state(session, "unavailable next page");
+    if (api->process_key(session, std::get<0>(key_case), 0) ||
+        read_state(session, "rejected next page") != last_page_state) {
+      Fail(std::string(schema_id) + " " + std::get<1>(key_case) +
+           " was consumed or mutated composition without a next page");
+    }
+    ExpectNoCommit(api, session, "rejected next candidate page");
+    if (!api->process_key(session, std::get<2>(key_case), 0) ||
+        CurrentCandidatePage(api, session, std::get<3>(key_case)) !=
+            final_page - 1) {
+      Fail(std::string(schema_id) + " " + std::get<3>(key_case) +
+           " did not return from the final candidate page");
     }
     api->destroy_session(session);
   }
@@ -1422,18 +1946,8 @@ void ExpectColdClientFirstKeyLatency(RimeApi_stdbool* api) {
 }
 
 void ExpectSchemaList(RimeApi_stdbool* api) {
-  RimeSchemaList list = {};
-  if (!api->get_schema_list(&list)) {
-    Fail("could not read schema list");
-  }
-
-  std::vector<std::string> actual;
-  bool valid = list.size == kProductSchemaIDs.size();
-  for (size_t index = 0; valid && index < list.size; ++index) {
-    valid = list.list[index].schema_id != nullptr;
-    if (valid) actual.emplace_back(list.list[index].schema_id);
-  }
-  api->free_schema_list(&list);
+  std::vector<std::string> actual = RuntimeProductSchemaIDs(api);
+  bool valid = actual.size() == kProductSchemaIDs.size();
   std::vector<std::string> expected(kProductSchemaIDs.begin(),
                                     kProductSchemaIDs.end());
   std::sort(actual.begin(), actual.end());
@@ -2002,9 +2516,9 @@ void ExpectOverlappingShiftRepressDoesNotToggle(RimeApi_stdbool* api) {
 void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
   ExpectOverlappingShiftRepressDoesNotToggle(api);
   ExpectShiftPreservesExplicitPrefix(api);
-  for (size_t index = 0; index + 1 < kProductSchemaIDs.size(); ++index) {
-    const char* chinese_schema = kProductSchemaIDs[index];
-    const RimeSessionId session = CreateSchemaSession(api, chinese_schema);
+  for (const auto& chinese_schema : RuntimeChineseSchemaIDs(api)) {
+    const RimeSessionId session =
+        CreateSchemaSession(api, chinese_schema.c_str());
     TapShift(api, session, XK_Shift_L);
     ExpectCurrentSchema(api, session, "linnet_en",
                         std::string(chinese_schema) +
@@ -2015,18 +2529,18 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
 
     TapShift(api, session, XK_Shift_R);
     ExpectCurrentSchema(api, session, chinese_schema,
-                        std::string(chinese_schema) +
+                        chinese_schema +
                             " direct Shift back to the same Chinese profile");
     if (api->get_option(session, "ascii_mode")) {
       Fail("direct Shift back to Chinese retained raw ASCII mode");
     }
     ExpectSessionPropertyAbsent(
         api, session, kModeReturnSchemaProperty,
-        std::string(chinese_schema) + " direct Shift return identity");
+        chinese_schema + " direct Shift return identity");
     api->destroy_session(session);
 
     for (const auto& shift : kShiftKeyCases) {
-      ExpectShiftCommitsRawCode(api, chinese_schema, shift, "a");
+      ExpectShiftCommitsRawCode(api, chinese_schema.c_str(), shift, "a");
     }
   }
 
@@ -2297,25 +2811,32 @@ std::string SelectNormalizedCandidate(RimeApi_stdbool* api,
                                       RimeSessionId session,
                                       const std::string& input,
                                       const std::string& expected);
+std::map<std::string, std::string> LoadFormalProfileReviewedInputs();
+std::string PagingInputForProfile(RimeApi_stdbool* api,
+                                  const std::string& schema_id,
+                                  const std::string& reviewed);
 
 void ExpectCandidateArrowNavigation(RimeApi_stdbool* api) {
-  struct Fixture {
-    const char* schema;
-    const char* input;
-  };
-  constexpr std::array<Fixture, 2> fixtures = {{
-      {"linnet_zh_pinyin", "shi"},
-      {"linnet_en", "a"},
-  }};
+  const auto reviewed_inputs = LoadFormalProfileReviewedInputs();
+  std::vector<std::pair<std::string, std::string>> fixtures;
+  for (const auto& schema_id : RuntimeChineseSchemaIDs(api)) {
+    const auto reviewed = reviewed_inputs.find(schema_id);
+    if (reviewed == reviewed_inputs.end()) {
+      Fail("candidate arrows have no reviewed input for " + schema_id);
+    }
+    fixtures.emplace_back(
+        schema_id, PagingInputForProfile(api, schema_id, reviewed->second));
+  }
+  fixtures.emplace_back("linnet_en", "a");
 
   for (const auto& fixture : fixtures) {
     const std::string horizontal_reason =
-        std::string(fixture.schema) + " horizontal linear";
+        fixture.first + " horizontal linear";
     const RimeSessionId horizontal =
-        CreateSchemaSession(api, fixture.schema);
+        CreateSchemaSession(api, fixture.first.c_str());
     api->set_option(horizontal, "_linear", true);
     api->set_option(horizontal, "_vertical", false);
-    Enter(api, horizontal, fixture.input);
+    Enter(api, horizontal, fixture.second);
     if (CandidateOrigins(horizontal).size() < 10) {
       Fail(horizontal_reason + " fixture has fewer than ten candidates");
     }
@@ -2362,11 +2883,12 @@ void ExpectCandidateArrowNavigation(RimeApi_stdbool* api) {
     // The product's "vertical candidates" setting is a stacked list with
     // horizontal text. `_vertical` describes glyph orientation, not list flow.
     const std::string stacked_reason =
-        std::string(fixture.schema) + " vertical stacked horizontal-text";
-    const RimeSessionId stacked = CreateSchemaSession(api, fixture.schema);
+        fixture.first + " vertical stacked horizontal-text";
+    const RimeSessionId stacked =
+        CreateSchemaSession(api, fixture.first.c_str());
     api->set_option(stacked, "_linear", false);
     api->set_option(stacked, "_vertical", false);
-    Enter(api, stacked, fixture.input);
+    Enter(api, stacked, fixture.second);
     const auto stacked_start =
         ReadCandidateNavigationState(stacked, stacked_reason);
     if (stacked_start.selected_index != 0 ||
@@ -2647,7 +3169,9 @@ void ExpectInvalidActiveSelectionKeysPassThrough(RimeApi_stdbool* api) {
   }
 }
 
-void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
+void ExpectNonFormalPunctuationBoundaries(RimeApi_stdbool* api) {
+  // The formal profile matrix owns / , . : ; ' [ ] - = and reverse lookup
+  // owns |. This table covers only the remaining half-shape punctuation.
   struct PunctuationCase {
     int keycode;
     int modifiers;
@@ -2655,9 +3179,8 @@ void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
     const char* chinese_commit;
     bool identity_mapping;
   };
-  constexpr std::array<PunctuationCase, 30> punctuation_cases = {{
+  constexpr std::array<PunctuationCase, 19> punctuation_cases = {{
       {'!', kShiftMask, "!", "！", false},
-      {'"', kShiftMask, "\"", "“", false},
       {'#', kShiftMask, "#", "#", true},
       {'$', kShiftMask, "$", "¥", false},
       {'%', kShiftMask, "%", "%", true},
@@ -2666,34 +3189,20 @@ void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
       {')', kShiftMask, ")", "）", false},
       {'*', kShiftMask, "*", "*", true},
       {'+', kShiftMask, "+", "+", true},
-      {',', 0, ",", "，", false},
-      {'-', 0, "-", "-", true},
-      {'.', 0, ".", "。", false},
-      {'/', 0, "/", "/", true},
-      {':', kShiftMask, ":", "：", false},
-      {';', 0, ";", "；", false},
       {'<', kShiftMask, "<", "《", false},
-      {'=', 0, "=", "=", true},
       {'>', kShiftMask, ">", "》", false},
       {'?', kShiftMask, "?", "？", false},
       {'@', kShiftMask, "@", "@", true},
-      {'[', 0, "[", "【", false},
       {'\\', 0, "\\", "、", false},
-      {']', 0, "]", "】", false},
       {'^', kShiftMask, "^", "……", false},
       {'_', kShiftMask, "_", "——", false},
       {'{', kShiftMask, "{", "「", false},
-      {'|', kShiftMask, "|", "|", true},
       {'}', kShiftMask, "}", "」", false},
       {'~', kShiftMask, "~", "~", true},
   }};
 
   for (const auto& punctuation : punctuation_cases) {
-    const bool pages_candidates =
-        punctuation.modifiers == 0 &&
-        (punctuation.keycode == '-' || punctuation.keycode == '=' ||
-         punctuation.keycode == '[' || punctuation.keycode == ']');
-    if (!pages_candidates) {
+    {
       const std::string english_reason =
           std::string("English active hello+") + punctuation.name;
       const RimeSessionId english = CreateSchemaSession(api, "linnet_en");
@@ -2757,9 +3266,7 @@ void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
       api->destroy_session(session);
     }
 
-    // A leading semicolon is the Settings-owned pinyin reverse-lookup prefix;
-    // its idle lifecycle and every profile projection have dedicated probes.
-    if (punctuation.keycode != ';') {
+    {
       const std::string idle_reason =
           std::string("idle Chinese punctuation ") + punctuation.name;
       const RimeSessionId idle =
@@ -2786,7 +3293,7 @@ void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
       api->destroy_session(idle);
     }
 
-    if (punctuation.keycode != ';') {
+    {
       const std::string idle_english_reason =
           std::string("idle Smart English punctuation ") + punctuation.name;
       const RimeSessionId idle_english = CreateSchemaSession(api, "linnet_en");
@@ -2844,174 +3351,6 @@ void ExpectActivePunctuationBoundaries(RimeApi_stdbool* api) {
     Fail("idle full-shape punctuation lost the canonical mapping");
   }
   api->destroy_session(full_shape);
-}
-
-void ExpectProfilePunctuationSyntaxMatrix(RimeApi_stdbool* api) {
-  struct ProfileCase {
-    const char* schema;
-    const char* code;
-    bool semicolon_is_spelling;
-  };
-  constexpr std::array<ProfileCase, 8> profiles = {{
-      {"linnet_zh", "nihk", false},
-      {"linnet_zh_pinyin", "nihao", false},
-      {"linnet_zh_flypy", "nihc", false},
-      {"linnet_zh_mspy", "nihk", true},
-      {"linnet_zh_sogou", "nihk", true},
-      {"linnet_zh_abc", "nihk", false},
-      {"linnet_zh_ziguang", "nihq", true},
-      {"linnet_zh_jiajia", "nihd", false},
-  }};
-
-  const auto selected_text = [&](RimeSessionId session,
-                                 const std::string& reason) {
-    const auto candidates = Candidates(api, session);
-    const int selected = HighlightedCandidateIndex(api, session);
-    if (selected < 0 || static_cast<size_t>(selected) >= candidates.size()) {
-      Fail(reason + " has no selected candidate");
-    }
-    return candidates[selected].text;
-  };
-  const auto expect_cleared = [&](RimeSessionId session,
-                                  const std::string& reason) {
-    const char* input = api->get_input(session);
-    const auto live = rime::Service::instance().GetSession(session);
-    if ((input && *input) || !Candidates(api, session).empty() || !live ||
-        !live->context() || !live->context()->composition().empty()) {
-      Fail(reason + " retained hidden input-method state");
-    }
-  };
-  const auto expect_spelling_key = [&](const ProfileCase& profile,
-                                       int keycode,
-                                       const std::string& suffix,
-                                       bool ascii_punct,
-                                       const std::string& name) {
-    const std::string reason = std::string(profile.schema) + " active " + name +
-        (ascii_punct ? " with English punctuation" : " with Chinese punctuation");
-    const RimeSessionId session = CreateSchemaSession(api, profile.schema);
-    api->set_option(session, "ascii_punct", ascii_punct);
-    Enter(api, session, profile.code);
-    if (!api->process_key(session, keycode, 0)) {
-      Fail(reason + " did not remain in the schema spelling");
-    }
-    ExpectNoCommit(api, session, reason);
-    const char* input = api->get_input(session);
-    const auto live = rime::Service::instance().GetSession(session);
-    if (!input || input != std::string(profile.code) + suffix || !live ||
-        !live->context() || live->context()->composition().empty()) {
-      Fail(reason + " did not preserve its exact active spelling");
-    }
-    api->destroy_session(session);
-  };
-
-  for (const auto& profile : profiles) {
-    {
-      const std::string reason =
-          std::string(profile.schema) + " active identity slash";
-      const RimeSessionId session = CreateSchemaSession(api, profile.schema);
-      Enter(api, session, profile.code);
-      const std::string selected = selected_text(session, reason);
-      if (api->process_key(session, XK_slash, 0)) {
-        Fail(reason + " was captured instead of reaching the host");
-      }
-      if (TakeCommit(api, session, reason) != selected) {
-        Fail(reason + " did not commit its selected candidate exactly once");
-      }
-      ExpectNoCommit(api, session, "duplicate " + reason);
-      expect_cleared(session, reason);
-      api->destroy_session(session);
-    }
-
-    for (const bool ascii_punct : {false, true}) {
-      {
-        const std::string reason = std::string(profile.schema) +
-            (ascii_punct ? " active English comma" : " active Chinese comma");
-        const RimeSessionId session = CreateSchemaSession(api, profile.schema);
-        api->set_option(session, "ascii_punct", ascii_punct);
-        Enter(api, session, profile.code);
-        const std::string selected = selected_text(session, reason);
-        const bool handled = api->process_key(session, XK_comma, 0);
-        if (handled == ascii_punct) {
-          Fail(reason + " used the wrong punctuation owner");
-        }
-        const std::string expected = selected + (ascii_punct ? "" : "，");
-        if (TakeCommit(api, session, reason) != expected) {
-          Fail(reason + " produced the wrong exact commit");
-        }
-        ExpectNoCommit(api, session, "duplicate " + reason);
-        expect_cleared(session, reason);
-        api->destroy_session(session);
-      }
-
-      expect_spelling_key(
-          profile, XK_apostrophe, "'", ascii_punct, "apostrophe delimiter");
-      expect_spelling_key(
-          profile, XK_grave, "`", ascii_punct, "backtick auxiliary code");
-
-      if (profile.semicolon_is_spelling) {
-        expect_spelling_key(
-            profile, XK_semicolon, ";", ascii_punct,
-            "embedded semicolon");
-      } else {
-        const std::string reason = std::string(profile.schema) +
-            (ascii_punct ? " active English semicolon"
-                         : " active Chinese semicolon");
-        const RimeSessionId session = CreateSchemaSession(api, profile.schema);
-        api->set_option(session, "ascii_punct", ascii_punct);
-        Enter(api, session, profile.code);
-        const std::string selected = selected_text(session, reason);
-        const bool handled = api->process_key(session, XK_semicolon, 0);
-        if (handled == ascii_punct) {
-          Fail(reason + " used the wrong punctuation owner");
-        }
-        const std::string expected = selected + (ascii_punct ? "" : "；");
-        if (TakeCommit(api, session, reason) != expected) {
-          Fail(reason + " produced the wrong exact commit");
-        }
-        ExpectNoCommit(api, session, "duplicate " + reason);
-        expect_cleared(session, reason);
-        api->destroy_session(session);
-      }
-    }
-  }
-
-  struct PairCase {
-    int keycode;
-    int modifiers;
-    const char* name;
-    const char* opening;
-    const char* closing;
-  };
-  for (const auto& punctuation : std::array<PairCase, 2>{{
-           {'"', kShiftMask, "double quote", "“", "”"},
-           {XK_apostrophe, 0, "single quote", "‘", "’"},
-       }}) {
-    const std::string reason =
-        std::string("idle Chinese ") + punctuation.name + " pair";
-    const RimeSessionId session =
-        CreateSchemaSession(api, "linnet_zh_pinyin");
-    api->set_option(session, "ascii_punct", false);
-    for (const char* expected : {punctuation.opening, punctuation.closing}) {
-      if (!api->process_key(session, punctuation.keycode,
-                            punctuation.modifiers) ||
-          TakeCommit(api, session, reason) != expected) {
-        Fail(reason + " lost its opening/closing state");
-      }
-      ExpectNoCommit(api, session, "duplicate " + reason);
-      expect_cleared(session, reason);
-    }
-    api->destroy_session(session);
-  }
-
-  const RimeSessionId idle_backtick =
-      CreateSchemaSession(api, "linnet_zh_pinyin");
-  api->set_option(idle_backtick, "ascii_punct", false);
-  if (!api->process_key(idle_backtick, XK_grave, 0) ||
-      TakeCommit(api, idle_backtick, "idle Chinese backtick") != "·") {
-    Fail("idle Chinese backtick did not use its half-shape mapping");
-  }
-  expect_cleared(idle_backtick, "idle Chinese backtick");
-  api->destroy_session(idle_backtick);
 }
 
 std::string SelectNormalizedCandidate(RimeApi_stdbool* api,
@@ -4035,33 +4374,12 @@ void ExpectFullShapeOff(RimeApi_stdbool* api,
   }
 }
 
-void ExpectDefaultChinesePunctuation(RimeApi_stdbool* api,
-                                     const char* schema_id) {
+void ExpectDefaultChinesePunctuationMode(RimeApi_stdbool* api,
+                                         const char* schema_id) {
   const RimeSessionId session = CreateSchemaSession(api, schema_id);
   if (api->get_option(session, "ascii_punct")) {
     Fail(std::string(schema_id) +
          " unexpectedly started with English punctuation");
-  }
-  for (const auto& punctuation :
-       std::array<std::pair<char, const char*>, 4>{{
-           {',', "，"}, {'.', "。"}, {'?', "？"}, {'!', "！"},
-       }}) {
-    if (!api->process_key(session, punctuation.first, 0)) {
-      Fail(std::string(schema_id) +
-           " did not consume default Chinese punctuation");
-    }
-    RimeCommit commit = {};
-    RIME_STRUCT_INIT(RimeCommit, commit);
-    if (!api->get_commit(session, &commit)) {
-      Fail(std::string(schema_id) + " did not commit punctuation '" +
-           punctuation.first + "'");
-    }
-    const std::string actual = commit.text ? commit.text : "";
-    api->free_commit(&commit);
-    if (actual != punctuation.second) {
-      Fail(std::string(schema_id) + " mapped punctuation to '" + actual +
-           "', expected '" + punctuation.second + "'");
-    }
   }
   api->destroy_session(session);
 }
@@ -4102,12 +4420,13 @@ void ExpectPersistedSwitchDefaults(RimeApi_stdbool* api) {
     }
     SetPersistedUserOption(api, item.first, item.second);
   }
-  ExpectDefaultChinesePunctuation(api, "linnet_zh");
+  ExpectDefaultChinesePunctuationMode(api, "linnet_zh");
 }
 
 std::string SimulateHostText(RimeApi_stdbool* api,
                              RimeSessionId session,
                              const std::string& input);
+int PrintableModifier(unsigned char ch);
 
 void ExpectDeployedInputSwitches(RimeApi_stdbool* api) {
   const RimeSessionId punctuation =
@@ -4164,7 +4483,7 @@ std::string SimulateHostText(RimeApi_stdbool* api,
                              const std::string& input) {
   std::string output;
   for (const unsigned char byte : input) {
-    if (!api->process_key(session, byte, 0)) {
+    if (!api->process_key(session, byte, PrintableModifier(byte))) {
       output.push_back(static_cast<char>(byte));
     }
     RimeCommit commit = {};
@@ -4175,56 +4494,6 @@ std::string SimulateHostText(RimeApi_stdbool* api,
     }
   }
   return output;
-}
-
-void ExpectStandardChineseNumericPunctuation(RimeApi_stdbool* api) {
-  for (const char separator : std::string(",.:")) {
-    const RimeSessionId staged = CreateSchemaSession(api, "linnet_zh");
-    if (api->process_key(staged, '3', 0)) {
-      Fail("Chinese numeric prefix did not pass through to the host");
-    }
-    ExpectNoCommit(api, staged, "Chinese numeric prefix");
-    if (!api->process_key(staged, separator, 0)) {
-      Fail(std::string("Chinese numeric separator was not accepted: ") +
-           separator);
-    }
-    const std::string actual = TakeOptionalCommit(api, staged);
-    if (actual != std::string(1, separator)) {
-      std::string action = "<missing>";
-      const auto debug_session = rime::Service::instance().GetSession(staged);
-      if (debug_session && debug_session->schema() &&
-          debug_session->schema()->config()) {
-        debug_session->schema()->config()->GetString(
-            "punctuator/digit_separator_action", &action);
-      }
-      const auto origins = CandidateOrigins(staged);
-      std::ostringstream evidence;
-      for (const auto& origin : origins) {
-        evidence << " [" << origin.type << "/" << origin.genuine_type << "]";
-      }
-      Fail(std::string("Chinese numeric separator committed '") + actual +
-           "' instead of '" + separator + "'; action=" + action +
-           " origins=" + evidence.str());
-    }
-    const auto live = rime::Service::instance().GetSession(staged);
-    if (!live || !live->context() ||
-        !live->context()->composition().empty() ||
-        !live->context()->input().empty()) {
-      Fail(std::string("Chinese numeric separator remained in composition: ") +
-           separator);
-    }
-    api->destroy_session(staged);
-  }
-
-  for (const std::string& text : {"1,000", "3.14", "12:30"}) {
-    const RimeSessionId session = CreateSchemaSession(api, "linnet_zh");
-    const std::string actual = SimulateHostText(api, session, text);
-    api->destroy_session(session);
-    if (actual != text) {
-      Fail("Chinese numeric punctuation changed '" + text + "' to '" +
-           actual + "'");
-    }
-  }
 }
 
 struct KeyInteractionSnapshot {
@@ -4261,6 +4530,39 @@ KeyInteractionSnapshot ReadKeyInteractionSnapshot(RimeApi_stdbool* api,
     result.candidates.push_back(candidate.text);
   }
   return result;
+}
+
+void ExpectStatefulChinesePunctuation(RimeApi_stdbool* api) {
+  const auto expect_cleared = [&](RimeSessionId session,
+                                  const std::string& reason) {
+    const auto state = ReadKeyInteractionSnapshot(api, session);
+    if (!state.input.empty() || state.composition_size != 0 ||
+        !state.candidates.empty()) {
+      Fail(reason + " retained hidden input-method state");
+    }
+  };
+
+  const RimeSessionId quotes =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  for (const char* expected : {"“", "”"}) {
+    if (!api->process_key(quotes, '"', kShiftMask) ||
+        TakeCommit(api, quotes, "idle Chinese quote pair") != expected) {
+      Fail("idle Chinese quote pair lost its opening/closing state");
+    }
+    ExpectNoCommit(api, quotes, "duplicate idle Chinese quote pair");
+    expect_cleared(quotes, "idle Chinese quote pair");
+  }
+  api->destroy_session(quotes);
+
+  const RimeSessionId backtick =
+      CreateSchemaSession(api, "linnet_zh_pinyin");
+  if (!api->process_key(backtick, XK_grave, 0) ||
+      TakeCommit(api, backtick, "idle Chinese backtick") != "·") {
+    Fail("idle Chinese backtick did not use its half-shape mapping");
+  }
+  ExpectNoCommit(api, backtick, "duplicate idle Chinese backtick");
+  expect_cleared(backtick, "idle Chinese backtick");
+  api->destroy_session(backtick);
 }
 
 void ExpectHostModifierPassThrough(RimeApi_stdbool* api) {
@@ -4412,15 +4714,6 @@ void ExpectPrintableAsciiMatrix(RimeApi_stdbool* api) {
   }
 }
 
-void ExpectIdleSpacePassThrough(RimeApi_stdbool* api) {
-  const RimeSessionId session = CreateSchemaSession(api, "linnet_zh");
-  if (api->process_key(session, XK_space, 0)) {
-    Fail("Chinese half-shape punctuator consumed idle Space");
-  }
-  ExpectNoCommit(api, session, "idle Space pass-through");
-  api->destroy_session(session);
-}
-
 bool IsWeekdayShortcutCandidate(const std::string& text) {
   static constexpr std::array<const char*, 36> kWeekdayCandidates = {
       "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六",
@@ -4453,10 +4746,6 @@ void ExpectDateShortcutProfileIsolation(RimeApi_stdbool* api) {
        profile_index < kDoublePinyinSchemaIDs.size(); ++profile_index) {
     const char* schema_id = kDoublePinyinSchemaIDs[profile_index];
     const std::string schema = schema_id;
-    const std::string prefix =
-        schema == "linnet_zh_jiajia" || schema == "linnet_zh_mspy"
-            ? "|"
-            : ";";
     const RimeSessionId session = CreateSchemaSession(api, schema_id);
     Enter(api, session, "xq");
     const auto ordinary = Candidates(api, session);
@@ -4492,7 +4781,7 @@ void ExpectDateShortcutProfileIsolation(RimeApi_stdbool* api) {
       Fail(std::string(schema_id) +
            " lost the explicit double-pinyin week command");
     }
-    Enter(api, session, prefix + "week");
+    Enter(api, session, std::string(kDefaultPinyinReversePrefix) + "week");
     const auto prefixed_date = Candidates(api, session);
     if (std::any_of(prefixed_date.begin(), prefixed_date.end(),
                     [](const auto& item) {
@@ -4509,7 +4798,7 @@ void ExpectDateShortcutProfileIsolation(RimeApi_stdbool* api) {
                      })) {
       Fail(std::string(schema_id) + " lost the ordinary UUID command");
     }
-    Enter(api, session, prefix + "uuid");
+    Enter(api, session, std::string(kDefaultPinyinReversePrefix) + "uuid");
     const auto prefixed_uuid = Candidates(api, session);
     if (std::any_of(prefixed_uuid.begin(), prefixed_uuid.end(),
                     [](const auto& item) {
@@ -4530,7 +4819,7 @@ void ExpectDateShortcutProfileIsolation(RimeApi_stdbool* api) {
           BaseText(full_pinyin_shortcut.front().text))) {
     Fail("full pinyin lost its reviewed xq weekday shortcut");
   }
-  Enter(api, full_pinyin, ";xq");
+  Enter(api, full_pinyin, std::string(kDefaultPinyinReversePrefix) + "xq");
   const auto prefixed_shortcut = Candidates(api, full_pinyin);
   if (std::any_of(prefixed_shortcut.begin(), prefixed_shortcut.end(),
                   [](const auto& item) {
@@ -4538,7 +4827,7 @@ void ExpectDateShortcutProfileIsolation(RimeApi_stdbool* api) {
                   })) {
     Fail("full pinyin let the xq date command enter reverse lookup");
   }
-  Enter(api, full_pinyin, ";uuid");
+  Enter(api, full_pinyin, std::string(kDefaultPinyinReversePrefix) + "uuid");
   const auto prefixed_uuid = Candidates(api, full_pinyin);
   if (std::any_of(prefixed_uuid.begin(), prefixed_uuid.end(),
                   [](const auto& item) {
@@ -4577,21 +4866,21 @@ void ExpectPinyinReverseUsesActiveProfiles(RimeApi_stdbool* api) {
   struct ProfileCase {
     const char* schema;
     const char* code;
-    const char* prefix;
   };
   for (const auto& profile :
        std::vector<ProfileCase>{
-           {"linnet_zh_pinyin", "suanfa", ";"},
-           {"linnet_zh", "srfa", ";"},
-           {"linnet_zh_flypy", "srfa", ";"},
-           {"linnet_zh_mspy", "srfa", "|"},
-           {"linnet_zh_sogou", "srfa", ";"},
-           {"linnet_zh_abc", "spfa", ";"},
-           {"linnet_zh_ziguang", "slfa", ";"},
-           {"linnet_zh_jiajia", "scfa", "|"},
+           {"linnet_zh_pinyin", "suanfa"},
+           {"linnet_zh", "srfa"},
+           {"linnet_zh_flypy", "srfa"},
+           {"linnet_zh_mspy", "srfa"},
+           {"linnet_zh_sogou", "srfa"},
+           {"linnet_zh_abc", "spfa"},
+           {"linnet_zh_ziguang", "slfa"},
+           {"linnet_zh_jiajia", "scfa"},
        }) {
     const RimeSessionId session = CreateSchemaSession(api, profile.schema);
-    Enter(api, session, std::string(profile.prefix) + profile.code);
+    Enter(api, session,
+          std::string(kDefaultPinyinReversePrefix) + profile.code);
     const auto origins = CandidateOrigins(session);
     const auto algorithm = std::find_if(
         origins.begin(), origins.end(), [](const auto& candidate) {
@@ -4622,28 +4911,27 @@ void ExpectPinyinReverseUsesActiveProfiles(RimeApi_stdbool* api) {
       Fail(std::string(profile.schema) +
            " enabled pinyin-to-English lookup without the trigger");
     }
-    if (std::string(profile.prefix) != ";") {
-      Enter(api, session, std::string(";") + profile.code);
-      const auto retired_trigger = CandidateOrigins(session);
-      if (std::any_of(retired_trigger.begin(), retired_trigger.end(),
-                      [](const auto& candidate) {
-                        return candidate.genuine_type == "linnet_pinyin";
-                      })) {
-        Fail(std::string(profile.schema) +
-             " kept the bundled semicolon after the Settings trigger changed");
-      }
+    Enter(api, session, std::string(";") + profile.code);
+    const auto retired_trigger = CandidateOrigins(session);
+    if (std::any_of(retired_trigger.begin(), retired_trigger.end(),
+                    [](const auto& candidate) {
+                      return candidate.genuine_type == "linnet_pinyin";
+                    })) {
+      Fail(std::string(profile.schema) +
+           " retained semicolon after the product default moved to vertical bar");
     }
     api->destroy_session(session);
   }
 
   for (const auto& profile :
        std::vector<ProfileCase>{
-           {"linnet_zh_pinyin", "suan'fa", ";"},
-           {"linnet_zh", "sr'fa", ";"},
-           {"linnet_zh_jiajia", "sc'fa", "|"},
+           {"linnet_zh_pinyin", "suan'fa"},
+           {"linnet_zh", "sr'fa"},
+           {"linnet_zh_jiajia", "sc'fa"},
        }) {
     const RimeSessionId session = CreateSchemaSession(api, profile.schema);
-    Enter(api, session, std::string(profile.prefix) + profile.code);
+    Enter(api, session,
+          std::string(kDefaultPinyinReversePrefix) + profile.code);
     const auto origins = CandidateOrigins(session);
     if (std::none_of(origins.begin(), origins.end(), [](const auto& candidate) {
           return BaseText(candidate.text) == "algorithm" &&
@@ -4661,19 +4949,15 @@ void ExpectPinyinReverseUsesActiveProfiles(RimeApi_stdbool* api) {
     api->destroy_session(session);
   }
 
-  struct EmbeddedSeparatorCase {
-    const char* schema;
-    const char* code;
-    const char* prefix;
-  };
   for (const auto& profile :
-       std::vector<EmbeddedSeparatorCase>{
-           {"linnet_zh_mspy", "m;tm", "|"},
-           {"linnet_zh_sogou", "m;tm", ";"},
-           {"linnet_zh_ziguang", "m;tf", ";"},
+       std::vector<ProfileCase>{
+           {"linnet_zh_mspy", "m;tm"},
+           {"linnet_zh_sogou", "m;tm"},
+           {"linnet_zh_ziguang", "m;tf"},
        }) {
     const RimeSessionId session = CreateSchemaSession(api, profile.schema);
-    Enter(api, session, std::string(profile.prefix) + profile.code);
+    Enter(api, session,
+          std::string(kDefaultPinyinReversePrefix) + profile.code);
     const auto origins = CandidateOrigins(session);
     if (std::none_of(origins.begin(), origins.end(), [](const auto& candidate) {
           return BaseText(candidate.text) == "tomorrow" &&
@@ -4682,22 +4966,20 @@ void ExpectPinyinReverseUsesActiveProfiles(RimeApi_stdbool* api) {
       Fail(std::string(profile.schema) +
            " lost the semicolon inside its active double-pinyin code");
     }
-    if (std::string(profile.prefix) != ";") {
-      Enter(api, session, std::string(";") + profile.code);
-      const auto retired = CandidateOrigins(session);
-      if (std::any_of(retired.begin(), retired.end(), [](const auto& candidate) {
-            return candidate.genuine_type == "linnet_pinyin";
-          })) {
-        Fail(std::string(profile.schema) +
-             " retained semicolon after the alternate trigger deployment");
-      }
+    Enter(api, session, std::string(";") + profile.code);
+    const auto retired = CandidateOrigins(session);
+    if (std::any_of(retired.begin(), retired.end(), [](const auto& candidate) {
+          return candidate.genuine_type == "linnet_pinyin";
+        })) {
+      Fail(std::string(profile.schema) +
+           " retained semicolon after the alternate trigger deployment");
     }
     api->destroy_session(session);
   }
 
   const RimeSessionId decomposed_tone =
       CreateSchemaSession(api, "linnet_zh_pinyin");
-  Enter(api, decomposed_tone, ";me");
+  Enter(api, decomposed_tone, "|me");
   const auto tone_origins = CandidateOrigins(decomposed_tone);
   if (std::none_of(tone_origins.begin(), tone_origins.end(),
                    [](const auto& candidate) {
@@ -4791,7 +5073,8 @@ void ExpectPinyinReverseTraversalBounded(RimeApi_stdbool* api) {
   constexpr char kReviewedLongResult[] =
       "Liaison Office of the Central People's Government in the Hong Kong "
       "Special Administrative Region";
-  Enter(api, reviewed_session, std::string(";") + kReviewedLongKey);
+  Enter(api, reviewed_session,
+        std::string(kDefaultPinyinReversePrefix) + kReviewedLongKey);
   const auto reviewed = CandidateOrigins(reviewed_session);
   if (std::none_of(reviewed.begin(), reviewed.end(), [&](const auto& candidate) {
         return BaseText(candidate.text) == kReviewedLongResult &&
@@ -4850,7 +5133,7 @@ void ExpectPinyinReverseKeyLimit(RimeApi_stdbool* api) {
       CreateSchemaSession(api, "linnet_pinyin_limit_64");
   api->set_option(at_limit, "emoji", false);
   api->set_option(at_limit, "traditionalization", false);
-  Enter(api, at_limit, ";probe");
+  Enter(api, at_limit, std::string(kDefaultPinyinReversePrefix) + "probe");
   const auto allowed = CandidateOrigins(at_limit, 128);
   const size_t pinyin_count = static_cast<size_t>(std::count_if(
       allowed.begin(), allowed.end(), [](const auto& candidate) {
@@ -4882,7 +5165,8 @@ void ExpectPinyinReverseKeyLimit(RimeApi_stdbool* api) {
       CreateSchemaSession(api, "linnet_pinyin_limit_65");
   api->set_option(over_limit, "emoji", false);
   api->set_option(over_limit, "traditionalization", false);
-  Enter(api, over_limit, ";probe");
+  Enter(api, over_limit,
+        std::string(kDefaultPinyinReversePrefix) + "probe");
   const auto rejected = CandidateOrigins(over_limit);
   if (std::any_of(rejected.begin(), rejected.end(), [](const auto& candidate) {
         return candidate.genuine_type == "linnet_pinyin";
@@ -4922,7 +5206,8 @@ void ExpectModeSwitchClearsSmartEnglishState(RimeApi_stdbool* api) {
     ExpectSessionPropertyAbsent(api, session, property,
                                 "English-to-Chinese schema boundary");
   }
-  Enter(api, session, ";ypjisr");
+  Enter(api, session,
+        std::string(kDefaultPinyinReversePrefix) + "ypjisr");
   const auto explicit_origins = CandidateOrigins(session);
   if (std::none_of(explicit_origins.begin(), explicit_origins.end(),
                    [](const auto& candidate) {
@@ -5366,6 +5651,293 @@ void ExpectFastConfigurationReload(RimeApi_stdbool* api,
             << "ms: PASS\n";
 }
 
+std::map<std::string, std::string> LoadFormalProfileReviewedInputs() {
+  constexpr char kPath[] = "tests/fixtures/chinese_profile_golden.tsv";
+  std::ifstream input(kPath);
+  if (!input) {
+    Fail("the fixed Chinese profile fixture is missing");
+  }
+  std::map<std::string, std::string> result;
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.empty() || line.front() == '#' ||
+        line.rfind("case_id\t", 0) == 0) {
+      continue;
+    }
+    std::istringstream row(line);
+    std::array<std::string, 6> fields;
+    for (auto& field : fields) {
+      if (!std::getline(row, field, '\t')) {
+        Fail("the fixed Chinese profile fixture is not strict six-column TSV");
+      }
+    }
+    std::string trailing;
+    if (std::getline(row, trailing, '\t')) {
+      Fail("the fixed Chinese profile fixture has an extra column");
+    }
+    if (fields[0] != "c001") continue;
+    if (fields[1] != "canonical:daily" || fields[4] != "你好" ||
+        fields[2].empty() || fields[3].empty() ||
+        !result.emplace(fields[2], fields[3]).second) {
+      Fail("the fixed Chinese profile fixture has an invalid c001 owner row");
+    }
+  }
+  if (result.size() != 8) {
+    Fail("the fixed Chinese profile fixture does not own all eight spellings");
+  }
+  return result;
+}
+
+std::string PagingInputForProfile(RimeApi_stdbool* api,
+                                  const std::string& schema_id,
+                                  const std::string& reviewed) {
+  for (size_t length = 1; length <= reviewed.size(); ++length) {
+    const std::string input = reviewed.substr(0, length);
+    const RimeSessionId session =
+        CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, session, input);
+    const size_t candidates = CandidateOrigins(session).size();
+    api->destroy_session(session);
+    if (candidates >= 10) return input;
+  }
+  Fail(schema_id +
+       " has no reviewed prefix with a second candidate page");
+}
+
+void ExpectFormalProfileCommitKeys(RimeApi_stdbool* api,
+                                   const std::string& schema_id,
+                                   const std::string& input) {
+  for (const auto& idle_key :
+       std::array<std::pair<int, const char*>, 4>{{
+           {XK_space, "Space"},
+           {kReturn, "Return"},
+           {kTab, "Tab"},
+           {kEscape, "Escape"},
+       }}) {
+    const std::string reason = schema_id + " idle " + idle_key.second;
+    const RimeSessionId idle = CreateSchemaSession(api, schema_id.c_str());
+    if (api->process_key(idle, idle_key.first, 0)) {
+      Fail(reason + " was captured instead of reaching the host");
+    }
+    ExpectNoCommit(api, idle, reason);
+    const auto after = ReadKeyInteractionSnapshot(api, idle);
+    api->destroy_session(idle);
+    if (!after.input.empty() || after.composition_size != 0 ||
+        !after.candidates.empty()) {
+      Fail(reason + " retained hidden input-method state");
+    }
+  }
+
+  {
+    const std::string reason = schema_id + " active Space";
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, session, input);
+    const auto candidates = Candidates(api, session);
+    const int selected = HighlightedCandidateIndex(api, session);
+    if (selected < 0 || static_cast<size_t>(selected) >= candidates.size() ||
+        !api->process_key(session, XK_space, 0) ||
+        TakeCommit(api, session, reason) != candidates[selected].text) {
+      Fail(reason + " did not commit the selected candidate exactly once");
+    }
+    ExpectNoCommit(api, session, "duplicate " + reason);
+    api->destroy_session(session);
+  }
+
+  {
+    const std::string reason = schema_id + " active Return";
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, session, input);
+    if (!api->process_key(session, kReturn, 0) ||
+        TakeCommit(api, session, reason) != input) {
+      Fail(reason + " did not commit the unconfirmed spelling verbatim");
+    }
+    ExpectNoCommit(api, session, "duplicate " + reason);
+    api->destroy_session(session);
+  }
+
+  {
+    const std::string reason = schema_id + " active Tab";
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    api->set_option(session, "_linear", true);
+    api->set_option(session, "_vertical", false);
+    Enter(api, session, input);
+    const auto before = ReadCandidateNavigationState(session, reason);
+    if (CandidateOrigins(session).size() < 2 ||
+        !api->process_key(session, kTab, 0)) {
+      Fail(reason + " did not expose candidate navigation");
+    }
+    const auto after = ReadCandidateNavigationState(session, reason);
+    if (before.selected_index != 0 || after.selected_index != 1 ||
+        after.caret_position != before.caret_position) {
+      Fail(reason + " did not move exactly one candidate");
+    }
+    ExpectNoCommit(api, session, reason);
+    api->destroy_session(session);
+  }
+
+  {
+    const std::string reason = schema_id + " active Escape";
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, session, input);
+    if (!api->process_key(session, kEscape, 0)) {
+      Fail(reason + " did not cancel the active composition");
+    }
+    ExpectNoCommit(api, session, reason);
+    const auto after = ReadKeyInteractionSnapshot(api, session);
+    api->destroy_session(session);
+    if (!after.input.empty() || after.composition_size != 0 ||
+        !after.candidates.empty()) {
+      Fail(reason + " retained hidden input-method state");
+    }
+  }
+}
+
+void ExpectFormalProfileSymbolKeys(RimeApi_stdbool* api,
+                                   const std::string& schema_id,
+                                   const std::string& input,
+                                   bool semicolon_is_spelling) {
+  for (const char symbol : std::string("/,.:") +
+                               (semicolon_is_spelling ? "" : ";")) {
+    const std::string reason =
+        schema_id + " active host symbol " + std::string(1, symbol);
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, session, input);
+    const auto candidates = Candidates(api, session);
+    const int selected = HighlightedCandidateIndex(api, session);
+    if (selected < 0 || static_cast<size_t>(selected) >= candidates.size()) {
+      Fail(reason + " has no selected Chinese candidate");
+    }
+    if (api->process_key(
+            session, symbol,
+            PrintableModifier(static_cast<unsigned char>(symbol)))) {
+      Fail(reason + " was captured instead of reaching the host");
+    }
+    if (TakeCommit(api, session, reason) != candidates[selected].text) {
+      Fail(reason + " did not commit the selected candidate exactly once");
+    }
+    ExpectNoCommit(api, session, "duplicate " + reason);
+    const auto after = ReadKeyInteractionSnapshot(api, session);
+    api->destroy_session(session);
+    if (!after.input.empty() || after.composition_size != 0 ||
+        !after.candidates.empty()) {
+      Fail(reason + " retained hidden input-method state");
+    }
+  }
+
+  for (const auto& spelling :
+       std::array<std::pair<char, bool>, 3>{{
+           {'\'', true},
+           {';', semicolon_is_spelling},
+           {'`', true},
+       }}) {
+    if (!spelling.second) continue;
+    const std::string reason = schema_id + " active spelling separator " +
+                               std::string(1, spelling.first);
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, session, input);
+    if (!api->process_key(session, spelling.first, 0)) {
+      Fail(reason + " did not remain in the schema spelling");
+    }
+    ExpectNoCommit(api, session, reason);
+    const auto after = ReadCompositionEditingState(session, reason);
+    api->destroy_session(session);
+    if (after.input != input + spelling.first ||
+        after.caret_position != after.input.size()) {
+      Fail(reason + " did not preserve its exact active spelling");
+    }
+  }
+}
+
+void ExpectFormalSingleLetterMatrix(RimeApi_stdbool* api) {
+  for (const auto& schema_id : RuntimeChineseSchemaIDs(api)) {
+    const RimeSessionId session =
+        CreateSchemaSession(api, schema_id.c_str());
+    size_t covered_letters = 0;
+    size_t english_fallback_letters = 0;
+    for (char letter = 'a'; letter <= 'z'; ++letter) {
+      if (ExpectSingleLetterChinesePriority(api, session, schema_id, letter)) {
+        ++covered_letters;
+      } else {
+        ++english_fallback_letters;
+      }
+    }
+    api->destroy_session(session);
+    if (covered_letters + english_fallback_letters != 26 ||
+        covered_letters == 0) {
+      Fail("single-letter priority matrix found no Chinese candidates in " +
+           schema_id);
+    }
+  }
+}
+
+void ExpectFormalProfileKeyMatrix(RimeApi_stdbool* api) {
+  const auto schemas = RuntimeChineseSchemaIDs(api);
+  const auto reviewed_inputs = LoadFormalProfileReviewedInputs();
+  for (const auto& schema_id : schemas) {
+    const auto reviewed = reviewed_inputs.find(schema_id);
+    if (reviewed == reviewed_inputs.end()) {
+      Fail("the fixed profile fixture has no reviewed input for " + schema_id);
+    }
+    const RimeSessionId schema_session =
+        CreateSchemaSession(api, schema_id.c_str());
+    const auto live = rime::Service::instance().GetSession(schema_session);
+    std::string alphabet;
+    if (!live || !live->schema() || !live->schema()->config() ||
+        !live->schema()->config()->GetString("speller/alphabet", &alphabet)) {
+      Fail(schema_id + " does not publish its formal speller alphabet");
+    }
+    for (char letter = 'a'; letter <= 'z'; ++letter) {
+      if (alphabet.find(letter) == std::string::npos) {
+        Fail(schema_id + " formal alphabet lost key " +
+             std::string(1, letter));
+      }
+    }
+    const bool semicolon_is_spelling = alphabet.find(';') != std::string::npos;
+    api->destroy_session(schema_session);
+
+    const std::string paging_input =
+        PagingInputForProfile(api, schema_id, reviewed->second);
+    ExpectCandidatePagingShortcuts(api, schema_id.c_str(), paging_input);
+    ExpectNineCandidateSelectKeys(api, schema_id.c_str(), paging_input);
+    ExpectFormalProfileCommitKeys(api, schema_id, paging_input);
+    ExpectFormalProfileSymbolKeys(
+        api, schema_id, paging_input, semicolon_is_spelling);
+
+    // The unshifted identity symbols below are host text while idle, but '-'
+    // and '=' become page commands only when a menu exists. Shifted partners
+    // of scheme spelling keys belong to the macOS key-normalization matrix,
+    // not this Rime-level physical-key oracle.
+    for (const char symbol : std::string("/,.:;'[]-=")) {
+      const std::string reason = schema_id + " idle identity symbol " + symbol;
+      const RimeSessionId idle = CreateSchemaSession(api, schema_id.c_str());
+      if (api->process_key(idle, symbol,
+                           PrintableModifier(
+                               static_cast<unsigned char>(symbol)))) {
+        Fail(reason + " was captured instead of reaching the host");
+      }
+      ExpectNoCommit(api, idle, reason);
+      const auto after = ReadKeyInteractionSnapshot(api, idle);
+      api->destroy_session(idle);
+      if (!after.input.empty() || after.composition_size != 0 ||
+          !after.candidates.empty()) {
+        Fail(reason + " retained hidden input-method state");
+      }
+    }
+
+    for (const std::string& numeric : {"1,000", "3.14", "12:30"}) {
+      const RimeSessionId numeric_session =
+          CreateSchemaSession(api, schema_id.c_str());
+      const std::string actual =
+          SimulateHostText(api, numeric_session, numeric);
+      api->destroy_session(numeric_session);
+      if (actual != numeric) {
+        Fail(schema_id + " changed numeric input '" + numeric + "' to '" +
+             actual + "'");
+      }
+    }
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -5377,17 +5949,9 @@ int main(int argc, char** argv) {
       argc == 4 && std::strcmp(argv[3], "--settings-off-probe") == 0;
   const bool learning_off_probe =
       argc == 4 && std::strcmp(argv[3], "--learning-off-probe") == 0;
-  const bool shift_probe =
-      argc == 4 && std::strcmp(argv[3], "--shift-probe") == 0;
-  const bool core_shift_overlap_probe =
+  const bool profile_key_matrix_probe =
       argc == 4 &&
-      std::strcmp(argv[3], "--core-shift-overlap-probe") == 0;
-  const bool prediction_layout_probe =
-      argc == 4 &&
-      std::strcmp(argv[3], "--prediction-layout-probe") == 0;
-  const bool partial_return_probe =
-      argc == 4 &&
-      std::strcmp(argv[3], "--partial-return-probe") == 0;
+      std::strcmp(argv[3], "--profile-key-matrix-probe") == 0;
   const bool lifecycle_raw_exit_probe =
       argc == 4 &&
       std::strcmp(argv[3], "--lifecycle-raw-exit-probe") == 0;
@@ -5400,9 +5964,6 @@ int main(int argc, char** argv) {
   const bool prediction_punctuation_probe =
       argc == 4 &&
       std::strcmp(argv[3], "--prediction-punctuation-probe") == 0;
-  const bool single_key_ranking_probe =
-      argc == 4 &&
-      std::strcmp(argv[3], "--single-key-ranking-probe") == 0;
   const bool mixed_input_probe =
       argc == 4 && std::strcmp(argv[3], "--mixed-input-probe") == 0;
   const bool mixed_learning_on_probe =
@@ -5419,23 +5980,22 @@ int main(int argc, char** argv) {
       argc == 4 && std::strcmp(argv[3], "--cold-client-probe") == 0;
   if (argc != 3 && !input_options_probe && !input_switches_probe &&
       !settings_off_probe && !learning_off_probe &&
-      !shift_probe && !core_shift_overlap_probe &&
-      !prediction_layout_probe && !partial_return_probe &&
+      !profile_key_matrix_probe &&
       !lifecycle_raw_exit_probe &&
       !page_size_probe && !english_profile_probe &&
       !fast_config_reload_probe && !prediction_punctuation_probe &&
-      !single_key_ranking_probe && !mixed_input_probe &&
+      !mixed_input_probe &&
       !mixed_learning_on_probe &&
       !mixed_learning_off_probe &&
       !mixed_latency_probe && !warm_session_probe && !cold_client_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
-         "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|--shift-probe|"
-         "--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe|"
+         "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|"
+         "--profile-key-matrix-probe|"
          "--lifecycle-raw-exit-probe|"
          "--page-size-probe EXPECTED|"
          "--english-profile-probe PROFILE CHINESE_SCHEMA CODE PREFIX|"
          "--fast-config-reload-probe|--prediction-punctuation-probe|"
-         "--single-key-ranking-probe|--mixed-input-probe|"
+         "--mixed-input-probe|"
          "--mixed-learning-on-probe|"
          "--mixed-learning-off-probe|"
          "--mixed-latency-probe|--warm-session-probe|--cold-client-probe]");
@@ -5509,24 +6069,24 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  if (core_shift_overlap_probe) {
-    ExpectOverlappingShiftRepressDoesNotToggle(api);
-    api->finalize();
-    std::cout << "rime_smoke_test: overlapping Shift re-press: PASS\n";
-    return 0;
-  }
-
-  if (prediction_layout_probe) {
-    ExpectPassivePredictionLayoutMatrix(api);
-    api->finalize();
-    std::cout << "rime_smoke_test: passive prediction layout matrix: PASS\n";
-    return 0;
-  }
-
-  if (partial_return_probe) {
+  if (profile_key_matrix_probe) {
+    ExpectFormalProfileKeyMatrix(api);
+    ExpectNineCandidateSelectKeys(api, "linnet_en", "a");
+    ExpectFormalSingleLetterMatrix(api);
+    ExpectNaturalSingleKeyDefaultRanking(api);
+    ExpectCandidateArrowNavigation(api);
+    ExpectSingleSyllablePreferenceLearning(api);
+    ExpectPartialSelectionRanksCurrentSegment(api);
+    for (const auto& schema_id : RuntimeProductSchemaIDs(api)) {
+      ExpectCapsLockRawPath(api, schema_id.c_str());
+    }
+    ExpectCapsLockPreservesExplicitPrefix(api);
     ExpectReturnPreservesExplicitPrefix(api);
+    ExpectCapsLockDismissesPassivePrediction(api);
+    ExpectDirectShiftSmartEnglish(api);
+    ExpectPassivePredictionKeyboardSelection(api);
     api->finalize();
-    std::cout << "rime_smoke_test: partial-confirmed raw Return: PASS\n";
+    std::cout << "rime_smoke_test: formal eight-profile key matrix: PASS\n";
     return 0;
   }
 
@@ -5537,22 +6097,9 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  if (single_key_ranking_probe) {
-    ExpectNaturalSingleKeyDefaultRanking(api);
-    ExpectSingleSyllablePreferenceLearning(api);
-    api->finalize();
-    std::cout << "rime_smoke_test: natural single-key ranking and learning: PASS\n";
-    return 0;
-  }
-
   if (mixed_input_probe) {
-    ExpectNaturalSingleKeyDefaultRanking(api);
-    ExpectSingleSyllablePreferenceLearning(api);
-    std::cout << "rime_smoke_test: single-syllable preference learning: PASS\n";
     ExpectSupplementalExtendedChineseCoverage(api);
-    ExpectCandidatePagingShortcuts(api, "linnet_zh_pinyin", "shi");
-    ExpectCandidatePagingShortcuts(api, "linnet_en", "a");
-    ExpectModelessMixedInput(api);
+    ExpectNativeMixedInput(api);
     BenchmarkSchema(api, "linnet_zh_pinyin", "xuexicsjiting");
     api->finalize();
     std::cout << "rime_smoke_test: modeless mixed input: PASS\n";
@@ -5560,14 +6107,14 @@ int main(int argc, char** argv) {
   }
 
   if (mixed_learning_off_probe) {
-    ExpectModelessMixedLearningDisabled(api);
+    ExpectNativeMixedLearningDisabled(api);
     api->finalize();
     std::cout << "rime_smoke_test: modeless mixed learning disabled: PASS\n";
     return 0;
   }
 
   if (mixed_learning_on_probe) {
-    ExpectModelessMixedLearningEnabled(api);
+    ExpectNativeMixedLearningEnabled(api);
     api->finalize();
     std::cout << "rime_smoke_test: modeless mixed learning enabled: PASS\n";
     return 0;
@@ -5677,20 +6224,6 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  if (shift_probe) {
-    for (const char* schema_id : kProductSchemaIDs) {
-      ExpectCapsLockRawPath(api, schema_id);
-    }
-    ExpectCapsLockPreservesExplicitPrefix(api);
-    ExpectReturnPreservesExplicitPrefix(api);
-    ExpectCapsLockDismissesPassivePrediction(api);
-    ExpectDirectShiftSmartEnglish(api);
-    api->finalize();
-    std::cout << "rime_smoke_test: direct Shift Chinese/Smart English and "
-                 "Caps Lock raw ASCII: PASS\n";
-    return 0;
-  }
-
   if (page_size_probe) {
     // This must exercise a deployed schema in a fresh process. Rime's schema
     // component keeps only weak references to mutable ConfigData, so closing a
@@ -5776,9 +6309,7 @@ int main(int argc, char** argv) {
   ExpectCuratedPhonexRuntimeProjection(english);
   ExpectFullShapeOff(api, english, "linnet_en");
   ExpectFullShapeOff(api, chinese, "linnet_zh");
-  ExpectDefaultChinesePunctuation(api, "linnet_zh");
-  ExpectStandardChineseNumericPunctuation(api);
-  ExpectIdleSpacePassThrough(api);
+  ExpectFormalProfileKeyMatrix(api);
   ExpectDateShortcutProfileIsolation(api);
   ExpectPinyinReverseUsesActiveProfiles(api);
   ExpectPinyinReverseTraversalBounded(api);
@@ -5786,15 +6317,14 @@ int main(int argc, char** argv) {
   ExpectAutomaticPinyinTailProjection(api);
   ExpectDeployedMenuPageSize(api, "linnet_zh", 9);
   ExpectDeployedMenuPageSize(api, "linnet_en", 9);
-  for (const char* schema_id : kProductSchemaIDs) {
-    ExpectCapsLockRawPath(api, schema_id);
+  for (const auto& schema_id : RuntimeProductSchemaIDs(api)) {
+    ExpectCapsLockRawPath(api, schema_id.c_str());
   }
   ExpectCapsLockPreservesExplicitPrefix(api);
   ExpectReturnPreservesExplicitPrefix(api);
   ExpectDirectShiftSmartEnglish(api);
   ExpectSwitcherHotkeysPassThrough(api);
   ExpectModeSwitchClearsSmartEnglishState(api);
-  ExpectNineCandidateSelectKeys(api, "linnet_zh_pinyin", "shi");
   ExpectNineCandidateSelectKeys(api, "linnet_en", "a");
   ExpectCandidateArrowNavigation(api);
   ExpectPassivePredictionExitContract(api);
@@ -5805,8 +6335,8 @@ int main(int argc, char** argv) {
   ExpectPredictionPunctuationExitContract(api);
   ExpectRawLikeArrowEditing(api);
   ExpectInvalidActiveSelectionKeysPassThrough(api);
-  ExpectActivePunctuationBoundaries(api);
-  ExpectProfilePunctuationSyntaxMatrix(api);
+  ExpectNonFormalPunctuationBoundaries(api);
+  ExpectStatefulChinesePunctuation(api);
   ExpectHostModifierPassThrough(api);
   ExpectTrailingDeletePassThrough(api);
   ExpectPrintableAsciiMatrix(api);
@@ -6233,7 +6763,7 @@ int main(int argc, char** argv) {
 
   const RimeSessionId explicit_pinyin_phrase =
       CreateSchemaSession(api, "linnet_zh_pinyin");
-  if (SelectNormalizedCandidate(api, explicit_pinyin_phrase, ";yunjisuan",
+  if (SelectNormalizedCandidate(api, explicit_pinyin_phrase, "|yunjisuan",
                                 "cloud computing") != "cloud computing") {
     Fail("explicit Chinese pinyin reverse lookup changed its phrase commit");
   }
@@ -6403,19 +6933,10 @@ int main(int argc, char** argv) {
   // meaningful English words. Whenever the active profile can produce a
   // same-span Chinese candidate, keep that candidate first without deleting
   // the English candidate from the menu.
-  for (size_t schema_index = 0;
-       schema_index + 1 < kProductSchemaIDs.size(); ++schema_index) {
-    const char* schema_id = kProductSchemaIDs[schema_index];
-    const RimeSessionId profile_session = CreateSchemaSession(api, schema_id);
-    size_t covered_letters = 0;
-    for (char letter = 'a'; letter <= 'z'; ++letter) {
-      covered_letters += ExpectSingleLetterChinesePriority(
-          api, profile_session, schema_id, letter);
-    }
-    if (covered_letters == 0) {
-      Fail("single-letter priority matrix found no Chinese candidates in " +
-           std::string(schema_id));
-    }
+  ExpectFormalSingleLetterMatrix(api);
+  for (const auto& schema_id : RuntimeChineseSchemaIDs(api)) {
+    const RimeSessionId profile_session =
+        CreateSchemaSession(api, schema_id.c_str());
     for (const char* explicit_english : {"A", "L", "I"}) {
       ExpectExactEnglishFirst(api, profile_session, schema_id,
                               explicit_english);
@@ -6789,7 +7310,7 @@ int main(int argc, char** argv) {
       api, english, "ceshi", {"test", "beta", "exam", "quiz"});
   ExpectAutomaticPinyinOrder(api, english, "zhinengti", {"agent"});
   ExpectAutomaticPinyinOrder(api, english, "xiecheng", {"coroutine"});
-  ExpectNormalizedOrder(api, pinyin_reverse, ";yun",
+  ExpectNormalizedOrder(api, pinyin_reverse, "|yun",
                         {"cloud", "confused", "dizzy", "giddy"});
   for (const auto& product_case :
        std::vector<std::pair<std::string, std::string>>{
@@ -6815,16 +7336,16 @@ int main(int argc, char** argv) {
            {"ni", "you"}, {"de", "of"}, {"chu", "out"},
            {"fa", "send"}}) {
     ExpectFirstNormalizedCandidate(api, pinyin_reverse,
-                                   ";" + product_case.first,
+                                   "|" + product_case.first,
                                    product_case.second);
   }
-  ExpectCandidateAbsent(api, pinyin_reverse, ";zhinengti", "a gent");
+  ExpectCandidateAbsent(api, pinyin_reverse, "|zhinengti", "a gent");
   for (const auto& retained_sense :
        std::vector<std::pair<std::string, std::string>>{
            {"bu", "not"}, {"shuo", "speak"}, {"he", "with"},
            {"chu", "exit"}, {"chu", "leave"}, {"fa", "fine"}}) {
     ExpectNormalizedCandidate(
-        api, pinyin_reverse, ";" + retained_sense.first,
+        api, pinyin_reverse, "|" + retained_sense.first,
         retained_sense.second);
   }
   for (const auto& rejected_candidate :
@@ -6834,7 +7355,7 @@ int main(int argc, char** argv) {
     ExpectCandidateAbsent(api, english, rejected_candidate.first,
                           rejected_candidate.second);
     ExpectCandidateAbsent(api, pinyin_reverse,
-                          ";" + rejected_candidate.first,
+                          "|" + rejected_candidate.first,
                           rejected_candidate.second);
   }
   api->destroy_session(pinyin_reverse);
@@ -6917,7 +7438,7 @@ int main(int argc, char** argv) {
   for (const std::string& token : {"uUser", "U2", "cCalculator", "V2"}) {
     ExpectFirstCandidate(api, english, token, token);
   }
-  ExpectModelessMixedInput(api);
+  ExpectNativeMixedInput(api);
   ExpectNaturalSingleKeyDefaultRanking(api);
   ExpectSingleSyllablePreferenceLearning(api);
   api->destroy_session(isolated_session);

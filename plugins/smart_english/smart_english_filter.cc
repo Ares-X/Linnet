@@ -14,12 +14,10 @@
 #include <rime/translation.h>
 
 #include <algorithm>
-#include <cmath>
 #include <functional>
 #include <limits>
 #include <utility>
 #include <vector>
-#include "smart_english_mixed_decoder.h"
 
 namespace linnet {
 using namespace rime;
@@ -32,6 +30,50 @@ namespace {
 constexpr double kEstablishedChinesePhraseMinimumLexicalWeight =
     -13.815510557964274;
 
+struct MixedTextShape {
+  std::size_t entity_start = std::string::npos;
+  std::size_t entity_length = 0;
+
+  explicit operator bool() const {
+    return entity_start != std::string::npos;
+  }
+};
+
+MixedTextShape InspectMixedText(const string& text) {
+  MixedTextShape result;
+  bool has_non_ascii = false;
+  for (std::size_t index = 0; index < text.size();) {
+    const auto byte = static_cast<unsigned char>(text[index]);
+    if (byte >= 'A' && byte <= 'Z') {
+      const std::size_t start = index;
+      while (index < text.size() && text[index] >= 'A' &&
+             text[index] <= 'Z') {
+        ++index;
+      }
+      const std::size_t length = index - start;
+      if (result || length < 2 || length > 6) return {};
+      result.entity_start = start;
+      result.entity_length = length;
+      continue;
+    }
+    if (byte < 0x80) return {};
+    has_non_ascii = true;
+    ++index;
+  }
+  return result && has_non_ascii ? result : MixedTextShape{};
+}
+
+bool IsMixedChineseCandidate(const an<Candidate>& candidate) {
+  const auto phrase = As<Phrase>(candidate);
+  if (!phrase || !phrase->language() ||
+      phrase->language()->name() != "linnet_zh" ||
+      !phrase->is_exact_match()) {
+    return false;
+  }
+  const MixedTextShape shape = InspectMixedText(phrase->text());
+  return static_cast<bool>(shape);
+}
+
 an<Candidate> ProjectSmartEnglishCandidate(
     const an<Candidate>& candidate,
     const SmartEnglishIndex& index,
@@ -39,9 +81,13 @@ an<Candidate> ProjectSmartEnglishCandidate(
     const SpacingState& spacing,
     CaseStyle requested_case,
     bool sentence_boundary) {
-  if (As<ModelessMixedCandidate>(candidate)) return candidate;
+  if (!candidate || candidate->type() == kMixedCandidateType) return candidate;
   const auto genuine = Candidate::GetGenuineCandidate(candidate);
-  if (!candidate || !genuine) return nullptr;
+  if (!genuine) return nullptr;
+  if (IsMixedChineseCandidate(genuine)) {
+    return New<ShadowCandidate>(genuine, kMixedCandidateType, genuine->text(),
+                                genuine->comment(), false);
+  }
   string text = genuine->text();
   string comment = genuine->comment();
   const bool raw = IsRawCandidate(candidate);
@@ -151,8 +197,12 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   if (!translation || !engine_) return result;
 
   Context* context = engine_->context();
+  const auto pending_segment =
+      std::exchange(pending_segment_, std::nullopt);
   const string ranking_input =
-      std::exchange(pending_segment_input_, std::nullopt).value_or(string());
+      pending_segment ? pending_segment->input : string();
+  const bool is_pinyin_flow =
+      pending_segment && pending_segment->pinyin_flow;
   string input_word = LowerAsciiWord(ranking_input);
   struct RankedCandidate {
     an<Candidate> candidate, genuine;
@@ -161,7 +211,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     std::size_t static_rank = std::numeric_limits<std::size_t>::max();
     std::uint16_t session_count = 0;
     bool raw = false, exact = false, chinese = false, mixed = false,
-         preferred_mixed = false,
          strong_chinese_collision = false;
   };
   std::vector<RankedCandidate> candidates;
@@ -187,26 +236,20 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
                            : SessionBigrams{};
   const auto static_ranks = index_.LookupStaticOrdinals(
       context->get_property(rime::predict::kStaticKeyProperty));
-  bool has_exact = false, has_pinyin = false, has_mixed = false,
-       has_preferred_mixed = false;
-  double best_chinese_sentence_weight = -std::numeric_limits<double>::infinity();
+  bool has_exact = false, has_pinyin = false, has_mixed = false;
   for (auto& item : candidates) {
     if (!item.genuine) continue;
     item.raw = IsRawCandidate(item.candidate);
     has_pinyin = has_pinyin || item.genuine->type() == "linnet_pinyin";
     const auto phrase = rime::As<Phrase>(item.genuine);
-    item.chinese = phrase && phrase->language() &&
+    item.mixed = IsMixedChineseCandidate(item.genuine);
+    item.chinese = !item.mixed && phrase && phrase->language() &&
                    phrase->language()->name() == "linnet_zh";
-    if (item.chinese)
-      if (const auto sentence = As<Sentence>(item.genuine))
-        best_chinese_sentence_weight = (std::max)(
-            best_chinese_sentence_weight, sentence->weight());
     item.exact = !input_word.empty() && item.word == input_word &&
                  IsLinnetEnglishPhrase(item.genuine) &&
                  (!phrase || phrase->is_exact_match()) &&
                  item.candidate->type() != "linnet_correction";
     has_exact = has_exact || item.exact;
-    item.mixed = As<ModelessMixedCandidate>(item.candidate) != nullptr;
     has_mixed = has_mixed || item.mixed;
     item.session_count = previous.empty() || item.word.empty()
                              ? 0
@@ -216,7 +259,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
       item.static_rank = static_rank->second;
     }
   }
-  const bool is_pinyin_flow = schema_id_ != "linnet_en" && has_pinyin;
   // Exact dictionary identity is the default bilingual intent signal for a
   // complete word. A lowercase single letter remains incomplete Chinese input
   // whenever the active profile has a same-span Chinese candidate. Longer
@@ -225,17 +267,10 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   // long-tail transliterations stay below an independently meaningful English
   // word.
   const bool explicit_english_case = !input_word.empty() && ranking_input != input_word;
-  const bool lowercase_chinese_input = (has_exact || has_mixed) &&
-      schema_id_ != kSmartEnglishSchema && !explicit_english_case;
+  const bool lowercase_chinese_input =
+      (has_exact || has_mixed) && schema_id_ != kSmartEnglishSchema &&
+      !explicit_english_case;
   const bool lowercase_chinese_exact = has_exact && lowercase_chinese_input;
-  for (auto& item : candidates) {
-    if (const auto mixed = As<ModelessMixedCandidate>(item.candidate)) {
-      item.preferred_mixed = std::isfinite(best_chinese_sentence_weight) &&
-          mixed->model_weight() - best_chinese_sentence_weight >=
-              kMixedEntityAmbiguityLogMargin;
-      has_preferred_mixed = has_preferred_mixed || item.preferred_mixed;
-    }
-  }
   auto bilingual_candidate = std::find_if(candidates.begin(), candidates.end(),
       [](const auto& item) { return item.exact; });
   if (bilingual_candidate == candidates.end()) {
@@ -269,8 +304,8 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
       lowercase_chinese_exact &&
       (single_letter_chinese_input || has_strong_same_span_chinese);
   const bool promote_exact = has_exact && !preserve_chinese_exact;
-  const bool promote_mixed = !has_exact && has_preferred_mixed &&
-      !has_strong_same_span_chinese;
+  const bool promote_mixed =
+      !has_exact && has_mixed && !has_same_span_chinese;
   const bool has_non_raw = std::any_of(
       candidates.begin(), candidates.end(),
       [](const auto& item) { return item.genuine && !item.raw; });
@@ -288,9 +323,25 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
                        }),
         candidates.end());
   }
+  if (!is_pinyin_flow && has_mixed && has_same_span_chinese) {
+    const auto mixed = std::find_if(candidates.begin(), candidates.end(),
+                                    [](const auto& item) {
+                                      return item.mixed;
+                                    });
+    if (mixed != candidates.end()) {
+      const auto chinese = std::find_if(
+          mixed, candidates.end(), [&](const auto& item) {
+            return item.chinese && item.genuine->start() == mixed->genuine->start() &&
+                   item.genuine->end() == mixed->genuine->end();
+          });
+      if (chinese != candidates.end()) {
+        std::rotate(mixed, chinese, std::next(chinese));
+      }
+    }
+  }
   if (!is_pinyin_flow && (has_exact || promote_mixed)) {
     std::stable_partition(candidates.begin(), candidates.end(), [has_exact](const auto& item) {
-      return has_exact ? !item.mixed : item.preferred_mixed;
+      return has_exact ? !item.mixed : item.mixed;
     });
   }
   if (!is_pinyin_flow && has_exact) {
@@ -393,7 +444,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
 }
 
 bool SmartEnglishFilter::AppliesToSegment(Segment* segment) {
-  pending_segment_input_.reset();
+  pending_segment_.reset();
   if (!segment || segment->HasTag("zz_code_token") ||
       segment->HasTag("text_expander")) {
     return false;
@@ -413,8 +464,10 @@ bool SmartEnglishFilter::AppliesToSegment(Segment* segment) {
       segment->end > composition_input.size()) {
     return false;
   }
-  pending_segment_input_ = composition_input.substr(
-      segment->start, segment->end - segment->start);
+  pending_segment_ = PendingSegment{
+      composition_input.substr(segment->start,
+                               segment->end - segment->start),
+      segment->HasTag("linnet_pinyin")};
   return true;
 }
 

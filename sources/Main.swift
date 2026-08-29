@@ -40,7 +40,6 @@ struct SquirrelApp {
 
   static var productSlug: String { productName.lowercased() }
   static var rimeAppName: String { "rime.\(productSlug)" }
-  static var settingsBundleIdentifier: String { "\(bundleIdentifier).settings" }
   static let dataRegistry: LinnetDataRegistry = {
     do {
       return try LinnetDataRegistry(productName: productName, coreVersion: productVersion)
@@ -52,70 +51,12 @@ struct SquirrelApp {
 
   static let appDir = Bundle.main.bundleURL
 
-  /// Owns process enumeration for executable-driven lifecycle boundaries.
-  /// Uninstall may force Host and Settings only after its grace period. Core
-  /// updates never call this owner because live InputMethodKit client
-  /// connections must survive replacement of the App bytes on disk.
-  static func quitProductProcesses() -> Bool {
-    let ownPID = ProcessInfo.processInfo.processIdentifier
-    func runningTargets() -> [NSRunningApplication] {
-      [bundleIdentifier, settingsBundleIdentifier].flatMap { identifier in
-        NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
-      }.filter { $0.processIdentifier != ownPID && !$0.isTerminated }
-    }
-    func waitForExit(until deadline: Date) -> Bool {
-      while Date() < deadline {
-        if runningTargets().isEmpty { return true }
-        Thread.sleep(forTimeInterval: 0.05)
-      }
-      return runningTargets().isEmpty
-    }
-
-    let targets = runningTargets()
-    targets.forEach { _ = $0.terminate() }
-    if waitForExit(until: Date().addingTimeInterval(3)) { return true }
-    runningTargets().forEach { _ = $0.forceTerminate() }
-    return waitForExit(until: Date().addingTimeInterval(2))
-  }
-
-  /// Removes the temporary log path whose name and location are owned here.
-  /// The uninstaller calls this before deleting the executable so it never has
-  /// to duplicate or infer Foundation's per-user temporary-directory contract.
-  static func purgeOwnedTemporaryState() -> Bool {
-    let fileManager = FileManager.default
-    let temporaryRoot = fileManager.temporaryDirectory.standardizedFileURL
-    let targets = [logDir.standardizedFileURL]
-    guard logDir.lastPathComponent == rimeAppName,
-      targets.allSatisfy({
-        $0 != temporaryRoot && $0.deletingLastPathComponent() == temporaryRoot
-      })
-    else { return false }
-
-    do {
-      for target in targets {
-        let exists = fileManager.fileExists(atPath: target.path)
-          || (try? fileManager.destinationOfSymbolicLink(atPath: target.path)) != nil
-        if exists { try fileManager.removeItem(at: target) }
-      }
-      return true
-    } catch {
-      FileHandle.standardError.write(
-        Data("Linnet temporary-state cleanup failed: \(error.localizedDescription)\n".utf8))
-      return false
-    }
-  }
-
   /// Invalid product metadata cannot be repaired at runtime, but it also must
   /// never become a macOS crash report. Exit normally with one diagnostic.
   static func configurationFailure(_ message: String) -> Never {
     FileHandle.standardError.write(Data("Linnet startup failure: \(message)\n".utf8))
     exit(EXIT_FAILURE)
   }
-  static var logDir: URL {
-    FileManager.default.temporaryDirectory.appending(
-      component: rimeAppName, directoryHint: .isDirectory)
-  }
-  // swiftlint:disable:next cyclomatic_complexity
   static func main() {
     let main = Bundle.main
     guard SquirrelInstaller.hostMayStartRuntime(bundleURL: main.bundleURL) else {
@@ -127,19 +68,6 @@ struct SquirrelApp {
       if args.count > 1 {
         do {
           switch args[1] {
-          case "--quit":
-            guard args.count == 2 else {
-              configurationFailure("Quit accepts no process identifier")
-            }
-            guard quitProductProcesses() else {
-              configurationFailure("Linnet processes did not terminate before uninstall")
-            }
-            return true
-          case "--purge-owned-temporary-state":
-            guard purgeOwnedTemporaryState() else {
-              configurationFailure("Linnet temporary state could not be removed")
-            }
-            return true
           case "--register-input-source":
             guard args.count == 2 else {
               configurationFailure("Register accepts no input source identifier")
@@ -209,10 +137,6 @@ struct SquirrelApp {
   static var helpDoc: String {
     """
     Supported arguments:
-    Perform actions:
-      --quit                     quit all \(productName) processes
-      --purge-owned-temporary-state
-                                 remove Linnet-owned temporary logs
     Manage \(productName):
       --register-input-source             register input source
     """

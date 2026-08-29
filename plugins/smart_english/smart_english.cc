@@ -40,7 +40,6 @@
 #include "smart_english_domain.h"
 #include "smart_english_filter.h"
 #include "smart_english_index.h"
-#include "smart_english_mixed_decoder.h"
 
 namespace linnet {
 namespace {
@@ -232,9 +231,10 @@ bool ContinuesPredictionContext(int keycode) {
          keycode == XK_asciitilde;
 }
 
-// Linnet owns selection validity, Tab, raw-caret, and passive-prediction state
-// before Rime Predictor/Selector/Navigator. Stock Selector/Navigator remain the
-// sole owners of ordinary candidate and spelling-arrow movement.
+// Linnet owns selection validity, menu-bounded printable paging, Tab, raw-caret,
+// and passive-prediction state before Rime Predictor/Selector/Navigator. Stock
+// Selector/Navigator remain the sole owners of ordinary candidate and
+// spelling-arrow movement.
 class LinnetInteractionProcessor : public Processor {
  public:
   explicit LinnetInteractionProcessor(const Ticket& ticket)
@@ -286,6 +286,9 @@ class LinnetInteractionProcessor : public Processor {
         context->composition().back().HasTag("prediction")) {
       return ProcessPrediction(context, key);
     }
+    const ProcessResult printable_paging =
+        ProcessPrintablePagingKey(context, key);
+    if (printable_paging != kNoop) return printable_paging;
     if (key.keycode() == XK_Tab) return ProcessTab(context, key);
 
     if (!context->composition().empty()) {
@@ -299,6 +302,15 @@ class LinnetInteractionProcessor : public Processor {
       } else {
         const ProcessResult selection = ProcessSelectionKey(context, key);
         if (selection != kNoop) return selection;
+        const int keycode = key.keycode();
+        const bool unconfigured_digit =
+            (keycode >= XK_0 && keycode <= XK_9) ||
+            (keycode >= XK_KP_0 && keycode <= XK_KP_9);
+        if (IsPlainKey(key) && unconfigured_digit) {
+          CommitCurrentSelection(context, PostCommitPrediction::kDismiss,
+                                 false);
+          return kRejected;
+        }
       }
     }
 
@@ -345,6 +357,45 @@ class LinnetInteractionProcessor : public Processor {
   bool HasPredictionSegment(const Context* context) const {
     return context && !context->composition().empty() &&
            context->composition().back().HasTag("prediction");
+  }
+
+  ProcessResult ProcessPrintablePagingKey(Context* context,
+                                          const KeyEvent& key) const {
+    if (!IsPlainKey(key)) return kNoop;
+    const bool previous =
+        key.keycode() == XK_bracketleft || key.keycode() == XK_minus;
+    const bool next =
+        key.keycode() == XK_bracketright || key.keycode() == XK_equal;
+    if (!previous && !next) return kNoop;
+    if (!context || context->composition().empty()) return kRejected;
+
+    Segment& segment = context->composition().back();
+    if (!segment.menu || IsRawLikeSegment(segment) || !engine_->schema()) {
+      return kRejected;
+    }
+    const int page_size = engine_->schema()->page_size();
+    if (page_size <= 0) return kRejected;
+    const size_t selected = segment.selected_index;
+    size_t target = 0;
+    if (previous) {
+      if (selected < static_cast<size_t>(page_size)) return kRejected;
+      target = selected - static_cast<size_t>(page_size);
+    } else {
+      const size_t page_start =
+          (selected / static_cast<size_t>(page_size)) *
+          static_cast<size_t>(page_size);
+      const size_t next_page_start = page_start + page_size;
+      const int candidate_count =
+          segment.menu->Prepare(next_page_start + page_size);
+      if (candidate_count <= static_cast<int>(next_page_start)) {
+        return kRejected;
+      }
+      target = (std::min)(selected + static_cast<size_t>(page_size),
+                          static_cast<size_t>(candidate_count - 1));
+    }
+    context->Highlight(target);
+    segment.tags.insert("paging");
+    return kAccepted;
   }
 
   void HardStop(Context* context) const {
@@ -674,7 +725,7 @@ class SmartEnglishTranslator : public Translator {
  public:
   explicit SmartEnglishTranslator(const Ticket& ticket)
       : Translator(ticket), schema_id_(ticket.schema ? ticket.schema->schema_id() : string()), options_(InteractionOptions::Load(ticket.schema)),
-        predict_engine_(PredictEngineComponent::Shared()->GetInstance(ticket)), index_(predict_engine_), mixed_decoder_(ticket) {
+        predict_engine_(PredictEngineComponent::Shared()->GetInstance(ticket)), index_(predict_engine_) {
     if (!engine_) return;
     Context* context = engine_->context();
     commit_connection_ = context->commit_notifier().connect([this](Context* ctx) { OnCommit(ctx); });
@@ -722,11 +773,6 @@ class SmartEnglishTranslator : public Translator {
         result->Append(candidate);
       }
       return result;
-    }
-    if (schema_id_ != kSmartEnglishSchema && IsOrdinarySegment(segment)) {
-      for (const auto& candidate : mixed_decoder_.Query(input, segment)) {
-        result->Append(candidate);
-      }
     }
     if (!segment.HasTag("zz_english")) return result;
     const string normalized = LowerAsciiWord(input);
@@ -1008,7 +1054,6 @@ class SmartEnglishTranslator : public Translator {
   const InteractionOptions options_;
   const an<PredictEngine> predict_engine_;
   const SmartEnglishIndex index_;
-  ModelessMixedDecoder mixed_decoder_;
   bool pinyin_decoder_initialized_ = false;
   bool pinyin_formatter_loaded_ = false;
   the<Dictionary> pinyin_dictionary_;

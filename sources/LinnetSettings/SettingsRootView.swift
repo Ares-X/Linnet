@@ -176,16 +176,7 @@ struct SettingsRootView: View {
       AppearanceTabView(model: model)
         .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
       InputTabView(model: model)
-        .tabItem { Label("Chinese Input", systemImage: "keyboard") }
-      EnglishTabView(model: model)
-        .tabItem {
-          Label {
-            Text("Smart English")
-          } icon: {
-            LinnetSettingsPageMarkView(mark: .latinABC, context: .tab)
-              .font(.system(size: 10, weight: .bold))
-          }
-        }
+        .tabItem { Label("Input", systemImage: "keyboard") }
       DictionaryTabView(model: model)
         .tabItem { Label("Dictionary", systemImage: "text.book.closed") }
       DataTabView(
@@ -198,7 +189,9 @@ struct SettingsRootView: View {
         pendingBackupRemoval: $pendingBackupRemoval,
         pendingLegacyImport: $pendingLegacyImport
       )
-      .tabItem { Label("Data", systemImage: "internaldrive") }
+      .tabItem {
+        Label("Data & Updates", systemImage: "arrow.triangle.2.circlepath")
+      }
     }
   }
 

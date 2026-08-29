@@ -3,9 +3,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # GitHub Actions transport boundary for a verified candidate. It may create an
-# unpublished GitHub draft and upload missing exact assets. An already
-# published byte-identical data seed is accepted read-only, but this owner
-# cannot publish a release, create a release tag, or advance the stable Catalog.
+# unpublished GitHub draft and upload missing exact assets. For Core and public
+# channels it may retire an exact Linnet-owned unpublished Draft from an older
+# revision before recreating the same version for the current candidate.
+# Immutable pack assets may be reused from an earlier revision's byte-identical
+# data Release; the Core draft owns the candidate's raw Catalog snapshot. This
+# owner cannot publish a release, create a release tag, or advance the stable
+# Catalog.
 
 set -euo pipefail
 
@@ -143,7 +147,7 @@ case "${channel}" in
   data)
     {
       echo "Linnet Settings 使用的同仓库自动数据频道。普通用户无需手动下载这些文件。"
-      echo "Catalog 绑定每个语言包的字节数和 SHA-256。"
+      echo "每个不可变语言包都由字节数和 SHA-256 绑定。"
       echo
       echo "频道资产："
       while IFS=$'\t' read -r name digest _; do
@@ -156,7 +160,7 @@ esac
 release_exists=false
 release_error="${work_root}/release-error"
 if gh release view "${tag}" --repo "${repository}" \
-    --json databaseId,isDraft,isPrerelease,tagName,targetCommitish,assets \
+    --json databaseId,isDraft,isPrerelease,tagName,name,targetCommitish,assets \
     >"${release_json}" 2>"${release_error}"; then
   release_exists=true
 elif [[ "$(tr -d '\r\n' <"${release_error}")" != "release not found" ]]; then
@@ -164,61 +168,116 @@ elif [[ "$(tr -d '\r\n' <"${release_error}")" != "release not found" ]]; then
   fail_stage "${tag} release identity is unavailable"
 fi
 
-if [[ "${release_exists}" == false ]]; then
-  [[ "${mode}" == stage ]] || fail_stage "${tag} draft is missing"
+create_draft() {
   create_args=(release create "${tag}" --repo "${repository}"
     --target "${candidate_revision}" --draft --title "${title}"
     --notes-file "${notes}")
   [[ "${prerelease}" == true ]] && create_args+=(--prerelease)
   gh "${create_args[@]}"
   gh release view "${tag}" --repo "${repository}" \
-    --json databaseId,isDraft,isPrerelease,tagName,targetCommitish,assets \
+    --json databaseId,isDraft,isPrerelease,tagName,name,targetCommitish,assets \
     >"${release_json}"
-fi
+}
 
-release_state="$(ruby -rjson -e '
-  release = JSON.parse(File.binread(ARGV.fetch(0)))
-  abort unless release.fetch("tagName") == ARGV.fetch(1)
-  abort unless release.fetch("isPrerelease") == (ARGV.fetch(2) == "true")
-  puts release.fetch("isDraft")
-' "${release_json}" "${tag}" "${prerelease}")" ||
-  fail_stage "${tag} release kind is invalid"
-
-if [[ "${release_state}" == true ]]; then
-  ruby -rjson -e '
-    release = JSON.parse(File.binread(ARGV.fetch(0)))
-    abort unless release.fetch("targetCommitish") == ARGV.fetch(1)
-  ' "${release_json}" "${candidate_revision}" ||
-    fail_stage "${tag} draft targets another revision"
-else
-  tag_revision="$(gh api "repos/${repository}/git/ref/tags/${tag}" --jq '.object.sha')" ||
-    fail_stage "${tag} published tag is unavailable"
-  [[ "${tag_revision}" == "${candidate_revision}" ]] ||
-    fail_stage "${tag} published tag resolves to another revision"
+if [[ "${release_exists}" == false ]]; then
+  [[ "${mode}" == stage ]] || fail_stage "${tag} draft is missing"
+  create_draft
 fi
 
 actual="${work_root}/actual.tsv"
-ruby -rjson -e '
-  release = JSON.parse(File.binread(ARGV.fetch(0)))
-  release.fetch("assets").each do |asset|
-    puts [asset.fetch("name"), asset.fetch("digest"), asset.fetch("size")].join("\t")
-  end
-' "${release_json}" | LC_ALL=C sort >"${actual}"
+snapshot_release_assets() {
+  ruby -rjson -e '
+    release = JSON.parse(File.binread(ARGV.fetch(0)))
+    release.fetch("assets").each do |asset|
+      puts [asset.fetch("name"), asset.fetch("digest"), asset.fetch("size")].join("\t")
+    end
+  ' "${release_json}" | LC_ALL=C sort >"${actual}"
+}
 
-ruby -e '
-  expected = File.readlines(ARGV.fetch(0), chomp: true).to_h do |line|
-    name, digest, bytes = line.split("\t", 3)
-    [name, [digest, bytes]]
-  end
-  seen = {}
-  actual = File.readlines(ARGV.fetch(1), chomp: true).to_h do |line|
-    name, digest, bytes = line.split("\t", 3)
-    abort "duplicate remote asset" if seen.key?(name)
-    seen[name] = true
-    [name, [digest, bytes]]
-  end
-  actual.each { |name, identity| abort "foreign remote asset" unless expected[name] == identity }
-' "${expected}" "${actual}" || fail_stage "${tag} contains foreign asset bytes"
+verify_release_asset_subset() {
+  ruby -e '
+    expected = File.readlines(ARGV.fetch(0), chomp: true).to_h do |line|
+      name, digest, bytes = line.split("\t", 3)
+      [name, [digest, bytes]]
+    end
+    seen = {}
+    File.readlines(ARGV.fetch(1), chomp: true).each do |line|
+      name, digest, bytes = line.split("\t", 3)
+      abort "duplicate remote asset" if seen.key?(name)
+      seen[name] = true
+      abort "foreign remote asset" unless expected[name] == [digest, bytes]
+    end
+  ' "${expected}" "${actual}" ||
+    fail_stage "${tag} contains foreign asset bytes"
+}
+
+snapshot_release_assets
+verify_release_asset_subset
+
+release_state="$(ruby -rjson -e '
+  release = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort unless release.fetch("tagName") == ARGV.fetch(1) &&
+    release.fetch("name") == ARGV.fetch(2) &&
+    release.fetch("isPrerelease") == (ARGV.fetch(3) == "true")
+  puts release.fetch("isDraft")
+' "${release_json}" "${tag}" "${title}" "${prerelease}")" ||
+  fail_stage "${tag} release kind is invalid"
+
+if [[ "${release_state}" == true ]]; then
+  draft_revision="$(ruby -rjson -e '
+    release = JSON.parse(File.binread(ARGV.fetch(0)))
+    revision = release.fetch("targetCommitish")
+    abort unless revision.match?(/\A[0-9a-f]{40}\z/) &&
+      revision != "0" * 40
+    puts revision
+  ' "${release_json}")" || fail_stage "${tag} draft target is invalid"
+  if [[ "${draft_revision}" != "${candidate_revision}" ]]; then
+    if [[ "${channel}" == data ]]; then
+      cmp -s "${expected}" "${actual}" ||
+        fail_stage "${tag} earlier-revision data Draft is not byte-identical"
+    else
+      [[ "${mode}" == stage ]] ||
+        fail_stage "${tag} draft targets another revision"
+      ruby -rjson -e '
+        release = JSON.parse(File.binread(ARGV.fetch(0)))
+        expected_names = File.readlines(ARGV.fetch(1), chomp: true).map do |line|
+          line.split("\t", 2).fetch(0)
+        end
+        assets = release.fetch("assets")
+        names = assets.map { |asset| asset.fetch("name") }
+        abort unless release.fetch("databaseId").is_a?(Integer) &&
+          release.fetch("databaseId").positive? &&
+          release.fetch("name") == ARGV.fetch(2) &&
+          names.uniq == names &&
+          (names - expected_names).empty?
+      ' "${release_json}" "${expected}" "${title}" ||
+        fail_stage "${tag} older Draft is not exact Linnet-owned state"
+      gh release delete "${tag}" --repo "${repository}" --yes
+      create_draft
+      release_state="$(ruby -rjson -e '
+        release = JSON.parse(File.binread(ARGV.fetch(0)))
+        abort unless release.fetch("tagName") == ARGV.fetch(1) &&
+          release.fetch("name") == ARGV.fetch(2) &&
+          release.fetch("isPrerelease") == (ARGV.fetch(3) == "true") &&
+          release.fetch("isDraft") &&
+          release.fetch("targetCommitish") == ARGV.fetch(4)
+        puts true
+      ' "${release_json}" "${tag}" "${title}" "${prerelease}" \
+        "${candidate_revision}")" ||
+        fail_stage "${tag} replacement Draft identity is invalid"
+      snapshot_release_assets
+      verify_release_asset_subset
+    fi
+  fi
+else
+  tag_revision="$(gh api "repos/${repository}/git/ref/tags/${tag}" --jq '.object.sha')" ||
+    fail_stage "${tag} published tag is unavailable"
+  [[ "${tag_revision}" =~ ^[0-9a-f]{40}$ ]] ||
+    fail_stage "${tag} published tag identity is invalid"
+  if [[ "${channel}" != data && "${tag_revision}" != "${candidate_revision}" ]]; then
+    fail_stage "${tag} published tag resolves to another revision"
+  fi
+fi
 
 if [[ "${release_state}" == true && "${mode}" == stage ]]; then
   while IFS=$'\t' read -r name _ _; do
@@ -227,14 +286,10 @@ if [[ "${release_state}" == true && "${mode}" == stage ]]; then
     fi
   done <"${expected}"
   gh release view "${tag}" --repo "${repository}" \
-    --json databaseId,isDraft,isPrerelease,tagName,targetCommitish,assets \
+    --json databaseId,isDraft,isPrerelease,tagName,name,targetCommitish,assets \
     >"${release_json}"
-  ruby -rjson -e '
-    release = JSON.parse(File.binread(ARGV.fetch(0)))
-    release.fetch("assets").each do |asset|
-      puts [asset.fetch("name"), asset.fetch("digest"), asset.fetch("size")].join("\t")
-    end
-  ' "${release_json}" | LC_ALL=C sort >"${actual}"
+  snapshot_release_assets
+  verify_release_asset_subset
 fi
 
 cmp -s "${expected}" "${actual}" ||

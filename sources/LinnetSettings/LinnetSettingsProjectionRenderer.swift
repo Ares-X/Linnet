@@ -251,7 +251,7 @@ private extension LinnetSettingsProjectionRenderer {
     _ trigger: LinnetSettingsDocument.PinyinReverseTrigger,
     to entries: inout [(String, String)]
   ) {
-    guard trigger != .semicolon else { return }
+    guard trigger != .verticalBar else { return }
     entries.append((
       "recognizer/patterns/linnet_pinyin",
       quoted(trigger.recognizerPattern)

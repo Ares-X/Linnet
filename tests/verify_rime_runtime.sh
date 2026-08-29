@@ -10,18 +10,14 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 runtime_probe="${1:-}"
-if [[ "${1:-}" == --single-key-ranking-probe ||
-      "${1:-}" == --mixed-input-probe ||
+if [[ "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --mixed-latency-probe ||
       "${1:-}" == --warm-session-probe ||
       "${1:-}" == --cold-client-probe ||
-      "${1:-}" == --shift-probe ||
-      "${1:-}" == --core-shift-overlap-probe ||
-      "${1:-}" == --prediction-layout-probe ||
-      "${1:-}" == --partial-return-probe ]]; then
+      "${1:-}" == --profile-key-matrix-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--shift-probe|--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe]" >&2
+  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe]" >&2
   exit 64
 fi
 
@@ -131,14 +127,7 @@ test "$(rg -F -c '"linnet/recognizer_patterns/zz_code_token"' \
   "${user}/default.custom.yaml")" -eq 1
 end_phase "compile Settings projection fixture"
 
-# These two profiles deliberately override the default document after the
-# production renderer has installed the Core-owned policy projection.
 begin_phase "deploy native schemas"
-cp tests/fixtures/linnet_zh_pipe.custom.yaml \
-  "${user}/linnet_zh_jiajia.custom.yaml"
-cp tests/fixtures/linnet_zh_pipe.custom.yaml \
-  "${user}/linnet_zh_mspy.custom.yaml"
-
 make --no-print-directory smart-english-plugin
 make --no-print-directory verify-rime-binaries
 RIME_LOG_DIR="${logs}" \
@@ -223,16 +212,8 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime retained warm-session latency: PASS"
   elif [[ "${runtime_probe}" == --cold-client-probe ]]; then
     echo "Linnet native Rime cold-client first-key latency: PASS"
-  elif [[ "${runtime_probe}" == --single-key-ranking-probe ]]; then
-    echo "Linnet native Rime focused single-key ranking probe: PASS"
-  elif [[ "${runtime_probe}" == --shift-probe ]]; then
-    echo "Linnet native Rime focused Shift probe: PASS"
-  elif [[ "${runtime_probe}" == --core-shift-overlap-probe ]]; then
-    echo "Linnet native Rime focused overlapping Shift probe: PASS"
-  elif [[ "${runtime_probe}" == --prediction-layout-probe ]]; then
-    echo "Linnet native Rime focused prediction layout probe: PASS"
-  elif [[ "${runtime_probe}" == --partial-return-probe ]]; then
-    echo "Linnet native Rime focused partial-confirmed Return probe: PASS"
+  elif [[ "${runtime_probe}" == --profile-key-matrix-probe ]]; then
+    echo "Linnet native Rime formal eight-profile key matrix: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi
@@ -319,18 +300,18 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     --fast-config-reload-probe
 
 profile_cases=(
-  'semicolon:natural:linnet_zh:srfa'
-  'semicolon:full_pinyin:linnet_zh_pinyin:suanfa'
-  'semicolon:flypy:linnet_zh_flypy:srfa'
-  'semicolon:microsoft:linnet_zh_mspy:srfa'
-  'semicolon:sogou:linnet_zh_sogou:srfa'
-  'semicolon:abc:linnet_zh_abc:spfa'
-  'semicolon:ziguang:linnet_zh_ziguang:slfa'
-  'semicolon:jiajia:linnet_zh_jiajia:scfa'
-  # Profile and trigger are separate renderer facts. The Swift owner test
-  # proves the alternate trigger reaches every schema; retain the one native
-  # cross-case whose Microsoft code itself contains a semicolon.
+  'vertical_bar:natural:linnet_zh:srfa'
+  'vertical_bar:full_pinyin:linnet_zh_pinyin:suanfa'
+  'vertical_bar:flypy:linnet_zh_flypy:srfa'
   'vertical_bar:microsoft:linnet_zh_mspy:srfa'
+  'vertical_bar:sogou:linnet_zh_sogou:srfa'
+  'vertical_bar:abc:linnet_zh_abc:spfa'
+  'vertical_bar:ziguang:linnet_zh_ziguang:slfa'
+  'vertical_bar:jiajia:linnet_zh_jiajia:scfa'
+  # Profile and trigger are separate renderer facts. The Swift owner test
+  # proves the optional trigger reaches every schema; retain one native custom
+  # semicolon cross-case whose Microsoft code itself contains a semicolon.
+  'semicolon:microsoft:linnet_zh_mspy:srfa'
 )
 for profile_case in "${profile_cases[@]}"; do
   IFS=: read -r trigger profile schema code <<<"${profile_case}"

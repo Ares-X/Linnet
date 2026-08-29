@@ -315,6 +315,7 @@ english_cache="${project_root}/build/linnet-english-cache"
 if [[ -f "${english_fingerprint_stamp}" &&
       "$(cat "${english_fingerprint_stamp}")" == "${english_fingerprint}" &&
       -s "${english_cache}/linnet_en.dict.yaml" &&
+      -s "${english_cache}/linnet_english_entities.dict.yaml" &&
       -s "${english_cache}/linnet.smart.db" &&
       -f "${english_cache}/linnet.english-data-manifest.json" ]]; then
     echo "generate-linnet-english-data: SKIP (inputs unchanged; cached projection reused)"
