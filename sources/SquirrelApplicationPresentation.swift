@@ -157,15 +157,20 @@ extension SquirrelApplicationDelegate {
       return
     }
     let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = true
     configuration.addsToRecentItems = false
     configuration.allowsRunningApplicationSubstitution = false
     NSWorkspace.shared.openApplication(
       at: settingsURL,
       configuration: configuration
-    ) { _, error in
-      if error != nil {
+    ) { runningApplication, error in
+      guard error == nil, let runningApplication else {
         Self.showMessage(msgText: "Settings could not be opened.")
+        return
+      }
+      if !runningApplication.activate(
+        options: [.activateAllWindows, .activateIgnoringOtherApps]
+      ) {
+        Self.showMessage(msgText: "Settings could not be brought to the front.")
       }
     }
   }
