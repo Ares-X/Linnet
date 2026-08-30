@@ -203,6 +203,33 @@ Production source and the installed input method remain unchanged; full
 release-candidate and installed-product acceptance are separate, not claimed
 by this focused run.
 
+### Settings UI scroll incident — 2026-08-30
+
+Release Action `33303649630`, source
+`064ad67e6fa8c046128ee65673db2733698da143`, passed source, Swift, Rime,
+Periphery and signed-package verification, then failed its first UI test at
+09:51:44 UTC. `testAppearanceControlsAndPreviewRemainResponsive` could not
+reveal Xuan: target `(73, 704, 208, 105)`, viewport `(32, 112, 960, 523)`,
+existing and enabled but not hittable. The remaining nine UI tests were
+skipped by the existing fail-fast contract; Draft staging did not run.
+
+The reveal owner issued twelve fixed -600-point scrolls followed by twelve
++600-point scrolls. Those jumps exceed the 418-point interval in which this
+105-point card can fit inside the viewport, so a valid position can be
+skipped. Intermediate target frames were not retained; the log alone does
+not prove that this was the only cause or that the product was unclickable.
+Candidate `343ebe2f5521f72fdaad894ad96f0a274eefc5db` instead centers the observed
+target, bounds each step to half the viewport and records frames on failure.
+Full containment, hittability and selected-state assertions remain intact.
+The sole scroll owner remains `reveal` (one before/after); no product path,
+fallback click, input method restart or local installation was added.
+Local typechecking and release-workflow gates pass. Isolated Action
+`33305751531` stopped before UI execution because the new profile omitted
+the declared build-tool installation, leaving `rg` unavailable; this is
+`ENVIRONMENT_INVALID`, not a UI result. The profile now uses the existing
+tool installer before hydration. Until the isolated UI replay passes, the
+scroll correction is unverified and the release blocker remains open.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |

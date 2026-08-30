@@ -56,8 +56,8 @@ jobs:
             linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install declared build tools once
-        if: inputs.profile == 'full'
-        run: scripts/install_ci_build_tools.sh quality
+        if: inputs.profile != 'theme-preview'
+        run: scripts/install_ci_build_tools.sh ${{ inputs.profile == 'full' && 'quality' || 'release' }}
 
       - name: Strict Swift lint
         if: inputs.profile == 'full'

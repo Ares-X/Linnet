@@ -371,6 +371,13 @@ tests/verify_swift_units.sh
 不需要下载词库或构建 Rime。手动 CI 的 `theme-preview` profile 只运行此项，
 失败截图随日志保留；其结果不能替代完整 CI 或安装验收。
 
+Settings 的实际点击、滚动或窗口行为失败时，使用手动 CI 的 `settings-ui`
+profile；`ui_test` 留空运行完整 Settings UI 套件，也可填写现有测试方法名
+仅复现该用例。此入口复用锁定依赖准备、无签名构建和
+`tests/verify_visible_settings_fixture.sh --ui-test [test-name]`，不运行 Rime/Swift
+全套门、签名或发布打包。真实界面测试只在 CI 或明确隔离的 macOS 桌面执行，
+不得为了测试而关闭使用者的应用；通过也不等于正式安装包验收。
+
 ### Development composite
 
 ```bash
