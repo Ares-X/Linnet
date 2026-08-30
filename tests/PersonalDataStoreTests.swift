@@ -4,7 +4,7 @@ import Foundation
 @main
 struct PersonalDataStoreTests {
   static func main() {
-    let directory = FileManager.default.temporaryDirectory.appending(
+    let directory = LinnetTestScratch.directory.appending(
       path: "LinnetPersonalDataStoreTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )

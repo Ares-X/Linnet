@@ -13,11 +13,9 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
-scratch="$(mktemp -d /tmp/linnet-swift-units.XXXXXX)"
-cleanup() {
-  [[ "${scratch}" == /tmp/linnet-swift-units.* ]] && /bin/rm -rf -- "${scratch}"
-}
-trap cleanup EXIT INT TERM
+bash tests/verify_swift_scratch.sh
+source tests/swift_test_scratch.sh
+linnet_swift_scratch_init
 
 swiftc="$(xcrun --find swiftc)"
 sdk="$(xcrun --show-sdk-path)"
@@ -40,7 +38,8 @@ compile_run() {
   local name="$1"
   shift
   begin_phase "compile and run ${name}"
-  linnet_swift_compile "${name}" -warnings-as-errors -sdk "${sdk}" "$@"
+  linnet_swift_compile "${name}" -warnings-as-errors -sdk "${sdk}" \
+    tests/LinnetTestScratch.swift "$@"
   "${LINNET_SWIFT_COMPILED_BINARY}"
   end_phase "compile and run ${name}"
 }
@@ -226,6 +225,7 @@ linnet_swift_compile rime-path -parse-as-library -warnings-as-errors -sdk "${sdk
 end_phase "Rime filesystem projection"
 
 common_settings_sources=(
+  tests/LinnetTestScratch.swift
   sources/LinnetPackContract.swift
   sources/LinnetDataChannel.swift
   sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift

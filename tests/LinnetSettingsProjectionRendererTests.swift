@@ -5,7 +5,7 @@ import Foundation
 @main
 struct LinnetSettingsProjectionRendererTests {
   static func main() {
-    let directory = FileManager.default.temporaryDirectory.appending(
+    let directory = LinnetTestScratch.directory.appending(
       path: "LinnetSettingsProjectionRendererTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )

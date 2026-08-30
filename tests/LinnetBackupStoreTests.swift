@@ -4,7 +4,7 @@ import Foundation
 @main
 struct LinnetBackupStoreTests {
   static func main() {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "LinnetBackupStoreTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )

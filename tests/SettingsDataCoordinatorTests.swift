@@ -487,7 +487,7 @@ struct SettingsDataCoordinatorTests {
 
   static func main() async {
     let fileManager = FileManager.default
-    let fixtureRoot = FileManager.default.temporaryDirectory.appending(
+    let fixtureRoot = LinnetTestScratch.directory.appending(
       path: "LinnetDataCoordinatorTests-\(UUID().uuidString)",
       directoryHint: .isDirectory)
     let productName = "Linnet Data Test \(UUID().uuidString)"

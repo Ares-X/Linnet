@@ -181,7 +181,7 @@ struct LinnetDataChannelTests {
       LinnetTestFailure.fail("old Core was accepted")
     } catch {}
 
-    let file = FileManager.default.temporaryDirectory.appending(
+    let file = LinnetTestScratch.directory.appending(
       path: "LinnetDataChannelTests-\(UUID().uuidString).linnetpack")
     defer { try? FileManager.default.removeItem(at: file) }
     try Data("four".utf8).write(to: file)

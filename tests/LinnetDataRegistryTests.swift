@@ -544,7 +544,7 @@ struct LinnetDataRegistryTests {
   private static func descriptorCanonicalTemporaryRootSupportsAtomicSwap(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
-    let support = FileManager.default.temporaryDirectory.appending(
+    let support = LinnetTestScratch.directory.appending(
       path: "LinnetDescriptorRoot-\(UUID().uuidString)", directoryHint: .isDirectory)
     defer { try? FileManager.default.removeItem(at: support) }
     let registry = try LinnetDataRegistry(
@@ -1367,7 +1367,7 @@ struct LinnetDataRegistryTests {
     _ fixtureSigning: FixtureSigningOwner,
     _ body: (LinnetDataRegistry) throws -> Void
   ) throws {
-    let base = FileManager.default.temporaryDirectory.appending(
+    let base = LinnetTestScratch.directory.appending(
       path: "LinnetDataRegistryTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )

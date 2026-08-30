@@ -225,7 +225,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
   private static func makeBundleFixture(
     identity: LinnetSettingsContract.ProductIdentity
   ) throws -> BundleFixture {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "LinnetSettingsUpdateCheckerTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )

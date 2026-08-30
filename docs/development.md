@@ -366,6 +366,13 @@ tests/verify_swift_units.sh
 
 只运行受影响的最小集合，先证明缺陷用例，再证明它转绿。
 
+Swift 夹具通过 `LinnetTestScratch.directory` 使用本轮测试专属目录；不要直接使用
+Foundation 的 `temporaryDirectory`（macOS 上不会随 `TMPDIR` 重定向）。
+`verify_swift_units.sh` 负责在成功、失败退出或 INT/TERM 中断后回收目录，包括只读
+词包；删除失败会使测试门失败，不会静默忽略。编译缓存不在回收范围内。
+清理回归已纳入该门，也可单独运行 `bash tests/verify_swift_scratch.sh`。
+强制杀死父进程（SIGKILL）或断电无法执行退出清理，不在此保证内。
+
 主题卡片渲染或 OCR 失败时，可单独运行
 `tests/verify_swift_units.sh --appearance-preview`。它复用同一测试与编译缓存，
 不需要下载词库或构建 Rime。手动 CI 的 `theme-preview` profile 只运行此项，

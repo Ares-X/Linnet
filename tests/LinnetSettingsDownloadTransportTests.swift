@@ -669,7 +669,7 @@ struct LinnetSettingsDownloadTransportTests {
   }
 
   private static func temporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appending(
+    let url = LinnetTestScratch.directory.appending(
       path: "linnet-download-\(UUID().uuidString)", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(
       at: url, withIntermediateDirectories: false,

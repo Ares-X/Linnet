@@ -355,7 +355,7 @@ struct LinnetPackTests {
   private static func withFixture(
     _ body: (LinnetDataRegistry) throws -> Void
   ) throws {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "LinnetPackTests-\(UUID().uuidString)", directoryHint: .isDirectory)
     defer { try? FileManager.default.removeItem(at: root) }
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

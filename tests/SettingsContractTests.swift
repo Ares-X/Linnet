@@ -471,7 +471,7 @@ struct SettingsContractTests {
   private static func inTemporaryBundleTree(
     _ body: (Bundle, Bundle, String, String) throws -> Void
   ) throws {
-    let directory = FileManager.default.temporaryDirectory
+    let directory = LinnetTestScratch.directory
       .appendingPathComponent(
         "LinnetSettingsContractTests-\(UUID().uuidString)", isDirectory: true)
     let hostURL = directory.appendingPathComponent("Host.app", isDirectory: true)
