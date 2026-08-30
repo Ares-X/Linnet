@@ -279,8 +279,14 @@ helper instances, helper-exit polling and all NSWorkspace calls in XCTRunner are
 removed. One unsandboxed fixture owns launch arguments/environment; product code
 and all real-home checks are unchanged. Local Swift typecheck, fixture compilation,
 fixed-home dry-run and publication-owner checks pass. Local desktop automation
-returns a closed native pipe; real three-case verification remains pending on
-the isolated runner, not claimed by compilation.
+returns a closed native pipe; it does not provide local visual acceptance.
+Isolated Action `33316110481`, source
+`f86bb0b84acba83ebf66421ff7f922f6e6e2f4b4`, passes all three real UI cases on
+2026-08-30 at 14:16 UTC: cold open 7.726 s, covered reopen 11.966 s and minimized
+reopen 12.360 s (32.051 s total, zero failures). The unchanged real-home metadata
+and content checks also pass; the script reaches `Visible Settings isolated UI
+suite: PASS`. This closes the fixture launch/isolation incident. It is not yet
+the complete candidate suite, signed-artifact installation or publication.
 
 | Case | Exact complete-run result |
 | --- | --- |
