@@ -134,6 +134,26 @@ transitions. README version duplication found in the same local release checks
 was removed without changing the gate. These are release-tool corrections,
 not input-runtime changes or a successful cloud rerun.
 
+### Cloud theme-preview assertion — 2026-08-30
+
+Action `33301220240`, source `c3cd850a58469f729cb305d45152c03e5cce8ad7`,
+passed source/publication checks, then failed at 08:28:08 UTC in the Swift
+appearance-preview fixture. Vision recognized 13 occurrences of “输入” instead
+of 14 in the 680-point Dark Aqua theme grid. Compilation succeeded. The
+macos-26-arm64 runner also logged an unavailable paravirtual display driver,
+but that does not establish the cause of the recognition difference.
+
+On the maintainer's macOS 26.6, both default 2x and explicitly controlled 1x
+captures passed all four appearance/width cases; visual inspection of the 1x
+Dark Aqua 680-point image found all fourteen samples. Thus a scale-only cause
+was not reproduced and the cloud assertion is not yet a confirmed product
+rendering defect. The old fixture saved only 900-point images after its
+assertion, so the failed cloud image was lost. The fixture now saves each
+capture before recognition, logs its pixel dimensions and emits the synthetic
+PNG in the existing job log on a count failure. The fourteen-sample threshold,
+rendering path and production UI remain unchanged. Cloud diagnosis and formal
+artifact publication remain incomplete; no third cloud run was authorized.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |

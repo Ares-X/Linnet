@@ -51,6 +51,13 @@ struct LinnetSettingsAppearancePreviewTests {
       }
       view.cacheDisplay(in: view.bounds, to: bitmap)
       guard let image = bitmap.cgImage else { fail("theme picker image is empty") }
+      print("Theme picker render: \(appearance.rawValue) \(width)pt, \(bitmap.pixelsWide)x\(bitmap.pixelsHigh)px")
+      guard let png = bitmap.representation(using: .png, properties: [:]) else {
+        fail("cannot encode rendered theme evidence")
+      }
+      do {
+        try png.write(to: URL(fileURLWithPath: "build/settings-theme-preview-\(appearance.rawValue)-\(Int(width)).png"))
+      } catch { fail("cannot save rendered theme evidence: \(error)") }
       let request = VNRecognizeTextRequest()
       request.recognitionLanguages = ["zh-Hans", "en-US"]
       request.recognitionLevel = .accurate
@@ -59,13 +66,13 @@ struct LinnetSettingsAppearancePreviewTests {
       } catch { fail("theme preview OCR unavailable: \(error)") }
       let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
       let samples = text.components(separatedBy: "输入").count - 1
+      if samples < 14 {
+        // Failed hosted jobs discard local files; retain the synthetic fixture
+        // in their existing log without introducing another artifact uploader.
+        print("LINNET_THEME_PREVIEW_FAILURE_PNG_BASE64=\(png.base64EncodedString())")
+      }
       require(samples >= 14,
         "\(appearance) \(width)pt theme picker must show a readable Light/Dark candidate for all seven themes; found \(samples): \(text)")
-      if width == 900, let png = bitmap.representation(using: .png, properties: [:]) {
-        do {
-          try png.write(to: URL(fileURLWithPath: "build/settings-theme-preview-\(appearance.rawValue).png"))
-        } catch { fail("cannot save rendered theme evidence: \(error)") }
-      }
     }
   }
 
