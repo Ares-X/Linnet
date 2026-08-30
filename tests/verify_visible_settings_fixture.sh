@@ -90,8 +90,8 @@ rg -Fq 'continueAfterFailure = false' "${settings_ui_source}" ||
 if rg -n 'suiteHasFailed|XCTSkipIf' "${settings_ui_source}"; then
   fail "one failed Settings test must not skip independent UI workflows"
 fi
-rg -Fq 'terminate_fixture_settings' "$0" ||
-  fail "Settings UI cleanup no longer terminates its exact fixture process"
+rg -Fq 'terminate_fixture_apps' "$0" ||
+  fail "Settings UI cleanup no longer terminates its exact fixture processes"
 
 if [[ "${run_ui_tests}" == true ]] &&
   { [[ -e "${uat_home}" ]] || [[ -L "${uat_home}" ]]; }; then
@@ -148,21 +148,25 @@ uat_home_created=false
 fixture_settings_stopped=true
 ui_test_completed=false
 
-terminate_fixture_settings() {
+terminate_fixture_apps() {
   local executable process_id remaining=0
-  executable="${fixture}/DerivedData/Build/Products/Debug/Linnet.app/Contents/Applications/Settings.app/Contents/MacOS/Settings"
-  while read -r process_id; do
-    [[ -n "${process_id}" ]] || continue
-    /bin/kill -TERM "${process_id}" 2>/dev/null || true
-  done < <(/bin/ps -axo pid=,command= | /usr/bin/awk -v executable="${executable}" \
-    '$2 == executable { print $1 }')
-  for _ in {1..50}; do
-    remaining="$(/bin/ps -axo command= | /usr/bin/awk -v executable="${executable}" \
-      '$1 == executable { count += 1 } END { print count + 0 }')"
-    [[ "${remaining}" -eq 0 ]] && return 0
-    /bin/sleep 0.1
+  for executable in \
+      "${fixture}/DerivedData/Build/Products/Debug/Linnet.app/Contents/Applications/Settings.app/Contents/MacOS/Settings" \
+      "${fixture}/DerivedData/Build/Products/Debug/ForegroundFixture.app/Contents/MacOS/ForegroundFixture"; do
+    while read -r process_id; do
+      [[ -n "${process_id}" ]] || continue
+      /bin/kill -TERM "${process_id}" 2>/dev/null || true
+    done < <(/bin/ps -axo pid=,command= | /usr/bin/awk -v executable="${executable}" \
+      '$2 == executable { print $1 }')
+    for _ in {1..50}; do
+      remaining="$(/bin/ps -axo command= | /usr/bin/awk -v executable="${executable}" \
+        '$1 == executable { count += 1 } END { print count + 0 }')"
+      [[ "${remaining}" -eq 0 ]] && break
+      /bin/sleep 0.1
+    done
+    [[ "${remaining}" -eq 0 ]] || return 1
   done
-  return 1
+  return 0
 }
 
 unregister_fixture_apps() {
@@ -185,9 +189,9 @@ unregister_fixture_apps() {
 cleanup_uat_preference_domains() {
   local domain preference_file
   for domain in "${uat_host_identifier}" "${uat_settings_identifier}" \
-    "${uat_test_identifier}"; do
+    "${uat_test_identifier}" "${uat_host_identifier}.foreground"; do
     case "${domain}" in
-      "${uat_host_identifier}"|"${uat_settings_identifier}"|"${uat_test_identifier}") ;;
+      "${uat_host_identifier}"|"${uat_settings_identifier}"|"${uat_test_identifier}"|"${uat_host_identifier}.foreground") ;;
       *) return 1 ;;
     esac
     /usr/bin/defaults delete "${domain}" >/dev/null 2>&1 || true
@@ -217,8 +221,8 @@ cleanup() {
       echo "verify_visible_settings_fixture: UI suite did not reach its completed boundary" >&2
       exit_code=1
     fi
-    if ! terminate_fixture_settings; then
-      echo "verify_visible_settings_fixture: exact fixture Settings process did not stop" >&2
+    if ! terminate_fixture_apps; then
+      echo "verify_visible_settings_fixture: an exact fixture process did not stop" >&2
       fixture_settings_stopped=false
       exit_code=1
     fi
@@ -465,6 +469,13 @@ HOME="${isolated_home}" CFFIXED_USER_HOME="${isolated_home}" TMPDIR="${isolated_
   fail "fixed-home probe changed protected real-user Settings content"
 
 if [[ "${run_ui_tests}" == true ]]; then
+  foreground_app="${fixture}/DerivedData/Build/Products/Debug/ForegroundFixture.app"
+  mkdir -p "${foreground_app}/Contents/MacOS"
+  cp tests/SettingsUITests/ForegroundFixture-Info.plist "${foreground_app}/Contents/Info.plist"
+  xcrun swiftc -warnings-as-errors -parse-as-library -target arm64-apple-macos13.0 \
+    tests/SettingsUITests/ForegroundFixture.swift \
+    -o "${foreground_app}/Contents/MacOS/ForegroundFixture"
+  codesign --sign - "${foreground_app}"
   if [[ -n "${ui_test_name}" ]]; then
     echo "Visible Settings focused UI test: ${ui_test_name}"
   else

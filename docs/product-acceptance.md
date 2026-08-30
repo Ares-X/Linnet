@@ -319,6 +319,33 @@ NSRunningApplication snapshots only advance on the main run loop, so request
 return values are no longer treated as observed foreground state. Product
 activation code remains untouched. Both corrections await the exact replay.
 
+Action `33309486828`, source `406dd9fd7cfd82f421a8b922591e2d8f1787a387`,
+passes the complete progressive-disclosure case: Cloud, Manual and Diagnostics
+all report true and reveal their descendants. The next failure is now distinct:
+at 11:48:24–40 Retention is enabled, fully visible at `(143,468,247,26)`, but
+XCTest reports `isHittable=false`. The retained screen recording at +54s
+confirms the same exposed popup, without another window or overlay. The scroll
+helper's hittability prerequisite stopped before any Retention click occurred.
+Visibility is now the scroll owner's sole decision; the popup workflow verifies
+enabled state, an actual centered mouse click, the requested menu item and the
+resulting selected value. No click fallback or source/product bypass is added.
+Because this changes the shared reveal prerequisite, the next replay is the
+complete ten-case UI suite, not a claim extrapolated from selected cases.
+
+Two attempts to turn background XCTRunner into the covering application failed:
+changing its activation policy did not admit NSRunningApplication activation,
+and NSApplication activation never made it active. That path is retired rather
+than receiving a third policy patch. The cross-application scenario now has a
+real, regular test-only AppKit app and event loop: launch Settings → launch the
+separate exact-URL foreground fixture → assert Settings inactive → reopen
+Settings through NSWorkspace → assert Settings active and visible → terminate
+only the owned fixture apps. Its 16-line main and bundle metadata are compiled
+below the existing disposable DerivedData root; the existing cleanup owner
+also covers its exact executable, bundle registration and preference domain.
+No user application, input source or installed product is involved. This adds
+one necessary test process boundary while deleting the in-runner panel/policy
+path; production files and production authoritative-path counts stay unchanged.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |

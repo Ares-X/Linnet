@@ -81,29 +81,20 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    // XCTRunner is LSBackgroundOnly. A prohibited app cannot own an active
-    // covering window; change only our runner's policy and restore it afterward.
-    let runner = NSApplication.shared
-    let previousPolicy = runner.activationPolicy()
-    print("Foreground fixture initial policy=\(previousPolicy.rawValue)")
-    XCTAssertTrue(runner.setActivationPolicy(.regular))
-    defer { _ = runner.setActivationPolicy(previousPolicy) }
-
-    let coveringWindow = NSPanel(
-      contentRect: NSRect(x: 120, y: 120, width: 480, height: 320),
-      styleMask: [.titled, .closable],
-      backing: .buffered,
-      defer: false
-    )
-    coveringWindow.title = "Settings UI foreground fixture"
-    runner.activate(ignoringOtherApps: true)
-    coveringWindow.makeKeyAndOrderFront(nil)
-    defer { coveringWindow.close() }
-    let fixtureActive = XCTNSPredicateExpectation(
-      predicate: NSPredicate(format: "isActive == true"), object: runner)
+    // Exercise a real second application, not a panel in background XCTRunner.
+    let foregroundURL = Bundle.main.bundleURL.deletingLastPathComponent()
+      .appending(path: "ForegroundFixture.app", directoryHint: .isDirectory)
+    XCTAssertEqual(Bundle(url: foregroundURL)?.bundleIdentifier,
+      "io.github.ares-x.inputmethod.Linnet.settings-ui-uat.foreground")
+    let coveringApp = XCUIApplication(url: foregroundURL)
+    coveringApp.launchEnvironment = app.launchEnvironment
+    coveringApp.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+    coveringApp.launch()
+    defer { coveringApp.terminate() }
+    XCTAssertTrue(coveringApp.windows.firstMatch.waitForExistence(timeout: 5))
     XCTAssertEqual(
-      XCTWaiter.wait(for: [fixtureActive], timeout: 3), .completed,
-      "The controlled foreground fixture did not become active")
+      coveringApp.state, .runningForeground,
+      "The separate foreground fixture did not become active")
 
     let settings = try XCTUnwrap(
       NSRunningApplication.runningApplications(
@@ -831,10 +822,17 @@ final class SettingsUITests: XCTestCase {
       let popUp = identifier.map { app.popUpButtons[$0] }
         ?? app.popUpButtons.matching(predicate).firstMatch
       try reveal(popUp, named: identifier ?? option, in: app)
-      popUp.click()
+      XCTAssertTrue(popUp.isEnabled)
+      // Expanded SwiftUI disclosures can report false isHittable for a visibly
+      // exposed child. Verify the actual mouse/menu/value path, not that hint.
+      popUp.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
       let menuItem = app.menuItems[option]
       XCTAssertTrue(menuItem.waitForExistence(timeout: 3), "Missing menu item: \(option)")
       menuItem.click()
+      let selected = XCTNSPredicateExpectation(
+        predicate: NSPredicate(format: "value == %@", option), object: popUp)
+      XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed,
+        "The popup did not select \(option)")
       XCTAssertNotEqual(app.state, .notRunning, "Settings exited after choosing \(option)")
     }
   }
@@ -887,10 +885,10 @@ final class SettingsUITests: XCTestCase {
         if element.exists {
           let frame = element.frame
           let hittable = element.isHittable
-          if hittable, viewport.contains(frame) { return }
+          if viewport.contains(frame) { return }
           print("Reveal \(name): frame=\(frame), viewport=\(viewport), hittable=\(hittable)")
           // Center the target instead of jumping over its visible interval.
-          // A centered but non-hittable control is a failure, not more scrolling.
+          // Visibility belongs here; each interaction verifies its actual result.
           deltaY = min(max(viewport.midY - frame.midY, -maximumStep), maximumStep)
           if abs(deltaY) < 1 { break }
         }
