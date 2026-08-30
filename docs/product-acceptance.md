@@ -236,6 +236,58 @@ probes accept the current workflow and reject removing the full suite or giving
 the full profile only release tools; the complete publication-owner gate passes.
 No release gate, product code, version or package identity was relaxed or changed.
 
+Action `33313241996` at `8832754d5dc0350003fd53c48f70ea0b8d9b48cf`
+passed strict/source, Swift, Rime, Periphery, signed-package verification and all
+ten Settings UI cases (zero failures, 556.382 s), but failed the post-test home
+isolation check. The real runner Linnet/UserData/Transactions directories appeared
+at 13:37:17 UTC, exactly when the cold NSWorkspace-open case began. XCTRunner's
+generated entitlements contain `com.apple.security.app-sandbox=1`;
+[Apple documents](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration/environment)
+that a sandboxed caller's launch environment is ignored. The test's HOME override
+therefore did not establish isolation. This is an environment/fixture failure,
+not an overall release PASS; no Draft or local installation was produced.
+
+The correction moves cold/reopen requests to the existing unsandboxed foreground
+fixture, using launch arguments to reach it and one NSWorkspace environment owner
+there. The two direct Settings-open implementations in XCTRunner are retired;
+the real-home metadata/content checks remain unchanged. Product code and signing
+are unchanged. Local compilation passes, but the focused dynamic replay failed:
+Action `33315502196`, source `13fb7cb6ee8598d2cee8ab1283edb31cdfc59795`,
+on 2026-08-30 at 14:02:46–14:03:42 UTC returned `reopenFailed` in all three
+cold/covered/minimized cases. AppKit's installed `NSWorkspace.h` explicitly
+states that sandboxed callers' `arguments` are ignored too. Therefore forwarding
+arguments through the same sandboxed NSWorkspace caller did not establish the
+intended fixture command. This correction is NOT accepted and is not merged;
+there was no subsequent full candidate run, installation or publication.
+
+The two failed assumptions were that sandboxed NSWorkspace could forward HOME,
+then that it could forward a helper command through arguments. The unchanged
+failing boundary is XCTRunner → NSWorkspace launch configuration. Further patches
+and Action dispatches are stopped pending a complete fixture launch redesign:
+XCTest should operate the existing foreground fixture through its normal UI,
+with that unsandboxed fixture owning the exact isolated Settings open request.
+Cold, covered and minimized states must each observe the real Settings window;
+launch failure must remain a failure, and real-home protection must remain intact.
+No production activation workaround, sandbox relaxation or new runtime owner is
+authorized by this test-fixture diagnosis.
+
+After renewed user authorization, the redesign uses an ordinary “Open Settings”
+button in the existing foreground fixture. XCTest launches/observes it through
+XCUIApplication, clicks the button, and waits for the real NSWorkspace completion
+before checking the exact Settings process/window. Command forwarding, forced
+helper instances, helper-exit polling and all NSWorkspace calls in XCTRunner are
+removed. One unsandboxed fixture owns launch arguments/environment; product code
+and all real-home checks are unchanged. Local Swift typecheck, fixture compilation,
+fixed-home dry-run and publication-owner checks pass. Local desktop automation
+returns a closed native pipe; it does not provide local visual acceptance.
+Isolated Action `33316110481`, source
+`f86bb0b84acba83ebf66421ff7f922f6e6e2f4b4`, passes all three real UI cases on
+2026-08-30 at 14:16 UTC: cold open 7.726 s, covered reopen 11.966 s and minimized
+reopen 12.360 s (32.051 s total, zero failures). The unchanged real-home metadata
+and content checks also pass; the script reaches `Visible Settings isolated UI
+suite: PASS`. This closes the fixture launch/isolation incident. It is not yet
+the complete candidate suite, signed-artifact installation or publication.
+
 | Case | Exact complete-run result |
 | --- | --- |
 | Appearance controls, theme previews and popup selections | PASS, 99.659 s |

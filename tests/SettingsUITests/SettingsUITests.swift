@@ -66,7 +66,7 @@ final class SettingsUITests: XCTestCase {
       object: window)
     XCTAssertEqual(XCTWaiter.wait(for: [minimized], timeout: 3), .completed)
 
-    try await reopenSettings(at: settingsApplicationURL())
+    _ = try await openSettingsWithoutActivation(at: settingsApplicationURL())
     let restored = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "isHittable == true"),
       object: window)
@@ -111,7 +111,7 @@ final class SettingsUITests: XCTestCase {
       "The controlled fixture did not cover Settings"
     )
 
-    try await reopenSettings(at: settingsApplicationURL())
+    _ = try await openSettingsWithoutActivation(at: settingsApplicationURL())
     let raised = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "isActive == true"),
       object: settings
@@ -538,59 +538,35 @@ final class SettingsUITests: XCTestCase {
       .appending(path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
   }
 
-  private func reopenSettings(at settingsURL: URL) async throws {
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
-    configuration.addsToRecentItems = false
-    configuration.allowsRunningApplicationSubstitution = false
-    try await withCheckedThrowingContinuation {
-      (continuation: CheckedContinuation<Void, Error>) in
-      NSWorkspace.shared.openApplication(
-        at: settingsURL,
-        configuration: configuration
-      ) { application, error in
-        if let error {
-          continuation.resume(throwing: error)
-        } else if application == nil {
-          continuation.resume(throwing: SettingsUIFailure.reopenFailed)
-        } else {
-          continuation.resume(returning: ())
-        }
-      }
-    }
-  }
-
+  @MainActor
   private func openSettingsWithoutActivation(
     at settingsURL: URL
   ) async throws -> NSRunningApplication {
-    let isolatedHome = "/private/tmp/linnet-settings-ui-uat-active-\(getuid())"
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
-    configuration.addsToRecentItems = false
-    configuration.allowsRunningApplicationSubstitution = false
-    configuration.environment = [
-      "HOME": isolatedHome,
-      "CFFIXED_USER_HOME": isolatedHome,
-    ]
-    configuration.arguments = [
-      "-AppleLanguages", "(en)",
-      "-AppleLocale", "en_US",
-    ]
-    return try await withCheckedThrowingContinuation {
-      (continuation: CheckedContinuation<NSRunningApplication, Error>) in
-      NSWorkspace.shared.openApplication(
-        at: settingsURL,
-        configuration: configuration
-      ) { application, error in
-        if let error {
-          continuation.resume(throwing: error)
-        } else if let application {
-          continuation.resume(returning: application)
-        } else {
-          continuation.resume(throwing: SettingsUIFailure.reopenFailed)
-        }
-      }
+    let fixtureURL = Bundle.main.bundleURL.deletingLastPathComponent()
+      .appending(path: "ForegroundFixture.app", directoryHint: .isDirectory)
+    let launcher = XCUIApplication(url: fixtureURL)
+    let wasRunning = launcher.state != .notRunning
+    if !wasRunning {
+      launcher.launch()
     }
+    defer { if !wasRunning { launcher.terminate() } }
+    let openButton = launcher.buttons["Open Settings"]
+    XCTAssertTrue(openButton.waitForExistence(timeout: 5))
+    openButton.click()
+    XCTAssertTrue(launcher.staticTexts["Settings open delivered"].waitForExistence(timeout: 5),
+      "The fixture did not complete its isolated NSWorkspace open request")
+    for _ in 0..<50 {
+      if let settings = NSRunningApplication.runningApplications(
+        withBundleIdentifier: isolatedBundleIdentifier
+      ).first(where: {
+        $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL ==
+          settingsURL.resolvingSymlinksInPath().standardizedFileURL
+      }) {
+        return settings
+      }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    throw SettingsUIFailure.reopenFailed
   }
 
   private func terminateIsolatedSettings(at settingsURL: URL) async throws {
