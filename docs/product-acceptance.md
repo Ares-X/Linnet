@@ -243,6 +243,16 @@ does not activate the application or loosen the foreground/window assertions.
 The target identity paths reduce from two to one. The complete Settings suite
 and publication remain blocked until this second correction is replayed.
 
+Action `33306439387`, source `24f4548e35e7e4a0c7497ac6af900b72b3b7be83`,
+passed Appearance again (84.231 seconds), draft-close (35.692 seconds) and
+cold-Host-open (2.420 seconds). This closes the cold test's build-selection
+defect. The suite then reached Data and failed to find the retention popup
+immediately after expanding Manual recovery. Unlike checkbox and button
+helpers, `selectEachPopUpOption` clicked without calling the shared reveal
+owner. All ten popup call sites now use that same visibility prerequisite;
+there is no alternate selector or blind click. The next replay must still
+prove the Data workflow and the remaining six tests, which were skipped.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |
