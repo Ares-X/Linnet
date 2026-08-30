@@ -96,12 +96,14 @@ final class SettingsUITests: XCTestCase {
       defer: false
     )
     coveringWindow.title = "Settings UI foreground fixture"
+    runner.activate(ignoringOtherApps: true)
     coveringWindow.makeKeyAndOrderFront(nil)
     defer { coveringWindow.close() }
-    XCTAssertTrue(
-      NSRunningApplication.current.activate(options: [.activateAllWindows]),
-      "The controlled foreground fixture could not be activated"
-    )
+    let fixtureActive = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "isActive == true"), object: runner)
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [fixtureActive], timeout: 3), .completed,
+      "The controlled foreground fixture did not become active")
 
     let settings = try XCTUnwrap(
       NSRunningApplication.runningApplications(
@@ -646,10 +648,12 @@ final class SettingsUITests: XCTestCase {
     before.name = "Before expanding \(name)"
     before.lifetime = .keepAlways
     add(before)
-    // SwiftUI exposes the label and leading chevron as one AX triangle.
-    // Click the chevron, not the label's center, which does not expand on macOS.
+    // At this fixture's fixed system font, macOS 26's AX outline frame starts
+    // 26 pt before the painted chevron (xcresult: frame x=43, arrow x=69).
+    // The label center and frame.minX + height/2 both miss the actual control.
+    let chevronInset: CGFloat = 26
     control.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
-      .withOffset(CGVector(dx: control.frame.height / 2, dy: 0)).click()
+      .withOffset(CGVector(dx: chevronInset, dy: 0)).click()
     let expanded = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "value == 1"), object: control)
     let result = XCTWaiter.wait(for: [expanded], timeout: 3)

@@ -298,6 +298,27 @@ The release artifact guard now distinguishes diagnostic evidence from the
 still-prohibited App/package artifact transport. No user application is
 stopped, input source registered, version advanced or publication authorized.
 
+Diagnostic Action `33308803451` at
+`fcfe211e696b3c1505b1841ad2492b9a23bd166a` retained its native report and
+reproduced all three failures. It falsifies the value-type hypothesis: both
+disclosures return `__NSCFBoolean(0)`. At 11:34:03 the event record targets
+`(51,548)`, whereas the screenshot paints Manual's chevron at `(69,548)`;
+the AX frame starts at x=43, outside the painted GroupBox. Cloud shows the
+same mismatch. The fixed-font UI fixture now uses the measured 26-pt chevron
+inset, not height/2 or the label center. Its native expanded-value assertion
+and later descendant interactions are unchanged; there is no alternate click.
+This is an explicitly fixed-fixture geometry measurement, not a product
+layout constant. A future OS/control-metric change must fail with screenshots,
+not silently try another location.
+
+The runner reports initial policy 2 (prohibited); changing policy succeeds,
+but the immediate NSRunningApplication activation request is still rejected.
+The fixture now uses NSApplication's own activation entrypoint and waits for
+actual active state before verifying Settings loses and regains focus. Native
+NSRunningApplication snapshots only advance on the main run loop, so request
+return values are no longer treated as observed foreground state. Product
+activation code remains untouched. Both corrections await the exact replay.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |
