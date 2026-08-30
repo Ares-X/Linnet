@@ -151,8 +151,37 @@ rendering defect. The old fixture saved only 900-point images after its
 assertion, so the failed cloud image was lost. The fixture now saves each
 capture before recognition, logs its pixel dimensions and emits the synthetic
 PNG in the existing job log on a count failure. The fourteen-sample threshold,
-rendering path and production UI remain unchanged. Cloud diagnosis and formal
-artifact publication remain incomplete; no third cloud run was authorized.
+rendering path and production UI remain unchanged. At that checkpoint cloud
+diagnosis and formal artifact publication were incomplete; no additional cloud
+run had been authorized.
+
+The subsequently authorized isolated diagnostic ran once as Action
+`33302408070`, source `bee9c175f16ff67a13eb7e6691eee71c42887caa`, on
+2026-08-30 at 08:46 UTC. Its macOS job took 36 seconds; hydration, build-cache
+downloads, full product tests, packaging and publication were all skipped.
+The same 680-point Dark Aqua assertion failed with 13 recognized samples.
+The preserved 680×501 PNG has SHA-256
+`69187fbd84f038977300d2da4aeb543cd810ee856384956d87fd38267a72ef6f`.
+It is recoverable from the job's raw log marker
+`LINNET_THEME_PREVIEW_FAILURE_PNG_BASE64`; the CLI's formatted failed-log view
+omits that long line, so retrieval used the job-log API.
+
+Visual inspection of those exact cloud pixels found all fourteen samples,
+without missing candidate text. Replaying whole-image Vision recognition on
+the same PNG locally reproduced 13: the Xuan dark sample was segmented into
+“C 1” and “2候选”, omitting the visible “输入”. Restricting the same recognition
+request to that sample's actual image region recognized “1输入 2候选” without
+changing the pixels. The earliest wrong result is therefore the test's
+whole-image OCR count being treated as proof of missing rendered content,
+not a demonstrated product rendering failure or cloud-only Vision failure.
+
+This closes diagnosis, not the failing test or release gate. The next correction
+must retain all fourteen visible-sample requirements while removing the
+whole-grid recognition ambiguity; no production theme change is justified by
+this evidence. The diagnostic entrypoint reuses the same fixture, source list
+and Swift cache owner (each remains one). Its local run, release-automation
+gate, shell syntax and exact default-flow equivalence checks pass. No installed
+App was changed, no second cloud diagnostic was run, and no release was made.
 
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
