@@ -66,7 +66,7 @@ final class SettingsUITests: XCTestCase {
       object: window)
     XCTAssertEqual(XCTWaiter.wait(for: [minimized], timeout: 3), .completed)
 
-    try await reopenSettings(at: settingsApplicationURL())
+    _ = try await openSettingsWithoutActivation(at: settingsApplicationURL())
     let restored = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "isHittable == true"),
       object: window)
@@ -111,7 +111,7 @@ final class SettingsUITests: XCTestCase {
       "The controlled fixture did not cover Settings"
     )
 
-    try await reopenSettings(at: settingsApplicationURL())
+    _ = try await openSettingsWithoutActivation(at: settingsApplicationURL())
     let raised = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "isActive == true"),
       object: settings
@@ -538,28 +538,7 @@ final class SettingsUITests: XCTestCase {
       .appending(path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
   }
 
-  private func reopenSettings(at settingsURL: URL) async throws {
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
-    configuration.addsToRecentItems = false
-    configuration.allowsRunningApplicationSubstitution = false
-    try await withCheckedThrowingContinuation {
-      (continuation: CheckedContinuation<Void, Error>) in
-      NSWorkspace.shared.openApplication(
-        at: settingsURL,
-        configuration: configuration
-      ) { application, error in
-        if let error {
-          continuation.resume(throwing: error)
-        } else if application == nil {
-          continuation.resume(throwing: SettingsUIFailure.reopenFailed)
-        } else {
-          continuation.resume(returning: ())
-        }
-      }
-    }
-  }
-
+  @MainActor
   private func openSettingsWithoutActivation(
     at settingsURL: URL
   ) async throws -> NSRunningApplication {
@@ -568,18 +547,14 @@ final class SettingsUITests: XCTestCase {
     configuration.activates = false
     configuration.addsToRecentItems = false
     configuration.allowsRunningApplicationSubstitution = false
-    configuration.environment = [
-      "HOME": isolatedHome,
-      "CFFIXED_USER_HOME": isolatedHome,
-    ]
-    configuration.arguments = [
-      "-AppleLanguages", "(en)",
-      "-AppleLocale", "en_US",
-    ]
-    return try await withCheckedThrowingContinuation {
+    configuration.createsNewApplicationInstance = true
+    configuration.arguments = ["--open-settings", settingsURL.path, isolatedHome]
+    let fixtureURL = Bundle.main.bundleURL.deletingLastPathComponent()
+      .appending(path: "ForegroundFixture.app", directoryHint: .isDirectory)
+    let launcher = try await withCheckedThrowingContinuation {
       (continuation: CheckedContinuation<NSRunningApplication, Error>) in
       NSWorkspace.shared.openApplication(
-        at: settingsURL,
+        at: fixtureURL,
         configuration: configuration
       ) { application, error in
         if let error {
@@ -591,6 +566,25 @@ final class SettingsUITests: XCTestCase {
         }
       }
     }
+    defer { _ = launcher.terminate() }
+    // Reopen must wait for the helper to deliver its open event, not merely
+    // observe the already-running (possibly minimized) Settings process.
+    for _ in 0..<50 where !launcher.isTerminated {
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    guard launcher.isTerminated else { throw SettingsUIFailure.reopenFailed }
+    for _ in 0..<50 {
+      if let settings = NSRunningApplication.runningApplications(
+        withBundleIdentifier: isolatedBundleIdentifier
+      ).first(where: {
+        $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL ==
+          settingsURL.resolvingSymlinksInPath().standardizedFileURL
+      }) {
+        return settings
+      }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    throw SettingsUIFailure.reopenFailed
   }
 
   private func terminateIsolatedSettings(at settingsURL: URL) async throws {

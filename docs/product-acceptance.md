@@ -236,6 +236,23 @@ probes accept the current workflow and reject removing the full suite or giving
 the full profile only release tools; the complete publication-owner gate passes.
 No release gate, product code, version or package identity was relaxed or changed.
 
+Action `33313241996` at `8832754d5dc0350003fd53c48f70ea0b8d9b48cf`
+passed strict/source, Swift, Rime, Periphery, signed-package verification and all
+ten Settings UI cases (zero failures, 556.382 s), but failed the post-test home
+isolation check. The real runner Linnet/UserData/Transactions directories appeared
+at 13:37:17 UTC, exactly when the cold NSWorkspace-open case began. XCTRunner's
+generated entitlements contain `com.apple.security.app-sandbox=1`;
+[Apple documents](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration/environment)
+that a sandboxed caller's launch environment is ignored. The test's HOME override
+therefore did not establish isolation. This is an environment/fixture failure,
+not an overall release PASS; no Draft or local installation was produced.
+
+The correction moves cold/reopen requests to the existing unsandboxed foreground
+fixture, using launch arguments to reach it and one NSWorkspace environment owner
+there. The two direct Settings-open implementations in XCTRunner are retired;
+the real-home metadata/content checks remain unchanged. Product code and signing
+are unchanged. Local compilation is checked; dynamic replay is still pending.
+
 | Case | Exact complete-run result |
 | --- | --- |
 | Appearance controls, theme previews and popup selections | PASS, 99.659 s |
