@@ -92,8 +92,8 @@ if rg -n 'suiteHasFailed|XCTSkipIf' "${settings_ui_source}"; then
 fi
 rg -Fq 'terminate_fixture_apps' "$0" ||
   fail "Settings UI cleanup no longer terminates its exact fixture processes"
-if rg -Fq 'configuration.environment' "${settings_ui_source}"; then
-  fail "sandboxed XCTRunner cannot own the Settings launch environment"
+if rg -Fq 'NSWorkspace.' "${settings_ui_source}"; then
+  fail "sandboxed XCTRunner cannot own Settings workspace launch requests"
 fi
 
 if [[ "${run_ui_tests}" == true ]] &&

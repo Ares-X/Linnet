@@ -542,37 +542,19 @@ final class SettingsUITests: XCTestCase {
   private func openSettingsWithoutActivation(
     at settingsURL: URL
   ) async throws -> NSRunningApplication {
-    let isolatedHome = "/private/tmp/linnet-settings-ui-uat-active-\(getuid())"
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
-    configuration.addsToRecentItems = false
-    configuration.allowsRunningApplicationSubstitution = false
-    configuration.createsNewApplicationInstance = true
-    configuration.arguments = ["--open-settings", settingsURL.path, isolatedHome]
     let fixtureURL = Bundle.main.bundleURL.deletingLastPathComponent()
       .appending(path: "ForegroundFixture.app", directoryHint: .isDirectory)
-    let launcher = try await withCheckedThrowingContinuation {
-      (continuation: CheckedContinuation<NSRunningApplication, Error>) in
-      NSWorkspace.shared.openApplication(
-        at: fixtureURL,
-        configuration: configuration
-      ) { application, error in
-        if let error {
-          continuation.resume(throwing: error)
-        } else if let application {
-          continuation.resume(returning: application)
-        } else {
-          continuation.resume(throwing: SettingsUIFailure.reopenFailed)
-        }
-      }
+    let launcher = XCUIApplication(url: fixtureURL)
+    let wasRunning = launcher.state != .notRunning
+    if !wasRunning {
+      launcher.launch()
     }
-    defer { _ = launcher.terminate() }
-    // Reopen must wait for the helper to deliver its open event, not merely
-    // observe the already-running (possibly minimized) Settings process.
-    for _ in 0..<50 where !launcher.isTerminated {
-      try await Task.sleep(nanoseconds: 100_000_000)
-    }
-    guard launcher.isTerminated else { throw SettingsUIFailure.reopenFailed }
+    defer { if !wasRunning { launcher.terminate() } }
+    let openButton = launcher.buttons["Open Settings"]
+    XCTAssertTrue(openButton.waitForExistence(timeout: 5))
+    openButton.click()
+    XCTAssertTrue(launcher.staticTexts["Settings open delivered"].waitForExistence(timeout: 5),
+      "The fixture did not complete its isolated NSWorkspace open request")
     for _ in 0..<50 {
       if let settings = NSRunningApplication.runningApplications(
         withBundleIdentifier: isolatedBundleIdentifier

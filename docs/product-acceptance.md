@@ -251,7 +251,36 @@ The correction moves cold/reopen requests to the existing unsandboxed foreground
 fixture, using launch arguments to reach it and one NSWorkspace environment owner
 there. The two direct Settings-open implementations in XCTRunner are retired;
 the real-home metadata/content checks remain unchanged. Product code and signing
-are unchanged. Local compilation is checked; dynamic replay is still pending.
+are unchanged. Local compilation passes, but the focused dynamic replay failed:
+Action `33315502196`, source `13fb7cb6ee8598d2cee8ab1283edb31cdfc59795`,
+on 2026-08-30 at 14:02:46–14:03:42 UTC returned `reopenFailed` in all three
+cold/covered/minimized cases. AppKit's installed `NSWorkspace.h` explicitly
+states that sandboxed callers' `arguments` are ignored too. Therefore forwarding
+arguments through the same sandboxed NSWorkspace caller did not establish the
+intended fixture command. This correction is NOT accepted and is not merged;
+there was no subsequent full candidate run, installation or publication.
+
+The two failed assumptions were that sandboxed NSWorkspace could forward HOME,
+then that it could forward a helper command through arguments. The unchanged
+failing boundary is XCTRunner → NSWorkspace launch configuration. Further patches
+and Action dispatches are stopped pending a complete fixture launch redesign:
+XCTest should operate the existing foreground fixture through its normal UI,
+with that unsandboxed fixture owning the exact isolated Settings open request.
+Cold, covered and minimized states must each observe the real Settings window;
+launch failure must remain a failure, and real-home protection must remain intact.
+No production activation workaround, sandbox relaxation or new runtime owner is
+authorized by this test-fixture diagnosis.
+
+After renewed user authorization, the redesign uses an ordinary “Open Settings”
+button in the existing foreground fixture. XCTest launches/observes it through
+XCUIApplication, clicks the button, and waits for the real NSWorkspace completion
+before checking the exact Settings process/window. Command forwarding, forced
+helper instances, helper-exit polling and all NSWorkspace calls in XCTRunner are
+removed. One unsandboxed fixture owns launch arguments/environment; product code
+and all real-home checks are unchanged. Local Swift typecheck, fixture compilation,
+fixed-home dry-run and publication-owner checks pass. Local desktop automation
+returns a closed native pipe; real three-case verification remains pending on
+the isolated runner, not claimed by compilation.
 
 | Case | Exact complete-run result |
 | --- | --- |
