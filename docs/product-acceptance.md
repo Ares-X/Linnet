@@ -194,8 +194,14 @@ component captures also pass locally. No production code or theme palette was
 changed, and no second compiler/cache owner was added. Strict SwiftLint,
 release-automation checks and the complete local Swift owner suite pass,
 including candidate interaction and the two-process Settings IPC fixture.
-Exact cloud validation of this correction and release acceptance are still
-pending.
+Exact cloud verification passed on 2026-08-30 in Action `33302857559`, source
+`0523dd55fbf6986ef37328b106d3668b67f7be36`. The macOS job ran from 08:57:50 to
+08:59:08 UTC (78 seconds). It passed the retained cloud image, all sixteen
+negative images and all four actual 1x captures; hydration, full product build,
+packaging and publication were skipped. This closes the OCR test defect.
+Production source and the installed input method remain unchanged; full
+release-candidate and installed-product acceptance are separate, not claimed
+by this focused run.
 
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
