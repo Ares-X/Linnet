@@ -3,12 +3,17 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Full product validation or isolated theme-preview diagnosis
+        description: Full product validation or focused Settings diagnosis
         type: choice
         default: full
         options:
           - full
           - theme-preview
+          - settings-ui
+      ui_test:
+        description: Settings UI test method (settings-ui only; empty runs the suite)
+        type: string
+        default: ''
 permissions:
   contents: read
 
@@ -19,7 +24,7 @@ concurrency:
 jobs:
   product:
     runs-on: macos-latest
-    timeout-minutes: ${{ inputs.profile == 'theme-preview' && 10 || 120 }}
+    timeout-minutes: ${{ inputs.profile == 'theme-preview' && 10 || inputs.profile == 'settings-ui' && 30 || 120 }}
     steps:
       - name: Checkout last commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -36,7 +41,7 @@ jobs:
         run: tests/verify_swift_units.sh --appearance-preview
 
       - name: Restore locked build cache once
-        if: inputs.profile == 'full'
+        if: inputs.profile != 'theme-preview'
         uses: ./.github/actions/restore-locked-build-cache
         with:
           save: true
@@ -83,11 +88,11 @@ jobs:
         run: tests/verify_release_automation.sh && tests/verify_publication_owner.sh
 
       - name: Hydrate and verify locked inputs once
-        if: inputs.profile == 'full'
+        if: inputs.profile != 'theme-preview'
         run: ./action-install.sh
 
       - name: Build the unsigned local product once
-        if: inputs.profile == 'full'
+        if: inputs.profile != 'theme-preview'
         run: make --no-print-directory release
 
       - name: Verify App and package owners
@@ -97,6 +102,12 @@ jobs:
       - name: Verify visible Settings workflow
         if: inputs.profile == 'full'
         run: tests/verify_visible_settings_fixture.sh --ui-test
+
+      - name: Diagnose Settings UI without release packaging
+        if: inputs.profile == 'settings-ui'
+        env:
+          LINNET_UI_TEST: ${{ inputs.ui_test }}
+        run: tests/verify_visible_settings_fixture.sh --ui-test "${LINNET_UI_TEST}"
 
       - name: Verify Swift owner contracts
         if: inputs.profile == 'full'

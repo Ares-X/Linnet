@@ -850,19 +850,29 @@ final class SettingsUITests: XCTestCase {
     in app: XCUIApplication
   ) throws {
     let scrollView = app.scrollViews["settings.page.scroll"]
-    for deltaY in [-600.0, 600.0] {
+    for direction in [-1.0, 1.0] {
       for _ in 0..<12 {
-        if element.exists, scrollView.exists {
-          let viewport = scrollView.frame.insetBy(dx: 0, dy: 12)
-          if element.isHittable, viewport.contains(element.frame) { return }
-        }
         guard scrollView.exists else { break }
+        let viewport = scrollView.frame.insetBy(dx: 0, dy: 12)
+        let maximumStep = viewport.height / 2
+        var deltaY = direction * maximumStep
+        if element.exists {
+          let frame = element.frame
+          let hittable = element.isHittable
+          if hittable, viewport.contains(frame) { return }
+          print("Reveal \(name): frame=\(frame), viewport=\(viewport), hittable=\(hittable)")
+          // Center the target instead of jumping over its visible interval.
+          // A centered but non-hittable control is a failure, not more scrolling.
+          deltaY = min(max(viewport.midY - frame.midY, -maximumStep), maximumStep)
+          if abs(deltaY) < 1 { break }
+        }
         scrollView.scroll(byDeltaX: 0, deltaY: deltaY)
       }
     }
     let viewport = scrollView.exists
       ? scrollView.frame.insetBy(dx: 0, dy: 12)
       : CGRect.null
+    print(app.debugDescription)
     XCTFail(
       "Settings control is unavailable: \(name); "
         + "exists=\(element.exists), isEnabled=\(element.isEnabled), "
