@@ -366,6 +366,11 @@ tests/verify_swift_units.sh
 
 只运行受影响的最小集合，先证明缺陷用例，再证明它转绿。
 
+主题卡片渲染或 OCR 失败时，可单独运行
+`tests/verify_swift_units.sh --appearance-preview`。它复用同一测试与编译缓存，
+不需要下载词库或构建 Rime。手动 CI 的 `theme-preview` profile 只运行此项，
+失败截图随日志保留；其结果不能替代完整 CI 或安装验收。
+
 ### Development composite
 
 ```bash
