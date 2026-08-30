@@ -227,6 +227,15 @@ zero failures, 156.754 s, completed at 12:40:53 UTC. This closes the remaining
 Data interaction failure. The nine passes above and this focused pass are
 separate runs; no single exact ten-case PASS or installed acceptance is claimed.
 
+Release Action `33312706703` at `e781b916b709520d8012ad37b37af75c9471acf8`
+stopped before compilation/signing at 13:01:14 UTC: the publication source guard
+counted the focused UI command as a second full suite. Its tools check also still
+required the former literal quality command. The guard now requires exactly one
+unfiltered full-suite entry and the profile-specific tools command. Local contract
+probes accept the current workflow and reject removing the full suite or giving
+the full profile only release tools; the complete publication-owner gate passes.
+No release gate, product code, version or package identity was relaxed or changed.
+
 | Case | Exact complete-run result |
 | --- | --- |
 | Appearance controls, theme previews and popup selections | PASS, 99.659 s |

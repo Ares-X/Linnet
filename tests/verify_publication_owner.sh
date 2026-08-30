@@ -411,7 +411,7 @@ ruby -e '
     abort unless ci.scan(%r{tests/verify_development\.sh app}).size == 1
     abort unless ci.scan(%r{tests/verify_development\.sh swift}).size == 1
     abort unless ci.scan(%r{tests/verify_development\.sh rime}).size == 1
-    abort unless ci.scan(%r{tests/verify_visible_settings_fixture\.sh --ui-test}).size == 1
+    abort unless ci.scan(%r{^\s*run:\s*tests/verify_visible_settings_fixture\.sh --ui-test\s*$}).size == 1
     abort unless ci.scan(%r{scripts/run_periphery\.sh}).size == 1
     abort unless ci.scan(/^\s*path:\s*build\/swift-unit-cache\s*$/).size == 1
     abort unless ci.scan(/linnet-swift-units-v1-/).size == 2
@@ -576,7 +576,8 @@ ruby -e '
     runtime_builder.include?(%q{build/.rime-runtime-publish.XXXXXX})
   final_cache_check = %q{runtime_cache_is_valid "${runtime_cache_target}"}
   abort unless runtime_builder.rindex(final_cache_check) < runtime_builder.rindex(stamp)
-  abort unless commit.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
+  manual_tools = "run: scripts/install_ci_build_tools.sh ${{ inputs.profile == \x27full\x27 && \x27quality\x27 || \x27release\x27 }}"
+  abort unless commit.lines.count { |line| line.strip == manual_tools } == 1
   abort unless pull_request.scan(/^\s*run:\s*scripts\/install_ci_build_tools\.sh quality\s*$/).size == 1
   abort unless swift_gate.scan(/^source tests\/swift_test_cache\.sh$/).size == 1
   abort unless swift_gate.scan(/linnet_swift_compile/).size >= 4
