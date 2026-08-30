@@ -230,6 +230,19 @@ the declared build-tool installation, leaving `rg` unavailable; this is
 tool installer before hydration. Until the isolated UI replay passes, the
 scroll correction is unverified and the release blocker remains open.
 
+The corrected environment replay, Action `33305873514` at
+`ac153380ca7c5b9880e26813037bac685743b644`, passed the complete Appearance
+interaction test (76.444 seconds) and draft-close test (35.041 seconds).
+This closes the scroll defect without changing product code. It then failed
+the cold-Host-open test: the exact embedded NSWorkspace application was active,
+but the bundle-ID-only XCUIApplication proxy reported no window. The build
+contains both standalone and embedded Settings apps with the same identifier;
+all passing launch paths use the exact embedded URL. The cold test now uses
+that same URL rather than asking XCTest to resolve another build by ID. This
+does not activate the application or loosen the foreground/window assertions.
+The target identity paths reduce from two to one. The complete Settings suite
+and publication remain blocked until this second correction is replayed.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |

@@ -34,7 +34,9 @@ final class SettingsUITests: XCTestCase {
     try await terminateIsolatedSettings(at: settingsURL)
     let runningApplication = try await openSettingsWithoutActivation(
       at: settingsURL)
-    let app = XCUIApplication(bundleIdentifier: isolatedBundleIdentifier)
+    // The build also contains a standalone Settings.app with this bundle ID.
+    // Observe the exact embedded app opened above, as launchSettings does.
+    let app = XCUIApplication(url: settingsURL)
     defer { _ = runningApplication.terminate() }
 
     XCTAssertEqual(
@@ -48,7 +50,10 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(
       runningApplication.isActive,
       "Settings did not activate itself after the Host opened it without activation")
-    XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertTrue(
+      app.windows.firstMatch.waitForExistence(timeout: 5),
+      "No window for embedded Settings at \(settingsURL.path), "
+        + "opened PID=\(runningApplication.processIdentifier), state=\(app.state.rawValue)")
     XCTAssertTrue(
       app.windows.firstMatch.isHittable,
       "Cold-opened Settings window is hidden behind another app")
