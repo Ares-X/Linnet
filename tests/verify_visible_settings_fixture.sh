@@ -12,7 +12,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 [[ "$#" -le 2 ]] || {
-  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name]]" >&2
+  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name,...]]" >&2
   exit 2
 }
 mode="${1:---verify}"
@@ -27,7 +27,7 @@ case "${mode}" in
     ;;
   --ui-test) run_ui_tests=true ;;
   *)
-    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name]]" >&2
+    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name,...]]" >&2
     exit 2
     ;;
 esac
@@ -54,13 +54,16 @@ uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
 uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
 xcode_user_name="$(id -un)"
 settings_ui_source="tests/SettingsUITests/SettingsUITests.swift"
-focused_ui_test=""
+focused_ui_tests=()
 if [[ -n "${ui_test_name}" ]]; then
-  [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+$ ]] ||
+  [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+(,test[A-Za-z0-9]+)*$ ]] ||
     fail "invalid Settings UI test name: ${ui_test_name}"
-  rg -q "^[[:space:]]*func ${ui_test_name}\\(\\) (async )?throws \\{" \
-    "${settings_ui_source}" || fail "unknown Settings UI test: ${ui_test_name}"
-  focused_ui_test="-only-testing:SettingsUITests/SettingsUITests/${ui_test_name}"
+  IFS=, read -r -a selected_tests <<<"${ui_test_name}"
+  for selected_test in "${selected_tests[@]}"; do
+    rg -q "^[[:space:]]*func ${selected_test}\\(\\) (async )?throws \\{" \
+      "${settings_ui_source}" || fail "unknown Settings UI test: ${selected_test}"
+    focused_ui_tests+=("-only-testing:SettingsUITests/SettingsUITests/${selected_test}")
+  done
 fi
 xcode_generated_paths=(
   "${repo_root}/Linnet.xcodeproj/project.xcworkspace/xcuserdata/${xcode_user_name}.xcuserdatad/UserInterfaceState.xcuserstate"
@@ -82,11 +85,13 @@ if /usr/bin/grep -Eq \
   "${settings_ui_source}"; then
   fail "SettingsUITests restored a retired scroll helper or segmented fallback"
 fi
-rg -Fq 'override func record(_ issue: XCTIssue)' "${settings_ui_source}" &&
-  rg -Fq 'try XCTSkipIf(Self.suiteHasFailed' "${settings_ui_source}" ||
-  fail "SettingsUITests lost suite-level fail-fast behavior"
-rg -Fq 'terminate_fixture_settings' "$0" ||
-  fail "Settings UI cleanup no longer terminates its exact fixture process"
+rg -Fq 'continueAfterFailure = false' "${settings_ui_source}" ||
+  fail "Settings UI tests must stop interactions inside a failed test"
+if rg -n 'suiteHasFailed|XCTSkipIf' "${settings_ui_source}"; then
+  fail "one failed Settings test must not skip independent UI workflows"
+fi
+rg -Fq 'terminate_fixture_apps' "$0" ||
+  fail "Settings UI cleanup no longer terminates its exact fixture processes"
 
 if [[ "${run_ui_tests}" == true ]] &&
   { [[ -e "${uat_home}" ]] || [[ -L "${uat_home}" ]]; }; then
@@ -98,6 +103,10 @@ if [[ "${run_ui_tests}" == true ]] &&
   fail "SettingsUITests does not require the isolated UAT preference domain"
 fi
 if [[ "${run_ui_tests}" == true ]]; then
+  # Results outlive disposable apps so a failed run retains its actual UI
+  # evidence. Each invocation owns a new directory, never an older result.
+  mkdir -p "${repo_root}/build/settings-ui-results"
+  results="$(mktemp -d "${repo_root}/build/settings-ui-results/run.XXXXXX")"
   for generated_path in "${xcode_generated_paths[@]}"; do
     [[ ! -e "${generated_path}" && ! -L "${generated_path}" ]] ||
       fail "refusing to overwrite pre-existing Xcode user state: ${generated_path}"
@@ -139,21 +148,25 @@ uat_home_created=false
 fixture_settings_stopped=true
 ui_test_completed=false
 
-terminate_fixture_settings() {
+terminate_fixture_apps() {
   local executable process_id remaining=0
-  executable="${fixture}/DerivedData/Build/Products/Debug/Linnet.app/Contents/Applications/Settings.app/Contents/MacOS/Settings"
-  while read -r process_id; do
-    [[ -n "${process_id}" ]] || continue
-    /bin/kill -TERM "${process_id}" 2>/dev/null || true
-  done < <(/bin/ps -axo pid=,command= | /usr/bin/awk -v executable="${executable}" \
-    '$2 == executable { print $1 }')
-  for _ in {1..50}; do
-    remaining="$(/bin/ps -axo command= | /usr/bin/awk -v executable="${executable}" \
-      '$1 == executable { count += 1 } END { print count + 0 }')"
-    [[ "${remaining}" -eq 0 ]] && return 0
-    /bin/sleep 0.1
+  for executable in \
+      "${fixture}/DerivedData/Build/Products/Debug/Linnet.app/Contents/Applications/Settings.app/Contents/MacOS/Settings" \
+      "${fixture}/DerivedData/Build/Products/Debug/ForegroundFixture.app/Contents/MacOS/ForegroundFixture"; do
+    while read -r process_id; do
+      [[ -n "${process_id}" ]] || continue
+      /bin/kill -TERM "${process_id}" 2>/dev/null || true
+    done < <(/bin/ps -axo pid=,command= | /usr/bin/awk -v executable="${executable}" \
+      '$2 == executable { print $1 }')
+    for _ in {1..50}; do
+      remaining="$(/bin/ps -axo command= | /usr/bin/awk -v executable="${executable}" \
+        '$1 == executable { count += 1 } END { print count + 0 }')"
+      [[ "${remaining}" -eq 0 ]] && break
+      /bin/sleep 0.1
+    done
+    [[ "${remaining}" -eq 0 ]] || return 1
   done
-  return 1
+  return 0
 }
 
 unregister_fixture_apps() {
@@ -176,9 +189,9 @@ unregister_fixture_apps() {
 cleanup_uat_preference_domains() {
   local domain preference_file
   for domain in "${uat_host_identifier}" "${uat_settings_identifier}" \
-    "${uat_test_identifier}"; do
+    "${uat_test_identifier}" "${uat_host_identifier}.foreground"; do
     case "${domain}" in
-      "${uat_host_identifier}"|"${uat_settings_identifier}"|"${uat_test_identifier}") ;;
+      "${uat_host_identifier}"|"${uat_settings_identifier}"|"${uat_test_identifier}"|"${uat_host_identifier}.foreground") ;;
       *) return 1 ;;
     esac
     /usr/bin/defaults delete "${domain}" >/dev/null 2>&1 || true
@@ -208,8 +221,8 @@ cleanup() {
       echo "verify_visible_settings_fixture: UI suite did not reach its completed boundary" >&2
       exit_code=1
     fi
-    if ! terminate_fixture_settings; then
-      echo "verify_visible_settings_fixture: exact fixture Settings process did not stop" >&2
+    if ! terminate_fixture_apps; then
+      echo "verify_visible_settings_fixture: an exact fixture process did not stop" >&2
       fixture_settings_stopped=false
       exit_code=1
     fi
@@ -456,18 +469,25 @@ HOME="${isolated_home}" CFFIXED_USER_HOME="${isolated_home}" TMPDIR="${isolated_
   fail "fixed-home probe changed protected real-user Settings content"
 
 if [[ "${run_ui_tests}" == true ]]; then
+  foreground_app="${fixture}/DerivedData/Build/Products/Debug/ForegroundFixture.app"
+  mkdir -p "${foreground_app}/Contents/MacOS"
+  cp tests/SettingsUITests/ForegroundFixture-Info.plist "${foreground_app}/Contents/Info.plist"
+  xcrun swiftc -warnings-as-errors -parse-as-library -target arm64-apple-macos13.0 \
+    tests/SettingsUITests/ForegroundFixture.swift \
+    -o "${foreground_app}/Contents/MacOS/ForegroundFixture"
+  codesign --sign - "${foreground_app}"
   if [[ -n "${ui_test_name}" ]]; then
     echo "Visible Settings focused UI test: ${ui_test_name}"
   else
-    echo "Visible Settings full UI suite: fail-fast after the first failed test"
+    echo "Visible Settings full UI suite: stop each failed test, report all workflows"
   fi
   xcodebuild_args=(-project Linnet.xcodeproj -scheme SettingsUITests \
     -configuration Debug -destination 'platform=macOS' \
     -derivedDataPath "${fixture}/DerivedData" \
-    -resultBundlePath "${fixture}/SettingsUITests.xcresult" \
+    -resultBundlePath "${results}/SettingsUITests.xcresult" \
     LINNET_BUNDLE_IDENTIFIER="${uat_host_identifier}" \
     CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-")
-  [[ -z "${focused_ui_test}" ]] || xcodebuild_args+=("${focused_ui_test}")
+  [[ -z "${ui_test_name}" ]] || xcodebuild_args+=("${focused_ui_tests[@]}")
   xcodebuild_args+=(test)
   xcodebuild "${xcodebuild_args[@]}"
   [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||

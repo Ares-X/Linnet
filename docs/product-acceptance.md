@@ -118,6 +118,16 @@ reinstall row was individually exercised. The later Action-built candidate
 still requires its own artifact identity and installed acceptance; this local
 package must not be substituted for those bytes.
 
+Maintainer release direction, 2026-08-30: preserve the working local installation
+rather than downgrade it solely to repeat an update. System Installer records
+show the local 0.1.9 Core candidate installed at 14:05 and the above 0.1.10
+candidate at 15:47, followed by the user's successful-input report. For this
+release, retain that local upgrade evidence and exercise the exact Action Core
+over the working candidate, then reinstall the same bytes. This is a bounded
+0.1.10 acceptance decision, not evidence that the public 0.1.9 package or every
+application was exercised. Online update discovery remains a separate
+post-publication check; no downgrade or publication is implied by a test PASS.
+
 ### Candidate publication failure — 2026-08-30
 
 Action `33300580967`, source `414841ff9b17716cd0da43c4e6dcb95fb74dd4b8`,
@@ -202,6 +212,84 @@ packaging and publication were skipped. This closes the OCR test defect.
 Production source and the installed input method remain unchanged; full
 release-candidate and installed-product acceptance are separate, not claimed
 by this focused run.
+
+### Settings UI scroll incident — 2026-08-30
+
+Current complete UI evidence: Action [33310223404](https://github.com/Ares-X/Linnet/actions/runs/33310223404),
+source `1a4d414d52f62ec471cfbd959c7c4dc97771ef88`, ran all ten cases:
+**nine PASS, one FAIL**. No product source, installed App, version, pack or
+publication identity changed during this harness repair. This is isolated
+Settings workflow evidence, not exact signed-package installation acceptance.
+
+Focused Data replay: Action [33311506249](https://github.com/Ares-X/Linnet/actions/runs/33311506249),
+source `8e423f471f80ae16f8e695b07912127239ca28a2`, **PASS**, one test,
+zero failures, 156.754 s, completed at 12:40:53 UTC. This closes the remaining
+Data interaction failure. The nine passes above and this focused pass are
+separate runs; no single exact ten-case PASS or installed acceptance is claimed.
+
+| Case | Exact complete-run result |
+| --- | --- |
+| Appearance controls, theme previews and popup selections | PASS, 99.659 s |
+| Pending-change close/discard | PASS, 36.356 s |
+| Cold Host-like Settings open | PASS, 2.595 s |
+| Data controls and cancellation | FAIL, 143.607 s; diagnostic Refresh hit testing |
+| Progressive Cloud/Manual/Diagnostics disclosure | PASS, 31.275 s |
+| Focused dictionary-row deletion | PASS, 130.998 s |
+| Four-page navigation | PASS, 20.424 s |
+| Chinese and English input settings | PASS, 89.565 s |
+| Reopen above a separate foreground application | PASS, 8.844 s |
+| Reopen after minimizing | PASS, 6.781 s |
+
+Confirmed causes and retired paths:
+
+- **Scrolling:** official candidate Action `33303649630` at `064ad67`
+  failed Xuan at 09:51:44 UTC: target `(73,704,208,105)`, viewport
+  `(32,112,960,523)`. Fixed 600-pt jumps could skip the 418-pt visible interval.
+  The sole manual scroll owner now centers the observed target with bounded
+  steps. Appearance repeatedly passes, including the current complete run.
+- **Cold-open identity:** Action `33305873514` opened the exact embedded App,
+  but the bundle-ID-only XCTest observer could select its standalone sibling.
+  All observers now use the exact embedded URL (target-selection paths 2→1).
+  Neither launch nor reopen assertions activate Settings on its behalf.
+- **Disclosure:** two unsuccessful positioning attempts stopped further guessing.
+  Action `33308803451` at `fcfe211` retained the decisive screenshot and
+  synthesized event: at 11:34:03, click `(51,548)` missed the painted arrow
+  at `(69,548)`; the AX frame begins at x=43. The string-value hypothesis
+  was falsified by `__NSCFBoolean(0)`. This fixed-system-font macOS-26 fixture
+  uses the measured 26-pt inset and still requires true expanded state and
+  actual descendants; no alternate clicks or product offsets exist.
+- **Visible controls:** Action `33309486828` at `406dd9f` proved Retention
+  was enabled and visibly exposed at `(143,468,247,26)`, despite false
+  `isHittable`. The scroll owner now proves containment only. Actual centered
+  popup clicks, menu items and selected values prove interaction. The current
+  full run passed all retention choices and subsequent cancellation paths.
+- **Foreground fixture:** XCTRunner is LSBackgroundOnly. Both changing its
+  policy and activating NSApplication failed to make it foreground. The
+  in-runner panel and policy mutations are retired. One minimal regular AppKit
+  fixture owns the separate-app boundary: Settings active → fixture active and
+  Settings inactive → NSWorkspace reopen → Settings active and visible.
+  This now passes. Exact-path cleanup covers only the two disposable apps,
+  their bundle registrations and UAT preferences; no user application is used.
+- **Data interaction failure:** at 12:14:17 the native Refresh click attempted
+  implicit scrolling even though its frame was already within the viewport,
+  then failed `Not hittable` three times. The affected diagnostic and file-panel
+  buttons now use the same visible-frame mouse primitive as the verified popup
+  path. Enabled-state, operation completion, dialog appearance and cancellation
+  assertions remain. Full-path review also separates the fixed language footer
+  from scrollable popups: it is tested against the window bounds on every
+  language change, not against a scroll viewport that cannot contain it.
+  The focused replay above passed the complete Data workflow, including file
+  panels, diagnostic Refresh and all three interface-language choices.
+
+XCTest's `continueAfterFailure=false` stops each failed test; the retired
+global skip flag no longer suppresses independent workflows (failure owners
+2→1). The manual `settings-ui` profile accepts one selected-method batch or
+the default full suite. It reuses locked preparation and the existing build
+owner, without release signing or packaging. Native xcresults survive fixture
+cleanup under unique `build/settings-ui-results/` directories; manual CI
+retains only these synthetic reports for three days, not App/package transport.
+A failed declared-tool setup in Action `33305751531` was
+`ENVIRONMENT_INVALID`, not product evidence. It was corrected before UI replay.
 
 | Level | Evidence | What it may prove |
 | --- | --- | --- |

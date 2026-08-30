@@ -3,18 +3,11 @@ import Darwin
 import XCTest
 
 final class SettingsUITests: XCTestCase {
-  private static var suiteHasFailed = false
   private let isolatedBundleIdentifier =
     "io.github.ares-x.inputmethod.Linnet.settings-ui-uat.settings"
 
   override func setUpWithError() throws {
-    try XCTSkipIf(Self.suiteHasFailed, "Skipped after the first Settings UI failure")
     continueAfterFailure = false
-  }
-
-  override func record(_ issue: XCTIssue) {
-    Self.suiteHasFailed = true
-    super.record(issue)
   }
 
   @MainActor
@@ -34,7 +27,9 @@ final class SettingsUITests: XCTestCase {
     try await terminateIsolatedSettings(at: settingsURL)
     let runningApplication = try await openSettingsWithoutActivation(
       at: settingsURL)
-    let app = XCUIApplication(bundleIdentifier: isolatedBundleIdentifier)
+    // The build also contains a standalone Settings.app with this bundle ID.
+    // Observe the exact embedded app opened above, as launchSettings does.
+    let app = XCUIApplication(url: settingsURL)
     defer { _ = runningApplication.terminate() }
 
     XCTAssertEqual(
@@ -48,7 +43,10 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(
       runningApplication.isActive,
       "Settings did not activate itself after the Host opened it without activation")
-    XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertTrue(
+      app.windows.firstMatch.waitForExistence(timeout: 5),
+      "No window for embedded Settings at \(settingsURL.path), "
+        + "opened PID=\(runningApplication.processIdentifier), state=\(app.state.rawValue)")
     XCTAssertTrue(
       app.windows.firstMatch.isHittable,
       "Cold-opened Settings window is hidden behind another app")
@@ -83,19 +81,20 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
-    let coveringWindow = NSPanel(
-      contentRect: NSRect(x: 120, y: 120, width: 480, height: 320),
-      styleMask: [.titled, .closable],
-      backing: .buffered,
-      defer: false
-    )
-    coveringWindow.title = "Settings UI foreground fixture"
-    coveringWindow.makeKeyAndOrderFront(nil)
-    defer { coveringWindow.close() }
-    XCTAssertTrue(
-      NSRunningApplication.current.activate(options: [.activateAllWindows]),
-      "The controlled foreground fixture could not be activated"
-    )
+    // Exercise a real second application, not a panel in background XCTRunner.
+    let foregroundURL = Bundle.main.bundleURL.deletingLastPathComponent()
+      .appending(path: "ForegroundFixture.app", directoryHint: .isDirectory)
+    XCTAssertEqual(Bundle(url: foregroundURL)?.bundleIdentifier,
+      "io.github.ares-x.inputmethod.Linnet.settings-ui-uat.foreground")
+    let coveringApp = XCUIApplication(url: foregroundURL)
+    coveringApp.launchEnvironment = app.launchEnvironment
+    coveringApp.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+    coveringApp.launch()
+    defer { coveringApp.terminate() }
+    XCTAssertTrue(coveringApp.windows.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertEqual(
+      coveringApp.state, .runningForeground,
+      "The separate foreground fixture did not become active")
 
     let settings = try XCTUnwrap(
       NSRunningApplication.runningApplications(
@@ -202,7 +201,7 @@ final class SettingsUITests: XCTestCase {
       XCTAssertNotEqual(app.state, .notRunning)
     }
 
-    selectEachPopUpOption([
+    try selectEachPopUpOption([
       "System Default",
       "Avenir Next + Hiragino Sans GB",
       "Helvetica Neue + Heiti SC",
@@ -245,7 +244,7 @@ final class SettingsUITests: XCTestCase {
     defer { app.terminate() }
 
     clickTab("Input", in: app)
-    selectEachPopUpOption([
+    try selectEachPopUpOption([
       "Natural Code",
       "Full Pinyin",
       "Flypy Double Pinyin",
@@ -255,12 +254,12 @@ final class SettingsUITests: XCTestCase {
       "Ziguang Double Pinyin",
       "Jiajia Pinyin",
     ], in: app)
-    selectEachPopUpOption([
+    try selectEachPopUpOption([
       "Enhanced learning (Recommended)",
       "Standard learning",
       "Turn off learning",
     ], in: app)
-    selectEachPopUpOption(["Semicolon (;)", "Vertical bar (|)"], in: app)
+    try selectEachPopUpOption(["Semicolon (;)", "Vertical bar (|)"], in: app)
     for label in [
       "Suggest emoji candidates",
       "Output traditional Chinese by default",
@@ -283,7 +282,7 @@ final class SettingsUITests: XCTestCase {
     ] {
       try clickCheckBox(label, in: app)
     }
-    selectEachPopUpOption([
+    try selectEachPopUpOption([
       "Smart complete",
       "Navigate candidates",
       "Pass to application",
@@ -348,12 +347,12 @@ final class SettingsUITests: XCTestCase {
     checkAgain.click()
     try waitUntilEnabled(checkAgain, timeout: 30)
 
-    selectEachPopUpOption([
+    try selectEachPopUpOption([
       "GitHub (Direct)",
       "GH-Proxy Public Mirror (Third-party)",
     ], identifier: "settings.data.downloadSource", in: app)
     XCTAssertTrue(app.links["Open GH-Proxy Service Information"].exists)
-    selectEachPopUpOption(
+    try selectEachPopUpOption(
       ["Custom Mirror…"],
       identifier: "settings.data.downloadSource",
       in: app)
@@ -384,14 +383,14 @@ final class SettingsUITests: XCTestCase {
       in: app)
     XCTAssertEqual(mirror.value as? String, "https://second-mirror.example.com/")
     try waitUntilEnabled(useCustomMirror, timeout: 3)
-    selectEachPopUpOption(
+    try selectEachPopUpOption(
       ["GitHub (Direct)"],
       identifier: "settings.data.downloadSource",
       in: app)
 
     try expandDisclosure("Manual recovery & transfer", in: app)
 
-    selectEachPopUpOption([
+    try selectEachPopUpOption([
       "Keep latest 10 verified backups",
       "Keep latest 30 verified backups",
       "Keep latest 100 verified backups",
@@ -439,7 +438,8 @@ final class SettingsUITests: XCTestCase {
     try expandDisclosure("Diagnostics", in: app)
     let refresh = app.buttons["Refresh"]
     try reveal(refresh, named: "Refresh", in: app)
-    refresh.click()
+    try waitUntilEnabled(refresh, timeout: 10)
+    refresh.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     try waitUntilEnabled(refresh, timeout: 10)
     try openAndCancelPanel(button: "Save…", title: "Export Linnet Diagnostics", in: app)
 
@@ -450,17 +450,12 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(app.buttons["Open Data Folder"].exists)
     XCTAssertTrue(app.buttons["Copy Report"].exists)
 
-    let interfaceLanguage = app.popUpButtons["settings.interfaceLanguage"]
-    XCTAssertTrue(interfaceLanguage.exists)
-    XCTAssertTrue(
-      app.windows.firstMatch.frame.contains(interfaceLanguage.frame),
-      "Interface language is outside the Settings window: "
-        + "window=\(app.windows.firstMatch.frame), control=\(interfaceLanguage.frame)")
-    selectEachPopUpOption([
+    try selectEachPopUpOption([
       "Follow System",
       "简体中文",
       "English",
-    ], identifier: "settings.interfaceLanguage", in: app)
+    ], identifier: "settings.interfaceLanguage", in: app,
+      fixedViewport: app.windows.firstMatch)
     XCTAssertNotEqual(app.state, .notRunning)
   }
 
@@ -481,12 +476,12 @@ final class SettingsUITests: XCTestCase {
       ("Diagnostics", app.buttons["Copy Report"]),
     ]
     for row in rows {
-      let disclosure = disclosure(row.group, in: app)
+      let disclosure = app.disclosureTriangles[row.group]
       try reveal(disclosure, named: row.group, in: app)
       XCTAssertFalse(
         row.hiddenControl.exists,
         "\(row.group) was expanded before the user requested it")
-      disclosure.click()
+      try expandDisclosure(row.group, in: app)
       XCTAssertTrue(
         row.hiddenControl.waitForExistence(timeout: 3),
         "\(row.group) did not reveal its existing controls")
@@ -633,17 +628,36 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
-  private func disclosure(_ name: String, in app: XCUIApplication) -> XCUIElement {
-    let triangle = app.disclosureTriangles[name]
-    if triangle.exists { return triangle }
-    return app.buttons[name]
-  }
-
-  @MainActor
   private func expandDisclosure(_ name: String, in app: XCUIApplication) throws {
-    let control = disclosure(name, in: app)
+    let control = app.disclosureTriangles[name]
     try reveal(control, named: name, in: app)
-    control.click()
+    let before = XCTAttachment(screenshot: app.screenshot())
+    before.name = "Before expanding \(name)"
+    before.lifetime = .keepAlways
+    add(before)
+    // At this fixture's fixed system font, macOS 26's AX outline frame starts
+    // 26 pt before the painted chevron (xcresult: frame x=43, arrow x=69).
+    // The label center and frame.minX + height/2 both miss the actual control.
+    let chevronInset: CGFloat = 26
+    control.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
+      .withOffset(CGVector(dx: chevronInset, dy: 0)).click()
+    let expanded = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value == 1"), object: control)
+    let result = XCTWaiter.wait(for: [expanded], timeout: 3)
+    let value = control.value
+    print("Disclosure \(name): value=\(String(describing: value)), "
+      + "type=\(value.map { String(reflecting: type(of: $0)) } ?? "nil"), "
+      + "frame=\(control.frame)")
+    if result != .completed {
+      print(app.debugDescription)
+      let after = XCTAttachment(screenshot: app.screenshot())
+      after.name = "After expanding \(name)"
+      after.lifetime = .keepAlways
+      add(after)
+    }
+    XCTAssertEqual(
+      result, .completed,
+      "Disclosure did not expand after clicking its chevron: \(name)")
   }
 
   @MainActor
@@ -699,7 +713,7 @@ final class SettingsUITests: XCTestCase {
     let button = app.buttons[label]
     try reveal(button, named: label, in: app)
     try waitUntilEnabled(button, timeout: 10)
-    button.click()
+    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     let panel = app.dialogs.firstMatch
     XCTAssertTrue(panel.waitForExistence(timeout: 3), "Missing panel: \(title)")
     let cancel = panel.buttons["Cancel"].firstMatch
@@ -797,16 +811,31 @@ final class SettingsUITests: XCTestCase {
   private func selectEachPopUpOption(
     _ options: [String],
     identifier: String? = nil,
-    in app: XCUIApplication
-  ) {
+    in app: XCUIApplication,
+    fixedViewport: XCUIElement? = nil
+  ) throws {
     let predicate = NSPredicate(format: "value IN %@", options)
     for option in options {
       let popUp = identifier.map { app.popUpButtons[$0] }
         ?? app.popUpButtons.matching(predicate).firstMatch
-      popUp.click()
+      if let fixedViewport {
+        XCTAssertTrue(popUp.exists)
+        XCTAssertTrue(fixedViewport.frame.contains(popUp.frame),
+          "Fixed popup is outside its window: \(identifier ?? option)")
+      } else {
+        try reveal(popUp, named: identifier ?? option, in: app)
+      }
+      XCTAssertTrue(popUp.isEnabled)
+      // Expanded SwiftUI disclosures can report false isHittable for a visibly
+      // exposed child. Verify the actual mouse/menu/value path, not that hint.
+      popUp.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
       let menuItem = app.menuItems[option]
       XCTAssertTrue(menuItem.waitForExistence(timeout: 3), "Missing menu item: \(option)")
       menuItem.click()
+      let selected = XCTNSPredicateExpectation(
+        predicate: NSPredicate(format: "value == %@", option), object: popUp)
+      XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed,
+        "The popup did not select \(option)")
       XCTAssertNotEqual(app.state, .notRunning, "Settings exited after choosing \(option)")
     }
   }
@@ -850,24 +879,35 @@ final class SettingsUITests: XCTestCase {
     in app: XCUIApplication
   ) throws {
     let scrollView = app.scrollViews["settings.page.scroll"]
-    for deltaY in [-600.0, 600.0] {
+    for direction in [-1.0, 1.0] {
       for _ in 0..<12 {
-        if element.exists, scrollView.exists {
-          let viewport = scrollView.frame.insetBy(dx: 0, dy: 12)
-          if element.isHittable, viewport.contains(element.frame) { return }
-        }
         guard scrollView.exists else { break }
+        let viewport = scrollView.frame.insetBy(dx: 0, dy: 12)
+        let maximumStep = viewport.height / 2
+        var deltaY = direction * maximumStep
+        if element.exists {
+          let frame = element.frame
+          let hittable = element.isHittable
+          if viewport.contains(frame) { return }
+          print("Reveal \(name): frame=\(frame), viewport=\(viewport), hittable=\(hittable)")
+          // Center the target instead of jumping over its visible interval.
+          // Visibility belongs here; each interaction verifies its actual result.
+          deltaY = min(max(viewport.midY - frame.midY, -maximumStep), maximumStep)
+          if abs(deltaY) < 1 { break }
+        }
         scrollView.scroll(byDeltaX: 0, deltaY: deltaY)
       }
     }
     let viewport = scrollView.exists
       ? scrollView.frame.insetBy(dx: 0, dy: 12)
       : CGRect.null
+    print(app.debugDescription)
+    let state = element.exists
+      ? "isEnabled=\(element.isEnabled), isHittable=\(element.isHittable), frame=\(element.frame)"
+      : "element not found in the accessibility tree"
     XCTFail(
       "Settings control is unavailable: \(name); "
-        + "exists=\(element.exists), isEnabled=\(element.isEnabled), "
-        + "isHittable=\(element.isHittable), frame=\(element.frame), "
-        + "viewport=\(viewport)")
+        + "\(state), viewport=\(viewport)")
   }
 
   private enum SettingsUIFailure: Error {
