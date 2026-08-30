@@ -211,6 +211,12 @@ source `1a4d414d52f62ec471cfbd959c7c4dc97771ef88`, ran all ten cases:
 publication identity changed during this harness repair. This is isolated
 Settings workflow evidence, not exact signed-package installation acceptance.
 
+Focused Data replay: Action [33311506249](https://github.com/Ares-X/Linnet/actions/runs/33311506249),
+source `8e423f471f80ae16f8e695b07912127239ca28a2`, **PASS**, one test,
+zero failures, 156.754 s, completed at 12:40:53 UTC. This closes the remaining
+Data interaction failure. The nine passes above and this focused pass are
+separate runs; no single exact ten-case PASS or installed acceptance is claimed.
+
 | Case | Exact complete-run result |
 | --- | --- |
 | Appearance controls, theme previews and popup selections | PASS, 99.659 s |
@@ -254,7 +260,7 @@ Confirmed causes and retired paths:
   Settings inactive → NSWorkspace reopen → Settings active and visible.
   This now passes. Exact-path cleanup covers only the two disposable apps,
   their bundle registrations and UAT preferences; no user application is used.
-- **Remaining Data failure:** at 12:14:17 the native Refresh click attempted
+- **Data interaction failure:** at 12:14:17 the native Refresh click attempted
   implicit scrolling even though its frame was already within the viewport,
   then failed `Not hittable` three times. The affected diagnostic and file-panel
   buttons now use the same visible-frame mouse primitive as the verified popup
@@ -262,8 +268,8 @@ Confirmed causes and retired paths:
   assertions remain. Full-path review also separates the fixed language footer
   from scrollable popups: it is tested against the window bounds on every
   language change, not against a scroll viewport that cannot contain it.
-  This Data-only correction is **pending focused replay**;
-  it must not be reported as a full ten-case PASS yet.
+  The focused replay above passed the complete Data workflow, including file
+  panels, diagnostic Refresh and all three interface-language choices.
 
 XCTest's `continueAfterFailure=false` stops each failed test; the retired
 global skip flag no longer suppresses independent workflows (failure owners
