@@ -105,6 +105,25 @@ input menu, Settings and real input.
 
 ## Evidence levels
 
+### Published 0.1.10 acceptance — 2026-08-30
+
+Published source `56cb640678fa3e726d95c9e208505e2f90f71df9`, version 0.1.10 (69):
+Action `33316501948` passed the complete candidate workflow, including all ten
+Settings UI cases and unchanged real-home checks (546.220 s, zero failures).
+The exact Core was installed twice successfully; the same Host, TextEdit and
+Codex processes and Active metadata hash were retained. After being asked to
+apply the installed update and check TextEdit/Teams/Codex, the user confirmed
+“确认正常”. This is user-reported input acceptance, not automated local AX proof.
+
+Action `33319136816` published the same assets without rebuilding. Latest is
+`v0.1.10`, with only `Linnet.pkg`, SHA-256
+`9d6068cda43e8dfc5f4538d4b9de6f6109ead570f06f837adb94bce865956a88`.
+The eight-file set digest is
+`267c599ce20cd2397fde77eb8910d11ba1c6b8fbec79f2843480637b6a6cd03d`;
+data-channel commit `0374855c4325a24471c427d498ea173f393d9cdd` contains the
+byte-identical accepted Catalog. The older rows below retain their dated scopes;
+unexercised cross-device/accessibility cases are not promoted to PASS.
+
 ### Local 0.1.10 user feedback — 2026-08-30
 
 Installed source `53ab4e263e971c6849d0dd0dfa6cdea4e9447a9b`, version
