@@ -11,7 +11,7 @@ on:
           - theme-preview
           - settings-ui
       ui_test:
-        description: Settings UI test method (settings-ui only; empty runs the suite)
+        description: Settings UI test methods, comma-separated (empty runs the suite)
         type: string
         default: ''
 permissions:
@@ -108,6 +108,15 @@ jobs:
         env:
           LINNET_UI_TEST: ${{ inputs.ui_test }}
         run: tests/verify_visible_settings_fixture.sh --ui-test "${LINNET_UI_TEST}"
+
+      - name: Preserve isolated Settings UI evidence
+        if: always() && inputs.profile != 'theme-preview'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: settings-ui-results
+          path: build/settings-ui-results/
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Verify Swift owner contracts
         if: inputs.profile == 'full'

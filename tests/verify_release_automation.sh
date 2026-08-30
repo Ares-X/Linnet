@@ -35,10 +35,27 @@ for owner in "${control}" "${stager}" "${publisher}" "${identity}"; do
   bash -n "${owner}"
 done
 
-if rg -n 'uses:[[:space:]]*actions/(upload|download)-artifact@|actions/artifacts' \
-    "${repo_root}/.github/workflows" "${stager}" "${publisher}"; then
+if rg -n 'actions/artifacts|actions/(upload|download)-artifact@' \
+    "${release_workflow}" "${stager}" "${publisher}"; then
   fail "the 906 MB Actions artifact upload/download path returned"
 fi
+# Diagnostic reports are not product transport. Only the manual UI lane may
+# retain its isolated xcresult; no workflow may upload build/package payloads.
+ruby -ryaml -e '
+  ARGV.each do |path|
+    workflow = YAML.load_file(path)
+    workflow.fetch("jobs", {}).each_value do |job|
+      job.fetch("steps", []).each do |step|
+        next unless step.fetch("uses", "").match?(%r{actions/(upload|download)-artifact@})
+        allowed = File.basename(path) == "commit-ci.yml" &&
+          step["uses"].start_with?("actions/upload-artifact@") &&
+          step.fetch("with", {})["path"] == "build/settings-ui-results/" &&
+          step.fetch("with", {})["retention-days"] == 3
+        abort "only isolated Settings reports may use Actions artifacts: #{path}" unless allowed
+      end
+    end
+  end
+' "${repo_root}"/.github/workflows/*.yml
 if rg -n 'scripts/release-control publish|signs exactly once locally|本地归档.*正式候选|本机.*正式候选' \
     "${policy_docs[@]}"; then
   fail "maintainer documentation regained a local formal-candidate owner"

@@ -12,7 +12,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 [[ "$#" -le 2 ]] || {
-  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name]]" >&2
+  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name,...]]" >&2
   exit 2
 }
 mode="${1:---verify}"
@@ -27,7 +27,7 @@ case "${mode}" in
     ;;
   --ui-test) run_ui_tests=true ;;
   *)
-    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name]]" >&2
+    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name,...]]" >&2
     exit 2
     ;;
 esac
@@ -54,13 +54,16 @@ uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
 uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
 xcode_user_name="$(id -un)"
 settings_ui_source="tests/SettingsUITests/SettingsUITests.swift"
-focused_ui_test=""
+focused_ui_tests=()
 if [[ -n "${ui_test_name}" ]]; then
-  [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+$ ]] ||
+  [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+(,test[A-Za-z0-9]+)*$ ]] ||
     fail "invalid Settings UI test name: ${ui_test_name}"
-  rg -q "^[[:space:]]*func ${ui_test_name}\\(\\) (async )?throws \\{" \
-    "${settings_ui_source}" || fail "unknown Settings UI test: ${ui_test_name}"
-  focused_ui_test="-only-testing:SettingsUITests/SettingsUITests/${ui_test_name}"
+  IFS=, read -r -a selected_tests <<<"${ui_test_name}"
+  for selected_test in "${selected_tests[@]}"; do
+    rg -q "^[[:space:]]*func ${selected_test}\\(\\) (async )?throws \\{" \
+      "${settings_ui_source}" || fail "unknown Settings UI test: ${selected_test}"
+    focused_ui_tests+=("-only-testing:SettingsUITests/SettingsUITests/${selected_test}")
+  done
 fi
 xcode_generated_paths=(
   "${repo_root}/Linnet.xcodeproj/project.xcworkspace/xcuserdata/${xcode_user_name}.xcuserdatad/UserInterfaceState.xcuserstate"
@@ -100,6 +103,10 @@ if [[ "${run_ui_tests}" == true ]] &&
   fail "SettingsUITests does not require the isolated UAT preference domain"
 fi
 if [[ "${run_ui_tests}" == true ]]; then
+  # Results outlive disposable apps so a failed run retains its actual UI
+  # evidence. Each invocation owns a new directory, never an older result.
+  mkdir -p "${repo_root}/build/settings-ui-results"
+  results="$(mktemp -d "${repo_root}/build/settings-ui-results/run.XXXXXX")"
   for generated_path in "${xcode_generated_paths[@]}"; do
     [[ ! -e "${generated_path}" && ! -L "${generated_path}" ]] ||
       fail "refusing to overwrite pre-existing Xcode user state: ${generated_path}"
@@ -466,10 +473,10 @@ if [[ "${run_ui_tests}" == true ]]; then
   xcodebuild_args=(-project Linnet.xcodeproj -scheme SettingsUITests \
     -configuration Debug -destination 'platform=macOS' \
     -derivedDataPath "${fixture}/DerivedData" \
-    -resultBundlePath "${fixture}/SettingsUITests.xcresult" \
+    -resultBundlePath "${results}/SettingsUITests.xcresult" \
     LINNET_BUNDLE_IDENTIFIER="${uat_host_identifier}" \
     CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-")
-  [[ -z "${focused_ui_test}" ]] || xcodebuild_args+=("${focused_ui_test}")
+  [[ -z "${ui_test_name}" ]] || xcodebuild_args+=("${focused_ui_tests[@]}")
   xcodebuild_args+=(test)
   xcodebuild "${xcodebuild_args[@]}"
   [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||

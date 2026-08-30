@@ -372,13 +372,15 @@ tests/verify_swift_units.sh
 失败截图随日志保留；其结果不能替代完整 CI 或安装验收。
 
 Settings 的实际点击、滚动或窗口行为失败时，使用手动 CI 的 `settings-ui`
-profile；`ui_test` 留空运行完整 Settings UI 套件，也可填写现有测试方法名
-仅复现该用例。此入口复用锁定依赖准备、无签名构建和
-`tests/verify_visible_settings_fixture.sh --ui-test [test-name]`，不运行 Rime/Swift
+profile；`ui_test` 留空运行完整 Settings UI 套件，也可填写逗号分隔的现有测试方法名
+一次复现所选用例。此入口复用锁定依赖准备、无签名构建和
+`tests/verify_visible_settings_fixture.sh --ui-test [test-name,...]`，不运行 Rime/Swift
 全套门、签名或发布打包。真实界面测试只在 CI 或明确隔离的 macOS 桌面执行，
 不得为了测试而关闭使用者的应用；通过也不等于正式安装包验收。
 每个用例失败后立即停止该用例内的后续点击，但继续其余独立用例；任意失败仍使
 整个门失败。不要恢复全局“首错跳过其他用例”标志，以免每次构建只能发现一个问题。
+原生 xcresult（含失败截图）保留在 `build/settings-ui-results/`；手动 CI 上传此
+隔离报告并保留三天，不上传 App、词库、安装包，也不参与正式发布传输。
 
 ### Development composite
 

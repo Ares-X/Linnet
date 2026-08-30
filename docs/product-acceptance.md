@@ -269,6 +269,35 @@ control owners reduce from two to one; fixture/user-state isolation is unchanged
 This change is not permission to continue clicking inside a failed test or to
 count unexecuted rows as PASS. The exact combined UI replay remains required.
 
+Action `33307665435`, source `d927709afabb32e22443cdcfe28a2d204f08a215`,
+executed all ten workflows: seven passed, both Data cases failed the numeric
+disclosure assertion, and the covering-window case failed before covering
+Settings. Two Data correction attempts have failed; further coordinate patches
+are stopped. The complete transition is: locate/reveal native triangle → click
+→ SwiftUI expansion → AX value and descendants → interact with descendants.
+The previous log proves row-center clicking left value 0; this run only proves
+`value == 1` timed out, not that the arrow left the content collapsed. Apple's
+XCUIElementAttributes contract permits NSString or NSNumber, but this test
+assumed NSNumber and discarded xcresult before inspection. Retain both value
+type/descendants and before/after screenshots before deciding the next fix.
+
+The covering fixture used NSPanel inside the XCTest runner without changing
+its activation policy. The Xcode 26.6 runner template sets LSBackgroundOnly;
+AppKit defines that as prohibited activation, consistent with the failed
+activate request at 11:11 UTC. The fixture now explicitly sets/restores its own
+regular policy and records the initial policy. It never changes Settings or
+activates Settings on its behalf. This is a test-environment correction,
+pending runtime verification, not a product foreground fix.
+
+Diagnostic scope is the three failed methods in one isolated run; complete
+default-suite acceptance remains required afterward. Production paths remain
+unchanged. Disclosure action owner stays one; no alternative clicks or state
+normalizer are added. The result bundle now survives fixture cleanup under a
+unique build directory; manual CI retains only this report for three days.
+The release artifact guard now distinguishes diagnostic evidence from the
+still-prohibited App/package artifact transport. No user application is
+stopped, input source registered, version advanced or publication authorized.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |

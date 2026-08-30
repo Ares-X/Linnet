@@ -81,6 +81,14 @@ final class SettingsUITests: XCTestCase {
     let app = try launchSettings()
     defer { app.terminate() }
 
+    // XCTRunner is LSBackgroundOnly. A prohibited app cannot own an active
+    // covering window; change only our runner's policy and restore it afterward.
+    let runner = NSApplication.shared
+    let previousPolicy = runner.activationPolicy()
+    print("Foreground fixture initial policy=\(previousPolicy.rawValue)")
+    XCTAssertTrue(runner.setActivationPolicy(.regular))
+    defer { _ = runner.setActivationPolicy(previousPolicy) }
+
     let coveringWindow = NSPanel(
       contentRect: NSRect(x: 120, y: 120, width: 480, height: 320),
       styleMask: [.titled, .closable],
@@ -634,14 +642,30 @@ final class SettingsUITests: XCTestCase {
   private func expandDisclosure(_ name: String, in app: XCUIApplication) throws {
     let control = app.disclosureTriangles[name]
     try reveal(control, named: name, in: app)
+    let before = XCTAttachment(screenshot: app.screenshot())
+    before.name = "Before expanding \(name)"
+    before.lifetime = .keepAlways
+    add(before)
     // SwiftUI exposes the label and leading chevron as one AX triangle.
     // Click the chevron, not the label's center, which does not expand on macOS.
     control.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
       .withOffset(CGVector(dx: control.frame.height / 2, dy: 0)).click()
     let expanded = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "value == 1"), object: control)
+    let result = XCTWaiter.wait(for: [expanded], timeout: 3)
+    let value = control.value
+    print("Disclosure \(name): value=\(String(describing: value)), "
+      + "type=\(value.map { String(reflecting: type(of: $0)) } ?? "nil"), "
+      + "frame=\(control.frame)")
+    if result != .completed {
+      print(app.debugDescription)
+      let after = XCTAttachment(screenshot: app.screenshot())
+      after.name = "After expanding \(name)"
+      after.lifetime = .keepAlways
+      add(after)
+    }
     XCTAssertEqual(
-      XCTWaiter.wait(for: [expanded], timeout: 3), .completed,
+      result, .completed,
       "Disclosure did not expand after clicking its chevron: \(name)")
   }
 
