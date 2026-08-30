@@ -175,13 +175,27 @@ changing the pixels. The earliest wrong result is therefore the test's
 whole-image OCR count being treated as proof of missing rendered content,
 not a demonstrated product rendering failure or cloud-only Vision failure.
 
-This closes diagnosis, not the failing test or release gate. The next correction
-must retain all fourteen visible-sample requirements while removing the
-whole-grid recognition ambiguity; no production theme change is justified by
-this evidence. The diagnostic entrypoint reuses the same fixture, source list
-and Swift cache owner (each remains one). Its local run, release-automation
-gate, shell syntax and exact default-flow equivalence checks pass. No installed
-App was changed, no second cloud diagnostic was run, and no release was made.
+That run closed diagnosis, not the failing test or release gate. The diagnostic
+entrypoint reuses the same fixture, source list and Swift cache owner (each
+remains one). Its local run, release-automation gate, shell syntax and exact
+default-flow equivalence checks passed. It changed no installed App and made
+no release.
+
+The subsequent authorized correction retains the unedited PNG at
+`tests/fixtures/settings-theme-cloud-dark-680.png`. The new regression failed
+with the original direct-bitmap OCR path. One canonical OCR boundary now
+normalizes its input to sRGB at 2 pixels per layout point, removing dependence
+on host backing-scale and bitmap format; the original capture remains the
+saved evidence. The same fixture passes with all fourteen samples. Erasing
+each of the fourteen samples separately, an entirely blank grid and a clipped
+grid are all rejected. There are no retries, alternate recognition results or
+lowered sample thresholds. The actual four Aqua/Dark Aqua × 680/900-point
+component captures also pass locally. No production code or theme palette was
+changed, and no second compiler/cache owner was added. Strict SwiftLint,
+release-automation checks and the complete local Swift owner suite pass,
+including candidate interaction and the two-process Settings IPC fixture.
+Exact cloud validation of this correction and release acceptance are still
+pending.
 
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
