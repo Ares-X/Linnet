@@ -3,18 +3,11 @@ import Darwin
 import XCTest
 
 final class SettingsUITests: XCTestCase {
-  private static var suiteHasFailed = false
   private let isolatedBundleIdentifier =
     "io.github.ares-x.inputmethod.Linnet.settings-ui-uat.settings"
 
   override func setUpWithError() throws {
-    try XCTSkipIf(Self.suiteHasFailed, "Skipped after the first Settings UI failure")
     continueAfterFailure = false
-  }
-
-  override func record(_ issue: XCTIssue) {
-    Self.suiteHasFailed = true
-    super.record(issue)
   }
 
   @MainActor
@@ -486,12 +479,12 @@ final class SettingsUITests: XCTestCase {
       ("Diagnostics", app.buttons["Copy Report"]),
     ]
     for row in rows {
-      let disclosure = disclosure(row.group, in: app)
+      let disclosure = app.disclosureTriangles[row.group]
       try reveal(disclosure, named: row.group, in: app)
       XCTAssertFalse(
         row.hiddenControl.exists,
         "\(row.group) was expanded before the user requested it")
-      disclosure.click()
+      try expandDisclosure(row.group, in: app)
       XCTAssertTrue(
         row.hiddenControl.waitForExistence(timeout: 3),
         "\(row.group) did not reveal its existing controls")
@@ -638,18 +631,18 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
-  private func disclosure(_ name: String, in app: XCUIApplication) -> XCUIElement {
-    let triangle = app.disclosureTriangles[name]
-    if triangle.exists { return triangle }
-    return app.buttons[name]
-  }
-
-  @MainActor
   private func expandDisclosure(_ name: String, in app: XCUIApplication) throws {
-    let control = disclosure(name, in: app)
+    let control = app.disclosureTriangles[name]
     try reveal(control, named: name, in: app)
-    control.click()
-    print("Disclosure \(name): value=\(String(describing: control.value))")
+    // SwiftUI exposes the label and leading chevron as one AX triangle.
+    // Click the chevron, not the label's center, which does not expand on macOS.
+    control.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
+      .withOffset(CGVector(dx: control.frame.height / 2, dy: 0)).click()
+    let expanded = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value == 1"), object: control)
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [expanded], timeout: 3), .completed,
+      "Disclosure did not expand after clicking its chevron: \(name)")
   }
 
   @MainActor
@@ -880,11 +873,12 @@ final class SettingsUITests: XCTestCase {
       ? scrollView.frame.insetBy(dx: 0, dy: 12)
       : CGRect.null
     print(app.debugDescription)
+    let state = element.exists
+      ? "isEnabled=\(element.isEnabled), isHittable=\(element.isHittable), frame=\(element.frame)"
+      : "element not found in the accessibility tree"
     XCTFail(
       "Settings control is unavailable: \(name); "
-        + "exists=\(element.exists), isEnabled=\(element.isEnabled), "
-        + "isHittable=\(element.isHittable), frame=\(element.frame), "
-        + "viewport=\(viewport)")
+        + "\(state), viewport=\(viewport)")
   }
 
   private enum SettingsUIFailure: Error {

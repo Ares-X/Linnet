@@ -82,9 +82,11 @@ if /usr/bin/grep -Eq \
   "${settings_ui_source}"; then
   fail "SettingsUITests restored a retired scroll helper or segmented fallback"
 fi
-rg -Fq 'override func record(_ issue: XCTIssue)' "${settings_ui_source}" &&
-  rg -Fq 'try XCTSkipIf(Self.suiteHasFailed' "${settings_ui_source}" ||
-  fail "SettingsUITests lost suite-level fail-fast behavior"
+rg -Fq 'continueAfterFailure = false' "${settings_ui_source}" ||
+  fail "Settings UI tests must stop interactions inside a failed test"
+if rg -n 'suiteHasFailed|XCTSkipIf' "${settings_ui_source}"; then
+  fail "one failed Settings test must not skip independent UI workflows"
+fi
 rg -Fq 'terminate_fixture_settings' "$0" ||
   fail "Settings UI cleanup no longer terminates its exact fixture process"
 
@@ -459,7 +461,7 @@ if [[ "${run_ui_tests}" == true ]]; then
   if [[ -n "${ui_test_name}" ]]; then
     echo "Visible Settings focused UI test: ${ui_test_name}"
   else
-    echo "Visible Settings full UI suite: fail-fast after the first failed test"
+    echo "Visible Settings full UI suite: stop each failed test, report all workflows"
   fi
   xcodebuild_args=(-project Linnet.xcodeproj -scheme SettingsUITests \
     -configuration Debug -destination 'platform=macOS' \

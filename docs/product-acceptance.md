@@ -253,6 +253,22 @@ owner. All ten popup call sites now use that same visibility prerequisite;
 there is no alternate selector or blind click. The next replay must still
 prove the Data workflow and the remaining six tests, which were skipped.
 
+Action `33307100013` at `5f4f5e7e56d27a73df5c1ae2bf9a8a3685ad2611`
+again passed Appearance, draft-close and cold-open. The added observation
+falsified missing scroll as the Data failure's complete cause: Manual recovery
+remained `value: 0` immediately after the row click and in the final AX tree.
+The correction now targets the leading disclosure chevron and requires its
+expanded state before finding descendants; both Data tests use that same
+expansion action. The speculative button-selector fallback is removed.
+
+The suite-level `suiteHasFailed` flag, issue override and subsequent-test skip
+are retired. Each test still uses XCTest's native `continueAfterFailure=false`,
+but independent workflows now run to collect the complete failure list in one
+job. Any failed test still fails xcodebuild and blocks publication. Failure
+control owners reduce from two to one; fixture/user-state isolation is unchanged.
+This change is not permission to continue clicking inside a failed test or to
+count unexecuted rows as PASS. The exact combined UI replay remains required.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |
