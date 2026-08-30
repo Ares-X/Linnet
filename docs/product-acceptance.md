@@ -118,6 +118,22 @@ reinstall row was individually exercised. The later Action-built candidate
 still requires its own artifact identity and installed acceptance; this local
 package must not be substituted for those bytes.
 
+### Candidate publication failure — 2026-08-30
+
+Action `33300580967`, source `414841ff9b17716cd0da43c4e6dcb95fb74dd4b8`,
+stopped at 08:09:46 UTC before signing or upload. Its comparison against the
+merge's first parent rejected Chinese sequence 31→34: the metadata owner
+required an exact +1 increment even though the branch contained multiple
+valid data revisions. Local preflight had not exercised this merge-endpoint
+comparison. The correction retains one metadata owner and removes the two
+adjacency assumptions (pack and Catalog); changed identities must increase,
+unchanged identities must retain their sequence, and reused identities or
+regressing ABI/minimum-Core remain rejected. The existing regression suite
+covers individual transitions, their merged endpoints and reverse/non-increasing
+transitions. README version duplication found in the same local release checks
+was removed without changing the gate. These are release-tool corrections,
+not input-runtime changes or a successful cloud rerun.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |
