@@ -1661,6 +1661,11 @@ struct LinnetCandidateWindowInteractionTests {
   private static func testEnglishMetadataFooterNaturalSize() {
     for point in [CGFloat(12), 15, 16, 32] {
       testEnglishMetadataFooterNaturalSize(candidatePoint: point)
+      testEnglishMetadataFooterNaturalSize(
+        candidatePoint: point,
+        values: ["ok", "欧克", "欧凯", "欧楷", "鸥科", "欧卡", "欧", "哦", "😮"],
+        rawDetailText: "ˌəʊˈkeɪ · adj. 好；不错；可以\nadv. 好；行",
+        darkMode: true)
     }
     testEnglishMetadataFooterNaturalSize(
       candidatePoint: 16,
@@ -1844,7 +1849,39 @@ struct LinnetCandidateWindowInteractionTests {
         abs(canonicalFrames.size.width - candidateRect.width) <= 0.5,
         "\(candidatePoint)pt translation widened an already wider candidate row")
     }
+    if values.first == "ok" {
+      testCandidateDetailEditingTransitions(panel: panel, controller: controller)
+    }
     panel.hide()
+  }
+
+  private static func testCandidateDetailEditingTransitions(
+    panel: SquirrelPanel, controller: SquirrelInputController
+  ) {
+    // Reuse the same live panel across typing and backspace, including both
+    // introduction and removal of the definition footer.
+    let edits: [(values: [String], detail: String)] = [
+      (["你", "呢", "泥", "拟", "妮", "倪", "腻", "逆", "匿"], ""),
+      (["n", "need", "night", "no", "not", "now", "number", "na", "nc"], "en · n. 字母 N"),
+      (["你", "呢", "泥", "拟", "妮", "倪", "腻", "逆", "匿"], ""),
+      (["niu", "你是", "你说", "你啥", "你上", "逆市", "你谁", "你熟", "逆势"], "adj. 牛的；牛属动物的"),
+      (["牛", "扭", "纽", "妞", "钮"], ""),
+    ]
+    for edit in edits {
+      _ = panel.update(
+        preedit: "", selRange: .empty, caretPos: 0,
+        candidates: SquirrelInputController.CandidateSnapshot(
+          items: edit.values.enumerated().map { index, value in
+            .init(
+              text: value, comment: index == 0 ? edit.detail : "",
+              page: 0, indexOnPage: index, absoluteIndex: index,
+              selectionLabel: String(index + 1))
+          },
+          pageSize: edit.values.count, currentPage: 0, isLastPage: true,
+          isExpanded: false, canExpand: false),
+        highlighted: 0, update: true, controller: controller)
+      render(panel.view)
+    }
   }
 
   private static func testSharedCandidateDetailSidecarGeometry() {
@@ -2394,11 +2431,32 @@ struct LinnetCandidateWindowInteractionTests {
   }
 
   private static func render(_ view: SquirrelView) {
-    guard let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+    // NSTextViews are siblings of SquirrelView, not its children. Rendering
+    // only SquirrelView tests the highlight but misses AppKit text auto-sizing.
+    let panel = view.window as? SquirrelPanel
+    let surface = panel?.contentView ?? view
+    guard let representation = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) else {
       failures.append("candidate view did not create a bitmap render target")
       return
     }
-    view.cacheDisplay(in: view.bounds, to: representation)
+    surface.cacheDisplay(in: surface.bounds, to: representation)
+    guard panel != nil else { return }
+    let cells = view.candidateAccessibilityGeometry().candidateFrames
+    let origin = view.textView.textContainerOrigin
+    let detailFrame = view.convert(view.detailTextView.bounds, from: view.detailTextView)
+    for (candidate, cell) in zip(view.candidateRanges, cells) {
+      guard let range = view.convert(range: candidate) else {
+        failures.append("rendered candidate has no text range")
+        continue
+      }
+      let glyph = view.convert(
+        view.contentRect(range: range).offsetBy(dx: origin.x, dy: origin.y),
+        from: view.textView)
+      require(cell.insetBy(dx: -0.5, dy: -0.5).contains(glyph.center),
+        "rendered glyph escaped its candidate cell: glyph \(glyph), cell \(cell)")
+      require(view.detailTextView.isHidden || !glyph.intersects(detailFrame),
+        "rendered candidate overlaps its definition: glyph \(glyph), detail \(detailFrame)")
+    }
   }
 
   private struct ThemeSample {

@@ -68,10 +68,15 @@ final class SquirrelView: NSView {
     textView.drawsBackground = false
     textView.isEditable = false
     textView.isSelectable = false
+    // Panel geometry owns both frames. NSTextView's automatic height fitting
+    // otherwise bottom-anchors the candidate glyphs below their highlight when
+    // a detail footer makes the panel taller than the candidate text.
+    textView.isVerticallyResizable = false
     textView.textLayoutManager?.delegate = squirrelLayoutDelegate
     detailTextView.drawsBackground = false
     detailTextView.isEditable = false
     detailTextView.isSelectable = false
+    detailTextView.isVerticallyResizable = false
     detailTextView.isHidden = true
     detailDividerView.isHidden = true
     detailDividerView.wantsLayer = true
