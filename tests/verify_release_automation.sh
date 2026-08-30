@@ -35,8 +35,8 @@ for owner in "${control}" "${stager}" "${publisher}" "${identity}"; do
   bash -n "${owner}"
 done
 
-if rg -n 'actions/artifacts|actions/(upload|download)-artifact@' \
-    "${release_workflow}" "${stager}" "${publisher}"; then
+if rg -n 'actions/artifacts' \
+    "${repo_root}/.github/workflows" "${stager}" "${publisher}"; then
   fail "the 906 MB Actions artifact upload/download path returned"
 fi
 # Diagnostic reports are not product transport. Only the manual UI lane may

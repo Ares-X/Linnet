@@ -438,7 +438,8 @@ final class SettingsUITests: XCTestCase {
     try expandDisclosure("Diagnostics", in: app)
     let refresh = app.buttons["Refresh"]
     try reveal(refresh, named: "Refresh", in: app)
-    refresh.click()
+    try waitUntilEnabled(refresh, timeout: 10)
+    refresh.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     try waitUntilEnabled(refresh, timeout: 10)
     try openAndCancelPanel(button: "Save…", title: "Export Linnet Diagnostics", in: app)
 
@@ -449,17 +450,12 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(app.buttons["Open Data Folder"].exists)
     XCTAssertTrue(app.buttons["Copy Report"].exists)
 
-    let interfaceLanguage = app.popUpButtons["settings.interfaceLanguage"]
-    XCTAssertTrue(interfaceLanguage.exists)
-    XCTAssertTrue(
-      app.windows.firstMatch.frame.contains(interfaceLanguage.frame),
-      "Interface language is outside the Settings window: "
-        + "window=\(app.windows.firstMatch.frame), control=\(interfaceLanguage.frame)")
     try selectEachPopUpOption([
       "Follow System",
       "简体中文",
       "English",
-    ], identifier: "settings.interfaceLanguage", in: app)
+    ], identifier: "settings.interfaceLanguage", in: app,
+      fixedViewport: app.windows.firstMatch)
     XCTAssertNotEqual(app.state, .notRunning)
   }
 
@@ -717,7 +713,7 @@ final class SettingsUITests: XCTestCase {
     let button = app.buttons[label]
     try reveal(button, named: label, in: app)
     try waitUntilEnabled(button, timeout: 10)
-    button.click()
+    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     let panel = app.dialogs.firstMatch
     XCTAssertTrue(panel.waitForExistence(timeout: 3), "Missing panel: \(title)")
     let cancel = panel.buttons["Cancel"].firstMatch
@@ -815,13 +811,20 @@ final class SettingsUITests: XCTestCase {
   private func selectEachPopUpOption(
     _ options: [String],
     identifier: String? = nil,
-    in app: XCUIApplication
+    in app: XCUIApplication,
+    fixedViewport: XCUIElement? = nil
   ) throws {
     let predicate = NSPredicate(format: "value IN %@", options)
     for option in options {
       let popUp = identifier.map { app.popUpButtons[$0] }
         ?? app.popUpButtons.matching(predicate).firstMatch
-      try reveal(popUp, named: identifier ?? option, in: app)
+      if let fixedViewport {
+        XCTAssertTrue(popUp.exists)
+        XCTAssertTrue(fixedViewport.frame.contains(popUp.frame),
+          "Fixed popup is outside its window: \(identifier ?? option)")
+      } else {
+        try reveal(popUp, named: identifier ?? option, in: app)
+      }
       XCTAssertTrue(popUp.isEnabled)
       // Expanded SwiftUI disclosures can report false isHittable for a visibly
       // exposed child. Verify the actual mouse/menu/value path, not that hint.

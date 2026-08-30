@@ -205,146 +205,75 @@ by this focused run.
 
 ### Settings UI scroll incident — 2026-08-30
 
-Release Action `33303649630`, source
-`064ad67e6fa8c046128ee65673db2733698da143`, passed source, Swift, Rime,
-Periphery and signed-package verification, then failed its first UI test at
-09:51:44 UTC. `testAppearanceControlsAndPreviewRemainResponsive` could not
-reveal Xuan: target `(73, 704, 208, 105)`, viewport `(32, 112, 960, 523)`,
-existing and enabled but not hittable. The remaining nine UI tests were
-skipped by the existing fail-fast contract; Draft staging did not run.
+Current complete UI evidence: Action [33310223404](https://github.com/Ares-X/Linnet/actions/runs/33310223404),
+source `1a4d414d52f62ec471cfbd959c7c4dc97771ef88`, ran all ten cases:
+**nine PASS, one FAIL**. No product source, installed App, version, pack or
+publication identity changed during this harness repair. This is isolated
+Settings workflow evidence, not exact signed-package installation acceptance.
 
-The reveal owner issued twelve fixed -600-point scrolls followed by twelve
-+600-point scrolls. Those jumps exceed the 418-point interval in which this
-105-point card can fit inside the viewport, so a valid position can be
-skipped. Intermediate target frames were not retained; the log alone does
-not prove that this was the only cause or that the product was unclickable.
-Candidate `343ebe2f5521f72fdaad894ad96f0a274eefc5db` instead centers the observed
-target, bounds each step to half the viewport and records frames on failure.
-Full containment, hittability and selected-state assertions remain intact.
-The sole scroll owner remains `reveal` (one before/after); no product path,
-fallback click, input method restart or local installation was added.
-Local typechecking and release-workflow gates pass. Isolated Action
-`33305751531` stopped before UI execution because the new profile omitted
-the declared build-tool installation, leaving `rg` unavailable; this is
-`ENVIRONMENT_INVALID`, not a UI result. The profile now uses the existing
-tool installer before hydration. Until the isolated UI replay passes, the
-scroll correction is unverified and the release blocker remains open.
+| Case | Exact complete-run result |
+| --- | --- |
+| Appearance controls, theme previews and popup selections | PASS, 99.659 s |
+| Pending-change close/discard | PASS, 36.356 s |
+| Cold Host-like Settings open | PASS, 2.595 s |
+| Data controls and cancellation | FAIL, 143.607 s; diagnostic Refresh hit testing |
+| Progressive Cloud/Manual/Diagnostics disclosure | PASS, 31.275 s |
+| Focused dictionary-row deletion | PASS, 130.998 s |
+| Four-page navigation | PASS, 20.424 s |
+| Chinese and English input settings | PASS, 89.565 s |
+| Reopen above a separate foreground application | PASS, 8.844 s |
+| Reopen after minimizing | PASS, 6.781 s |
 
-The corrected environment replay, Action `33305873514` at
-`ac153380ca7c5b9880e26813037bac685743b644`, passed the complete Appearance
-interaction test (76.444 seconds) and draft-close test (35.041 seconds).
-This closes the scroll defect without changing product code. It then failed
-the cold-Host-open test: the exact embedded NSWorkspace application was active,
-but the bundle-ID-only XCUIApplication proxy reported no window. The build
-contains both standalone and embedded Settings apps with the same identifier;
-all passing launch paths use the exact embedded URL. The cold test now uses
-that same URL rather than asking XCTest to resolve another build by ID. This
-does not activate the application or loosen the foreground/window assertions.
-The target identity paths reduce from two to one. The complete Settings suite
-and publication remain blocked until this second correction is replayed.
+Confirmed causes and retired paths:
 
-Action `33306439387`, source `24f4548e35e7e4a0c7497ac6af900b72b3b7be83`,
-passed Appearance again (84.231 seconds), draft-close (35.692 seconds) and
-cold-Host-open (2.420 seconds). This closes the cold test's build-selection
-defect. The suite then reached Data and failed to find the retention popup
-immediately after expanding Manual recovery. Unlike checkbox and button
-helpers, `selectEachPopUpOption` clicked without calling the shared reveal
-owner. All ten popup call sites now use that same visibility prerequisite;
-there is no alternate selector or blind click. The next replay must still
-prove the Data workflow and the remaining six tests, which were skipped.
+- **Scrolling:** official candidate Action `33303649630` at `064ad67`
+  failed Xuan at 09:51:44 UTC: target `(73,704,208,105)`, viewport
+  `(32,112,960,523)`. Fixed 600-pt jumps could skip the 418-pt visible interval.
+  The sole manual scroll owner now centers the observed target with bounded
+  steps. Appearance repeatedly passes, including the current complete run.
+- **Cold-open identity:** Action `33305873514` opened the exact embedded App,
+  but the bundle-ID-only XCTest observer could select its standalone sibling.
+  All observers now use the exact embedded URL (target-selection paths 2→1).
+  Neither launch nor reopen assertions activate Settings on its behalf.
+- **Disclosure:** two unsuccessful positioning attempts stopped further guessing.
+  Action `33308803451` at `fcfe211` retained the decisive screenshot and
+  synthesized event: at 11:34:03, click `(51,548)` missed the painted arrow
+  at `(69,548)`; the AX frame begins at x=43. The string-value hypothesis
+  was falsified by `__NSCFBoolean(0)`. This fixed-system-font macOS-26 fixture
+  uses the measured 26-pt inset and still requires true expanded state and
+  actual descendants; no alternate clicks or product offsets exist.
+- **Visible controls:** Action `33309486828` at `406dd9f` proved Retention
+  was enabled and visibly exposed at `(143,468,247,26)`, despite false
+  `isHittable`. The scroll owner now proves containment only. Actual centered
+  popup clicks, menu items and selected values prove interaction. The current
+  full run passed all retention choices and subsequent cancellation paths.
+- **Foreground fixture:** XCTRunner is LSBackgroundOnly. Both changing its
+  policy and activating NSApplication failed to make it foreground. The
+  in-runner panel and policy mutations are retired. One minimal regular AppKit
+  fixture owns the separate-app boundary: Settings active → fixture active and
+  Settings inactive → NSWorkspace reopen → Settings active and visible.
+  This now passes. Exact-path cleanup covers only the two disposable apps,
+  their bundle registrations and UAT preferences; no user application is used.
+- **Remaining Data failure:** at 12:14:17 the native Refresh click attempted
+  implicit scrolling even though its frame was already within the viewport,
+  then failed `Not hittable` three times. The affected diagnostic and file-panel
+  buttons now use the same visible-frame mouse primitive as the verified popup
+  path. Enabled-state, operation completion, dialog appearance and cancellation
+  assertions remain. Full-path review also separates the fixed language footer
+  from scrollable popups: it is tested against the window bounds on every
+  language change, not against a scroll viewport that cannot contain it.
+  This Data-only correction is **pending focused replay**;
+  it must not be reported as a full ten-case PASS yet.
 
-Action `33307100013` at `5f4f5e7e56d27a73df5c1ae2bf9a8a3685ad2611`
-again passed Appearance, draft-close and cold-open. The added observation
-falsified missing scroll as the Data failure's complete cause: Manual recovery
-remained `value: 0` immediately after the row click and in the final AX tree.
-The correction now targets the leading disclosure chevron and requires its
-expanded state before finding descendants; both Data tests use that same
-expansion action. The speculative button-selector fallback is removed.
-
-The suite-level `suiteHasFailed` flag, issue override and subsequent-test skip
-are retired. Each test still uses XCTest's native `continueAfterFailure=false`,
-but independent workflows now run to collect the complete failure list in one
-job. Any failed test still fails xcodebuild and blocks publication. Failure
-control owners reduce from two to one; fixture/user-state isolation is unchanged.
-This change is not permission to continue clicking inside a failed test or to
-count unexecuted rows as PASS. The exact combined UI replay remains required.
-
-Action `33307665435`, source `d927709afabb32e22443cdcfe28a2d204f08a215`,
-executed all ten workflows: seven passed, both Data cases failed the numeric
-disclosure assertion, and the covering-window case failed before covering
-Settings. Two Data correction attempts have failed; further coordinate patches
-are stopped. The complete transition is: locate/reveal native triangle → click
-→ SwiftUI expansion → AX value and descendants → interact with descendants.
-The previous log proves row-center clicking left value 0; this run only proves
-`value == 1` timed out, not that the arrow left the content collapsed. Apple's
-XCUIElementAttributes contract permits NSString or NSNumber, but this test
-assumed NSNumber and discarded xcresult before inspection. Retain both value
-type/descendants and before/after screenshots before deciding the next fix.
-
-The covering fixture used NSPanel inside the XCTest runner without changing
-its activation policy. The Xcode 26.6 runner template sets LSBackgroundOnly;
-AppKit defines that as prohibited activation, consistent with the failed
-activate request at 11:11 UTC. The fixture now explicitly sets/restores its own
-regular policy and records the initial policy. It never changes Settings or
-activates Settings on its behalf. This is a test-environment correction,
-pending runtime verification, not a product foreground fix.
-
-Diagnostic scope is the three failed methods in one isolated run; complete
-default-suite acceptance remains required afterward. Production paths remain
-unchanged. Disclosure action owner stays one; no alternative clicks or state
-normalizer are added. The result bundle now survives fixture cleanup under a
-unique build directory; manual CI retains only this report for three days.
-The release artifact guard now distinguishes diagnostic evidence from the
-still-prohibited App/package artifact transport. No user application is
-stopped, input source registered, version advanced or publication authorized.
-
-Diagnostic Action `33308803451` at
-`fcfe211e696b3c1505b1841ad2492b9a23bd166a` retained its native report and
-reproduced all three failures. It falsifies the value-type hypothesis: both
-disclosures return `__NSCFBoolean(0)`. At 11:34:03 the event record targets
-`(51,548)`, whereas the screenshot paints Manual's chevron at `(69,548)`;
-the AX frame starts at x=43, outside the painted GroupBox. Cloud shows the
-same mismatch. The fixed-font UI fixture now uses the measured 26-pt chevron
-inset, not height/2 or the label center. Its native expanded-value assertion
-and later descendant interactions are unchanged; there is no alternate click.
-This is an explicitly fixed-fixture geometry measurement, not a product
-layout constant. A future OS/control-metric change must fail with screenshots,
-not silently try another location.
-
-The runner reports initial policy 2 (prohibited); changing policy succeeds,
-but the immediate NSRunningApplication activation request is still rejected.
-The fixture now uses NSApplication's own activation entrypoint and waits for
-actual active state before verifying Settings loses and regains focus. Native
-NSRunningApplication snapshots only advance on the main run loop, so request
-return values are no longer treated as observed foreground state. Product
-activation code remains untouched. Both corrections await the exact replay.
-
-Action `33309486828`, source `406dd9fd7cfd82f421a8b922591e2d8f1787a387`,
-passes the complete progressive-disclosure case: Cloud, Manual and Diagnostics
-all report true and reveal their descendants. The next failure is now distinct:
-at 11:48:24–40 Retention is enabled, fully visible at `(143,468,247,26)`, but
-XCTest reports `isHittable=false`. The retained screen recording at +54s
-confirms the same exposed popup, without another window or overlay. The scroll
-helper's hittability prerequisite stopped before any Retention click occurred.
-Visibility is now the scroll owner's sole decision; the popup workflow verifies
-enabled state, an actual centered mouse click, the requested menu item and the
-resulting selected value. No click fallback or source/product bypass is added.
-Because this changes the shared reveal prerequisite, the next replay is the
-complete ten-case UI suite, not a claim extrapolated from selected cases.
-
-Two attempts to turn background XCTRunner into the covering application failed:
-changing its activation policy did not admit NSRunningApplication activation,
-and NSApplication activation never made it active. That path is retired rather
-than receiving a third policy patch. The cross-application scenario now has a
-real, regular test-only AppKit app and event loop: launch Settings → launch the
-separate exact-URL foreground fixture → assert Settings inactive → reopen
-Settings through NSWorkspace → assert Settings active and visible → terminate
-only the owned fixture apps. Its 16-line main and bundle metadata are compiled
-below the existing disposable DerivedData root; the existing cleanup owner
-also covers its exact executable, bundle registration and preference domain.
-No user application, input source or installed product is involved. This adds
-one necessary test process boundary while deleting the in-runner panel/policy
-path; production files and production authoritative-path counts stay unchanged.
+XCTest's `continueAfterFailure=false` stops each failed test; the retired
+global skip flag no longer suppresses independent workflows (failure owners
+2→1). The manual `settings-ui` profile accepts one selected-method batch or
+the default full suite. It reuses locked preparation and the existing build
+owner, without release signing or packaging. Native xcresults survive fixture
+cleanup under unique `build/settings-ui-results/` directories; manual CI
+retains only these synthetic reports for three days, not App/package transport.
+A failed declared-tool setup in Action `33305751531` was
+`ENVIRONMENT_INVALID`, not product evidence. It was corrected before UI replay.
 
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
