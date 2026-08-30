@@ -4,7 +4,7 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
-## 0.1.10 — 待发布
+## 0.1.10 — 2026-08-30
 
 ### 候选窗与主题
 

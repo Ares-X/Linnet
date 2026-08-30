@@ -105,6 +105,19 @@ input menu, Settings and real input.
 
 ## Evidence levels
 
+### Local 0.1.10 user feedback — 2026-08-30
+
+Installed source `53ab4e263e971c6849d0dd0dfa6cdea4e9447a9b`, version
+0.1.10 (69), Core PKG SHA-256
+`a26d2dc6fa323e52dd6afe8365d72ea666dfbada7d8023cfc301615d290f11f3`:
+macOS Installer completed successfully and the Active language-data metadata
+hash remained unchanged. After being asked to check input after applying the
+update, the user reported “输入正常”. This is real-user input feedback for the
+local candidate, not a claim that every application, theme, accessibility or
+reinstall row was individually exercised. The later Action-built candidate
+still requires its own artifact identity and installed acceptance; this local
+package must not be substituted for those bytes.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |
