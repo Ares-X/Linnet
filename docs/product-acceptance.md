@@ -118,6 +118,16 @@ reinstall row was individually exercised. The later Action-built candidate
 still requires its own artifact identity and installed acceptance; this local
 package must not be substituted for those bytes.
 
+Maintainer release direction, 2026-08-30: preserve the working local installation
+rather than downgrade it solely to repeat an update. System Installer records
+show the local 0.1.9 Core candidate installed at 14:05 and the above 0.1.10
+candidate at 15:47, followed by the user's successful-input report. For this
+release, retain that local upgrade evidence and exercise the exact Action Core
+over the working candidate, then reinstall the same bytes. This is a bounded
+0.1.10 acceptance decision, not evidence that the public 0.1.9 package or every
+application was exercised. Online update discovery remains a separate
+post-publication check; no downgrade or publication is implied by a test PASS.
+
 ### Candidate publication failure — 2026-08-30
 
 Action `33300580967`, source `414841ff9b17716cd0da43c4e6dcb95fb74dd4b8`,
