@@ -7,6 +7,7 @@ import Vision
 @main
 struct LinnetSettingsAppearancePreviewTests {
   @MainActor static func main() {
+    testCloudThemeRecognition()
     testPreviewDisclosureStateIsPerLanguage()
     testBundledThemeSourceIsComplete()
     testCatalogOwnsThemePairs()
@@ -51,22 +52,89 @@ struct LinnetSettingsAppearancePreviewTests {
       }
       view.cacheDisplay(in: view.bounds, to: bitmap)
       guard let image = bitmap.cgImage else { fail("theme picker image is empty") }
-      let request = VNRecognizeTextRequest()
-      request.recognitionLanguages = ["zh-Hans", "en-US"]
-      request.recognitionLevel = .accurate
+      print("Theme picker render: \(appearance.rawValue) \(width)pt, \(bitmap.pixelsWide)x\(bitmap.pixelsHigh)px")
+      guard let png = bitmap.representation(using: .png, properties: [:]) else {
+        fail("cannot encode rendered theme evidence")
+      }
       do {
-        try VNImageRequestHandler(cgImage: image).perform([request])
-      } catch { fail("theme preview OCR unavailable: \(error)") }
-      let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
+        try png.write(to: URL(fileURLWithPath: "build/settings-theme-preview-\(appearance.rawValue)-\(Int(width)).png"))
+      } catch { fail("cannot save rendered theme evidence: \(error)") }
+      let text = themeCandidateText(in: image, widthInPoints: width)
       let samples = text.components(separatedBy: "输入").count - 1
+      if samples < 14 {
+        // Failed hosted jobs discard local files; retain the synthetic fixture
+        // in their existing log without introducing another artifact uploader.
+        print("LINNET_THEME_PREVIEW_FAILURE_PNG_BASE64=\(png.base64EncodedString())")
+      }
       require(samples >= 14,
         "\(appearance) \(width)pt theme picker must show a readable Light/Dark candidate for all seven themes; found \(samples): \(text)")
-      if width == 900, let png = bitmap.representation(using: .png, properties: [:]) {
-        do {
-          try png.write(to: URL(fileURLWithPath: "build/settings-theme-preview-\(appearance.rawValue).png"))
-        } catch { fail("cannot save rendered theme evidence: \(error)") }
-      }
     }
+  }
+
+  private static func themeCandidateText(in image: CGImage, widthInPoints: CGFloat) -> String {
+    // OCR observes one fixed 2 px/pt sRGB representation, independent of the
+    // host display's backing scale and bitmap color space. Keep the original
+    // capture as evidence; do not retry OCR or accept a lower sample count.
+    let width = Int((widthInPoints * 2).rounded())
+    let height = Int((CGFloat(image.height) * CGFloat(width) / CGFloat(image.width)).rounded())
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+      let context = CGContext(data: nil, width: width, height: height,
+        bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { fail("cannot create fixed-density OCR image") }
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    guard let recognitionImage = context.makeImage() else { fail("OCR image is empty") }
+    let request = VNRecognizeTextRequest()
+    request.recognitionLanguages = ["zh-Hans", "en-US"]
+    request.recognitionLevel = .accurate
+    do {
+      try VNImageRequestHandler(cgImage: recognitionImage).perform([request])
+    } catch { fail("theme preview OCR unavailable: \(error)") }
+    return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
+  }
+
+  private static func testCloudThemeRecognition() {
+    // Exact unedited Action 33302408070 screenshot, including the Xuan dark
+    // underline that whole-grid recognition previously mistook for missing text.
+    let url = URL(fileURLWithPath: "tests/fixtures/settings-theme-cloud-dark-680.png")
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+      let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+    else { fail("cannot read cloud theme regression image") }
+    require(image.width == 680 && image.height == 501, "cloud regression image dimensions changed")
+    let text = themeCandidateText(in: image, widthInPoints: 680)
+    require(text.components(separatedBy: "输入").count - 1 == 14,
+      "all fourteen visible cloud samples must be recognized: \(text)")
+    testMissingCloudSamples(image)
+  }
+
+  private static func testMissingCloudSamples(_ image: CGImage) {
+    // These rectangles describe the immutable cloud fixture, not inferred
+    // production geometry. Erase each sample separately: none may be hidden
+    // by recognition of its thirteen siblings. Also reject a blank grid.
+    for sample in 0...14 {
+      guard let context = CGContext(data: nil, width: image.width, height: image.height,
+        bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+      else { fail("cannot create missing-sample regression image") }
+      context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+      let family = sample / 2
+      let top = 76 + (family / 3) * 115 + (sample % 2) * 37
+      let region = sample == 14
+        ? CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        : CGRect(x: 36 + (family % 3) * 210, y: image.height - top - 33, width: 188, height: 33)
+      context.setFillColor(CGColor(gray: 0, alpha: 1))
+      context.fill(region)
+      guard let missing = context.makeImage() else { fail("missing-sample image is empty") }
+      let text = themeCandidateText(in: missing, widthInPoints: 680)
+      require(text.components(separatedBy: "输入").count - 1 < 14,
+        "OCR accepted missing sample \(sample): \(text)")
+    }
+    guard let clipped = image.cropping(to: CGRect(x: 0, y: 0, width: 680, height: 335))
+    else { fail("cannot create clipped cloud fixture") }
+    require(themeCandidateText(in: clipped, widthInPoints: 680).components(separatedBy: "输入").count - 1 < 14,
+      "OCR accepted a clipped theme grid")
+    print("Cloud theme OCR regression: PASS (14 visible; each of 14 missing, blank and clipped rejected)")
   }
 
   private static func testPreviewDisclosureStateIsPerLanguage() {

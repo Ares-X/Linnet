@@ -134,6 +134,75 @@ transitions. README version duplication found in the same local release checks
 was removed without changing the gate. These are release-tool corrections,
 not input-runtime changes or a successful cloud rerun.
 
+### Cloud theme-preview assertion — 2026-08-30
+
+Action `33301220240`, source `c3cd850a58469f729cb305d45152c03e5cce8ad7`,
+passed source/publication checks, then failed at 08:28:08 UTC in the Swift
+appearance-preview fixture. Vision recognized 13 occurrences of “输入” instead
+of 14 in the 680-point Dark Aqua theme grid. Compilation succeeded. The
+macos-26-arm64 runner also logged an unavailable paravirtual display driver,
+but that does not establish the cause of the recognition difference.
+
+On the maintainer's macOS 26.6, both default 2x and explicitly controlled 1x
+captures passed all four appearance/width cases; visual inspection of the 1x
+Dark Aqua 680-point image found all fourteen samples. Thus a scale-only cause
+was not reproduced and the cloud assertion is not yet a confirmed product
+rendering defect. The old fixture saved only 900-point images after its
+assertion, so the failed cloud image was lost. The fixture now saves each
+capture before recognition, logs its pixel dimensions and emits the synthetic
+PNG in the existing job log on a count failure. The fourteen-sample threshold,
+rendering path and production UI remain unchanged. At that checkpoint cloud
+diagnosis and formal artifact publication were incomplete; no additional cloud
+run had been authorized.
+
+The subsequently authorized isolated diagnostic ran once as Action
+`33302408070`, source `bee9c175f16ff67a13eb7e6691eee71c42887caa`, on
+2026-08-30 at 08:46 UTC. Its macOS job took 36 seconds; hydration, build-cache
+downloads, full product tests, packaging and publication were all skipped.
+The same 680-point Dark Aqua assertion failed with 13 recognized samples.
+The preserved 680×501 PNG has SHA-256
+`69187fbd84f038977300d2da4aeb543cd810ee856384956d87fd38267a72ef6f`.
+It is recoverable from the job's raw log marker
+`LINNET_THEME_PREVIEW_FAILURE_PNG_BASE64`; the CLI's formatted failed-log view
+omits that long line, so retrieval used the job-log API.
+
+Visual inspection of those exact cloud pixels found all fourteen samples,
+without missing candidate text. Replaying whole-image Vision recognition on
+the same PNG locally reproduced 13: the Xuan dark sample was segmented into
+“C 1” and “2候选”, omitting the visible “输入”. Restricting the same recognition
+request to that sample's actual image region recognized “1输入 2候选” without
+changing the pixels. The earliest wrong result is therefore the test's
+whole-image OCR count being treated as proof of missing rendered content,
+not a demonstrated product rendering failure or cloud-only Vision failure.
+
+That run closed diagnosis, not the failing test or release gate. The diagnostic
+entrypoint reuses the same fixture, source list and Swift cache owner (each
+remains one). Its local run, release-automation gate, shell syntax and exact
+default-flow equivalence checks passed. It changed no installed App and made
+no release.
+
+The subsequent authorized correction retains the unedited PNG at
+`tests/fixtures/settings-theme-cloud-dark-680.png`. The new regression failed
+with the original direct-bitmap OCR path. One canonical OCR boundary now
+normalizes its input to sRGB at 2 pixels per layout point, removing dependence
+on host backing-scale and bitmap format; the original capture remains the
+saved evidence. The same fixture passes with all fourteen samples. Erasing
+each of the fourteen samples separately, an entirely blank grid and a clipped
+grid are all rejected. There are no retries, alternate recognition results or
+lowered sample thresholds. The actual four Aqua/Dark Aqua × 680/900-point
+component captures also pass locally. No production code or theme palette was
+changed, and no second compiler/cache owner was added. Strict SwiftLint,
+release-automation checks and the complete local Swift owner suite pass,
+including candidate interaction and the two-process Settings IPC fixture.
+Exact cloud verification passed on 2026-08-30 in Action `33302857559`, source
+`0523dd55fbf6986ef37328b106d3668b67f7be36`. The macOS job ran from 08:57:50 to
+08:59:08 UTC (78 seconds). It passed the retained cloud image, all sixteen
+negative images and all four actual 1x captures; hydration, full product build,
+packaging and publication were skipped. This closes the OCR test defect.
+Production source and the installed input method remain unchanged; full
+release-candidate and installed-product acceptance are separate, not claimed
+by this focused run.
+
 | Level | Evidence | What it may prove |
 | --- | --- | --- |
 | C | source, type, unit and structural tests | an owner contract and regression guard exist |
