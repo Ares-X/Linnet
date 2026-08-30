@@ -28,7 +28,6 @@ enum LinnetRimeCandidateSnapshotBuilder {
       page: currentPage, pageSize: pageSize)
     else { return nil }
 
-    let hasActiveInput = context.composition.length > 0
     let pageStart = expandedBounds.lowerBound
     var compactItems = [SquirrelInputController.CandidateItem]()
     compactItems.reserveCapacity(currentCount)
@@ -40,8 +39,8 @@ enum LinnetRimeCandidateSnapshotBuilder {
         indexOnPage: indexOnPage,
         text: candidate.text.map { String(cString: $0) } ?? "",
         comment: candidate.comment.map { String(cString: $0) } ?? "",
-        selectionLabel: hasActiveInput
-          ? selectionLabel(at: indexOnPage, labels: labels) : nil
+        selectionLabel: LinnetCandidatePresentation.candidateSelectionLabel(
+          at: indexOnPage, labels: labels)
       ))
     }
     let compact = SquirrelInputController.CandidateSnapshot(
@@ -76,8 +75,9 @@ enum LinnetRimeCandidateSnapshotBuilder {
         indexOnPage: indexOnPage,
         text: iterator.candidate.text.map { String(cString: $0) } ?? "",
         comment: iterator.candidate.comment.map { String(cString: $0) } ?? "",
-        selectionLabel: page == currentPage && hasActiveInput
-          ? selectionLabel(at: indexOnPage, labels: labels) : nil
+        selectionLabel: page == currentPage
+          ? LinnetCandidatePresentation.candidateSelectionLabel(
+            at: indexOnPage, labels: labels) : nil
       ))
     }
     let highlightedAbsolute = pageStart + highlightedOnPage
@@ -94,16 +94,5 @@ enum LinnetRimeCandidateSnapshotBuilder {
       isLastPage: context.menu.is_last_page,
       canExpand: !context.menu.is_last_page,
       isExpanded: true)
-  }
-
-  private static func selectionLabel(at index: Int, labels: [String]) -> String {
-    if labels.count > 1, labels.indices.contains(index) {
-      return labels[index]
-    }
-    if let customLabels = labels.first, labels.count == 1,
-      index >= 0, index < customLabels.count {
-      return String(customLabels[customLabels.index(customLabels.startIndex, offsetBy: index)])
-    }
-    return String(index + 1)
   }
 }

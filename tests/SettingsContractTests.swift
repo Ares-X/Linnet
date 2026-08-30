@@ -13,6 +13,7 @@ struct SettingsContractTests {
       testPinyinReverseLookupExamples()
       testCoreActivationGate()
       try testLegacyRuntimeHealthWithoutIdentity()
+      try testLegacyCoreActivationBlockerWireCodes()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
         testProductIdentity(host: host, settings: settings)
@@ -55,121 +56,70 @@ struct SettingsContractTests {
   }
 
   private static func testCoreActivationGate() {
-    let ledger = LinnetInputClientLedger()
-    ledger.record(bundleIdentifier: "com.example.Editor")
-    ledger.record(bundleIdentifier: "com.example.Settings")
-    let history = ledger.snapshot()
-    let requester = LinnetCoreActivationGate.RunningApplication(
-      processIdentifier: 41,
-      bundleIdentifier: "com.example.Settings",
-      displayName: "Settings"
-    )
-    let editor = LinnetCoreActivationGate.RunningApplication(
-      processIdentifier: 42,
-      bundleIdentifier: "com.example.Editor",
-      displayName: "Editor"
-    )
-
-    guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
-      compositionIsActive: false,
-      dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
-    ).isReady else {
-      fail("a closed historical client still blocked explicit Core activation")
-    }
-
-    let connected = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
-      compositionIsActive: false,
-      dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester, editor],
-      requesterPID: requester.processIdentifier
-    )
-    guard connected.blocker == .applicationsStillRunning,
-      connected.applications == ["Editor"]
+    guard LinnetInputSourceSelection.classify(
+      currentIdentifier: "io.github.ares-x.inputmethod.Linnet",
+      linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .linnet,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: "unrelated.example",
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .other,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: nil,
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .unknown,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: "",
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .unknown
     else {
-      fail("a running historical client did not block Core activation")
+      fail("optional HIToolbox evidence no longer preserves an unknown state")
     }
 
-    let secondRequesterProcess = LinnetCoreActivationGate.RunningApplication(
-      processIdentifier: 43,
-      bundleIdentifier: requester.bundleIdentifier,
-      displayName: "Settings"
-    )
     guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: false,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester, secondRequesterProcess],
-      requesterPID: requester.processIdentifier
-    ).blocker == .applicationsStillRunning else {
-      fail("another process of the requester app did not block Core activation")
+      requesterIsAlive: true
+    ).isReady else {
+      fail("inactive clients still blocked explicit Core activation")
     }
 
     let activeSource = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: true,
+      selectedInputSource: .linnet,
       compositionIsActive: false,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: true
     )
     let activeComposition = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: true,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: true
     )
     let activeTransaction = LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: false,
       dataTransactionIsActive: true,
-      history: history,
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: true
+    )
+    let unknownSource = LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .unknown,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      requesterIsAlive: true
     )
     guard activeSource.blocker == .inputSourceActive,
       activeComposition.blocker == .compositionActive,
-      activeTransaction.blocker == .dataTransactionActive
+      activeTransaction.blocker == .dataTransactionActive,
+      unknownSource.blocker == .unknownClient
     else {
       fail("Core activation no longer fails closed at every Host mutation boundary")
     }
 
     guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
+      selectedInputSource: .other,
       compositionIsActive: false,
       dataTransactionIsActive: false,
-      history: history,
-      runningApplications: [editor],
-      requesterPID: requester.processIdentifier
+      requesterIsAlive: false
     ).blocker == .requesterUnavailable else {
       fail("a missing Settings requester did not block Core activation")
-    }
-
-    let unknownLedger = LinnetInputClientLedger()
-    unknownLedger.record(bundleIdentifier: nil)
-    guard LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive: false,
-      compositionIsActive: false,
-      dataTransactionIsActive: false,
-      history: unknownLedger.snapshot(),
-      runningApplications: [requester],
-      requesterPID: requester.processIdentifier
-    ).blocker == .unknownClient else {
-      fail("an unidentified historical input client did not fail closed")
-    }
-
-    let firstGeneration = history.generation
-    ledger.record(bundleIdentifier: "com.example.Editor")
-    guard ledger.snapshot().generation == firstGeneration + 1 else {
-      fail("a new client session did not invalidate an in-flight activation drain")
     }
   }
 
@@ -203,6 +153,38 @@ struct SettingsContractTests {
       LinnetSettingsContract.validRuntimeReply(reply)
     else {
       fail("the shipped build60 identity-free health shape is no longer valid")
+    }
+  }
+
+  /// Remove with the two 0.1.9 RuntimeReplyCode cases when the minimum Core
+  /// becomes 0.1.10 for the public 0.1.11 release.
+  private static func testLegacyCoreActivationBlockerWireCodes() throws {
+    let fixtures: [(wireCode: String, code: LinnetSettingsContract.RuntimeReplyCode)] = [
+      ("core_activation_applications_running", .coreActivationApplicationsRunning),
+      ("core_activation_unknown_client", .coreActivationUnknownClient),
+    ]
+    for (index, fixture) in fixtures.enumerated() {
+      let transactionID = UUID(
+        uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 2))!
+      let document: [String: Any] = [
+        "transactionID": transactionID.uuidString,
+        "status": "rejected",
+        "code": fixture.wireCode,
+        "detail": "Published 0.1.9 Host blocked Core activation.",
+        "health": NSNull(),
+      ]
+      let data = try JSONSerialization.data(withJSONObject: document)
+      let reply = try JSONDecoder().decode(
+        LinnetSettingsContract.RuntimeReply.self,
+        from: data)
+      guard reply.transactionID == transactionID,
+        reply.status == .rejected,
+        reply.code == fixture.code,
+        reply.health == nil,
+        LinnetSettingsContract.validRuntimeReply(reply)
+      else {
+        fail("published 0.1.9 blocker wire code \(fixture.wireCode) changed meaning")
+      }
     }
   }
 

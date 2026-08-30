@@ -29,17 +29,15 @@ extension SquirrelApplicationDelegate {
       runtimeDataSnapshot = nil
       return false
     }
+    guard let logDirectory = try? SquirrelApp.dataRegistry.prepareRuntimeLogDirectory() else {
+      runtimeDataSnapshot = nil
+      print("Linnet runtime log directory is unavailable.")
+      return false
+    }
     runtimeDataSnapshot = snapshot
     // OpenCC resolves dictionary paths relative to the one activated data
     // view. A runtime restart repeats this after Settings repairs or updates.
     FileManager.default.changeCurrentDirectoryPath(snapshot.sharedDataDirectory.path)
-    do {
-      try FileManager.default.createDirectory(
-        at: SquirrelApp.logDir,
-        withIntermediateDirectories: true)
-    } catch {
-      print("Error creating user data directory: \(SquirrelApp.logDir.path)")
-    }
     // swiftlint:disable identifier_name
     let notification_handler:
       @convention(c) (
@@ -54,7 +52,7 @@ extension SquirrelApplicationDelegate {
     rimeDuoTraits.setCString(snapshot.userDataDirectory.path, to: \.user_data_dir)
     rimeDuoTraits.setCString(snapshot.prebuiltDataDirectory.path, to: \.prebuilt_data_dir)
     rimeDuoTraits.setCString(snapshot.stagingDirectory.path, to: \.staging_dir)
-    rimeDuoTraits.setCString(SquirrelApp.logDir.path, to: \.log_dir)
+    rimeDuoTraits.setCString(logDirectory.path, to: \.log_dir)
     rimeDuoTraits.setCString(SquirrelApp.productName, to: \.distribution_code_name)
     rimeDuoTraits.setCString(SquirrelApp.productName, to: \.distribution_name)
     rimeDuoTraits.setCString(SquirrelApp.productVersion, to: \.distribution_version)
@@ -77,6 +75,12 @@ extension SquirrelApplicationDelegate {
     }
     let settingsSnapshot: LinnetSettingsDocumentStore.Snapshot
     do {
+      guard let source = Bundle.main.url(forResource: "squirrel", withExtension: "yaml"),
+        let runtime = runtimeDataSnapshot
+      else { throw LinnetSettingsProjectionRenderer.Failure.unsafeFile("squirrel.yaml") }
+      try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+        source: source, to: runtime.userDataDirectory,
+        stagingDirectory: runtime.stagingDirectory)
       settingsSnapshot = try reconcileLiveSettings()
     } catch {
       print("Linnet settings reconciliation failed.")
@@ -100,9 +104,9 @@ extension SquirrelApplicationDelegate {
       // Maintenance disables Service::CreateSession. Do not publish Host
       // readiness or deploy another config task until its worker has exited.
       rimeAPI.join_maintenance_thread()
-      guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else {
-        return failStart("Linnet runtime configuration deployment failed.")
-      }
+    }
+    guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else {
+      return failStart("Linnet runtime configuration deployment failed.")
     }
     guard warmRimeSession.prepare(using: rimeAPI) != nil else {
       return failStart("Linnet runtime session readiness check failed.")
@@ -363,9 +367,8 @@ extension SquirrelApplicationDelegate {
   }
 
   /// The user may request an immediate Core replacement, but the Host alone
-  /// owns the exit decision. Historical client applications must have really
-  /// terminated; controller deinit and input-source switching are not accepted
-  /// as connection-release evidence.
+  /// owns the exit decision. Switching away from Linnet releases active input
+  /// ownership; inactive client applications remain open and reconnect later.
   private func activateInstalledCore(_ request: LinnetSettingsContract.DataRequest) {
     guard LinnetSettingsContract.requestCanContinue(request) else {
       reply(
@@ -376,17 +379,13 @@ extension SquirrelApplicationDelegate {
       )
       return
     }
-    let history = SquirrelInputController.coreActivationClientLedger.snapshot()
-    let decision = coreActivationDecision(
-      requesterPID: request.requesterPID,
-      history: history
-    )
+    let decision = coreActivationDecision(requesterPID: request.requesterPID)
     guard decision.isReady else {
       reply(
         to: request.transactionID,
         status: .rejected,
         code: coreActivationReplyCode(for: decision.blocker),
-        detail: coreActivationDiagnostic(decision)
+        detail: coreActivationDiagnostic(decision.blocker)
       )
       return
     }
@@ -399,40 +398,24 @@ extension SquirrelApplicationDelegate {
     )
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       guard let self else { return }
-      let finalHistory = SquirrelInputController.coreActivationClientLedger.snapshot()
       guard LinnetSettingsContract.requestCanContinue(request),
-        finalHistory.generation == history.generation,
-        coreActivationDecision(
-          requesterPID: request.requesterPID,
-          history: finalHistory
-        ).isReady
+        coreActivationDecision(requesterPID: request.requesterPID).isReady
       else { return }
       NSApp.terminate(nil)
     }
   }
 
   private func coreActivationDecision(
-    requesterPID: Int32,
-    history: LinnetInputClientLedger.Snapshot
+    requesterPID: Int32
   ) -> LinnetCoreActivationGate.Decision {
-    let runningApplications = NSWorkspace.shared.runningApplications
-      .filter { !$0.isTerminated }
-      .map {
-        LinnetCoreActivationGate.RunningApplication(
-          processIdentifier: $0.processIdentifier,
-          bundleIdentifier: $0.bundleIdentifier,
-          displayName: $0.localizedName ?? $0.bundleIdentifier ?? "Unknown application"
-        )
-      }
     return LinnetCoreActivationGate.evaluate(
-      inputSourceIsActive:
-        SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier,
+      selectedInputSource: LinnetInputSourceSelection.classify(
+        currentIdentifier: LinnetInputSourceRegistration.currentInputSourceID(),
+        linnetIdentifier: SquirrelApp.bundleIdentifier),
       compositionIsActive:
         panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true,
       dataTransactionIsActive: activeDataTransaction != nil,
-      history: history,
-      runningApplications: runningApplications,
-      requesterPID: requesterPID
+      requesterIsAlive: LinnetSettingsContract.requesterIsAlive(requesterPID)
     )
   }
 
@@ -450,13 +433,9 @@ extension SquirrelApplicationDelegate {
   }
 
   private func coreActivationDiagnostic(
-    _ decision: LinnetCoreActivationGate.Decision
+    _ blocker: LinnetSettingsContract.CoreActivationBlocker?
   ) -> String {
-    guard !decision.applications.isEmpty else {
-      return "The explicit Core activation drain is not safe."
-    }
-    return "Applications still connected during Core activation: "
-      + decision.applications.joined(separator: ", ")
+    "The explicit Core activation drain is not safe: \(blocker?.rawValue ?? "unknown")."
   }
 
   private enum SettingsPublicationScope: Equatable {

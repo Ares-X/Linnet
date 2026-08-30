@@ -116,6 +116,10 @@ linnet_disabled_filter:
 linnet_english_interaction:
   __include: default.yaml:/linnet/english_interaction
 
+key_binder:
+  bindings:
+    __include: default.yaml:/key_binder/bindings
+
 # Plain Space and Return are selected-candidate behavior owned by the native
 # interaction processor. Host-modified keys are rejected before the editor;
 # only unmodified editing keys remain in this downstream owner.

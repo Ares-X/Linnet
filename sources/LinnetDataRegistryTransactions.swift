@@ -1,6 +1,26 @@
 import Foundation
 
 extension LinnetDataRegistry {
+  static func inspectInstalledRuntime(
+    productName: String,
+    coreVersion: String,
+    applicationSupportDirectory: URL
+  ) throws -> InstalledRuntimeState {
+    do {
+      let registry = try LinnetDataRegistry(
+        productName: productName,
+        coreVersion: coreVersion,
+        applicationSupportDirectory: applicationSupportDirectory,
+        rootAccess: .existing)
+      try registry.verifyCanonicalRoot()
+      guard try registry.validateInstalledRootLayout() else { return .missing }
+      _ = try registry.validatedRuntimeSnapshot(requirement: .committed)
+      return .healthy
+    } catch Failure.missingRegistryRoot {
+      return .missing
+    }
+  }
+
   func runtimeSnapshot() throws -> RuntimeSnapshot {
     try runtimeSnapshot(reconcilingStorage: true)
   }
@@ -22,11 +42,14 @@ extension LinnetDataRegistry {
       throw Failure.invalidActiveState
     }
     let snapshot = try runtimeSnapshot(reconcilingStorage: false)
+    switch set.updateSelection(installedPacks: snapshot.state.packs) {
+    case .localAhead: throw Failure.staleDataChannel
+    case .conflict: throw Failure.invalidActiveState
+    case .current, .available: break
+    }
     let transactionID = UUID()
-    let directory = transactionsDirectory.appending(
-      path: transactionID.uuidString, directoryHint: .isDirectory)
-    let download = downloadsDirectory.appending(
-      path: transactionID.uuidString, directoryHint: .isDirectory)
+    let directory = transactionsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
+    let download = downloadsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
       attributes: [.posixPermissions: 0o700])
     do {
@@ -42,9 +65,7 @@ extension LinnetDataRegistry {
           phase: .downloading,
           candidateRevision: nil),
         to: directory.appending(path: Self.languageTransactionMarkerName))
-      try FileManager.default.createDirectory(
-        at: download, withIntermediateDirectories: false,
-        attributes: [.posixPermissions: 0o700])
+      try FileManager.default.createDirectory(at: download, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
     } catch {
       try? FileManager.default.removeItem(at: download)
       try? FileManager.default.removeItem(at: directory)
@@ -100,9 +121,25 @@ extension LinnetDataRegistry {
 
   func runtimeSnapshot(reconcilingStorage: Bool) throws -> RuntimeSnapshot {
     try prepareMutableDirectories()
+    let requirement: RuntimePublicationRequirement =
+      reconcilingStorage ? .committed : .committedOrPrepared
+    let snapshot = try validatedRuntimeSnapshot(requirement: requirement)
+    if reconcilingStorage {
+      // Runtime truth is the validated immutable Active view. Reconciliation
+      // is a retryable projection/GC side effect and cannot block that view.
+      try? reconcileLanguageStorage(activeState: snapshot.state)
+    }
+    return snapshot
+  }
+
+  private enum RuntimePublicationRequirement { case committed, committedOrPrepared }
+
+  private func validatedRuntimeSnapshot(
+    requirement: RuntimePublicationRequirement
+  ) throws -> RuntimeSnapshot {
     let activeDocument = try loadActiveStateDocument()
     let state = activeDocument.state
-    if reconcilingStorage, state.publication != .committed {
+    if requirement == .committed, state.publication != .committed {
       throw Failure.invalidActiveState
     }
     let active = activeSharedDataDirectory.standardizedFileURL
@@ -118,12 +155,6 @@ extension LinnetDataRegistry {
       manifests[pack.kind] = try verifiedInstalledManifest(for: pack).manifest
     }
     try verifyActiveProjection(state: state, manifests: manifests)
-    if reconcilingStorage {
-      // Runtime truth is the validated immutable Active view. Reconciliation
-      // is a retryable projection/GC side effect and cannot block that view.
-      try? reconcileLanguageStorage(activeState: state)
-    }
-
     return RuntimeSnapshot(
       sharedDataDirectory: active,
       userDataDirectory: userDataDirectory,

@@ -23,13 +23,18 @@ class SmartEnglishFilter : public rime::Filter {
   rime::an<rime::Translation> Apply(
       rime::an<rime::Translation> translation,
       rime::CandidateList*) override;
-  bool AppliesToSegment(rime::Segment* segment) override;
+ bool AppliesToSegment(rime::Segment* segment) override;
 
  private:
+  struct PendingSegment {
+    std::string input;
+    bool pinyin_flow = false;
+  };
+
   const std::string schema_id_;
   const smart_english_domain::InteractionOptions options_;
   const SmartEnglishIndex index_;
-  std::optional<std::string> pending_segment_input_;
+  std::optional<PendingSegment> pending_segment_;
 };
 
 }  // namespace linnet

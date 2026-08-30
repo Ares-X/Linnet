@@ -168,7 +168,7 @@ expected_leaf="$(read_value "${metadata_path}" leaf_certificate_sha256)" ||
 
 if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
   if [[ "${verification_mode}" == existing ]]; then
-    printf '%s\n' missing-app-install
+    printf '%s\n' clean-complete-install
     exit 0
   fi
   fail_identity "installed App is missing"

@@ -43,6 +43,18 @@ if rg -n -i 'python|\.py([[:space:]"]|$)' \
     sources resources package/installer-scripts package/uninstall-linnet; then
   fail "the installed product or lifecycle scripts gained a Python runtime dependency"
 fi
+
+if rg -n 'runtime_is_minimally_repairable|validate_complete_repair_state' \
+    package/core-installer-scripts/preinstall; then
+  fail "Complete regained a shell-owned Runtime repair classifier"
+fi
+if rg -n 'case validate|probe\|validate' tools/LinnetRuntimeInspector.swift ||
+    rg -n '"\$\{runtime_inspector\}" validate' \
+      package/installer-scripts/postinstall; then
+  fail "the package Runtime inspector retained a mutating validation command"
+fi
+rg -Fq '"${runtime_inspector}" probe' package/installer-scripts/postinstall ||
+  fail "postinstall does not consume the read-only committed Runtime probe"
 rg -Fq -- "-name '*.py'" package/stage_language_pack_sources ||
   fail "language-pack staging can admit Python source"
 
@@ -122,14 +134,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-sdk="$(xcrun --sdk macosx --show-sdk-path)"
 tool="${repo_root}/build/linnet-pack"
-make -C "${repo_root}" --no-print-directory linnet-pack-tool
-snapshot_test="${fixture}/activation-profile-runtime-snapshot"
-xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift tests/ActivationProfileRuntimeSnapshotTests.swift \
-  -o "${snapshot_test}"
+runtime_inspector="${repo_root}/build/linnet-runtime-inspector"
+make -C "${repo_root}" --no-print-directory \
+  linnet-pack-tool linnet-runtime-inspector
 
 mkdir "${fixture}/sources" "${fixture}/packs" "${fixture}/containers"
 for kind in chinese english lts extended; do
@@ -205,7 +213,120 @@ LINNET_RELEASE_TOOL="${tool}" LINNET_CORE_VERSION=0.1.0 \
     "${runtime_root}/Data/Packs/english/1-fixture" \
     "${runtime_root}/Data/Packs/lts/1-fixture" \
     "${runtime_root}/Data/Packs/extended/1-fixture"
-"${snapshot_test}" "${runtime_support}" Linnet
+
+snapshot_runtime_tree() {
+  local root="$1"
+  local output="$2"
+  ruby -rdigest -e '
+    root = File.realpath(ARGV.fetch(0))
+    rows = Dir.glob("**/*", File::FNM_DOTMATCH, base: root)
+      .reject { |path| path == "." || path == ".." }
+      .sort.map do |relative|
+        path = File.join(root, relative)
+        stat = File.lstat(path)
+        identity = [relative, stat.ftype, stat.mode, stat.size,
+          stat.ino, stat.mtime.to_f, stat.ctime.to_f]
+        if stat.symlink?
+          identity << File.readlink(path)
+        elsif stat.file?
+          identity << Digest::SHA256.file(path).hexdigest
+        end
+        identity.join("\t")
+      end
+    File.binwrite(ARGV.fetch(1), rows.join("\n") + "\n")
+  ' "${root}" "${output}"
+}
+
+probe_before="${fixture}/runtime-probe-before"
+probe_after="${fixture}/runtime-probe-after"
+snapshot_runtime_tree "${runtime_root}" "${probe_before}"
+[[ "$("${runtime_inspector}" probe 0.1.0 "${runtime_support}")" == healthy ]] ||
+  fail "installed Runtime probe rejected the canonical activation profile"
+snapshot_runtime_tree "${runtime_root}" "${probe_after}"
+cmp "${probe_before}" "${probe_after}" ||
+  fail "installed Runtime probe changed product bytes or metadata"
+if "${runtime_inspector}" validate 0.1.0 "${runtime_support}" >/dev/null 2>&1; then
+  fail "the Runtime inspector retained the mutating validate command"
+fi
+
+absent_support="${fixture}/absent-support"
+mkdir "${absent_support}"
+[[ "$("${runtime_inspector}" probe 0.1.0 "${absent_support}")" == missing ]] ||
+  fail "installed Runtime probe did not classify an absent product root as missing"
+[[ ! -e "${absent_support}/Linnet" && ! -L "${absent_support}/Linnet" ]] ||
+  fail "installed Runtime probe created an absent product root"
+
+preserved_support="${fixture}/preserved-support"
+preserved_root="${preserved_support}/Linnet"
+mkdir -p "${preserved_root}/UserData" "${preserved_root}/Backups" \
+  "${preserved_root}/Transactions"
+preserved_before="${fixture}/preserved-probe-before"
+preserved_after="${fixture}/preserved-probe-after"
+snapshot_runtime_tree "${preserved_root}" "${preserved_before}"
+[[ "$("${runtime_inspector}" probe 0.1.0 "${preserved_support}")" == missing ]] ||
+  fail "installed Runtime probe rejected a root containing only preserved data"
+snapshot_runtime_tree "${preserved_root}" "${preserved_after}"
+cmp "${preserved_before}" "${preserved_after}" ||
+  fail "missing Runtime probe changed preserved data or metadata"
+
+for preserved_name in UserData Backups Transactions; do
+  unsafe_preserved_support="${fixture}/unsafe-preserved-${preserved_name}"
+  mkdir -p "${unsafe_preserved_support}/Linnet" \
+    "${unsafe_preserved_support}/external"
+  ln -s "${unsafe_preserved_support}/external" \
+    "${unsafe_preserved_support}/Linnet/${preserved_name}"
+  if "${runtime_inspector}" probe 0.1.0 "${unsafe_preserved_support}" \
+      >/dev/null 2>&1; then
+    fail "installed Runtime probe accepted symbolic-link ${preserved_name}"
+  fi
+
+  file_preserved_support="${fixture}/file-preserved-${preserved_name}"
+  mkdir -p "${file_preserved_support}/Linnet"
+  printf 'unsafe\n' >"${file_preserved_support}/Linnet/${preserved_name}"
+  if "${runtime_inspector}" probe 0.1.0 "${file_preserved_support}" \
+      >/dev/null 2>&1; then
+    fail "installed Runtime probe accepted non-directory ${preserved_name}"
+  fi
+
+  writable_preserved_support="${fixture}/writable-preserved-${preserved_name}"
+  mkdir -p "${writable_preserved_support}/Linnet/${preserved_name}"
+  chmod 0777 "${writable_preserved_support}/Linnet/${preserved_name}"
+  if "${runtime_inspector}" probe 0.1.0 "${writable_preserved_support}" \
+      >/dev/null 2>&1; then
+    fail "installed Runtime probe accepted writable ${preserved_name}"
+  fi
+done
+
+for generated_root in Data Runtime Build Downloads State Profiles; do
+  incomplete_support="${fixture}/incomplete-${generated_root}"
+  mkdir -p "${incomplete_support}/Linnet/${generated_root}"
+  if "${runtime_inspector}" probe 0.1.0 "${incomplete_support}" \
+      >/dev/null 2>&1; then
+    fail "installed Runtime probe classified incomplete ${generated_root} as missing"
+  fi
+done
+unsafe_support="${fixture}/unsafe-support"
+mkdir -p "${unsafe_support}/Linnet" "${fixture}/external-data"
+ln -s "${fixture}/external-data" "${unsafe_support}/Linnet/Data"
+if "${runtime_inspector}" probe 0.1.0 "${unsafe_support}" >/dev/null 2>&1; then
+  fail "installed Runtime probe accepted an unsafe generated root"
+fi
+if "${runtime_inspector}" probe 0.0.9 "${runtime_support}" >/dev/null 2>&1; then
+  fail "installed Runtime probe accepted packs requiring a newer Core"
+fi
+
+active_grammar="${runtime_root}/Runtime/Active/linnet_grammar_active.yaml"
+cp "${active_grammar}" "${fixture}/active-grammar"
+grammar_mode="$(stat -f '%Lp' "${active_grammar}")"
+chmod u+w "${active_grammar}"
+printf 'invalid\n' >"${active_grammar}"
+if "${runtime_inspector}" probe 0.1.0 "${runtime_support}" >/dev/null 2>&1; then
+  fail "installed Runtime probe accepted a corrupted Active projection"
+fi
+cp "${fixture}/active-grammar" "${active_grammar}"
+chmod "${grammar_mode}" "${active_grammar}"
+[[ "$("${runtime_inspector}" probe 0.1.0 "${runtime_support}")" == healthy ]] ||
+  fail "installed Runtime probe did not recover after fixture restoration"
 
 tests/verify_data_channel_release.sh
 

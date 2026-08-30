@@ -7,6 +7,7 @@ cd "${project_root}"
 
 readonly periphery_version="3.8.0"
 readonly periphery_archive_sha256="07d4e286e31dd79164df39097e0b59f533c94badbe18158464a455ea88a166d7"
+readonly periphery_binary_sha256="043b2c2ff7589b87f2b30c6c9b91e8d9b8e5c6c3cd03d2e3395960e00d53e9b5"
 
 read_product_setting() {
   local key="$1"
@@ -35,58 +36,53 @@ product_name="$(read_product_setting LINNET_PRODUCT_NAME)"
 readonly product_name
 readonly analysis_product_name="${product_name}Periphery"
 
-if [[ -n "${RUNNER_TEMP:-}" ]]; then
-  periphery_root="${RUNNER_TEMP}/linnet-periphery-${periphery_version}"
-else
-  periphery_root="${project_root}/build/tools/periphery-${periphery_version}"
-fi
+periphery_root="${project_root}/build/tools/periphery-${periphery_version}"
 periphery_binary="${periphery_root}/periphery"
 readonly local_app_cleanup="${project_root}/scripts/unregister-local-apps"
-download_root=""
-
-periphery_products_roots() {
-  local cache_root="${HOME}/Library/Caches/com.github.peripheryapp"
-  local info workspace
-  [[ -d "${cache_root}" ]] || return 1
-  while IFS= read -r -d '' info; do
-    workspace="$(plutil -extract WorkspacePath raw -o - "${info}" 2>/dev/null)" ||
-      continue
-    if [[ "${workspace}" == "${project_root}/Linnet.xcodeproj" ]]; then
-      printf '%s/Build/Products\n' "${info%/info.plist}"
-    fi
-  done < <(find "${cache_root}" -mindepth 2 -maxdepth 2 -type f \
-    -name info.plist -print0)
-}
+analysis_root="$(mktemp -d /private/tmp/linnet-periphery-analysis.XXXXXX)"
+derived_data="${analysis_root}/DerivedData"
+products="${derived_data}/Build/Products"
 
 cleanup_local_registrations() {
   local required="${1:-false}"
-  local products analysis_app settings_app embedded_settings_app retired_app
-  local found=false
-  while IFS= read -r products; do
-    [[ -n "${products}" ]] || continue
-    found=true
-    analysis_app="${products}/Debug/${analysis_product_name}.app"
-    settings_app="${products}/Debug/Settings.app"
-    embedded_settings_app="${analysis_app}/Contents/Applications/Settings.app"
-    retired_app="${products}/Debug/${product_name}.app"
-    "${local_app_cleanup}" "${products}" \
-      "${analysis_app}" "${settings_app}" "${embedded_settings_app}" "${retired_app}"
-  done < <(periphery_products_roots)
-  [[ "${found}" == true || "${required}" != true ]]
+  local analysis_app settings_app embedded_settings_app retired_app
+  if [[ ! -d "${products}" ]]; then
+    [[ "${required}" != true ]]
+    return
+  fi
+  analysis_app="${products}/Debug/${analysis_product_name}.app"
+  settings_app="${products}/Debug/Settings.app"
+  embedded_settings_app="${analysis_app}/Contents/Applications/Settings.app"
+  retired_app="${products}/Debug/${product_name}.app"
+  "${local_app_cleanup}" "${products}" \
+    "${analysis_app}" "${settings_app}" "${embedded_settings_app}" "${retired_app}"
+}
+
+remove_analysis_root() {
+  [[ "${analysis_root}" == /private/tmp/linnet-periphery-analysis.* &&
+    -d "${analysis_root}" && ! -L "${analysis_root}" ]] || return 1
+  /bin/chmod -R u+w "${analysis_root}" 2>/dev/null || true
+  /bin/rm -rf -x -- "${analysis_root}"
 }
 
 cleanup() {
   cleanup_local_registrations false >/dev/null 2>&1 || true
-  if [[ -n "${download_root}" && -d "${download_root}" ]]; then
-    rm -rf -- "${download_root}"
-  fi
+  remove_analysis_root >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM HUP
+
+if [[ -x "${periphery_binary}" ]] &&
+    ! printf '%s  %s\n' "${periphery_binary_sha256}" "${periphery_binary}" |
+      shasum -a 256 -c - >/dev/null 2>&1; then
+  echo "Cached Periphery binary failed its pinned identity check." >&2
+  exit 1
+fi
 
 if [[ ! -x "${periphery_binary}" ]]; then
   archive_url="https://github.com/peripheryapp/periphery/releases/download/"
   archive_url+="${periphery_version}/periphery-${periphery_version}.zip"
-  download_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-periphery.XXXXXX")"
+  download_root="${analysis_root}/download"
+  mkdir -p "${download_root}"
   archive_path="${download_root}/periphery.zip"
   curl --fail --location --silent --show-error \
     "${archive_url}" \
@@ -97,18 +93,59 @@ if [[ ! -x "${periphery_binary}" ]]; then
   unzip -q "${archive_path}" -d "${periphery_root}"
 fi
 
-"${periphery_binary}" scan \
-  --relative-results \
-  --strict \
-  --retain-codable-properties \
-  --retain-equatable-properties \
-  --retain-objc-accessible \
-  -- LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}" \
-  LINNET_PRODUCT_NAME="${analysis_product_name}"
+printf '%s  %s\n' "${periphery_binary_sha256}" "${periphery_binary}" |
+  shasum -a 256 -c - >/dev/null
+
+echo "Periphery: indexing Linnet and Settings"
+xcodebuild -project Linnet.xcodeproj -scheme Linnet -configuration Debug \
+  -destination 'platform=macOS' -derivedDataPath "${derived_data}" \
+  -showBuildTimingSummary -quiet \
+  LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}" \
+  LINNET_PRODUCT_NAME="${analysis_product_name}" \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+  COMPILER_INDEX_STORE_ENABLE=YES INDEX_ENABLE_DATA_STORE=YES build
+
+index_store="${derived_data}/Index.noindex/DataStore"
+analysis_app="${products}/Debug/${analysis_product_name}.app"
+settings_app="${products}/Debug/Settings.app"
+[[ -d "${index_store}" && -f "${analysis_app}/Contents/Info.plist" &&
+  -f "${settings_app}/Contents/Info.plist" ]] || {
+  echo "Periphery production index is incomplete." >&2
+  exit 1
+}
+
+echo "Periphery: indexing release command-line products"
+swiftc_path="$(xcrun --find swiftc)"
+indexed_swiftc="${swiftc_path} -index-store-path ${index_store} -module-name Squirrel"
+make --no-print-directory LINNET_RUNTIME_INSPECTOR="${analysis_root}/runtime-inspector" \
+  SWIFTC="${indexed_swiftc}" linnet-runtime-inspector
+make --no-print-directory LINNET_PACK_TOOL="${analysis_root}/pack-tool" \
+  SWIFTC="${indexed_swiftc}" linnet-pack-tool
+make --no-print-directory INPUT_SOURCE_REGISTRATION_INSPECTOR="${analysis_root}/registration-inspector" \
+  SWIFTC="${indexed_swiftc}" input-source-registration-inspector
+indexed_swiftc="${swiftc_path} -index-store-path ${index_store} -module-name LinnetEnglishDataGenerator"
+make --no-print-directory ENGLISH_DATA_GENERATOR="${analysis_root}/english-generator" \
+  SWIFTC="${indexed_swiftc}" english-data-generator
+
+generic_config="${analysis_root}/generic-project.json"
+cat >"${generic_config}" <<EOF
+{
+  "indexstores": ["${index_store}"],
+  "test_targets": [],
+  "plists": [
+    "${analysis_app}/Contents/Info.plist",
+    "${settings_app}/Contents/Info.plist"
+  ],
+  "xibs": [],
+  "xcdatamodels": [],
+  "xcmappingmodels": []
+}
+EOF
+
+echo "Periphery: analyzing every production entrypoint"
+"${periphery_binary}" scan --generic-project-config "${generic_config}"
 
 cleanup_local_registrations true
-if [[ -n "${download_root}" && -d "${download_root}" ]]; then
-  rm -rf -- "${download_root}"
-  download_root=""
-fi
+remove_analysis_root
+analysis_root=""
 trap - EXIT INT TERM HUP

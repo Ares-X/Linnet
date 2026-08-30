@@ -164,7 +164,7 @@ extension LinnetDataRegistry {
     else { throw Failure.invalidActiveState }
 
     for required in [
-      "default.yaml", "squirrel.yaml", "linnet_zh.schema.yaml",
+      "default.yaml", "linnet_zh.schema.yaml",
       "linnet_zh.dict.yaml", "linnet_en.schema.yaml",
       "wanxiang-lts-zh-hans.gram"
     ] where expectedTargets[required] == nil {
@@ -533,6 +533,17 @@ extension LinnetDataRegistry {
     return try openCanonicalRoot(root, expected: rootInfo)
   }
 
+  static func openExistingCanonicalRoot(applicationSupportDirectory: URL, productName: String) throws -> (url: URL, device: dev_t, inode: ino_t) {
+    guard applicationSupportDirectory.isFileURL,
+      applicationSupportDirectory.path.hasPrefix("/")
+    else { throw Failure.unsafePath(applicationSupportDirectory.path) }
+    let support = applicationSupportDirectory.standardizedFileURL
+    _ = try existingOwnedDirectory(support)
+    let resolvedSupport = support.resolvingSymlinksInPath().standardizedFileURL
+    let root = resolvedSupport.appending(component: productName, directoryHint: .isDirectory).standardizedFileURL
+    return try openCanonicalRoot(root, expected: existingOwnedDirectory(root))
+  }
+
   static func ensureOwnedDirectory(
     _ directory: URL,
     withIntermediateDirectories: Bool
@@ -553,6 +564,36 @@ extension LinnetDataRegistry {
         throw Failure.unsafePath(directory.path)
       }
     }
+    return try validateOwnedDirectory(info, at: directory)
+  }
+
+  static func existingOwnedDirectory(_ directory: URL) throws -> stat {
+    var info = stat()
+    if lstat(directory.path, &info) != 0 {
+      guard errno == ENOENT else { throw Failure.unsafePath(directory.path) }
+      throw Failure.missingRegistryRoot
+    }
+    return try validateOwnedDirectory(info, at: directory)
+  }
+
+  func validateInstalledRootLayout() throws -> Bool {
+    var found = false
+    for name in ["Data", "Runtime", "Build", "Downloads", "State", "Profiles", "UserData", "Backups", "Transactions"] {
+      let directory = rootDirectory.appending(
+        component: name, directoryHint: .isDirectory)
+      var info = stat()
+      if lstat(directory.path, &info) != 0 {
+        guard errno == ENOENT else { throw Failure.unsafePath(directory.path) }
+        continue
+      }
+      _ = try Self.validateOwnedDirectory(info, at: directory)
+      guard info.st_dev == rootDevice else { throw Failure.unsafePath(directory.path) }
+      if name != "UserData" && name != "Backups" && name != "Transactions" { found = true }
+    }
+    return found
+  }
+
+  static func validateOwnedDirectory(_ info: stat, at directory: URL) throws -> stat {
     guard (info.st_mode & S_IFMT) == S_IFDIR,
       info.st_uid == getuid(),
       (info.st_mode & (S_IWGRP | S_IWOTH)) == 0

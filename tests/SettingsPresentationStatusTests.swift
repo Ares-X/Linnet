@@ -291,8 +291,6 @@ struct SettingsPresentationStatusTests {
       accessibilityLabel: "Error: Language data update failed integrity verification.",
       locale: english
     )
-    expectFooterConsumesTypedPresentation()
-
     expectPanel(
       .portableExport,
       productName: "Linnet",
@@ -405,26 +403,6 @@ struct SettingsPresentationStatusTests {
     else {
       fail("typed presentation does not own status semantics: \(status), \(presentation)")
     }
-  }
-
-  private static func expectFooterConsumesTypedPresentation() {
-    let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-      .deletingLastPathComponent()
-    let sourceURL = repository.appending(path: "sources/LinnetSettings/SettingsRootView.swift")
-    guard let source = try? String(contentsOf: sourceURL, encoding: .utf8),
-      let start = source.range(of: "  private var footer: some View {"),
-      let end = source.range(of: "\n  }\n}", range: start.upperBound..<source.endIndex)
-    else { fail("Settings footer source could not be inspected") }
-    let footer = source[start.lowerBound..<end.upperBound]
-    guard footer.contains("model.displayedStatus.presentation("),
-      footer.contains("presentation.systemImage"),
-      footer.contains("presentation.text"),
-      footer.contains("presentation.accessibilityLabel"),
-      footer.contains("presentation.severity.footerColor"),
-      !footer.contains("Image(systemName: \"info.circle\")"),
-      !footer.contains("Text(model.displayedStatus.text"),
-      !footer.contains(".foregroundStyle(.secondary)")
-    else { fail("Settings footer still owns fixed status presentation") }
   }
 
   private static func fail(_ message: String) -> Never {

@@ -58,13 +58,15 @@ for required in \
     'Bootstrap an exact future LTS data seed' \
     'scripts/fetch-locked-release-asset upstreams.lock.json' \
     './action-install.sh' \
+    'scripts/run_swiftlint.sh' \
+    'tests/verify_development.sh swift' \
+    'tests/verify_development.sh rime' \
+    'scripts/run_periphery.sh' \
     'make --no-print-directory archive' \
     'package/verify_publication_artifacts' \
     'for channel in core data public' \
     'package/stage_github_release stage' \
     'package/publish_github_release data-seed' \
-    'Linnet manual full CI' \
-    '-f event=workflow_dispatch' \
     'runs-on: ubuntu-latest' \
     'package/publish_github_release publish'; do
   rg -Fq -- "${required}" "${release_workflow}" ||
@@ -76,6 +78,14 @@ if [[ "$(rg -c '^  build-candidate:$' "${release_workflow}")" -ne 1 ||
 fi
 if rg -n 'workflow_run:|workflow_call:' "${release_workflow}"; then
   fail "release may only start from the two explicit immutable tags"
+fi
+if rg -n 'Linnet manual full CI|actions/workflows/commit-ci.yml/runs|event=workflow_dispatch' \
+    "${release_workflow}"; then
+  fail "the candidate builder still depends on a second full-CI workflow"
+fi
+if [[ "$(rg -c '^[[:space:]]*run: ./action-install\.sh$' \
+      "${release_workflow}")" -ne 1 ]]; then
+  fail "the candidate workflow must hydrate locked inputs exactly once"
 fi
 
 for required in \
@@ -99,9 +109,22 @@ fi
 
 rg -Fq 'mode}" == verify || "${GITHUB_ACTIONS:-}" == true' "${stager}" ||
   fail "draft mutation is not restricted to GitHub Actions"
-if rg -n 'release edit|release delete|refs/heads/data-channel|--latest' "${stager}"; then
+if rg -n 'release edit|refs/heads/data-channel|--latest' "${stager}"; then
   fail "the candidate stager can still publish a channel"
 fi
+[[ "$(rg -c '^[[:space:]]*gh release delete "\$\{tag\}" --repo "\$\{repository\}" --yes$' \
+      "${stager}")" -eq 1 ]] ||
+  fail "the stager must have one exact owned-Draft retirement action"
+for required in \
+    'if [[ "${channel}" == data ]]' \
+    'earlier-revision data Draft is not byte-identical' \
+    '[[ "${mode}" == stage ]]' \
+    'older Draft is not exact Linnet-owned state' \
+    'release.fetch("isDraft")' \
+    'release.fetch("targetCommitish") == ARGV.fetch(4)'; do
+  rg -Fq -- "${required}" "${stager}" ||
+    fail "Draft retirement is missing a fail-closed ownership boundary: ${required}"
+done
 rg -Fq 'mode}" == verify || "${GITHUB_ACTIONS:-}" == true' "${publisher}" ||
   fail "public release mutation is not restricted to GitHub Actions"
 rg -Fq -- '--pattern Linnet-Data-Channel.json' "${publisher}" ||
@@ -125,11 +148,45 @@ if rg -n '^[[:space:]]*push:' "${commit_workflow}"; then
   fail "every main push still spends the full CI matrix"
 fi
 for workflow in "${commit_workflow}" "${pull_request_workflow}"; do
-  rg -Fq 'profile: [app, swift, rime]' "${workflow}" ||
-    fail "CI did not retire the duplicate settings-ui product job"
-  rg -Fq 'tests/verify_visible_settings_fixture.sh --ui-test' "${workflow}" ||
-    fail "settings UI acceptance disappeared instead of moving into app"
+  if rg -n 'matrix:|profile: \[app, swift, rime\]' "${workflow}"; then
+    fail "CI still duplicates one checkout and hydration across product jobs"
+  fi
+  [[ "$(rg -c '^[[:space:]]*runs-on: macos-latest$' "${workflow}")" -eq 1 ]] ||
+    fail "CI must use one serial macOS job: ${workflow##*/}"
+  [[ "$(rg -c 'uses: \./\.github/actions/restore-locked-build-cache' \
+        "${workflow}")" -eq 1 ]] ||
+    fail "CI must restore locked build inputs once: ${workflow##*/}"
+  [[ "$(rg -c '^[[:space:]]*run: \./action-install\.sh$' "${workflow}")" -eq 1 ]] ||
+    fail "CI must hydrate locked inputs once: ${workflow##*/}"
+  for required in \
+      'scripts/run_swiftlint.sh' \
+      'tests/verify_development.sh app' \
+      'tests/verify_visible_settings_fixture.sh --ui-test' \
+      'tests/verify_development.sh swift' \
+      'tests/verify_development.sh rime' \
+      'scripts/run_periphery.sh'; do
+    rg -Fq -- "${required}" "${workflow}" ||
+      fail "serial CI lost a required gate: ${workflow##*/}: ${required}"
+  done
+  ruby -e '
+    source = File.binread(ARGV.fetch(0))
+    ordered = ARGV.drop(1).map { |needle| source.index(needle) || abort(needle) }
+    abort unless ordered == ordered.sort
+  ' "${workflow}" \
+    'scripts/run_swiftlint.sh' \
+    'run: ./action-install.sh' \
+    'tests/verify_development.sh app' \
+    'tests/verify_development.sh swift' \
+    'tests/verify_development.sh rime' \
+    'scripts/run_periphery.sh' ||
+    fail "CI product gates are not one deterministic serial chain: ${workflow##*/}"
 done
+rg -Fq 'build/tools' .github/actions/restore-locked-build-cache/action.yml ||
+  fail "the pinned Periphery tool is no longer part of the verified build cache"
+rg -Fq "scripts/run_periphery.sh" .github/actions/restore-locked-build-cache/action.yml ||
+  fail "the build cache key no longer follows the pinned Periphery owner"
+rg -Fq 'periphery_binary_sha256=' scripts/run_periphery.sh ||
+  fail "cached Periphery bytes have no pinned binary identity"
 if rg -n 'only_testing=\(\)|"\$\{only_testing\[@\]\}"' \
     "${visible_settings_fixture}"; then
   fail "the full Settings UI suite can still become a false-green empty-array launch"

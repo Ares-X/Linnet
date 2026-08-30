@@ -23,22 +23,57 @@ mkdir -p "${scripts_root}" "${user_home}/Library"
   echo "Package lifecycle has no candidate App identity owner." >&2
   exit 1
 }
-[[ -f package/installer-scripts/quit-applications-clean.jxa &&
-  ! -L package/installer-scripts/quit-applications-clean.jxa ]] || {
-  echo "Core update has no pre-payload cooperative process-quiescence owner." >&2
+if rg -n '/usr/bin/osascript|quit-applications-clean\.jxa' \
+    package/core-installer-scripts/preinstall package/make_package \
+    package/verify_package; then
+  echo "Core Installer regained an application-quiescence owner." >&2
   exit 1
-}
+fi
 cp package/core-installer-scripts/preinstall "${scripts_root}/preinstall"
 cp package/installer-scripts/postinstall "${scripts_root}/postinstall"
 cp package/installer-scripts/candidate-app-identity.sh \
   "${scripts_root}/candidate-app-identity.sh"
-cp package/installer-scripts/quit-applications-clean.jxa \
-  "${scripts_root}/quit-applications-clean.jxa"
+cat >"${scripts_root}/input-source-registration-inspector" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" == 1 && "$1" == io.github.ares-x.inputmethod.Linnet ]]
+printf '%s\n' "${LINNET_FAKE_REGISTRATION_STATE:-registered:bundle-match:path-unknown}"
+SH
+cat >"${scripts_root}/linnet-runtime-inspector" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" == 3 && "$1" == probe &&
+  "$2" == 0.1.0 && "$3" == "${HOME}/Library/Application Support" ]]
+[[ -z "${LINNET_FAKE_RUNTIME_LOG:-}" ]] || printf '%s\n' "$*" >>"${LINNET_FAKE_RUNTIME_LOG}"
+case "${LINNET_FAKE_RUNTIME_STATE:-auto}" in
+  healthy)
+    [[ -f "$3/Linnet/Runtime/Active/activation.json" ]] || exit 1
+    printf 'healthy\n'
+    ;;
+  missing)
+    printf 'missing\n'
+    ;;
+  invalid)
+    exit 1
+    ;;
+  auto)
+    if [[ -f "$3/Linnet/Runtime/Active/activation.json" ]]; then
+      printf 'healthy\n'
+    else
+      printf 'missing\n'
+    fi
+    ;;
+  *) exit 1 ;;
+esac
+SH
+chmod 755 "${scripts_root}/input-source-registration-inspector" \
+  "${scripts_root}/linnet-runtime-inspector"
 
 # A Core update must not replace the live InputMethodKit server. Existing
 # client applications retain per-server connections and are not required to
-# reconnect merely because package bytes changed on disk. Complete install and
-# uninstall own their separate registration/termination boundaries.
+# reconnect merely because package bytes changed on disk. Complete owns first
+# registration; uninstall has no termination owner and requires exact product
+# processes to be absent before mutation.
 if rg -Fq -- '--quit-host-clean' package/installer-scripts/postinstall ||
     rg -Fq '/usr/bin/open' package/installer-scripts/postinstall ||
     rg -Fq '<app id="io.github.ares-x.inputmethod.Linnet"/>' \
@@ -103,26 +138,6 @@ sed -i '' "s#/usr/bin/codesign#${fake_codesign}#g" \
 # the package-owned identity gate.
 sed -i '' 's#^executable="${app_path}/Contents/MacOS/Linnet"$#executable="${LINNET_TEST_EXECUTABLE:-${app_path}/Contents/MacOS/Linnet}"#' \
   "${scripts_root}/postinstall"
-fake_osascript="${scripts_root}/fake-osascript"
-cat >"${fake_osascript}" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >>"${LINNET_FAKE_QUIESCER_LOG:?}"
-if [[ "${LINNET_FAKE_QUIESCER_RESULT:-success}" == success ]]; then
-  if [[ -n "${LINNET_FAKE_SELECTION_DOCUMENT:-}" ]]; then
-    printf '%s\n' "${LINNET_FAKE_SELECTION_DOCUMENT}"
-  else
-    printf '%s\n' \
-      '{"format":2,"target_input_source_id":"io.github.ares-x.inputmethod.Linnet","was_current":true,"post_quiescence_input_source_id":"com.apple.keylayout.ABC","prior_enablement":"enabled"}'
-  fi
-else
-  exit 1
-fi
-SH
-chmod 755 "${fake_osascript}"
-# Production has no command override. The isolated copy records pre-payload
-# intent without addressing the currently installed Host or Settings process.
-sed -i '' "s#/usr/bin/osascript#${fake_osascript}#" "${scripts_root}/preinstall"
 printf '0.1.0\n' >"${scripts_root}/candidate-core-version"
 
 candidate_fixture="${test_root}/fixed-community-cms/Linnet.app"
@@ -156,7 +171,11 @@ cat >"${candidate_fixture}/Contents/Resources/LinnetRelease/VERSION.json" <<JSON
 JSON
 cat >"${candidate_fixture}/Contents/MacOS/Linnet" <<'SH'
 #!/usr/bin/env bash
-exit 0
+[[ -z "${LINNET_LEGACY_HOST_LOG:-}" ]] || printf '%s\n' "$*" >>"${LINNET_LEGACY_HOST_LOG}"
+# Public 0.1.9/0.1.10 Hosts do not recognize the new inspection option. Their
+# default branch enters the long-lived InputMethodKit run loop; fail promptly
+# here so a preinstall regression cannot hang this fixture.
+exit 97
 SH
 chmod 755 "${candidate_fixture}/Contents/MacOS/Linnet"
 printf 'community-cms\n' \
@@ -222,8 +241,6 @@ rg -Fq 'community-cms' package/make_package package/verify_package \
   package/installer-scripts/candidate-app-identity.sh
 rg -Fq 'document["format"] = 3' package/make_package
 rg -Fq 'candidate_identity["format"] = 3' package/verify_package
-rg -Fq 'quit-applications-clean.jxa' package/core-installer-scripts/preinstall \
-  package/make_package package/verify_package
 if rg -n 'core-update-selection|prior_enablement|TISDisable|TISEnableInputSource|TISSelectInputSource|--activate-input-source|--disable-input-source|--select-input-source|--refresh-core-input-source' \
     package/core-installer-scripts/preinstall package/installer-scripts \
     sources/InputSource.swift sources/Main.swift; then
@@ -231,42 +248,84 @@ if rg -n 'core-update-selection|prior_enablement|TISDisable|TISEnableInputSource
   exit 1
 fi
 test "$(rg -F -c 'TISRegisterInputSource' sources/InputSource.swift)" = 1
+legacy_revisions=(
+  755f69612ddd529ae5178a940498a2f2f9ac7cbf
+  3a48e4853674b27cfd49b6bddcf9f6c9d6ee0999
+)
+legacy_versions=(0.1.9 0.1.10)
+legacy_builds=(68 27)
+for index in "${!legacy_revisions[@]}"; do
+  legacy_revision="${legacy_revisions[index]}"
+  legacy_main="$(git show "${legacy_revision}:sources/Main.swift")"
+  legacy_product="$(git show "${legacy_revision}:config/LinnetProduct.xcconfig")"
+  [[ "${legacy_main}" != *'--inspect-input-source-registration'* &&
+    "${legacy_main}" == *'app.run()'* &&
+    "${legacy_product}" == *"MARKETING_VERSION = ${legacy_versions[index]}"* &&
+    "${legacy_product}" == *"CURRENT_PROJECT_VERSION = ${legacy_builds[index]}"* ]] || {
+    echo "Legacy Host contract changed unexpectedly: ${legacy_revision}" >&2
+    exit 1
+  }
+done
+if rg -Fq -- '"${executable}" --inspect-input-source-registration' \
+    package/core-installer-scripts/preinstall; then
+  echo "Core preinstall still depends on a new CLI in the installed legacy Host." >&2
+  exit 1
+fi
+rg -Fq 'input-source-registration-inspector' package/core-installer-scripts/preinstall
+rg -Fq 'linnet-runtime-inspector' package/core-installer-scripts/preinstall \
+  package/installer-scripts/postinstall package/make_package package/verify_package
+if rg -n 'semver_at_least|check_active_core|packs\.\$\{index\}\.min_core' \
+    package/core-installer-scripts/preinstall; then
+  echo "Installer retained a second shell owner for installed Runtime compatibility." >&2
+  exit 1
+fi
 test "$(rg -F -c -- '"${executable}" --register-input-source' \
   package/installer-scripts/postinstall)" = 1
-
-# The package-owned helper uses exact LaunchServices identities and cooperative
-# AppKit termination only. A refused request remains observable until timeout;
-# there is no signal, force-quit, activation, or Text Input state path.
-quiescer=package/installer-scripts/quit-applications-clean.jxa
-rg -Fq 'runningApplicationsWithBundleIdentifier' "${quiescer}"
-rg -Fq 'Boolean(application.terminate)' "${quiescer}"
-if rg -Fq 'application.terminate()' "${quiescer}"; then
-  echo "Core application quiescence calls a JXA zero-argument method as a function." >&2
+if rg -n 'missing-app-install' package/core-installer-scripts/preinstall \
+    package/installer-scripts/candidate-app-identity.sh; then
+  echo "The ambiguous missing-App repair transition returned." >&2
   exit 1
 fi
-rg -Fq 'applications refused to quit' "${quiescer}"
-rg -Fq 'function quiesceApplication(bundleIdentifier, timeoutSeconds)' "${quiescer}" || {
-  echo "Core application quiescence does not wait for each identity independently." >&2
-  exit 1
-}
-rg -Fq 'quiesceApplication(bundleIdentifier, timeoutSeconds);' "${quiescer}" || {
-  echo "Core application quiescence does not preserve the package-owned exit order." >&2
-  exit 1
-}
-if rg -n 'forceTerminate|kill|pkill|killall|\.activate|TIS|InputSource' \
-    "${quiescer}"; then
-  echo "Core application quiescence gained a forcing or Text Input state path." >&2
+rg -Fq 'clean-complete-install' package/core-installer-scripts/preinstall \
+  package/installer-scripts/candidate-app-identity.sh
+for visible_installer_text in package/WELCOME.md package/Conclusion-summary.txt; do
+  rg -Fq 'Complete is the sole registration owner' "${visible_installer_text}"
+  rg -Fq 'supported, signature-verified App repair.' "${visible_installer_text}"
+  rg -Fq 'Complete 是全新首次安装或受支持、已验证签名 App 修复的' \
+    "${visible_installer_text}"
+  rg -Fq 'Healthy installations use Core for routine updates.' \
+    "${visible_installer_text}"
+  rg -Fq '健康安装的常规升级只使用 Core。' "${visible_installer_text}"
+  rg -Fq 'If Core reports only a missing registration, run Complete to repair it.' \
+    "${visible_installer_text}"
+  rg -Fq '若 Core 仅报告输入源未注册，请运行 Complete 修复。' \
+    "${visible_installer_text}"
+  rg -Fq 'If Core reports duplicate, conflicting, or unverifiable registration remnants,' \
+    "${visible_installer_text}"
+  rg -Fq 'run the official uninstaller first, then install Complete.' \
+    "${visible_installer_text}"
+  rg -Fq '若 Core 报告重复、冲突或无法验证的注册残留，' \
+    "${visible_installer_text}"
+  rg -Fq '请先运行官方卸载器，再安装 Complete。' "${visible_installer_text}"
+done
+if rg -n 'A first Complete installation registers|Complete rejects an existing App|首次 Complete 只注册|Complete 会拒绝.*已有 App' \
+    package/WELCOME.md package/Conclusion-summary.txt; then
+  echo "Installer-visible text restored the clean-install-only Complete contract." >&2
   exit 1
 fi
-/usr/bin/osascript -l JavaScript "${quiescer}" 1 \
-  io.github.ares-x.inputmethod.Linnet.lifecycle-test-settings \
-  io.github.ares-x.inputmethod.Linnet.lifecycle-test-host >/dev/null
-if /usr/bin/osascript -l JavaScript "${quiescer}" 0 \
-    io.github.ares-x.inputmethod.Linnet.lifecycle-test-settings \
-    io.github.ares-x.inputmethod.Linnet.lifecycle-test-host >/dev/null 2>&1; then
-  echo "Core application quiescence accepted an invalid deadline." >&2
+if rg -n 'historical client|历史客户端应用|关闭本次登录期间使用过 Linnet' \
+    package/WELCOME.md package/Conclusion-summary.txt; then
+  echo "Installer-visible text restored application quiescence or client-history requirements." >&2
   exit 1
 fi
+for visible_installer_text in package/WELCOME.md package/Conclusion-summary.txt; do
+  rg -Fq 'Other applications stay open' "${visible_installer_text}"
+  rg -Fq '其他应用保持打开' "${visible_installer_text}"
+  rg -Fq 'Settings' "${visible_installer_text}"
+done
+rg -Fq 'Registration mutation is exclusively a Complete clean-install or' \
+  package/installer-scripts/postinstall
+rg -Fq 'supported-repair boundary.' package/installer-scripts/postinstall
 rg -Fq 'if model.operationActive {' sources/LinnetSettings/SettingsApplication.swift
 rg -Fq 'return .terminateCancel' sources/LinnetSettings/SettingsApplication.swift
 rg -Fq 'guard model.pendingChanges else { return .terminateNow }' \
@@ -547,11 +606,6 @@ rg -Fq 'cp -X "${project_root}/package/installer-scripts/postinstall"' \
   echo "Core update lost its post-payload identity verification." >&2
   exit 1
 }
-rg -Fq 'cp -X "${project_root}/package/installer-scripts/quit-applications-clean.jxa"' \
-  package/make_package || {
-  echo "Core update lost its pre-payload application quiescence owner." >&2
-  exit 1
-}
 ruby -e '
   source = File.read(ARGV.fetch(0))
   abort "package verifier does not distinguish Core and Complete script shapes" unless
@@ -686,12 +740,34 @@ fi
 if [[ "${candidate_fixture_available}" == true ]]; then
   postinstall_home="${test_root}/postinstall-positive/home"
   postinstall_log="${test_root}/postinstall-positive/host-invocations"
+  postinstall_runtime_log="${test_root}/postinstall-positive/runtime-inspections"
   prepare_signed_postinstall_home "${postinstall_home}"
   HOME="${postinstall_home}" LINNET_FAKE_HOST_LOG="${postinstall_log}" \
+    LINNET_FAKE_RUNTIME_LOG="${postinstall_runtime_log}" \
     LINNET_TEST_EXECUTABLE="${postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
   [[ "$(cat "${postinstall_log}")" == '--register-input-source' ]] || {
     echo "Complete postinstall did not perform exactly first registration." >&2
+    exit 1
+  }
+  grep -Fxq "probe 0.1.0 ${postinstall_home}/Library/Application Support" \
+    "${postinstall_runtime_log}" || {
+    echo "Complete postinstall did not use the read-only Runtime probe." >&2
+    exit 1
+  }
+
+  invalid_runtime_home="${test_root}/postinstall-invalid-runtime/home"
+  invalid_runtime_log="${test_root}/postinstall-invalid-runtime/host-invocations"
+  prepare_signed_postinstall_home "${invalid_runtime_home}"
+  if HOME="${invalid_runtime_home}" LINNET_FAKE_HOST_LOG="${invalid_runtime_log}" \
+      LINNET_TEST_EXECUTABLE="${invalid_runtime_home}/fake-Linnet" \
+      LINNET_FAKE_RUNTIME_STATE=invalid \
+      "${scripts_root}/postinstall" >/dev/null 2>&1; then
+    echo "Complete postinstall accepted an invalid final Runtime projection." >&2
+    exit 1
+  fi
+  [[ ! -e "${invalid_runtime_log}" || ! -s "${invalid_runtime_log}" ]] || {
+    echo "Complete registered the input source before validating final Runtime bytes." >&2
     exit 1
   }
 fi
@@ -803,10 +879,10 @@ fi
 }
 rm "${support_root}"
 
-# Complete is strictly the clean/reinstall product. Preserved personal data is
-# not an installed Core, but any App or Active/state residue must fail closed;
-# an existing healthy installation is told to use Core instead of earning a
-# second logout boundary.
+# Complete accepts a clean installation or a supported, signed damaged App so
+# its sole postinstall mutation owner can idempotently repair registration.
+# Residual Active state without an executable cannot supply authoritative TIS
+# evidence and remains fail closed.
 retained_home="${test_root}/complete-retained-data/home"
 mkdir -p "${retained_home}/Library/Application Support/Linnet/UserData"
 printf 'preserved\n' >"${retained_home}/Library/Application Support/Linnet/UserData/sentinel"
@@ -818,27 +894,82 @@ if [[ "${candidate_fixture_available}" == true ]]; then
 else
   mkdir -p "${app_only_home}/Library/Input Methods/Linnet.app"
 fi
-app_only_error="${test_root}/complete-app-only/error"
-if HOME="${app_only_home}" "${scripts_root}/preinstall" 2>"${app_only_error}"; then
-  echo "Complete preinstall accepted an existing App without Active/state." >&2
-  exit 1
-fi
 if [[ "${candidate_fixture_available}" == true ]]; then
-  grep -Fq 'Use Linnet Core' "${app_only_error}" || {
-    echo "Complete rejection did not direct an existing installation to Core." >&2
+  HOME="${app_only_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
+    "${scripts_root}/preinstall" || {
+    echo "Complete preinstall rejected a supported missing-registration repair." >&2
     exit 1
   }
+  HOME="${app_only_home}" \
+    LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+    "${scripts_root}/preinstall" || {
+    echo "Complete preinstall rejected an idempotent signed-App repair." >&2
+    exit 1
+  }
+  for rejected_registration in duplicate:2 conflict:source-or-bundle-id unknown:bundle-id; do
+    if HOME="${app_only_home}" \
+        LINNET_FAKE_REGISTRATION_STATE="${rejected_registration}" \
+        "${scripts_root}/preinstall" >/dev/null 2>&1; then
+      echo "Complete accepted conflicting TIS state ${rejected_registration}." >&2
+      exit 1
+    fi
+  done
 fi
 
-active_only_home="${test_root}/complete-active-only/home"
-mkdir -p "${active_only_home}/Library/Application Support/Linnet/Runtime/Active" \
-  "${active_only_home}/Library/Application Support/Linnet/State"
-printf '{}\n' >"${active_only_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
+missing_app_home="${test_root}/complete-missing-app-repair/home"
+mkdir -p "${missing_app_home}/Library/Application Support/Linnet/Runtime/Active" \
+  "${missing_app_home}/Library/Application Support/Linnet/State"
+printf '{}\n' >"${missing_app_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
 ln -s ../Runtime/Active/activation.json \
-  "${active_only_home}/Library/Application Support/Linnet/State/active.json"
-if HOME="${active_only_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
-  echo "Complete preinstall accepted Active/state residue without an App." >&2
-  exit 1
+  "${missing_app_home}/Library/Application Support/Linnet/State/active.json"
+for repair_registration in missing registered:bundle-match:path-unknown; do
+  HOME="${missing_app_home}" LINNET_FAKE_REGISTRATION_STATE="${repair_registration}" \
+    "${scripts_root}/preinstall" || {
+    echo "Complete could not repair a missing App with safe product state." >&2
+    exit 1
+  }
+done
+for rejected_registration in duplicate:2 conflict:source-or-bundle-id unknown:bundle-id; do
+  if HOME="${missing_app_home}" \
+      LINNET_FAKE_REGISTRATION_STATE="${rejected_registration}" \
+      "${scripts_root}/preinstall" >/dev/null 2>&1; then
+    echo "Complete accepted unrecoverable TIS residue ${rejected_registration}." >&2
+    exit 1
+  fi
+done
+
+# Complete is a first-install and damaged-state repair owner, not an alternate
+# routine updater. A fully healthy signed App, exact TIS registration and
+# validated immutable runtime must use Core so an installed user is never sent
+# through Complete's one-time logout boundary again.
+if [[ "${candidate_fixture_available}" == true ]]; then
+  healthy_complete_home="${test_root}/complete-healthy/home"
+  healthy_complete_error="${test_root}/complete-healthy/error"
+  copy_candidate_app "${healthy_complete_home}"
+  mkdir -p "${healthy_complete_home}/Library/Application Support/Linnet/Runtime/Active" \
+    "${healthy_complete_home}/Library/Application Support/Linnet/State"
+  printf '{}\n' \
+    >"${healthy_complete_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
+  ln -s ../Runtime/Active/activation.json \
+    "${healthy_complete_home}/Library/Application Support/Linnet/State/active.json"
+  if HOME="${healthy_complete_home}" \
+      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_RUNTIME_STATE=healthy \
+      "${scripts_root}/preinstall" >/dev/null 2>"${healthy_complete_error}"; then
+    echo "Complete accepted a fully healthy installation and would require another logout." >&2
+    exit 1
+  fi
+  grep -Fq 'Core' "${healthy_complete_error}" || {
+    echo "Complete healthy-install rejection did not direct the user to Core." >&2
+    exit 1
+  }
+  HOME="${healthy_complete_home}" \
+    LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+    LINNET_FAKE_RUNTIME_STATE=invalid \
+    "${scripts_root}/preinstall" >/dev/null 2>&1 && {
+    echo "Complete accepted corrupt Runtime bytes as a repairable missing state." >&2
+    exit 1
+  }
 fi
 
 # The public Core artifact is update-only and may never install a Host that has
@@ -864,19 +995,46 @@ cat >"${support_root}/Runtime/Active/activation.json" <<'JSON'
 }
 JSON
 ln -s ../Runtime/Active/activation.json "${support_root}/State/active.json"
-quit_log="${test_root}/core-update-quit.log"
-LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
-  "${scripts_root}/preinstall"
+core_missing_app_error="${test_root}/core-missing-app-error"
+if HOME="${user_home}" "${scripts_root}/preinstall" \
+    >/dev/null 2>"${core_missing_app_error}"; then
+  echo "Core update accepted Active state without the registered App owner." >&2
+  exit 1
+fi
+grep -Fq 'Linnet Complete' "${core_missing_app_error}" || {
+  echo "Core missing-App failure did not direct the user to Complete repair." >&2
+  exit 1
+}
 if [[ "${candidate_fixture_available}" == true ]]; then
   copy_candidate_app "${user_home}"
 fi
-: >"${quit_log}"
-LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" "${scripts_root}/preinstall"
-expected_quiescence="-l JavaScript ${scripts_root}/quit-applications-clean.jxa 30 io.github.ares-x.inputmethod.Linnet.settings"
-[[ "$(cat "${quit_log}")" == "${expected_quiescence}" ]] || {
-  echo "Core preinstall did not quiesce only Settings ahead of payload." >&2
+legacy_host_log="${test_root}/legacy-host-invocations"
+if ! HOME="${user_home}" LINNET_LEGACY_HOST_LOG="${legacy_host_log}" \
+    "${scripts_root}/preinstall"; then
+  echo "Core preinstall could not upgrade the exact legacy Host contract." >&2
+  exit 1
+fi
+[[ ! -e "${legacy_host_log}" || ! -s "${legacy_host_log}" ]] || {
+  echo "Core preinstall invoked the legacy InputMethodKit Host before payload replacement." >&2
   exit 1
 }
+if HOME="${user_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
+    "${scripts_root}/preinstall" >/dev/null 2>"${test_root}/core-missing-registration"; then
+  echo "Core update accepted a missing TIS registration." >&2
+  exit 1
+fi
+grep -Fq 'Linnet Complete' "${test_root}/core-missing-registration" || {
+  echo "Core missing-registration failure did not direct the user to Complete." >&2
+  exit 1
+}
+for rejected_registration in duplicate:2 conflict:source-or-bundle-id unknown:bundle-id; do
+  if HOME="${user_home}" \
+      LINNET_FAKE_REGISTRATION_STATE="${rejected_registration}" \
+      "${scripts_root}/preinstall" >/dev/null 2>&1; then
+    echo "Core accepted conflicting TIS state ${rejected_registration}." >&2
+    exit 1
+  fi
+done
 [[ ! -e "${support_root}/Transactions" && ! -L "${support_root}/Transactions" ]] || {
   echo "Core preinstall created the runtime-owned Transactions directory." >&2
   exit 1
@@ -890,23 +1048,9 @@ expected_quiescence="-l JavaScript ${scripts_root}/quit-applications-clean.jxa 3
 # an input-source enablement or selection transaction.
 if [[ "${candidate_fixture_available}" == true ]]; then
   configure_installed_identity "${user_home}" legacy-community-adhoc
-  : >"${quit_log}"
-  LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
-    "${scripts_root}/preinstall"
+  HOME="${user_home}" "${scripts_root}/preinstall"
   configure_installed_identity "${user_home}" exact-community-cms
 fi
-
-: >"${quit_log}"
-if LINNET_FAKE_QUIESCER_LOG="${quit_log}" LINNET_FAKE_QUIESCER_RESULT=refuse \
-    HOME="${user_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
-  echo "Core preinstall crossed payload after an application refused clean quit." >&2
-  exit 1
-fi
-[[ "$(cat "${quit_log}")" == "${expected_quiescence}" ]] || {
-  echo "Core preinstall did not propagate the clean-quit refusal." >&2
-  exit 1
-}
-: >"${quit_log}"
 
 if [[ "${candidate_fixture_available}" == true ]]; then
   if [[ "${candidate_identity_format}" == 1 || "${candidate_identity_format}" == 3 ]]; then
@@ -916,36 +1060,20 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     write_candidate_identity "${candidate_version}" "${candidate_build}" \
       "${candidate_revision}" "" 2 invalid-community-trust
   fi
-  if LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
-      "${scripts_root}/preinstall" >/dev/null 2>&1; then
+  if HOME="${user_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
     echo "Core preinstall accepted a conflicting candidate trust identity." >&2
     exit 1
   fi
-  [[ ! -e "${quit_log}" || ! -s "${quit_log}" ]] || {
-    echo "Core preinstall requested process quiescence before rejecting candidate identity." >&2
-    exit 1
-  }
   write_candidate_identity "${candidate_version}" "${candidate_build}" \
     "${candidate_revision}" "${candidate_leaf}"
 fi
 
-/usr/bin/plutil -replace packs.0.min_core -string 0.1.1 \
-  "${support_root}/Runtime/Active/activation.json"
-if LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" \
+if HOME="${user_home}" LINNET_FAKE_RUNTIME_STATE=invalid \
     "${scripts_root}/preinstall" >/dev/null 2>&1; then
-  echo "Core update accepted language data requiring a newer Core." >&2
+  echo "Core update accepted Runtime bytes rejected by the canonical inspector." >&2
   exit 1
 fi
-/usr/bin/plutil -replace packs.0.min_core -string 0.1.0-rc.1 \
-  "${support_root}/Runtime/Active/activation.json"
-: >"${quit_log}"
-LINNET_FAKE_QUIESCER_LOG="${quit_log}" HOME="${user_home}" "${scripts_root}/preinstall"
-[[ "$(cat "${quit_log}")" == "${expected_quiescence}" ]] || {
-  echo "Core prerelease compatibility path bypassed process quiescence." >&2
-  exit 1
-}
-/usr/bin/plutil -replace packs.0.min_core -string 0.1.0 \
-  "${support_root}/Runtime/Active/activation.json"
+HOME="${user_home}" "${scripts_root}/preinstall"
 
 chmod 0777 "${support_root}/Runtime/Active"
 if HOME="${user_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
@@ -959,21 +1087,15 @@ if HOME="${user_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
   echo "Core preinstall accepted an unknown package mode." >&2
   exit 1
 fi
+printf 'complete\n' >"${scripts_root}/install-mode"
 
-# The package helper owns only pre-payload cooperative Settings quiescence.
-# Main owns the distinct uninstall boundary and may force both product processes
-# only after its grace period; Core has no Host termination command.
-rg -Fq 'settingsBundleIdentifier' sources/Main.swift
-test "$(rg -F -c 'runningApplications(withBundleIdentifier:' sources/Main.swift)" -eq 1
-rg -Fq 'forceTerminate()' sources/Main.swift
-rg -Fq 'quitProductProcesses()' sources/Main.swift
-rg -Fq '[bundleIdentifier, settingsBundleIdentifier].flatMap' sources/Main.swift
+# Core and uninstall have no broad process-control command. The exact
+# no-execution uninstall contract is exercised below before its structural
+# retirement gate, so a regression fails on behavior rather than source text.
 if rg -Fq -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
   echo "A retired Core Host termination path returned." >&2
   exit 1
 fi
-rg -Fq -- '--purge-owned-temporary-state' sources/Main.swift package/uninstall-linnet
-rg -Fq 'logDir' sources/Main.swift
 if rg -n 'killall|pkill' package/uninstall-linnet sources/Main.swift; then
   echo "Product uninstall gained a broad process-kill path." >&2
   exit 1
@@ -983,16 +1105,17 @@ if rg -Fq '"${host_cli}" --disable-input-source' package/uninstall-linnet; then
   exit 1
 fi
 
-# Registration is a first-install boundary. A Core update must preserve the
-# one existing TIS identity instead of registering it again.
+# Registration mutation is a Complete boundary. Core consumes the package
+# helper's typed, read-only TIS classification and never registers.
 rg -Fq 'case registrationFailed(OSStatus)' sources/InputSource.swift
-if ! rg -Fq 'static func registrationRequired' sources/InputSource.swift ||
-    ! rg -Fq 'Input source is already registered' sources/InputSource.swift; then
-  echo "Core updates can re-register the existing input source." >&2
+if ! rg -Fq 'static func classify' sources/LinnetInputSourceRegistration.swift ||
+    ! rg -Fq 'registered:bundle-match:path-unknown' \
+      sources/LinnetInputSourceRegistration.swift; then
+  echo "The typed, read-only TIS owner is missing." >&2
   exit 1
 fi
-if rg -Fq 'case inputSourceUnavailable' sources/InputSource.swift; then
-  echo "TIS resolution retained a separate zero-match interpretation." >&2
+if rg -Fq 'registrationRequired' sources/InputSource.swift; then
+  echo "TIS resolution retained a second count interpretation." >&2
   exit 1
 fi
 
@@ -1010,6 +1133,8 @@ rg -Fq 'if edition == "complete" && kind == "core"' package/verify_package
 # symlink must fail closed without touching any content behind that link.
 uninstall_fixture="${scripts_root}/uninstall-linnet"
 pkgutil_fixture="${scripts_root}/pkgutil"
+ps_fixture="${scripts_root}/ps"
+uninstall_stat_fixture="${scripts_root}/uninstall-stat"
 cp package/uninstall-linnet "${uninstall_fixture}"
 cat >"${pkgutil_fixture}" <<'SH'
 #!/usr/bin/env bash
@@ -1019,8 +1144,32 @@ if [[ -n "${LINNET_FAKE_PKGUTIL_LOG:-}" ]]; then
 fi
 exit 1
 SH
-chmod +x "${uninstall_fixture}" "${pkgutil_fixture}"
+cat >"${ps_fixture}" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == '-axo command=' ]]
+[[ -z "${LINNET_FAKE_PS_COMMANDS:-}" ]] || printf '%s\n' "${LINNET_FAKE_PS_COMMANDS}"
+SH
+cat >"${uninstall_stat_fixture}" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+path=""
+for argument in "$@"; do path="${argument}"; done
+if [[ -n "${LINNET_FAKE_MOUNT_PATH:-}" && "${path}" == "${LINNET_FAKE_MOUNT_PATH}" ]]; then
+  case "${2:-}" in
+    '%u %d') printf '%s %s\n' "$(/usr/bin/id -u)" 2147483647 ;;
+    '%d') printf '%s\n' 2147483647 ;;
+    *) exec /usr/bin/stat "$@" ;;
+  esac
+else
+  exec /usr/bin/stat "$@"
+fi
+SH
+chmod +x "${uninstall_fixture}" "${pkgutil_fixture}" "${ps_fixture}" \
+  "${uninstall_stat_fixture}"
 sed -i '' "s#/usr/sbin/pkgutil#${pkgutil_fixture}#g" "${uninstall_fixture}"
+sed -i '' "s#/bin/ps#${ps_fixture}#g" "${uninstall_fixture}"
+sed -i '' "s#/usr/bin/stat#${uninstall_stat_fixture}#g" "${uninstall_fixture}"
 external_support="${test_root}/external-support"
 mkdir -p "${external_support}/Data"
 printf 'external sentinel\n' >"${external_support}/Data/sentinel"
@@ -1036,27 +1185,146 @@ fi
   exit 1
 }
 
-# A damaged installation must never turn the absence of its lifecycle owner
-# into permission to delete the remaining App or generated data. The user can
-# repair/reinstall the Host first; only a genuinely empty target is idempotent.
+# A damaged or unverifiable App is never executed. When exact Host and Settings
+# processes are absent, the official uninstaller still owns safe cleanup of the
+# App and generated roots while preserving every personal-data owner.
 damaged_home="${test_root}/damaged-home"
 damaged_support="${damaged_home}/Library/Application Support/Linnet"
-mkdir -p "${damaged_home}/Library/Input Methods/Linnet.app" \
-  "${damaged_support}/Data"
+damaged_app="${damaged_home}/Library/Input Methods/Linnet.app"
+damaged_host="${damaged_app}/Contents/MacOS/Linnet"
+damaged_host_log="${test_root}/damaged-host-invocations"
+mkdir -p "${damaged_app}/Contents/MacOS" "${damaged_support}/Data" \
+  "${damaged_support}/UserData" "${damaged_support}/Backups" \
+  "${damaged_support}/Transactions"
+cat >"${damaged_host}" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${LINNET_FAKE_UNINSTALL_HOST_LOG:?}"
+exit 0
+SH
+chmod 0755 "${damaged_host}"
 printf 'damaged install sentinel\n' >"${damaged_support}/Data/sentinel"
-if HOME="${damaged_home}" "${uninstall_fixture}" >/dev/null 2>&1; then
-  echo "Uninstall accepted deletion targets without a trusted Host CLI." >&2
+printf 'personal\n' >"${damaged_support}/UserData/sentinel"
+printf 'backup\n' >"${damaged_support}/Backups/sentinel"
+printf 'transaction\n' >"${damaged_support}/Transactions/sentinel"
+HOME="${damaged_home}" LINNET_FAKE_PS_COMMANDS= \
+  LINNET_FAKE_UNINSTALL_HOST_LOG="${damaged_host_log}" \
+  "${uninstall_fixture}" >/dev/null
+[[ ! -e "${damaged_app}" && ! -e "${damaged_support}/Data" ]] || {
+  echo "Uninstall retained damaged App or generated data after proving processes absent." >&2
   exit 1
-fi
-[[ -f "${damaged_support}/Data/sentinel" ]] || {
-  echo "Uninstall deleted damaged-install data without terminating the product." >&2
+}
+[[ ! -e "${damaged_host_log}" && \
+  "$(cat "${damaged_support}/UserData/sentinel")" == personal && \
+  "$(cat "${damaged_support}/Backups/sentinel")" == backup && \
+  "$(cat "${damaged_support}/Transactions/sentinel")" == transaction ]] || {
+  echo "Uninstall executed damaged bytes or changed retained personal data." >&2
   exit 1
 }
 
-# The canonical uninstaller must also tolerate a historical or independently
-# hardened pack tree with 0555 directories and 0444 files. It must retire those
-# Linnet-owned generated bytes without following a malicious nested symbolic
-# link, while retaining all personal-data owners byte-for-byte.
+damaged_running_home="${test_root}/damaged-running-home"
+damaged_running_support="${damaged_running_home}/Library/Application Support/Linnet"
+damaged_running_app="${damaged_running_home}/Library/Input Methods/Linnet.app"
+damaged_running_host="${damaged_running_app}/Contents/MacOS/Linnet"
+mkdir -p "${damaged_running_app}/Contents/MacOS" \
+  "${damaged_running_support}/Data"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${damaged_running_host}"
+chmod 0755 "${damaged_running_host}"
+printf 'generated\n' >"${damaged_running_support}/Data/sentinel"
+if HOME="${damaged_running_home}" \
+    LINNET_FAKE_PS_COMMANDS="${damaged_running_host}" \
+    "${uninstall_fixture}" >/dev/null 2>&1; then
+  echo "Uninstall removed damaged bytes while the exact Host process was running." >&2
+  exit 1
+fi
+[[ -f "${damaged_running_support}/Data/sentinel" && \
+  -d "${damaged_running_app}" ]] || {
+  echo "Uninstall changed damaged state before proving product processes absent." >&2
+  exit 1
+}
+
+damaged_settings_home="${test_root}/damaged-settings-running-home"
+damaged_settings_support="${damaged_settings_home}/Library/Application Support/Linnet"
+damaged_settings_app="${damaged_settings_home}/Library/Input Methods/Linnet.app"
+damaged_settings_cli="${damaged_settings_app}/Contents/Applications/Settings.app/Contents/MacOS/Settings"
+mkdir -p "${damaged_settings_app}/Contents/MacOS" \
+  "$(dirname "${damaged_settings_cli}")" "${damaged_settings_support}/Data"
+printf '#!/usr/bin/env bash\nexit 0\n' \
+  >"${damaged_settings_app}/Contents/MacOS/Linnet"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${damaged_settings_cli}"
+chmod 0755 "${damaged_settings_app}/Contents/MacOS/Linnet" \
+  "${damaged_settings_cli}"
+printf 'generated\n' >"${damaged_settings_support}/Data/sentinel"
+if HOME="${damaged_settings_home}" \
+    LINNET_FAKE_PS_COMMANDS="${damaged_settings_cli}" \
+    "${uninstall_fixture}" >/dev/null 2>&1; then
+  echo "Uninstall removed bytes while the exact Settings process was running." >&2
+  exit 1
+fi
+[[ -f "${damaged_settings_support}/Data/sentinel" && \
+  -d "${damaged_settings_app}" ]] || {
+  echo "Uninstall changed state before proving Settings was stopped." >&2
+  exit 1
+}
+
+# If the App is already absent, the official uninstaller must still provide a
+# reachable recovery path for safe Linnet-generated residue. It may do so only
+# after proving the exact deleted-on-disk Host and Settings executables are not
+# running; personal data remains byte-for-byte owned by the user. After the
+# required fresh login clears TIS remnants, Complete must be reachable again.
+missing_app_recovery_home="${test_root}/missing-app-recovery/home"
+missing_app_recovery_support="${missing_app_recovery_home}/Library/Application Support/Linnet"
+mkdir -p "${missing_app_recovery_home}/Library/Input Methods" \
+  "${missing_app_recovery_support}/Data" \
+  "${missing_app_recovery_support}/Runtime" \
+  "${missing_app_recovery_support}/State" \
+  "${missing_app_recovery_support}/UserData" \
+  "${missing_app_recovery_support}/Backups" \
+  "${missing_app_recovery_support}/Transactions"
+printf 'generated\n' >"${missing_app_recovery_support}/Data/sentinel"
+printf 'personal\n' >"${missing_app_recovery_support}/UserData/sentinel"
+printf 'backup\n' >"${missing_app_recovery_support}/Backups/sentinel"
+printf 'transaction\n' >"${missing_app_recovery_support}/Transactions/sentinel"
+HOME="${missing_app_recovery_home}" LINNET_FAKE_PS_COMMANDS= \
+  "${uninstall_fixture}" >/dev/null
+[[ ! -e "${missing_app_recovery_support}/Data" && \
+  ! -e "${missing_app_recovery_support}/Runtime" && \
+  ! -e "${missing_app_recovery_support}/State" ]] || {
+  echo "Uninstall left safe generated residue after the App was already absent." >&2
+  exit 1
+}
+[[ "$(cat "${missing_app_recovery_support}/UserData/sentinel")" == personal && \
+  "$(cat "${missing_app_recovery_support}/Backups/sentinel")" == backup && \
+  "$(cat "${missing_app_recovery_support}/Transactions/sentinel")" == transaction ]] || {
+  echo "Uninstall changed personal data while recovering a missing App." >&2
+  exit 1
+}
+HOME="${missing_app_recovery_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
+  "${scripts_root}/preinstall" >/dev/null || {
+  echo "Fresh-login missing-App recovery did not lead back to Complete." >&2
+  exit 1
+}
+
+running_missing_app_home="${test_root}/missing-app-running/home"
+running_missing_app_support="${running_missing_app_home}/Library/Application Support/Linnet"
+running_host="${running_missing_app_home}/Library/Input Methods/Linnet.app/Contents/MacOS/Linnet"
+mkdir -p "${running_missing_app_home}/Library/Input Methods" \
+  "${running_missing_app_support}/Data"
+printf 'generated\n' >"${running_missing_app_support}/Data/sentinel"
+if HOME="${running_missing_app_home}" LINNET_FAKE_PS_COMMANDS="${running_host}" \
+    "${uninstall_fixture}" >/dev/null 2>&1; then
+  echo "Uninstall removed missing-App residue while the exact Host process was still running." >&2
+  exit 1
+fi
+[[ -f "${running_missing_app_support}/Data/sentinel" ]] || {
+  echo "Uninstall changed missing-App residue before proving the Host was stopped." >&2
+  exit 1
+}
+
+# A user-owned App is never executable authority for its own deletion, even
+# when an arbitrary codesign command reports it valid. The canonical
+# uninstaller must still retire an immutable pack tree after proving exact
+# product processes absent, without following a nested symbolic link or
+# changing personal-data owners.
 immutable_home="${test_root}/immutable-home"
 immutable_app="${immutable_home}/Library/Input Methods/Linnet.app"
 immutable_support="${immutable_home}/Library/Application Support/Linnet"
@@ -1070,6 +1338,8 @@ mkdir -p "${immutable_app}/Contents/MacOS" "${immutable_pack}/build" \
   "${immutable_external}"
 cat >"${immutable_app}/Contents/MacOS/Linnet" <<'SH'
 #!/usr/bin/env bash
+[[ -z "${LINNET_FAKE_UNINSTALL_HOST_LOG:-}" ]] || \
+  printf '%s\n' "$*" >>"${LINNET_FAKE_UNINSTALL_HOST_LOG}"
 exit 0
 SH
 chmod 0755 "${immutable_app}/Contents/MacOS/Linnet"
@@ -1081,7 +1351,14 @@ printf 'backup sentinel\n' >"${immutable_support}/Backups/sentinel"
 printf 'transaction sentinel\n' >"${immutable_support}/Transactions/sentinel"
 chmod 0444 "${immutable_pack}/build/linnet_en.table.bin"
 chmod 0555 "${immutable_pack}/build" "${immutable_pack}"
-HOME="${immutable_home}" "${uninstall_fixture}" >/dev/null
+immutable_host_log="${test_root}/immutable-host-invocations"
+HOME="${immutable_home}" LINNET_FAKE_PS_COMMANDS= \
+  LINNET_FAKE_UNINSTALL_HOST_LOG="${immutable_host_log}" \
+  "${uninstall_fixture}" >/dev/null
+[[ ! -e "${immutable_host_log}" ]] || {
+  echo "Uninstall executed user-owned App bytes." >&2
+  exit 1
+}
 [[ ! -e "${immutable_app}" && ! -e "${immutable_support}/Data" && \
   ! -e "${immutable_support}/Runtime" && ! -e "${immutable_support}/Build" && \
   ! -e "${immutable_support}/Downloads" && ! -e "${immutable_support}/State" && \
@@ -1099,6 +1376,47 @@ HOME="${immutable_home}" "${uninstall_fixture}" >/dev/null
   echo "Uninstall changed retained Linnet data while retiring immutable data." >&2
   exit 1
 }
+
+# `rm -x` protects traversal below its starting hierarchy; it cannot establish
+# that the starting App/support/generated target itself belongs to its parent
+# filesystem. Simulate that device mismatch deterministically and require the
+# complete preflight to fail before App/data removal or receipt mutation.
+for mount_target_kind in app support generated; do
+  mount_home="${test_root}/mounted-${mount_target_kind}-home"
+  mount_app="${mount_home}/Library/Input Methods/Linnet.app"
+  mount_host="${mount_app}/Contents/MacOS/Linnet"
+  mount_support="${mount_home}/Library/Application Support/Linnet"
+  mount_generated="${mount_support}/Data"
+  mount_receipt_log="${test_root}/mounted-${mount_target_kind}-receipts"
+  mkdir -p "$(dirname "${mount_host}")" "${mount_generated}" \
+    "${mount_home}/Library/Preferences"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"${mount_host}"
+  chmod 0755 "${mount_host}"
+  printf 'app sentinel\n' >"${mount_app}/sentinel"
+  printf 'generated sentinel\n' >"${mount_generated}/sentinel"
+  printf 'preference sentinel\n' \
+    >"${mount_home}/Library/Preferences/io.github.ares-x.inputmethod.Linnet.plist"
+  case "${mount_target_kind}" in
+    app) mount_target="${mount_app}" ;;
+    support) mount_target="${mount_support}" ;;
+    generated) mount_target="${mount_generated}" ;;
+    *) exit 1 ;;
+  esac
+  if HOME="${mount_home}" LINNET_FAKE_PS_COMMANDS= \
+      LINNET_FAKE_MOUNT_PATH="${mount_target}" \
+      LINNET_FAKE_PKGUTIL_LOG="${mount_receipt_log}" \
+      "${uninstall_fixture}" >/dev/null 2>&1; then
+    echo "Uninstall accepted a mounted ${mount_target_kind} deletion target." >&2
+    exit 1
+  fi
+  [[ "$(cat "${mount_app}/sentinel")" == "app sentinel" && \
+    "$(cat "${mount_generated}/sentinel")" == "generated sentinel" && \
+    "$(cat "${mount_home}/Library/Preferences/io.github.ares-x.inputmethod.Linnet.plist")" == \
+      "preference sentinel" && ! -e "${mount_receipt_log}" ]] || {
+    echo "Mounted ${mount_target_kind} preflight mutated App, data, preferences or receipts." >&2
+    exit 1
+  }
+done
 rg -Fq '/usr/bin/find -P -x "${path}" -type d -print0' package/uninstall-linnet
 rg -Fq '/bin/chmod -h u+wx "${directory}"' package/uninstall-linnet
 
@@ -1135,14 +1453,16 @@ cp package/uninstall-linnet "${purge_uninstall_fixture}"
 chmod 0755 "${purge_defaults_fixture}" "${purge_uninstall_fixture}"
 sed -i '' "s#/usr/sbin/pkgutil#${pkgutil_fixture}#g" "${purge_uninstall_fixture}"
 sed -i '' "s#/usr/bin/defaults#${purge_defaults_fixture}#g" "${purge_uninstall_fixture}"
+sed -i '' "s#/bin/ps#${ps_fixture}#g" "${purge_uninstall_fixture}"
 mkdir -p "${purge_app}/Contents/MacOS" "${purge_support}/UserData" \
-  "${purge_preferences}"
+  "${purge_support}/Runtime/Logs" "${purge_preferences}"
 cat >"${purge_app}/Contents/MacOS/Linnet" <<'SH'
 #!/usr/bin/env bash
 exit 0
 SH
 chmod 0755 "${purge_app}/Contents/MacOS/Linnet"
 printf 'persistent data\n' >"${purge_support}/UserData/sentinel"
+printf 'runtime log\n' >"${purge_support}/Runtime/Logs/sentinel"
 for domain in io.github.ares-x.inputmethod.Linnet \
     io.github.ares-x.inputmethod.Linnet.settings; do
   printf 'preference data\n' >"${purge_preferences}/${domain}.plist"
@@ -1150,7 +1470,7 @@ done
 HOME="${purge_home}" LINNET_FAKE_DEFAULTS_LOG="${purge_defaults_log}" \
   "${purge_uninstall_fixture}" --purge-user-data >/dev/null
 [[ ! -e "${purge_app}" && ! -e "${purge_support}" ]] || {
-  echo "Explicit purge left App or Application Support data behind." >&2
+  echo "Explicit purge left App or Registry-owned support data behind." >&2
   exit 1
 }
 for domain in io.github.ares-x.inputmethod.Linnet \
@@ -1218,15 +1538,29 @@ if rg -n 'LaunchServices\.framework/Support/lsregister|[[:space:]]lsregister[[:s
   exit 1
 fi
 
-# A failed exact quit must stop the shell before the first App/data deletion.
-ruby -e '
-  source = File.read(ARGV.fetch(0))
-  quit = source.index(%q{"${host_cli}" --quit}) or abort "quit missing"
-  purge = source.index(%q{--purge-owned-temporary-state}) or abort "temporary purge missing"
-  first_delete = source.index(%q{/bin/rm -rf --}) or abort "delete missing"
-  abort "quit is not fail-closed before deletion" unless quit < purge && purge < first_delete
-  line = source.lines.find { |candidate| candidate.include?(%q{"${host_cli}" --quit}) }
-  abort "quit failure is ignored" if line.include?("|| true")
-' package/uninstall-linnet
+# Installed user-owned bytes are never a trust or process-lifecycle owner for
+# their own removal. Product process absence and filesystem deletion preflight
+# must complete without executing or signature-classifying the installed App.
+if rg -n '/usr/bin/codesign|"\$\{host_cli\}" --(quit|purge-owned-temporary-state)' \
+    package/uninstall-linnet; then
+  echo "Uninstall regained an installed-App execution or trust path." >&2
+  exit 1
+fi
+if rg -n 'quitProductProcesses|--purge-owned-temporary-state|forceTerminate\(\)' \
+    sources/Main.swift; then
+  echo "Host regained an uninstall-only process or cleanup CLI." >&2
+  exit 1
+fi
+test "$(rg -F -c '/bin/rm -rf -x --' package/uninstall-linnet)" -eq 3
+rg -Fq 'require_recursive_delete_target' package/uninstall-linnet
+if rg -n 'getconf DARWIN_USER_TEMP_DIR|temporary_(root|log_path)' \
+    package/uninstall-linnet; then
+  echo "Uninstall regained a second runtime-log path owner." >&2
+  exit 1
+fi
+if rg -Fq '/bin/rm -rf --' package/uninstall-linnet; then
+  echo "Uninstall recursive deletion lost its filesystem boundary." >&2
+  exit 1
+fi
 
 echo "Linnet package lifecycle fixtures: PASS"

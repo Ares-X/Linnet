@@ -25,7 +25,6 @@ jobs:
       cancel-in-progress: true
     environment: community-signing
     permissions:
-      actions: read
       contents: write
     runs-on: macos-latest
     steps:
@@ -37,7 +36,7 @@ jobs:
           persist-credentials: false
           submodules: false
 
-      - name: Validate candidate intent and exact manual CI
+      - name: Validate exact candidate intent
         id: request
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,27 +76,6 @@ jobs:
             remote_main="$(gh api \
               "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
             test "${remote_main}" = "${CANDIDATE_REVISION}"
-
-            ci_runs="${RUNNER_TEMP}/linnet-manual-ci.json"
-            gh api --method GET \
-              "repos/${GITHUB_REPOSITORY}/actions/workflows/commit-ci.yml/runs" \
-              -f head_sha="${CANDIDATE_REVISION}" \
-              -f event=workflow_dispatch -F per_page=100 >"${ci_runs}"
-            ruby -rjson -e '
-              document = JSON.parse(File.binread(ARGV.fetch(0)))
-              revision = ARGV.fetch(1)
-              accepted = document.fetch("workflow_runs").any? do |run|
-                run.fetch("name") == "Linnet manual full CI" &&
-                  run.fetch("path") == ".github/workflows/commit-ci.yml" &&
-                  run.fetch("head_sha") == revision &&
-                  run.fetch("event") == "workflow_dispatch" &&
-                  run.fetch("status") == "completed" &&
-                  run.fetch("conclusion") == "success" &&
-                  run.dig("repository", "full_name") == "Ares-X/Linnet" &&
-                  run.dig("head_repository", "full_name") == "Ares-X/Linnet"
-              end
-              abort "candidate requires a successful exact manual full CI" unless accepted
-            ' "${ci_runs}" "${CANDIDATE_REVISION}"
           fi
 
           product_version="$(sed -n \
@@ -120,13 +98,21 @@ jobs:
             echo "catalog_sequence=${catalog_sequence}"
           } >>"${GITHUB_OUTPUT}"
 
-      - name: Restore locked build cache
+      - name: Restore locked build cache once
         uses: ./.github/actions/restore-locked-build-cache
         with:
           save: false
 
-      - name: Install declared build tools
-        run: scripts/install_ci_build_tools.sh release
+      - name: Restore and save incremental Swift owner tests
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        with:
+          path: build/swift-unit-cache
+          key: linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install declared build tools once
+        run: scripts/install_ci_build_tools.sh quality
 
       - name: Bootstrap an exact future LTS data seed
         if: steps.request.outputs.mode == 'data-seed'
@@ -153,6 +139,38 @@ jobs:
 
       - name: Prepare locked dependencies and generated data
         run: ./action-install.sh
+
+      - name: Verify strict source and publication owners
+        env:
+          REQUEST_MODE: ${{ steps.request.outputs.mode }}
+        run: |
+          set -euo pipefail
+          scripts/run_swiftlint.sh
+          if git cat-file -e 'HEAD^' 2>/dev/null; then
+            changed="$(mktemp)"
+            previous="$(mktemp)"
+            trap 'rm -f "${changed}" "${previous}"' EXIT
+            git diff --name-only 'HEAD^' HEAD >"${changed}"
+            package/data_release_metadata check-source-change <"${changed}"
+            if git show 'HEAD^:config/linnet-data-releases.json' \
+                >"${previous}" 2>/dev/null; then
+              package/data_release_metadata check-monotonic \
+                "${previous}" config/linnet-data-releases.json
+            fi
+          fi
+          tests/verify_release_automation.sh
+          tests/verify_publication_owner.sh
+
+      - name: Verify Swift owner contracts
+        if: steps.request.outputs.mode == 'candidate'
+        run: tests/verify_development.sh swift
+
+      - name: Verify Rime and all input profiles
+        run: tests/verify_development.sh rime
+
+      - name: Check unused production code
+        if: steps.request.outputs.mode == 'candidate'
+        run: scripts/run_periphery.sh
 
       - name: Import the pinned community signing identity
         env:
@@ -209,6 +227,10 @@ jobs:
             package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
               "${{ steps.request.outputs.version }}" \
               "${LINNET_CANDIDATE_REVISION}"
+
+      - name: Verify visible Settings workflow
+        if: steps.request.outputs.mode == 'candidate'
+        run: tests/verify_visible_settings_fixture.sh --ui-test
 
       - name: Stage exact GitHub Release bytes
         env:

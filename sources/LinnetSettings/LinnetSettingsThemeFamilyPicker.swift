@@ -23,7 +23,7 @@ extension LinnetSettingsDocument.ThemeFamily {
 struct LinnetSettingsThemeFamilyPicker: View {
   @Binding var selection: LinnetSettingsDocument.ThemeFamily
   @Binding var mode: LinnetSettingsDocument.ThemeMode
-  private let columns = [GridItem(.adaptive(minimum: 124, maximum: 176), spacing: 10)]
+  private let columns = [GridItem(.adaptive(minimum: 190, maximum: 250), spacing: 10)]
   var body: some View {
     GroupBox("Theme") {
       VStack(alignment: .leading, spacing: 10) {
@@ -73,40 +73,32 @@ struct LinnetSettingsThemeFamilyPicker: View {
   ) -> some View {
     LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
       ForEach(LinnetSettingsDocument.ThemeFamily.allCases, id: \.self) { family in
-        if let pair = catalog.pair(for: family) {
-          let selected = selection == family
-          Button {
-            selection = family
-          } label: {
-            themeCard(family: family, pair: pair, selected: selected)
-          }
-          .buttonStyle(.borderless)
-          .accessibilityElement(children: .ignore)
-          .accessibilityLabel(Text(family.settingsTitle))
-          .accessibilityIdentifier("settings.appearance.theme.\(family.rawValue)")
-          .accessibilityValue(selected ? Text("Selected") : Text("Not selected"))
-          .accessibilityHint(Text("Choose this candidate-window theme."))
-          .accessibilityAddTraits(selected ? .isSelected : [])
+        let selected = selection == family
+        Button {
+          selection = family
+        } label: {
+          themeCard(family: family, catalog: catalog, selected: selected)
         }
+        .buttonStyle(.borderless)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(family.settingsTitle))
+        .accessibilityIdentifier("settings.appearance.theme.\(family.rawValue)")
+        .accessibilityValue(selected ? Text("Selected") : Text("Not selected"))
+        .accessibilityHint(Text("Choose this candidate-window theme."))
+        .accessibilityAddTraits(selected ? .isSelected : [])
       }
     }
   }
 
   private func themeCard(
     family: LinnetSettingsDocument.ThemeFamily,
-    pair: LinnetSettingsAppearancePreview.Catalog.ThemePair,
+    catalog: LinnetSettingsAppearancePreview.Catalog,
     selected: Bool
   ) -> some View {
     VStack(alignment: .leading, spacing: 7) {
-      HStack(spacing: 0) {
-        themeHalf(pair.light, isDark: false)
-        themeHalf(pair.dark, isDark: true)
-      }
-      .frame(height: 54)
-      .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-          .stroke(Color(nsColor: NSColor.separatorColor), lineWidth: 0.5)
+      VStack(spacing: 5) {
+        themeSample(family, mode: .light, catalog: catalog)
+        themeSample(family, mode: .dark, catalog: catalog)
       }
 
       HStack(spacing: 5) {
@@ -137,42 +129,46 @@ struct LinnetSettingsThemeFamilyPicker: View {
     .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
   }
 
-  private func themeHalf(
-    _ scheme: LinnetSettingsAppearancePreview.Catalog.Scheme,
-    isDark: Bool
+  @ViewBuilder
+  private func themeSample(
+    _ family: LinnetSettingsDocument.ThemeFamily,
+    mode: LinnetSettingsDocument.ThemeMode,
+    catalog: LinnetSettingsAppearancePreview.Catalog
   ) -> some View {
-    ZStack(alignment: .topTrailing) {
-      LinnetSettingsThemeSurface(
-        palette: scheme.palette,
-        isTranslucent: scheme.isTranslucent,
-        isDark: isDark
-      )
-      Capsule()
-        .fill(scheme.palette.selectedPrimary.color)
-        .frame(width: 24, height: 5)
-        .padding(6)
-        .background {
-          if scheme.selectionStyle == .tile {
-            RoundedRectangle(
-              cornerRadius: scheme.highlightedCornerRadius,
-              style: .continuous
-            )
-            .fill(scheme.palette.selectedBackground.color)
-          }
+    let appearance = LinnetSettingsDocument.Appearance(
+      fontPoint: 13, themeMode: mode,
+      chineseCandidateLayout: .horizontal, englishCandidateLayout: .horizontal,
+      pageSize: 3, themeFamily: family)
+    if case .success(let preview) = LinnetSettingsAppearancePreview.presentation(
+      for: appearance, systemIsDark: mode == .dark, catalog: catalog) {
+      let fonts = (
+        label: LinnetCandidatePresentation.platformFont(
+          fontNames: [], size: preview.labelFontPoint),
+        candidate: LinnetCandidatePresentation.platformFont(
+          fontNames: [], size: preview.candidateFontPoint))
+      HStack(spacing: 8) {
+        Image(systemName: preview.isDark ? "moon" : "sun.max")
+          .font(.system(size: 10))
+          .foregroundStyle(preview.palette.secondary.color)
+          .frame(width: 12)
+        HStack(spacing: LinnetCandidatePresentation.inlineCandidateSeparatorWidth(font: fonts.candidate)) {
+          LinnetSettingsAppearancePreview.candidate("1", "输入", selected: true, preview, fonts: fonts)
+          LinnetSettingsAppearancePreview.candidate("2", "候选", selected: false, preview, fonts: fonts)
         }
-        .overlay(alignment: .bottom) {
-          if scheme.selectionStyle == .underline {
-            Rectangle().fill(scheme.palette.selectedBackground.color).frame(height: 2)
-          }
-        }
-        .overlay(alignment: .leading) {
-          if scheme.selectionStyle == .bar {
-            RoundedRectangle(cornerRadius: 1)
-              .fill(scheme.palette.selectedBackground.color).frame(width: 2)
-          }
-        }
-        .accessibilityHidden(true)
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background {
+        LinnetSettingsThemeSurface(
+          palette: preview.palette, isTranslucent: preview.isTranslucent, isDark: preview.isDark)
+      }
+      .clipShape(RoundedRectangle(cornerRadius: preview.cornerRadius))
+      .overlay {
+        RoundedRectangle(cornerRadius: preview.cornerRadius)
+          .stroke(preview.palette.border.color, lineWidth: 0.5)
+      }
+      .accessibilityHidden(true)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }

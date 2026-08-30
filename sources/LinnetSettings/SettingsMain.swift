@@ -1,8 +1,8 @@
 //
 //  SettingsMain.swift
 //  Native, offline settings surface embedded in the input-method bundle.
-//  The window is a five-tab surface: Appearance, Input, Dictionary, English,
-//  Data.
+//  The window has four tabs: Appearance, Input, Dictionary, and Data & Updates.
+//  Smart English belongs to the Input tab.
 //  Theme, typeface, and size are published immediately. Candidate count,
 //  layouts, input, English, and personal-data changes remain explicit Apply
 //  Changes operations.
@@ -46,8 +46,6 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
 
   let productName: String
-  let appVersion: String
-  let appBuild: UInt64
   @Published private(set) var dataServicesAvailable: Bool
   let updateChecker: LinnetSettingsUpdateChecker
 
@@ -72,18 +70,12 @@ final class SettingsModel: ObservableObject {
     productName =
       host?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
       ?? "Input Method"
-    appVersion =
-      (host?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
-      ?? (host?.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
-      ?? "development"
-    appBuild = UInt64(host?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
     let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
     dataRegistry = registry
     installedPacks = []
     dataEdition = nil
     dataServicesAvailable = false
     updateChecker = LinnetSettingsUpdateChecker(
-      currentVersion: appVersion, currentBuild: appBuild,
       edition: nil, installedPacks: [], bundle: bundle)
     let downloadPreference = LinnetSettingsDownloadSource.load()
     downloadSourceMode = downloadPreference.mode

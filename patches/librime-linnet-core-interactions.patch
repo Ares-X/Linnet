@@ -1,5 +1,5 @@
 diff --git a/src/rime/context.cc b/src/rime/context.cc
-index ec840a3..fb2633b 100644
+index ec840a3e..c83c0d2d 100644
 --- a/src/rime/context.cc
 +++ b/src/rime/context.cc
 @@ -25,6 +25,29 @@ bool Context::Commit() {
@@ -33,7 +33,7 @@ index ec840a3..fb2633b 100644
    if (get_option("dumb"))
      return string();
 diff --git a/src/rime/context.h b/src/rime/context.h
-index d526130..55605cf 100644
+index d5261300..55605cf9 100644
 --- a/src/rime/context.h
 +++ b/src/rime/context.h
 @@ -29,6 +29,7 @@ class RIME_DLL Context {
@@ -44,8 +44,91 @@ index d526130..55605cf 100644
    string GetCommitText() const;
    string GetScriptText() const;
    Preedit GetPreedit() const;
+diff --git a/src/rime/dict/dictionary.cc b/src/rime/dict/dictionary.cc
+index 58f21a34..fd166514 100644
+--- a/src/rime/dict/dictionary.cc
++++ b/src/rime/dict/dictionary.cc
+@@ -66,6 +66,24 @@ struct Chunk {
+   bool is_predictive_match() const { return matching_code_size < code.size(); }
+ };
+ 
++an<DictEntry> MakeEntry(const Chunk& chunk, size_t cursor) {
++  const auto& table_entry = chunk.entries[cursor];
++  auto entry = New<DictEntry>();
++  entry->code = chunk.code;
++  entry->text = chunk.table->GetEntryText(table_entry);
++  const double kS = 18.420680743952367;  // log(1e8)
++  entry->weight = table_entry.weight - kS + chunk.credibility;
++  entry->quality_len = chunk.quality_len;
++  if (!chunk.remaining_code.empty()) {
++    entry->comment = "~" + chunk.remaining_code;
++    entry->remaining_code_length = chunk.remaining_code.length();
++  }
++  if (chunk.is_predictive_match()) {
++    entry->matching_code_size = chunk.matching_code_size;
++  }
++  return entry;
++}
++
+ struct QueryResult {
+   vector<Chunk> chunks;
+ };
+@@ -154,26 +172,26 @@ an<DictEntry> DictEntryIterator::Peek() {
+   if (!entry_ && !exhausted()) {
+     // get next entry from current chunk
+     const auto& chunk = query_result_->chunks[chunk_index_];
+-    const auto& e = chunk.entries[chunk.cursor];
+     DLOG(INFO) << "creating temporary dict entry '"
+-               << chunk.table->GetEntryText(e) << "'.";
+-    entry_ = New<DictEntry>();
+-    entry_->code = chunk.code;
+-    entry_->text = chunk.table->GetEntryText(e);
+-    const double kS = 18.420680743952367;  // log(1e8)
+-    entry_->weight = e.weight - kS + chunk.credibility;
+-    entry_->quality_len = chunk.quality_len;
+-    if (!chunk.remaining_code.empty()) {
+-      entry_->comment = "~" + chunk.remaining_code;
+-      entry_->remaining_code_length = chunk.remaining_code.length();
+-    }
+-    if (chunk.is_predictive_match()) {
+-      entry_->matching_code_size = chunk.matching_code_size;
+-    }
++               << chunk.table->GetEntryText(chunk.entries[chunk.cursor])
++               << "'.";
++    entry_ = dictionary::MakeEntry(chunk, chunk.cursor);
+   }
+   return entry_;
+ }
+ 
++an<DictEntry> DictEntryIterator::FindRemainingEntry(const string& text) const {
++  for (size_t chunk_index = chunk_index_;
++       chunk_index < query_result_->chunks.size(); ++chunk_index) {
++    const auto& chunk = query_result_->chunks[chunk_index];
++    for (size_t cursor = chunk.cursor; cursor < chunk.size; ++cursor) {
++      auto entry = dictionary::MakeEntry(chunk, cursor);
++      if (entry->text == text && (!filter_ || filter_(entry))) return entry;
++    }
++  }
++  return nullptr;
++}
++
+ bool DictEntryIterator::FindNextEntry() {
+   if (exhausted()) {
+     return false;
+diff --git a/src/rime/dict/dictionary.h b/src/rime/dict/dictionary.h
+index f1127e5a..61d78764 100644
+--- a/src/rime/dict/dictionary.h
++++ b/src/rime/dict/dictionary.h
+@@ -36,6 +36,7 @@ class RIME_DLL DictEntryIterator : public DictEntryFilterBinder {
+   void Sort();
+   void AddFilter(DictEntryFilter filter) override;
+   an<DictEntry> Peek();
++  an<DictEntry> FindRemainingEntry(const string& text) const;
+   bool Next();
+   bool Skip(size_t num_entries);
+   bool exhausted() const;
 diff --git a/src/rime/gear/ascii_composer.cc b/src/rime/gear/ascii_composer.cc
-index e49dc38..2a8ece6 100644
+index e49dc387..aa04631a 100644
 --- a/src/rime/gear/ascii_composer.cc
 +++ b/src/rime/gear/ascii_composer.cc
 @@ -51,18 +51,23 @@ static void load_bindings(const an<ConfigMap>& src,
@@ -146,13 +229,12 @@ index e49dc38..2a8ece6 100644
    // possible key binding: Control+x, Shift+space
    if (key_event.ctrl() || key_event.alt() || key_event.super() ||
        (key_event.shift() && ch == XK_space)) {
-@@ -144,23 +147,12 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
+@@ -144,18 +147,7 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
    int ch = key_event.keycode();
    if (ch == XK_Caps_Lock) {
      if (!key_event.release()) {
 -      shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
 -          super_key_pressed_ = false;
-+      ResetModifierState();
 -      // temporarily disable good-old (uppercase) Caps Lock as mode switch key
 -      // in case the user switched to ascii mode with other keys, eg. with Shift
 -      if (good_old_caps_lock_ && !toggle_with_caps_) {
@@ -163,16 +245,11 @@ index e49dc38..2a8ece6 100644
 -        }
 -      }
 -      toggle_with_caps_ = !key_event.caps();
++      ResetModifierState();
        // NOTE: for Linux, Caps Lock modifier is clear when we are about to
        // turn it on; for Windows it is the opposite:
        // Caps Lock modifier has been set before we process VK_CAPITAL.
-       // here we assume IBus' behavior and invert caps with ! operation.
--      SwitchAsciiMode(!key_event.caps(), caps_lock_switch_style_);
-+      SwitchAsciiMode(!key_event.caps(), caps_lock_switch_style_);
-       // When good_old_caps_lock is enabled, allow the key event to pass
-       // through the input method to toggle the Caps Lock state.
-       return good_old_caps_lock_ ? kRejected : kAccepted;
-@@ -236,7 +231,6 @@ bool AsciiComposer::ToggleAsciiModeWithKey(int key_code) {
+@@ -236,7 +228,6 @@ bool AsciiComposer::ToggleAsciiModeWithKey(int key_code) {
      return false;
    }
    SwitchAsciiMode(new_mode, style);
@@ -180,7 +257,7 @@ index e49dc38..2a8ece6 100644
    return true;
  }
  
-@@ -255,10 +249,13 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+@@ -255,10 +246,13 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
              [this](Context* ctx) { OnContextUpdate(ctx); });
        }
      } else if (style == kAsciiModeSwitchCommitText) {
@@ -197,7 +274,7 @@ index e49dc38..2a8ece6 100644
      } else if (style == kAsciiModeSwitchClear || style == kAsciiModeSet ||
                 style == kAsciiModeUnset) {
        ctx->Clear();
-@@ -268,6 +265,12 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+@@ -268,6 +262,12 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
    ctx->set_option("ascii_mode", ascii_mode);
  }
  
@@ -211,7 +288,7 @@ index e49dc38..2a8ece6 100644
    if (!ctx->IsComposing()) {
      connection_.disconnect();
 diff --git a/src/rime/gear/ascii_composer.h b/src/rime/gear/ascii_composer.h
-index 756771f..15f1145 100644
+index 756771ff..15f1145b 100644
 --- a/src/rime/gear/ascii_composer.h
 +++ b/src/rime/gear/ascii_composer.h
 @@ -8,6 +8,7 @@
@@ -222,7 +299,7 @@ index 756771f..15f1145 100644
  #include <rime/common.h>
  #include <rime/component.h>
  #include <rime/processor.h>
-@@ -42,6 +43,7 @@ class AsciiComposer : public Processor {
+@@ -42,20 +43,21 @@ class AsciiComposer : public Processor {
    bool ToggleAsciiModeWithKey(int key_code);
    void SwitchAsciiMode(bool ascii_mode, AsciiModeSwitchStyle style);
    void OnContextUpdate(Context* ctx);
@@ -230,7 +307,7 @@ index 756771f..15f1145 100644
  
    // config options
    AsciiModeSwitchKeyBindings bindings_;
-@@ -49,13 +51,13 @@ class AsciiComposer : public Processor {
+   AsciiModeSwitchStyle caps_lock_switch_style_ = kAsciiModeSwitchNoop;
    bool good_old_caps_lock_ = false;
    // state
 -  bool toggle_with_caps_ = false;
@@ -250,7 +327,7 @@ index 756771f..15f1145 100644
  
  }  // namespace rime
 diff --git a/src/rime/gear/chord_composer.cc b/src/rime/gear/chord_composer.cc
-index 789697b..165c42a 100644
+index 789697b7..165c42ad 100644
 --- a/src/rime/gear/chord_composer.cc
 +++ b/src/rime/gear/chord_composer.cc
 @@ -65,8 +65,7 @@ bool ChordComposer::CommitRawInput(Context* ctx) {
@@ -264,7 +341,7 @@ index 789697b..165c42a 100644
  }
  
 diff --git a/src/rime/gear/editor.cc b/src/rime/gear/editor.cc
-index 37b3dda..0e57a97 100644
+index 37b3dda6..0e57a970 100644
 --- a/src/rime/gear/editor.cc
 +++ b/src/rime/gear/editor.cc
 @@ -111,8 +111,7 @@ bool Editor::CommitScriptText(Context* ctx) {
@@ -277,8 +354,227 @@ index 37b3dda..0e57a97 100644
    return true;
  }
  
+diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
+index 963dd796..696c14c1 100644
+--- a/src/rime/gear/poet.cc
++++ b/src/rime/gear/poet.cc
+@@ -27,6 +27,7 @@ struct Line {
+   size_t end_pos;
+   double weight;
+   size_t text_hash;  // for dedup
++  size_t preserved_entry_count;
+ 
+   static const Line kEmpty;
+ 
+@@ -69,7 +70,7 @@ struct Line {
+   }
+ };
+ 
+-const Line Line::kEmpty{nullptr, nullptr, 0, 0.0, 0};
++const Line Line::kEmpty{nullptr, nullptr, 0, 0.0, 0, 0};
+ 
+ inline static Grammar* create_grammar(Config* config) {
+   if (auto* grammar = Grammar::Require("grammar")) {
+@@ -217,7 +218,7 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
+           double weight = candidate.weight +
+                           Grammar::Evaluate(context, entry->text, entry->weight,
+                                             is_rear, grammar_.get());
+-          Line new_line{&candidate, entry.get(), end_pos, weight};
++          Line new_line{&candidate, entry.get(), end_pos, weight, 0, 0};
+           Line& best = Strategy::BestLineToUpdate(target_state, new_line);
+           if (best.empty() || compare_(best, new_line)) {
+             DLOG(INFO) << "updated line ending at " << end_pos
+@@ -259,12 +260,17 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+                                         size_t total_length,
+                                         const string& preceding_text,
+                                         size_t max_sentences,
+-                                        double cutoff_threshold) {
++                                        double cutoff_threshold,
++                                        EntryPredicate preserve_entry,
++                                        PreservedEntryMode preserved_entry_mode) {
+   size_t beam_width =
+       max_sentences * 3;  // allow more possibilities during search
+-  using State = std::list<Line>;
++  struct State {
++    std::list<Line> ordinary;
++    std::list<Line> preserved;
++  };
+   map<int, State> states;
+-  states[0].push_back(Line::kEmpty);
++  states[0].ordinary.push_back(Line::kEmpty);
+   for (const auto& sv : graph) {
+     size_t start_pos = sv.first;
+     if (states.find(start_pos) == states.end())
+@@ -279,7 +285,7 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+       bool is_rear = end_pos == total_length;
+       auto& target_state = states[end_pos];
+ 
+-      for (const auto& source_line : source_state) {
++      const auto extend = [&](const Line& source_line) {
+         for (const auto& entry : entries) {
+           const string& context =
+               source_line.empty() ? preceding_text : source_line.context();
+@@ -290,15 +296,29 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+           for (char c : entry->text) {
+             new_hash = new_hash * 31 + c;
+           }
+-          Line new_line{&source_line, entry.get(), end_pos, weight, new_hash};
++          const size_t preserved_entry_count =
++              source_line.preserved_entry_count +
++              (preserve_entry && preserve_entry(*entry) ? 1 : 0);
++          Line new_line{&source_line, entry.get(), end_pos, weight, new_hash,
++                        preserved_entry_count};
++
++          if (preserved_entry_count > 0) {
++            if (preserved_entry_count == 1 &&
++                (target_state.preserved.empty() ||
++                 target_state.preserved.front().weight < new_line.weight)) {
++              target_state.preserved.clear();
++              target_state.preserved.push_back(new_line);
++            }
++            continue;
++          }
+ 
+           // dedup by text hash
+           auto dup = std::find_if(
+-              target_state.begin(), target_state.end(),
++              target_state.ordinary.begin(), target_state.ordinary.end(),
+               [&](const Line& l) { return l.text_hash == new_line.text_hash; });
+-          if (dup != target_state.end()) {
++          if (dup != target_state.ordinary.end()) {
+             if (new_line.weight > dup->weight) {
+-              target_state.erase(dup);
++              target_state.ordinary.erase(dup);
+             } else {
+               continue;
+             }
+@@ -306,47 +326,71 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+ 
+           // insert in descending order of weight
+           auto it = std::find_if(
+-              target_state.begin(), target_state.end(),
++              target_state.ordinary.begin(), target_state.ordinary.end(),
+               [&](const Line& l) { return l.weight < new_line.weight; });
+-          target_state.insert(it, new_line);
+-          if (target_state.size() > beam_width)
+-            target_state.pop_back();
++          target_state.ordinary.insert(it, new_line);
++          if (target_state.ordinary.size() > beam_width)
++            target_state.ordinary.pop_back();
+         }
++      };
++      for (const auto& source_line : source_state.ordinary) {
++        extend(source_line);
++      }
++      for (const auto& source_line : source_state.preserved) {
++        extend(source_line);
+       }
+     }
+   }
+ 
+   auto found = states.find(total_length);
+-  if (found == states.end() || found->second.empty())
++  if (found == states.end() ||
++      (found->second.ordinary.empty() && found->second.preserved.empty()))
+     return {};
+ 
+   deque<an<Sentence>> results;
+-  double last_weight;
+-  double acceleration = 1.0 - 1.0 / (double)max_sentences;
+-  auto iter = found->second.begin();
+-  for (size_t i = 0; iter != found->second.end() && i < max_sentences;
+-       ++i, ++iter) {
+-    const auto& candidate = *iter;
+-    double cur_weight = candidate.weight;
+-    if (i > 0) {
+-      // idea: if the current sentence is, on average, not too rare when
+-      // compared to last sentence, we should consider it too
+-      if (fabs(cur_weight - last_weight) / fabs(last_weight) >
+-          cutoff_threshold) {
+-        break;
++  if (preserved_entry_mode != PreservedEntryMode::kOnly) {
++    double last_weight;
++    double acceleration = 1.0 - 1.0 / (double)max_sentences;
++    auto iter = found->second.ordinary.begin();
++    for (size_t i = 0;
++         iter != found->second.ordinary.end() && i < max_sentences;
++         ++i, ++iter) {
++      const auto& candidate = *iter;
++      double cur_weight = candidate.weight;
++      if (i > 0) {
++        // idea: if the current sentence is, on average, not too rare when
++        // compared to last sentence, we should consider it too
++        if (fabs(cur_weight - last_weight) / fabs(last_weight) >
++            cutoff_threshold) {
++          break;
++        }
++        // but don't deviate too far from the first weight by accelerating
++        // the cutoff threshold. cutoff_threshold becomes
++        // ~0.36*cutoff_threshold after N candidates are added.
++        cutoff_threshold *= acceleration;
+       }
+-      // but don't deviate too far from the first weight by accelerating
+-      // the cutoff threshold. cutoff_threshold becomes
+-      // ~0.36*cutoff_threshold after N candidates are added.
+-      cutoff_threshold *= acceleration;
++      last_weight = cur_weight;
++      auto sentence = New<Sentence>(language_);
++      for (const auto* c : candidate.components()) {
++        if (!c->entry)
++          continue;
++        sentence->Extend(*c->entry, c->end_pos, c->weight);
++      }
++      results.emplace_back(sentence);
+     }
+-    last_weight = cur_weight;
++  }
++  if (preserve_entry &&
++      preserved_entry_mode != PreservedEntryMode::kNone &&
++      !found->second.preserved.empty()) {
++    const auto& preserved = found->second.preserved.front();
+     auto sentence = New<Sentence>(language_);
+-    for (const auto* c : candidate.components()) {
++    for (const auto* c : preserved.components()) {
+       if (!c->entry)
+         continue;
+       sentence->Extend(*c->entry, c->end_pos, c->weight);
+     }
++    if (results.size() == max_sentences)
++      results.pop_back();
+     results.emplace_back(sentence);
+   }
+   return results;
+diff --git a/src/rime/gear/poet.h b/src/rime/gear/poet.h
+index 1bd82ca5..6749166e 100644
+--- a/src/rime/gear/poet.h
++++ b/src/rime/gear/poet.h
+@@ -27,6 +27,12 @@ class Poet {
+  public:
+   // Line "less", used to compare composed line of the same input range.
+   using Compare = function<bool(const Line&, const Line&)>;
++  using EntryPredicate = function<bool(const DictEntry&)>;
++  enum class PreservedEntryMode {
++    kNone,
++    kInclude,
++    kOnly,
++  };
+ 
+   static bool CompareWeight(const Line& one, const Line& other);
+   static bool LeftAssociateCompare(const Line& one, const Line& other);
+@@ -43,7 +49,10 @@ class Poet {
+                                     size_t total_length,
+                                     const string& preceding_text,
+                                     size_t count,
+-                                    double cutoff_threshold);
++                                    double cutoff_threshold,
++                                    EntryPredicate preserve_entry = {},
++                                    PreservedEntryMode preserved_entry_mode =
++                                        PreservedEntryMode::kNone);
+ 
+   template <class TranslatorT>
+   an<Translation> ContextualWeighted(an<Translation> translation,
 diff --git a/src/rime/gear/punctuator.cc b/src/rime/gear/punctuator.cc
-index 0c20b92..71d992a 100644
+index 0c20b922..71d992a6 100644
 --- a/src/rime/gear/punctuator.cc
 +++ b/src/rime/gear/punctuator.cc
 @@ -7,6 +7,7 @@
@@ -307,8 +603,326 @@ index 0c20b92..71d992a 100644
  }
  
  inline static bool ends_with_digit(const string& text) {
+diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translator.cc
+index aef62178..7f50cf3a 100644
+--- a/src/rime/gear/script_translator.cc
++++ b/src/rime/gear/script_translator.cc
+@@ -75,6 +75,8 @@ static bool syllabify_dfs(SyllabifyTask* task,
+ 
+ }  // anonymous namespace
+ 
++using EntityConstraints = map<size_t, map<size_t, set<string>>>;
++
+ class ScriptSyllabifier : public PhraseSyllabifier {
+  public:
+   ScriptSyllabifier(ScriptTranslator* translator,
+@@ -97,6 +99,12 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+   string GetPreeditString(const Phrase& cand) const;
+   string GetOriginalSpelling(const Phrase& cand) const;
+   bool IsCorrection(const Code& code, size_t code_length) const;
++  SpellingType SpellingTypeAt(size_t end_pos) const {
++    const auto vertex = syllable_graph_.vertices.find(end_pos);
++    return vertex == syllable_graph_.vertices.end()
++               ? kInvalidSpelling
++               : vertex->second;
++  }
+ 
+   const SyllableGraph& syllable_graph() const { return syllable_graph_; }
+ 
+@@ -137,14 +145,18 @@ class ScriptTranslation : public Translation {
+   bool CheckEmpty();
+   bool IsNormalSpelling() const;
+   bool PrepareCandidate();
++  std::optional<double> FindSystemLexicalWeight(
++      const string& text, size_t code_length) const;
+   template <class QueryResult>
+   void EnrollEntries(map<int, DictEntryList>& entries_by_end_pos,
+                      const an<QueryResult>& query_result);
+   WordGraph PrepareForMakingSentence(Dictionary* dict,
+-                                     UserDictionary* user_dict);
++                                     UserDictionary* user_dict,
++                                     set<const DictEntry*>* preserved = nullptr);
+   an<Sentence> MakeSentence(Dictionary* dict, UserDictionary* user_dict);
+   deque<an<Sentence>> MakeSentences(Dictionary* dict,
+-                                    UserDictionary* user_dict);
++                                    UserDictionary* user_dict,
++                                    Poet::PreservedEntryMode mode);
+ 
+   ScriptTranslator* translator_;
+   Poet* poet_;
+@@ -155,6 +167,7 @@ class ScriptTranslation : public Translation {
+   an<DictEntryCollector> phrase_;
+   an<UserDictEntryCollector> user_phrase_;
+   deque<an<Sentence>> sentences_;
++  EntityConstraints entity_constraints_;
+ 
+   an<Phrase> candidate_ = nullptr;
+   size_t candidate_index_ = 0;
+@@ -190,6 +203,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
+     config->GetBool(name_space_ + "/always_show_comments",
+                     &always_show_comments_);
+     config->GetBool(name_space_ + "/enable_correction", &enable_correction_);
++    config->GetBool(name_space_ + "/sentence_with_uppercase_syllable",
++                    &sentence_with_uppercase_syllable_);
+     if (!config->GetBool(name_space_ + "/enable_word_completion",
+                          &enable_word_completion_)) {
+       enable_word_completion_ = enable_completion_;
+@@ -448,11 +463,42 @@ static bool has_exact_match_phrase(Ptr ptr, Iter iter, size_t consumed) {
+          iter->second.Peek()->IsExactMatch();
+ }
+ 
++static bool is_uppercase_entity(const string& text) {
++  return text.size() >= 2 && text.size() <= 6 &&
++         std::all_of(text.begin(), text.end(), [](char byte) {
++           return byte >= 'A' && byte <= 'Z';
++         });
++}
++
++static EntityConstraints find_entity_constraints(const SyllableGraph& graph,
++                                                  Dictionary* dict) {
++  EntityConstraints constraints;
++  if (!dict || !dict->primary_table())
++    return constraints;
++  for (const auto& start : graph.edges) {
++    for (const auto& end : start.second) {
++      for (const auto& spelling : end.second) {
++        if (spelling.second.type != kNormalSpelling)
++          continue;
++        const string text =
++            dict->primary_table()->GetSyllableById(spelling.first);
++        if (is_uppercase_entity(text)) {
++          constraints[start.first][end.first].insert(text);
++        }
++      }
++    }
++  }
++  return constraints;
++}
++
+ // ScriptTranslation implementation
+ 
+ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+   size_t consumed = syllabifier_->BuildSyllableGraph(*dict->prism());
+   const auto& syllable_graph = syllabifier_->syllable_graph();
++  if (translator_->sentence_with_uppercase_syllable()) {
++    entity_constraints_ = find_entity_constraints(syllable_graph, dict);
++  }
+   bool predict_word = translator_->enable_word_completion() &&
+                       start_ + consumed == end_of_input_;
+ 
+@@ -492,12 +538,19 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+              << ", has_reliable_phrase: " << has_reliable_phrase
+              << ", has_reliable_user_phrase: " << has_reliable_user_phrase
+              << ", has_at_least_two_syllables: " << has_at_least_two_syllables;
+-  // make sentences when there is no exact-matching phrase candidate
+-  if (has_at_least_two_syllables && !has_reliable_phrase &&
+-      !has_reliable_user_phrase) {
+-    if (max_sentences_ > 1)
+-      sentences_ = MakeSentences(dict, user_dict);
+-    else if (max_sentences_) {
++  const bool has_reliable_match =
++      has_reliable_phrase || has_reliable_user_phrase;
++  if (has_at_least_two_syllables && has_reliable_match &&
++      !entity_constraints_.empty() && max_sentences_) {
++    sentences_ = MakeSentences(dict, user_dict,
++                               Poet::PreservedEntryMode::kOnly);
++  } else if (has_at_least_two_syllables && !has_reliable_match) {
++    if (max_sentences_ > 1 ||
++        (max_sentences_ &&
++         translator_->sentence_with_uppercase_syllable())) {
++      sentences_ = MakeSentences(dict, user_dict,
++                                 Poet::PreservedEntryMode::kInclude);
++    } else if (max_sentences_) {
+       auto sentence = MakeSentence(dict, user_dict);
+       if (sentence)
+         sentences_ = {sentence};
+@@ -588,6 +641,15 @@ inline static bool prefer_user_phrase(
+          (user_phrase_weight == sys_phrase_weight && compare_on_tie());
+ }
+ 
++std::optional<double> ScriptTranslation::FindSystemLexicalWeight(
++    const string& text, size_t code_length) const {
++  if (!phrase_) return std::nullopt;
++  const auto group = phrase_->find(code_length);
++  if (group == phrase_->end()) return std::nullopt;
++  const auto entry = group->second.FindRemainingEntry(text);
++  return entry ? std::optional<double>(entry->weight) : std::nullopt;
++}
++
+ bool ScriptTranslation::PrepareCandidate() {
+ iter_incremented:
+   if (exhausted()) {
+@@ -642,7 +704,10 @@ iter_incremented:
+     candidate_ =
+         New<Phrase>(translator_->language(),
+                     entry->IsPredictiveMatch() ? "completion" : "user_phrase",
+-                    start_, start_ + user_phrase_code_length, entry);
++                    start_, start_ + user_phrase_code_length, entry,
++                    syllabifier_->SpellingTypeAt(user_phrase_code_length),
++                    FindSystemLexicalWeight(entry->text,
++                                            user_phrase_code_length));
+     candidate_->set_quality(std::exp(entry->weight) +
+                             translator_->initial_quality() +
+                             (entry->quality_len / full_code_length));
+@@ -660,7 +725,9 @@ iter_incremented:
+     candidate_ =
+         New<Phrase>(translator_->language(),
+                     entry->IsPredictiveMatch() ? "completion" : "phrase",
+-                    start_, start_ + phrase_code_length, entry);
++                    start_, start_ + phrase_code_length, entry,
++                    syllabifier_->SpellingTypeAt(phrase_code_length),
++                    entry->weight);
+     candidate_->set_quality(std::exp(entry->weight) +
+                             translator_->initial_quality() +
+                             (entry->quality_len / full_code_length));
+@@ -697,7 +764,8 @@ void ScriptTranslation::EnrollEntries(
+ 
+ WordGraph ScriptTranslation::PrepareForMakingSentence(
+     Dictionary* dict,
+-    UserDictionary* user_dict) {
++    UserDictionary* user_dict,
++    set<const DictEntry*>* preserved) {
+   const int kMaxSyllablesForUserPhraseQuery = 5;
+   const auto& syllable_graph = syllabifier_->syllable_graph();
+   WordGraph graph;
+@@ -709,21 +777,59 @@ WordGraph ScriptTranslation::PrepareForMakingSentence(
+                                       kMaxSyllablesForUserPhraseQuery));
+     }
+     // merge lookup results
+-    EnrollEntries(same_start_pos, dict->Lookup(syllable_graph, x.first,
+-                                               &translator_->blacklist()));
++    const auto system_entries =
++        dict->Lookup(syllable_graph, x.first, &translator_->blacklist());
++    map<int, size_t> system_starts;
++    if (system_entries)
++      for (const auto& group : *system_entries)
++        system_starts[group.first] = same_start_pos[group.first].size();
++    EnrollEntries(same_start_pos, system_entries);
++    const auto start_constraints = entity_constraints_.find(x.first);
++    if (!system_entries || start_constraints == entity_constraints_.end())
++      continue;
++    for (auto& group : *system_entries) {
++      const auto end_constraints = start_constraints->second.find(group.first);
++      if (end_constraints == start_constraints->second.end()) continue;
++      auto& homophones = same_start_pos[group.first];
++      const size_t system_start = system_starts[group.first];
++      for (const auto& text : end_constraints->second) {
++        const auto enrolled = std::find_if(
++            homophones.begin() + system_start, homophones.end(),
++                         [&](const an<DictEntry>& entry) {
++                           return entry && entry->text == text;
++                         });
++        const auto entry = enrolled != homophones.end()
++                               ? *enrolled
++                               : group.second.FindRemainingEntry(text);
++        if (!entry) continue;
++        if (enrolled == homophones.end())
++          homophones.push_back(entry);
++        if (preserved) preserved->insert(entry.get());
++      }
++    }
+   }
+   return graph;
+ }
+ 
+ deque<an<Sentence>> ScriptTranslation::MakeSentences(
+     Dictionary* dict,
+-    UserDictionary* user_dict) {
++    UserDictionary* user_dict,
++    Poet::PreservedEntryMode mode) {
+   const auto& syllable_graph = syllabifier_->syllable_graph();
+-  WordGraph graph = PrepareForMakingSentence(dict, user_dict);
++  set<const DictEntry*> preserved_entries;
++  WordGraph graph =
++      PrepareForMakingSentence(dict, user_dict, &preserved_entries);
++  Poet::EntryPredicate preserve_entity;
++  if (!preserved_entries.empty()) {
++    preserve_entity = [preserved_entries](const DictEntry& entry) {
++      return preserved_entries.count(&entry) != 0;
++    };
++  }
+   auto sentences =
+       poet_->MakeSentences(graph, syllable_graph.interpreted_length,
+                            translator_->GetPrecedingText(start_),
+-                           max_sentences_, sentence_cutoff_threshold_);
++                           max_sentences_, sentence_cutoff_threshold_,
++                           preserve_entity, mode);
+   for (auto& sentence : sentences) {
+     sentence->Offset(start_);
+     sentence->set_syllabifier(syllabifier_);
+diff --git a/src/rime/gear/script_translator.h b/src/rime/gear/script_translator.h
+index e5b60a7a..361b6080 100644
+--- a/src/rime/gear/script_translator.h
++++ b/src/rime/gear/script_translator.h
+@@ -50,6 +50,9 @@ class ScriptTranslator : public Translator,
+   int spelling_hints() const { return spelling_hints_; }
+   bool always_show_comments() const { return always_show_comments_; }
+   bool enable_word_completion() const { return enable_word_completion_; }
++  bool sentence_with_uppercase_syllable() const {
++    return sentence_with_uppercase_syllable_;
++  }
+   int max_word_length() const { return max_word_length_; }
+   int core_word_length() const;
+ 
+@@ -61,6 +64,7 @@ class ScriptTranslator : public Translator,
+   bool always_show_comments_ = false;
+   bool enable_correction_ = false;
+   bool enable_word_completion_ = false;
++  bool sentence_with_uppercase_syllable_ = false;
+   the<Corrector> corrector_;
+   the<Poet> poet_;
+   vector<an<Phrase>> queue_;
+diff --git a/src/rime/gear/translator_commons.h b/src/rime/gear/translator_commons.h
+index 6217e5a7..8d51190a 100644
+--- a/src/rime/gear/translator_commons.h
++++ b/src/rime/gear/translator_commons.h
+@@ -7,6 +7,7 @@
+ #ifndef RIME_TRANSLATOR_COMMONS_H_
+ #define RIME_TRANSLATOR_COMMONS_H_
+ 
++#include <optional>
+ #include <boost/regex.hpp>
+ #include <rime/common.h>
+ #include <rime/config.h>
+@@ -66,8 +67,14 @@ class Phrase : public Candidate {
+          const string& type,
+          size_t start,
+          size_t end,
+-         const an<DictEntry>& entry)
+-      : Candidate(type, start, end), language_(language), entry_(entry) {}
++         const an<DictEntry>& entry,
++         SpellingType spelling_type = kInvalidSpelling,
++         std::optional<double> system_lexical_weight = std::nullopt)
++      : Candidate(type, start, end),
++        language_(language),
++        entry_(entry),
++        spelling_type_(spelling_type),
++        system_lexical_weight_(std::move(system_lexical_weight)) {}
+   const string& text() const { return entry_->text; }
+   string comment() const { return entry_->comment; }
+   string preedit() const { return entry_->preedit; }
+@@ -77,6 +84,10 @@ class Phrase : public Candidate {
+     syllabifier_ = syllabifier;
+   }
+   double weight() const { return entry_->weight; }
++  SpellingType spelling_type() const { return spelling_type_; }
++  const std::optional<double>& system_lexical_weight() const {
++    return system_lexical_weight_;
++  }
+   void set_weight(double weight) { entry_->weight = weight; }
+   Code& code() const { return entry_->code; }
+   const DictEntry& entry() const { return *entry_; }
+@@ -107,6 +118,8 @@ class Phrase : public Candidate {
+   const Language* language_;
+   an<DictEntry> entry_;
+   an<PhraseSyllabifier> syllabifier_;
++  const SpellingType spelling_type_;
++  const std::optional<double> system_lexical_weight_;
+ };
+ 
+ //
 diff --git a/src/rime/service.cc b/src/rime/service.cc
-index d30f991..1c35a54 100644
+index d30f991e..2ffbc488 100644
 --- a/src/rime/service.cc
 +++ b/src/rime/service.cc
 @@ -9,6 +9,7 @@
@@ -380,7 +994,7 @@ index d30f991..1c35a54 100644
        ++count;
      } else {
 diff --git a/src/rime/service.h b/src/rime/service.h
-index a69ae74..7c7d1e1 100644
+index a69ae741..af515175 100644
 --- a/src/rime/service.h
 +++ b/src/rime/service.h
 @@ -37,8 +37,10 @@ class Session {
@@ -394,7 +1008,7 @@ index a69ae74..7c7d1e1 100644
  
    Context* context() const;
    Schema* schema() const;
-@@ -46,6 +47,7 @@ class Session {
+@@ -46,6 +48,7 @@ class Session {
    const string& commit_text() const { return commit_text_; }
  
   private:
@@ -403,7 +1017,7 @@ index a69ae74..7c7d1e1 100644
  
    the<Engine> engine_;
 diff --git a/src/rime_api.h b/src/rime_api.h
-index 2fccde0..4d69a23 100644
+index 2fccde0f..4d69a237 100644
 --- a/src/rime_api.h
 +++ b/src/rime_api.h
 @@ -505,6 +505,10 @@ typedef struct RIME_FLAVORED(rime_api_t) {
@@ -418,7 +1032,7 @@ index 2fccde0..4d69a23 100644
  
  //! API entry
 diff --git a/src/rime_api_impl.h b/src/rime_api_impl.h
-index 30f4514..4d2f797 100644
+index 30f4514f..4d2f7979 100644
 --- a/src/rime_api_impl.h
 +++ b/src/rime_api_impl.h
 @@ -184,6 +184,13 @@ RIME_DEPRECATED Bool RimeCommitComposition(RimeSessionId session_id) {
@@ -443,202 +1057,3 @@ index 30f4514..4d2f797 100644
    }
    return &s_api;
  }
-
-diff --git a/src/rime/gear/translator_commons.h b/src/rime/gear/translator_commons.h
---- a/src/rime/gear/translator_commons.h
-+++ b/src/rime/gear/translator_commons.h
-@@ -7,6 +7,7 @@
- #ifndef RIME_TRANSLATOR_COMMONS_H_
- #define RIME_TRANSLATOR_COMMONS_H_
- 
-+#include <optional>
- #include <boost/regex.hpp>
- #include <rime/common.h>
- #include <rime/config.h>
-@@ -68,6 +69,12 @@ class Phrase : public Candidate {
-          size_t end,
--         const an<DictEntry>& entry)
-+         const an<DictEntry>& entry,
-+         SpellingType spelling_type = kInvalidSpelling,
-+         std::optional<double> system_lexical_weight = std::nullopt)
--      : Candidate(type, start, end), language_(language), entry_(entry) {}
-+      : Candidate(type, start, end),
-+        language_(language),
-+        entry_(entry),
-+        spelling_type_(spelling_type),
-+        system_lexical_weight_(std::move(system_lexical_weight)) {}
-   const string& text() const { return entry_->text; }
-   string comment() const { return entry_->comment; }
-   string preedit() const { return entry_->preedit; }
-@@ -77,6 +84,10 @@ class Phrase : public Candidate {
-     syllabifier_ = syllabifier;
-   }
-   double weight() const { return entry_->weight; }
-+  SpellingType spelling_type() const { return spelling_type_; }
-+  const std::optional<double>& system_lexical_weight() const {
-+    return system_lexical_weight_;
-+  }
-   void set_weight(double weight) { entry_->weight = weight; }
-   Code& code() const { return entry_->code; }
-   const DictEntry& entry() const { return *entry_; }
-@@ -104,6 +115,8 @@ class Phrase : public Candidate {
-   const Language* language_;
-   an<DictEntry> entry_;
-   an<PhraseSyllabifier> syllabifier_;
-+  const SpellingType spelling_type_;
-+  const std::optional<double> system_lexical_weight_;
- };
- 
- //
-
-diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translator.cc
---- a/src/rime/gear/script_translator.cc
-+++ b/src/rime/gear/script_translator.cc
-@@ -95,7 +95,13 @@ class ScriptSyllabifier : public PhraseSyllabifier {
-   virtual Spans Syllabify(const Phrase* phrase);
-   size_t BuildSyllableGraph(Prism& prism);
-   string GetPreeditString(const Phrase& cand) const;
-   string GetOriginalSpelling(const Phrase& cand) const;
-   bool IsCorrection(const Code& code, size_t code_length) const;
-+  SpellingType SpellingTypeAt(size_t end_pos) const {
-+    const auto vertex = syllable_graph_.vertices.find(end_pos);
-+    return vertex == syllable_graph_.vertices.end()
-+               ? kInvalidSpelling
-+               : vertex->second;
-+  }
- 
-   const SyllableGraph& syllable_graph() const { return syllable_graph_; }
-@@ -136,6 +142,8 @@ class ScriptTranslation : public Translation {
-   bool CheckEmpty();
-   bool IsNormalSpelling() const;
-   bool PrepareCandidate();
-+  std::optional<double> FindSystemLexicalWeight(
-+      const string& text, size_t code_length) const;
-   template <class QueryResult>
-   void EnrollEntries(map<int, DictEntryList>& entries_by_end_pos,
-                      const an<QueryResult>& query_result);
-@@ -587,6 +595,15 @@ inline static bool prefer_user_phrase(
-   return user_phrase_weight > sys_phrase_weight ||
-          (user_phrase_weight == sys_phrase_weight && compare_on_tie());
- }
- 
-+std::optional<double> ScriptTranslation::FindSystemLexicalWeight(
-+    const string& text, size_t code_length) const {
-+  if (!phrase_) return std::nullopt;
-+  const auto group = phrase_->find(code_length);
-+  if (group == phrase_->end()) return std::nullopt;
-+  const auto entry = group->second.FindRemainingEntry(text);
-+  return entry ? std::optional<double>(entry->weight) : std::nullopt;
-+}
-+
- bool ScriptTranslation::PrepareCandidate() {
- iter_incremented:
-@@ -642,7 +659,10 @@ bool ScriptTranslation::PrepareCandidate() {
-     candidate_ =
-         New<Phrase>(translator_->language(),
-                     entry->IsPredictiveMatch() ? "completion" : "user_phrase",
--                    start_, start_ + user_phrase_code_length, entry);
-+                    start_, start_ + user_phrase_code_length, entry,
-+                    syllabifier_->SpellingTypeAt(user_phrase_code_length),
-+                    FindSystemLexicalWeight(entry->text,
-+                                            user_phrase_code_length));
-     candidate_->set_quality(std::exp(entry->weight) +
-                             translator_->initial_quality() +
-                             (entry->quality_len / full_code_length));
-@@ -660,7 +680,9 @@ bool ScriptTranslation::PrepareCandidate() {
-     candidate_ =
-         New<Phrase>(translator_->language(),
-                     entry->IsPredictiveMatch() ? "completion" : "phrase",
--                    start_, start_ + phrase_code_length, entry);
-+                    start_, start_ + phrase_code_length, entry,
-+                    syllabifier_->SpellingTypeAt(phrase_code_length),
-+                    entry->weight);
-     candidate_->set_quality(std::exp(entry->weight) +
-                             translator_->initial_quality() +
-                             (entry->quality_len / full_code_length));
-
-diff --git a/src/rime/dict/dictionary.h b/src/rime/dict/dictionary.h
---- a/src/rime/dict/dictionary.h
-+++ b/src/rime/dict/dictionary.h
-@@ -35,6 +35,7 @@ class RIME_DLL DictEntryIterator : public DictEntryFilterBinder {
-   void Sort();
-   void AddFilter(DictEntryFilter filter) override;
-   an<DictEntry> Peek();
-+  an<DictEntry> FindRemainingEntry(const string& text) const;
-   bool Next();
-   bool Skip(size_t num_entries);
-   bool exhausted() const;
-
-diff --git a/src/rime/dict/dictionary.cc b/src/rime/dict/dictionary.cc
---- a/src/rime/dict/dictionary.cc
-+++ b/src/rime/dict/dictionary.cc
-@@ -64,8 +64,26 @@ struct Chunk {
-   bool is_exact_match() const { return matching_code_size == code.size(); }
- 
-   bool is_predictive_match() const { return matching_code_size < code.size(); }
- };
- 
-+an<DictEntry> MakeEntry(const Chunk& chunk, size_t cursor) {
-+  const auto& table_entry = chunk.entries[cursor];
-+  auto entry = New<DictEntry>();
-+  entry->code = chunk.code;
-+  entry->text = chunk.table->GetEntryText(table_entry);
-+  const double kS = 18.420680743952367;  // log(1e8)
-+  entry->weight = table_entry.weight - kS + chunk.credibility;
-+  entry->quality_len = chunk.quality_len;
-+  if (!chunk.remaining_code.empty()) {
-+    entry->comment = "~" + chunk.remaining_code;
-+    entry->remaining_code_length = chunk.remaining_code.length();
-+  }
-+  if (chunk.is_predictive_match()) {
-+    entry->matching_code_size = chunk.matching_code_size;
-+  }
-+  return entry;
-+}
-+
- struct QueryResult {
-   vector<Chunk> chunks;
- };
-@@ -153,27 +171,27 @@ void DictEntryIterator::AddFilter(DictEntryFilter filter) {
- an<DictEntry> DictEntryIterator::Peek() {
-   if (!entry_ && !exhausted()) {
-     // get next entry from current chunk
-     const auto& chunk = query_result_->chunks[chunk_index_];
--    const auto& e = chunk.entries[chunk.cursor];
-     DLOG(INFO) << "creating temporary dict entry '"
--               << chunk.table->GetEntryText(e) << "'.";
--    entry_ = New<DictEntry>();
--    entry_->code = chunk.code;
--    entry_->text = chunk.table->GetEntryText(e);
--    const double kS = 18.420680743952367;  // log(1e8)
--    entry_->weight = e.weight - kS + chunk.credibility;
--    entry_->quality_len = chunk.quality_len;
--    if (!chunk.remaining_code.empty()) {
--      entry_->comment = "~" + chunk.remaining_code;
--      entry_->remaining_code_length = chunk.remaining_code.length();
--    }
--    if (chunk.is_predictive_match()) {
--      entry_->matching_code_size = chunk.matching_code_size;
--    }
-+               << chunk.table->GetEntryText(chunk.entries[chunk.cursor])
-+               << "'.";
-+    entry_ = dictionary::MakeEntry(chunk, chunk.cursor);
-   }
-   return entry_;
- }
- 
-+an<DictEntry> DictEntryIterator::FindRemainingEntry(const string& text) const {
-+  for (size_t chunk_index = chunk_index_;
-+       chunk_index < query_result_->chunks.size(); ++chunk_index) {
-+    const auto& chunk = query_result_->chunks[chunk_index];
-+    for (size_t cursor = chunk.cursor; cursor < chunk.size; ++cursor) {
-+      auto entry = dictionary::MakeEntry(chunk, cursor);
-+      if (entry->text == text && (!filter_ || filter_(entry))) return entry;
-+    }
-+  }
-+  return nullptr;
-+}
-+
- bool DictEntryIterator::FindNextEntry() {
-   if (exhausted()) {
-     return false;

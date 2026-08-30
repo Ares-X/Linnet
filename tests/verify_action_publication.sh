@@ -29,9 +29,12 @@ done
 for required in \
     'candidate draft mutation is owned by GitHub Actions' \
     'release create "${tag}"' \
+    'release delete "${tag}"' \
     'release upload "${tag}"' \
     'contains foreign asset bytes' \
-    'published byte-identical data seed is accepted read-only'; do
+    'older Draft is not exact Linnet-owned state' \
+    'Immutable pack' \
+    'earlier revision'; do
   rg -Fq -- "${required}" "${stager}" ||
     fail "draft stager contract is incomplete: ${required}"
 done
@@ -214,13 +217,22 @@ if command == "release"
   when "view"
     puts JSON.generate(read_release(state, tag))
   when "create"
+    if ENV["FAKE_FAIL_CREATE_ONCE"] == "true"
+      marker = File.join(state, "fail-create-once-#{tag}")
+      unless File.exist?(marker)
+        FileUtils.touch(marker)
+        fail_fake("injected release create interruption", 1)
+      end
+    end
     target_index = ARGV.index("--target")
     target = target_index ? ARGV.fetch(target_index + 1) : revision
+    title_index = ARGV.index("--title")
     document = {
       "databaseId" => 1,
       "isDraft" => true,
       "isPrerelease" => ARGV.include?("--prerelease"),
       "tagName" => tag,
+      "name" => title_index ? ARGV.fetch(title_index + 1) : "",
       "targetCommitish" => target,
       "assets" => [],
     }
@@ -238,6 +250,12 @@ if command == "release"
     }
     write_release(state, tag, document)
     append_line(mutations, "release-upload #{tag} #{name}")
+  when "delete"
+    document = read_release(state, tag)
+    fail_fake("published release deletion") unless document.fetch("isDraft")
+    fail_fake("unconfirmed release deletion") unless ARGV.include?("--yes")
+    FileUtils.rm_f(release_path(state, tag))
+    append_line(mutations, "release-delete #{tag}")
   when "edit"
     document = read_release(state, tag)
     if ARGV.include?("--draft=false")
@@ -392,11 +410,18 @@ unset GITHUB_ACTIONS
 
 write_release() {
   local state="$1" channel="$2" tag="$3" prerelease="$4" draft="$5"
+  local release_revision="${6:-${candidate_revision}}"
+  local release_title
+  case "${channel}" in
+    core) release_title="Linnet Core update ${version}" ;;
+    data) release_title="Linnet automatic data channel ${catalog_sequence}" ;;
+    public) release_title="Linnet ${version}" ;;
+  esac
   ruby -rjson -rdigest - "${state}" "${fixture_assets}" \
       "${fixture_repo}/package/release_asset_manifest" "${channel}" \
       "${tag}" "${prerelease}" "${draft}" "${version}" \
-      "${catalog_sequence}" "${candidate_revision}" <<'RUBY'
-state, root, manifest, channel, tag, prerelease, draft, version, sequence, revision = ARGV
+      "${catalog_sequence}" "${release_revision}" "${release_title}" <<'RUBY'
+state, root, manifest, channel, tag, prerelease, draft, version, sequence, revision, title = ARGV
 names = IO.popen([manifest, channel, version, sequence], &:read).lines(chomp: true)
 assets = names.map do |name|
   path = File.join(root, name)
@@ -411,6 +436,7 @@ document = {
   "isDraft" => draft == "true",
   "isPrerelease" => prerelease == "true",
   "tagName" => tag,
+  "name" => title,
   "targetCommitish" => revision,
   "assets" => assets,
 }
@@ -458,6 +484,103 @@ GITHUB_ACTIONS=true run_stager "${stager_state}" stage core >/dev/null ||
 
 core_release="${stager_state}/releases/core-v${version}.json"
 cp "${core_release}" "${fixture}/exact-core-release.json"
+old_candidate_revision=89abcdef0123456789abcdef0123456789abcdef
+write_release "${stager_state}" core "core-v${version}" true true \
+  "${old_candidate_revision}"
+: >"${stager_state}/mutations.log"
+GITHUB_ACTIONS=true run_stager "${stager_state}" stage core >/dev/null ||
+  fail "same-version Core Draft from an older revision was not retired"
+[[ "$(sed -n '1p' "${stager_state}/mutations.log")" == \
+    "release-delete core-v${version}" ]] ||
+  fail "older Core Draft was not retired before replacement"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort unless document.fetch("isDraft") &&
+    document.fetch("targetCommitish") == ARGV.fetch(1)
+' "${core_release}" "${candidate_revision}" ||
+  fail "replacement Core Draft does not own the current candidate"
+
+write_release "${stager_state}" public "v${version}" false true \
+  "${old_candidate_revision}"
+: >"${stager_state}/mutations.log"
+GITHUB_ACTIONS=true run_stager "${stager_state}" stage public >/dev/null ||
+  fail "same-version public Draft from an older revision was not retired"
+[[ "$(sed -n '1p' "${stager_state}/mutations.log")" == \
+    "release-delete v${version}" ]] ||
+  fail "older public Draft was not retired before replacement"
+
+write_release "${stager_state}" data "data-${catalog_sequence}" true true \
+  "${old_candidate_revision}"
+: >"${stager_state}/mutations.log"
+GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null ||
+  fail "byte-identical data Draft from an earlier direct commit was not reusable"
+[[ ! -s "${stager_state}/mutations.log" ]] ||
+  fail "byte-identical earlier-revision data Draft was mutated"
+run_stager "${stager_state}" verify data >/dev/null ||
+  fail "local verifier rejected a byte-identical earlier-revision data Draft"
+data_release="${stager_state}/releases/data-${catalog_sequence}.json"
+cp "${data_release}" "${fixture}/exact-data-release.json"
+
+ruby -rjson -e '
+  path = ARGV.fetch(0)
+  document = JSON.parse(File.binread(path))
+  document["name"] = "foreign data title"
+  File.binwrite(path, JSON.generate(document) + "\n")
+' "${data_release}"
+: >"${stager_state}/mutations.log"
+if GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null 2>&1; then
+  fail "earlier-revision data Draft with a foreign title was accepted"
+fi
+[[ ! -s "${stager_state}/mutations.log" ]] ||
+  fail "foreign-title data Draft rejection mutated release state"
+
+cp "${fixture}/exact-data-release.json" "${data_release}"
+ruby -rjson -e '
+  path = ARGV.fetch(0)
+  document = JSON.parse(File.binread(path))
+  document["targetCommitish"] = "0" * 40
+  File.binwrite(path, JSON.generate(document) + "\n")
+' "${data_release}"
+if GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null 2>&1; then
+  fail "data Draft without a valid direct commit identity was accepted"
+fi
+[[ ! -s "${stager_state}/mutations.log" ]] ||
+  fail "invalid-target data Draft rejection mutated release state"
+
+cp "${fixture}/exact-data-release.json" "${data_release}"
+ruby -rjson -e '
+  path = ARGV.fetch(0)
+  document = JSON.parse(File.binread(path))
+  document.fetch("assets").fetch(0)["digest"] = "sha256:#{"0" * 64}"
+  File.binwrite(path, JSON.generate(document) + "\n")
+' "${data_release}"
+if GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null 2>&1; then
+  fail "earlier-revision data Draft with foreign bytes was accepted"
+fi
+[[ ! -s "${stager_state}/mutations.log" ]] ||
+  fail "foreign-byte data Draft rejection mutated release state"
+cp "${fixture}/exact-data-release.json" "${data_release}"
+
+write_release "${stager_state}" core "core-v${version}" true true \
+  "${old_candidate_revision}"
+: >"${stager_state}/mutations.log"
+if FAKE_FAIL_CREATE_ONCE=true GITHUB_ACTIONS=true \
+    run_stager "${stager_state}" stage core >/dev/null 2>&1; then
+  fail "injected Draft replacement interruption unexpectedly succeeded"
+fi
+[[ "$(cat "${stager_state}/mutations.log")" == \
+    "release-delete core-v${version}" ]] ||
+  fail "interrupted replacement mutated more than the retired old Draft"
+[[ ! -e "${core_release}" ]] ||
+  fail "interrupted replacement left the old-revision Core Draft active"
+: >"${stager_state}/mutations.log"
+GITHUB_ACTIONS=true run_stager "${stager_state}" stage core >/dev/null ||
+  fail "Draft replacement was not retryable after interruption"
+run_stager "${stager_state}" verify core >/dev/null ||
+  fail "retried Draft replacement did not produce exact candidate bytes"
+
+write_release "${stager_state}" core "core-v${version}" true true \
+  "${old_candidate_revision}"
 ruby -rjson -e '
   path = ARGV.fetch(0)
   document = JSON.parse(File.binread(path))
@@ -471,7 +594,7 @@ if GITHUB_ACTIONS=true run_stager "${stager_state}" stage core >/dev/null 2>&1; 
   fail "foreign draft asset was accepted"
 fi
 [[ ! -s "${stager_state}/mutations.log" ]] ||
-  fail "foreign draft asset was silently replaced"
+  fail "foreign old-revision Draft was silently replaced"
 cp "${fixture}/exact-core-release.json" "${core_release}"
 ruby -rjson -e '
   path = ARGV.fetch(0)
@@ -480,7 +603,7 @@ ruby -rjson -e '
   File.binwrite(path, JSON.generate(document) + "\n")
 ' "${core_release}"
 mkdir -p "${stager_state}/tags"
-printf '%s\n' "${candidate_revision}" >"${stager_state}/tags/core-v${version}"
+printf '%s\n' "${old_candidate_revision}" >"${stager_state}/tags/core-v${version}"
 : >"${stager_state}/mutations.log"
 if GITHUB_ACTIONS=true run_stager "${stager_state}" stage core \
     >/dev/null 2>&1; then
@@ -488,19 +611,17 @@ if GITHUB_ACTIONS=true run_stager "${stager_state}" stage core \
 fi
 [[ ! -s "${stager_state}/mutations.log" ]] ||
   fail "published Core rejection mutated release state"
-run_stager "${stager_state}" verify core >/dev/null ||
-  fail "exact published Core metadata was not verifiable"
-printf '%040d\n' 0 >"${stager_state}/tags/core-v${version}"
 if run_stager "${stager_state}" verify core >/dev/null 2>&1; then
   fail "published Core tag owned by another revision was accepted"
 fi
 
 write_release "${stager_state}" data "data-${catalog_sequence}" true false
-printf '%s\n' "${candidate_revision}" \
+data_seed_revision=89abcdef0123456789abcdef0123456789abcdef
+printf '%s\n' "${data_seed_revision}" \
   >"${stager_state}/tags/data-${catalog_sequence}"
 : >"${stager_state}/mutations.log"
 GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null ||
-  fail "byte-identical published data seed was not reusable"
+  fail "byte-identical published data assets from an earlier revision were not reusable"
 [[ ! -s "${stager_state}/mutations.log" ]] ||
   fail "published byte-identical data seed was mutated"
 
@@ -614,11 +735,13 @@ cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
   fail "stable data-channel did not receive the exact staged Catalog"
 
 : >"${publisher_state}/mutations.log"
+printf '%s\n' "${data_seed_revision}" \
+  >"${publisher_state}/tags/data-${catalog_sequence}"
 GITHUB_ACTIONS=true run_publisher publish >/dev/null ||
   fail "exact publication retry was not idempotent"
 [[ "$(cat "${publisher_state}/mutations.log")" == \
     "release-latest v${version}" ]] ||
-  fail "publication retry recreated assets or Catalog state"
+  fail "publication retry copied immutable data assets or recreated Catalog state"
 
 seed_catalog() {
   local source="$1" ref="$2"
@@ -630,6 +753,42 @@ seed_catalog() {
   printf '%040d\n' 11 >"${branch}/blob"
   printf '%040d\n' 10 >"${branch}/commits/${ref}"
 }
+
+previous_core_catalog="${fixture}/previous-core-catalog.json"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document.fetch("core")["version"] = "0.1.0"
+  document.fetch("core")["revision"] = "f" * 40
+  document.fetch("core")["release_url"] =
+    "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.0"
+  document.fetch("core")["package_url"] =
+    "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg"
+  File.binwrite(ARGV.fetch(1), JSON.generate(document) + "\n")
+' "${fixture_assets}/Linnet-Data-Channel.json" "${previous_core_catalog}"
+seed_catalog "${previous_core_catalog}" "$(printf 'b%.0s' {1..40})"
+: >"${publisher_state}/mutations.log"
+GITHUB_ACTIONS=true run_publisher publish >/dev/null ||
+  fail "same-sequence Catalog could not advance its Core snapshot"
+[[ "$(cat "${publisher_state}/mutations.log")" == $'catalog-update\n'"release-latest v${version}" ]] ||
+  fail "Core-only Catalog promotion mutated a pack Release"
+cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${publisher_state}/data-channel/catalog" ||
+  fail "Core-only Catalog promotion did not retain the exact candidate snapshot"
+
+changed_pack_catalog="${fixture}/changed-pack-catalog.json"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  document.fetch("activation_sets").fetch(0).fetch("packs").fetch(0)[
+    "container_sha256"] = "0" * 64
+  File.binwrite(ARGV.fetch(1), JSON.generate(document) + "\n")
+' "${fixture_assets}/Linnet-Data-Channel.json" "${changed_pack_catalog}"
+seed_catalog "${changed_pack_catalog}" "$(printf 'a%.0s' {1..40})"
+: >"${publisher_state}/mutations.log"
+if GITHUB_ACTIONS=true run_publisher publish >/dev/null 2>&1; then
+  fail "same-sequence Catalog replaced a different immutable pack set"
+fi
+[[ ! -s "${publisher_state}/mutations.log" ]] ||
+  fail "rejected same-sequence pack mutation changed publication state"
 
 higher_catalog="${fixture}/higher-catalog.json"
 ruby -rjson -e '

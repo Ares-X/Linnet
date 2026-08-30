@@ -66,7 +66,7 @@ Linnet 差异只有两个人工 owner：
 - `reviewed_pronunciations.tsv`：已接受的读音替换；
 - `reviewed_rankings.tsv`：已接受的精确排序行。
 
-精确 source patch 删除被拒绝的 `(text, code)`，`linnet_reviewed` 表添加接受行。不存在 Python composer、自动 tone inference、L1/L2/L3 重分层、rime-ice 中文候选 merge 或运行时 fallback。
+精确 source patch 删除被拒绝的 `(text, code)`，`linnet_reviewed` 表添加接受行。锁定的 `rime-ice/cn_dicts/ext.dict.yaml` 是唯一中文补充输入：构建期投影器只接收万象核心尚未拥有的三字及以上行，使用万象 `zi` 表转换声调编码，拒绝歧义或无法验证的读音，再以低权重导入同一个 Rime dictionary graph。不存在提交进仓库的生成词典、第二个运行时 translator、自动猜音或运行时 fallback。
 
 维护更新必须修改唯一 review ledger/source patch，而不是生成第二份中文词典或运行时修正规则。
 
@@ -90,7 +90,15 @@ Settings document 拥有候选外观、中文默认项、反查触发键、学�
 
 只改变 document 的 Apply 仅在 `Transactions/<UUID>/configuration-candidate/` 暂存一份 `linnet_settings.json`。Host 校验候选与 expected/base revision，以唯一 live document 为 canonical owner 执行 CAS 和同卷原子交换，再从已发布 document reconcile 可重建 custom YAML、按固定顺序部署 exact 11 份 config（default、九个产品 schema 与 squirrel），使旧 session generation 失效并用 fresh session 验证所选方案。成功必须回报同一 SHA-256 `activeSettingsRevision`；交换、reconcile、部署或健康检查失败时，Host 原子换回旧 document、重新 reconcile/deploy 并验证旧 revision，无法验证则 fail closed。Host 启动也会在 Rime 接受输入前从 canonical document 向前 reconcile。该快速路径不 finalize Rime、不运行 maintenance、不重编词典，也不创建备份。个人数据变更与语言数据激活仍在隔离候选中验证，再通过 Host 的唯一 live runtime owner 原子切换并健康检查。
 
-Core App 不携带语言数据。Chinese、English、LTS 和 Extended 各有独立 `(kind, sequence, version, content_sha256)`，通过一个完整 Active 视图消费。精确格式和文件成员由 Registry、package 工具及其结构门共同验证；文档不维护第二份成员清单。
+Core App 拥有界面主题，但不携带语言数据。`data/squirrel.yaml` 同时进入 Host 和 Settings 的资源包；Host 在 Rime 初始化前由现有 ProjectionRenderer 将其投影到 UserData，再由 Rime 按标准流程应用用户外观选项。只有 Core 主题字节改变时才重建 `Build/squirrel.yaml`，不会清空词典或学习缓存。旧词包可以保留原有不可变主题文件，但不再决定实际界面；新词包不再包含它。
+
+Chinese、English、LTS 和 Extended 各有独立
+`(kind, sequence, version, content_sha256, data_abi, min_core)`，通过一个完整 Active
+视图消费；只有对应 pack 内容或兼容边界变化才推进该 pack。Catalog 保持现有 JSON
+格式，但发布身份是 `data-channel` 的精确 commit/blob；它引用当前 Core 和当前四个
+不可变 pack。Core-only 更新生成新的 Catalog snapshot，却复用原 data Release 和所有
+未变 pack sequence。精确格式和文件成员由 Registry、package 工具及其结构门共同验证；
+文档不维护第二份成员清单。
 
 ## 上游和依赖
 
@@ -104,7 +112,7 @@ Core App 不携带语言数据。Chinese、English、LTS 和 Extended 各有独�
 
 公开源码以一个独立根快照发布，不继承 Squirrel 的 Git 父链。Squirrel 来源由 lock 中的精确 tag/commit 和发布 SBOM 的 `VARIANT_OF` 关系共同证明；构建不得从当前分支的祖先关系推断来源。
 
-rime-ice 只提供锁定的英文补充、OpenCC/符号/部件数据和选择的 Lua 源；不提供 Linnet 中文候选或 runtime schema。Hallelujah 原始应用、localhost UI、JavaScriptCore 和运行时 SQLite 不进入产品。
+rime-ice 提供锁定的英文补充、OpenCC/符号/部件数据、选择的 Lua 源，以及唯一选中的中文扩展输入 `cn_dicts/ext.dict.yaml`；后者只在构建期通过上述投影边界补充万象缺词，不提供 runtime schema 或第二套中文候选 owner。Hallelujah 原始应用、localhost UI、JavaScriptCore 和运行时 SQLite 不进入产品。
 
 查看候选更新：
 
@@ -127,11 +135,12 @@ focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有�
 release identity。定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并
 上游或发布。
 
-正常正式候选必须是 clean、精确远端 `main` revision，并已有同 revision 成功的
-`Linnet manual full CI`。显式
-`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动 macOS release Action；
-GitHub runner 使用临时 Keychain 构建、签名、打包和最终验证一次，再把互不重叠的
-Core 2 件、data 5 件和 public 1 件直接写入三个 Draft GitHub Releases。候选传输
+正常正式候选必须是 clean、精确远端 `main` revision，并先在本地通过完整 composite
+与安装前门。显式 `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动唯一 macOS
+release Action；该 job 一次 checkout/cache/hydrate，串行执行 lint、owner、Swift、
+Rime、Periphery 和候选 App/package 门，再使用临时 Keychain 构建、签名、打包和最终
+验证一次。互不重叠的 Core 3 件、data 4 件和 public 1 件直接写入三个 Draft GitHub
+Releases。候选传输
 不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
 
 RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此普通冷构建只从
@@ -144,10 +153,10 @@ identity。由于未来 `data-N` 尚不存在，只有显式
 - macOS Action 只在这个显式模式从上游锁定 URL 下载原始模型，并先验证 lock 中的
   bytes/SHA-256；
 - 同一个 Action 完成正式的完整八文件构建和
-  `package/verify_publication_artifacts`，但只暂存并公开五件 data 预发布资产；
+  `package/verify_publication_artifacts`，但只暂存并公开四件 data 预发布资产；
 - seed 不创建 Core/Public Release，不写 `data-channel`，因此已安装用户看不到它；
-- 只有同一个 `candidate_revision` 可以快进到 `main`；随后正常 manual CI 和
-  candidate Action 必须从已发布的固定 `data-N` pack 冷构建并得到相同 data bytes。
+- 只有同一个 `candidate_revision` 可以快进到 `main`；随后正常 candidate Action
+  必须从已发布的固定 `data-N` pack 冷构建并得到相同 data bytes。
 
 进入安装验收时，本地只下载 candidate Action 的三个 Draft Release 原字节。验收人
 运行 `scripts/release-control authorize /absolute/release-directory` 后，本地 owner
@@ -157,18 +166,19 @@ identity。由于未来 `data-N` 尚不存在，只有显式
 public / Latest 发布。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖、经 fingerprint 和 inventory digest
-验证的原生 Rime 编译 transport，以及英文生成数据。只有手动 full CI 的 native Rime
-profile 可以在成功任务结束后写入缓存；PR 和候选只读缓存。缓存不是版本或发布权威：
+验证的原生 Rime 编译 transport、固定 Periphery binary，以及英文生成数据。手动
+commit CI 是 build cache 的唯一 writer；PR 与候选只读该 cache。Swift owner tests
+只使用 `tests/swift_test_cache.sh` 的独立内容指纹 cache，不存在第二个静态模块编译
+owner。缓存不是版本或发布权威：
 每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、内部 fingerprint 与产物
 形状，不匹配时只重建受影响部分。
 
-PR CI 先执行快速 lint、release owner 和数据 identity 门，再把 App、Swift owner
-tests 与 native Rime 三个有独立耗时价值的 profile 放到隔离 runner 并行执行。
-Settings UI acceptance 已并入唯一 App build，不再为同一 App 启动第四个 product
-runner。旧四 product runner 加 quality 的成功样本合计约 30 个 macOS runner
-minutes；新矩阵的真实总量必须等工作流启用后的首个完整运行再测，不能把并行墙钟
-当成用量。`main` push 不自动重复完整矩阵；需要发布或专项验收时才手动运行
-`Linnet manual full CI`。连续 PR 更新仍只保留最新一次。
+PR CI 在一个 macOS job 内完成一次 checkout、cache restore、hydrate 和 unsigned App
+build，再串行执行 lint、release/data owner、App（含 Settings UI）、Swift owner、
+native Rime 与 Periphery。commit CI 采用同一条串行链，但只允许手动 dispatch；
+`main` push 不自动重复完整验证。这样避免四个 runner 重复下载、hydrate 和构建，
+也不会把并行墙钟误当成额度用量。首个真实 Actions 样本仍须记录墙钟、runner minutes
+和 cache 命中，未执行前不宣称云端加速百分比。连续 PR 更新只保留最新一次。
 
 ## 构建
 
@@ -275,16 +285,17 @@ Host 连续性和 TIS 不变性不从这份历史指纹推断，统一由当前 
 到候选，再把同一候选的原字节重装一次。两轮都要
 证明 Installer 无注销、无 Keychain 密码提示、登录会话不变，并保留
 enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移不
-授权同 leaf Core 重新 register、enable 或 select。preinstall 必须在 payload 前以
-正常 AppKit 退出请求只确认 Settings 已停止；Settings 拒绝退出、未保存草稿或进行中
-操作必须让安装 fail closed，不能强杀。运行中的 Host 必须保持同一 PID，更新前已
-连接的应用与更新后新打开的应用都要继续输入。安装完成后，Settings 必须分别显示
-磁盘与运行中的 version/build/revision；只有切换离开 Linnet、所有旧 Host 的
-InputMethodKit controller 已断开且没有数据事务时，Host 才能接受自行退出。Settings
+授权同 leaf Core 重新 register、enable 或 select。Core preinstall 只验证候选、已安装
+App、Active data 与 package-owned read-only typed TIS 状态；脚本不关闭 Host 或任何
+用户应用，也不调用 `osascript`。Distribution 的 Apple `must-close` 只关闭正在被替换的
+Linnet Settings 自身窗口；运行中的 Host 必须保持同一
+PID，更新前已连接的应用与更新后新打开的应用都要继续输入。安装完成后，Settings
+必须分别显示磁盘与运行中的 version/build/revision；只有切换离开 Linnet、没有未完成
+composition 或数据事务时，Host 的 typed activation owner 才能接受自行退出。Settings
 随后只从 canonical 安装路径启动 Host，并在精确 revision 一致后报告生效；任一前提
-不满足都必须拒绝，不能强杀。还要分别证明 enabled/disabled、selected、
-missing-App+unregistered repair 与用户数据均保留；missing App 仍有
-enabled/disabled 系统身份必须在 payload 前失败。默认卸载和显式 purge 仍需要独立
+不满足都必须拒绝，不能强杀。Core 遇到 missing App 或 missing TIS registration 必须
+在 payload 前失败；受支持签名 App 的缺失注册由 Complete 修复，重复、冲突或未知 TIS
+残留必须先官方卸载。默认卸载和显式 purge 仍需要独立
 验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**
 打开设置；它是 `Linnet.app` 内嵌的 accessory App，不作为独立产品安装、不常驻
 Dock，并在最后一个窗口关闭后退出。
@@ -330,7 +341,7 @@ Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Rele
 
 `data/chinese/reports/enriched_pinyin_english.json` 的候选顺序是 rank owner，`pinyin_embargo_remove.tsv` 是精确删除 owner。Smart English 直接查询 full-pinyin key；中文的标准 affix segmentor 去掉触发前缀，当前 profile Prism 只解码完整非纠错路径，再查询同一 key。生成器只把这份审核快照投影到 `p/<pinyin>`，不得自动重写快照或另设运行时排序表。
 
-所有 profile 必须覆盖默认 `;` 和可选 `|`、标准音节分隔符、profile 内部可能使用的分号，以及 64/65 个可达 Prism key 的 fail-closed 边界。
+所有 profile 必须覆盖默认 `|` 和用户可选的 `;`、标准音节分隔符、profile 内部可能使用的分号，以及 64/65 个可达 Prism key 的 fail-closed 边界。默认 idle `/ , . ; ' [ ] - =` 必须到达 host；只有用户显式选择 `;` 作为反查触发键或当前方案把它当作拼写键时，分号才进入组合。
 
 ### Rime Core
 

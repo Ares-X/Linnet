@@ -72,12 +72,17 @@ trap cleanup EXIT INT TERM HUP
 
 verify_tag_revision() {
   local requested_tag="$1"
+  local expected_revision="${2-${candidate_revision}}"
   local tag_record
   tag_record="$(gh api "repos/${repository}/git/ref/tags/${requested_tag}" \
     --jq '[.object.type, .object.sha] | @tsv')" ||
     fail_publish "${requested_tag} tag is unavailable"
-  [[ "${tag_record}" == commit$'\t'"${candidate_revision}" ]] ||
+  [[ "${tag_record}" =~ ^commit$'\t'[0-9a-f]{40}$ ]] ||
+    fail_publish "${requested_tag} tag is not a direct commit identity"
+  if [[ -n "${expected_revision}" &&
+        "${tag_record}" != commit$'\t'"${expected_revision}" ]]; then
     fail_publish "${requested_tag} tag does not resolve directly to the candidate"
+  fi
 }
 
 verify_tag_revision "${publication_authorization}"
@@ -138,18 +143,20 @@ load_and_verify_release() {
 
   if [[ "$(ruby -rjson -e 'puts JSON.parse(File.binread(ARGV.fetch(0))).fetch("isDraft")' \
       "${json}")" == false ]]; then
-    verify_tag_revision "${tag}"
+    if [[ "${channel}" == data ]]; then
+      verify_tag_revision "${tag}" ""
+    else
+      verify_tag_revision "${tag}"
+    fi
   fi
 }
 
 if [[ "${mode}" == data-seed ]]; then
   load_and_verify_release data
-  catalog_validation=data-seed
 else
   for channel in core data public; do
     load_and_verify_release "${channel}"
   done
-  catalog_validation=full
 
   candidate_manifest="${work_root}/candidate.tsv"
   cut -f1,2 "${work_root}/core-assets.tsv" \
@@ -178,7 +185,11 @@ publish_channel() {
   elif [[ "${channel}" == public ]]; then
     gh release edit "${tag}" --repo "${repository}" --latest
   fi
-  verify_tag_revision "${tag}"
+  if [[ "${channel}" == data ]]; then
+    verify_tag_revision "${tag}" ""
+  else
+    verify_tag_revision "${tag}"
+  fi
   load_and_verify_release "${channel}"
   [[ "$(ruby -rjson -e \
       'puts JSON.parse(File.binread(ARGV.fetch(0))).fetch("isDraft")' \
@@ -186,18 +197,22 @@ publish_channel() {
     fail_publish "${tag} remained a draft"
 }
 
+if [[ "${mode}" == data-seed ]]; then
+  publish_channel data
+  echo "Linnet ${version} data seed: PASS (Catalog not promoted)"
+  exit 0
+fi
+
 catalog="${work_root}/Linnet-Data-Channel.json"
-gh release download "$(channel_tag data)" --repo "${repository}" \
+gh release download "$(channel_tag core)" --repo "${repository}" \
   --pattern Linnet-Data-Channel.json --dir "${work_root}"
 
 ruby -rjson -rdigest -e '
-  validation, catalog_path, core_assets_path, data_assets_path, repository,
+  catalog_path, core_assets_path, data_assets_path, repository,
     version, revision, sequence = ARGV
   sequence = Integer(sequence, 10)
   assets = {}
-  paths = [data_assets_path]
-  paths << core_assets_path if validation == "full"
-  paths.each do |path|
+  [core_assets_path, data_assets_path].each do |path|
     File.readlines(path, chomp: true).each do |line|
       name, digest, bytes = line.split("\t", 3)
       abort if assets.key?(name)
@@ -212,11 +227,9 @@ ruby -rjson -rdigest -e '
     core.fetch("revision") == revision &&
     core.fetch("release_url") == "https://github.com/#{repository}/releases/tag/core-v#{version}" &&
     core.fetch("package_url") == "https://github.com/#{repository}/releases/download/core-v#{version}/#{core_name}"
-  if validation == "full"
-    core_asset = assets.fetch(core_name)
-    abort unless core.fetch("bytes") == core_asset.fetch(:bytes) &&
-      core.fetch("sha256") == core_asset.fetch(:digest)
-  end
+  core_asset = assets.fetch(core_name)
+  abort unless core.fetch("bytes") == core_asset.fetch(:bytes) &&
+    core.fetch("sha256") == core_asset.fetch(:digest)
   names = {
     "chinese" => "Linnet-Chinese.linnetpack",
     "english" => "Linnet-English.linnetpack",
@@ -242,7 +255,7 @@ ruby -rjson -rdigest -e '
   catalog_asset = assets.fetch("Linnet-Data-Channel.json")
   abort unless File.size(catalog_path) == catalog_asset.fetch(:bytes) &&
     Digest::SHA256.file(catalog_path).hexdigest == catalog_asset.fetch(:digest)
-' "${catalog_validation}" "${catalog}" "${work_root}/core-assets.tsv" \
+' "${catalog}" "${work_root}/core-assets.tsv" \
   "${work_root}/data-assets.tsv" \
   "${repository}" "${version}" "${candidate_revision}" "${catalog_sequence}" ||
   fail_publish "staged Catalog does not bind its GitHub Release assets"
@@ -251,12 +264,6 @@ if [[ "${mode}" == verify ]]; then
   echo "Linnet ${version} staged GitHub Releases: VERIFIED"
   exit 0
 fi
-if [[ "${mode}" == data-seed ]]; then
-  publish_channel data
-  echo "Linnet ${version} data seed: PASS (Catalog not promoted)"
-  exit 0
-fi
-
 promote_catalog() {
   local api="repos/${repository}/git"
   local current_commit="" current_tree current_blob current_sequence
@@ -280,8 +287,18 @@ promote_catalog() {
       puts value
     ' "${work_root}/current-catalog")" ||
       fail_publish "current data-channel Catalog is invalid"
-    (( current_sequence < catalog_sequence )) ||
+    if (( current_sequence == catalog_sequence )); then
+      ruby -rjson -e '
+        current = JSON.parse(File.binread(ARGV.fetch(0)))
+        candidate = JSON.parse(File.binread(ARGV.fetch(1)))
+        current.delete("core")
+        candidate.delete("core")
+        abort unless current == candidate
+      ' "${work_root}/current-catalog" "${catalog}" ||
+        fail_publish "Catalog sequence cannot change immutable pack identity"
+    elif (( current_sequence > catalog_sequence )); then
       fail_publish "Catalog sequence cannot replace current sequence ${current_sequence}"
+    fi
   elif ! grep -Eq 'Not Found|HTTP 404' "${work_root}/data-channel-error"; then
     [[ ! -s "${work_root}/data-channel-error" ]] ||
       cat "${work_root}/data-channel-error" >&2

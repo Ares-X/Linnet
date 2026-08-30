@@ -31,7 +31,8 @@ public_assets() {
 core_assets() {
   printf '%s\n' \
     "Linnet-${version}-arm64-Core-community-beta.pkg" \
-    "Linnet-${version}-Uninstall.command"
+    "Linnet-${version}-Uninstall.command" \
+    Linnet-Data-Channel.json
 }
 
 data_assets() {
@@ -39,8 +40,7 @@ data_assets() {
     Linnet-Chinese.linnetpack \
     Linnet-English.linnetpack \
     Linnet-Extended.linnetpack \
-    Linnet-LTS.linnetpack \
-    Linnet-Data-Channel.json
+    Linnet-LTS.linnetpack
 }
 
 case "${channel}" in

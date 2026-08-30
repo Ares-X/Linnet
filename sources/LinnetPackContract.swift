@@ -332,6 +332,7 @@ extension LinnetPackContract {
     case .english:
       return path == "linnet.smart.db"
         || path == "linnet.english-data-manifest.json"
+        || path == "linnet_english_entities.dict.yaml"
         || path.hasPrefix("linnet_en.")
         || path.hasPrefix("build/linnet_en.")
     case .chinese:
@@ -344,7 +345,7 @@ extension LinnetPackContract {
         "dicts/zi.dict.yaml", "dicts/jichu.dict.yaml",
         "dicts/lianxiang.dict.yaml", "dicts/cuoyin.dict.yaml",
         "dicts/duoyin.dict.yaml", "dicts/shici.dict.yaml",
-        "dicts/diming.dict.yaml"
+        "dicts/diming.dict.yaml", "dicts/ext.dict.yaml"
       ]
       return names.contains(path) || dictionaries.contains(path)
         || ["linnet_zh", "radical_pinyin"].contains(where: path.hasPrefix)

@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Project the locked rime-ice ext table into Wanxiang's tone-coded graph."""
+
+from __future__ import annotations
+
+import math
+import statistics
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+
+TONE_MAP = {
+    "ā": ("a", 1), "á": ("a", 2), "ǎ": ("a", 3), "à": ("a", 4),
+    "ō": ("o", 1), "ó": ("o", 2), "ǒ": ("o", 3), "ò": ("o", 4),
+    "ē": ("e", 1), "é": ("e", 2), "ě": ("e", 3), "è": ("e", 4),
+    "ī": ("i", 1), "í": ("i", 2), "ǐ": ("i", 3), "ì": ("i", 4),
+    "ū": ("u", 1), "ú": ("u", 2), "ǔ": ("u", 3), "ù": ("u", 4),
+    "ǖ": ("v", 1), "ǘ": ("v", 2), "ǚ": ("v", 3), "ǜ": ("v", 4),
+    "ü": ("v", 0), "ń": ("n", 2), "ň": ("n", 3), "ǹ": ("n", 4),
+    "ḿ": ("m", 2), "m̀": ("m", 4),
+}
+SERIAL_DIGITS = frozenset("〇零一二三四五六七八九十0123456789")
+CORE_TABLES = ("zi", "jichu", "lianxiang", "cuoyin", "duoyin", "shici", "diming")
+LENGTH_OFFSETS = {1: 100, 2: 200, 3: 350, 4: 500, 5: 650, 6: 700}
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"project-rime-ice-ext: {message}")
+
+
+def tone_to_plain(value: str) -> str:
+    return "".join(TONE_MAP.get(character, (character, 0))[0] for character in value)
+
+
+def tone_level(value: str) -> int:
+    for character in value:
+        tone = TONE_MAP.get(character, (character, 0))[1]
+        if tone:
+            return tone
+    return 0
+
+
+def dictionary_rows(path: Path):
+    body = False
+    with path.open(encoding="utf-8") as stream:
+        for line_number, raw in enumerate(stream, 1):
+            line = raw.rstrip("\n")
+            if line == "...":
+                body = True
+                continue
+            if not body or not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 3:
+                continue
+            try:
+                weight = max(0, int(fields[2]))
+            except ValueError:
+                continue
+            yield line_number, fields[0], fields[1], weight
+
+
+def load_zi(path: Path):
+    readings = defaultdict(lambda: defaultdict(list))
+    for _, text, code, weight in dictionary_rows(path):
+        if len(text) != 1:
+            continue
+        plain = tone_to_plain(code)
+        candidate = (code, weight)
+        if candidate not in readings[text][plain]:
+            readings[text][plain].append(candidate)
+    return readings
+
+
+def resolve_tones(text: str, plain_code: str, readings) -> tuple[str, str]:
+    syllables = plain_code.split()
+    characters = list(text)
+    if len(syllables) != len(characters):
+        return "", "unverified"
+
+    candidates = []
+    for character, syllable in zip(characters, syllables):
+        matches = readings.get(character, {}).get(syllable, [])
+        if not matches:
+            return "", "unverified"
+        candidates.append(matches)
+
+    chosen: list[str | None] = [None] * len(characters)
+    status = "verified"
+    for index in range(len(characters) - 1, -1, -1):
+        character = characters[index]
+        syllable = syllables[index]
+        if character == "一" and syllable == "yi":
+            adjacent_digit = (
+                index + 1 < len(characters) and characters[index + 1] in SERIAL_DIGITS
+            ) or (index > 0 and characters[index - 1] in SERIAL_DIGITS)
+            if adjacent_digit or index + 1 == len(characters):
+                chosen[index] = "yī"
+            else:
+                following_tone = tone_level(chosen[index + 1] or "")
+                chosen[index] = "yí" if following_tone == 4 else "yì"
+            continue
+        if character == "不" and syllable == "bu":
+            following_tone = (
+                tone_level(chosen[index + 1] or "")
+                if index + 1 < len(characters) else 0
+            )
+            chosen[index] = "bú" if following_tone == 4 else "bù"
+            continue
+
+        if len(candidates[index]) != 1:
+            return "", "ambiguous"
+        chosen[index] = candidates[index][0][0]
+    return " ".join(value or "" for value in chosen), status
+
+
+def calibrated_weight(text: str, raw_weight: int, medians: dict[int, float]) -> int:
+    length = len(text)
+    median_cap = int(medians.get(length, 1000) * 0.15 * 0.7)
+    if length >= 5:
+        cap = max(int(LENGTH_OFFSETS.get(length, 700) * 0.7), median_cap)
+    else:
+        cap = median_cap
+    cap = max(1, cap)
+    ratio = math.log1p(raw_weight) / math.log1p(1_000_000) if raw_weight else 0.1
+    return max(1, min(int(ratio * cap), cap))
+
+
+def main() -> None:
+    if len(sys.argv) != 5:
+        fail("usage: SOURCE_EXT WANXIANG_DICT_DIR OUTPUT EXPECTED_MINIMUM")
+    source, wanxiang_dir, output = map(Path, sys.argv[1:4])
+    try:
+        expected_minimum = int(sys.argv[4])
+    except ValueError:
+        fail("EXPECTED_MINIMUM must be an integer")
+    for path in (source, wanxiang_dir):
+        if not path.exists() or path.is_symlink():
+            fail(f"unsafe or missing input: {path}")
+
+    ext_rows = list(dictionary_rows(source))
+    if not ext_rows:
+        fail("locked ext source is empty")
+    ext_texts = {text for _, text, _, _ in ext_rows}
+    wanxiang_owned = set()
+    wanxiang_weights_by_plain_code = defaultdict(int)
+    weights_by_length = defaultdict(list)
+    for table in CORE_TABLES:
+        path = wanxiang_dir / f"{table}.dict.yaml"
+        if not path.is_file() or path.is_symlink():
+            fail(f"unsafe or missing Wanxiang table: {path}")
+        for _, text, code, weight in dictionary_rows(path):
+            weights_by_length[len(text)].append(weight)
+            if text in ext_texts:
+                wanxiang_owned.add(text)
+            plain_code = " ".join(tone_to_plain(code).split())
+            wanxiang_weights_by_plain_code[plain_code] = max(
+                wanxiang_weights_by_plain_code[plain_code], weight
+            )
+    medians = {
+        length: statistics.median(weights)
+        for length, weights in weights_by_length.items()
+    }
+    readings = load_zi(wanxiang_dir / "zi.dict.yaml")
+    counts = defaultdict(int)
+    projected = []
+    for line_number, text, code, weight in ext_rows:
+        if len(text) < 3:
+            fail(f"source contract contains a short row at line {line_number}")
+        if text in wanxiang_owned:
+            counts["wanxiang_owned"] += 1
+            continue
+        plain_code = " ".join(tone_to_plain(code).split())
+        resolved, status = resolve_tones(text, plain_code, readings)
+        if status != "verified":
+            counts[status] += 1
+            continue
+        projected_weight = calibrated_weight(text, weight, medians)
+        wanxiang_weight = wanxiang_weights_by_plain_code.get(plain_code)
+        if wanxiang_weight is not None:
+            if wanxiang_weight <= 1:
+                counts["wanxiang_code_floor"] += 1
+                continue
+            projected_weight = min(projected_weight, wanxiang_weight - 1)
+        projected.append((text, resolved, projected_weight))
+        counts[status] += 1
+
+    if len(projected) < expected_minimum:
+        fail(f"accepted only {len(projected)} rows; expected at least {expected_minimum}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(
+            "# Locked rime-ice ext projected into Wanxiang tone/weight space\n"
+            "# Generated by scripts/project-rime-ice-ext; DO NOT EDIT\n"
+            "---\nname: ext\nversion: \"1\"\nsort: by_weight\n"
+            "use_preset_vocabulary: false\n...\n"
+        )
+        for text, code, weight in projected:
+            stream.write(f"{text}\t{code}\t{weight}\n")
+    print(
+        "project-rime-ice-ext: "
+        f"{len(projected)} verified accepted; skipped "
+        f"{counts['wanxiang_owned']} Wanxiang-owned, "
+        f"{counts['ambiguous']} ambiguous, {counts['unverified']} unverified, "
+        f"{counts['wanxiang_code_floor']} Wanxiang-code floors"
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -10,17 +10,19 @@ input_methods_root="${library_root}/Input Methods"
 app_path="${input_methods_root}/Linnet.app"
 application_support_root="${library_root}/Application Support"
 support_root="${application_support_root}/Linnet"
-active_state="${support_root}/Runtime/Active/activation.json"
-state_link="${support_root}/State/active.json"
 state_root="${support_root}/State"
 script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 candidate_file="${script_root}/candidate-core-version"
 mode_file="${script_root}/install-mode"
 identity_helper="${script_root}/candidate-app-identity.sh"
 identity_metadata="${script_root}/candidate-app-identity.json"
-application_quiescer="${script_root}/quit-applications-clean.jxa"
+registration_inspector="${script_root}/input-source-registration-inspector"
+runtime_inspector="${script_root}/linnet-runtime-inspector"
 current_uid="$(/usr/bin/id -u)"
 identity_transition=""
+registration_state=""
+runtime_state=""
+candidate_bundle_identifier=""
 
 secure_owned_path() {
   local path="$1"
@@ -46,79 +48,6 @@ require_secure_directory_if_present() {
   fi
 }
 
-semver_at_least() {
-  local actual="$1"
-  local required="$2"
-  local semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
-  local actual_major actual_minor actual_patch actual_pre
-  local required_major required_minor required_patch required_pre
-  local index actual_part required_part
-  local -a actual_parts required_parts
-
-  [[ "${actual}" =~ ${semver} ]] || return 1
-  actual_major="${BASH_REMATCH[1]}"
-  actual_minor="${BASH_REMATCH[2]}"
-  actual_patch="${BASH_REMATCH[3]}"
-  actual_pre="${BASH_REMATCH[5]:-}"
-  [[ "${required}" =~ ${semver} ]] || return 1
-  required_major="${BASH_REMATCH[1]}"
-  required_minor="${BASH_REMATCH[2]}"
-  required_patch="${BASH_REMATCH[3]}"
-  required_pre="${BASH_REMATCH[5]:-}"
-
-  for index in 0 1 2; do
-    actual_part=("${actual_major}" "${actual_minor}" "${actual_patch}")
-    required_part=("${required_major}" "${required_minor}" "${required_patch}")
-    if (( actual_part[index] > required_part[index] )); then return 0; fi
-    if (( actual_part[index] < required_part[index] )); then return 1; fi
-  done
-  [[ "${actual_pre}" == "${required_pre}" ]] && return 0
-  [[ -z "${actual_pre}" ]] && return 0
-  [[ -z "${required_pre}" ]] && return 1
-
-  IFS='.' read -r -a actual_parts <<<"${actual_pre}"
-  IFS='.' read -r -a required_parts <<<"${required_pre}"
-  index=0
-  while (( index < ${#actual_parts[@]} || index < ${#required_parts[@]} )); do
-    [[ "${actual_parts[index]+set}" == set ]] || return 1
-    [[ "${required_parts[index]+set}" == set ]] || return 0
-    actual_part="${actual_parts[index]}"
-    required_part="${required_parts[index]}"
-    if [[ "${actual_part}" != "${required_part}" ]]; then
-      if [[ "${actual_part}" =~ ^[0-9]+$ && "${required_part}" =~ ^[0-9]+$ ]]; then
-        (( 10#${actual_part} >= 10#${required_part} ))
-        return
-      fi
-      [[ "${actual_part}" =~ ^[0-9]+$ ]] && return 1
-      [[ "${required_part}" =~ ^[0-9]+$ ]] && return 0
-      [[ "${actual_part}" > "${required_part}" ]]
-      return
-    fi
-    ((index += 1))
-  done
-  return 0
-}
-
-check_active_core() {
-  local candidate="$1"
-  local format pack_count index kind required seen=' '
-  semver_at_least "${candidate}" "0.0.0" || return 1
-  format="$(/usr/bin/plutil -extract format raw -o - "${active_state}")" || return 1
-  [[ "${format}" == io.github.ares-x.linnet.active-set.v1 ]] || return 1
-  pack_count="$(/usr/bin/plutil -extract packs raw -o - "${active_state}")" || return 1
-  [[ "${pack_count}" == 4 ]] || return 1
-  for ((index = 0; index < pack_count; index += 1)); do
-    kind="$(/usr/bin/plutil -extract "packs.${index}.kind" raw -o - "${active_state}")" ||
-      return 1
-    required="$(/usr/bin/plutil -extract "packs.${index}.min_core" raw -o - "${active_state}")" ||
-      return 1
-    case "${kind}" in chinese|english|lts|extended) ;; *) return 1 ;; esac
-    [[ "${seen}" != *" ${kind} "* ]] || return 1
-    seen+="${kind} "
-    semver_at_least "${candidate}" "${required}" || return 1
-  done
-}
-
 [[ "${user_home}" == /* ]] && secure_owned_path "${user_home}" directory || {
   echo "Linnet Core preinstall: current user home is unavailable" >&2
   exit 1
@@ -131,7 +60,11 @@ secure_owned_path "${library_root}" directory || {
   -f "${mode_file}" && ! -L "${mode_file}" && \
   -f "${identity_helper}" && ! -L "${identity_helper}" && \
   -x "${identity_helper}" && \
-  -f "${identity_metadata}" && ! -L "${identity_metadata}" ]] || {
+  -f "${identity_metadata}" && ! -L "${identity_metadata}" && \
+  -f "${registration_inspector}" && ! -L "${registration_inspector}" && \
+  -x "${registration_inspector}" && \
+  -f "${runtime_inspector}" && ! -L "${runtime_inspector}" && \
+  -x "${runtime_inspector}" ]] || {
   echo "Linnet Core preinstall: compatibility metadata is unavailable" >&2
   exit 1
 }
@@ -170,81 +103,121 @@ for payload_directory in "${payload_directories[@]}"; do
 done
 
 # The package-owned candidate identity is the only authority for deciding
-# whether an existing integrity-checked App can be replaced or a missing App
-# can be restored without inferring prior enablement. It validates without
-# running installed code and returns one typed transition before mutation.
+# whether an existing integrity-checked App can be replaced or Complete owns a
+# clean first install. It validates without running installed code and returns
+# one typed transition before mutation.
 identity_transition="$("${identity_helper}" existing)" || exit 1
+candidate_bundle_identifier="$(/usr/bin/plutil -extract bundle_identifier raw -o - \
+  "${identity_metadata}")" || exit 1
+[[ -n "${candidate_bundle_identifier}" && \
+  "${candidate_bundle_identifier}" != *$'\n'* ]] || exit 1
 
-# Complete is only a clean first install or a reinstall after the official
-# uninstaller removed App, Active, and state. Preserved UserData, Backups,
-# Transactions, and preferences do not participate in this installed-state
-# decision. Never let Complete overwrite an existing or partially removed App;
-# a healthy installation must use Core and therefore earns no second logout.
+inspect_input_source_registration() {
+  secure_owned_path "${registration_inspector}" file || return 1
+  registration_state="$("${registration_inspector}" \
+    "${candidate_bundle_identifier}")" || return 1
+  [[ -n "${registration_state}" && "${registration_state}" != *$'\n'* ]]
+}
+
+inspect_runtime() {
+  secure_owned_path "${runtime_inspector}" file || return 1
+  runtime_state="$("${runtime_inspector}" probe \
+    "${candidate_core_version}" "${application_support_root}")" || return 1
+  case "${runtime_state}" in
+    healthy|missing) ;;
+    *) return 1 ;;
+  esac
+}
+
+# Complete owns both clean installation and repair of a supported signed App.
+# A clean install has no executable from which to read TIS. A repair must first
+# pass the same installed-App signature transition as Core, then consume the
+# package-owned helper's read-only typed TIS state. Registration mutation stays
+# exclusively in Complete postinstall.
 if [[ "${install_mode}" == complete ]]; then
-  if [[ -e "${app_path}" || -L "${app_path}" || \
-    -e "${active_state}" || -L "${active_state}" || \
-    -e "${state_link}" || -L "${state_link}" ]]; then
-    echo "Linnet Complete requires a clean first install or completed uninstall. Use Linnet Core for an existing installation." >&2
-    exit 1
+  if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
+    [[ "${identity_transition}" == clean-complete-install ]] || {
+      echo "Linnet Complete requires an absent App identity" >&2
+      exit 1
+    }
+  else
+    case "${identity_transition}" in
+      legacy-community-adhoc-to-cms|same-community-cms-leaf) ;;
+      *)
+        echo "Linnet Complete cannot repair this App identity. Uninstall Linnet first." >&2
+        exit 1
+        ;;
+    esac
   fi
-  exit 0
+
+  inspect_input_source_registration || {
+    echo "Linnet Complete could not inspect input-source registration. Uninstall Linnet first." >&2
+    exit 1
+  }
+  inspect_runtime || {
+    echo "Linnet Complete found invalid installed language data. Run the official uninstaller first." >&2
+    exit 1
+  }
+  case "${registration_state}" in
+    missing) exit 0 ;;
+    registered:bundle-match:path-unknown)
+      if [[ "${identity_transition}" != clean-complete-install && \
+        "${runtime_state}" == healthy ]]; then
+        echo "Linnet is already healthy. Use Linnet Core for routine updates; Complete is only for first installation or repair." >&2
+        exit 1
+      fi
+      exit 0
+      ;;
+    *)
+      echo "Linnet Complete found conflicting or unverifiable input-source registration (${registration_state}). Uninstall Linnet first." >&2
+      exit 1
+      ;;
+  esac
 fi
 
-# Core is the only in-place App update or repair product. A missing App carries
-# no prior enablement intent: it may restore the accepted candidate, but it is
-# registered without being enabled or selected on the user's behalf.
+# Core is only an in-place update of the registered App identity. Missing App
+# state is not reconstructible from filesystem evidence, so it fails before
+# payload mutation and remains owned by the Complete registration lifecycle.
 case "${identity_transition}" in
-  legacy-community-adhoc-to-cms|same-community-cms-leaf|missing-app-install) ;;
+  legacy-community-adhoc-to-cms|same-community-cms-leaf) ;;
+  clean-complete-install)
+    echo "Linnet Core update requires the installed App. Run Linnet Complete to repair it." >&2
+    exit 1
+    ;;
   *)
     echo "Linnet Core preinstall: App identity transition is invalid" >&2
     exit 1
     ;;
 esac
 
-# Core cannot install without the complete product's authoritative Active
-# language state.
-if [[ ! -e "${active_state}" && ! -L "${active_state}" && \
-  ! -e "${state_link}" && ! -L "${state_link}" ]]; then
-  echo "Linnet Core update requires an existing Complete installation. Install Linnet.pkg first." >&2
+# Core can replace bytes only when TIS resolves exactly one source with Linnet's
+# source and bundle IDs. HIToolbox exposes no authoritative bundle path, so the
+# typed state explicitly records path-unknown. Core performs no TIS mutation.
+inspect_input_source_registration || {
+  echo "Linnet Core update could not inspect input-source registration. Uninstall Linnet first." >&2
   exit 1
-fi
+}
+case "${registration_state}" in
+  registered:bundle-match:path-unknown) ;;
+  missing)
+    echo "Linnet Core update requires a registered input source. Run Linnet Complete to repair it." >&2
+    exit 1
+    ;;
+  *)
+    echo "Linnet Core update found conflicting or unverifiable input-source registration (${registration_state}). Uninstall Linnet first, then install Linnet Complete." >&2
+    exit 1
+    ;;
+esac
 
-# Existing language data is authoritative. Reject an older Core before its
-# payload mutates the installed App; a damaged or partial active state also
-# fails closed instead of replacing the last executable that may still work.
-[[ -L "${state_link}" && "$(readlink "${state_link}")" == \
-  "../Runtime/Active/activation.json" ]] && \
-  secure_owned_path "${active_state}" file || {
-  echo "Linnet Core preinstall: active language state is incomplete" >&2
+# Existing language data is authoritative. The Registry-backed inspector is
+# the one full compatibility/inventory/projection owner; Core never replaces
+# the App after only a partial shell interpretation of activation.json.
+inspect_runtime || {
+  echo "Linnet Core preinstall: installed language data is missing, incompatible, or invalid. Run Linnet Complete to repair it." >&2
   exit 1
 }
-check_active_core "${candidate_core_version}" || {
-  echo "Linnet Core preinstall: active language data requires a newer Core" >&2
-  exit 1
-}
-
-# Distribution must-close is the early Installer UI boundary. Enforce the
-# Settings mutation-time invariant again after every compatibility check and
-# immediately before allowing payload replacement. The InputMethodKit Host
-# deliberately remains alive: existing client applications keep their server
-# connection while new bytes wait for the next natural Host launch. Settings
-# can reject the normal quit request while work or an unsaved draft is active;
-# any refusal or relaunch leaves the process visible and fails this preinstall.
-[[ -f "${application_quiescer}" && ! -L "${application_quiescer}" ]] || {
-  echo "Linnet Core preinstall: application quiescence owner is unavailable" >&2
-  exit 1
-}
-quiescer_mode="$(/usr/bin/stat -f '%Lp' "${application_quiescer}")" || {
-  echo "Linnet Core preinstall: application quiescence owner cannot be inspected" >&2
-  exit 1
-}
-(( (8#${quiescer_mode} & 0022) == 0 )) || {
-  echo "Linnet Core preinstall: application quiescence owner is unsafe" >&2
-  exit 1
-}
-/usr/bin/osascript -l JavaScript "${application_quiescer}" 30 \
-  io.github.ares-x.inputmethod.Linnet.settings >/dev/null || {
-  echo "Linnet Core update requires Settings to quit cleanly before replacement" >&2
+[[ "${runtime_state}" == healthy ]] || {
+  echo "Linnet Core preinstall: installed language data is missing. Run Linnet Complete to repair it." >&2
   exit 1
 }
 

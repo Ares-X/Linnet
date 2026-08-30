@@ -290,8 +290,7 @@ extension SquirrelPanel {
       candidateFontPoint: theme.font.pointSize)
     let selectedDetail = usesInlineComments
       ? nil : selectedDetail(theme: theme, candidates: candidates.items, highlighted: index)
-    var detailRange = NSRange.empty
-    var sidecarDetail: NSAttributedString?
+    let detailRange = NSRange.empty
 
     // candidates
     var candidateRanges = [NSRange](
@@ -360,23 +359,13 @@ extension SquirrelPanel {
       }
     }
 
-    if let selectedDetail {
-      switch detailGeometry.placement {
-      case .footer:
-        text.append(NSAttributedString(string: "\n", attributes: theme.detailAttrs))
-        detailRange = NSRange(location: text.length, length: selectedDetail.length)
-        text.append(selectedDetail)
-      case .sidecar:
-        sidecarDetail = selectedDetail
-      }
-    }
-
     // text done!
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.textContentStorage?.attributedString = text
-    view.publishSidecarDetail(sidecarDetail)
+    view.publishSidecarDetail(selectedDetail)
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.setLayoutOrientation(vertical ? .vertical : .horizontal)
+    view.detailTextView.setLayoutOrientation(vertical ? .vertical : .horizontal)
     guard publicationIsCurrent(currentPublication) else { return false }
     let controlMode: LinnetCandidatePresentation.CandidateControlMode =
       theme.candidateExpansionAllowed && (candidates.canExpand || candidates.isExpanded)

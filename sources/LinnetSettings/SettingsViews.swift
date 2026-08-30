@@ -171,8 +171,8 @@ struct InputTabView: View {
 
   var body: some View {
     LinnetSettingsPage(
-      "Chinese Input",
-      summary: "Configure input behavior. Choose your Chinese scheme and reverse-lookup preferences here.",
+      "Input",
+      summary: "Configure Chinese and Smart English behavior in one place.",
       systemImage: "keyboard"
     ) {
       VStack(alignment: .leading, spacing: 16) {
@@ -199,6 +199,15 @@ struct InputTabView: View {
             reverseLookupSection
           }
         }
+        GroupBox("Smart English") {
+          LinnetSettingsTwoColumnLayout {
+            englishCandidateSuggestions
+          } trailing: {
+            englishTypingBehavior
+          }
+          .padding(8)
+        }
+        .disabled(!model.configuration.canEdit)
       }
     }
   }
@@ -346,6 +355,58 @@ struct InputTabView: View {
     }
   }
 
+  private var englishCandidateSuggestions: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Candidate suggestions").font(.headline)
+      Toggle("Show IPA pronunciation", isOn: $model.configuration.documentDraft.english.showIPA)
+      Toggle(
+        "Show Chinese definitions",
+        isOn: $model.configuration.documentDraft.english.showTranslation
+      )
+      Toggle(
+        "Show Smart English context suggestions",
+        isOn: $model.configuration.documentDraft.english.predictionEnabled
+      )
+      Toggle(
+        "Suggest spelling corrections",
+        isOn: $model.configuration.documentDraft.english.spellingCorrection
+      )
+      Text(
+        "IPA and Chinese definitions can be hidden independently. Smart English suggestions and correction change candidate generation; all settings take effect after Apply Changes."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+    }
+  }
+
+  private var englishTypingBehavior: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Typing behavior").font(.headline)
+      Toggle(
+        "Capitalize sentence starts",
+        isOn: $model.configuration.documentDraft.english.sentenceCapitalization
+      )
+      Toggle(
+        "Learn from English selections",
+        isOn: $model.configuration.documentDraft.english.learnFromSelections
+      )
+      Toggle(
+        "Add a trailing space when Space accepts a candidate",
+        isOn: $model.configuration.documentDraft.english.spaceAddsTrailingSpace
+      )
+      Picker("Tab key", selection: $model.configuration.documentDraft.english.tabBehavior) {
+        Text("Smart complete").tag(LinnetSettingsDocument.TabBehavior.smartComplete)
+        Text("Navigate candidates").tag(LinnetSettingsDocument.TabBehavior.navigate)
+        Text("Pass to application").tag(LinnetSettingsDocument.TabBehavior.pass)
+      }
+      Text(
+        "Turning off learning stops reading and updating English learning data. Existing data returns when learning is enabled again; static context suggestions and spacing remain available."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+    }
+  }
+
   private func chineseLearningPolicyName(
     _ policy: LinnetSettingsDocument.ChineseLearningPolicy
   ) -> LocalizedStringKey {
@@ -395,7 +456,8 @@ struct InputTabView: View {
 
   private var inputChangesPending: Bool {
     guard let baseline = model.configuration.documentBaseline else { return false }
-    return model.configuration.documentDraft.input != baseline.input
+    return model.configuration.documentDraft.input != baseline.input ||
+      model.configuration.documentDraft.english != baseline.english
   }
 
   private var reverseLookupExample: String {
@@ -477,72 +539,6 @@ struct DictionaryTabView: View {
 
 }
 
-// MARK: - English
-
-struct EnglishTabView: View {
-  @ObservedObject var model: SettingsModel
-
-  var body: some View {
-    LinnetSettingsPage(
-      "Smart English",
-      summary: "Tune completion, pronunciation, translation, and correction together.",
-      mark: .latinABC
-    ) {
-      LinnetSettingsTwoColumnLayout {
-        GroupBox("Candidate suggestions") {
-          VStack(alignment: .leading, spacing: 10) {
-            Toggle("Show IPA pronunciation", isOn: $model.configuration.documentDraft.english.showIPA)
-            Toggle(
-              "Show Chinese definitions",
-              isOn: $model.configuration.documentDraft.english.showTranslation
-            )
-            Toggle(
-              "Show Smart English context suggestions",
-              isOn: $model.configuration.documentDraft.english.predictionEnabled
-            )
-            Toggle(
-              "Suggest spelling corrections",
-              isOn: $model.configuration.documentDraft.english.spellingCorrection
-            )
-            Text(
-              "IPA and Chinese definitions can be hidden independently. Smart English suggestions and correction change candidate generation; all settings take effect after Apply Changes."
-            )
-            .font(.caption).foregroundStyle(.secondary)
-          }.padding(8)
-        }
-        .disabled(!model.configuration.canEdit)
-      } trailing: {
-        GroupBox("Typing behavior") {
-          VStack(alignment: .leading, spacing: 10) {
-            Toggle(
-              "Capitalize sentence starts",
-              isOn: $model.configuration.documentDraft.english.sentenceCapitalization
-            )
-            Toggle(
-              "Learn from English selections",
-              isOn: $model.configuration.documentDraft.english.learnFromSelections
-            )
-            Toggle(
-              "Add a trailing space when Space accepts a candidate",
-              isOn: $model.configuration.documentDraft.english.spaceAddsTrailingSpace
-            )
-            Picker("Tab key", selection: $model.configuration.documentDraft.english.tabBehavior) {
-              Text("Smart complete").tag(LinnetSettingsDocument.TabBehavior.smartComplete)
-              Text("Navigate candidates").tag(LinnetSettingsDocument.TabBehavior.navigate)
-              Text("Pass to application").tag(LinnetSettingsDocument.TabBehavior.pass)
-            }
-            Text(
-              "Turning off learning stops reading and updating English learning data. Existing data returns when learning is enabled again; static context suggestions and spacing remain available."
-            )
-            .font(.caption).foregroundStyle(.secondary)
-          }.padding(8)
-        }
-        .disabled(!model.configuration.canEdit)
-      }
-    }
-  }
-}
-
 // MARK: - Data
 
 struct DataTabView: View {
@@ -558,23 +554,48 @@ struct DataTabView: View {
 
   var body: some View {
     LinnetSettingsPage(
-      "Data",
-      summary: "Update language data, sync or move personal data, and review backups and diagnostics.",
-      systemImage: "internaldrive"
+      "Data & Updates",
+      summary: "Review updates, sync or move personal data, and manage recovery.",
+      systemImage: "arrow.triangle.2.circlepath"
     ) {
       VStack(alignment: .leading, spacing: 16) {
         versionSection
+        coreUpdateSection
+        languageDataSection
         grammarModelSection
-        dataManagementSection
-        cloudSyncSection
-        backupSection
-        diagnosticsSection
+        GroupBox {
+          DisclosureGroup("iCloud Drive sync") {
+            cloudSyncSection
+              .padding(.top, 8)
+          }
+          .accessibilityIdentifier("settings.data.cloudDisclosure")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        GroupBox {
+          DisclosureGroup("Manual recovery & transfer") {
+            VStack(alignment: .leading, spacing: 16) {
+              personalDataSection
+              backupSection
+            }
+            .padding(.top, 8)
+          }
+          .accessibilityIdentifier("settings.data.manualDisclosure")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        GroupBox {
+          DisclosureGroup("Diagnostics") {
+            diagnosticsSection
+              .padding(.top, 8)
+          }
+          .accessibilityIdentifier("settings.data.diagnosticsDisclosure")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
   }
 
-  private var dataManagementSection: some View {
-    GroupBox("Data management") {
+  private var languageDataSection: some View {
+    GroupBox("Language data updates") {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
           VStack(alignment: .leading) {
@@ -630,60 +651,103 @@ struct DataTabView: View {
                 || model.packDownloadActive || model.operationActive)
           }
         }
-        Divider()
-        HStack {
-          VStack(alignment: .leading) {
-            Text("Existing Rime / Hallelujah data").font(.callout.weight(.medium))
-            Text(legacyDataDescription)
-            .font(.caption).foregroundStyle(.secondary)
-          }
-          Spacer()
-          Button("Import Existing") {
-            pendingLegacyImport = model.legacyImportCandidate
-          }
-            .disabled(
-              !model.configuration.canPersist || !model.migrationAvailable
-                || model.operationActive)
-        }
-        Divider()
-        HStack {
-          Text("Reset learning data").font(.callout.weight(.medium))
-          Spacer()
-          Menu("Clear Learning") {
-            Button("Chinese…") { pendingClear = [.chinese] }
-            Button("English…") { pendingClear = [.english] }
-            Button("Chinese and English…") { pendingClear = [.chinese, .english] }
-          }
-          .accessibilityLabel("Clear Learning")
-          .disabled(!model.dataServicesAvailable || model.operationActive)
-        }
-        Divider()
-        Text("Data to export").font(.callout.weight(.medium))
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170))], alignment: .leading) {
-          ForEach(LinnetBackupStore.Category.allCases, id: \.self) { category in
-            Toggle(categoryName(category), isOn: model.categorySelected(category))
-          }
-        }
-        HStack {
-          Button("Export…") { model.choosePortableExport(locale: locale) }
-            .disabled(
-              !model.dataServicesAvailable || model.exportCategories.isEmpty
-                || model.operationActive)
-          Button("Import…") {
-            guard let source = model.choosePortableImportSource(locale: locale) else { return }
-            Task {
-              pendingPortableImport = await model.inspectPortableImport(source)
-            }
-          }
-            .disabled(
-              !model.configuration.canPersist || model.operationActive
-                || model.portableInspectionActive)
-          Spacer()
-          Button("Open Data Folder") { model.openDataFolder() }
-            .disabled(!model.dataServicesAvailable)
-        }
       }.padding(8)
     }
   }
 
+  private var personalDataSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        VStack(alignment: .leading) {
+          Text("Existing Rime / Hallelujah data").font(.callout.weight(.medium))
+          Text(legacyDataDescription)
+          .font(.caption).foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("Import Existing") {
+          pendingLegacyImport = model.legacyImportCandidate
+        }
+          .disabled(
+            !model.configuration.canPersist || !model.migrationAvailable
+              || model.operationActive)
+      }
+      Divider()
+      HStack {
+        Text("Reset learning data").font(.callout.weight(.medium))
+        Spacer()
+        Menu("Clear Learning") {
+          Button("Chinese…") { pendingClear = [.chinese] }
+          Button("English…") { pendingClear = [.english] }
+          Button("Chinese and English…") { pendingClear = [.chinese, .english] }
+        }
+        .accessibilityLabel("Clear Learning")
+        .disabled(!model.dataServicesAvailable || model.operationActive)
+      }
+      Divider()
+      Text("Data to export").font(.callout.weight(.medium))
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 170))], alignment: .leading) {
+        ForEach(LinnetBackupStore.Category.allCases, id: \.self) { category in
+          Toggle(categoryName(category), isOn: model.categorySelected(category))
+        }
+      }
+      HStack {
+        Button("Export…") { model.choosePortableExport(locale: locale) }
+          .disabled(
+            !model.dataServicesAvailable || model.exportCategories.isEmpty
+              || model.operationActive)
+        Button("Import…") {
+          guard let source = model.choosePortableImportSource(locale: locale) else { return }
+          Task {
+            pendingPortableImport = await model.inspectPortableImport(source)
+          }
+        }
+          .disabled(
+            !model.configuration.canPersist || model.operationActive
+              || model.portableInspectionActive)
+        Spacer()
+        Button("Open Data Folder") { model.openDataFolder() }
+          .disabled(!model.dataServicesAvailable)
+      }
+    }
+  }
+
+}
+
+// MARK: - Shared Settings controls
+
+func sectionHeader(
+  _ title: LocalizedStringKey,
+  help: LocalizedStringKey,
+  add: @escaping () -> Void
+) -> some View {
+  HStack {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title).font(.callout.weight(.medium))
+      Text(help).font(.caption).foregroundStyle(.secondary)
+    }
+    Spacer()
+    Button(action: add) { Image(systemName: "plus") }
+      .accessibilityLabel(Text("Add") + Text(" ") + Text(title))
+      .help(Text("Add") + Text(" ") + Text(title))
+  }
+}
+
+func removeButton(
+  _ label: LocalizedStringKey,
+  action: @escaping () -> Void
+) -> some View {
+  Button(role: .destructive, action: action) { Image(systemName: "minus.circle") }
+    .buttonStyle(.borderless)
+    .accessibilityLabel(Text(label))
+    .help(Text(label))
+}
+
+func categoryName(_ category: LinnetBackupStore.Category) -> LocalizedStringKey {
+  switch category {
+  case .customWords: "Custom words"
+  case .disabledWords: "Disabled words"
+  case .textExpander: "Text Expander"
+  case .chineseLearning: "Chinese learning"
+  case .englishLearning: "English learning"
+  }
 }

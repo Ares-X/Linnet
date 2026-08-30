@@ -1,6 +1,0 @@
-# Test-only Settings projection: prove that the non-default trigger replaces,
-# rather than supplements, the bundled semicolon trigger in a deployed schema.
-patch:
-  "schema/name": Linnet Custom Pipe Trigger Probe
-  "recognizer/patterns/linnet_pinyin": "^[|][a-z;']*$"
-  "linnet_pinyin/prefix": "|"

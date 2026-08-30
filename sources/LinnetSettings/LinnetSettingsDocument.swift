@@ -309,7 +309,7 @@ extension LinnetSettingsDocument {
       asciiPunctuationDefault: false,
       singleCharacterSearchDefault: false,
       chineseLearningPolicy: .enhanced,
-      pinyinReverseTrigger: .semicolon
+      pinyinReverseTrigger: .verticalBar
     )
 
     init(
@@ -319,7 +319,7 @@ extension LinnetSettingsDocument {
       asciiPunctuationDefault: Bool,
       singleCharacterSearchDefault: Bool = false,
       chineseLearningPolicy: ChineseLearningPolicy = .enhanced,
-      pinyinReverseTrigger: PinyinReverseTrigger = .semicolon
+      pinyinReverseTrigger: PinyinReverseTrigger
     ) {
       self.chineseProfile = chineseProfile
       self.emojiEnabled = emojiEnabled

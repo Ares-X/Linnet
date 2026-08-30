@@ -74,8 +74,8 @@ enum LinnetSettingsContract {
     case cancel
     case diagnose
     /// User-requested replacement of an installed Core. The running Host may
-    /// accept only after its process-lifetime client ledger proves that every
-    /// prior input application except the Settings requester has exited.
+    /// accept only after Linnet is inactive, composition and data mutation are
+    /// idle, and the requesting Settings process is still alive.
     case activateCore = "activate_core"
     /// Atomically publishes a candidate settings document whose differences
     /// are limited to the panel-live appearance subset, then reconciles and
@@ -136,6 +136,9 @@ enum LinnetSettingsContract {
     case coreActivationInputSourceActive = "core_activation_input_source_active"
     case coreActivationCompositionActive = "core_activation_composition_active"
     case coreActivationDataTransactionActive = "core_activation_data_transaction_active"
+    /// Decode-only compatibility for the published 0.1.9 Host. Remove these
+    /// two wire cases and their cross-version fixtures when the minimum Core
+    /// becomes 0.1.10 for the public 0.1.11 release.
     case coreActivationApplicationsRunning = "core_activation_applications_running"
     case coreActivationUnknownClient = "core_activation_unknown_client"
     case coreActivationRequesterUnavailable = "core_activation_requester_unavailable"
@@ -337,108 +340,6 @@ enum LinnetSettingsContract {
   }
 }
 
-/// Process-lifetime evidence owner for InputMethodKit clients. A controller's
-/// deinit does not prove that its application released the old IMKServer
-/// endpoint, so history is deliberately append-only until the Host exits.
-final class LinnetInputClientLedger: @unchecked Sendable {
-  struct Snapshot: Equatable, Sendable {
-    let bundleIdentifiers: Set<String>
-    let hasUnknownClient: Bool
-    let generation: UInt64
-  }
-
-  private let lock = NSLock()
-  private var bundleIdentifiers = Set<String>()
-  private var hasUnknownClient = false
-  private var generation: UInt64 = 0
-
-  func record(bundleIdentifier: String?) {
-    lock.lock()
-    defer { lock.unlock() }
-    generation &+= 1
-    guard let bundleIdentifier,
-      !bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    else {
-      hasUnknownClient = true
-      return
-    }
-    bundleIdentifiers.insert(bundleIdentifier)
-  }
-
-  func snapshot() -> Snapshot {
-    lock.lock()
-    defer { lock.unlock() }
-    return .init(
-      bundleIdentifiers: bundleIdentifiers,
-      hasUnknownClient: hasUnknownClient,
-      generation: generation
-    )
-  }
-}
-
-/// Pure fail-closed decision owner for the explicit Core activation boundary.
-/// Callers supply current macOS process evidence; this owner never infers that
-/// controller teardown means an application endpoint has disconnected.
-enum LinnetCoreActivationGate {
-  struct RunningApplication: Equatable, Sendable {
-    let processIdentifier: Int32
-    let bundleIdentifier: String?
-    let displayName: String
-  }
-
-  struct Decision: Equatable, Sendable {
-    let blocker: LinnetSettingsContract.CoreActivationBlocker?
-    let applications: [String]
-
-    var isReady: Bool { blocker == nil }
-  }
-
-  static func evaluate(
-    inputSourceIsActive: Bool,
-    compositionIsActive: Bool,
-    dataTransactionIsActive: Bool,
-    history: LinnetInputClientLedger.Snapshot,
-    runningApplications: [RunningApplication],
-    requesterPID: Int32
-  ) -> Decision {
-    if dataTransactionIsActive {
-      return .init(blocker: .dataTransactionActive, applications: [])
-    }
-    if inputSourceIsActive {
-      return .init(blocker: .inputSourceActive, applications: [])
-    }
-    if compositionIsActive {
-      return .init(blocker: .compositionActive, applications: [])
-    }
-    if history.hasUnknownClient {
-      return .init(blocker: .unknownClient, applications: [])
-    }
-    guard let requester = runningApplications.first(where: {
-      $0.processIdentifier == requesterPID
-    }), let requesterBundleIdentifier = requester.bundleIdentifier else {
-      return .init(blocker: .requesterUnavailable, applications: [])
-    }
-
-    var blockingNames = Set<String>()
-    for bundleIdentifier in history.bundleIdentifiers {
-      let matching = runningApplications.filter { $0.bundleIdentifier == bundleIdentifier }
-      guard !matching.isEmpty else { continue }
-      if bundleIdentifier == requesterBundleIdentifier,
-        matching.allSatisfy({ $0.processIdentifier == requesterPID }) {
-        continue
-      }
-      blockingNames.formUnion(matching.map(\.displayName))
-    }
-    guard blockingNames.isEmpty else {
-      return .init(
-        blocker: .applicationsStillRunning,
-        applications: blockingNames.sorted()
-      )
-    }
-    return .init(blocker: nil, applications: [])
-  }
-}
-
 extension LinnetSettingsContract {
   static func productIdentity(startingAt bundle: Bundle = .main) -> ProductIdentity? {
     guard let host = hostBundle(startingAt: bundle),
@@ -546,4 +447,59 @@ extension LinnetSettingsContract {
     return UserDefaults(suiteName: identifier)
   }
 
+}
+
+/// The single interpretation owner for optional HIToolbox selection evidence.
+/// A missing or empty identifier is unknown, never proof that Linnet is inactive.
+enum LinnetInputSourceSelection: Equatable, Sendable {
+  case linnet
+  case other
+  case unknown
+
+  static func classify(
+    currentIdentifier: String?,
+    linnetIdentifier: String
+  ) -> Self {
+    guard let currentIdentifier, !currentIdentifier.isEmpty else {
+      return .unknown
+    }
+    return currentIdentifier == linnetIdentifier ? .linnet : .other
+  }
+}
+
+/// Pure fail-closed decision owner for the explicit Core activation boundary.
+/// Switching away from Linnet ends active input ownership; inactive client
+/// processes do not need to exit before the Host replaces itself.
+enum LinnetCoreActivationGate {
+  struct Decision: Equatable, Sendable {
+    let blocker: LinnetSettingsContract.CoreActivationBlocker?
+
+    var isReady: Bool { blocker == nil }
+  }
+
+  static func evaluate(
+    selectedInputSource: LinnetInputSourceSelection,
+    compositionIsActive: Bool,
+    dataTransactionIsActive: Bool,
+    requesterIsAlive: Bool
+  ) -> Decision {
+    if dataTransactionIsActive {
+      return .init(blocker: .dataTransactionActive)
+    }
+    switch selectedInputSource {
+    case .linnet:
+      return .init(blocker: .inputSourceActive)
+    case .unknown:
+      return .init(blocker: .unknownClient)
+    case .other:
+      break
+    }
+    if compositionIsActive {
+      return .init(blocker: .compositionActive)
+    }
+    guard requesterIsAlive else {
+      return .init(blocker: .requesterUnavailable)
+    }
+    return .init(blocker: nil)
+  }
 }

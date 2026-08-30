@@ -10,6 +10,8 @@ source_core_app="${2:-}"
 edition="${3:-}"
 verification_scope="${4:-}"
 release_tool="${LINNET_RELEASE_TOOL:-}"
+registration_inspector="${project_root}/build/input-source-registration-inspector"
+runtime_inspector="${project_root}/build/linnet-runtime-inspector"
 unset LINNET_RELEASE_TOOL
 
 fail_verification() {
@@ -29,9 +31,15 @@ esac
   fail_verification "SOURCE_CORE_APP must be an absolute App bundle"
 [[ "${release_tool}" == /* && -x "${release_tool}" && ! -L "${release_tool}" ]] ||
   fail_verification "LINNET_RELEASE_TOOL must name the verified pack CLI"
+[[ -f "${registration_inspector}" && ! -L "${registration_inspector}" &&
+   -x "${registration_inspector}" ]] ||
+  fail_verification "input-source registration inspector is unavailable"
+[[ -f "${runtime_inspector}" && ! -L "${runtime_inspector}" &&
+   -x "${runtime_inspector}" ]] ||
+  fail_verification "installed-runtime inspector is unavailable"
 
-for required_tool in bash cmp codesign file find grep installer lipo pkgutil plutil readlink \
-    ruby sed shasum sort stat tr wc xar; do
+for required_tool in bash cmp codesign file find grep installer lipo nm otool pkgutil plutil \
+    readlink ruby sed shasum sort stat tr wc xar; do
   command -v "${required_tool}" >/dev/null 2>&1 ||
     fail_verification "required verification tool is unavailable: ${required_tool}"
 done
@@ -305,23 +313,28 @@ ruby -rjson -rrexml/document -e '
   candidate_identity = JSON.generate(candidate_identity) + "\n"
   identity_helper = File.binread(File.join(
     project, "package/installer-scripts/candidate-app-identity.sh"))
+  registration_inspector = File.binread(File.join(
+    project, "build/input-source-registration-inspector"))
+  runtime_inspector = File.binread(File.join(
+    project, "build/linnet-runtime-inspector"))
   core_scripts = {"candidate-app-identity.json" => [0o644, candidate_identity],
     "candidate-app-identity.sh" => [0o755, identity_helper],
     "candidate-core-version" => [0o644, "#{core_version}\n"],
+    "input-source-registration-inspector" => [0o755, registration_inspector],
+    "linnet-runtime-inspector" => [0o755, runtime_inspector],
     "install-mode" => [0o644, edition == "core" ? "core-update\n" : "complete\n"],
     "preinstall" => [0o755, File.binread(File.join(project, "package/core-installer-scripts/preinstall"))]}
   if edition == "core"
     core_scripts["postinstall"] = [0o755,
       File.binread(File.join(project, "package/installer-scripts/postinstall"))]
-    core_scripts["quit-applications-clean.jxa"] = [0o644,
-      File.binread(File.join(project,
-        "package/installer-scripts/quit-applications-clean.jxa"))]
   end
   script_contracts = {
     "core" => core_scripts,
     "profile" => {"candidate-app-identity.json" => [0o644, candidate_identity],
       "candidate-app-identity.sh" => [0o755, identity_helper],
+      "candidate-core-version" => [0o644, "#{core_version}\n"],
       "install-mode" => [0o644, "complete\n"],
+      "linnet-runtime-inspector" => [0o755, runtime_inspector],
       "postinstall" => [0o755,
         File.binread(File.join(project, "package/installer-scripts/postinstall"))]},
   }
@@ -365,20 +378,55 @@ fi
   "$(stat -f '%Lp' "${core_component}/Payload/Linnet.app/Contents/SharedSupport")" == 755 &&
   -z "$(find "${core_component}/Payload/Linnet.app/Contents/SharedSupport" -mindepth 1 -print -quit)" ]] ||
   fail_verification "Core SharedSupport is not empty"
-expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninstall-mode\npreinstall'
+expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninput-source-registration-inspector\ninstall-mode\nlinnet-runtime-inspector\npreinstall'
 [[ "${edition}" != core ]] || \
-  expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninstall-mode\npostinstall\npreinstall\nquit-applications-clean.jxa'
+  expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninput-source-registration-inspector\ninstall-mode\nlinnet-runtime-inspector\npostinstall\npreinstall'
 actual_core_scripts="$(find "${core_component}/Scripts" -mindepth 1 -maxdepth 1 -type f \
   -exec basename {} \; | LC_ALL=C sort)"
 [[ "${actual_core_scripts}" == "${expected_core_scripts}" ]] ||
   fail_verification "Core compatibility script allowlist mismatch"
 bash -n "${core_component}/Scripts/preinstall"
 bash -n "${core_component}/Scripts/candidate-app-identity.sh"
+[[ "$(lipo -archs "${core_component}/Scripts/input-source-registration-inspector")" == \
+  arm64 ]] || fail_verification "registration inspector is not thin arm64"
+cmp -s "${registration_inspector}" \
+  "${core_component}/Scripts/input-source-registration-inspector" ||
+  fail_verification "registration inspector differs from the canonical build tool"
+inspector_minos="$(otool -l "${registration_inspector}" | awk '
+  $1 == "cmd" && $2 == "LC_BUILD_VERSION" { build = 1; next }
+  build && $1 == "minos" { print $2; exit }
+')"
+[[ "${inspector_minos}" == 13.0 ]] ||
+  fail_verification "registration inspector minimum macOS version changed"
+inspector_symbols="$(nm -u "${registration_inspector}")"
+[[ "$(printf '%s\n' "${inspector_symbols}" | grep -F -c _TISCreateInputSourceList)" == 1 &&
+  "$(printf '%s\n' "${inspector_symbols}" | grep -F -c _TISGetInputSourceProperty)" == 1 ]] ||
+  fail_verification "registration inspector lost its read-only HIToolbox owner"
+if printf '%s\n' "${inspector_symbols}" |
+    grep -E '_TIS(Register|Enable|Select|Disable)InputSource'; then
+  fail_verification "registration inspector gained a HIToolbox mutation path"
+fi
+if otool -L "${registration_inspector}" | tail -n +2 | awk '{ print $1 }' |
+    grep -Ev '^(/System/Library/|/usr/lib/)'; then
+  fail_verification "registration inspector gained a non-system dependency"
+fi
+[[ "$(lipo -archs "${core_component}/Scripts/linnet-runtime-inspector")" == \
+  arm64 ]] || fail_verification "installed-runtime inspector is not thin arm64"
+cmp -s "${runtime_inspector}" \
+  "${core_component}/Scripts/linnet-runtime-inspector" ||
+  fail_verification "installed-runtime inspector differs from the canonical build tool"
+runtime_inspector_minos="$(otool -l "${runtime_inspector}" | awk '
+  $1 == "cmd" && $2 == "LC_BUILD_VERSION" { build = 1; next }
+  build && $1 == "minos" { print $2; exit }
+')"
+[[ "${runtime_inspector_minos}" == 13.0 ]] ||
+  fail_verification "installed-runtime inspector minimum macOS version changed"
+if otool -L "${runtime_inspector}" | tail -n +2 | awk '{ print $1 }' |
+    grep -Ev '^(/System/Library/|/usr/lib/)'; then
+  fail_verification "installed-runtime inspector gained a non-system dependency"
+fi
 if [[ "${edition}" == core ]]; then
   bash -n "${core_component}/Scripts/postinstall"
-  grep -Fq 'NSRunningApplication' \
-    "${core_component}/Scripts/quit-applications-clean.jxa" ||
-    fail_verification "Core application quiescence owner is incomplete"
 fi
 [[ "$(cat "${core_component}/Scripts/candidate-core-version")" == "${core_version}" ]] ||
   fail_verification "Core compatibility candidate version mismatch"
@@ -386,7 +434,7 @@ expected_install_mode="core-update"
 [[ "${edition}" != complete ]] || expected_install_mode=complete
 [[ "$(cat "${core_component}/Scripts/install-mode")" == "${expected_install_mode}" ]] ||
   fail_verification "Core component installation mode mismatch"
-grep -Fq 'check_active_core' "${core_component}/Scripts/preinstall" ||
+grep -Fq 'inspect_runtime || {' "${core_component}/Scripts/preinstall" ||
   fail_verification "Core compatibility preflight is incomplete"
 grep -Fq '"${identity_helper}" existing' "${core_component}/Scripts/preinstall" ||
   fail_verification "Core candidate identity preflight is incomplete"
@@ -517,7 +565,7 @@ if [[ "${edition}" != core ]]; then
   profile_component="${expanded}/${profile_file}"
   [[ "$(find "${profile_component}/Scripts" -mindepth 1 -maxdepth 1 -type f \
     -exec basename {} \; | LC_ALL=C sort)" == \
-    $'candidate-app-identity.json\ncandidate-app-identity.sh\ninstall-mode\npostinstall' ]] ||
+    $'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninstall-mode\nlinnet-runtime-inspector\npostinstall' ]] ||
     fail_verification "profile script allowlist mismatch"
   [[ "$(cat "${profile_component}/Scripts/install-mode")" == complete ]] ||
     fail_verification "profile component installation mode mismatch"
@@ -525,6 +573,9 @@ if [[ "${edition}" != core ]]; then
     fail_verification "postinstall is not executable"
   bash -n "${profile_component}/Scripts/postinstall"
   bash -n "${profile_component}/Scripts/candidate-app-identity.sh"
+  cmp -s "${runtime_inspector}" \
+    "${profile_component}/Scripts/linnet-runtime-inspector" ||
+    fail_verification "profile runtime inspector differs from the canonical build tool"
   grep -Fq '"${identity_helper}" installed' \
     "${profile_component}/Scripts/postinstall" ||
     fail_verification "Complete installed identity gate is incomplete"
@@ -592,7 +643,7 @@ if [[ "${edition}" != core ]]; then
     abort "Distribution profile receipt is not the sequence composite" unless
       receipt_versions.fetch("io.github.ares-x.inputmethod.Linnet.profile.pkg") ==
         expected_profile_version
-    %w[default.yaml squirrel.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml
+    %w[default.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml
        linnet_en.schema.yaml].each do |required|
       # Product expansion keeps component payloads in separate roots, so these
       # cross-component links are intentionally dangling until Installer merges

@@ -23,10 +23,45 @@ struct LinnetPackTests {
     try payloadHashAndTrailingBytesFailClosed()
     try corruptAndTruncatedZlibFailClosed()
     try compressionFixtureIsActuallyCompressed()
+    try englishEntityDictionaryIsOwnedByEnglishPack()
+    try chinesePackRejectsEnglishEntityDictionary()
     try minimumCoreFailsClosed()
     try extendedPackRequiresMatchingChineseABI()
     try unsupportedRequirementFailsClosed()
     print("LinnetPackTests: PASS")
+  }
+
+  private static func englishEntityDictionaryIsOwnedByEnglishPack() throws {
+    try withFixture { registry in
+      let package = registry.downloadsDirectory.appending(
+        path: "english-entities.linnetpack")
+      _ = try makePack(
+        package, path: "linnet_english_entities.dict.yaml",
+        payload: Data("AI\tAI\t1\n".utf8))
+      let active = try registry.verifyAndStagePack(
+        package: package, artifact: try catalogArtifact(package))
+      require(
+        FileManager.default.fileExists(
+          atPath: registry.rootDirectory
+            .appending(path: active.relativePath)
+            .appending(path: "linnet_english_entities.dict.yaml").path),
+        "English entity dictionary ownership")
+    }
+  }
+
+  private static func chinesePackRejectsEnglishEntityDictionary() throws {
+    try withFixture { registry in
+      let package = registry.downloadsDirectory.appending(
+        path: "chinese-cannot-own-english-entities.linnetpack")
+      _ = try makePack(
+        package, kind: .chinese,
+        path: "linnet_english_entities.dict.yaml",
+        payload: Data("AI\tAI\t1\n".utf8))
+      requirePackFailure(.unsafePath("linnet_english_entities.dict.yaml")) {
+        _ = try LinnetPackContract.verify(
+          package: package, coreVersion: "1.0.0")
+      }
+    }
   }
 
   private static func sameVersionNewSequenceUsesDistinctIdentityPath() throws {

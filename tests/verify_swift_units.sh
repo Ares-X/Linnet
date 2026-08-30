@@ -62,7 +62,8 @@ compile_run projection-renderer \
   sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionRendererTests.swift
-compile_run appearance-preview -framework SwiftUI \
+begin_phase "compile and run appearance-preview"
+linnet_swift_compile appearance-preview -warnings-as-errors -sdk "${sdk}" -framework SwiftUI \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
@@ -74,6 +75,14 @@ compile_run appearance-preview -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
   sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift \
   tests/LinnetSettingsAppearancePreviewTests.swift
+preview_app="${scratch}/AppearancePreview.app/Contents"
+mkdir -p "${preview_app}/MacOS" "${preview_app}/Resources"
+cp "${LINNET_SWIFT_COMPILED_BINARY}" "${preview_app}/MacOS/AppearancePreview"
+cp data/squirrel.yaml "${preview_app}/Resources/squirrel.yaml"
+plutil -create xml1 "${preview_app}/Info.plist"
+plutil -insert CFBundleExecutable -string AppearancePreview "${preview_app}/Info.plist"
+"${preview_app}/MacOS/AppearancePreview"
+end_phase "compile and run appearance-preview"
 compile_run settings-page-layout -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsPage.swift \
   tests/LinnetSettingsPageLayoutTests.swift
@@ -130,6 +139,16 @@ compile_run candidate-presentation \
   sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetCandidatePresentation.swift tests/LinnetCandidatePresentationTests.swift
+compile_run candidate-snapshot-builder -target "${target}" -framework AppKit \
+  -import-objc-header sources/Squirrel-Bridging-Header.h \
+  -I librime/dist/include \
+  sources/LinnetPackContract.swift \
+  sources/LinnetDataChannel.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
+  sources/LinnetSettings/SettingsContract.swift \
+  sources/LinnetCandidatePresentation.swift \
+  sources/LinnetRimeCandidateSnapshotBuilder.swift \
+  tests/LinnetRimeCandidateSnapshotBuilderTests.swift
 compile_run macos-keycodes -target "${target}" -framework AppKit \
   -import-objc-header sources/Squirrel-Bridging-Header.h \
   -I librime/dist/include \
@@ -141,9 +160,11 @@ compile_run rime-session-lease -target "${target}" \
 compile_run input-activation-policy \
   sources/LinnetInputActivationPolicy.swift tests/LinnetInputActivationPolicyTests.swift
 compile_run input-source-lifecycle -parse-as-library -framework InputMethodKit -framework Carbon \
-  sources/InputSource.swift tests/LinnetInputSourceLifecycleTests.swift
+  sources/LinnetInputSourceRegistration.swift sources/InputSource.swift \
+  tests/LinnetInputSourceLifecycleTests.swift
 begin_phase "parse Host entrypoints"
-"${swiftc}" -swift-version 5 -parse sources/Main.swift sources/InputSource.swift
+"${swiftc}" -swift-version 5 -parse sources/Main.swift \
+  sources/LinnetInputSourceRegistration.swift sources/InputSource.swift
 end_phase "parse Host entrypoints"
 compile_run preedit-geometry -parse-as-library \
   sources/LinnetPreeditGeometry.swift tests/LinnetPreeditGeometryTests.swift

@@ -20,12 +20,10 @@ RIME_TOOLS = bin/rime_deployer bin/rime_dict_manager
 SMART_ENGLISH_PLUGIN = lib/rime-plugins/librime-smart-english.dylib
 SMART_ENGLISH_SOURCES = plugins/smart_english/smart_english.cc \
 	plugins/smart_english/smart_english_filter.cc \
-	plugins/smart_english/smart_english_index.cc \
-	plugins/smart_english/smart_english_mixed_decoder.cc
+	plugins/smart_english/smart_english_index.cc
 SMART_ENGLISH_HEADERS = plugins/smart_english/smart_english_domain.h \
 	plugins/smart_english/smart_english_filter.h \
-	plugins/smart_english/smart_english_index.h \
-	plugins/smart_english/smart_english_mixed_decoder.h
+	plugins/smart_english/smart_english_index.h
 SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
 	librime/dist/include/rime/gear/selector.h \
 	librime/dist/include/glog/logging.h \
@@ -34,15 +32,23 @@ SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
 ENGLISH_DATA_GENERATOR = build/linnet-english-data-generator
 ENGLISH_DATA_GENERATOR_SOURCES = tools/LinnetEnglishDataSources.swift \
 	tools/LinnetEnglishDataGenerator.swift
-LINNET_PACK_TOOL = build/linnet-pack
-LINNET_PACK_TOOL_SOURCES = sources/LinnetPackContract.swift \
+LINNET_DATA_REGISTRY_SOURCES = sources/LinnetPackContract.swift \
 	sources/LinnetDataChannel.swift \
 	sources/LinnetDataRegistry.swift \
 	sources/LinnetDataRegistryTransactions.swift \
-	sources/LinnetDataRegistryStorage.swift \
+	sources/LinnetDataRegistryStorage.swift
+LINNET_PACK_TOOL = build/linnet-pack
+LINNET_PACK_TOOL_SOURCES = $(LINNET_DATA_REGISTRY_SOURCES) \
 	tools/LinnetDataCatalogBuilder.swift \
 	tools/LinnetPackEncoder.swift \
 	tools/LinnetPackTool.swift
+LINNET_RUNTIME_INSPECTOR = build/linnet-runtime-inspector
+LINNET_RUNTIME_INSPECTOR_SOURCES = $(LINNET_DATA_REGISTRY_SOURCES) \
+	tools/LinnetRuntimeInspector.swift
+INPUT_SOURCE_REGISTRATION_INSPECTOR = build/input-source-registration-inspector
+INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES = \
+	sources/LinnetInputSourceRegistration.swift \
+	tools/LinnetInputSourceRegistrationInspector.swift
 PLUM_DATA = data/plum/default.yaml \
 	data/plum/linnet_algebra.yaml \
 	data/plum/linnet_zh.schema.yaml \
@@ -60,6 +66,7 @@ PLUM_DATA = data/plum/default.yaml \
 	data/plum/linnet_en.schema.yaml \
 	data/plum/linnet_user.yaml \
 	data/plum/linnet_en.dict.yaml \
+	data/plum/linnet_english_entities.dict.yaml \
 	data/plum/linnet_zh.dict.yaml \
 	data/plum/linnet_reviewed.dict.yaml \
 	data/plum/dicts/zi.dict.yaml \
@@ -103,7 +110,8 @@ PRIVATE_CXX_FLAGS = "-ffile-prefix-map=$(abspath .)=Linnet/Workspace" \
 	-fdebug-compilation-dir=.
 
 .PHONY: copy-rime-binaries verify-rime-binaries smart-english-plugin \
-	english-data-generator linnet-pack-tool
+	english-data-generator linnet-pack-tool linnet-runtime-inspector \
+	input-source-registration-inspector
 
 copy-rime-binaries:
 	@set -e; \
@@ -150,6 +158,10 @@ english-data-generator: $(ENGLISH_DATA_GENERATOR)
 
 linnet-pack-tool: $(LINNET_PACK_TOOL)
 
+linnet-runtime-inspector: $(LINNET_RUNTIME_INSPECTOR)
+
+input-source-registration-inspector: $(INPUT_SOURCE_REGISTRATION_INSPECTOR)
+
 $(ENGLISH_DATA_GENERATOR): $(ENGLISH_DATA_GENERATOR_SOURCES)
 	@mkdir -p $(@D)
 	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
@@ -160,6 +172,19 @@ $(LINNET_PACK_TOOL): $(LINNET_PACK_TOOL_SOURCES)
 	@mkdir -p $(@D)
 	$(SWIFTC) -warnings-as-errors -sdk "$(MACOS_SDK)" \
 		$(LINNET_PACK_TOOL_SOURCES) -o $(LINNET_PACK_TOOL)
+
+$(LINNET_RUNTIME_INSPECTOR): $(LINNET_RUNTIME_INSPECTOR_SOURCES)
+	@mkdir -p $(@D)
+	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
+		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 \
+		$(LINNET_RUNTIME_INSPECTOR_SOURCES) -o $(LINNET_RUNTIME_INSPECTOR)
+
+$(INPUT_SOURCE_REGISTRATION_INSPECTOR): $(INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES)
+	@mkdir -p $(@D)
+	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
+		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 -framework Carbon \
+		$(INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES) \
+		-o $(INPUT_SOURCE_REGISTRATION_INSPECTOR)
 
 $(SMART_ENGLISH_PLUGIN): $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
 		$(SMART_ENGLISH_SDK_HEADERS) \
@@ -277,7 +302,8 @@ community-verified: community
 # The stable community PKG follows Squirrel's pkgbuild/component route, then
 # wraps the component with visible license, upstream notice and privacy pages.
 # Creation and static expansion do not install, launch or register the App.
-package: community-verified linnet-pack-tool
+package: community-verified linnet-pack-tool linnet-runtime-inspector \
+	input-source-registration-inspector
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
 	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_package \

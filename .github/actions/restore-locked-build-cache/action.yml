@@ -38,10 +38,11 @@ runs:
         path: |
           build/upstreams
           build/dependencies
+          build/tools
           data/chinese/grammar
           build/linnet-english-cache
           build/linnet-english.fingerprint
-        key: linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/LinnetEnglishDataSources.swift', 'tools/LinnetEnglishDataGenerator.swift', 'data/linnet/**', 'data/chinese/**') }}
+        key: linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'scripts/run_periphery.sh', 'tools/LinnetEnglishDataSources.swift', 'tools/LinnetEnglishDataGenerator.swift', 'data/linnet/**', 'data/chinese/**') }}
         restore-keys: |
           linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
 
@@ -52,10 +53,11 @@ runs:
         path: |
           build/upstreams
           build/dependencies
+          build/tools
           data/chinese/grammar
           build/linnet-english-cache
           build/linnet-english.fingerprint
-        key: linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'tools/LinnetEnglishDataSources.swift', 'tools/LinnetEnglishDataGenerator.swift', 'data/linnet/**', 'data/chinese/**') }}
+        key: linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-${{ hashFiles('upstreams.lock.json', 'patches/**', 'action-install.sh', 'scripts/build-rime-runtime', 'scripts/generate-linnet-lua-embedding', 'scripts/run_periphery.sh', 'tools/LinnetEnglishDataSources.swift', 'tools/LinnetEnglishDataGenerator.swift', 'data/linnet/**', 'data/chinese/**') }}
         restore-keys: |
           linnet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sha256 }}-
 

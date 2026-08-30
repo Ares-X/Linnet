@@ -135,7 +135,8 @@ private struct LinnetArtifact {
 @main
 enum LinnetEnglishDataGenerator {
   private static let outputs = Set([
-    "linnet_en.dict.yaml", "linnet.smart-index.tsv", "linnet.smart.db",
+    "linnet_en.dict.yaml", "linnet_english_entities.dict.yaml",
+    "linnet.smart-index.tsv", "linnet.smart.db",
     "linnet.english-data-manifest.json",
   ])
 
@@ -178,11 +179,16 @@ enum LinnetEnglishDataGenerator {
     defer { if !published { try? manager.removeItem(at: staging) } }
 
     let dictionaryURL = staging.appendingPathComponent("linnet_en.dict.yaml")
+    let entityDictionaryURL = staging.appendingPathComponent(
+      "linnet_english_entities.dict.yaml")
     let indexURL = staging.appendingPathComponent("linnet.smart-index.tsv")
     let databaseURL = staging.appendingPathComponent("linnet.smart.db")
     let manifestURL = staging.appendingPathComponent("linnet.english-data-manifest.json")
-    let dictionaryCounts = try writeDictionary(
+    let dictionaryProjection = try writeDictionary(
       dictionaryURL, snapshot: snapshot, translations: translations)
+    try writeEntityDictionary(
+      entityDictionaryURL, entities: dictionaryProjection.entities,
+      snapshot: snapshot)
     let indexCounts = try writeIndex(
       indexURL, snapshot: snapshot, translations: translations,
       enrichedPinyin: options.enrichedPinyin, embargo: options.pinyinEmbargo)
@@ -195,21 +201,23 @@ enum LinnetEnglishDataGenerator {
       "unexpected English projection artifact")
     try writeManifest(
       manifestURL, options: options, snapshot: snapshot, translations: translations,
-      dictionaryCounts: dictionaryCounts, indexCounts: indexCounts,
-      dictionaryURL: dictionaryURL, indexURL: indexURL, databaseURL: databaseURL)
+      dictionaryCounts: dictionaryProjection.counts, indexCounts: indexCounts,
+      entityCount: dictionaryProjection.entities.count,
+      dictionaryURL: dictionaryURL, entityDictionaryURL: entityDictionaryURL,
+      indexURL: indexURL, databaseURL: databaseURL)
     let finalEntries = try Set(manager.contentsOfDirectory(atPath: staging.path))
     try linnetRequire(
       finalEntries == outputs,
       "incomplete English projection")
     try manager.moveItem(at: staging, to: output)
     published = true
-    return (dictionaryCounts, indexCounts, translations.newWords.count)
+    return (dictionaryProjection.counts, indexCounts, translations.newWords.count)
   }
 
   private static func writeDictionary(
     _ url: URL, snapshot: LinnetEnglishSourceSnapshot,
     translations: LinnetTranslationInputs
-  ) throws -> LinnetDictionaryCounts {
+  ) throws -> (counts: LinnetDictionaryCounts, entities: [String]) {
     struct Row {
       let text: String
       let code: String
@@ -259,7 +267,44 @@ enum LinnetEnglishDataGenerator {
       try writer.append("\n")
     }
     try writer.finish()
-    return .init(entries: rows.count, texts: Set(rows.map(\.text)).count)
+    let entities = Set(rows.compactMap { row -> String? in
+      guard row.text == row.code else { return nil }
+      let bytes = Array(row.text.utf8)
+      guard (2...6).contains(bytes.count),
+        bytes.allSatisfy({ $0 >= 65 && $0 <= 90 })
+      else { return nil }
+      return row.text
+    }).sorted(by: linnetByteLess)
+    return (.init(entries: rows.count, texts: Set(rows.map(\.text)).count), entities)
+  }
+
+  private static func writeEntityDictionary(
+    _ url: URL, entities: [String], snapshot: LinnetEnglishSourceSnapshot
+  ) throws {
+    try linnetRequire(!entities.isEmpty, "English entity projection is empty")
+    let writer = try LinnetBufferedWriter(url)
+    try writer.append(
+      """
+      # Generated locked uppercase entity subset; do not edit.
+      # Uppercase source codes are the compile-time marker consumed by the
+      # Chinese Prism. Runtime input remains lowercase after schema algebra.
+      # SPDX-License-Identifier: GPL-3.0-or-later
+      ---
+      name: linnet_english_entities
+      version: "hallelujah-\(snapshot.lock.hallelujahTag)+rime-ice-\(snapshot.lock.rimeIceTag)"
+      sort: by_weight
+      use_preset_vocabulary: false
+      columns:
+        - text
+        - code
+        - weight
+      ...
+
+      """)
+    for entity in entities {
+      try writer.append("\(entity)\t\(entity)\t1\n")
+    }
+    try writer.finish()
   }
 
   private static func writeIndex(
@@ -506,10 +551,13 @@ enum LinnetEnglishDataGenerator {
     _ url: URL, options: LinnetGeneratorOptions,
     snapshot: LinnetEnglishSourceSnapshot, translations: LinnetTranslationInputs,
     dictionaryCounts: LinnetDictionaryCounts, indexCounts: LinnetIndexCounts,
-    dictionaryURL: URL, indexURL: URL, databaseURL: URL
+    entityCount: Int,
+    dictionaryURL: URL, entityDictionaryURL: URL, indexURL: URL,
+    databaseURL: URL
   ) throws {
     let artifacts = [
       "linnet_en.dict.yaml": try artifact(dictionaryURL).json,
+      "linnet_english_entities.dict.yaml": try artifact(entityDictionaryURL).json,
       "linnet.smart-index.tsv": try artifact(indexURL).json,
       "linnet.smart.db": try artifact(databaseURL).json,
     ]
@@ -524,8 +572,8 @@ enum LinnetEnglishDataGenerator {
     }
     let rime = snapshot.rimeIceCounts
     let manifest: [String: Any] = [
-      "format": 4,
-      "generator": ["name": "LinnetEnglishDataGenerator", "version": 1],
+      "format": 5,
+      "generator": ["name": "LinnetEnglishDataGenerator", "version": 2],
       "sources": [
         "hallelujah": [
           "repository": snapshot.lock.hallelujahRepository,
@@ -582,6 +630,7 @@ enum LinnetEnglishDataGenerator {
       "projection_counts": [
         "dictionary_entries": dictionaryCounts.entries,
         "dictionary_texts": dictionaryCounts.texts,
+        "mixed_entities": entityCount,
         "rime_ice_complement": [
           "overlap_texts": rime.overlapTexts,
           "complement_texts": rime.complementTexts,

@@ -8,8 +8,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
+  product:
     runs-on: macos-latest
+    timeout-minutes: 120
     steps:
       - name: Checkout last commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -19,10 +20,23 @@ jobs:
           # Keep all five source submodules on the lock-owning build path.
           submodules: false
 
-      - name: Install build tools
+      - name: Restore locked build cache once
+        uses: ./.github/actions/restore-locked-build-cache
+        with:
+          save: false
+
+      - name: Restore incremental Swift owner tests read-only
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        with:
+          path: build/swift-unit-cache
+          key: linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install declared build tools once
         run: scripts/install_ci_build_tools.sh quality
 
-      - name: Lint
+      - name: Strict Swift lint
         run: scripts/run_swiftlint.sh
 
       - name: Check language-data release identity changes
@@ -42,57 +56,23 @@ jobs:
       - name: Check release and publication owners
         run: tests/verify_release_automation.sh && tests/verify_publication_owner.sh
 
-  product:
-    needs: quality
-    name: Product ${{ matrix.profile }}
-    strategy:
-      fail-fast: false
-      matrix:
-        profile: [app, swift, rime]
-    runs-on: macos-latest
-    steps:
-      - name: Checkout last commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          submodules: false
+      - name: Hydrate and verify locked inputs once
+        run: ./action-install.sh
 
-      - name: Restore locked build cache
-        uses: ./.github/actions/restore-locked-build-cache
-        with:
-          save: false
+      - name: Build the unsigned local product once
+        run: make --no-print-directory release
 
-      - name: Restore incremental Swift owner tests read-only
-        if: matrix.profile == 'swift'
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
-        with:
-          path: build/swift-unit-cache
-          key: linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: |
-            linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Verify App and package owners
+        run: tests/verify_development.sh app
 
-      - name: Install build tools
-        run: scripts/install_ci_build_tools.sh release
+      - name: Verify visible Settings workflow
+        run: tests/verify_visible_settings_fixture.sh --ui-test
 
-      - name: Prepare and verify ${{ matrix.profile }} profile
-        env:
-          LINNET_CI_PROFILE: ${{ matrix.profile }}
-        run: |
-          set -euo pipefail
-          case "${LINNET_CI_PROFILE}" in
-            app)
-              ./action-build.sh release
-              tests/verify_development.sh app
-              tests/verify_visible_settings_fixture.sh --ui-test
-              ;;
-            swift|rime)
-              ./action-install.sh
-              tests/verify_development.sh "${LINNET_CI_PROFILE}"
-              ;;
-            *) exit 2 ;;
-          esac
+      - name: Verify Swift owner contracts
+        run: tests/verify_development.sh swift
 
-      - name: Check Unused Code
-        if: matrix.profile == 'app'
+      - name: Verify Rime and all input profiles
+        run: tests/verify_development.sh rime
+
+      - name: Check unused production code
         run: scripts/run_periphery.sh

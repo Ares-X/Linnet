@@ -63,6 +63,7 @@ for retired_orphan in \
   action-changelog.sh \
   package/report_size \
   tests/linnet_pinyin_probe.cc \
+  tests/fixtures/linnet_zh_pipe.custom.yaml \
   tests/fixtures/linnet_zh_english_metadata_off.custom.yaml; do
   [[ ! -e "${retired_orphan}" ]] ||
     fail "a retired zero-entry artifact returned: ${retired_orphan}"
@@ -88,7 +89,7 @@ done < <(rg --files sources -g '*.swift' | sort)
 xcrun swift -I "${swift_host_library}" -L "${swift_host_library}" \
   -lSwiftParser -lSwiftSyntax tests/verify_retired_projection_owners.swift \
   "${swift_sources[@]}" ||
-  fail "a retired snapshot, preview, or import-result owner path returned"
+  fail "TIS registration or Settings network transport escaped its single Swift owner"
 rg -Fq 'enum SettingsRuntimeReachability: String, Equatable, Sendable {' \
   sources/LinnetSettings/SettingsRuntimeReachability.swift ||
   fail "the canonical Settings runtime reachability contract is missing"
@@ -142,10 +143,10 @@ ruby -e '
   startup = source[/let delegate = SquirrelApplicationDelegate\(\).*?app\.run\(\)/m]
   abort "Host startup owner is missing" unless startup
   run = startup.index("app.run()")
-  %w[
-    guard\ delegate.setupRime()\ else
-    guard\ delegate.startRime(fullCheck:\ false)\ else
-    guard\ delegate.loadSettings()\ else
+  [
+    "guard delegate.setupRime() else",
+    "guard delegate.startRime(fullCheck: false) else",
+    "guard delegate.loadSettings() else",
   ].each do |marker|
     position = startup.index(marker)
     abort "Host can advertise an input source after #{marker} failed" unless
@@ -341,18 +342,17 @@ ruby -e '
   end
 ' data/linnet/linnet_zh.schema.yaml ||
   fail "the four Settings-owned new-session defaults diverged"
-rg -Fq '  digit_separators: ",.:"' data/linnet/default.yaml ||
-  fail "the Chinese punctuator lost the standard numeric separators"
-rg -Fq '  digit_separator_action: commit' data/linnet/default.yaml ||
-  fail "numeric punctuation regained a delayed next-key commit"
-ruby -e '
-  source = File.read(ARGV.fetch(0))
-  half = source[/^  half_shape:\n.*?(?=^\S|^  [A-Za-z_])/m]
-  abort "half-shape punctuation owner is missing" unless half
-  abort "half-shape punctuator still owns idle Space" if
-    half.match?(/^\s+[\x27\x22] [\x27\x22]\s*:/)
+ruby -ryaml -e '
+  config = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  punctuator = config.fetch("punctuator")
+  abort "numeric separators retained a delayed punctuation state" unless
+    punctuator["digit_separators"] == "" && !punctuator.key?("digit_separator_action")
+  half = punctuator.fetch("half_shape")
+  forbidden = [" ", "/", ",", ".", ":", ";", "\x27", "[", "]", "-", "="]
+  owned = forbidden.select { |key| half.key?(key) }
+  abort "half-shape punctuator still owns host keys: #{owned.join}" unless owned.empty?
 ' data/linnet/default.yaml ||
-  fail "the Chinese half-shape punctuator still consumes idle Space"
+  fail "the Chinese half-shape punctuator still consumes host-owned keys"
 if rg -n 'candidate_list_layout|text_orientation' \
     data/linnet/linnet_en.schema.yaml; then
   fail "the English schema regained a private candidate-layout default"
@@ -363,6 +363,16 @@ rg -Fq "  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA'" \
 rg -Fq '  initials: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA' \
   data/linnet/linnet_en.schema.yaml ||
   fail "Smart English again allows punctuation to start hidden spelling"
+ruby -ryaml -e '
+  ARGV.each do |path|
+    speller = YAML.safe_load(File.read(path), aliases: true).fetch("speller")
+    alphabet = speller.fetch("alphabet")
+    initials = speller.fetch("initials")
+    abort "#{path} lets digits enter Chinese spelling" if
+      alphabet.match?(/[0-9]/) || initials.match?(/[0-9]/)
+  end
+' data/linnet/linnet_zh*.schema.yaml ||
+  fail "Chinese schema digit spelling returned"
 ruby -e '
   document = [File.read(ARGV.fetch(0)), File.read(ARGV.fetch(1))].join("\n")
   renderer = File.read(ARGV.fetch(2))
@@ -466,10 +476,14 @@ rg -Fq 'candidateRanges[itemIndex] =' sources/SquirrelPanel.swift ||
   fail "visual candidate reordering stopped writing geometry back by item offset"
 rg -Fq 'candidate.absoluteIndex' sources/LinnetCandidateAccessibility.swift ||
   fail "candidate accessibility stopped selecting absolute Rime indices"
-if rg -n 'accept: (minus|equal|bracketleft|bracketright), send: Page_(Up|Down)' \
-    data/linnet/default.yaml; then
-  fail "printable paging keys regained unconditional Rime bindings"
-fi
+ruby -e '
+  actual = File.readlines(ARGV.fetch(0), chomp: true).map(&:strip).select do |line|
+    line.match?(/accept: (minus|equal|bracketleft|bracketright),/)
+  end
+  abort "key_binder regained an unconditional printable paging owner" unless
+    actual.empty?
+' data/linnet/default.yaml ||
+  fail "printable paging returned to key_binder"
 if rg -n 'accept: Control\+Shift\+[34], toggle: (ascii_punct|traditionalization)' \
     data/linnet/default.yaml; then
   fail "Settings-owned punctuation or traditional-output defaults regained hidden session shortcuts"
@@ -491,6 +505,14 @@ ruby -e '
   abort "the unified key owner lost the unhandled-key boundary" unless
     owner.include?("unhandled_key_notifier().connect") &&
       owner.include?("OnUnhandledKey")
+  abort "printable paging is no longer one boundary-aware interaction path" unless
+    owner.scan("ProcessPrintablePagingKey(").length == 2 &&
+      owner.include?("candidate_count <= static_cast<int>(next_page_start)") &&
+      owner.include?("selected < static_cast<size_t>(page_size)")
+  abort "digit selection regained a mixed-entity interception path" if
+    owner.include?("ProcessMixedEntityKey") ||
+      owner.include?("CanExtendEntity") ||
+      owner.include?("context->PushInput(next)")
   abort "the translator still reads unhandled key intent" if
     translator.include?("unhandled_key_notifier") ||
       translator.include?("OnUnhandledKey") ||
@@ -601,7 +623,7 @@ ruby -e '
   units = File.read("tests/verify_swift_units.sh")
   abort "application targets do not share the staged Rime API header owner" unless
     project.scan(%q{HEADER_SEARCH_PATHS = "$(SRCROOT)/librime/dist/include";}).length == 2 &&
-      units.scan("-I librime/dist/include").length == 4
+      units.scan("-I librime/dist/include").length == 5
   abort "an unpatched source header can shadow the staged Rime API" if
     project.include?("librime/src") || project.include?("librime/include") ||
       units.match?(/-I librime\/(?:src|include)(?:\s|$)/)
@@ -666,6 +688,37 @@ ruby -e '
       added.include?("SpellingType spelling_type() const") &&
       added.include?("const SpellingType spelling_type_") &&
       added.include?("syllabifier_->SpellingTypeAt(phrase_code_length)")
+  abort "the single ScriptTranslator graph lost its uppercase-entity boundary" unless
+    added.include?(%q{GetBool(name_space_ + "/sentence_with_uppercase_syllable"}) &&
+      added.include?("bool sentence_with_uppercase_syllable_ = false") &&
+      added.include?("find_entity_constraints(syllable_graph, dict)") &&
+      added.include?("EntityConstraints entity_constraints_") &&
+      added.scan("FindRemainingEntry(text)").length == 2 &&
+      added.include?("const bool has_reliable_match") &&
+      added.include?("translator_->sentence_with_uppercase_syllable()") &&
+      added.include?("Poet::PreservedEntryMode::kOnly") &&
+      added.include?("Poet::PreservedEntryMode::kInclude") &&
+      added.include?("set<const DictEntry*>* preserved") &&
+      added.include?("map<int, size_t> system_starts") &&
+      added.include?("system_starts[group.first] = same_start_pos[group.first].size()") &&
+      added.include?("const size_t system_start = system_starts[group.first]") &&
+      added.include?("homophones.begin() + system_start, homophones.end()") &&
+      added.include?("const auto entry = enrolled != homophones.end()") &&
+      added.include?("preserved->insert(entry.get())") &&
+      added.include?("set<const DictEntry*> preserved_entries") &&
+      added.include?("preserved_entries.count(&entry) != 0") &&
+      added.include?("size_t preserved_entry_count") &&
+      added.include?("target_state.ordinary") &&
+      added.include?("target_state.preserved") &&
+      added.include?("preserved_entry_count == 1")
+  abort "the Poet preserve predicate again widened exact graph entries by text" if
+    added.include?("return is_uppercase_entity(entry.text);")
+  abort "an iterator can survive a preserved-entry vector growth again" if
+    added.include?("const auto system_begin = homophones.begin()")
+  abort "a retired post-hoc entity sentence repair returned" if
+    added.include?("make_entity_sentence") ||
+      added.include?("sentence_has_uppercase_entity") ||
+      added.include?("std::remove_if(sentences_.begin(), sentences_.end()")
 ' || fail "the pinned core input-interaction repair regressed"
 ruby -e '
   callers = []
@@ -790,8 +843,10 @@ done
 test "$(rg -l -F 'affix_segmentor@linnet_pinyin' \
   data/linnet/linnet_zh*.schema.yaml | wc -l | tr -d ' ')" -eq 1 ||
   fail "active-profile pinyin lookup must have one standard affix owner"
-rg -Fq 'pinyin_reverse_lookup: "^;[a-z;'"'"']*$"' data/linnet/default.yaml ||
+rg -Fq 'pinyin_reverse_lookup: "^[|][a-z;'"'"']*$"' data/linnet/default.yaml ||
   fail "the bundled reverse-lookup trigger lost its prefix and inner-semicolon states"
+rg -Fq '    prefix: "|"' data/linnet/default.yaml ||
+  fail "the bundled reverse-lookup prefix is not vertical bar"
 rg -Fq 'text_expander: "^x;[-0-9A-Za-z_]*$"' data/linnet/default.yaml ||
   fail "the Settings-owned explicit x; command lost its recognizer"
 rg -Fq '__include: default.yaml:/linnet/pinyin_reverse_lookup' \
@@ -819,16 +874,12 @@ smart_english_main=plugins/smart_english/smart_english.cc
 smart_english_domain=plugins/smart_english/smart_english_domain.h
 smart_english_filter_header=plugins/smart_english/smart_english_filter.h
 smart_english_filter=plugins/smart_english/smart_english_filter.cc
-smart_english_mixed_header=plugins/smart_english/smart_english_mixed_decoder.h
-smart_english_mixed_decoder=plugins/smart_english/smart_english_mixed_decoder.cc
 test "$(wc -l < "${smart_english_main}" | tr -d ' ')" -lt 1500 ||
   fail "the Smart English module owner again exceeds 1500 lines"
 for extracted_owner in \
   "${smart_english_domain}" \
   "${smart_english_filter_header}" \
-  "${smart_english_filter}" \
-  "${smart_english_mixed_header}" \
-  "${smart_english_mixed_decoder}"; do
+  "${smart_english_filter}"; do
   test -f "${extracted_owner}" ||
     fail "the Smart English candidate owner extraction is missing ${extracted_owner}"
   test "$(wc -l < "${extracted_owner}" | tr -d ' ')" -lt 500 ||
@@ -836,56 +887,55 @@ for extracted_owner in \
 done
 rg -Fq 'plugins/smart_english/smart_english_filter.cc' Makefile ||
   fail "the extracted Smart English filter is absent from the plugin build"
-rg -Fq 'plugins/smart_english/smart_english_mixed_decoder.cc' Makefile ||
-  fail "the modeless mixed decoder is absent from the plugin build"
-for extracted_header in smart_english_domain.h smart_english_filter.h \
-  smart_english_mixed_decoder.h; do
+for extracted_header in smart_english_domain.h smart_english_filter.h; do
   rg -Fq "plugins/smart_english/${extracted_header}" Makefile ||
     fail "the extracted Smart English contract is absent from build dependencies: ${extracted_header}"
 done
-test "$(rg -l '^class ModelessMixedDecoder' plugins/smart_english | wc -l | tr -d ' ')" -eq 1 ||
-  fail "modeless mixed generation no longer has one typed owner"
-test "$(rg -F --no-filename 'mixed_decoder_.Query(' plugins/smart_english | wc -l | tr -d ' ')" -eq 1 ||
-  fail "modeless mixed generation gained a second runtime entrypoint"
-for mixed_contract in \
-  'entry->IsExactMatch() && entry->text == uppercase' \
-  'if (start == 0 && length == input.size()) continue;' \
-  'for (const auto& range : ChineseRanges(entities, input.size()))' \
-  'target_ends.count(end.first)' \
-  'user_dictionary->Lookup(syllable_graph, range.first,' \
-  'dictionary->Lookup(syllable_graph, range.first, &blacklist)' \
-  'poet_->MakeSentences(' \
-  'input.size() > kMaximumInputLength' \
-  'result.size() == kMaximumMixedCandidates'; do
-  rg -Fq "${mixed_contract}" "${smart_english_mixed_decoder}" ||
-    fail "modeless mixed generation lost its bounded canonical contract: ${mixed_contract}"
-done
-test "$(rg -F -c 'BuildSyllableGraph(' "${smart_english_mixed_decoder}")" -eq 1 ||
-  fail "modeless mixed generation no longer builds exactly one Chinese SyllableGraph"
-if rg -Fq 'const string suffix = input.substr(start);' \
-    "${smart_english_mixed_decoder}"; then
-  fail "modeless mixed generation regained per-start suffix graph rebuilding"
-fi
-if rg -Fq 'for (const auto& vertex : syllable_graph.edges)' \
-    "${smart_english_mixed_decoder}"; then
-  fail "modeless mixed generation regained duplicate all-vertex dictionary lookup"
-fi
-rg -Fq 'mixed->model_weight() - best_chinese_sentence_weight' \
-  "${smart_english_filter}" ||
-  fail "mixed and canonical Chinese sentences no longer share one model comparison owner"
-rg -Fq 'return has_exact ? !item.mixed : item.preferred_mixed;' \
-  "${smart_english_filter}" ||
-  fail "whole exact English no longer closes before contextual mixed ranking"
-if rg -n 'process_key|ProcessKey|keycode|XK_[0-9]|SelectionIndex|select_keys' \
-    "${smart_english_mixed_header}" "${smart_english_mixed_decoder}"; then
-  fail "modeless mixed generation attempted to own digit or key interaction"
-fi
 for retired_mixed_owner in \
+  plugins/smart_english/smart_english_mixed_decoder.h \
+  plugins/smart_english/smart_english_mixed_decoder.cc \
   plugins/smart_english/smart_english_mixed_projection.h \
   plugins/smart_english/smart_english_mixed_projection.cc; do
   [[ ! -e "${retired_mixed_owner}" ]] ||
-    fail "the retired lossy mixed projection returned: ${retired_mixed_owner}"
+    fail "a retired second mixed-input graph returned: ${retired_mixed_owner}"
 done
+if rg -n 'ModelessMixed|mixed_decoder_|smart_english_mixed_decoder' \
+    Makefile plugins/smart_english; then
+  fail "the retired second mixed-input runtime owner returned"
+fi
+if rg -n 'BuildSyllableGraph|MakeSentences|UserDictionary::Require|new Poet' \
+    "${smart_english_filter}"; then
+  fail "the presentation filter regained a mixed-input graph or dictionary owner"
+fi
+test "$(rg -F -c 'xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/' \
+  data/linnet/linnet_algebra.yaml)" -eq 8 ||
+  fail "the eight profile algebras no longer share one uppercase entity projection"
+for dictionary_root in data/linnet/linnet_zh.dict.yaml \
+  data/linnet/linnet_zh_full.dict.yaml; do
+  test "$(rg -F -c '  - linnet_english_entities' "${dictionary_root}")" -eq 1 ||
+    fail "the Chinese dictionary root lost its English entity edge owner: ${dictionary_root}"
+done
+for translator_contract in '  max_sentences: 3' \
+  '  sentence_with_uppercase_syllable: true'; do
+  rg -Fq "${translator_contract}" data/linnet/linnet_zh.schema.yaml ||
+    fail "the stock ScriptTranslator mixed-input contract drifted: ${translator_contract}"
+done
+if rg -n 'sentence_cutoff_threshold:[[:space:]]*1\.0' data/linnet; then
+  fail "mixed input regained a global ScriptTranslator cutoff override"
+fi
+test "$(rg -F -c 'bool IsMixedChineseCandidate(' "${smart_english_filter}")" -eq 1 ||
+  fail "mixed presentation classification no longer has one owner"
+test "$(rg -F -c 'New<ShadowCandidate>(genuine, kMixedCandidateType' \
+  "${smart_english_filter}")" -eq 1 ||
+  fail "mixed presentation no longer has one non-authoritative candidate projection"
+if rg -n 'sentence->components\(\)|word_lengths\(\)' \
+    "${smart_english_filter}"; then
+  fail "the filter regained a second native sentence/entity inference owner"
+fi
+rg -Fq 'struct PendingSegment {' "${smart_english_filter_header}" ||
+  fail "the exact segment flow lost its typed transport"
+rg -Fq 'bool pinyin_flow = false;' "${smart_english_filter_header}" ||
+  fail "the exact segment flow lost its pinyin-flow fact"
 if rg -n 'xuexicsjiting|liaojieaijishu|shiyongcpuxingneng|学习CS急停|了解AI技术|使用CPU性能' \
     plugins/smart_english; then
   fail "a mixed-input acceptance fixture leaked into production code"
@@ -949,7 +999,7 @@ if rg -n \
   fail "Smart English regained a second Chinese dictionary or spelling owner"
 fi
 if ! ruby -e '
-  owner = File.read(ARGV.fetch(0))
+  owner = ARGV.map { |path| File.read(path) }.join("\n")
   %w[
     phrase->is_exact_match()
     phrase->spelling_type()<kAbbreviation
@@ -959,9 +1009,12 @@ if ! ruby -e '
     has_same_span_chinese
     input_word.size()==1
     single_letter_chinese_input
-    std::exchange(pending_segment_input_,std::nullopt)
+    std::exchange(pending_segment_,std::nullopt)
+    pending_segment?pending_segment->input:string()
+    pending_segment&&pending_segment->pinyin_flow
     composition().input()
-    pending_segment_input_=composition_input.substr(segment->start,segment->end-segment->start)
+    pending_segment_=PendingSegment{
+    segment->HasTag("linnet_pinyin")
   ].each do |contract|
     compact = owner.gsub(/\s+/, "")
     abort "exact-English collision contract is missing #{contract}" unless
@@ -979,9 +1032,12 @@ if ! ruby -e '
   abort "whole-composition bilingual ranking returned" if
     owner.gsub(/\s+/, "").include?("ranking_input=context->input()") ||
       owner.include?("composition().back()")
+  abort "candidate presence again inferred the segment pinyin flow" if
+    owner.gsub(/\s+/, "").include?(
+      "schema_id_!=kSmartEnglishSchema&&has_pinyin")
   abort "a partial-selection fixture leaked into the production ranker" if
     %w[xwvb 下周].any? { |literal| owner.include?(literal) }
-' "${smart_english_filter}"; then
+' "${smart_english_filter_header}" "${smart_english_filter}"; then
   fail "exact-English ranking lost its single typed collision owner"
 fi
 rg -Fq '  contextual_suggestions: false' data/linnet/linnet_zh.schema.yaml ||
@@ -1308,17 +1364,13 @@ test "$(rg -F -o 'LinnetSettingsThemeSurface(' \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
   sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "the theme cards and candidate preview stopped sharing one material surface"
-if rg -n 'textformat\.abc' sources/LinnetSettings/SettingsMain.swift \
-    sources/LinnetSettings/SettingsRootView.swift \
-    sources/LinnetSettings/SettingsViews.swift; then
-  fail "the English Settings mark regained a locale-dependent SF Symbol"
+if rg -n 'Capsule\(|selectionStyle ==' sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift; then
+  fail "the theme cards regained placeholder glyphs or a separate selection renderer"
 fi
-test "$(rg -F -c 'Text(verbatim: "ABC")' sources/LinnetSettings/LinnetSettingsPage.swift)" -eq 1 ||
-  fail "the Settings ABC mark regained a second glyph owner"
-test "$(rg -F -o 'mark: .latinABC' sources/LinnetSettings/SettingsMain.swift \
-  sources/LinnetSettings/SettingsRootView.swift \
-  sources/LinnetSettings/SettingsViews.swift | wc -l | tr -d ' ')" -eq 2 ||
-  fail "the Settings tab and English page must share the fixed ABC mark"
+if rg -n 'LinnetSettingsPageMark|latinABC|mark: \.latinABC|Text\(verbatim: "ABC"\)' \
+    sources/LinnetSettings; then
+  fail "the retired English-tab/page-mark abstraction returned"
+fi
 test "$(rg -F -c 'NSSelectorFromString("windowEffectiveAppearance")' \
   sources/LinnetClientAppearance.swift)" -eq 1 ||
   fail "the optional InputMethodKit client-appearance capability lost its single owner"
@@ -1427,7 +1479,7 @@ test "$(rg -c 'registry\.cancelDataChannelUpdate\(transactionID: update\.transac
 if rg -n 'cancelDataChannelUpdate\(' sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift; then
   fail "the transport coordinator regained language cleanup ownership"
 fi
-if rg -n 'PendingDataChannel|pendingDataChannel|Profiles|ProfileMarker|profilesDirectory|profileDirectory|data-channel\.json|rollback\.json' \
+if rg -n 'PendingDataChannel|pendingDataChannel|ProfileMarker|profilesDirectory|profileDirectory|data-channel\.json|rollback\.json' \
     sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift; then
   fail "a retired second language state file or profile lifecycle returned"
 fi
@@ -1493,33 +1545,41 @@ ruby -e '
   ].map { |path| File.read(path) }.join("\n")
   controller = File.read("sources/SquirrelInputController.swift")
   settings = File.read("sources/LinnetSettings/LinnetSettingsUpdateChecker.swift")
+  settings_main = File.read("sources/LinnetSettings/SettingsMain.swift")
   ui = File.read("sources/LinnetSettings/SettingsDataViews.swift")
-  combined = contract + host + controller + settings + ui
+  combined = contract + host + controller + settings + settings_main + ui
+  selection = contract[/enum LinnetInputSourceSelection:.*?^\}/m]
+  gate = contract[/enum LinnetCoreActivationGate \{.*?^\}/m]
   activation = host[/private func activateInstalledCore\(.*?\n  \}/m]
-  ledger = contract[/final class LinnetInputClientLedger.*?\n\}/m]
-  abort "the explicit Core activation owner is missing" unless activation
-  abort "the process-lifetime input-client ledger is missing" unless ledger
+  abort "the explicit Core activation owner is missing" unless
+    activation && selection && gate
+  abort "optional HIToolbox evidence can again become an inactive source" unless
+    selection.include?("guard let currentIdentifier, !currentIdentifier.isEmpty") &&
+      selection.include?("return .unknown") &&
+      selection.include?("? .linnet : .other") &&
+      gate.include?("selectedInputSource: LinnetInputSourceSelection") &&
+      gate.include?("case .unknown:") && gate.include?(".unknownClient")
+  abort "the retired process-lifetime client ledger returned" if
+    combined.include?("LinnetInputClientLedger") ||
+      combined.include?("coreActivationClientLedger")
   abort "the retired transient Controller-count readiness path returned" if
     combined.match?(/connectedInputClientCount|markInputClient(?:Connected|Disconnected)/)
-  abort "the client ledger can forget a live-process historical endpoint" unless
-    ledger.include?("bundleIdentifiers.insert") &&
-      !ledger.match?(/bundleIdentifiers\.(?:remove|subtract)/)
-  abort "InputMethodKit controller creation no longer records client history" unless
-    controller.scan("coreActivationClientLedger.record").length == 1 &&
-      !controller.include?("coreActivationClientLedger.remove")
   abort "Host activation can bypass its connection or mutation boundaries" unless
     activation.scan("requestCanContinue(request)").length == 2 &&
-      activation.include?("history.generation") &&
       activation.scan("coreActivationDecision(").length == 2 &&
       activation.scan("NSApp.terminate(nil)").length == 1 &&
       !activation.include?("forceTerminate")
   decision = host[/private func coreActivationDecision\(.*?\n  \}/m]
   abort "the Host activation decision is incomplete" unless
     decision &&
-      decision.include?("currentInputSourceID") &&
+      decision.include?("LinnetInputSourceSelection.classify(") &&
+      decision.scan("currentInputSourceID()").length == 1 &&
       decision.include?("hasPendingRimeInput") &&
       decision.include?("activeDataTransaction != nil") &&
-      decision.include?("runningApplications")
+      decision.include?("requesterIsAlive") &&
+      !decision.include?("runningApplications")
+  abort "raw optional input-source evidence regained a business comparison" if
+    combined.match?(/currentInputSourceID\(\)\s*(?:==|!=|\?\?)/)
   abort "Settings can activate an unverified or substituted Host" unless
     settings.include?("reply.code == .coreActivationAccepted") &&
       settings.include?("health.productIdentity == installedIdentity") &&
@@ -1528,8 +1588,10 @@ ruby -e '
   check = settings[/  func check\(\).*?\n  \}/m]
   refresh = settings[/  func refreshRuntime\(\).*?\n  \}/m]
   abort "Core activation is no longer explicitly user initiated" unless
-    ui.include?(%q{Button("Apply Installed Update…")}) &&
+    ui.include?("Button(coreActivationButtonTitle)") &&
       ui.include?("confirmCoreActivation()") &&
+      ui.include?("Your apps stay open") &&
+      !ui.include?("close every other app") &&
       [initializer, check, refresh].compact.none? { |method| method.include?("activateInstalledCore") }
   abort "the running Core identity is not captured at Host process start" unless
     host.include?("processProductIdentity") &&
@@ -1538,9 +1600,16 @@ ruby -e '
     settings.include?("installed == running") &&
       settings.include?("case pending(") &&
       settings.include?("installed: LinnetSettingsContract.ProductIdentity")
+  abort "Settings regained a second installed Core identity projection" unless
+    settings.scan(
+      "LinnetSettingsContract.productIdentity(startingAt: identityBundle)"
+    ).length == 1 &&
+      !settings.match?(/private let current(?:Version|Build)/) &&
+      !settings_main.match?(/^s*let app(?:Version|Build):/i)
   abort "an identity-free Host regained the unsafe immediate-exit path" unless
-    settings.include?("guard let installed, let health else { return .unavailable }") &&
-      settings.include?("return .restartRequired(installed)") &&
+    settings.include?("guard let installed else { return .unavailable(installed: nil) }") &&
+      settings.include?("guard let health else { return .unavailable(installed: installed) }") &&
+      settings.match?(/return installed\.version == identityFreeBridgeTargetVersion\s*\?\s*\.restartRequired\(installed\)\s*:\s*\.unavailable\(installed: installed\)/) &&
       settings.include?("runtimeVersionState.activationIdentities")
   abort "unknown running identity can be inferred from installed files" if
     settings.match?(/running\s*\?\?\s*installed/)
@@ -1553,8 +1622,19 @@ if rg -nF "${retired_catalog_url}" \
     sources tests --glob '*.swift' --glob '*.sh'; then
   fail "the retired mutable GitHub Release catalog endpoint returned"
 fi
-rg -Fq 'FileManager.default.temporaryDirectory' sources/Main.swift ||
-  fail "the disposable log/launch-marker boundary moved"
+if rg -n 'FileManager\.default\.temporaryDirectory|static var logDir' sources/Main.swift; then
+  fail "Host regained a second runtime-log path owner"
+fi
+test "$(rg -F -o 'func prepareRuntimeLogDirectory() throws -> URL' \
+  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift \
+  sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 1 ||
+  fail "Registry lost its single runtime-log path owner"
+rg -Fq 'try? SquirrelApp.dataRegistry.prepareRuntimeLogDirectory()' \
+  sources/SquirrelApplicationRuntime.swift ||
+  fail "Host stopped consuming the Registry-owned runtime-log path"
+if rg -n 'getconf DARWIN_USER_TEMP_DIR|temporary_log_path' package/uninstall-linnet; then
+  fail "uninstall regained an inferred temporary-log path"
+fi
 test "$(rg -o 'reconcileLanguageStorage\(' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 4 ||
   fail "language storage reconciliation must have one owner and three lifecycle callers"
 rg -Fq 'static let languageTransactionMarkerName = ".linnet-language-transaction.json"' \
@@ -1571,8 +1651,6 @@ test "$(rg -o 'environment\.registry\.beginPersonalScratch' \
   fail "full and quick Settings scratch must each be marked once by Registry"
 test "$(rg -o 'validatedPersonalScratch\(' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "personal scratch GC must have one Registry validator and one caller"
-rg -Fq 'try? reconcileLanguageStorage(activeState: state)' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift ||
-  fail "retryable reconciliation can block the validated runtime snapshot"
 test "$(rg -o 'supersededPackCleanups\(' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "immutable-pack cleanup owner is missing"
 ruby -e '
@@ -1636,6 +1714,10 @@ ruby -e '
   deploy = method.index(%q{rimeAPI.deploy_config_file("squirrel.yaml", "config_version")})
   prepare = method.index("warmRimeSession.prepare(using: rimeAPI)")
   publish = method.index("isRimeRunning = true")
+  project = method.index("LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(")
+  initialize = method.index("rimeAPI.initialize(nil)")
+  abort "Core UI configuration is not projected before Rime starts" unless
+    project && initialize && project < initialize
   abort "runtime readiness order changed" unless
     [maintenance, join, deploy, prepare, publish].all? &&
       maintenance < join && join < deploy && deploy < prepare &&
@@ -1653,6 +1735,10 @@ ruby -e '
     method.scan("isRimeRunning = true").length == 1
 ' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "Host can publish runtime readiness before maintenance and session validation"
+
+if rg -n 'data/squirrel.yaml|squirrel_config|chinese\}/squirrel.yaml' package/stage_language_pack_sources; then
+  fail "UI themes returned to the language-pack publisher"
+fi
 
 ruby -e '
   host = ARGV.map { |path| File.read(path) }.join("\n")
@@ -1948,7 +2034,7 @@ ruby -e '
   delegate = ARGV.drop(2).map { |path| File.read(path) }.join("\n")
   activation = source[/func inputSourceDidActivate\(.*?\n  \}/m]
   selection = source[/@objc func inputSourceChanged\(_:\s*Notification\) \{.*?\n  \}/m]
-  fallback = source[/private func finalizeStrandedComposition\(\).*?\n  \}/m]
+  fallback = source[/private func finalizeStrandedComposition\(.*?\n  \}/m]
   activate = controller[/override func activateServer\(.*?\n  \}/m]
   deactivate = controller[/override func deactivateServer\(.*?\n  \}/m]
   teardown = controller[/deinit \{.*?\n  \}/m]
@@ -1962,10 +2048,22 @@ ruby -e '
     status && visibility && status < visibility
   abort "selection fallback can run reentrantly inside the native IMK transition" unless
     selection.include?("DispatchQueue.main.async") &&
-      selection.include?("updateStatusItemVisibility()") &&
-      selection.include?("finalizeStrandedComposition()")
+      selection.scan("currentInputSourceID()").length == 1 &&
+      selection.include?("let selectedSource = LinnetInputSourceSelection.classify(") &&
+      selection.include?("updateStatusItemVisibility(for: selectedSource)") &&
+      selection.include?("finalizeStrandedComposition(selectedSource: selectedSource)")
+  setup = source[/private func setupStatusItem\(\).*?\n  \}/m]
+  visibility_owner = source[/private func updateStatusItemVisibility\(\n    for selectedSource:.*?\n  \}/m]
+  abort "unknown input-source evidence can change status visibility" unless
+    setup && visibility_owner && setup.include?("item.isVisible = false") &&
+      visibility_owner.include?("case .linnet:") &&
+      visibility_owner.include?("case .other:") &&
+      visibility_owner.include?("case .unknown:") &&
+      visibility_owner.include?("break")
   abort "stranded-composition fallback no longer exits the panel-bound native client" unless
-      fallback.scan("SquirrelInstaller.currentInputSourceID()").length == 1 &&
+      fallback.include?("selectedSource: LinnetInputSourceSelection") &&
+      fallback.include?("guard selectedSource == .other else { return }") &&
+      !fallback.include?("currentInputSourceID") &&
       fallback.include?("let inputController = panel?.inputController") &&
       fallback.include?("let activeClient = inputController.activeClient") &&
       fallback.include?("inputController.deactivateServer(activeClient)")
@@ -1986,7 +2084,7 @@ ruby -e '
   abort "native deactivation can clear a replacement client" unless
     retire && commit_raw && retire < commit_raw && !deactivate.include?("===")
   abort "native deactivation regained input-source inference" if
-    deactivate.include?("SquirrelInstaller.currentInputSourceID()")
+    deactivate.include?("LinnetInputSourceRegistration.currentInputSourceID()")
   abort "controller teardown no longer destroys exactly its Rime session" unless
     teardown.scan("destroySession()").length == 1 &&
       !teardown.include?("Activation")
@@ -2047,9 +2145,9 @@ ruby -e '
   abort "the Settings Scene does not consume the canonical window metrics" unless
     settings.include?("minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth") &&
       settings.include?("idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth") &&
-      settings.include?("minHeight: LinnetSettingsLayoutMetrics.windowHeight") &&
-      settings.include?("height: LinnetSettingsLayoutMetrics.windowHeight") &&
-      settings.scan("LinnetSettingsLayoutMetrics.windowHeight").length == 2
+      settings.include?("minHeight: LinnetSettingsLayoutMetrics.minimumWindowHeight") &&
+      settings.include?("idealHeight: LinnetSettingsLayoutMetrics.defaultWindowHeight") &&
+      settings.include?("height: LinnetSettingsLayoutMetrics.defaultWindowHeight")
   abort "Settings root is missing" unless root.include?("struct SettingsRootView: View")
   conflict = root.index("if model.configuration.hasExternalConflict")
   tabs = root.index("TabView {")
@@ -2113,10 +2211,13 @@ ruby -e '
   page = File.read("sources/LinnetSettings/LinnetSettingsPage.swift")
   views = File.read("sources/LinnetSettings/SettingsViews.swift")
   input = views[/struct InputTabView: View \{.*?\n\}\n\n\/\/ MARK: - Dictionary/m]
-  dictionary = views[/struct DictionaryTabView: View \{.*?\n\}\n\n\/\/ MARK: - English/m]
-  english = views[/struct EnglishTabView: View \{.*?\n\}\n\n\/\/ MARK: - Data/m]
+  dictionary = views[/struct DictionaryTabView: View \{.*?\n\}\n\n\/\/ MARK: - Data/m]
   appearance = views[/struct AppearanceTabView: View \{.*?\n\}\n\n\/\/ MARK: - Input/m]
-  abort "Settings page sections are missing" unless input && dictionary && english && appearance
+  abort "Settings page sections are missing" unless input && dictionary && appearance
+  abort "Smart English regained a separate Settings page" if
+    views.include?("struct EnglishTabView: View")
+  abort "the Input page lost its Smart English section" unless
+    input.include?(%q{GroupBox("Smart English")})
   abort "an editable Settings collection regained mutable-index identity" if
     dictionary.include?("disabledWords.indices") ||
       dictionary.include?("disabledWords[index]") ||
@@ -2127,18 +2228,15 @@ ruby -e '
        expansionValueBinding expansionTriggerBinding].all? { |owner| dictionary.include?(owner) }
   abort "the retired single-item Advanced disclosure returned" if
     input.include?(%q{DisclosureGroup("Advanced")})
-  abort "the responsive two-column Settings owner count changed" unless
+  abort "the adaptive two-column Settings owner count changed" unless
     page.scan("struct LinnetSettingsTwoColumnLayout").length == 1
   layout = page[/struct LinnetSettingsTwoColumnLayout.*?\n\}/m]
-  abort "the Settings two-column owner is missing" unless layout
-  abort "the Settings preview may still fall below the controls" if
-    layout.include?("ViewThatFits") || layout.include?("VStack")
-  abort "the Settings two-column owner no longer has one horizontal path" unless
-    layout.scan("HStack").length == 1
-  abort "Appearance, Input, and English must share the two-column layout owner" unless
-    [appearance, input, english].all? { |section|
-      section.scan("LinnetSettingsTwoColumnLayout").length == 1
-    }
+  abort "the Settings adaptive layout owner is incomplete" unless
+    layout && layout.scan("ViewThatFits").length == 1 &&
+      layout.scan("HStack").length == 1 && layout.scan("VStack").length == 1
+  abort "Appearance and Input must share the adaptive layout owner" unless
+    appearance.scan("LinnetSettingsTwoColumnLayout").length == 1 &&
+      input.scan("LinnetSettingsTwoColumnLayout").length == 2
 ' || fail "Settings bilingual two-column layout ownership regressed"
 
 test -f sources/LinnetSettings/SettingsWindowCloseGuard.swift ||
@@ -2258,10 +2356,11 @@ ruby -rjson -e '
 ' || fail "Settings localization coverage regressed"
 ruby -e '
   source = File.read("sources/InputSource.swift")
+  registration = File.read("sources/LinnetInputSourceRegistration.swift")
   register = source[/func register\(\) throws \{.*?\n  \}/m]
   abort "the sole first-install registration owner is missing" unless
     register && register.scan("TISRegisterInputSource").length == 1 &&
-      register.include?("inputSources(identifier:") &&
+      register.include?("LinnetInputSourceRegistration.state(identifier:") &&
       register.include?("already registered")
   forbidden = %w[
     TISDisableInputSource
@@ -2273,11 +2372,31 @@ ruby -e '
     returned.empty?
   abort "TIS registration gained a second owner" unless
     source.scan("TISRegisterInputSource").length == 1
+  abort "the typed read-only registration owner is incomplete" unless
+    registration.scan("static func classify(_ sources:").length == 1 &&
+      registration.scan("static func state").length == 1 &&
+      registration.scan("static func currentInputSourceID()").length == 1 &&
+      registration.include?("registered:bundle-match:path-unknown") &&
+      registration.include?("case duplicate(count: Int)") &&
+      registration.include?("case conflictingIdentity") &&
+      registration.include?("case unknownBundleIdentifier")
+  abort "the retired uninstall-only TIS selection classifier returned" if
+    registration.include?("CurrentSelection") ||
+      registration.include?("classifyCurrentSelection") ||
+      registration.include?("currentSelection(identifier:")
   forbidden_mutations = %w[TISEnableInputSource TISSelectInputSource]
-  returned_mutations = forbidden_mutations.select { |name| source.include?(name) }
+  returned_mutations = forbidden_mutations.select do |name|
+    source.include?(name) || registration.include?(name)
+  end
   abort "programmatic input-source activation returned: #{returned_mutations.join(", ")}" unless
     returned_mutations.empty?
 ' || fail "install-boundary input-source availability regressed"
+if [[ -e package/installer-scripts/quit-applications-clean.jxa ]] ||
+    rg -n '/usr/bin/osascript|quit-applications-clean\.jxa' \
+      package/core-installer-scripts/preinstall package/make_package \
+      package/verify_package; then
+  fail "Core Installer regained an application-quiescence owner"
+fi
 if rg -n 'community-adhoc|sign_adhoc_code|verify_community_code|inspect-community-contract|sign-community-product|verify-publication-product|unsigned-community' \
     scripts/linnet-code-identity scripts/generate-release-metadata \
     Makefile action-build.sh package/make_archive package/make_package \
@@ -2534,9 +2653,23 @@ if rg -n 'struct Source|sourceProvider|registerInputSource:' sources/InputSource
 fi
 rg -Fq -- '--register-input-source' sources/Main.swift ||
   fail "install-boundary input-source registration command is missing"
+if rg -Fq -- '--inspect-input-source-registration' sources/Main.swift; then
+  fail "the retired installed-Host inspection entrypoint returned"
+fi
 if rg -n -- '--activate-input-source|--select-input-source|--disable-input-source|--refresh-core-input-source' \
     sources/Main.swift package/installer-scripts; then
   fail "Installer regained an activation, selection, disablement, or refresh command"
+fi
+test "$(rg -F -c -- '"${registration_inspector}"' \
+  package/core-installer-scripts/preinstall)" -ge 2 ||
+  fail "Core preinstall lost its package-owned read-only TIS gate"
+if rg -Fq -- '"${executable}" --inspect-input-source-registration' \
+    package/core-installer-scripts/preinstall; then
+  fail "Core preinstall can still invoke an incompatible installed Host"
+fi
+if rg -n -- '--register-input-source|TISRegisterInputSource' \
+    package/core-installer-scripts/preinstall; then
+  fail "Core preinstall regained a TIS mutation path"
 fi
 test "$(rg -F -c -- '"${executable}" --register-input-source' \
   package/installer-scripts/postinstall)" = 1 ||
@@ -2633,28 +2766,41 @@ rg -Fq 'else if statusTimer == nil {' sources/SquirrelPanel.swift ||
 rg -Fq 'func handlePassiveEmptyUpdate(' sources/SquirrelPanel.swift ||
   fail "passive empty updates no longer defer to the candidate panel"
 
-# The Host owns the explicit cross-process activation request after opening the
-# embedded Settings app. Settings owns only ordering its own key window once
-# AppKit delivers activation/reopen; neither side may infer another window.
+# Settings owns activation and ordering of its own key window. The Host only
+# launches the embedded app, so direct launch and reopen use the same owner and
+# never depend on a cross-process activation race.
 ruby -e '
   source = File.read(ARGV.fetch(0))
   host = File.read(ARGV.fetch(1))
-  owner = source[/private func presentSettingsWindow\(.*?\n  \}/m]
+  owner = source[/private func presentSettingsWindowIfReady\(.*?\n  \}/m]
   opener = host[/@objc func openSettings\(\) \{.*?\n  \}\n\n  static func showMessage/m]
   abort "Settings lost its reopen activation owner" unless owner &&
-    source.include?("applicationShouldHandleReopen") && opener
+    source.include?("applicationDidFinishLaunching") &&
+      source.include?("applicationDidUpdate") &&
+      source.include?("applicationShouldHandleReopen") && opener
+  abort "Settings lost its pending cold-launch presentation request" unless
+    source.include?("private var settingsWindowPresentationPending = false") &&
+      source.include?("private func requestSettingsWindowPresentation")
+  abort "Settings launch still guesses that one run-loop turn creates its window" if
+    source[/func applicationDidFinishLaunching\(.*?\n  \}/m]&.include?("DispatchQueue.main.async")
+  abort "Settings regained a post-activation presentation fallback" if
+    source[/func applicationDidBecomeActive\(.*?\n  \}/m]&.include?("presentSettingsWindow")
   abort "Settings no longer orders exactly its own key window" unless
     owner.scan("window.makeKeyAndOrderFront(nil)").length == 1
-  abort "Settings regained a duplicate in-process activation owner" if
-    owner.include?("application.activate(")
-  abort "the Host does not activate the exact opened Settings process" unless
-    opener.include?(") { runningApplication, error in") &&
-      opener.include?("guard error == nil, let runningApplication else") &&
-      opener.scan("runningApplication.activate(").length == 1 &&
-      opener.include?(".activateAllWindows") &&
+  abort "Settings no longer restores its own window on the current Space" unless
+    owner.scan("window.deminiaturize(nil)").length == 1 &&
+      owner.scan("window.collectionBehavior.insert(.moveToActiveSpace)").length == 1
+  activation = owner.index("application.activate(ignoringOtherApps: true)")
+  movement = owner.index("window.collectionBehavior.insert(.moveToActiveSpace)")
+  ordering = owner.index("window.makeKeyAndOrderFront(nil)")
+  abort "Settings no longer owns current-Space activation before ordering" unless
+    activation && movement && ordering && movement < activation && activation < ordering
+  abort "the Host regained a competing Settings activation owner" if
+    opener.include?("runningApplication.activate(") ||
+      opener.include?(".activateAllWindows") ||
       opener.include?(".activateIgnoringOtherApps")
-  abort "the unreliable implicit Settings activation path returned" if
-    opener.include?("configuration.activates = true")
+  abort "the Host no longer suppresses LaunchServices default activation" unless
+    opener.scan("configuration.activates = false").length == 1
   abort "Settings gained a competing floating or unconditional window owner" if
     source.match?(/orderFrontRegardless|\.level\s*=|setActivationPolicy|asyncAfter/)
 ' sources/LinnetSettings/SettingsApplication.swift \
