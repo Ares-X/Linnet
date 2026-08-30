@@ -1364,6 +1364,9 @@ test "$(rg -F -o 'LinnetSettingsThemeSurface(' \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
   sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift | wc -l | tr -d ' ')" -eq 2 ||
   fail "the theme cards and candidate preview stopped sharing one material surface"
+if rg -n 'Capsule\(|selectionStyle ==' sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift; then
+  fail "the theme cards regained placeholder glyphs or a separate selection renderer"
+fi
 if rg -n 'LinnetSettingsPageMark|latinABC|mark: \.latinABC|Text\(verbatim: "ABC"\)' \
     sources/LinnetSettings; then
   fail "the retired English-tab/page-mark abstraction returned"
@@ -1711,6 +1714,10 @@ ruby -e '
   deploy = method.index(%q{rimeAPI.deploy_config_file("squirrel.yaml", "config_version")})
   prepare = method.index("warmRimeSession.prepare(using: rimeAPI)")
   publish = method.index("isRimeRunning = true")
+  project = method.index("LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(")
+  initialize = method.index("rimeAPI.initialize(nil)")
+  abort "Core UI configuration is not projected before Rime starts" unless
+    project && initialize && project < initialize
   abort "runtime readiness order changed" unless
     [maintenance, join, deploy, prepare, publish].all? &&
       maintenance < join && join < deploy && deploy < prepare &&
@@ -1728,6 +1735,10 @@ ruby -e '
     method.scan("isRimeRunning = true").length == 1
 ' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
   fail "Host can publish runtime readiness before maintenance and session validation"
+
+if rg -n 'data/squirrel.yaml|squirrel_config|chinese\}/squirrel.yaml' package/stage_language_pack_sources; then
+  fail "UI themes returned to the language-pack publisher"
+fi
 
 ruby -e '
   host = ARGV.map { |path| File.read(path) }.join("\n")

@@ -1,10 +1,12 @@
 import AppKit
 import Darwin
 import Foundation
+import SwiftUI
+import Vision
 
 @main
 struct LinnetSettingsAppearancePreviewTests {
-  static func main() {
+  @MainActor static func main() {
     testPreviewDisclosureStateIsPerLanguage()
     testBundledThemeSourceIsComplete()
     testCatalogOwnsThemePairs()
@@ -13,11 +15,58 @@ struct LinnetSettingsAppearancePreviewTests {
     testThemePairsRemainDistinctAndReadable()
     testTranslucentSelectionContrast()
     testMoonJadeAndNativeGlassVisualRoles()
+    testSlateAndMoonHaveDifferentVisualStructures()
     testSystemModeAndTypographyStayDraftDerived()
     testPreviewUsesSelectedPageSize()
     testPreviewUsesTheCanonicalBilingualFontCascade()
     testMalformedThemeDataFailsClosed()
+    testThemeCardsShowReadableCandidates()
     print("LinnetSettingsAppearancePreviewTests: PASS")
+  }
+
+  @MainActor
+  private static func testThemeCardsShowReadableCandidates() {
+    _ = NSApplication.shared
+    let originalAppearance = NSApp.appearance
+    defer { NSApp.appearance = originalAppearance }
+    for name in [NSAppearance.Name.aqua, .darkAqua] {
+      NSApp.appearance = NSAppearance(named: name)
+      verifyThemeCards(appearance: name)
+    }
+  }
+
+  @MainActor
+  private static func verifyThemeCards(appearance: NSAppearance.Name) {
+    for width in [CGFloat(680), 900] {
+      let view = NSHostingView(rootView: LinnetSettingsThemeFamilyPicker(
+        selection: .constant(.nativeGlass), mode: .constant(.system))
+        .padding(16).frame(width: width)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.colorScheme, appearance == .darkAqua ? .dark : .light))
+      view.appearance = NSAppearance(named: appearance)
+      view.frame.size = view.fittingSize
+      view.layoutSubtreeIfNeeded()
+      guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+        fail("theme picker cannot render its actual view")
+      }
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      guard let image = bitmap.cgImage else { fail("theme picker image is empty") }
+      let request = VNRecognizeTextRequest()
+      request.recognitionLanguages = ["zh-Hans", "en-US"]
+      request.recognitionLevel = .accurate
+      do {
+        try VNImageRequestHandler(cgImage: image).perform([request])
+      } catch { fail("theme preview OCR unavailable: \(error)") }
+      let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
+      let samples = text.components(separatedBy: "输入").count - 1
+      require(samples >= 14,
+        "\(appearance) \(width)pt theme picker must show a readable Light/Dark candidate for all seven themes; found \(samples): \(text)")
+      if width == 900, let png = bitmap.representation(using: .png, properties: [:]) {
+        do {
+          try png.write(to: URL(fileURLWithPath: "build/settings-theme-preview-\(appearance.rawValue).png"))
+        } catch { fail("cannot save rendered theme evidence: \(error)") }
+      }
+    }
   }
 
   private static func testPreviewDisclosureStateIsPerLanguage() {
@@ -134,7 +183,7 @@ struct LinnetSettingsAppearancePreviewTests {
     let expectedRadii: [LinnetSettingsDocument.ThemeFamily: (Double, Double)] = [
       .paperLedger: (7, 0),
       .moonJade: (10, 0),
-      .sidecarSlate: (9, 0),
+      .sidecarSlate: (4, 2), // Crisp opaque Slate tiles, distinct from Moon's bar.
       .clayTiles: (12, 7),
       .mistJade: (10, 6),
       .nativeGlass: (10, 6),
@@ -263,6 +312,19 @@ struct LinnetSettingsAppearancePreviewTests {
         .map(Int.init).min()!
       require(backgroundSpread <= 4,
               "standard Native Glass must remain neutral instead of inheriting an artistic tint")
+    }
+  }
+
+  private static func testSlateAndMoonHaveDifferentVisualStructures() {
+    let catalog = canonicalCatalog()
+    guard let moon = catalog.pair(for: .moonJade), let slate = catalog.pair(for: .sidecarSlate) else {
+      fail("missing Moon/Slate themes")
+    }
+    for (moonScheme, slateScheme) in [(moon.light, slate.light), (moon.dark, slate.dark)] {
+      require(moonScheme.selectionStyle == .bar && slateScheme.selectionStyle == .tile,
+              "Moon and Slate must not differ only by a slight color shift")
+      require(slateScheme.highlightedCornerRadius <= 3 && !slateScheme.isTranslucent,
+              "Slate must retain crisp opaque selection instead of another rounded glass tile")
     }
   }
 

@@ -91,6 +91,31 @@ enum LinnetSettingsProjectionRenderer {
     return changed
   }
 
+  /// Core owns the base UI configuration; Rime still applies the document's
+  /// squirrel.custom.yaml with its normal compiler. Installed legacy packs may
+  /// retain their immutable copy, but it is not the presentation source.
+  static func reconcileCoreConfiguration(
+    source: URL, to directory: URL, stagingDirectory: URL
+  ) throws {
+    try requireDirectory(directory)
+    try requireDirectory(stagingDirectory)
+    let name = "squirrel.yaml"
+    guard let data = try existingData(at: source, name: name), !data.isEmpty else {
+      throw Failure.unsafeFile(name)
+    }
+    let destination = directory.appending(path: name)
+    guard try existingData(at: destination, name: name) != data else { return }
+    // Rime's compiled-config freshness is second-resolution mtime based. A
+    // changed Core must also invalidate this one rebuildable output when two
+    // candidates are installed within the same second, or config_version stays
+    // unchanged. Never invalidate dictionaries or user learning data.
+    let compiled = stagingDirectory.appending(path: name)
+    if try existingData(at: compiled, name: name) != nil {
+      try FileManager.default.removeItem(at: compiled)
+    }
+    try data.write(to: destination, options: .atomic)
+  }
+
   enum Failure: LocalizedError, Equatable, Sendable {
     case unsafeFile(String)
 

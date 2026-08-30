@@ -164,7 +164,7 @@ extension LinnetDataRegistry {
     else { throw Failure.invalidActiveState }
 
     for required in [
-      "default.yaml", "squirrel.yaml", "linnet_zh.schema.yaml",
+      "default.yaml", "linnet_zh.schema.yaml",
       "linnet_zh.dict.yaml", "linnet_en.schema.yaml",
       "wanxiang-lts-zh-hans.gram"
     ] where expectedTargets[required] == nil {

@@ -117,6 +117,8 @@ settings_executable="${settings_app}/Contents/MacOS/Settings"
 
 cmp -s data/squirrel.yaml "${settings_app}/Contents/Resources/squirrel.yaml" ||
   fail "embedded Settings squirrel.yaml is stale"
+cmp -s data/squirrel.yaml "${host_app}/Contents/Resources/squirrel.yaml" ||
+  fail "Core and Settings must ship the same canonical UI configuration"
 embedded_uuid="$(dwarfdump --uuid "${settings_executable}" | awk '{print $2 ":" $3}')"
 standalone_executable="${repo_root}/build/Build/Products/Release/Settings.app/Contents/MacOS/Settings"
 [[ -x "${standalone_executable}" ]] || fail "standalone Settings build product is missing"
@@ -413,7 +415,7 @@ for kind in chinese english lts extended; do
   case "${kind}" in
     chinese)
       mkdir "${source}/build"
-      for payload in default.yaml squirrel.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml; do
+      for payload in default.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml; do
         printf '%s\n' "${kind} ${payload} visible Settings fixture" >"${source}/${payload}"
       done
       printf '%s\n' "${kind} build visible Settings fixture" >"${source}/build/default.yaml"
@@ -438,7 +440,8 @@ for kind in chinese english lts extended; do
   pack_roots+=("${pack_root}")
 done
 
-LINNET_RELEASE_TOOL="${release_tool}" LINNET_CORE_VERSION=0.1.1 \
+LINNET_RELEASE_TOOL="${release_tool}" \
+  LINNET_CORE_VERSION="$(plutil -extract CFBundleShortVersionString raw -o - "${host_app}/Contents/Info.plist")" \
   package/build_activation_profile complete "${runtime_root}" \
     "${pack_roots[0]}" "${pack_roots[1]}" "${pack_roots[2]}" "${pack_roots[3]}"
 

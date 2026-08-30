@@ -643,7 +643,7 @@ if [[ "${edition}" != core ]]; then
     abort "Distribution profile receipt is not the sequence composite" unless
       receipt_versions.fetch("io.github.ares-x.inputmethod.Linnet.profile.pkg") ==
         expected_profile_version
-    %w[default.yaml squirrel.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml
+    %w[default.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml
        linnet_en.schema.yaml].each do |required|
       # Product expansion keeps component payloads in separate roots, so these
       # cross-component links are intentionally dangling until Installer merges

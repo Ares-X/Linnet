@@ -222,7 +222,7 @@ extension LinnetSettingsUpdateChecker {
           at: LinnetSettingsDownloadSource.canonicalCatalogURL)
         try Task.checkCancellation()
         let catalog = try LinnetDataChannel.verifyPublished(data).catalog
-        let result = catalog.updateAvailability(
+        let result = try catalog.updateAvailability(
           currentVersion: currentVersion, currentBuild: currentBuild,
           edition: edition, installedPacks: installedPacks)
         await self?.finish(result, cycle: activeCycle)

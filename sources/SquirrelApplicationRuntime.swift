@@ -75,6 +75,12 @@ extension SquirrelApplicationDelegate {
     }
     let settingsSnapshot: LinnetSettingsDocumentStore.Snapshot
     do {
+      guard let source = Bundle.main.url(forResource: "squirrel", withExtension: "yaml"),
+        let runtime = runtimeDataSnapshot
+      else { throw LinnetSettingsProjectionRenderer.Failure.unsafeFile("squirrel.yaml") }
+      try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+        source: source, to: runtime.userDataDirectory,
+        stagingDirectory: runtime.stagingDirectory)
       settingsSnapshot = try reconcileLiveSettings()
     } catch {
       print("Linnet settings reconciliation failed.")
@@ -98,9 +104,9 @@ extension SquirrelApplicationDelegate {
       // Maintenance disables Service::CreateSession. Do not publish Host
       // readiness or deploy another config task until its worker has exited.
       rimeAPI.join_maintenance_thread()
-      guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else {
-        return failStart("Linnet runtime configuration deployment failed.")
-      }
+    }
+    guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else {
+      return failStart("Linnet runtime configuration deployment failed.")
     }
     guard warmRimeSession.prepare(using: rimeAPI) != nil else {
       return failStart("Linnet runtime session readiness check failed.")

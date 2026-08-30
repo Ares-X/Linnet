@@ -62,7 +62,8 @@ compile_run projection-renderer \
   sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionRendererTests.swift
-compile_run appearance-preview -framework SwiftUI \
+begin_phase "compile and run appearance-preview"
+linnet_swift_compile appearance-preview -warnings-as-errors -sdk "${sdk}" -framework SwiftUI \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
@@ -74,6 +75,14 @@ compile_run appearance-preview -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsAppearancePreview.swift \
   sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift \
   tests/LinnetSettingsAppearancePreviewTests.swift
+preview_app="${scratch}/AppearancePreview.app/Contents"
+mkdir -p "${preview_app}/MacOS" "${preview_app}/Resources"
+cp "${LINNET_SWIFT_COMPILED_BINARY}" "${preview_app}/MacOS/AppearancePreview"
+cp data/squirrel.yaml "${preview_app}/Resources/squirrel.yaml"
+plutil -create xml1 "${preview_app}/Info.plist"
+plutil -insert CFBundleExecutable -string AppearancePreview "${preview_app}/Info.plist"
+"${preview_app}/MacOS/AppearancePreview"
+end_phase "compile and run appearance-preview"
 compile_run settings-page-layout -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsPage.swift \
   tests/LinnetSettingsPageLayoutTests.swift

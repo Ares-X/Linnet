@@ -57,6 +57,37 @@ enum LinnetDataChannel {
   struct ActivationSet: Codable, Equatable, Sendable {
     let edition: LinnetDataRegistry.Edition
     let packs: [Artifact]
+
+    enum UpdateSelection {
+      case current
+      case localAhead
+      case available([Artifact])
+      case conflict(LinnetPackContract.Kind)
+    }
+
+    /// A catalog describes one atomic set, not a menu of independently mixable
+    /// packs. Never advertise or download a set that regresses any local pack.
+    func updateSelection(installedPacks: [LinnetDataRegistry.ActivePack]) -> UpdateSelection {
+      var updates: [Artifact] = []
+      var localAhead = false
+      for artifact in packs {
+        if let installed = installedPacks.first(where: { $0.kind == artifact.kind }) {
+          if artifact.sequence < installed.sequence {
+            localAhead = true
+            continue
+          }
+          if artifact.sequence == installed.sequence {
+            guard artifact.matches(installed) else {
+              return .conflict(artifact.kind)
+            }
+            continue
+          }
+        }
+        updates.append(artifact)
+      }
+      if localAhead { return .localAhead }
+      return updates.isEmpty ? .current : .available(updates)
+    }
   }
 
   enum CoreAvailability: Equatable, Sendable {
@@ -66,6 +97,7 @@ enum LinnetDataChannel {
 
   enum UpdateAvailability: Equatable, Sendable {
     case current
+    case localDataAhead
     case core(Core)
     case languageData([LanguageDataUpdate])
   }
@@ -123,17 +155,23 @@ enum LinnetDataChannel {
       currentBuild: UInt64,
       edition: LinnetDataRegistry.Edition?,
       installedPacks: [LinnetDataRegistry.ActivePack]
-    ) -> UpdateAvailability {
+    ) throws -> UpdateAvailability {
       if core.availability(currentVersion: currentVersion, currentBuild: currentBuild)
         == .available {
         return .core(core)
       }
       guard let edition, let selected = activationSet(for: edition) else { return .current }
-      let updates = selected.packs.compactMap { artifact -> LanguageDataUpdate? in
+      let artifacts: [Artifact]
+      switch selected.updateSelection(installedPacks: installedPacks) {
+      case .current: return .current
+      case .localAhead: return .localDataAhead
+      case .available(let updates): artifacts = updates
+      case .conflict(let kind): throw Failure.invalidCatalog("conflicting pack sequence: \(kind.rawValue)")
+      }
+      let updates = artifacts.map { artifact -> LanguageDataUpdate in
         let installed = installedPacks.first {
           $0.kind == artifact.kind
         }
-        guard installed.map({ artifact.matches($0) }) != true else { return nil }
         return .init(
           kind: artifact.kind,
           installedVersion: installed?.version,
@@ -141,7 +179,7 @@ enum LinnetDataChannel {
           availableVersion: artifact.version,
           availableSequence: artifact.sequence)
       }
-      return updates.isEmpty ? .current : .languageData(updates)
+      return .languageData(updates)
     }
   }
 

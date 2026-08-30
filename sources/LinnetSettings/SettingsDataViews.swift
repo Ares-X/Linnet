@@ -380,6 +380,10 @@ extension DataTabView {
       case .some(.current):
         Label("Linnet and language data are up to date.", systemImage: "checkmark.circle.fill")
           .foregroundStyle(.green)
+      case .some(.localDataAhead):
+        Label("Installed language data is newer than this update channel. No downgrade will be downloaded.",
+              systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.secondary)
       case .some(.core(let core)):
         VStack(alignment: .leading, spacing: 2) {
           Label("Core update available", systemImage: "arrow.down.circle.fill")

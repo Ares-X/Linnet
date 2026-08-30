@@ -510,6 +510,7 @@ struct SettingsDataCoordinatorTests {
     do {
       let settings = try makeBundleFixture(at: fixtureRoot, productName: productName)
       try makeDirectory(fixtureRoot)
+      try verifyCoreThemeDeployment(in: fixtureRoot)
       try makeRegistryFixture(registry)
       do {
         _ = try registry.runtimeSnapshot()
@@ -2327,6 +2328,66 @@ struct SettingsDataCoordinatorTests {
     )
     try JSONEncoder().encode(state).write(
       to: active.appending(path: "activation.json"), options: .atomic)
+  }
+
+  private static func verifyCoreThemeDeployment(in root: URL) throws {
+    let shared = root.appending(path: "theme-shared")
+    let user = root.appending(path: "theme-user")
+    let staging = root.appending(path: "theme-build")
+    for directory in [shared, user, staging] { try makeDirectory(directory) }
+    let source = root.appending(path: "core-theme.yaml")
+    let bundled = try String(contentsOfFile: "data/squirrel.yaml", encoding: .utf8)
+    try "config_version: '1.1'\nstyle:\n  font_point: 99\n".write(
+      to: shared.appending(path: "squirrel.yaml"), atomically: true, encoding: .utf8)
+    var document = LinnetSettingsDocument.default
+    document.appearance.fontPoint = 32
+    document.appearance.themeFamily = .sidecarSlate
+    try LinnetSettingsProjectionRenderer.reconcile(document: document, to: user)
+    let api = rime_get_api_stdbool().pointee
+    for (index, accent) in ["0x995725", "0x123456"].enumerated() {
+      if index == 1 {
+        // New packs omit UI; the next Core must also replace a same-version
+        // theme without waiting for a timestamp tick or touching dictionaries.
+        try FileManager.default.removeItem(at: shared.appending(path: "squirrel.yaml"))
+      }
+      try bundled.replacingOccurrences(of: "0x995725", with: accent).write(
+        to: source, atomically: true, encoding: .utf8)
+      try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+        source: source, to: user, stagingDirectory: staging)
+      shared.path.withCString { sharedPath in
+        user.path.withCString { userPath in
+          staging.path.withCString { stagingPath in
+            var traits = RimeTraits()
+            traits.data_size = Int32(MemoryLayout<RimeTraits>.size - MemoryLayout<Int32>.size)
+            traits.shared_data_dir = sharedPath
+            traits.user_data_dir = userPath
+            traits.staging_dir = stagingPath
+            traits.prebuilt_data_dir = stagingPath
+            traits.min_log_level = 3
+            api.setup(&traits)
+          }
+        }
+      }
+      api.initialize(nil)
+      do {
+        defer { api.finalize() }
+        if api.start_maintenance(false) { api.join_maintenance_thread() }
+        guard api.deploy_config_file("squirrel.yaml", "config_version") else {
+          fail("Core theme could not be deployed by Rime")
+        }
+        var config = RimeConfig()
+        guard api.config_open("squirrel", &config) else { fail("Core theme could not be opened") }
+        defer { _ = api.config_close(&config) }
+        var font = 0.0
+        guard api.config_get_double(&config, "style/font_point", &font), font == 32,
+          let selected = api.config_get_cstring(&config, "style/color_scheme"),
+          String(cString: selected) == "linnet_sidecar_light",
+          let color = api.config_get_cstring(&config, "preset_color_schemes/linnet_sidecar_light/hilited_candidate_back_color"),
+          String(cString: color) == accent
+        else { fail("Rime retained pack/old-Core theme or lost the user's appearance choices") }
+      }
+    }
+    print("Core theme deployment: PASS (legacy pack, theme-free pack, same-version Core update, preserved choices)")
   }
 
   private static func verifySelectedChineseProfile(

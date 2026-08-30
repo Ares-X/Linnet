@@ -565,7 +565,7 @@ private extension LinnetSettingsAppearancePreviewView {
       ForEach(Array(rows.enumerated()), id: \.offset) { row in
         HStack(spacing: inlineSpacing) {
           ForEach(row.element, id: \.self) { index in
-            candidate(
+            LinnetSettingsAppearancePreview.candidate(
               index < preview.pageSize ? String(index + 1) : "",
               values[index],
               selected: index == 0,
@@ -596,8 +596,11 @@ private extension LinnetSettingsAppearancePreviewView {
       ]
     }
   }
+}
 
-  func candidate(
+extension LinnetSettingsAppearancePreview {
+  // Theme cards and the full preview share candidate typography and selection.
+  static func candidate(
     _ label: String,
     _ value: String,
     selected: Bool,
@@ -648,7 +651,9 @@ private extension LinnetSettingsAppearancePreviewView {
     .accessibilityHint(Text(label))
     .accessibilityAddTraits(selected ? .isSelected : .isStaticText)
   }
+}
 
+private extension LinnetSettingsAppearancePreviewView {
   @ViewBuilder
   func candidateDetail(
     _ preview: LinnetSettingsAppearancePreview.Presentation,
@@ -707,8 +712,10 @@ private extension LinnetSettingsAppearancePreviewView {
       commentAttributes: detailAttributes)
     return line.attributedString
   }
+}
 
-  func candidateCell<Content: View>(
+extension LinnetSettingsAppearancePreview {
+  private static func candidateCell<Content: View>(
     selected: Bool,
     preview: LinnetSettingsAppearancePreview.Presentation,
     selectionInsets: NSEdgeInsets,
@@ -752,7 +759,9 @@ private extension LinnetSettingsAppearancePreviewView {
         }
       }
   }
+}
 
+private extension LinnetSettingsAppearancePreviewView {
   @ViewBuilder
   func previewLanguageLabel(
     _ language: LinnetSettingsAppearancePreview.PreviewLanguage

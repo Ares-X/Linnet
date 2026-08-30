@@ -90,7 +90,9 @@ Settings document 拥有候选外观、中文默认项、反查触发键、学�
 
 只改变 document 的 Apply 仅在 `Transactions/<UUID>/configuration-candidate/` 暂存一份 `linnet_settings.json`。Host 校验候选与 expected/base revision，以唯一 live document 为 canonical owner 执行 CAS 和同卷原子交换，再从已发布 document reconcile 可重建 custom YAML、按固定顺序部署 exact 11 份 config（default、九个产品 schema 与 squirrel），使旧 session generation 失效并用 fresh session 验证所选方案。成功必须回报同一 SHA-256 `activeSettingsRevision`；交换、reconcile、部署或健康检查失败时，Host 原子换回旧 document、重新 reconcile/deploy 并验证旧 revision，无法验证则 fail closed。Host 启动也会在 Rime 接受输入前从 canonical document 向前 reconcile。该快速路径不 finalize Rime、不运行 maintenance、不重编词典，也不创建备份。个人数据变更与语言数据激活仍在隔离候选中验证，再通过 Host 的唯一 live runtime owner 原子切换并健康检查。
 
-Core App 不携带语言数据。Chinese、English、LTS 和 Extended 各有独立
+Core App 拥有界面主题，但不携带语言数据。`data/squirrel.yaml` 同时进入 Host 和 Settings 的资源包；Host 在 Rime 初始化前由现有 ProjectionRenderer 将其投影到 UserData，再由 Rime 按标准流程应用用户外观选项。只有 Core 主题字节改变时才重建 `Build/squirrel.yaml`，不会清空词典或学习缓存。旧词包可以保留原有不可变主题文件，但不再决定实际界面；新词包不再包含它。
+
+Chinese、English、LTS 和 Extended 各有独立
 `(kind, sequence, version, content_sha256, data_abi, min_core)`，通过一个完整 Active
 视图消费；只有对应 pack 内容或兼容边界变化才推进该 pack。Catalog 保持现有 JSON
 格式，但发布身份是 `data-channel` 的精确 commit/blob；它引用当前 Core 和当前四个

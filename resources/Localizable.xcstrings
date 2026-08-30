@@ -1,6 +1,7 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Installed language data is newer than this update channel. No downgrade will be downloaded." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"已安装的语言数据领先于此更新频道，不会下载旧版本。"}}}},
     "iCloud Drive sync" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"iCloud Drive 同步"}}}},
     "Sync learned words with iCloud Drive" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"通过 iCloud Drive 同步学习词"}}}},
     "Location" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"位置"}}}},

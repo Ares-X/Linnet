@@ -33,12 +33,12 @@ struct LinnetDataChannelTests {
         == .current,
       "current Core build was reported as outdated")
     require(
-      verified.catalog.updateAvailability(
+      try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 7, edition: .standard,
         installedPacks: []) == .core(verified.catalog.core),
       "Core update did not take priority over data")
     require(
-      verified.catalog.updateAvailability(
+      try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
         installedPacks: []) == .languageData([
           .init(
@@ -53,6 +53,21 @@ struct LinnetDataChannelTests {
         ]),
       "missing language-data releases were not identified")
     let installedStandard = installedPacks(from: catalog.activationSets[0].packs)
+    for edition in [LinnetDataRegistry.Edition.standard, .full] {
+      let packs = installedPacks(from: catalog.activationSet(for: edition)!.packs)
+      for sequences: [UInt64] in [packs.map { $0.sequence + 1 }, packs.enumerated().map { $0.offset == 0 ? 6 : 4 }] {
+        let newerLocal = zip(packs, sequences).map { pack, sequence in
+          LinnetDataRegistry.ActivePack(
+            packID: pack.packID, kind: pack.kind, version: pack.version,
+            sequence: sequence, dataABI: pack.dataABI, contentSHA256: pack.contentSHA256,
+            minCore: pack.minCore, requirements: pack.requirements,
+            relativePath: pack.relativePath, manifestSHA256: pack.manifestSHA256)
+        }
+        require(try catalog.updateAvailability(
+          currentVersion: "1.0.0", currentBuild: 8, edition: edition, installedPacks: newerLocal) == .localDataAhead,
+          "local-ahead or mixed new/old activation set must be explicitly identified")
+      }
+    }
     let staleEnglish = LinnetDataRegistry.ActivePack(
       packID: installedStandard[1].packID, kind: installedStandard[1].kind,
       version: "2026.08.09", sequence: 4, dataABI: installedStandard[1].dataABI,
@@ -60,8 +75,19 @@ struct LinnetDataChannelTests {
       minCore: installedStandard[1].minCore, requirements: [],
       relativePath: installedStandard[1].relativePath,
       manifestSHA256: installedStandard[1].manifestSHA256)
+    let conflictingEnglish = LinnetDataRegistry.ActivePack(
+      packID: staleEnglish.packID, kind: .english,
+      version: staleEnglish.version, sequence: 5, dataABI: staleEnglish.dataABI,
+      contentSHA256: staleEnglish.contentSHA256, minCore: staleEnglish.minCore, requirements: [],
+      relativePath: staleEnglish.relativePath, manifestSHA256: staleEnglish.manifestSHA256)
+    do {
+      _ = try catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        installedPacks: [installedStandard[0], conflictingEnglish, installedStandard[2]])
+      LinnetTestFailure.fail("same-sequence different content was accepted as current or an update")
+    } catch LinnetDataChannel.Failure.invalidCatalog { }
     require(
-      verified.catalog.updateAvailability(
+      try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
         installedPacks: [installedStandard[0], staleEnglish, installedStandard[2]])
         == .languageData([
@@ -72,7 +98,7 @@ struct LinnetDataChannelTests {
         ]),
       "an outdated language-data release did not report both versions")
     require(
-      verified.catalog.updateAvailability(
+      try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
         installedPacks: installedPacks(from: catalog.activationSets[0].packs)) == .current,
       "an exact installation was reported as outdated")
@@ -282,7 +308,7 @@ struct LinnetDataChannelTests {
       containerSHA256: "04efaf080f5a3e74e1c29d1ca6a48569382cbbcd324e8d59d2b83ef21c039f00")
   }
 
-  private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {
-    guard condition() else { LinnetTestFailure.fail(message) }
+  private static func require(_ condition: Bool, _ message: String) {
+    guard condition else { LinnetTestFailure.fail(message) }
   }
 }

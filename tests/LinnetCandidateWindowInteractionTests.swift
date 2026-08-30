@@ -2570,8 +2570,9 @@ struct LinnetCandidateWindowInteractionTests {
       ("cloudless", ""),
       ("cloudburst", ""),
     ]
+    let reverseInput = "|suanfa"
     guard let reverse = renderProductCandidatePanel(
-      sample: paper, preedit: ";suanfa", items: reverseItems),
+      sample: paper, preedit: reverseInput, items: reverseItems),
       let english = renderProductCandidatePanel(
         sample: paper, preedit: "cloud", items: englishItems)
     else {
@@ -2599,7 +2600,7 @@ struct LinnetCandidateWindowInteractionTests {
         .foregroundColor: secondary,
       ])
     let panels: [(String, String, NSBitmapImageRep)] = [
-      ("01 · 中文里的拼音反查", "输入 ;suanfa，不离开中文状态", reverse),
+      ("01 · 中文里的拼音反查", "输入 \(reverseInput)，不离开中文状态", reverse),
       ("02 · Smart English", "补全、IPA、中文释义与原始输入", english),
     ]
     for (index, panel) in panels.enumerated() {
@@ -2878,13 +2879,13 @@ struct LinnetCandidateWindowInteractionTests {
     }
     let samples = parseThemeSamples(source)
     let families = [
-      ("linnet_paper", "宣纸青黛", "Paper Ledger", "下划线"),
-      ("linnet_moon_jade", "月华玉青", "Moon Jade", "侧边栏"),
-      ("linnet_sidecar", "青岩", "Sidecar Slate", "侧边栏"),
-      ("linnet_clay", "陶印", "Clay Tiles", "色块"),
-      ("linnet_mist_jade", "月白雾青", "Mist Jade", "色块 · 材质"),
-      ("linnet_glass", "原生玻璃", "Native Glass", "色块 · 材质"),
-      ("linnet_ink_cinnabar", "夜墨朱砂", "Ink Cinnabar", "下划线"),
+      ("linnet_paper", "宣纸青黛", "Paper Ledger"),
+      ("linnet_moon_jade", "月华玉青", "Moon Jade"),
+      ("linnet_sidecar", "青岩", "Sidecar Slate"),
+      ("linnet_clay", "陶印", "Clay Tiles"),
+      ("linnet_mist_jade", "月白雾青", "Mist Jade"),
+      ("linnet_glass", "原生玻璃", "Native Glass"),
+      ("linnet_ink_cinnabar", "夜墨朱砂", "Ink Cinnabar"),
     ]
     guard samples.count == 14,
       families.allSatisfy({
@@ -2946,7 +2947,13 @@ struct LinnetCandidateWindowInteractionTests {
       (family.1 as NSString).draw(
         at: NSPoint(x: cardX + 24, y: cardY + 164),
         withAttributes: [.font: familyFont, .foregroundColor: ink])
-      ("\(family.2) · \(family.3)" as NSString).draw(
+      let treatment = switch light.selectionStyle {
+      case .underline: "下划线"
+      case .bar: "竖线"
+      case .tile: "色块"
+      }
+      let material = light.isTranslucent ? " · 材质" : ""
+      ("\(family.2) · \(treatment)\(material)" as NSString).draw(
         at: NSPoint(x: cardX + 24, y: cardY + 138),
         withAttributes: [.font: detailFont, .foregroundColor: secondary])
       let candidateScale = CGFloat(1.18)

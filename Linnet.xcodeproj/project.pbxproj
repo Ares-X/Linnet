@@ -85,6 +85,7 @@
 		E90400000000000000000001 /* LinnetSettingsAppearancePreview.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E90400000000000000000002 /* LinnetSettingsAppearancePreview.swift */; };
 		E90600000000000000000001 /* LinnetSettingsThemeFamilyPicker.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E90600000000000000000002 /* LinnetSettingsThemeFamilyPicker.swift */; };
 		E90500000000000000000001 /* squirrel.yaml in Settings Resources */ = {isa = PBXBuildFile; fileRef = E90500000000000000000002 /* squirrel.yaml */; };
+		E90500000000000000000003 /* squirrel.yaml in Core Resources */ = {isa = PBXBuildFile; fileRef = E90500000000000000000002 /* squirrel.yaml */; };
 		E60000000000000000000001 /* LinnetSettingsMutationLease.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E60000000000000000000002 /* LinnetSettingsMutationLease.swift */; };
 		E80000000000000000000001 /* SettingsPresentationStatus.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* SettingsPresentationStatus.swift */; };
 		E81200000000000000000001 /* SettingsRuntimeReachability.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E81200000000000000000002 /* SettingsRuntimeReachability.swift */; };
@@ -625,6 +626,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E90500000000000000000003 /* squirrel.yaml in Core Resources */,
 				F70000000000000000000004 /* InfoPlist.strings in Resources */,
 				446C01D71F767BD400A6C23E /* Assets.xcassets in Resources */,
 				B3EF08EA2F17125E00433A45 /* Linnet.xcassets in Resources */,

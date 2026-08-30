@@ -31,6 +31,7 @@ struct LinnetSettingsProjectionRendererTests {
       try testNewerDocumentFailsClosed(in: directory)
       try testOversizedSettingsDocumentFailsClosed(in: directory)
       try testProjectionReconciliationLifecycle(in: directory)
+      try testCoreThemeReconciliation(in: directory)
       try testAtomicDocumentExchange(in: directory)
       print("LinnetSettingsProjectionRendererTests: PASS")
     } catch {
@@ -945,6 +946,44 @@ struct LinnetSettingsProjectionRendererTests {
     }
   }
 
+  private static func testCoreThemeReconciliation(in directory: URL) throws {
+    let core = directory.appending(path: "core-squirrel.yaml")
+    let user = directory.appending(path: "core-theme-user")
+    let staging = user.appending(path: "build")
+    try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    let projected = user.appending(path: "squirrel.yaml")
+    let compiled = staging.appending(path: "squirrel.yaml")
+    let custom = user.appending(path: "squirrel.custom.yaml")
+    let preference = "patch:\n  style/font_point: 32\n"
+    try preference.write(to: custom, atomically: true, encoding: .utf8)
+    let first = "config_version: '1.1'\nstyle:\n  color_scheme: core_first\n"
+    try first.write(to: core, atomically: true, encoding: .utf8)
+    try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+      source: core, to: user, stagingDirectory: staging)
+    require(try Data(contentsOf: projected) == Data(first.utf8), "Core theme was not projected")
+    let identity = try fileIdentity(projected)
+    try Data("compiled".utf8).write(to: compiled)
+    try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+      source: core, to: user, stagingDirectory: staging)
+    require(try fileIdentity(projected) == identity, "unchanged Core theme was rewritten")
+    require(FileManager.default.fileExists(atPath: compiled.path), "unchanged theme invalidated its cache")
+
+    let second = first.replacingOccurrences(of: "core_first", with: "core_second")
+    try second.write(to: core, atomically: true, encoding: .utf8)
+    // No delay or config_version bump: content alone owns the transition.
+    try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+      source: core, to: user, stagingDirectory: staging)
+    require(try Data(contentsOf: projected) == Data(second.utf8), "Core theme update was lost")
+    require(!FileManager.default.fileExists(atPath: compiled.path), "changed theme retained stale compiled output")
+    require(try String(contentsOf: custom, encoding: .utf8) == preference, "Core update changed user preferences")
+    do {
+      try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+        source: directory.appending(path: "missing-core"), to: user, stagingDirectory: staging)
+      fail("missing Core theme was accepted")
+    } catch LinnetSettingsProjectionRenderer.Failure.unsafeFile { }
+    require(try Data(contentsOf: projected) == Data(second.utf8), "missing Core theme mutated the current projection")
+  }
+
   private static func testAtomicDocumentExchange(in directory: URL) throws {
     let live = directory.appending(path: "exchange-live", directoryHint: .isDirectory)
     let candidate = directory.appending(path: "exchange-candidate", directoryHint: .isDirectory)
@@ -1021,7 +1060,7 @@ struct LinnetSettingsProjectionRendererTests {
     exit(EXIT_FAILURE)
   }
 
-  private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {
-    guard condition() else { fail(message) }
+  private static func require(_ condition: Bool, _ message: String) {
+    guard condition else { fail(message) }
   }
 }

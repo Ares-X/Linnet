@@ -42,11 +42,14 @@ extension LinnetDataRegistry {
       throw Failure.invalidActiveState
     }
     let snapshot = try runtimeSnapshot(reconcilingStorage: false)
+    switch set.updateSelection(installedPacks: snapshot.state.packs) {
+    case .localAhead: throw Failure.staleDataChannel
+    case .conflict: throw Failure.invalidActiveState
+    case .current, .available: break
+    }
     let transactionID = UUID()
-    let directory = transactionsDirectory.appending(
-      path: transactionID.uuidString, directoryHint: .isDirectory)
-    let download = downloadsDirectory.appending(
-      path: transactionID.uuidString, directoryHint: .isDirectory)
+    let directory = transactionsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
+    let download = downloadsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
       attributes: [.posixPermissions: 0o700])
     do {
@@ -62,9 +65,7 @@ extension LinnetDataRegistry {
           phase: .downloading,
           candidateRevision: nil),
         to: directory.appending(path: Self.languageTransactionMarkerName))
-      try FileManager.default.createDirectory(
-        at: download, withIntermediateDirectories: false,
-        attributes: [.posixPermissions: 0o700])
+      try FileManager.default.createDirectory(at: download, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
     } catch {
       try? FileManager.default.removeItem(at: download)
       try? FileManager.default.removeItem(at: directory)

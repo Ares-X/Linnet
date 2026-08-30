@@ -164,6 +164,7 @@ struct LinnetDataRegistryTests {
     run("same sequence idempotence", fixtureSigning, sameContentSameSequenceIsIdempotent)
     run("exhaustive installed inventory", fixtureSigning, undeclaredPackEntryFailsClosed)
     run("incompatible replacement", fixtureSigning, incompatibleReplacementFailsClosed)
+    run("pack downgrade before download", fixtureSigning, oldPacksCannotStartDownload)
     run("cross-kind CAS", fixtureSigning, crossKindCandidatesCarryCASAndCleanOwnedPaths)
     run("full activation", fixtureSigning, replacementBuildsOneFullActivation)
     run("durable transaction pack protection", fixtureSigning, durableTransactionProtectsPlannedPacks)
@@ -1173,6 +1174,33 @@ struct LinnetDataRegistryTests {
     }
   }
 
+  private static func oldPacksCannotStartDownload(_ fixtureSigning: FixtureSigningOwner) throws {
+    try withFixture(fixtureSigning) { registry in
+      let previous = try fixturePacks(fixtureSigning)
+      let replacement = try replacementPack(
+        .english, version: "2026.08.2", registry: registry, fixtureSigning: fixtureSigning)
+      try publish(replacement, registry: registry)
+      let snapshot = try registry.runtimeSnapshot()
+      let transactions = try FileManager.default.contentsOfDirectory(atPath: registry.transactionsDirectory.path)
+      let downloads = try FileManager.default.contentsOfDirectory(atPath: registry.downloadsDirectory.path)
+      let newerCatalogWithOldPacks = LinnetDataChannel.Verified(
+        catalog: dataChannelCatalog(for: previous, sequence: 20),
+        digest: String(repeating: "a", count: 64))
+      requireFailure(.staleDataChannel) {
+        _ = try registry.beginDataChannelUpdate(accepting: newerCatalogWithOldPacks, edition: .standard)
+      }
+      let after = try registry.runtimeSnapshot()
+      let remainingTransactions = try FileManager.default.contentsOfDirectory(atPath: registry.transactionsDirectory.path)
+      let remainingDownloads = try FileManager.default.contentsOfDirectory(atPath: registry.downloadsDirectory.path)
+      require(after.activeRevision == snapshot.activeRevision,
+              "old catalog changed Active")
+      require(remainingTransactions == transactions,
+              "old pack created a transaction before rejection")
+      require(remainingDownloads == downloads,
+              "old pack created a download directory before rejection")
+    }
+  }
+
   private static func incompatibleReplacementFailsClosed(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
@@ -1223,7 +1251,7 @@ struct LinnetDataRegistryTests {
         relativePath: "Data/Packs/chinese/1-conflict",
         manifestSHA256: String(repeating: "8", count: 64)), at: 0)
       let verified = LinnetDataChannel.Verified(
-        catalog: dataChannelCatalog(for: target, sequence: 2),
+        catalog: dataChannelCatalog(for: try fixturePacks(fixtureSigning), sequence: 2),
         digest: String(repeating: "7", count: 64))
       let update = try registry.beginDataChannelUpdate(
         accepting: verified, edition: .standard)
@@ -1439,7 +1467,7 @@ struct LinnetDataRegistryTests {
   private static func fixtureFileNames(_ kind: LinnetPackContract.Kind) -> [String] {
     switch kind {
     case .chinese:
-      ["default.yaml", "linnet_zh.dict.yaml", "linnet_zh.schema.yaml", "squirrel.yaml"]
+      ["default.yaml", "linnet_zh.dict.yaml", "linnet_zh.schema.yaml"]
     case .english:
       ["linnet_en.schema.yaml"]
     case .lts:
