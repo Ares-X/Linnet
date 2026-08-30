@@ -64,20 +64,51 @@ check.call("version-only-with-sequences", :fail) do |document|
   pack["sequence"] += 1
   document["catalog_sequence"] += 1
 end
-check.call("content-with-skipped-pack-sequence", :fail) do |document|
+check.call("merged-content-with-multiple-pack-revisions", :pass) do |document|
   pack = document.fetch("packs").fetch("chinese")
   pack["content_sha256"] = "a" * 64
   pack["version"] = "#{pack.fetch("version")}.reviewed"
   pack["sequence"] += 2
   document["catalog_sequence"] += 1
 end
-check.call("content-with-skipped-catalog-sequence", :fail) do |document|
+check.call("merged-content-with-multiple-catalog-revisions", :pass) do |document|
   pack = document.fetch("packs").fetch("chinese")
   pack["content_sha256"] = "a" * 64
   pack["version"] = "#{pack.fetch("version")}.reviewed"
   pack["sequence"] += 1
   document["catalog_sequence"] += 2
 end
+[-1, 0].each do |delta|
+  check.call("changed-content-non-increasing-pack-#{delta}", :fail) do |document|
+    pack = document.fetch("packs").fetch("chinese")
+    pack["content_sha256"] = "a" * 64
+    pack["version"] += ".reviewed"
+    pack["sequence"] += delta
+    document["catalog_sequence"] += 1
+  end
+  check.call("changed-content-non-increasing-catalog-#{delta}", :fail) do |document|
+    pack = document.fetch("packs").fetch("chinese")
+    pack["content_sha256"] = "a" * 64
+    pack["version"] += ".reviewed"
+    pack["sequence"] += 1
+    document["catalog_sequence"] += delta
+  end
+end
+
+# A merge/squash compares the endpoints of several individually valid changes.
+# The identity ordering must accept their composition without renumbering packs.
+merged = Marshal.load(Marshal.dump(base))
+3.times do |index|
+  previous = Marshal.load(Marshal.dump(merged))
+  pack = merged.fetch("packs").fetch("chinese")
+  pack["content_sha256"] = (index + 1).to_s * 64
+  pack["version"] += ".reviewed"
+  pack["sequence"] += 1
+  merged["catalog_sequence"] += 1
+  check_documents.call("branch-transition-#{index}", :pass, previous, merged)
+end
+check_documents.call("merge-endpoint-transition", :pass, base, merged)
+check_documents.call("merge-endpoint-reverse", :fail, merged, base)
 check.call("content-without-version-transition", :fail) do |document|
   pack = document.fetch("packs").fetch("chinese")
   pack["content_sha256"] = "a" * 64

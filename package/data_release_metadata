@@ -188,9 +188,11 @@ when "check-monotonic"
     after_identity = after.values_at(*IDENTITY_FIELDS)
     pack_identity_changed = after_identity != before_identity
     identity_changed ||= pack_identity_changed
-    expected_sequence = before.fetch("sequence") + (pack_identity_changed ? 1 : 0)
+    # Merge and squash comparisons can span multiple valid data revisions.
+    # Immutable identities require ordering, not adjacent sequence numbers.
+    sequence_comparison = after.fetch("sequence") <=> before.fetch("sequence")
     fail_metadata("#{kind} sequence does not match its release identity transition") unless
-      after.fetch("sequence") == expected_sequence
+      sequence_comparison == (pack_identity_changed ? 1 : 0)
     version_changed = after.fetch("version") != before.fetch("version")
     fail_metadata("#{kind} version does not match its release identity transition") unless
       version_changed == pack_identity_changed
@@ -203,9 +205,9 @@ when "check-monotonic"
       fail_metadata("#{kind} min_core regressed")
     end
   end
-  expected_catalog_sequence = previous_catalog_sequence + (identity_changed ? 1 : 0)
+  catalog_comparison = current_catalog_sequence <=> previous_catalog_sequence
   fail_metadata("catalog sequence does not match the pack identity transition") unless
-    current_catalog_sequence == expected_catalog_sequence
+    catalog_comparison == (identity_changed ? 1 : 0)
   puts "Linnet data release metadata monotonicity: PASS"
 when "check-source-change"
   fail_metadata("usage: check-source-change < CHANGED_PATHS") unless ARGV.empty?

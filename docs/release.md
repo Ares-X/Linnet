@@ -108,6 +108,11 @@ candidate 流程。正常版本不运行 seed 模式。
 macOS Action 生成新候选。`v<VERSION>` 只标识公开版本，两个控制标签分别只授权
 显式 data seed 或已验收的八文件集合。
 
+词包身份变化时序号必须严格递增，身份不变时序号必须保持不变。合并或 squash
+可能一次包含多次合法修订，因此基线比较不要求序号恰好加一；不得为了合并检查
+把已有序号重新编号，或允许同一序号对应不同内容。Catalog 的词包快照序号遵循
+相同的顺序规则，Core-only 变化不推进词包序号。
+
 旧 ad-hoc → 固定 CMS 只是一条一次性的历史 Core lifecycle 验收边；唯一记录在
 `config/linnet-community-signing.json`。其中固定 leaf、bundle ID、macOS major 和
 identity classifier 的“旧迁移投影指纹”共同决定该历史证据能否继续复用：任一项与
