@@ -82,7 +82,6 @@ enum LinnetPackContract {
   struct VerifiedPack: Sendable {
     let manifest: Manifest
     let manifestData: Data
-    let manifestSHA256: String
   }
 
   enum Failure: LocalizedError, Equatable {
@@ -174,8 +173,7 @@ enum LinnetPackContract {
     try payload.finish()
     return VerifiedPack(
       manifest: manifest,
-      manifestData: manifestData,
-      manifestSHA256: sha256(manifestData)
+      manifestData: manifestData
     )
   }
 

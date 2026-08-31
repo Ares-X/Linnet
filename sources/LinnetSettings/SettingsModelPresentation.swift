@@ -14,6 +14,24 @@ struct SettingsOperationAcceptanceContext {
 
 @MainActor
 extension SettingsModel {
+  func observeCurrentConfiguration() -> SettingsConfigurationSession.ObservationResult? {
+    guard let userDirectory else { return nil }
+    do {
+      let personalSnapshot = try LinnetPersonalDataStore.snapshot(from: userDirectory)
+      let documentSnapshot = try LinnetSettingsDocumentStore.snapshot(from: userDirectory)
+      let personal = configuration.observePersonal(personalSnapshot)
+      let document = configuration.observeDocument(documentSnapshot)
+      if personal == .conflict || document == .conflict { return .conflict }
+      if personal == .reloaded || document == .reloaded { return .reloaded }
+      if personal == .unchanged && document == .unchanged { return .unchanged }
+      return .ignored
+    } catch {
+      configuration.markSourceUnreadable()
+      logDiagnostic(error, context: "Personal data could not be reloaded")
+      return nil
+    }
+  }
+
   func presentStaleOperation() {
     switch observeCurrentConfiguration() {
     case .reloaded:
@@ -54,6 +72,7 @@ extension SettingsModel {
     case .configurationRestoreFailed: .configurationRecoveryFailed
     case .timedOut: .timedOut
     case .cancelled: .unknown
+    case .cloudRecoveryRepairRequired: .invalidOperation
     }
   }
 
@@ -333,20 +352,6 @@ extension SettingsModel {
     return candidate
   }
 
-  var cloudBackupArchiveAvailable: Bool {
-    guard let archive = cloudBackupArchive else { return false }
-    var isDirectory = ObjCBool(false)
-    return FileManager.default.fileExists(
-      atPath: archive.path,
-      isDirectory: &isDirectory
-    ) && !isDirectory.boolValue
-  }
-
-  var cloudBackupArchive: URL? {
-    cloudSyncLocation?.folder.appending(
-      component: Self.cloudBackupName, directoryHint: .notDirectory)
-  }
-
   func choosePortableImportSource(locale: Locale) -> URL? {
     guard !operationActive else { return nil }
     let panel = NSOpenPanel()
@@ -403,5 +408,13 @@ extension SettingsModel {
         }
       }
     )
+  }
+
+  func synchronizeLearningNow() {
+    guard cloudSyncLocation != nil, !operationActive else { return }
+    DistributedNotificationCenter.default().postNotificationName(
+      LinnetSettingsContract.cloudSyncNowRequested, object: nil, userInfo: nil,
+      deliverImmediately: true)
+    status = .cloudSyncRequested
   }
 }

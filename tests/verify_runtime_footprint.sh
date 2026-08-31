@@ -2351,6 +2351,8 @@ ruby -rjson -e '
     "Deploy", "Logs...", "Advanced", "Change Folder…",
     "Choose a folder inside iCloud Drive to connect this Mac.", "Choose Folder…",
     "Disconnect", "No sync folder selected", "Suggest spelling corrections",
+    "Upload Full Backup…", "Review Full Backup…", "Upload and Replace",
+    "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed.",
     "This replaces Linnet-Full-Backup.linnet-data in the selected folder. Local data is not changed."
   ]
   returned = retired_keys & catalog.fetch("strings", {}).keys
@@ -2359,7 +2361,8 @@ ruby -rjson -e '
     "Sync learned words with iCloud Drive", "Location",
     "iCloud Drive is unavailable. Check iCloud Drive in System Settings.",
     "Linnet always uses iCloud Drive/Linnet; no folder selection is required.",
-    "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed."
+    "The first upload creates a full recovery baseline. Later uploads add an immutable delta only. Local data is not changed.",
+    "Upload Incremental Backup…", "Review Recovery Backup…", "Create Full Repair Backup"
   ]
   absent_cloud_keys = required_cloud_keys - catalog.fetch("strings", {}).keys
   abort "fixed iCloud localization keys are missing: #{absent_cloud_keys.join(", ")}" unless absent_cloud_keys.empty?
@@ -2370,6 +2373,13 @@ ruby -rjson -e '
   end
   abort "Simplified Chinese localization is missing or empty: #{missing.join(", ")}" unless missing.empty?
 ' || fail "Settings localization coverage regressed"
+if rg -n 'cloudBackupArchiveAvailable|cloudBackupArchive:|cloudBackupName' sources/LinnetSettings; then
+  fail "the retired whole-file cloud backup owner returned"
+fi
+if rg -n 'LinnetCloudSyncLocation\.productLocation|\.prepareLearningDirectory\(' \
+    sources/LinnetSettings/SettingsMain.swift sources/LinnetSettings/SettingsModelPresentation.swift; then
+  fail "Settings regained main-actor iCloud filesystem preparation"
+fi
 ruby -e '
   source = File.read("sources/InputSource.swift")
   registration = File.read("sources/LinnetInputSourceRegistration.swift")

@@ -359,7 +359,6 @@ protected_content_paths=(
   "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_abc.custom.yaml"
   "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_ziguang.custom.yaml"
   "${real_user_home}/Library/Application Support/Linnet/UserData/linnet_zh_jiajia.custom.yaml"
-  "${real_user_home}/Library/Application Support/Linnet/State/active.json"
   "${real_user_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
 )
 metadata_fingerprint() {
@@ -413,7 +412,7 @@ probe="${fixture}/visible-settings-fixture-probe"
 make -C "${repo_root}" --no-print-directory linnet-pack-tool
 xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift sources/LinnetSettings/SettingsContract.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift sources/LinnetSettings/SettingsContract.swift \
   tests/LinnetVisibleSettingsFixtureProbe.swift -o "${probe}"
 
 pack_roots=()

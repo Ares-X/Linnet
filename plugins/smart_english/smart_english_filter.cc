@@ -210,7 +210,8 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     std::size_t original = 0;
     std::size_t static_rank = std::numeric_limits<std::size_t>::max();
     std::uint16_t session_count = 0;
-    bool raw = false, exact = false, chinese = false, mixed = false,
+    bool raw = false, exact = false, ambiguous_english = false,
+         chinese = false, mixed = false,
          strong_chinese_collision = false;
   };
   std::vector<RankedCandidate> candidates;
@@ -236,7 +237,8 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
                            : SessionBigrams{};
   const auto static_ranks = index_.LookupStaticOrdinals(
       context->get_property(rime::predict::kStaticKeyProperty));
-  bool has_exact = false, has_pinyin = false, has_mixed = false;
+  bool has_exact = false, has_ambiguous_english = false,
+       has_pinyin = false, has_mixed = false;
   for (auto& item : candidates) {
     if (!item.genuine) continue;
     item.raw = IsRawCandidate(item.candidate);
@@ -249,7 +251,12 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
                  IsLinnetEnglishPhrase(item.genuine) &&
                  (!phrase || phrase->is_exact_match()) &&
                  item.candidate->type() != "linnet_correction";
+    // A table phrase whose spelling differs from the live segment reached us
+    // through a derived spelling or completion key, not direct English input.
+    item.ambiguous_english = !input_word.empty() && item.word != input_word &&
+                             IsLinnetEnglishPhrase(item.genuine);
     has_exact = has_exact || item.exact;
+    has_ambiguous_english = has_ambiguous_english || item.ambiguous_english;
     has_mixed = has_mixed || item.mixed;
     item.session_count = previous.empty() || item.word.empty()
                              ? 0
@@ -268,11 +275,18 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   // word.
   const bool explicit_english_case = !input_word.empty() && ranking_input != input_word;
   const bool lowercase_chinese_input =
-      (has_exact || has_mixed) && schema_id_ != kSmartEnglishSchema &&
+      (has_exact || has_ambiguous_english || has_mixed) &&
+      schema_id_ != kSmartEnglishSchema &&
       !explicit_english_case;
   const bool lowercase_chinese_exact = has_exact && lowercase_chinese_input;
   auto bilingual_candidate = std::find_if(candidates.begin(), candidates.end(),
       [](const auto& item) { return item.exact; });
+  if (bilingual_candidate == candidates.end()) {
+    bilingual_candidate = std::find_if(
+        candidates.begin(), candidates.end(), [](const auto& item) {
+          return item.ambiguous_english;
+        });
+  }
   if (bilingual_candidate == candidates.end()) {
     bilingual_candidate = std::find_if(candidates.begin(), candidates.end(),
         [](const auto& item) { return item.mixed; });
@@ -303,12 +317,28 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   const bool preserve_chinese_exact =
       lowercase_chinese_exact &&
       (single_letter_chinese_input || has_strong_same_span_chinese);
+  const bool preserve_chinese_ambiguous =
+      has_ambiguous_english && lowercase_chinese_input &&
+      has_same_span_chinese;
   const bool promote_exact = has_exact && !preserve_chinese_exact;
   const bool promote_mixed =
       !has_exact && has_mixed && !has_same_span_chinese;
   const bool has_non_raw = std::any_of(
       candidates.begin(), candidates.end(),
       [](const auto& item) { return item.genuine && !item.raw; });
+  const auto move_same_span_chinese_first =
+      [&](auto english, const auto& eligible_chinese) {
+        if (english == candidates.end()) return;
+        const auto chinese = std::find_if(
+            english, candidates.end(), [&](const auto& item) {
+              return item.chinese && eligible_chinese(item) &&
+                     item.genuine->start() == english->genuine->start() &&
+                     item.genuine->end() == english->genuine->end();
+            });
+        if (chinese != candidates.end() && english < chinese) {
+          std::rotate(english, chinese, std::next(chinese));
+        }
+      };
   // Prefetching the bounded prefix must not turn Rime's lowest-priority echo
   // fallback into an ordinary candidate. The native translator gives its
   // explicit zz_english typo candidate one typed origin; transport priority is
@@ -328,16 +358,8 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
                                     [](const auto& item) {
                                       return item.mixed;
                                     });
-    if (mixed != candidates.end()) {
-      const auto chinese = std::find_if(
-          mixed, candidates.end(), [&](const auto& item) {
-            return item.chinese && item.genuine->start() == mixed->genuine->start() &&
-                   item.genuine->end() == mixed->genuine->end();
-          });
-      if (chinese != candidates.end()) {
-        std::rotate(mixed, chinese, std::next(chinese));
-      }
-    }
+    move_same_span_chinese_first(mixed,
+                                 [](const auto&) { return true; });
   }
   if (!is_pinyin_flow && (has_exact || promote_mixed)) {
     std::stable_partition(candidates.begin(), candidates.end(), [has_exact](const auto& item) {
@@ -390,20 +412,18 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
       const auto exact = std::find_if(
           candidates.begin(), candidates.end(),
           [](const auto& item) { return item.exact; });
-      if (exact != candidates.end()) {
-        const auto chinese = std::find_if(
-            exact, candidates.end(), [&](const auto& item) {
-              return item.chinese &&
-                     (single_letter_chinese_input ||
-                      item.strong_chinese_collision) &&
-                     item.genuine->start() == exact->genuine->start() &&
-                     item.genuine->end() == exact->genuine->end();
-            });
-        if (chinese != candidates.end() && exact < chinese) {
-          std::rotate(exact, chinese, std::next(chinese));
-        }
-      }
+      move_same_span_chinese_first(exact, [&](const auto& item) {
+        return single_letter_chinese_input || item.strong_chinese_collision;
+      });
     }
+  }
+  if (!is_pinyin_flow && preserve_chinese_ambiguous) {
+    const auto ambiguous_english = std::find_if(
+        candidates.begin(), candidates.end(), [](const auto& item) {
+          return item.ambiguous_english;
+        });
+    move_same_span_chinese_first(ambiguous_english,
+                                 [](const auto&) { return true; });
   }
 
   // Hallelujah appends pinyin-to-English results after ordinary English

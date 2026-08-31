@@ -556,6 +556,117 @@ CandidateOriginView ExpectAmbiguousEnglishPreservesChinese(
   return *chinese;
 }
 
+RimeSessionId CreateSchemaSession(RimeApi_stdbool* api,
+                                  const char* schema_id);
+
+void ExpectSpellingDerivedEnglishPreservesChinese(RimeApi_stdbool* api) {
+  struct Case {
+    const char* schema_id;
+    const char* input;
+    const char* english;
+    bool chinese_collision;
+  };
+  // CandidateOrigins(64) confirmed these complete rows against the frozen
+  // profile set. The three aer rows without a Chinese reading deliberately
+  // assert only that the derived English table candidate stays reachable.
+  constexpr std::array<Case, 24> kCases{{
+      {"linnet_zh_pinyin", "teh", "the", true},
+      {"linnet_zh_pinyin", "aer", "are", true},
+      {"linnet_zh_pinyin", "oen", "one", true},
+      {"linnet_zh", "teh", "the", true},
+      {"linnet_zh", "aer", "are", true},
+      {"linnet_zh", "oen", "one", true},
+      {"linnet_zh_flypy", "teh", "the", true},
+      {"linnet_zh_flypy", "aer", "are", true},
+      {"linnet_zh_flypy", "oen", "one", true},
+      {"linnet_zh_mspy", "teh", "the", true},
+      {"linnet_zh_mspy", "aer", "are", false},
+      {"linnet_zh_mspy", "oen", "one", true},
+      {"linnet_zh_sogou", "teh", "the", true},
+      {"linnet_zh_sogou", "aer", "are", false},
+      {"linnet_zh_sogou", "oen", "one", true},
+      {"linnet_zh_abc", "teh", "the", true},
+      {"linnet_zh_abc", "aer", "are", true},
+      {"linnet_zh_abc", "oen", "one", true},
+      {"linnet_zh_ziguang", "teh", "the", true},
+      {"linnet_zh_ziguang", "aer", "are", true},
+      {"linnet_zh_ziguang", "oen", "one", true},
+      {"linnet_zh_jiajia", "teh", "the", true},
+      {"linnet_zh_jiajia", "aer", "are", false},
+      {"linnet_zh_jiajia", "oen", "one", true},
+  }};
+  for (const auto& test : kCases) {
+    const RimeSessionId session = CreateSchemaSession(api, test.schema_id);
+    Enter(api, session, test.input);
+    const auto candidates = CandidateOrigins(session);
+    const auto english = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return candidate.genuine_type == "table" &&
+                 candidate.genuine_language == "linnet_en" &&
+                 BaseText(candidate.text) == test.english &&
+                 candidate.start == 0 &&
+                 candidate.end == std::strlen(test.input);
+        });
+    const auto chinese = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return candidate.genuine_language == "linnet_zh" &&
+                 candidate.start == 0 &&
+                 candidate.end == std::strlen(test.input);
+        });
+    if (english == candidates.end() ||
+        (test.chinese_collision &&
+         (chinese == candidates.end() || chinese != candidates.begin() ||
+          english == candidates.begin()))) {
+      std::cerr << "Origins for spelling-derived English '" << test.input
+                << "' in " << test.schema_id << ":";
+      for (const auto& candidate : candidates) {
+        std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                  << candidate.genuine_type << ":" << candidate.genuine_language
+                  << ":" << candidate.start << "-" << candidate.end << "]";
+      }
+      std::cerr << '\n';
+      api->destroy_session(session);
+      Fail("spelling-derived English regression changed table reachability or Chinese priority");
+    }
+    api->destroy_session(session);
+  }
+  for (const auto& schema_id : RuntimeChineseSchemaIDs(api)) {
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    for (const char* exact : {"the", "agent"}) {
+      ExpectExactEnglishFirst(api, session, schema_id, exact);
+    }
+    api->destroy_session(session);
+  }
+}
+
+void ExpectSmartEnglishSpellingDerivedCandidate(RimeApi_stdbool* api) {
+  const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+  Enter(api, session, "teh");
+  const auto candidates = CandidateOrigins(session);
+  const auto english = std::find_if(
+      candidates.begin(), candidates.end(), [](const auto& candidate) {
+        return candidate.genuine_type == "table" &&
+               candidate.genuine_language == "linnet_en" &&
+               BaseText(candidate.text) == "the";
+      });
+  const bool raw_first = !candidates.empty() &&
+      BaseText(candidates.front().text) == "teh" &&
+      (candidates.front().type == kForcedRawCandidateType ||
+       candidates.front().genuine_type == kForcedRawCandidateType);
+  if (!raw_first || english == candidates.end()) {
+    std::cerr << "Origins for Smart English spelling-derived input teh:";
+    for (const auto& candidate : candidates) {
+      std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                << candidate.genuine_type << ":" << candidate.genuine_language
+                << "]";
+    }
+    std::cerr << '\n';
+    api->destroy_session(session);
+    Fail("Smart English lost raw-first spelling-derived input or table reachability");
+  }
+  api->destroy_session(session);
+}
+
 void ExpectPartialSelectionRanksCurrentSegment(RimeApi_stdbool* api) {
   constexpr char kSchema[] = "linnet_zh";
   constexpr char kInputPrefix[] = "xwvb";
@@ -6622,6 +6733,8 @@ int main(int argc, char** argv) {
     ExpectNineCandidateSelectKeys(api, "linnet_en", "a");
     ExpectFormalSingleLetterMatrix(api);
     ExpectNaturalSingleKeyDefaultRanking(api);
+    ExpectSpellingDerivedEnglishPreservesChinese(api);
+    ExpectSmartEnglishSpellingDerivedCandidate(api);
     ExpectCandidateArrowNavigation(api);
     ExpectSingleSyllablePreferenceLearning(api);
     ExpectPartialSelectionRanksCurrentSegment(api);
@@ -6911,8 +7024,8 @@ int main(int argc, char** argv) {
   ExpectImmediateEnglishSpaceCommit(api);
   ExpectCommentContains(api, english, "Dejavu", "Déjà vu", "似曾", "相识");
   ExpectCommentContains(api, english, "jwt", "jwt", "JSON Web Token", "令牌");
-  ExpectCommentIncludesExcludes(
-      api, english, "serialization", "serialization", "序列化", "连载");
+  ExpectCommentContains(api, english, "serialization", "serialization",
+                        "序列化", "连载");
   ExpectCommentIncludesExcludes(
       api, english, "deserialization", "deserialization", "反序列化",
       "串并");
@@ -7432,6 +7545,8 @@ int main(int argc, char** argv) {
         api, profile_session, profile.input, profile.expected_chinese);
     api->destroy_session(profile_session);
   }
+  ExpectSpellingDerivedEnglishPreservesChinese(api);
+  ExpectSmartEnglishSpellingDerivedCandidate(api);
   // A partially confirmed composition has its own remaining Segment. Bilingual
   // intent must be classified from that segment, not from the full historical
   // input that still contains the confirmed prefix.

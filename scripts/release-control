@@ -210,7 +210,7 @@ authorization_ref="refs/tags/${authorization_tag}"
 gh auth status --hostname github.com >/dev/null
 # Authorization never uploads or repairs bytes after installed acceptance. It
 # proves that all three Action-staged drafts still contain the accepted
-# eight-file set, then creates the immutable tag consumed by release-ci.yml.
+# manifest-owned set, then creates the immutable tag consumed by release-ci.yml.
 for channel in core data public; do
   GITHUB_REPOSITORY="${repository}" \
     "${repo_root}/package/stage_github_release" verify \

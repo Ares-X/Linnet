@@ -2,11 +2,13 @@
 
 ## 2026-08-31 post-release repair candidate (in progress)
 
-Source baseline: `05dce7b`; this section does not supersede the published
-`0.1.10` acceptance below. The current task repairs existing behavior and local
-verification reuse; it does not authorize a new public release or input-source
-registration. Chinese `teh` ranking is explicitly deferred to product review.
-Smart English correction/fuzzy matching is a core capability, not a switch.
+Historical repair baseline: `05dce7b`; the latest delivery freeze below uses
+`c53df52` plus the working candidate. These records do not supersede published
+`0.1.10` acceptance. The later user decisions authorize local verification,
+remote publication and installed acceptance, including Chinese-first ordering
+before ambiguous English corrections. They do not authorize input-source
+re-registration. Smart English correction/fuzzy matching remains a core
+capability, not a switch.
 
 2026-08-31 live-sync repair, base `05dce7b` plus the accepted uncommitted
 post-release candidate: the hourly main-run-loop callback enters
@@ -170,6 +172,209 @@ exact reconstructed tree without modifying its base. This establishes local
 mechanism feasibility, not product-format, cross-macOS, install or backup
 acceptance. No new dependency or resident updater was installed.
 
+### Differential delivery design freeze — 2026-08-31
+
+User decisions confirmed on 2026-08-31, source `c53df52`: in Chinese schemas,
+same-span Chinese candidates precede English spelling corrections; exact English
+matches retain the accepted bilingual ranking. Smart English continues to offer
+correction. Normal updates remain differential. Missing/damaged bases may offer
+an explicit complete repair, but cannot trigger it automatically. An attempted
+delta failure preserves the installed state and requires a new confirmation
+before any complete repair. The user has authorized local verification, remote
+publication and installed acceptance; the earlier no-Actions pause does not
+authorize skipping the local gate.
+
+The first differential release uses the exact published `v0.1.10` Complete bytes
+as its named release baseline, with the release asset SHA-256 and fixed CMS leaf
+verified before extraction. Older/locally modified installations are not claimed
+as that baseline: they keep their App and receive the explicit repair route.
+Complete repair reuses the replacement owner and does not re-register an already
+registered input source. Published language containers stay readable by old
+clients; optional Catalog delta descriptors add transport identities only.
+New clients reuse unchanged packs, choose an exact installed base for changed
+packs, and require confirmation before complete changed-pack repair. There is no
+silent retry against a full asset after a failed delta.
+
+The bounded implementation scopes are native ranking (one production owner),
+Core installer/package (at most eight files), backup/archive (at most eight),
+Catalog-to-Registry transport (at most eight), and the existing release publisher
+chain (at most eight). Compiler source lists are mechanical. Each scope retains
+its existing transaction, verification and publication owner, approximately 500
+non-mechanical lines/three hours and at most two correction loops. The scopes
+close together against one exact local composite; none is a separate release.
+For existing decisions authoritative paths and pass-through hops remain flat.
+The new directory-delta format has one decoder, and cloud recovery has one
+archive/history owner; neither can bypass the existing portable import or pack
+verification boundary. Full changed-pack downloads and whole cloud-archive
+replacement are retired as normal-update paths and retained only as explicitly
+named first-baseline/repair or portable-export contracts.
+
+Baseline `61ed072` contains the preceding repairs. Its exact source tree
+`b2fea6f041b4e4c5d1e9f858f74a12dbe11de1cd` passed `verify-local` (app, strict
+lint, Swift, Rime/eight profiles, package-owner fixtures and Periphery).
+Settings desktop UI and installed IMK remain NOT_EXERCISED. That receipt does
+not cover this additional delivery migration, and no full Core installation
+has been performed to bypass the new requirement.
+
+The deliverable is one locally installed differential candidate, not merely a
+new archive tool. Trace Core build/package -> package-owned preflight -> staged
+reconstruction -> existing CMS identity -> atomic directory exchange -> typed
+Host activation; trace Catalog -> existing downloader -> Registry staging ->
+existing exhaustive pack verification -> atomic language activation. Keep
+Complete as the explicit initial-baseline/repair owner, never an automatic
+fallback from failed Core or pack deltas. A no-op reinstall verifies the exact
+target and performs no replacement. Absent/mismatched bases, corrupt deltas,
+unsupported clone filesystems and failed target validation leave the original
+untouched; failed post-exchange validation restores the verified previous tree.
+
+Reuse system rsync protocol-29 batch generation/replay and APFS clonefile, not
+a new diff algorithm, download daemon or package manager. A single bounded
+directory-delta boundary owns base/target tree hashes and batch framing. The
+existing CLI creates it; Core scripts and Registry consume it. Generation must
+receive explicit verified baseline bytes, not rebuild an old signed App or
+infer a baseline from a version string. A single-base local package does not
+prove multi-version public update coverage; public delivery additionally needs
+explicit supported baselines and every delta in the publication hash manifest.
+
+Local backup uses independent COW snapshots of stable files and the two closed
+native learning databases. Retire the normal mutation path's TSV export/import
+round trip: it cannot preserve dynamic weights, clocks or negative commits.
+The Host's existing pause acknowledgement must precede cloning; Backups and
+Transactions must share the live volume. Preserve v2/v3 backup restore and the
+explicit portable import/export codec as shipped external contracts, not as a
+fallback for normal v4 snapshots. Only selected imported/cleared languages are
+replaced; other original databases remain intact. Identical settings/personal
+file bytes must not be rewritten. Deleting an older snapshot must not invalidate
+a newer snapshot. COW proves local write/storage incrementality, not iCloud
+network delta; the manual cloud backup producer must be migrated separately
+before the whole backup requirement can be called complete.
+
+| Decision | Before -> after authoritative paths | Retired path / retained boundary |
+| --- | --- | --- |
+| Normal Core replacement | 1 -> 1 | full App payload -> validated delta + atomic swap; existing preflight/CMS and typed activation retain different install/runtime boundaries |
+| Tree reconstruction | 0 -> 1 new transport contract | rsync batch with exact base/target, no alternate decoder or full-copy fallback |
+| Local backup | 1 -> 1 | streaming full copies and local TSV round trip -> direct COW; manifest publication, closed-Db pause, restore and retention remain distinct boundaries |
+| Settings/personal writes | 1 -> 1 | same-byte replacement -> no-op in the existing writers |
+| Installed language update | 1 -> 1 | full changed-pack download -> base-bound delta; first missing pack still needs its baseline |
+| Catalog pack identity | 1 -> 1 | delta transport metadata must not change pack sequence/content identity |
+| Cloud backup | 1 -> 1, component verified | whole portable JSON replacement retired; immutable base/delta/head archive, explicit repair, no automatic full backup |
+
+Differential permission regression, 2026-08-31, `c53df52` working candidate:
+the canonical Registry's immutable 0444 pack reconstructed correct content but
+failed exact target identity because `--inplace` kept staging's temporary 0644
+mode. The same RED/GREEN test now preserves cloned file modes and uses rsync's
+temporary-file replacement, deleting the extra chmod interpretation. The pack
+suite passes changed/unchanged read-only files, nested 0555 directories,
+add/delete/link, base isolation, rollback and corrupt-delta rejection; a 4 MiB
+file with a 64-byte edit produces a 10,932-byte delta. This is component evidence,
+not installed acceptance or cross-version rsync proof. Network transfer remains
+block-differential; changed files require full temporary-file space locally,
+while unchanged files retain their COW blocks.
+
+Cross-implementation component evidence on the same working candidate:
+official rsync 2.6.9 source built locally on macOS 26 and the system openrsync
+both replayed the other's protocol-29 batch. Exact mode/type/link/content checks
+passed for changed and unchanged 0444 files, nested 0555 directories, added and
+removed files. Log SHA-256:
+`be052d1a5f5614ec20dc9592b6703918a41b9807b6a98f4a8520c1c58462ad0c`.
+The old sender emitted `select exception ... 0` diagnostics but returned zero;
+the strict replay checks passed. This does not claim a physical macOS 13 or
+Action run. No dependency lock or system installation was changed.
+
+Each owner migration is bounded to at most eight non-mechanical production
+files/about 500 lines and three hours, two corrective loops. Shared compiler
+source-list wiring is mechanical and cannot introduce another cache owner.
+Main owns the directory transport, CLI and build wiring; the backup and package
+owners have disjoint file scopes. No edits to the accepted native patch,
+upstream pins, TIS state, user applications, external releases or credentials.
+Overlapping tests run serially. Require RED/ GREEN owner regressions, COW
+base-isolation, raw learning-state fidelity, delta size and exact reconstruction,
+add/delete/symlink and corruption/wrong-base/no-op/rollback rows, old backup
+restore, then the exact local composite and installed workflow. Actual remote
+transfer, second-Mac restore and unsupported-version cross-products remain
+NOT_EXERCISED until explicitly run; no source fixture can promote them to PASS.
+
+Working-candidate evidence on 2026-08-31 (base `c53df52`, uncommitted migration):
+DirectoryDelta and Registry owner tests pass, including a 4 MiB file with a
+64-byte edit reconstructed from a 10,865-byte delta, add/delete/relative links,
+COW base isolation, corruption rejection and atomic rollback. The first failed
+cloud replay was traced to `/var` versus `/private/var` relative inventories;
+POSIX canonicalization fixes that owner, and the same alias regression passes.
+Settings administrative `State` alone now remains a missing installation;
+partial Data/Runtime still fails instead of being treated as a fresh baseline.
+
+Backup-store (14s), coordinator (97s), presentation, package lifecycle and
+package architecture focused gates pass. Manual cloud fixtures cover no-op,
+delta-only continuation, reconstruction, an older verified head after damage,
+and explicit full repair when the chain is unusable. These are temporary local
+fixtures, not actual iCloud or installed IMK acceptance. No source receipt or
+release claim is issued until the final combined candidate passes the complete
+local gate and exact installation workflow.
+
+### Native learning-data upgrade handoff — 2026-08-31
+
+Final cross-review, 2026-08-31, same working candidate: the MainActor Settings
+initializer/toggle directly called the cloud filesystem provider, so those
+calls executed on the UI executor instead of the existing data coordinator.
+This proves the wrong execution boundary, not a measured provider-stall duration.
+Move both preparation sites to one coordinator method; retain the one fixed
+cloud-location provider and publish UI state only after its async result. A
+transient preparation flag serializes the toggle, not input or Host maintenance.
+No new service, thread registry or I/O fallback; direct UI provider paths 2->0,
+Settings preparation owner 0->1, cloud-location authority 1->1. The centralized
+retired-path guard is RED before the move; existing directory behavior and App
+integration gates remain required afterward.
+
+The Complete Distribution also unconditionally declared `RequireLogout`, even
+for an already-registered App repair. Its template regression is RED. Remove
+that declaration and the verifier's matching assumption; both package variants
+must report `RestartAction=None`. First-install instructions still explicitly
+request one manual logout. Core/App repair continues to preserve healthy packs;
+explicit full language-pack repair is a separate Settings/Registry transaction,
+not a request to overwrite healthy language data through Complete. Interrupted
+Complete staging remains a separate unexercised row with explicit uninstall
+guidance that preserves personal data; it is not normal Core-update recovery.
+
+Before the `0.1.11` source freeze, the exact final corrections pass strict lint,
+the centralized retired-path guard, Complete/Core lifecycle fixtures, package
+architecture, an unsigned Release App build and Periphery. The full preceding
+candidate passes Swift and Rime integration, including eight profiles and live
+sync typing; the versioned source still requires a new complete receipt. The
+configuration-observation method stays on SettingsModel and moves unchanged
+beside its existing presentation consumers; no wrapper or new owner is added.
+Logs are retained under `build/release-0.1.11.cOlf1m/`. No installed-product,
+actual iCloud-provider, Action-artifact or publication PASS follows from these
+local checks.
+
+The differential candidate's cross-version data boundary was corrected before
+the final source freeze. On 2026-08-31, base `c53df52` plus this candidate,
+an old Settings pause request was accepted by the new Host because IPC checked
+peer identity but not its native learning-data capability. The new native
+database can retain activated pending merge records after pause; the published
+`56cb640` Settings exporter cannot see those records. Export can omit them and
+a later old-format mutation can discard them. This is an upgrade handoff defect,
+not justification to drain the whole database on the input thread or terminate
+the Settings process.
+
+The existing Settings contract now declares `nativeLearningDataVersion = 1`;
+missing/unknown capability is rejected by the existing Host IPC owner before
+the pause handler can release the database. The same old-readable rejection
+reply is reused. Diagnosis and explicit Core activation remain available to old
+clients. After a Core upgrade the user reopens only Linnet Settings before data
+operations; old Settings displays its existing generic refusal, not new copy.
+No application is force-closed. Pause admission remains one authoritative path
+(1->1); unconditional old-client database grants go 1->0; capability is one new
+contract fact (0->1), with no adapter, alternate endpoint or fallback. UID/PID
+authentication and native-capability admission protect separate peer and data
+interpretation boundaries. Two production files add 20 lines net.
+
+The same two-process regression was RED with a missing capability (the Host
+handler ran), then GREEN in 17.45s: missing and unknown versions are rejected
+without calling the handler, current pause succeeds, old diagnosis and Core
+activation still succeed. Contract decode/round-trip passed in 6.10s. These are
+IPC/contract fixtures, not an installed cross-version workflow; the exact full
+local gate and real upgrade acceptance remain required.
+
 ### English definition cross-review — 2026-08-31
 
 Base `61ed072`, working-ledger SHA-256
@@ -243,16 +448,16 @@ restores locked build inputs and builds the CMS-signed archive; it does not
 repeat source tests recorded as PASS for that tree. Settings UI acceptance is
 either a real local isolated-desktop PASS or explicitly NOT_EXERCISED; only
 the latter runs in the candidate Action. No skipped row becomes a PASS.
-A passing `package/verify_publication_artifacts` run freezes exactly
-eight files: three Core-channel assets (Core PKG, uninstaller and raw Catalog),
-four immutable language packs and one public `Linnet.pkg`. The same job stages
+A passing `package/verify_publication_artifacts` run freezes the exact manifest:
+three Core-channel assets (Core PKG, uninstaller and raw Catalog), four immutable
+language packs, their declared deltas and one public `Linnet.pkg`. The same job stages
 or verifies the candidate-bound Core/Public Drafts and the byte-bound data
 Draft. A data Draft already attached to any valid direct commit is reused
-without mutation when its tag, title, prerelease state and four pack assets are
+without mutation when its tag, title, prerelease state and declared data assets are
 byte-identical. Real installed
 Settings/InputMethodKit acceptance downloads and consumes those exact bytes
 before any public-channel mutation. The maintainer then uses Git SSH to create
-one lightweight control tag binding version, full revision and the eight-file
+one lightweight control tag binding version, full revision and the manifest
 set digest. That tag authorizes the Ubuntu Action's ordered
 Core/data/Catalog/public publication chain without a large-asset redownload or
 rebuild. Installation acceptance remains separate evidence and must name the
@@ -649,13 +854,13 @@ all non-install blockers are closed.
   decision and must be listed in the release notes.
 - Core assets, the raw Catalog snapshot and the public `Linnet.pkg` must come
   from the macOS Action candidate whose revision is exact current `main`, after
-  the self-contained serial candidate gates and final eight-artifact verifier.
+  exact-tree local source acceptance and final candidate artifact verification.
   Core/Public Drafts remain bound to that exact candidate revision. Each data
   pack is instead owned by its immutable bytes and metadata; a data Draft may be
   reused across candidate revisions when its target is a valid direct commit and
   its tag, title, prerelease state, filenames, sizes and SHA-256 digests match
   exactly. The Catalog is the candidate's snapshot of the current Core plus
-  those existing immutable packs. The eight-file set digest freezes that exact
+  those existing immutable packs. The manifest set digest freezes that exact
   combination, which must pass installed acceptance before one SSH control tag
   bound to its version, full revision and set digest authorizes public-channel
   mutation. A later source revision requires a new Core/Public/Catalog Action
@@ -775,7 +980,7 @@ locale. Localization completeness alone is not visual proof.
 | ID | User journey | Required proof | Current status |
 | --- | --- | --- | --- |
 | J01 | Download, checksum and trust instructions | P, I, R | No current package exists. Retired UAT9 checksums remain historical evidence only; a new revision-bound Core/complete projection, installed trust flow and public Release bytes are pending. |
-| J02 | Clean install, add/enable Linnet and coexist with Squirrel | I | `NOT_EXERCISED`. Installation acceptance must use the exact verified eight-file Draft Release set produced by the candidate Action; rebuilding or re-signing creates different evidence. The record can change to `passed` only after this row and the full required matrix succeed. |
+| J02 | Clean install, add/enable Linnet and coexist with Squirrel | I | `NOT_EXERCISED`. Installation acceptance must use the exact verified manifest-bound Draft Release set produced by the candidate Action; rebuilding or re-signing creates different evidence. The record can change to `passed` only after this row and the full required matrix succeed. |
 | J03 | First Chinese input and candidate commit | E, I | E covers same-event commit for ordinary Chinese punctuation and ASCII `,`/`.`/`:` inside numbers, plus idle `/` and `~` as ordinary symbols; installed workflow remains pending. |
 | J04 | left/right Shift tap, chord, hold and active composition | C, E, I | replay/engine covers exact-once raw-letter commit rather than candidate/completion selection in every Chinese profile and Smart English; active full-pinyin composition explicitly exercises both `Shift_L` and `Shift_R`. The required six-application installed workflow (Terminal, VS Code, Chrome, Apple Notes, Word and Teams) is `NOT_EXERCISED` |
 | J05 | Caps Lock, passwords, URLs, paths and code identifiers | E, I | The E regression gate covers Caps Lock down/type/up entering and leaving raw ASCII in both Chinese and Smart English. Current exact serial E execution and installed Terminal/password-field behavior remain pending. |
@@ -793,7 +998,7 @@ locale. Localization completeness alone is not visual proof.
 | J17 | keyboard navigation, focus order, labels, VoiceOver and reduced-motion behavior | V, I | pending |
 | J18 | cold start, first key, sustained typing, memory, disk and p95/p99 latency | E, P, I | The native runtime gate requires p95 ≤ 5 ms and p99 ≤ 15 ms. The local freeze measured English p95/p99 0.510/0.519 ms and Chinese 1.392/1.423 ms over 8,192 samples, with independent cold-client first keys at 10 ms and 2 ms against the 100 ms limit. Candidate presentation measured 23.73 ms cold and 1.43 ms steady p95. E is passed; signed package size, installed cold start, APFS usage and first-run cache growth remain P/I pending. |
 | J19 | empty, loading, download, validation, disk-full, conflict and rollback error states | C, V, I | partial headless coverage; visible recovery audit pending |
-| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | The candidate Action accepts one clean exact-main revision, runs its own serial candidate gates, signs once on macOS, and freezes exactly eight verifier-approved Draft Release files. Installation consumes that exact set before any public-channel mutation. Only the SSH control tag binding version, full revision and eight-file set digest may let the Ubuntu publisher route Core/data/Catalog and the unchanged `Linnet.pkg` to public Release / Latest. Candidate Draft bytes and final Release-page evidence remain distinct R rows. |
+| J20 | artifact names, sizes, checksums, notices, SBOM, update URLs and README agree | P, R | The candidate Action accepts one clean exact-main revision and its local source receipt, signs once on macOS, and freezes the manifest's verifier-approved Draft Release files. Only Settings UI rows not exercised locally run again. Installation consumes that exact set before any public-channel mutation. Only the SSH control tag binding version, full revision and manifest set digest may let the Ubuntu publisher route Core/data/Catalog and the unchanged `Linnet.pkg` to public Release / Latest. Candidate Draft bytes and final Release-page evidence remain distinct R rows. |
 
 ## Finding ledger
 
@@ -810,7 +1015,7 @@ locale. Localization completeness alone is not visual proof.
 | closed | P1 | The Host lifecycle CLI and postinstall treated Installer as the user's Text Input session, enabling repeated stop/register/selection designs to disturb menu state and client connections. | Complete registration and Core package lifecycle | Complete owns the only `TISRegisterInputSource` call. Core and uninstall have no product-process termination owner; the uninstaller executes no installed App bytes, and Core never calls register/enable/select. |
 | closed | P0 | During exact `83e7adb` default-uninstall UAT, the old App and generated data were removed but the preserved `linnet_zh.userdb` rotated its LevelDB log and manifest after the uninstaller invoked `--disable-input-source`; the pre-action and post-action byte manifests differed while the already-quiesced Host had no pending user input. | default uninstaller lifecycle sequence | Both the TIS-disable transition and installed Host cleanup commands are retired. The user first selects another input source; exact Host or Settings presence makes uninstall fail closed and instructs logout/retry. Default uninstall preserves UserData, Backups, Transactions and preferences byte-for-byte while removing Registry-owned Runtime logs with Runtime. Purge removes remaining persistent data and preferences; no system temporary path is inferred. Real default/purge rows remain required. |
 | closed | P1 | Caps Lock lacked an automated key-event proof across Chinese and Smart English. | input-event engine acceptance | `rime_smoke_test` now proves Caps Lock down/type/up enters and leaves raw ASCII in both schemas; installed Terminal/password-field coverage remains in J05 |
-| gate | P1 | Every publication candidate requires a fresh revision-bound Core/complete/uninstaller projection after source, LTS identity or Settings bytes change. | App/Core identity, immutable pack identity and exact Action candidate | before candidate build/sign, require exact current main and let the same candidate job run the serial full gates; then freeze one Action-built eight-file set accepted by `package/verify_publication_artifacts` and staged as Draft Releases. Before pushing its SSH control tag, pass installed Settings/InputMethodKit acceptance on those same bytes. Full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity remain candidate gates. |
+| gate | P1 | Every publication candidate requires a fresh revision-bound Core/complete/uninstaller projection after source, LTS identity or Settings bytes change. | App/Core identity, immutable pack identity and exact Action candidate | before candidate build/sign, require exact current main and a matching local full-gate receipt; then freeze one Action-built manifest set accepted by `package/verify_publication_artifacts` and staged as Draft Releases. Before pushing its SSH control tag, pass installed Settings/InputMethodKit acceptance on those same bytes. Full `verify_product release`, independent expansion, code-sign policy, checksums, zero build/debug files, Full Active and source-to-packaged-Settings byte parity remain candidate gates. |
 | closed | P1 | The former release workflow could publish Core/data and advance the stable Catalog before installed UAT. | single revision + set-digest SSH authorization boundary | the candidate Action can only stage Draft bytes; only the post-UAT local verifier can create the digest-bound tag that starts the Action-owned Core/data/Catalog/public chain without a rebuild |
 | closed | P2 | Candidate labels/opacity/radius, fuzzy-pinyin policy, restore defaults and reviewed advanced overrides are not Beta controls. The former design draft over-promised them; font and theme presets are implemented. | typed settings document and deterministic projection renderer | retired controls remain outside the Beta contract; any future addition requires its own typed owner and product evidence |
 | closed | P1 | Settings previously shipped partial Traditional-Chinese strings beside otherwise English fallback, and dynamic status classified any Chinese locale as Simplified Chinese. | Settings bundle string catalog and typed presentation locale | Beta now supports exactly English and Simplified Chinese; every entry has reviewed Simplified Chinese, unsupported Chinese scripts uniformly fall back to English, and structural/component gates reject a mixed third locale |
@@ -854,8 +1059,8 @@ Any future installed-product acceptance record must name:
 - draft release asset and download/update verification for R evidence;
 - every accepted residual P2 risk and its user-visible mitigation.
 
-The macOS candidate Action assembles all eight product assets from the clean
-exact-main checkout and signs exactly once; the eight-file set digest and
+The macOS candidate Action assembles the manifest-owned product assets from the clean
+exact-main checkout and signs exactly once; the asset-set digest and
 per-file hashes identify the only installable candidate. Installation acceptance
 downloads and records those same Draft Release identities but does not itself
 authorize publication. The maintainer then runs

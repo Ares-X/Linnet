@@ -84,6 +84,7 @@ ruby -rjson -e '
   fail_archive "App identity differs from the candidate revision"
 expanded_complete="${work_root}/expanded-complete"
 pkgutil --expand-full "${complete_pkg}" "${expanded_complete}"
+delta_options=()
 
 publish_pack() {
   local expanded="$1"
@@ -135,9 +136,42 @@ publish_pack() {
       fail_archive "unsafe existing release output: ${archive_name}"
     cmp -s "${candidate}" "${output_dir}/${archive_name}" ||
       fail_archive "existing pack bytes differ: ${archive_name}"
-    return
+  else
+    cp "${candidate}" "${output_dir}/${archive_name}"
   fi
-  cp "${candidate}" "${output_dir}/${archive_name}"
+  local baseline_file="${project_root}/config/linnet-update-baselines.json"
+  local base_content base_root delta_name delta reconstructed transport
+  base_content="$(plutil -extract "pack_baselines.${kind}.content_sha256" raw -o - "${baseline_file}")"
+  [[ "${base_content}" != "${package_content_sha}" ]] || return 0
+  [[ "$(plutil -extract "pack_baselines.${kind}.target_sequence" raw -o - "${baseline_file}")" == "${pack_sequence}" ]] ||
+    fail_archive "${kind} delta is not bound to the current pack sequence"
+  base_root="$("${project_root}/package/prepare_update_baseline" "${kind}")"
+  delta_name="${archive_name%.linnetpack}-from-${base_content}.linnetdelta"
+  delta="${work_root}/${delta_name}"
+  reconstructed="${work_root}/reconstructed-${kind}"
+  transport="$(ruby -rjson -e '
+    baseline = JSON.parse(File.read(ARGV.fetch(0))).fetch("pack_baselines").fetch(ARGV.fetch(1))
+    puts baseline.key?("delta_source") ? "published" : "new"
+  ' "${baseline_file}" "${kind}")"
+  if [[ "${transport}" == published ]]; then
+    cp "$("${project_root}/package/prepare_update_baseline" "delta-${kind}")" "${delta}"
+  elif [[ -f "${output_dir}/${delta_name}" && ! -L "${output_dir}/${delta_name}" ]]; then
+    cp "${output_dir}/${delta_name}" "${delta}"
+  else
+    "${pack_tool}" build-delta --base "${base_root}" --target "${pack_root}" --output "${delta}"
+  fi
+  "${pack_tool}" apply-delta --base "${base_root}" --delta "${delta}" --output "${reconstructed}"
+  "${pack_tool}" inspect-installed --root "${reconstructed}" --core-version "${version}" \
+    >"${work_root}/reconstructed-${kind}.json"
+  cmp -s "${installed_manifest}" "${work_root}/reconstructed-${kind}.json" ||
+    fail_archive "${kind} delta does not reconstruct the accepted pack"
+  if [[ -e "${output_dir}/${delta_name}" ]]; then
+    [[ -f "${output_dir}/${delta_name}" && ! -L "${output_dir}/${delta_name}" ]] &&
+      cmp -s "${delta}" "${output_dir}/${delta_name}" || fail_archive "existing delta bytes differ"
+  else
+    cp "${delta}" "${output_dir}/${delta_name}"
+  fi
+  delta_options+=("--${kind}-delta" "${output_dir}/${delta_name}" "--${kind}-base-content" "${base_content}")
 }
 
 publish_pack "${expanded_complete}" Linnet-Chinese.component.pkg chinese
@@ -155,7 +189,7 @@ publish_catalog() {
     --chinese-pack "${output_dir}/Linnet-Chinese.linnetpack" \
     --english-pack "${output_dir}/Linnet-English.linnetpack" \
     --lts-pack "${output_dir}/Linnet-LTS.linnetpack" \
-    --extended-pack "${output_dir}/Linnet-Extended.linnetpack" ||
+    --extended-pack "${output_dir}/Linnet-Extended.linnetpack" "${delta_options[@]}" ||
     fail_archive "cannot build data Catalog"
   "${pack_tool}" verify-catalog --catalog "${candidate}" \
     --core-version "${version}" >/dev/null
@@ -193,6 +227,13 @@ publish_catalog() {
         abort "catalog byte count mismatch" unless artifact.fetch("bytes") == File.size(asset)
         abort "catalog container digest mismatch" unless
           artifact.fetch("container_sha256") == Digest::SHA256.file(asset).hexdigest
+        artifact.fetch("deltas", []).each do |delta|
+          delta_name = File.basename(delta.fetch("url"))
+          delta_file = File.join(root, delta_name)
+          abort "delta artifact type mismatch" unless File.file?(delta_file) && !File.symlink?(delta_file)
+          abort "delta byte identity mismatch" unless delta.fetch("bytes") == File.size(delta_file) &&
+            delta.fetch("sha256") == Digest::SHA256.file(delta_file).hexdigest
+        end
       end
     end
   ' "${work_root}/catalog-1.json" "${catalog_sequence}" "${output_dir}" "${version}" \

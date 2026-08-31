@@ -149,7 +149,7 @@ Settings UI 仅在显式隔离桌面和 Developer Mode 可用时运行，否则�
 checkout/cache/hydrate，保留历史相关的版本单调性检查及实际签名 App/package 门。
 不重跑已本地通过的源码测试；仅当收据的 Settings UI 未执行时补测这一项。
 它使用临时 Keychain 构建、签名、打包和最终验证一次。
-互不重叠的 Core 3 件、data 4 件和 public 1 件直接写入三个 Draft GitHub
+互不重叠的 Core 3 件、data 4 个完整词包及对应差分和 public 1 件直接写入三个 Draft GitHub
 Releases。候选传输
 不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
 
@@ -162,7 +162,7 @@ identity。由于未来 `data-N` 尚不存在，只有显式
 
 - macOS Action 只在这个显式模式从上游锁定 URL 下载原始模型，并先验证 lock 中的
   bytes/SHA-256；
-- 同一个 Action 完成正式的完整八文件构建和
+- 同一个 Action 完成正式的完整 manifest 产物构建和
   `package/verify_publication_artifacts`，但只暂存并公开四件 data 预发布资产；
 - seed 不创建 Core/Public Release，不写 `data-channel`，因此已安装用户看不到它；
 - 只有同一个 `candidate_revision` 可以快进到 `main`；随后正常 candidate Action
@@ -170,7 +170,7 @@ identity。由于未来 `data-N` 尚不存在，只有显式
 
 进入安装验收时，本地只下载 candidate Action 的三个 Draft Release 原字节。验收人
 运行 `scripts/release-control authorize /absolute/release-directory` 后，本地 owner
-重新验证八文件、远端 SHA-256/size 和精确 main，只创建非 force 的
+重新验证 manifest 中全部文件、远端 SHA-256/size 和精确 main，只创建非 force 的
 `linnet-publication/*` 标签。该标签启动 Ubuntu Action；publisher 不下载大型资产，
 只读取 GitHub metadata 和约 4 KB Catalog，按 Core → data → 非强制快进 Catalog →
 public / Latest 发布。稳定 Catalog 仍只有一个 owner 和一个 URL。
@@ -266,7 +266,7 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 `archive` 会沿同一链生成并验证固定 CMS leaf 的 App、未签名的 Complete/Core
 PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修补输出。由于 CMS
 签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载
-`release-ci` 直接写入三个 Draft GitHub Releases 的同一八文件原字节。
+`release-ci` 直接写入三个 Draft GitHub Releases 的同一 manifest 产物原字节。
 
 ### 本地安装验收与 macOS 安全检查
 
@@ -299,8 +299,8 @@ Host 连续性和 TIS 不变性不从这份历史指纹推断，统一由当前 
 enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移不
 授权同 leaf Core 重新 register、enable 或 select。Core preinstall 只验证候选、已安装
 App、Active data 与 package-owned read-only typed TIS 状态；脚本不关闭 Host 或任何
-用户应用，也不调用 `osascript`。Distribution 的 Apple `must-close` 只关闭正在被替换的
-Linnet Settings 自身窗口；运行中的 Host 必须保持同一
+用户应用，也不调用 `osascript`。Core 与 Complete 均不声明 `must-close`；安装过程
+持有 Settings 数据事务共用的 mutation lease，不关闭 Settings。运行中的 Host 必须保持同一
 PID，更新前已连接的应用与更新后新打开的应用都要继续输入。安装完成后，Settings
 必须分别显示磁盘与运行中的 version/build/revision；只有切换离开 Linnet、没有未完成
 composition 或数据事务时，Host 的 typed activation owner 才能接受自行退出。Settings
@@ -315,7 +315,7 @@ Dock，并在最后一个窗口关闭后退出。
 安装器、系统设置、授权提示、输入菜单、菜单栏状态、真实候选和 Settings 的教程截图都必须来自同一冻结候选完成的这次安装 UAT。可以保留品牌图，但不能用 mock、其他 revision、局部测试窗口或另一台机器的提示冒充当前步骤；未实际出现的提示不写成已观察事实。
 
 PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出
-精确 commit、八文件集合摘要、逐文件 SHA-256、实际通过的验证和未执行项。
+精确 commit、manifest 集合摘要、逐文件 SHA-256、实际通过的验证和未执行项。
 安装验收不会自行创建公开版本 tag 或稳定 Release；只有验收人显式运行
 `scripts/release-control authorize /absolute/release-directory` 后，本地才会用
 Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata

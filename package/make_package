@@ -15,7 +15,10 @@ lts_receipt="io.github.ares-x.inputmethod.Linnet.data.lts.pkg"
 extended_receipt="io.github.ares-x.inputmethod.Linnet.data.extended.pkg"
 profile_receipt="io.github.ares-x.inputmethod.Linnet.profile.pkg"
 core_install_location="/Library/Input Methods"
+complete_staging_name=".linnet-complete"
 support_install_location="/Library/Application Support/Linnet"
+complete_staging_location="${support_install_location}/${complete_staging_name}"
+complete_app_staging_location="${complete_staging_location}/App"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
 release_tool="${LINNET_RELEASE_TOOL:-}"
 registration_inspector="${project_root}/build/input-source-registration-inspector"
@@ -69,6 +72,10 @@ actual_revision="$(git -C "${project_root}" rev-parse --verify HEAD^{commit})"
   fail_package "candidate revision differs from the candidate checkout"
 [[ -z "$(git -C "${project_root}" status --porcelain)" ]] ||
   fail_package "package assembly requires a clean candidate revision"
+core_base_app="$("${project_root}/package/prepare_update_baseline" core)" ||
+  fail_package "published Core baseline is unavailable"
+[[ "${core_base_app}" == /* && -d "${core_base_app}" && ! -L "${core_base_app}" ]] ||
+  fail_package "published Core baseline is unsafe"
 
 data_release_file="${project_root}/config/linnet-data-releases.json"
 data_release_tool="${project_root}/package/data_release_metadata"
@@ -235,11 +242,16 @@ cp -X "${candidate_app_identity}" \
   "${complete_profile_scripts}/candidate-app-identity.json"
 cp -X "${runtime_inspector}" \
   "${complete_profile_scripts}/linnet-runtime-inspector"
+cp -X "${registration_inspector}" \
+  "${complete_profile_scripts}/input-source-registration-inspector"
+cp -X "${pack_tool}" "${complete_profile_scripts}/linnet-pack"
 printf '%s\n' "${version}" >"${complete_profile_scripts}/candidate-core-version"
 printf 'complete\n' >"${complete_profile_scripts}/install-mode"
 chmod 755 "${complete_profile_scripts}/postinstall" \
   "${complete_profile_scripts}/candidate-app-identity.sh" \
-  "${complete_profile_scripts}/linnet-runtime-inspector"
+  "${complete_profile_scripts}/linnet-runtime-inspector" \
+  "${complete_profile_scripts}/input-source-registration-inspector" \
+  "${complete_profile_scripts}/linnet-pack"
 chmod 644 "${complete_profile_scripts}/candidate-app-identity.json" \
   "${complete_profile_scripts}/candidate-core-version" \
   "${complete_profile_scripts}/install-mode"
@@ -308,6 +320,12 @@ for payload in "${core_payload}" "${chinese_payload}" "${english_payload}" \
   done < <(find "${payload}" -print0)
 done
 
+cp -X "${pack_tool}" "${core_update_scripts}/linnet-pack"
+chmod 0755 "${core_update_scripts}/linnet-pack"
+"${pack_tool}" build-delta --base "${core_base_app}" --target "${core_app}" \
+  --output "${core_update_scripts}/core.linnetdelta"
+chmod 0644 "${core_update_scripts}/core.linnetdelta"
+
 core_component="${work_root}/Linnet-Core.component.pkg"
 chinese_component="${work_root}/Linnet-Chinese.component.pkg"
 english_component="${work_root}/Linnet-English.component.pkg"
@@ -316,26 +334,25 @@ extended_component="${work_root}/Linnet-Extended.component.pkg"
 profile_component="${work_root}/Linnet-Profile.component.pkg"
 
 pkgbuild --info "${project_root}/package/PackageInfo" --compression latest \
-  --min-os-version 13.0 --root "${core_payload}" \
-  --component-plist "${project_root}/package/Linnet-component.plist" \
+  --min-os-version 13.0 --nopayload \
   --identifier "${core_receipt}" --version "${version}" \
   --install-location "${core_install_location}" --scripts "${core_update_scripts}" \
   "${core_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${chinese_payload}" \
   --identifier "${chinese_receipt}" --version "${chinese_sequence}" \
-  --install-location "${support_install_location}" "${chinese_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${chinese_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${english_payload}" \
   --identifier "${english_receipt}" --version "${english_sequence}" \
-  --install-location "${support_install_location}" "${english_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${english_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${lts_payload}" \
   --identifier "${lts_receipt}" --version "${lts_sequence}" \
-  --install-location "${support_install_location}" "${lts_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${lts_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${extended_payload}" \
   --identifier "${extended_receipt}" --version "${extended_sequence}" \
-  --install-location "${support_install_location}" "${extended_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${extended_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${profile_payload}" \
   --identifier "${profile_receipt}" \
-  --version "${profile_receipt_version}" --install-location "${support_install_location}" \
+  --version "${profile_receipt_version}" --install-location "${complete_staging_location}" \
   --scripts "${complete_profile_scripts}" \
   "${profile_component}" >/dev/null
 
@@ -369,6 +386,14 @@ generate_distribution() {
         "@EXTENDED_SEQUENCE@" => ENV.fetch("EXTENDED_SEQUENCE"),
       }
       replacements.each { |key, value| source = source.gsub(key, value) }
+      complete_must_close = "  <pkg-ref id=\"io.github.ares-x.inputmethod.Linnet.core.pkg\">\n" \
+        "    <must-close>\n" \
+        "      <app id=\"io.github.ares-x.inputmethod.Linnet\"/>\n" \
+        "      <app id=\"io.github.ares-x.inputmethod.Linnet.settings\"/>\n" \
+        "    </must-close>\n" \
+        "  </pkg-ref>\n"
+      abort "Complete Distribution lost its replacement-free contract" unless source.include?(complete_must_close)
+      source = source.sub(complete_must_close, "")
       abort "unexpanded Distribution token" if source.include?("@")
       File.write(ARGV.fetch(1), source)
     ' "${project_root}/package/Distribution.xml" "${destination}"
@@ -392,17 +417,15 @@ core_candidate="${work_root}/${core_package_name}"
 package_candidate="${work_root}/${package_name}"
 productbuild --distribution "${core_distribution}" --resources "${metadata_root}" \
   --package-path "${work_root}" "${core_candidate}" >/dev/null
-# Both products retain the same Core receipt, version and payload. Only the
-# component-local install intent differs: the public Core artifact is an update,
-# while Complete may cross the empty-home first-install boundary. Rebuild the
-# same component filename after the Core product has captured its strict copy;
-# this keeps both Distribution contracts single-path and unambiguous.
+# Complete transports the App and every language payload to one hidden
+# transaction root. Its Profile postinstall is the sole publication owner.
+# Core reconstructs its exact target from the explicit published baseline.
 unlink "${core_component}"
 pkgbuild --info "${project_root}/package/PackageInfo" --compression latest \
   --min-os-version 13.0 --root "${core_payload}" \
   --component-plist "${project_root}/package/Linnet-component.plist" \
   --identifier "${core_receipt}" --version "${version}" \
-  --install-location "${core_install_location}" --scripts "${complete_core_scripts}" \
+  --install-location "${complete_app_staging_location}" --scripts "${complete_core_scripts}" \
   "${core_component}" >/dev/null
 productbuild --distribution "${distribution}" --resources "${metadata_root}" \
   --package-path "${work_root}" "${package_candidate}" >/dev/null

@@ -13,14 +13,40 @@ application_support_root="${library_root}/Application Support"
 support_root="${application_support_root}/Linnet"
 executable="${app_path}/Contents/MacOS/Linnet"
 active_state="${support_root}/Runtime/Active/activation.json"
-state_link="${support_root}/State/active.json"
 script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 mode_file="${script_root}/install-mode"
 identity_helper="${script_root}/candidate-app-identity.sh"
 identity_metadata="${script_root}/candidate-app-identity.json"
 candidate_file="${script_root}/candidate-core-version"
 runtime_inspector="${script_root}/linnet-runtime-inspector"
+registration_inspector="${script_root}/input-source-registration-inspector"
+delta_tool="${script_root}/linnet-pack"
 current_uid="$(/usr/bin/id -u)"
+
+# PackageKit invokes this script directly. The only recursive form is launched
+# by the package-owned CLI while it retains the Registry's existing mutation
+# lease in its parent process; no installer lock or process-state inference is
+# introduced here.
+if [[ "${1:-}" != --lease-held ]]; then
+  [[ -f "${candidate_file}" && ! -L "${candidate_file}" && \
+    -f "${delta_tool}" && ! -L "${delta_tool}" && -x "${delta_tool}" ]] || {
+    echo "Linnet postinstall: package lease dispatcher is unavailable" >&2
+    exit 1
+  }
+  IFS= read -r lease_core_version <"${candidate_file}"
+  [[ -n "${lease_core_version}" && "${lease_core_version}" != *$'\n'* ]] || {
+    echo "Linnet postinstall: package lease version is unavailable" >&2
+    exit 1
+  }
+  exec "${delta_tool}" with-settings-mutation-lease \
+    --application-support "${application_support_root}" \
+    --core-version "${lease_core_version}" --timeout-seconds 0 -- \
+    /bin/bash "${BASH_SOURCE[0]}" --lease-held
+fi
+[[ "$#" -eq 1 ]] || {
+  echo "Linnet postinstall: invalid lease dispatcher invocation" >&2
+  exit 1
+}
 
 secure_owned_path() {
   local path="$1"
@@ -59,18 +85,28 @@ case "${install_mode}" in
     exit 1
     ;;
 esac
+[[ -f "${registration_inspector}" && ! -L "${registration_inspector}" && \
+  -x "${registration_inspector}" && -f "${delta_tool}" && ! -L "${delta_tool}" && \
+  -x "${delta_tool}" ]] || {
+  echo "Linnet postinstall: repair tools are unavailable" >&2
+  exit 1
+}
+candidate_bundle_identifier="$(/usr/bin/plutil -extract bundle_identifier raw -o - \
+  "${identity_metadata}")" || {
+  echo "Linnet postinstall: candidate bundle identity is unavailable" >&2
+  exit 1
+}
+[[ "${candidate_bundle_identifier}" == io.github.ares-x.inputmethod.Linnet ]] || {
+  echo "Linnet postinstall: candidate bundle identity is invalid" >&2
+  exit 1
+}
 
 required_directories=(
   "${user_home}"
   "${library_root}"
   "${input_methods_root}"
-  "${app_path}"
-  "${app_path}/Contents"
-  "${app_path}/Contents/MacOS"
   "${application_support_root}"
   "${support_root}"
-  "${support_root}/Runtime"
-  "${support_root}/Runtime/Active"
   "${support_root}/State"
 )
 for required_directory in "${required_directories[@]}"; do
@@ -79,16 +115,204 @@ for required_directory in "${required_directories[@]}"; do
     exit 1
   }
 done
-secure_owned_path "${executable}" file && [[ -x "${executable}" ]] || {
-  echo "Linnet postinstall: installed Core App is missing or unsafe" >&2
-  exit 1
+require_installed_app() {
+  local directory
+  for directory in "${app_path}" "${app_path}/Contents" "${app_path}/Contents/MacOS"; do
+    secure_owned_path "${directory}" directory || return 1
+  done
+  secure_owned_path "${executable}" file && [[ -x "${executable}" ]]
 }
-secure_owned_path "${active_state}" file && \
-  [[ -L "${state_link}" && "$(readlink "${state_link}")" == \
-    "../Runtime/Active/activation.json" ]] || {
-  echo "Linnet postinstall: installed language profile is incomplete" >&2
-  exit 1
+
+require_live_runtime() {
+  secure_owned_path "${support_root}/Runtime" directory && \
+    secure_owned_path "${support_root}/Runtime/Active" directory && \
+    secure_owned_path "${active_state}" file
 }
+
+complete_stage_root="${support_root}/.linnet-complete"
+complete_staged_app="${complete_stage_root}/App/Linnet.app"
+complete_staged_data="${complete_stage_root}/Data"
+complete_staged_runtime="${complete_stage_root}/Runtime"
+complete_app_action=none
+complete_app_base=""
+complete_app_target=""
+complete_data_published=false
+complete_runtime_published=false
+
+publish_complete_app() {
+  local base target
+  if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
+    /bin/mv "${complete_staged_app}" "${app_path}"
+    published_action=created
+    published_base=""
+    published_target=""
+    return 0
+  fi
+  require_installed_app || return 1
+  base="$("${delta_tool}" tree-digest --root "${app_path}")" || return 1
+  target="$("${delta_tool}" tree-digest --root "${complete_staged_app}")" || return 1
+  "${delta_tool}" exchange-trees --installed "${app_path}" --staged "${complete_staged_app}" \
+    --base-sha256 "${base}" --target-sha256 "${target}" || return 1
+  published_action=swapped
+  published_base="${base}"
+  published_target="${target}"
+}
+
+rollback_complete_app() {
+  case "${complete_app_action}" in
+    none) ;;
+    created) /bin/mv "${app_path}" "${complete_staged_app}" ;;
+    swapped) "${delta_tool}" exchange-trees --installed "${app_path}" --staged "${complete_staged_app}" \
+      --base-sha256 "${complete_app_base}" --target-sha256 "${complete_app_target}" ;;
+    *) return 1 ;;
+  esac
+}
+
+update_root=""
+update_accepted=false
+if [[ "${install_mode}" == core-update ]]; then
+  require_live_runtime || {
+    echo "Linnet postinstall: installed language runtime is incomplete" >&2
+    exit 1
+  }
+  [[ "$("${runtime_inspector}" probe "${candidate_core_version}" \
+    "${application_support_root}")" == healthy ]] || {
+    echo "Linnet postinstall: installed language runtime is invalid" >&2
+    exit 1
+  }
+  require_installed_app || {
+    echo "Linnet postinstall: installed Core App is missing or unsafe" >&2
+    exit 1
+  }
+  delta_file="${script_root}/core.linnetdelta"
+  secure_owned_path "${delta_file}" file || {
+    echo "Linnet postinstall: differential payload is missing or unsafe" >&2
+    exit 1
+  }
+  delta_state="$("${delta_tool}" delta-state --base "${app_path}" --delta "${delta_file}")"
+  case "${delta_state}" in
+    target) ;;
+    base)
+      update_root="$(/usr/bin/mktemp -d "${input_methods_root}/.linnet-core.XXXXXX")"
+      staged_app="${update_root}/Linnet.app"
+      cleanup_update() {
+        local result=$? current_state
+        trap - EXIT INT TERM HUP
+        if [[ "${update_root%/*}" != "${input_methods_root}" ||
+          "${update_root##*/}" != .linnet-core.?????? ]] ||
+          ! secure_owned_path "${update_root}" directory; then exit 1; fi
+        if [[ "${update_accepted}" != true ]]; then
+          current_state="$("${delta_tool}" delta-state --base "${app_path}" --delta "${delta_file}")" || {
+            echo "Linnet postinstall: installed identity changed; retained recovery at ${update_root}" >&2
+            exit 1
+          }
+          if [[ "${current_state}" == target ]]; then
+            "${delta_tool}" exchange-delta --installed "${app_path}" \
+              --staged "${staged_app}" --delta "${delta_file}" || {
+              echo "Linnet postinstall: rollback failed; retained recovery at ${update_root}" >&2
+              exit 1
+            }
+          fi
+        fi
+        /bin/chmod -R -P u+w "${update_root}"
+        /bin/rm -rf -- "${update_root}"
+        exit "${result}"
+      }
+      trap cleanup_update EXIT
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
+      trap 'exit 129' HUP
+      "${delta_tool}" apply-delta --base "${app_path}" --delta "${delta_file}" \
+        --output "${staged_app}"
+      "${identity_helper}" staged "${staged_app}"
+      "${delta_tool}" exchange-delta --installed "${app_path}" \
+        --staged "${staged_app}" --delta "${delta_file}"
+      ;;
+    *) echo "Linnet postinstall: invalid differential state" >&2; exit 1 ;;
+  esac
+else
+  secure_owned_path "${complete_stage_root}" directory && \
+    secure_owned_path "${complete_staged_app}" directory && \
+    secure_owned_path "${complete_staged_app}/Contents" directory && \
+    secure_owned_path "${complete_staged_app}/Contents/MacOS" directory && \
+    secure_owned_path "${complete_staged_data}" directory && \
+    secure_owned_path "${complete_staged_runtime}" directory && \
+    secure_owned_path "${complete_staged_runtime}/Active" directory && \
+    secure_owned_path "${complete_staged_runtime}/Active/activation.json" file || {
+    echo "Linnet postinstall: complete staging payload is missing or unsafe" >&2
+    exit 1
+  }
+  "${identity_helper}" staged "${complete_staged_app}"
+  complete_runtime_state="$("${runtime_inspector}" probe "${candidate_core_version}" \
+    "${application_support_root}")" || {
+    echo "Linnet postinstall: installed language runtime is invalid" >&2
+    exit 1
+  }
+  case "${complete_runtime_state}" in
+    healthy|missing) ;;
+    *)
+      echo "Linnet postinstall: installed language runtime state is invalid" >&2
+      exit 1
+      ;;
+  esac
+  complete_cleanup() {
+    local result=$?
+    trap - EXIT INT TERM HUP
+    if [[ ! -d "${complete_stage_root}" || -L "${complete_stage_root}" ]] ||
+      ! secure_owned_path "${complete_stage_root}" directory; then exit 1; fi
+    if [[ "${update_accepted}" != true ]]; then
+      if [[ "${complete_runtime_published}" == true ]]; then
+        /bin/mv "${support_root}/Runtime" "${complete_staged_runtime}" || {
+          echo "Linnet postinstall: complete Runtime rollback failed; retained recovery at ${complete_stage_root}" >&2
+          exit 1
+        }
+      fi
+      if [[ "${complete_data_published}" == true ]]; then
+        /bin/mv "${support_root}/Data" "${complete_staged_data}" || {
+          echo "Linnet postinstall: complete Data rollback failed; retained recovery at ${complete_stage_root}" >&2
+          exit 1
+        }
+      fi
+      rollback_complete_app || {
+          echo "Linnet postinstall: complete App rollback failed; retained recovery at ${complete_stage_root}" >&2
+          exit 1
+      }
+    fi
+    /bin/chmod -R -P u+w "${complete_stage_root}"
+    /bin/rm -rf -- "${complete_stage_root}"
+    exit "${result}"
+  }
+  trap complete_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  if [[ "${complete_runtime_state}" == missing ]]; then
+    [[ ! -e "${support_root}/Data" && ! -L "${support_root}/Data" && \
+      ! -e "${support_root}/Runtime" && ! -L "${support_root}/Runtime" ]] || {
+      echo "Linnet postinstall: missing Runtime state retained a language baseline path" >&2
+      exit 1
+    }
+  fi
+  publish_complete_app || {
+    echo "Linnet postinstall: complete App publication failed" >&2
+    exit 1
+  }
+  complete_app_action="${published_action}"
+  complete_app_base="${published_base}"
+  complete_app_target="${published_target}"
+  if [[ "${complete_runtime_state}" == missing ]]; then
+    /bin/mv "${complete_staged_data}" "${support_root}/Data" || {
+      echo "Linnet postinstall: complete Data publication failed" >&2
+      exit 1
+    }
+    complete_data_published=true
+    /bin/mv "${complete_staged_runtime}" "${support_root}/Runtime" || {
+      echo "Linnet postinstall: complete Runtime publication failed" >&2
+      exit 1
+    }
+    complete_runtime_published=true
+  fi
+fi
 
 "${identity_helper}" installed
 [[ "$("${runtime_inspector}" probe "${candidate_core_version}" \
@@ -98,12 +322,24 @@ secure_owned_path "${active_state}" file && \
 }
 
 # Registration mutation is exclusively a Complete clean-install or
-# supported-repair boundary. register() is idempotent for the one verified
-# source. A Core update must not touch TIS or stop the live InputMethodKit Host:
-# connected applications keep
-# their process, and the new executable activates at a natural Host launch.
+# missing-registration repair boundary. A Complete repair with the exact TIS
+# source preserves it after atomic App replacement. Core never touches TIS or
+# stops the live InputMethodKit Host: connected applications retain their
+# process, and the new executable activates at a natural Host launch.
 if [[ "${install_mode}" == complete ]]; then
-  "${executable}" --register-input-source
+  registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
+    echo "Linnet postinstall: input-source registration is unavailable" >&2
+    exit 1
+  }
+  case "${registration_state}" in
+    registered:bundle-match:path-unknown) ;;
+    missing) "${executable}" --register-input-source ;;
+    *)
+      echo "Linnet postinstall: input-source registration changed during Complete repair" >&2
+      exit 1
+      ;;
+  esac
 fi
+update_accepted=true
 
 exit 0

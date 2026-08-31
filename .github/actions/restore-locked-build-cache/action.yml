@@ -38,6 +38,7 @@ runs:
         path: |
           build/upstreams
           build/dependencies
+          build/update-baselines
           build/tools
           data/chinese/grammar
           build/linnet-english-cache
@@ -53,6 +54,7 @@ runs:
         path: |
           build/upstreams
           build/dependencies
+          build/update-baselines
           build/tools
           data/chinese/grammar
           build/linnet-english-cache

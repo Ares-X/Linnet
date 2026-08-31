@@ -180,11 +180,7 @@ enum LinnetPersonalDataStore {
     to directory: URL
   ) throws {
     for (name, contents) in try renderedPersonalFiles(for: data) {
-      try contents.write(
-        to: directory.appending(path: name),
-        atomically: true,
-        encoding: .utf8
-      )
+      try publishChangedFile(contents, to: directory.appending(path: name))
     }
   }
 
@@ -196,12 +192,24 @@ enum LinnetPersonalDataStore {
     to directory: URL
   ) throws {
     let (name, contents) = try renderedRuntimeSettings(for: data)
-    try contents.write(
-      to: directory.appending(path: name),
-      atomically: true,
-      encoding: .utf8
-    )
+    try publishChangedFile(contents, to: directory.appending(path: name))
     try retireLegacySettings(in: directory)
+  }
+
+  /// Identical publication must preserve the inode and its COW-shared blocks.
+  private static func publishChangedFile(_ contents: String, to file: URL) throws {
+    var info = stat()
+    if lstat(file.path, &info) == 0 {
+      let opened = try openBoundedFile(file)
+      defer { try? opened.handle.close() }
+      let existing = try opened.handle.read(upToCount: maximumFileBytes + 1) ?? Data()
+      try validateUnchangedFile(
+        opened.handle.fileDescriptor, before: opened.info, observedBytes: existing.count, file: file)
+      if existing == Data(contents.utf8) { return }
+    } else if errno != ENOENT {
+      throw Failure.unsafeFile(file.lastPathComponent)
+    }
+    try contents.write(to: file, atomically: true, encoding: .utf8)
   }
 
   /// Backup-boundary normalization fills only canonical personal files that

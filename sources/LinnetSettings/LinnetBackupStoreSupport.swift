@@ -15,6 +15,7 @@ extension LinnetBackupStore {
   ])
   static let stableFiles = Set(["installation.yaml", "user.yaml"])
   static let learningFiles = Set(["linnet_zh.txt", "linnet_en.txt"])
+  static let learningDirectories = Set(Category.allCases.compactMap(\.learningSchema).map { "\($0).userdb" })
 
   enum StableLayout {
     case current
@@ -354,11 +355,25 @@ extension LinnetBackupStore {
     try requireDirectory(learning)
     let stableURLs = try stableArtifactURLs(
       stable, formatVersion: formatVersion).files
-    let learningURLs = try immediateChildren(
+    let learningEntries = try immediateChildren(
       of: learning,
       maximumCount: learningFiles.count,
       overflow: .artifactTooLarge("learning file count")
     )
+    let learningURLs: [URL]
+    if formatVersion == backupFormatVersion {
+      learningURLs = try learningEntries.flatMap { database in
+        guard learningDirectories.contains(database.lastPathComponent) else {
+          throw Failure.unsafeArtifact(database.lastPathComponent)
+        }
+        return try databaseFiles(in: database)
+      }
+    } else {
+      guard learningEntries.allSatisfy({ learningFiles.contains($0.lastPathComponent) }) else {
+        throw Failure.unsafeArtifact("learning file")
+      }
+      learningURLs = learningEntries
+    }
     var aggregateBytes = 0
     for url in stableURLs + learningURLs {
       let name = url.lastPathComponent
@@ -372,24 +387,24 @@ extension LinnetBackupStore {
     var artifacts: [BackupArtifact] = []
     for url in stableURLs {
       let name = url.lastPathComponent
-      artifacts.append(try backupArtifact(url, path: "stable/\(name)", learning: false))
+      artifacts.append(try backupArtifact(
+        url, path: "stable/\(name)", learning: false, limit: stableArtifactLimit(name)))
     }
     for url in learningURLs {
-      let name = url.lastPathComponent
-      guard learningFiles.contains(name) else { throw Failure.unsafeArtifact(name) }
+      let name = String(url.path.dropFirst(learning.path.count + 1))
       artifacts.append(
         try backupArtifact(
           url,
           path: "user-dictionaries/\(name)",
-          learning: true
+          learning: formatVersion != backupFormatVersion,
+          limit: maximumBackupArtifactBytes
         ))
     }
     return artifacts.sorted { $0.path < $1.path }
   }
 
-  static func backupArtifact(_ url: URL, path: String, learning: Bool) throws
+  static func backupArtifact(_ url: URL, path: String, learning: Bool, limit: Int) throws
     -> BackupArtifact {
-    let limit = learning ? maximumBackupArtifactBytes : stableArtifactLimit(url.lastPathComponent)
     let byteCount = try regularFileSize(url, limit: limit)
     let contents: String?
     if learning {
@@ -408,6 +423,18 @@ extension LinnetBackupStore {
       rowCount: contents.map(learningRowCount),
       sha256: try sha256(url, expectedBytes: byteCount)
     )
+  }
+
+  static func databaseFiles(in directory: URL) throws -> [URL] {
+    let files = try immediateChildren(
+      of: directory, maximumCount: maximumLiveDirectoryEntries,
+      overflow: .artifactTooLarge("user database file count"))
+    guard !files.isEmpty else { throw Failure.incompleteBackup }
+    for file in files {
+      guard safeName(file.lastPathComponent) else { throw Failure.unsafeArtifact(file.lastPathComponent) }
+      _ = try regularFileSize(file, limit: maximumBackupArtifactBytes)
+    }
+    return files.sorted { $0.lastPathComponent < $1.lastPathComponent }
   }
 
   static func safeName(_ name: String) -> Bool {
@@ -439,7 +466,7 @@ extension LinnetBackupStore {
     let names = Set(files.map(\.lastPathComponent))
     let layout: StableLayout
     switch formatVersion {
-    case backupFormatVersion: layout = .current
+    case backupFormatVersion, tableBackupFormatVersion: layout = .current
     case legacyBackupFormatVersion: layout = .legacyV2
     case .some(let version): throw Failure.unsupportedVersion(version)
     case nil:
@@ -504,7 +531,7 @@ extension LinnetBackupStore {
     var copiedBytes = 0
     for file in preserved {
       let remaining = maximumBackupBytes - copiedBytes
-      let copied = try copyBoundedRegularFile(
+      let copied = try cloneBoundedRegularFile(
         file,
         to: destination.appending(path: file.lastPathComponent),
         limit: min(stableArtifactLimit(file.lastPathComponent), remaining)
@@ -595,15 +622,14 @@ extension LinnetBackupStore {
     return Int(info.st_size)
   }
 
-  static func copyBoundedRegularFile(
+  static func cloneBoundedRegularFile(
     _ source: URL,
     to destination: URL,
     limit: Int
   ) throws -> Int {
     let sourceDescriptor = open(source.path, O_RDONLY | O_NOFOLLOW)
     guard sourceDescriptor >= 0 else { throw Failure.unsafeArtifact(source.lastPathComponent) }
-    let sourceHandle = FileHandle(fileDescriptor: sourceDescriptor, closeOnDealloc: true)
-    defer { try? sourceHandle.close() }
+    defer { close(sourceDescriptor) }
     var info = stat()
     guard limit >= 0,
       fstat(sourceDescriptor, &info) == 0,
@@ -615,39 +641,27 @@ extension LinnetBackupStore {
       if info.st_size > limit { throw Failure.artifactTooLarge(source.lastPathComponent) }
       throw Failure.unsafeArtifact(source.lastPathComponent)
     }
-    let destinationDescriptor = open(
-      destination.path,
-      O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
-      S_IRUSR | S_IWUSR
-    )
-    guard destinationDescriptor >= 0 else {
+    let parent = destination.deletingLastPathComponent()
+    try requireDirectory(parent)
+    let directoryDescriptor = open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+    guard directoryDescriptor >= 0 else {
       throw Failure.unsafeArtifact(destination.lastPathComponent)
     }
-    let destinationHandle = FileHandle(
-      fileDescriptor: destinationDescriptor,
-      closeOnDealloc: true
-    )
-    var copied = 0
-    do {
-      while true {
-        let chunk = try sourceHandle.read(upToCount: 1024 * 1024) ?? Data()
-        if chunk.isEmpty { break }
-        guard copied <= limit - chunk.count else {
-          throw Failure.artifactTooLarge(source.lastPathComponent)
-        }
-        try destinationHandle.write(contentsOf: chunk)
-        copied += chunk.count
-      }
-      guard copied == Int(info.st_size) else {
-        throw Failure.unsafeArtifact(source.lastPathComponent)
-      }
-      try destinationHandle.synchronize()
-      try destinationHandle.close()
-      return copied
-    } catch {
-      try? destinationHandle.close()
-      throw error
+    defer { close(directoryDescriptor) }
+    // Unsupported/cross-volume clones are errors. Never silently turn a local
+    // incremental snapshot into a full byte-stream copy.
+    guard destination.lastPathComponent.withCString({ name in
+      fclonefileat(sourceDescriptor, directoryDescriptor, name, UInt32(CLONE_NOFOLLOW | CLONE_NOOWNERCOPY))
+    }) == 0 else {
+      throw Failure.unsafeArtifact(destination.lastPathComponent)
     }
+    var after = stat()
+    guard fstat(sourceDescriptor, &after) == 0,
+      info.st_size == after.st_size,
+      info.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+      info.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec
+    else { throw Failure.unsafeArtifact(source.lastPathComponent) }
+    return Int(info.st_size)
   }
 
   /// Reads one current-user regular file through a single no-follow descriptor.

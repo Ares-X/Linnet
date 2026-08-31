@@ -135,7 +135,7 @@ enum LinnetSettingsTransactionIPC {
         channel.close()
         return
       }
-      handler(request) { reply in
+      let sendReply: Reply = { reply in
         guard reply.transactionID == request.transactionID,
           LinnetSettingsContract.validRuntimeReply(reply),
           let payload = try? encode(reply)
@@ -149,6 +149,18 @@ enum LinnetSettingsTransactionIPC {
           if terminal(reply.status, for: request.command) { channel.close() }
         }
       }
+      guard request.command != .pause
+        || request.nativeLearningDataVersion == LinnetSettingsContract.nativeLearningDataVersion
+      else {
+        sendReply(.init(
+          transactionID: request.transactionID,
+          status: .rejected,
+          code: .requesterUnavailable,
+          detail: "The requested native learning-data view is unavailable.",
+          health: nil))
+        return
+      }
+      handler(request, sendReply)
     }
 
     private func removeChannel(_ fd: Int32) {

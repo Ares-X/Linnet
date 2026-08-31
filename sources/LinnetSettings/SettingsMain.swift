@@ -15,7 +15,6 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class SettingsModel: ObservableObject {
-  static let cloudBackupName = "Linnet-Full-Backup.\(LinnetBackupStore.portableExtension)"
   @Published var backupRetentionPolicy: LinnetSettingsContract.BackupRetentionPolicy
   @Published var configuration: SettingsConfigurationSession {
     didSet {
@@ -45,6 +44,9 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var appearancePublishActive = false
   @Published private(set) var cloudSyncEnabled = false
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
+  @Published private(set) var cloudSyncPreparing = false
+  @Published var cloudRecoveryRepairConfirmationRequired = false
+  @Published var languageDataRepairTarget: SettingsLanguageDataUpdateTarget?
 
   let productName: String
   @Published private(set) var dataServicesAvailable: Bool
@@ -128,13 +130,6 @@ final class SettingsModel: ObservableObject {
     personalValidation = .valid(initialConfiguration.personalDraft)
     legacyImportState = .unavailable
     cloudSyncEnabled = LinnetSettingsContract.cloudSyncEnabled(startingAt: bundle)
-    if cloudSyncEnabled {
-      do {
-        cloudSyncLocation = try LinnetCloudSyncLocation.productLocation()
-      } catch {
-        print("The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription)")
-      }
-    }
     schedulePersonalValidation()
     updateObservation = updateChecker.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
@@ -158,6 +153,15 @@ extension SettingsModel {
     legacyImportState = dataServicesAvailable ? .checking : .unavailable
     detectGrammarModel()
     updateChecker.refreshInstalledData(edition: dataEdition, packs: installedPacks)
+    if cloudSyncEnabled, cloudSyncLocation == nil, !cloudSyncPreparing {
+      cloudSyncPreparing = true
+      defer { cloudSyncPreparing = false }
+      do {
+        cloudSyncLocation = try await coordinator.prepareCloudSyncLocation()
+      } catch {
+        logDiagnostic(error, context: "The Linnet iCloud Drive folder is unavailable")
+      }
+    }
   }
 
   private func schedulePersonalValidation() {
@@ -286,12 +290,14 @@ extension SettingsModel {
     ) { _ in .portableExported(productName: self.productName) }
   }
 
-  func setCloudSyncEnabled(_ enabled: Bool) {
-    guard !operationActive else { return }
+  func setCloudSyncEnabled(_ enabled: Bool) async {
+    guard !operationActive, !cloudSyncPreparing else { return }
+    cloudSyncPreparing = true
+    defer { cloudSyncPreparing = false }
     if enabled {
       do {
-        let location = try LinnetCloudSyncLocation.productLocation()
-        _ = try location.prepareLearningDirectory()
+        let location = try await coordinator.prepareCloudSyncLocation()
+        guard !Task.isCancelled else { return }
         guard LinnetSettingsContract.setCloudSyncEnabled(true) else {
           status = .operationFailed(.unavailable)
           return
@@ -316,34 +322,48 @@ extension SettingsModel {
     }
   }
 
-  func synchronizeLearningNow() {
-    guard cloudSyncLocation != nil, !operationActive else { return }
-    DistributedNotificationCenter.default().postNotificationName(
-      LinnetSettingsContract.cloudSyncNowRequested,
-      object: nil,
-      userInfo: nil,
-      deliverImmediately: true)
-    status = .cloudSyncRequested
-  }
-
-  func uploadCloudBackupArchive() {
-    guard let destination = cloudBackupArchive, !operationActive else { return }
+  func uploadCloudBackupArchive(repair: Bool = false) {
+    guard let cloudFolder = cloudSyncLocation?.folder, !operationActive else { return }
     run(
-      .portableExport,
-      operation: .exportPortable(
+      .cloudBackup,
+      operation: .exportCloudRecovery(
         categories: Set(LinnetBackupStore.Category.allCases),
-        destination: destination
+        cloudFolder: cloudFolder,
+        repair: repair
       )
-    ) { _ in .cloudBackupUploaded }
+    ) { outcome in
+      guard let recovery = outcome.cloudRecovery else { return .operationFailed(.unknown) }
+      return switch recovery.kind {
+      case .uploaded: .cloudBackupUploaded(recovery.verifiedAt)
+      case .unchanged: .cloudBackupUnchanged(recovery.verifiedAt)
+      }
+    }
   }
 
-  func inspectCloudBackupArchive(
-  ) async -> SettingsDataCoordinator.PortableImportCandidate? {
-    guard let source = cloudBackupArchive, cloudBackupArchiveAvailable else {
+  func inspectCloudBackupArchive() async -> SettingsDataCoordinator.PortableImportCandidate? {
+    guard configuration.canPersist, !operationActive, !portableInspectionActive,
+      let cloudFolder = cloudSyncLocation?.folder
+    else {
       status = .operationFailed(.unavailable)
       return nil
     }
-    return await inspectPortableImport(source)
+    portableInspectionActive = true
+    status = .operationProgress(.portableImport, .preflight)
+    defer { portableInspectionActive = false }
+    do {
+      guard let candidate = try await coordinator.inspectCloudRecovery(in: cloudFolder) else {
+        status = .operationFailed(.unavailable)
+        return nil
+      }
+      status = .ready
+      return candidate
+    } catch SettingsDataCoordinator.Failure.cancelled {
+      status = .operationCancelled; return nil
+    } catch {
+      logDiagnostic(error, context: "Cloud recovery inspection failed")
+      status = .operationFailed(presentationFailure(error))
+      return nil
+    }
   }
 
   private func notifyCloudSyncConfigurationChanged() {
@@ -366,8 +386,7 @@ extension SettingsModel {
       status = .ready
       return candidate
     } catch SettingsDataCoordinator.Failure.cancelled {
-      status = .operationCancelled
-      return nil
+      status = .operationCancelled; return nil
     } catch {
       logDiagnostic(error, context: "Portable import inspection failed")
       status = .operationFailed(presentationFailure(error))
@@ -418,17 +437,13 @@ extension SettingsModel {
   }
 
   func clearLearning(_ domains: Set<SettingsDataCoordinator.LearningDomain>) {
-    run(.clearLearning, operation: .clearLearning(domains)) { _ in
-      .learningCleared
-    }
+    run(.clearLearning, operation: .clearLearning(domains)) { _ in .learningCleared }
   }
 
   func refreshDiagnostics() {
     run(.diagnostics, operation: .diagnose) { [weak self] outcome in
       self?.diagnostics = outcome.diagnostics
-      return outcome.diagnostics?.reachability == .unreachable
-        ? .diagnosticsUnreachable
-        : .diagnosticsRefreshed
+      return outcome.diagnostics?.reachability == .unreachable ? .diagnosticsUnreachable : .diagnosticsRefreshed
     }
   }
 
@@ -498,6 +513,9 @@ extension SettingsModel {
       presentStaleOperation()
     } catch SettingsDataCoordinator.Failure.cancelled {
       status = .operationCancelled
+    } catch SettingsDataCoordinator.Failure.cloudRecoveryRepairRequired {
+      cloudRecoveryRepairConfirmationRequired = true
+      status = .cloudBackupRepairRequired
     } catch {
       logDiagnostic(error, context: "Settings operation failed")
       status = kind == .removeBackup
@@ -715,24 +733,6 @@ extension SettingsModel {
       }
     case .submittedAppearance:
       return .rejected
-    }
-  }
-
-  func observeCurrentConfiguration() -> SettingsConfigurationSession.ObservationResult? {
-    guard let userDirectory else { return nil }
-    do {
-      let personalSnapshot = try LinnetPersonalDataStore.snapshot(from: userDirectory)
-      let documentSnapshot = try LinnetSettingsDocumentStore.snapshot(from: userDirectory)
-      let personal = configuration.observePersonal(personalSnapshot)
-      let document = configuration.observeDocument(documentSnapshot)
-      if personal == .conflict || document == .conflict { return .conflict }
-      if personal == .reloaded || document == .reloaded { return .reloaded }
-      if personal == .unchanged && document == .unchanged { return .unchanged }
-      return .ignored
-    } catch {
-      configuration.markSourceUnreadable()
-      logDiagnostic(error, context: "Personal data could not be reloaded")
-      return nil
     }
   }
 

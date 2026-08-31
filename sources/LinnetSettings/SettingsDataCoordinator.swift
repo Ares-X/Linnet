@@ -93,6 +93,11 @@ actor SettingsDataCoordinator {
       categories: Set<LinnetBackupStore.Category>,
       destination: URL
     )
+    case exportCloudRecovery(
+      categories: Set<LinnetBackupStore.Category>,
+      cloudFolder: URL,
+      repair: Bool
+    )
     case importPortable(PortableImportCandidate, baseRevision: String)
     case restoreBackup(URL)
     case removeBackupRecord(LinnetBackupStore.BackupRecord)
@@ -140,6 +145,27 @@ actor SettingsDataCoordinator {
     let importReport: HallelujahSubstitutionImporter.Report?
     let legacyImportedCount: Int
     let diagnostics: Diagnostics?
+    let cloudRecovery: LinnetCloudRecoveryArchive.Outcome?
+
+    init(
+      backupDirectory: URL?,
+      personalSnapshot: LinnetPersonalDataStore.Snapshot,
+      personalEffect: PersonalEffect,
+      documentEffect: DocumentEffect,
+      importReport: HallelujahSubstitutionImporter.Report?,
+      legacyImportedCount: Int,
+      diagnostics: Diagnostics?,
+      cloudRecovery: LinnetCloudRecoveryArchive.Outcome? = nil
+    ) {
+      self.backupDirectory = backupDirectory
+      self.personalSnapshot = personalSnapshot
+      self.personalEffect = personalEffect
+      self.documentEffect = documentEffect
+      self.importReport = importReport
+      self.legacyImportedCount = legacyImportedCount
+      self.diagnostics = diagnostics
+      self.cloudRecovery = cloudRecovery
+    }
   }
 
   enum Failure: LocalizedError, Equatable, Sendable {
@@ -152,6 +178,7 @@ actor SettingsDataCoordinator {
     case configurationRestoreFailed
     case timedOut
     case cancelled
+    case cloudRecoveryRepairRequired
 
     var errorDescription: String? {
       switch self {
@@ -166,6 +193,8 @@ actor SettingsDataCoordinator {
         "The previous runtime configuration could not be restored consistently."
       case .timedOut: "The input method did not reply in time."
       case .cancelled: "The data operation was cancelled."
+      case .cloudRecoveryRepairRequired:
+        "Cloud recovery needs explicit full-repair confirmation."
       }
     }
   }
@@ -196,6 +225,8 @@ actor SettingsDataCoordinator {
       legacyUserDirectory: RimeUserDataBridge.PreparedUserDirectory?
     )
     case export(Set<LinnetBackupStore.Category>, destination: URL)
+    case cloudRecovery(
+      Set<LinnetBackupStore.Category>, cloudFolder: URL, repair: Bool)
     case portable(LinnetBackupStore.PortableArchive, baseRevision: String)
     case restore(URL, LinnetBackupStore.BackupManifest)
     case removeBackup(LinnetBackupStore.BackupRecord)
@@ -239,6 +270,9 @@ actor SettingsDataCoordinator {
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
   }
 
+}
+
+extension SettingsDataCoordinator {
   func inspectLegacy(
     hallelujahDatabase: URL?,
     legacyUserDirectory: URL?
@@ -308,9 +342,29 @@ actor SettingsDataCoordinator {
     )
   }
 
-}
+  /// Filesystem preparation belongs to this actor, not the Settings UI executor.
+  func prepareCloudSyncLocation() throws -> LinnetCloudSyncLocation {
+    let location = try LinnetCloudSyncLocation.productLocation()
+    _ = try location.prepareLearningDirectory()
+    return location
+  }
 
-extension SettingsDataCoordinator {
+  /// Cloud recovery reconstruction can invoke rsync and read a full archive;
+  /// it stays on this coordinator actor rather than the Settings main actor.
+  func inspectCloudRecovery(
+    in cloudFolder: URL
+  ) throws -> PortableImportCandidate? {
+    guard !Task.isCancelled else { throw Failure.cancelled }
+    let scratch = fileManager.temporaryDirectory.appending(
+      path: "CloudRecoveryInspect-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try fileManager.createDirectory(at: scratch, withIntermediateDirectories: false)
+    defer { try? fileManager.removeItem(at: scratch) }
+    guard let materialized = try LinnetCloudRecoveryArchive.materializeLatest(
+      in: cloudFolder, workspace: scratch)
+    else { return nil }
+    return try inspectPortable(materialized)
+  }
+
   func run(
     _ operation: DataOperation,
     progress: @escaping @Sendable (OperationProgress) -> Void = { _ in }
@@ -343,6 +397,15 @@ extension SettingsDataCoordinator {
         outcome = try await exportPortable(
           categories: categories,
           destination: destination,
+          environment: environment,
+          personalEffect: personalEffect,
+          progress: phaseProgress
+        )
+      case .cloudRecovery(let categories, let cloudFolder, let repair):
+        outcome = try await exportCloudRecovery(
+          categories: categories,
+          cloudFolder: cloudFolder,
+          repair: repair,
           environment: environment,
           personalEffect: personalEffect,
           progress: phaseProgress
@@ -401,6 +464,9 @@ extension SettingsDataCoordinator {
     } catch let failure as HallelujahSubstitutionImporter.Failure {
       phaseProgress(.failed)
       throw Failure.invalidOperation("Hallelujah import failed: \(failure)")
+    } catch LinnetCloudRecoveryArchive.Failure.needsConfirmedRepair {
+      phaseProgress(.failed)
+      throw Failure.cloudRecoveryRepairRequired
     } catch {
       phaseProgress(.failed)
       throw error
@@ -421,6 +487,8 @@ extension SettingsDataCoordinator {
       (.publishAppearance, .preflight), (.publishAppearance, .staging),
       (.exportPortable, .preflight), (.exportPortable, .pausing),
       (.exportPortable, .snapshotting),
+      (.exportCloudRecovery, .preflight), (.exportCloudRecovery, .pausing),
+      (.exportCloudRecovery, .snapshotting),
       (.removeBackupRecord, .preflight):
       cancellation = .available
     default:
@@ -435,7 +503,8 @@ extension SettingsDataCoordinator {
       return .submittedDraft
     case .importLegacy, .importPortable, .restoreBackup:
       return .externalReplacement
-    case .publishAppearance, .exportPortable, .removeBackupRecord, .clearLearning, .diagnose:
+    case .publishAppearance, .exportPortable, .exportCloudRecovery,
+      .removeBackupRecord, .clearLearning, .diagnose:
       return .observed
     }
   }

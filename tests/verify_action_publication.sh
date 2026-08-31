@@ -43,7 +43,7 @@ for required in \
     'publication authorization differs from candidate bytes' \
     'data-seed authorization differs from candidate identity' \
     'Catalog not promoted' \
-    'staged candidate inventory is not the exact eight-file set' \
+    'staged candidate inventory differs from the canonical asset set' \
     'publish_channel core' \
     'publish_channel data' \
     'promote_catalog' \
@@ -68,13 +68,15 @@ fixture_assets="${fixture}/assets"
 fake_bin="${fixture}/bin"
 publisher_state="${fixture}/publisher-state"
 stager_state="${fixture}/stager-state"
-mkdir -p "${fixture_repo}/package" "${fixture_assets}" "${fake_bin}" \
+mkdir -p "${fixture_repo}/package" "${fixture_repo}/config" "${fixture_assets}" "${fake_bin}" \
   "${publisher_state}/releases" "${publisher_state}/tags" \
   "${stager_state}/releases" "${stager_state}/tags"
 cp "${stager}" "${fixture_repo}/package/stage_github_release"
 cp "${publisher}" "${fixture_repo}/package/publish_github_release"
 cp "${manifest}" "${fixture_repo}/package/release_asset_manifest"
 cp "${identity_owner}" "${fixture_repo}/package/release_candidate_identity"
+cp "${repo_root}/config/linnet-data-releases.json" "${fixture_repo}/config/"
+cp "${repo_root}/config/linnet-update-baselines.json" "${fixture_repo}/config/"
 cp "${repo_root}/CHANGELOG.md" "${fixture_repo}/CHANGELOG.md"
 chmod 755 "${fixture_repo}/package/"*
 
@@ -94,9 +96,11 @@ for kind in Chinese English Extended LTS; do
 done
 
 ruby -rjson -rdigest - "${fixture_assets}" "${version}" \
-    "${catalog_sequence}" "${candidate_revision}" <<'RUBY'
-root, version, sequence, revision = ARGV
+    "${catalog_sequence}" "${candidate_revision}" "${fixture_repo}/config" <<'RUBY'
+root, version, sequence, revision, config = ARGV
 sequence = Integer(sequence, 10)
+baselines = JSON.parse(File.binread(File.join(config, "linnet-update-baselines.json"))).fetch("pack_baselines")
+releases = JSON.parse(File.binread(File.join(config, "linnet-data-releases.json"))).fetch("packs")
 asset = lambda do |name|
   path = File.join(root, name)
   {
@@ -115,12 +119,26 @@ packs = {
 pack = lambda do |kind|
   name = packs.fetch(kind)
   identity = asset.call(name)
-  {
+  entry = {
     "kind" => kind,
     "bytes" => identity.fetch("bytes"),
     "container_sha256" => identity.fetch("container_sha256"),
+    "content_sha256" => releases.fetch(kind).fetch("content_sha256"),
     "url" => "https://github.com/Ares-X/Linnet/releases/download/data-#{sequence}/#{name}",
   }
+  base = baselines.fetch(kind).fetch("content_sha256")
+  unless base == entry.fetch("content_sha256")
+    delta_name = name.sub(/\.linnetpack\z/, "-from-#{base}.linnetdelta")
+    File.binwrite(File.join(root, delta_name), "delta:#{kind}:#{base}\n")
+    delta = asset.call(delta_name)
+    entry["deltas"] = [{
+      "base_content_sha256" => base,
+      "bytes" => delta.fetch("bytes"),
+      "sha256" => delta.fetch("container_sha256"),
+      "url" => "https://github.com/Ares-X/Linnet/releases/download/data-#{sequence}/#{delta_name}",
+    }]
+  end
+  entry
 end
 catalog = {
   "format" => 1,

@@ -253,7 +253,7 @@ jobs:
               echo "### Linnet Action-built LTS data seed"
               echo
               echo "- Source: ${CANDIDATE_REVISION}"
-              echo "- Eight-file build identity: ${identity}"
+              echo "- Manifest build identity: ${identity}"
               echo "- Published boundary: data prerelease only; Catalog unchanged"
             } >>"${GITHUB_STEP_SUMMARY}"
           else
@@ -266,7 +266,7 @@ jobs:
               echo "### Linnet Action-built installation candidate"
               echo
               echo "- Source: ${CANDIDATE_REVISION}"
-              echo "- Eight-file identity: ${identity}"
+              echo "- Manifest identity: ${identity}"
               echo "- Transport: draft Core, data and public GitHub Releases"
             } >>"${GITHUB_STEP_SUMMARY}"
           fi

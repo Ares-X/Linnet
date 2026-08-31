@@ -14,7 +14,8 @@ Complete 是全新首次安装或受支持、已验证签名 App 修复的
    允许 Linnet，请选择“允许”。
 3. 确认 Linnet 已在启用列表中，再从菜单栏输入菜单选择 Linnet。
 
-若 Core 仅报告输入源未注册，请运行 Complete 修复。
+若 Core 报告未匹配精确发布基线或输入源未注册，请由用户主动运行 `Linnet.pkg`
+完整修复；Core 不会静默切换到完整安装。
 若 Core 报告重复、冲突或无法验证的注册残留，
 请先运行官方卸载器，再安装 Complete。
 不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。
@@ -24,11 +25,15 @@ Settings 进程仍在运行，请注销并重新登录后重试。运行日志�
 `Application Support/Linnet/Runtime/Logs`，会随默认卸载的 Runtime 一起删除。
 默认卸载保留个人数据；完整清理还会删除偏好与剩余个人数据，不推断系统临时路径。
 
-Core 安装时，macOS Installer 只关闭正在被替换的 Linnet Settings 自身窗口；它不停止
-正在服务的 InputMethodKit Host 或任何其他用户应用，也不触碰输入源注册、启用或选择状态。现有应用继续使用当前 Host；用户切换到其他输入法，
+Core 安装时，Settings 与其他应用保持打开；它不停止正在服务的 InputMethodKit Host，
+也不触碰输入源注册、启用或选择状态。Settings 正在修改数据时，请完成该操作后重试安装。
+现有应用继续使用当前 Host；用户切换到其他输入法，
 且没有未完成组合或数据事务时，可在 Settings 中明确请求新 Core 接管。其他应用保持打开；
 否则新 Core 在下次正常登录或重启后接管。当前候选仍须通过真实安装升级 UAT，才能把
 免注销与输入连续性作为发布结论。
+
+从 0.1.10 升级后，备份、导入或修改数据前，请关闭并重新打开升级前已打开的
+Settings 窗口。旧窗口不认识新的增量学习格式，其数据操作会被拒绝；无需退出其他应用。
 
 日常使用：
 
@@ -38,7 +43,7 @@ Core 安装时，macOS Installer 只关闭正在被替换的 Linnet Settings 自
 - 在 Settings 选择默认简体或繁体输出。
 - 从原生 Linnet 输入菜单选择 Settings。它内嵌于 Linnet，不作为独立产品
   安装、不常驻 Dock，并在最后一个窗口关闭后退出。
-- Settings 可分别开关智能英文上下文预测、拼写纠错和选词学习。候选字号
+- 智能英文始终提供拼写纠错和模糊匹配；Settings 可分别开关上下文预测和选词学习。候选字号
   范围为 12–32 pt，所有字体预设只使用 macOS 内置字体。
 
 许可信息：
@@ -68,7 +73,8 @@ For a first Complete installation:
    Allow if macOS asks for permission.
 3. Confirm that Linnet is enabled, then select it from the menu-bar input menu.
 
-If Core reports only a missing registration, run Complete to repair it.
+If Core reports a non-matching published baseline or a missing registration,
+explicitly run `Linnet.pkg` for Complete repair; Core never falls back silently.
 If Core reports duplicate, conflicting, or unverifiable registration remnants,
 run the official uninstaller first, then install Complete.
 Do not use Complete for a routine healthy upgrade or to bypass a rejected App
@@ -81,15 +87,19 @@ out and back in, then retry. Runtime logs live in the fixed product path
 removal. Default uninstall keeps personal data; purge additionally removes
 preferences and remaining personal data without inferring a system temporary path.
 
-During a Core installation, macOS Installer closes only Linnet's own Settings
-window whose files are being replaced. It does not stop the live Host or any
-other user application, and does not touch input-source registration,
+During a Core installation, Settings and other applications stay open.
+If Settings is modifying data, finish that operation before retrying installation.
+Core does not stop the live Host or touch input-source registration,
 enablement, or selection. Existing
 applications keep using the current Host. The new Core can take over after an explicit request once
 Linnet is inactive and no composition or data transaction is in progress.
 Other applications stay open while Settings starts and verifies the new Core.
 This candidate still requires installed upgrade UAT before no-logout and input
 continuity are accepted release claims.
+
+After upgrading from 0.1.10, reopen a Settings window that was already open
+before using data operations. The old window cannot read the new incremental
+learning format; its data requests are rejected. Other applications stay open.
 
 Daily use:
 
@@ -102,8 +112,8 @@ Daily use:
 - Choose Settings from the native Linnet input menu. It is embedded in Linnet,
   is not installed as a separate product, does not remain in the Dock, and
   exits when its last window closes.
-- Settings can independently enable Smart English context prediction, spelling
-  correction, and selection learning. Candidate font size is limited to
+- Smart English always provides spelling correction and fuzzy matching. Settings
+  can independently enable context prediction and selection learning. Candidate font size is limited to
   12–32 pt, and every font preset uses only fonts built into macOS.
 
 Licenses:

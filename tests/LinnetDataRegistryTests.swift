@@ -141,6 +141,7 @@ struct LinnetDataRegistryTests {
       LinnetTestFailure.fail("fixture signing owner: \(error)")
     }
     run("valid snapshot", fixtureSigning, validSnapshotUsesOneCanonicalRoot)
+    run("administrative State before installation", fixtureSigning, administrativeStateDoesNotImplyInstalledRuntime)
     run("legacy receipt Core-only migration", fixtureSigning, legacyReceiptAllowsCoreOnlyEditionUpdate)
     run("runtime log directory", fixtureSigning, runtimeLogDirectoryIsRegistryOwned)
     run("descriptor-canonical temporary root", fixtureSigning,
@@ -217,6 +218,34 @@ struct LinnetDataRegistryTests {
       try registry.cancelDataChannelUpdate(transactionID: update.transactionID)
       require(!FileManager.default.fileExists(atPath: transaction.path),
         "canonical cancellation retained transaction")
+    }
+  }
+
+  private static func administrativeStateDoesNotImplyInstalledRuntime(
+    _ fixtureSigning: FixtureSigningOwner
+  ) throws {
+    let support = LinnetTestScratch.directory.appending(path: "preinstall-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: support) }
+    try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+    let registry = try LinnetDataRegistry(
+      productName: "Linnet", coreVersion: "1.0.0", applicationSupportDirectory: support)
+    let state = registry.rootDirectory.appending(path: "State")
+    try FileManager.default.createDirectory(at: state, withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700])
+    try Data().write(to: state.appending(path: "settings-mutation.lock"))
+    let installed = try LinnetDataRegistry.inspectInstalledRuntime(
+      productName: "Linnet", coreVersion: "1.0.0", applicationSupportDirectory: support)
+    require(installed == .missing, "Settings administrative State is not a language baseline")
+    for name in ["Data", "Runtime"] {
+      let partial = registry.rootDirectory.appending(path: name)
+      try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o700])
+      do {
+        _ = try LinnetDataRegistry.inspectInstalledRuntime(
+          productName: "Linnet", coreVersion: "1.0.0", applicationSupportDirectory: support)
+        LinnetTestFailure.fail("partial \(name) installation was accepted as missing")
+      } catch is LinnetDataRegistry.Failure { }
+      try FileManager.default.removeItem(at: partial)
     }
   }
 

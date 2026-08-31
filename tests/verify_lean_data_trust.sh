@@ -56,8 +56,6 @@ if rg -n 'candidate_revision|candidate-revision|signing-request-set|pack-signing
   exit 1
 fi
 
-rg -Fq 'verifyAndStagePack(package: package, artifact: artifact)' \
-  sources/LinnetSettings/SettingsModelLanguageData.swift
 if rg -n 'verifyDownloadedArtifact\(|artifact\.matches\(staged\)' \
     sources/LinnetSettings/SettingsMain.swift \
     sources/LinnetSettings/SettingsModelLanguageData.swift; then

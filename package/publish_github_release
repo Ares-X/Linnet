@@ -168,9 +168,9 @@ else
     'print Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "${candidate_manifest}")"
   [[ "${candidate_identity}" == "${authorized_digest}" ]] ||
     fail_publish "publication authorization differs from candidate bytes (${authorized_digest} != ${candidate_identity})"
-  [[ "$(wc -l <"${candidate_manifest}" | tr -d ' ')" == 8 &&
-     "$(cut -f1 "${candidate_manifest}" | LC_ALL=C sort -u | wc -l | tr -d ' ')" == 8 ]] ||
-    fail_publish "staged candidate inventory is not the exact eight-file set"
+  expected_names="$("${project_root}/package/release_asset_manifest" candidate "${version}" "${catalog_sequence}")"
+  [[ "$(cut -f1 "${candidate_manifest}")" == "${expected_names}" ]] ||
+    fail_publish "staged candidate inventory differs from the canonical asset set"
 fi
 
 publish_channel() {
@@ -239,6 +239,7 @@ ruby -rjson -rdigest -e '
     "lts" => "Linnet-LTS.linnetpack",
   }
   observed = {}
+  observed_deltas = {}
   catalog.fetch("activation_sets").each do |set|
     abort unless %w[standard full].include?(set.fetch("edition"))
     set.fetch("packs").each do |pack|
@@ -251,9 +252,20 @@ ruby -rjson -rdigest -e '
       identity = pack.reject { |key, _| key == "url" }
       abort if observed.key?(kind) && observed.fetch(kind) != identity
       observed[kind] = identity
+      pack.fetch("deltas", []).each do |delta|
+        base = delta.fetch("base_content_sha256")
+        abort unless base.match?(/\A[0-9a-f]{64}\z/) && base != pack.fetch("content_sha256")
+        delta_name = name.sub(/\.linnetpack\z/, "-from-#{base}.linnetdelta")
+        delta_asset = assets.fetch(delta_name)
+        abort unless delta.fetch("url") == "https://github.com/#{repository}/releases/download/data-#{sequence}/#{delta_name}" &&
+          delta.fetch("bytes") == delta_asset.fetch(:bytes) && delta.fetch("sha256") == delta_asset.fetch(:digest)
+        abort if observed_deltas.key?(delta_name) && observed_deltas.fetch(delta_name) != delta
+        observed_deltas[delta_name] = delta
+      end
     end
   end
   abort unless observed.keys.sort == names.keys.sort
+  abort unless observed_deltas.keys.sort == assets.keys.grep(/\.linnetdelta\z/).sort
   catalog_asset = assets.fetch("Linnet-Data-Channel.json")
   abort unless File.size(catalog_path) == catalog_asset.fetch(:bytes) &&
     Digest::SHA256.file(catalog_path).hexdigest == catalog_asset.fetch(:digest)
@@ -295,6 +307,9 @@ promote_catalog() {
         candidate = JSON.parse(File.binread(ARGV.fetch(1)))
         current.delete("core")
         candidate.delete("core")
+        [current, candidate].each do |catalog|
+          catalog.fetch("activation_sets").each { |set| set.fetch("packs").each { |pack| pack.delete("deltas") } }
+        end
         abort unless current == candidate
       ' "${work_root}/current-catalog" "${catalog}" ||
         fail_publish "Catalog sequence cannot change immutable pack identity"

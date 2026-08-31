@@ -551,7 +551,9 @@ extension LinnetDataRegistry {
       }
       _ = try Self.validateOwnedDirectory(info, at: directory)
       guard info.st_dev == rootDevice else { throw Failure.unsafePath(directory.path) }
-      if name != "UserData" && name != "Backups" && name != "Transactions" { found = true }
+      // Settings IPC and its mutation lease may precede the first language
+      // installation. Administrative State is not a language-data baseline.
+      if name != "UserData" && name != "Backups" && name != "Transactions" && name != "State" { found = true }
     }
     return found
   }

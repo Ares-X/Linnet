@@ -174,7 +174,51 @@ fixed_cms_candidate_conflict = <<~'BASH'
 BASH
 clean_complete_transition = "    printf '%s\\n' clean-complete-install\n"
 historical_missing_transition = "    printf '%s\\n' missing-app-install\n"
+staged_identity_dispatch = <<~'BASH'
+  [[ "$#" -ge 1 ]] || fail_identity "usage: existing | installed | staged APP"
+  readonly verification_mode="$1"
+  case "${verification_mode}" in
+    existing|installed)
+      [[ "$#" -eq 1 ]] || fail_identity "unexpected App path"
+      readonly app_path="${user_home}/Library/Input Methods/Linnet.app"
+      ;;
+    staged)
+      [[ "$#" -eq 2 && ( "$2" == \
+        "${user_home}/Library/Input Methods/.linnet-core."??????"/Linnet.app" || \
+        "$2" == "${user_home}/Library/Application Support/Linnet/.linnet-complete/App/Linnet.app" ) ]] ||
+        fail_identity "staged App is outside the package transaction"
+      readonly app_path="$2"
+      secure_owned_path "${app_path%/*}" directory &&
+        [[ "$(cd "${app_path%/*}" && pwd -P)" == "${app_path%/*}" ]] ||
+        fail_identity "staged App parent is unsafe"
+      ;;
+    *) fail_identity "verification mode is invalid" ;;
+  esac
+BASH
+historical_identity_dispatch = <<~'BASH'
+  [[ "$#" -eq 1 ]] || fail_identity "usage: existing | installed"
+  readonly verification_mode="$1"
+  case "${verification_mode}" in
+    existing|installed) ;;
+    *) fail_identity "verification mode is invalid" ;;
+  esac
+BASH
+current_uid_binding = "readonly current_uid=\"$(/usr/bin/id -u)\"\n"
+historical_app_binding = "readonly app_path=\"${user_home}/Library/Input Methods/Linnet.app\"\n"
+staged_exact_candidate_gate = "if [[ \"${verification_mode}\" != existing ]]; then"
+historical_installed_candidate_gate = "if [[ \"${verification_mode}\" == installed ]]; then"
 legacy_projection = lambda do |content|
+  if content.include?(staged_identity_dispatch)
+    abort unless content.scan(staged_identity_dispatch).size == 1 &&
+      content.scan(historical_identity_dispatch).empty? &&
+      content.scan(current_uid_binding).size == 1 &&
+      content.scan(historical_app_binding).size == 1 &&
+      content.scan(staged_exact_candidate_gate).size == 1 &&
+      content.scan(historical_installed_candidate_gate).empty?
+    content = content.sub(current_uid_binding, historical_app_binding + current_uid_binding)
+      .sub(staged_identity_dispatch, historical_identity_dispatch)
+      .sub(staged_exact_candidate_gate, historical_installed_candidate_gate)
+  end
   occurrences = content.scan(fixed_cms_candidate_conflict).size
   abort unless occurrences <= 1
   content.sub(fixed_cms_candidate_conflict, "")
@@ -187,7 +231,9 @@ abort unless historical_identity_status.success? &&
   historical_identity.scan(fixed_cms_candidate_conflict).size == 1 &&
   current_identity.scan(fixed_cms_candidate_conflict).empty? &&
   historical_identity.scan(clean_complete_transition).empty? &&
-  current_identity.scan(clean_complete_transition).size == 1
+  current_identity.scan(clean_complete_transition).size == 1 &&
+  historical_identity.scan(staged_identity_dispatch).empty? &&
+  current_identity.scan(staged_identity_dispatch).size == 1
 legacy_max_build = current_identity[/^readonly legacy_max_build='(\d+)'$/, 1]
 historical_legacy_max_build = historical_identity[/^readonly legacy_max_build='(\d+)'$/, 1]
 current_build = product[/^CURRENT_PROJECT_VERSION = (\d+)$/, 1]
@@ -269,11 +315,13 @@ version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
   "${repo_root}/config/LinnetProduct.xcconfig")"
 if ! ruby - "${repo_root}/README.md" "${version}" <<'RUBY'
 readme, version = ARGV
-versions = File.read(readme).scan(/\b\d+\.\d+\.\d+\b/)
+# Upgrade instructions may name an older baseline; only the current-branch
+# projection owns the version that must agree with the product config.
+versions = File.read(readme).scan(/本分支版本为 \*\*(\d+\.\d+\.\d+)\*\*/).flatten
 abort unless versions == [version]
 RUBY
 then
-  fail "README must project the current Core version exactly once"
+  fail "README current-branch version must match the Core version exactly once"
 fi
 current_release_change="$(ruby - "${repo_root}/CHANGELOG.md" "${version}" <<'RUBY'
 path, version = ARGV
@@ -296,21 +344,25 @@ RUBY
 )"
 catalog_sequence="$("${repo_root}/package/data_release_metadata" get-catalog-sequence \
   "${repo_root}/config/linnet-data-releases.json")"
-candidate_expected="$(printf '%s\n' \
-  Linnet.pkg \
-  "Linnet-${version}-arm64-Core-community-beta.pkg" \
-  "Linnet-${version}-Uninstall.command" \
-  Linnet-Chinese.linnetpack Linnet-English.linnetpack \
-  Linnet-LTS.linnetpack Linnet-Extended.linnetpack \
-  Linnet-Data-Channel.json | LC_ALL=C sort)"
 public_expected=Linnet.pkg
 core_expected="$(printf '%s\n' \
   "Linnet-${version}-arm64-Core-community-beta.pkg" \
   "Linnet-${version}-Uninstall.command" \
   Linnet-Data-Channel.json | LC_ALL=C sort)"
+delta_expected="$(ruby -rjson -e '
+  baseline = JSON.parse(File.read(ARGV.fetch(0))).fetch("pack_baselines")
+  packs = JSON.parse(File.read(ARGV.fetch(1))).fetch("packs")
+  %w[chinese english lts extended].each do |kind|
+    entry = baseline.fetch(kind)
+    next if entry.fetch("content_sha256") == packs.fetch(kind).fetch("content_sha256")
+    name = kind == "lts" ? "LTS" : kind.capitalize
+    puts "Linnet-#{name}-from-#{entry.fetch("content_sha256")}.linnetdelta"
+  end
+' "${repo_root}/config/linnet-update-baselines.json" "${repo_root}/config/linnet-data-releases.json")"
 data_expected="$(printf '%s\n' \
   Linnet-Chinese.linnetpack Linnet-English.linnetpack \
-  Linnet-LTS.linnetpack Linnet-Extended.linnetpack | LC_ALL=C sort)"
+  Linnet-LTS.linnetpack Linnet-Extended.linnetpack "${delta_expected}" | sed '/^$/d' | LC_ALL=C sort)"
+candidate_expected="$(printf '%s\n' "${public_expected}" "${core_expected}" "${data_expected}" | LC_ALL=C sort)"
 for spec in \
     "candidate:${candidate_expected}" \
     "public:${public_expected}" \

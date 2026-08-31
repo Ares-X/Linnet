@@ -90,7 +90,7 @@ core_build="$(plutil -extract CFBundleVersion raw -o - \
   "${source_core_app}/Contents/Info.plist")"
 ruby -rjson -rrexml/document -e '
   expanded, edition, core_version, product_build, project, source_app,
-    verification_scope = ARGV
+    verification_scope, release_tool = ARGV
   components = edition == "core" ? %w[core] : %w[core chinese english lts extended profile]
   names = {"core" => "Core", "chinese" => "Chinese", "english" => "English",
     "lts" => "LTS", "extended" => "Extended", "profile" => "Profile"}
@@ -99,7 +99,18 @@ ruby -rjson -rrexml/document -e '
     ids[kind] = "io.github.ares-x.inputmethod.Linnet.data.#{kind}.pkg"
   end
   ids["profile"] = "io.github.ares-x.inputmethod.Linnet.profile.pkg"
-  locations = components.to_h { |kind| [kind, kind == "core" ? "/Library/Input Methods" : "/Library/Application Support/Linnet"] }
+  locations = components.to_h do |kind|
+    location = if edition == "complete" && kind == "core"
+      "/Library/Application Support/Linnet/.linnet-complete/App"
+    elsif edition == "complete"
+      "/Library/Application Support/Linnet/.linnet-complete"
+    elsif kind == "core"
+      "/Library/Input Methods"
+    else
+      "/Library/Application Support/Linnet"
+    end
+    [kind, location]
+  end
   attrs = ->(element) { element.attributes.each_attribute.to_h { |attribute| [attribute.name, attribute.value] } }
   children = ->(element) { element.elements.to_a }
   empty = ->(element, name) {
@@ -113,6 +124,7 @@ ruby -rjson -rrexml/document -e '
   versions = {}
   install_kbytes = {}
   components.each do |kind|
+    delta_component = kind == "core" && edition == "core"
     component = File.join(expanded, "Linnet-#{names.fetch(kind)}.component.pkg")
     info_path = File.join(component, "PackageInfo")
     stat = File.lstat(info_path) rescue abort("PackageInfo is missing")
@@ -134,12 +146,17 @@ ruby -rjson -rrexml/document -e '
     end
     versions[kind] = root.attributes["version"]
     nodes = children.call(root)
-    payload = nodes.shift
-    abort "payload mapping mismatch" unless payload&.name == "payload" &&
-      attrs.call(payload).keys.sort == %w[installKBytes numberOfFiles] &&
-      attrs.call(payload).values.all? { |value| value.match?(/\A[0-9]+\z/) } && children.call(payload).empty?
-    install_kbytes[kind] = payload.attributes["installKBytes"]
-    if kind == "core"
+    if delta_component
+      abort "Core update retained a full payload" if nodes.first&.name == "payload"
+      install_kbytes[kind] = "0"
+    else
+      payload = nodes.shift
+      abort "payload mapping mismatch" unless payload&.name == "payload" &&
+        attrs.call(payload).keys.sort == %w[installKBytes numberOfFiles] &&
+        attrs.call(payload).values.all? { |value| value.match?(/\A[0-9]+\z/) } && children.call(payload).empty?
+      install_kbytes[kind] = payload.attributes["installKBytes"]
+    end
+    if kind == "core" && !delta_component
       product_version = core_version
       bundle = nodes.shift
       leaf.call(bundle, "bundle", {"path" => "./Linnet.app", "id" => "io.github.ares-x.inputmethod.Linnet",
@@ -165,7 +182,7 @@ ruby -rjson -rrexml/document -e '
     empty.call(nodes.shift, "update-bundle")
     empty.call(nodes.shift, "atomic-update-bundle")
     strict = nodes.shift
-    if kind == "core"
+    if kind == "core" && !delta_component
       abort "strict bundle mapping mismatch" unless strict&.name == "strict-identifier" &&
         children.call(strict).map { |item| attrs.call(item) } == [
           {"id" => "io.github.ares-x.inputmethod.Linnet"},
@@ -223,7 +240,6 @@ ruby -rjson -rrexml/document -e '
       primary_attributes["installKBytes"] = install_kbytes.fetch(kind)
       primary_attributes["updateKBytes"] = "0"
     end
-    primary_attributes["onConclusion"] = "RequireLogout" if edition == "complete" && kind == "core"
     leaf.call(primary, "pkg-ref", primary_attributes,
       "#Linnet-#{names.fetch(kind)}.component.pkg")
   end
@@ -237,24 +253,11 @@ ruby -rjson -rrexml/document -e '
     abort "secondary pkg-ref mismatch" unless secondary&.name == "pkg-ref" &&
       attrs.call(secondary) == secondary_attributes
     secondary_nodes = children.call(secondary)
-    if kind == "core"
-      must_close = secondary_nodes.shift
-      expected_closed_apps = edition == "core" ? [
-        ["app", {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}, []],
-      ] : [
-        ["app", {"id" => "io.github.ares-x.inputmethod.Linnet"}, []],
-        ["app", {"id" => "io.github.ares-x.inputmethod.Linnet.settings"}, []],
-      ]
-      abort "Core must-close mapping mismatch" unless must_close&.name == "must-close" &&
-        attrs.call(must_close).empty? && children.call(must_close).map { |app|
-          [app.name, attrs.call(app), children.call(app)]
-        } == expected_closed_apps
-    end
     bundle_version = secondary_nodes.shift
     abort "Distribution bundle-version mismatch" unless bundle_version.name == "bundle-version"
     abort "secondary pkg-ref contains an extra mapping" unless secondary_nodes.empty?
     bundles = children.call(bundle_version)
-    if kind == "core"
+    if kind == "core" && edition == "complete"
       expected = [
         {"CFBundleShortVersionString" => core_version, "CFBundleVersion" => product_build,
           "id" => "io.github.ares-x.inputmethod.Linnet.settings", "path" => "Linnet.app/Contents/Applications/Settings.app"},
@@ -327,13 +330,17 @@ ruby -rjson -rrexml/document -e '
   if edition == "core"
     core_scripts["postinstall"] = [0o755,
       File.binread(File.join(project, "package/installer-scripts/postinstall"))]
+    core_scripts["linnet-pack"] = [0o755, File.binread(release_tool)]
+    core_scripts["core.linnetdelta"] = [0o644, nil]
   end
   script_contracts = {
     "core" => core_scripts,
     "profile" => {"candidate-app-identity.json" => [0o644, candidate_identity],
       "candidate-app-identity.sh" => [0o755, identity_helper],
       "candidate-core-version" => [0o644, "#{core_version}\n"],
+      "input-source-registration-inspector" => [0o755, registration_inspector],
       "install-mode" => [0o644, "complete\n"],
+      "linnet-pack" => [0o755, File.binread(release_tool)],
       "linnet-runtime-inspector" => [0o755, runtime_inspector],
       "postinstall" => [0o755,
         File.binread(File.join(project, "package/installer-scripts/postinstall"))]},
@@ -348,25 +355,37 @@ ruby -rjson -rrexml/document -e '
       expected.each do |name, (mode, bytes)|
         path = File.join(scripts, name); entry = File.lstat(path)
         abort "unsafe Installer script" unless entry.file? && !entry.symlink? &&
-          (entry.mode & 0o7777) == mode && File.binread(path) == bytes
+          (entry.mode & 0o7777) == mode && (bytes.nil? ? entry.size.positive? : File.binread(path) == bytes)
       end
     else
       abort "data component gained a Scripts entry" if File.exist?(scripts) || File.symlink?(scripts)
     end
   end
 ' "${expanded}" "${edition}" "${core_version}" "${core_build}" "${project_root}" \
-  "${source_core_app}" "${verification_scope}" ||
+  "${source_core_app}" "${verification_scope}" "${release_tool}" ||
   fail_verification "canonical Installer metadata contract failed"
 
-expected_restart_action=None
-[[ "${edition}" != complete ]] || expected_restart_action=RequireLogout
 [[ "$(installer -query RestartAction -pkg "${package_path}")" == \
-  "${expected_restart_action}" ]] ||
+  None ]] ||
   fail_verification "Installer exposes the wrong ${edition} session conclusion"
 
 core_component="${expanded}/Linnet-Core.component.pkg"
-[[ "$(find "${core_component}/Payload" -mindepth 1 -maxdepth 1 -exec basename {} \;)" == \
-  "Linnet.app" ]] || fail_verification "Core payload is not exactly Linnet.app"
+if [[ "${edition}" == core ]]; then
+  [[ ! -e "${core_component}/Payload" && ! -L "${core_component}/Payload" ]] ||
+    fail_verification "Core differential package contains a full payload"
+  core_base_app="$("${project_root}/package/prepare_update_baseline" core)" ||
+    fail_verification "published Core baseline is unavailable"
+  [[ "${core_base_app}" == /* && -d "${core_base_app}" && ! -L "${core_base_app}" ]] ||
+    fail_verification "published Core baseline is unsafe"
+  payload_core_app="${work_root}/Linnet.app"
+  "${release_tool}" apply-delta --base "${core_base_app}" \
+    --delta "${core_component}/Scripts/core.linnetdelta" --output "${payload_core_app}" ||
+    fail_verification "Core differential reconstruction failed"
+else
+  [[ "$(find "${core_component}/Payload" -mindepth 1 -maxdepth 1 -exec basename {} \;)" == \
+    "Linnet.app" ]] || fail_verification "Complete Core payload is not exactly Linnet.app"
+  payload_core_app="${core_component}/Payload/Linnet.app"
+fi
 source_shared_support="${source_core_app}/Contents/SharedSupport"
 if [[ -e "${source_shared_support}" || -L "${source_shared_support}" ]]; then
   [[ -d "${source_shared_support}" && ! -L "${source_shared_support}" &&
@@ -374,17 +393,10 @@ if [[ -e "${source_shared_support}" || -L "${source_shared_support}" ]]; then
     -z "$(find "${source_shared_support}" -mindepth 1 -print -quit)" ]] ||
     fail_verification "accepted Core SharedSupport must be absent or empty"
 fi
-[[ -d "${core_component}/Payload/Linnet.app/Contents/SharedSupport" &&
-  "$(stat -f '%Lp' "${core_component}/Payload/Linnet.app/Contents/SharedSupport")" == 755 &&
-  -z "$(find "${core_component}/Payload/Linnet.app/Contents/SharedSupport" -mindepth 1 -print -quit)" ]] ||
+[[ -d "${payload_core_app}/Contents/SharedSupport" &&
+  "$(stat -f '%Lp' "${payload_core_app}/Contents/SharedSupport")" == 755 &&
+  -z "$(find "${payload_core_app}/Contents/SharedSupport" -mindepth 1 -print -quit)" ]] ||
   fail_verification "Core SharedSupport is not empty"
-expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninput-source-registration-inspector\ninstall-mode\nlinnet-runtime-inspector\npreinstall'
-[[ "${edition}" != core ]] || \
-  expected_core_scripts=$'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninput-source-registration-inspector\ninstall-mode\nlinnet-runtime-inspector\npostinstall\npreinstall'
-actual_core_scripts="$(find "${core_component}/Scripts" -mindepth 1 -maxdepth 1 -type f \
-  -exec basename {} \; | LC_ALL=C sort)"
-[[ "${actual_core_scripts}" == "${expected_core_scripts}" ]] ||
-  fail_verification "Core compatibility script allowlist mismatch"
 bash -n "${core_component}/Scripts/preinstall"
 bash -n "${core_component}/Scripts/candidate-app-identity.sh"
 [[ "$(lipo -archs "${core_component}/Scripts/input-source-registration-inspector")" == \
@@ -439,25 +451,19 @@ grep -Fq 'inspect_runtime || {' "${core_component}/Scripts/preinstall" ||
 grep -Fq '"${identity_helper}" existing' "${core_component}/Scripts/preinstall" ||
   fail_verification "Core candidate identity preflight is incomplete"
 if [[ "${edition}" == core ]]; then
+  grep -Fq 'delta-state --base "${app_path}" --delta "${delta_file}"' \
+    "${core_component}/Scripts/preinstall" ||
+    fail_verification "Core exact-baseline preflight is incomplete"
   grep -Fq '"${identity_helper}" installed' "${core_component}/Scripts/postinstall" ||
     fail_verification "Core installed identity gate is incomplete"
+  grep -Fq 'with-settings-mutation-lease' "${core_component}/Scripts/postinstall" ||
+    fail_verification "Core mutation lease dispatcher is incomplete"
 fi
 
-ruby -rdigest -e '
-  def manifest(root)
-    Dir.glob("#{root}/**/*", File::FNM_DOTMATCH).each_with_object([]) do |path, entries|
-      next if [".", ".."].include?(File.basename(path))
-      relative = path.delete_prefix(root + "/")
-      stat = File.lstat(path)
-      next if relative == "Contents/SharedSupport" && stat.directory?
-      kind = stat.symlink? ? "symlink" : stat.directory? ? "directory" : stat.file? ? "file" : "other"
-      content = stat.file? ? Digest::SHA256.file(path).hexdigest : stat.symlink? ? File.readlink(path) : nil
-      entries << [relative, kind, stat.mode & 0o7777, content]
-    end.sort
-  end
-  abort "Core payload differs from staged Core" unless manifest(ARGV.fetch(0)) == manifest(ARGV.fetch(1))
-' "${source_core_app}" "${core_component}/Payload/Linnet.app" ||
-  fail_verification "expanded Core differs from accepted Core"
+source_tree="$("${release_tool}" tree-digest --root "${source_core_app}")"
+payload_tree="$("${release_tool}" tree-digest --root "${payload_core_app}")"
+[[ "${source_tree}" == "${payload_tree}" ]] ||
+  fail_verification "reconstructed or expanded Core differs from the normalized accepted Core"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
   fail_verification "verification requires LINNET_CANDIDATE_REVISION"
@@ -465,7 +471,7 @@ source_code_identity="$("${project_root}/scripts/linnet-code-identity" \
   verify-product "${source_core_app}")" ||
   fail_verification "source Core App code identity or release metadata is invalid"
 payload_code_identity="$("${project_root}/scripts/linnet-code-identity" \
-  verify-product "${core_component}/Payload/Linnet.app")" ||
+  verify-product "${payload_core_app}")" ||
   fail_verification "packaged Core App code identity or release metadata is invalid"
 [[ "${payload_code_identity}" == "${source_code_identity}" ]] ||
   fail_verification "packaged Core identity differs from its accepted source"
@@ -480,9 +486,9 @@ ruby -rjson -e '
 ' "${source_code_identity}" "${candidate_revision}" ||
   fail_verification "publication code identity projection is invalid"
 cmp -s "${expanded}/Resources/NOTICE.md" \
-  "${core_component}/Payload/Linnet.app/Contents/Resources/LinnetRelease/NOTICE.md" ||
+  "${payload_core_app}/Contents/Resources/LinnetRelease/NOTICE.md" ||
   fail_verification "Installer notice differs from the finalized App release metadata"
-settings_app="${core_component}/Payload/Linnet.app/Contents/Applications/Settings.app"
+settings_app="${payload_core_app}/Contents/Applications/Settings.app"
 settings_executable="${settings_app}/Contents/MacOS/Settings"
 [[ -d "${settings_app}" && ! -L "${settings_app}" && -x "${settings_executable}" ]] ||
   fail_verification "embedded Settings App is missing or unsafe"
@@ -491,7 +497,7 @@ while IFS= read -r -d '' candidate; do
   [[ "${description}" == *Mach-O* ]] || continue
   [[ "$(lipo -archs "${candidate}")" == arm64 ]] ||
     fail_verification "Core contains a non-arm64 Mach-O"
-done < <(find "${core_component}/Payload/Linnet.app" -type f -print0)
+done < <(find "${payload_core_app}" -type f -print0)
 
 verify_data_component() {
   local filename="$1"
@@ -565,7 +571,7 @@ if [[ "${edition}" != core ]]; then
   profile_component="${expanded}/${profile_file}"
   [[ "$(find "${profile_component}/Scripts" -mindepth 1 -maxdepth 1 -type f \
     -exec basename {} \; | LC_ALL=C sort)" == \
-    $'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninstall-mode\nlinnet-runtime-inspector\npostinstall' ]] ||
+    $'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninput-source-registration-inspector\ninstall-mode\nlinnet-pack\nlinnet-runtime-inspector\npostinstall' ]] ||
     fail_verification "profile script allowlist mismatch"
   [[ "$(cat "${profile_component}/Scripts/install-mode")" == complete ]] ||
     fail_verification "profile component installation mode mismatch"
@@ -576,9 +582,20 @@ if [[ "${edition}" != core ]]; then
   cmp -s "${runtime_inspector}" \
     "${profile_component}/Scripts/linnet-runtime-inspector" ||
     fail_verification "profile runtime inspector differs from the canonical build tool"
+  cmp -s "${registration_inspector}" \
+    "${profile_component}/Scripts/input-source-registration-inspector" ||
+    fail_verification "profile registration inspector differs from the canonical build tool"
+  cmp -s "${release_tool}" "${profile_component}/Scripts/linnet-pack" ||
+    fail_verification "profile pack CLI differs from the canonical build tool"
   grep -Fq '"${identity_helper}" installed' \
     "${profile_component}/Scripts/postinstall" ||
     fail_verification "Complete installed identity gate is incomplete"
+  grep -Fq 'exchange-trees --installed "${app_path}"' \
+    "${profile_component}/Scripts/postinstall" ||
+    fail_verification "Complete atomic publication gate is incomplete"
+  grep -Fq 'with-settings-mutation-lease' \
+    "${profile_component}/Scripts/postinstall" ||
+    fail_verification "Complete mutation lease dispatcher is incomplete"
   if grep -REn 'sudo|dscacheutil|/Library/Launch|xattr|spctl|curl|wget' \
       "${profile_component}/Scripts"; then
     fail_verification "profile script crosses its lifecycle boundary"
@@ -589,10 +606,9 @@ if [[ "${edition}" != core ]]; then
     profile = File.join(expanded, ARGV.fetch(1), "Payload")
     support = Pathname.new("/Library/Application Support/Linnet")
     active = File.join(profile, "Runtime", "Active")
-    state = File.join(profile, "State", "active.json")
     abort "Active view is missing" unless File.directory?(active) && !File.symlink?(active)
-    abort "state pointer is not the canonical relative symlink" unless
-      File.symlink?(state) && File.readlink(state) == "../Runtime/Active/activation.json"
+    abort "profile retained a retired State or Profiles projection" if
+      File.exist?(File.join(profile, "State")) || File.exist?(File.join(profile, "Profiles"))
     activation_path = File.join(active, "activation.json")
     abort "activation manifest is missing" unless File.file?(activation_path) && !File.symlink?(activation_path)
     activation = JSON.parse(File.read(activation_path))

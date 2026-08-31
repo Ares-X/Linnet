@@ -18,10 +18,13 @@ identity_helper="${script_root}/candidate-app-identity.sh"
 identity_metadata="${script_root}/candidate-app-identity.json"
 registration_inspector="${script_root}/input-source-registration-inspector"
 runtime_inspector="${script_root}/linnet-runtime-inspector"
+delta_tool="${script_root}/linnet-pack"
+delta_file="${script_root}/core.linnetdelta"
 current_uid="$(/usr/bin/id -u)"
 identity_transition=""
 registration_state=""
 runtime_state=""
+delta_state=""
 candidate_bundle_identifier=""
 
 secure_owned_path() {
@@ -78,6 +81,13 @@ case "${install_mode}" in
     exit 1
     ;;
 esac
+if [[ "${install_mode}" == core-update ]]; then
+  [[ -f "${delta_tool}" && ! -L "${delta_tool}" && -x "${delta_tool}" && \
+    -f "${delta_file}" && ! -L "${delta_file}" ]] || {
+    echo "Linnet Core preinstall: differential payload is unavailable" >&2
+    exit 1
+  }
+fi
 
 # This is the pre-payload half of the Registry's canonical-root invariant.
 # Missing leaves are valid on first install. Every existing component of both
@@ -101,6 +111,13 @@ payload_directories=(
 for payload_directory in "${payload_directories[@]}"; do
   require_secure_directory_if_present "${payload_directory}"
 done
+if [[ "${install_mode}" == complete ]]; then
+  complete_stage_root="${support_root}/.linnet-complete"
+  [[ ! -e "${complete_stage_root}" && ! -L "${complete_stage_root}" ]] || {
+    echo "Linnet Complete preinstall: a prior repair staging path remains. Run the official uninstaller first." >&2
+    exit 1
+  }
+fi
 
 # The package-owned candidate identity is the only authority for deciding
 # whether an existing integrity-checked App can be replaced or Complete owns a
@@ -129,11 +146,12 @@ inspect_runtime() {
   esac
 }
 
-# Complete owns both clean installation and repair of a supported signed App.
+# Complete owns the separately confirmed clean-install and full-repair action.
 # A clean install has no executable from which to read TIS. A repair must first
 # pass the same installed-App signature transition as Core, then consume the
-# package-owned helper's read-only typed TIS state. Registration mutation stays
-# exclusively in Complete postinstall.
+# package-owned helper's read-only typed TIS state. Complete postinstall
+# rechecks that state after its atomic App publication; an already exact source
+# is preserved, while only a missing source receives the registration mutation.
 if [[ "${install_mode}" == complete ]]; then
   if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
     [[ "${identity_transition}" == clean-complete-install ]] || {
@@ -159,15 +177,7 @@ if [[ "${install_mode}" == complete ]]; then
     exit 1
   }
   case "${registration_state}" in
-    missing) exit 0 ;;
-    registered:bundle-match:path-unknown)
-      if [[ "${identity_transition}" != clean-complete-install && \
-        "${runtime_state}" == healthy ]]; then
-        echo "Linnet is already healthy. Use Linnet Core for routine updates; Complete is only for first installation or repair." >&2
-        exit 1
-      fi
-      exit 0
-      ;;
+    missing|registered:bundle-match:path-unknown) exit 0 ;;
     *)
       echo "Linnet Complete found conflicting or unverifiable input-source registration (${registration_state}). Uninstall Linnet first." >&2
       exit 1
@@ -220,5 +230,21 @@ inspect_runtime || {
   echo "Linnet Core preinstall: installed language data is missing. Run Linnet Complete to repair it." >&2
   exit 1
 }
+
+# CMS identity, registration and Runtime health admit a supported installed
+# product, but only the sealed directory delta can decide whether it is this
+# Core package's exact published baseline. Reject before PackageKit writes any
+# payload; Complete remains a separate user-confirmed repair action.
+if ! delta_state="$("${delta_tool}" delta-state --base "${app_path}" --delta "${delta_file}")"; then
+  echo "Linnet Core update requires the exact published baseline. Run the explicitly selected Linnet Complete install/repair package." >&2
+  exit 1
+fi
+case "${delta_state}" in
+  base|target) ;;
+  *)
+    echo "Linnet Core update requires the exact published baseline. Run the explicitly selected Linnet Complete install/repair package." >&2
+    exit 1
+    ;;
+esac
 
 exit 0

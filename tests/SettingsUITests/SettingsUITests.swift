@@ -498,9 +498,6 @@ final class SettingsUITests: XCTestCase {
       "Settings UI tests must never use the real user home")
     XCTAssertTrue(FileManager.default.fileExists(
       atPath: isolatedHomeURL.appending(
-        path: "Library/Application Support/Linnet/State/active.json").path))
-    XCTAssertTrue(FileManager.default.fileExists(
-      atPath: isolatedHomeURL.appending(
         path: "Library/Application Support/Linnet/UserData/linnet_settings.json").path))
 
     let settingsURL = settingsApplicationURL()

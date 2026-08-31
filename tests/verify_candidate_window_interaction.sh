@@ -24,7 +24,7 @@ linnet_swift_compile candidate-interaction \
   -sdk "$(xcrun --show-sdk-path)" -framework AppKit \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetCandidatePresentation.swift \
   sources/LinnetClientAppearance.swift \

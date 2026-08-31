@@ -8,6 +8,9 @@ import Foundation
 
 enum LinnetSettingsContract {
   static let englishSchemaID = "linnet_en"
+  /// The durable native learning-data logical view required before a Host may
+  /// pause and release its database to Settings. This is not an app ABI.
+  static let nativeLearningDataVersion: UInt = 1
 
   enum ChineseProfile: String, Codable, CaseIterable, Equatable, Sendable {
     case fullPinyin = "full_pinyin"
@@ -186,6 +189,9 @@ enum LinnetSettingsContract {
     /// Only a configuration recovery may accept the first operation's
     /// committed revision as an alternative to the original base revision.
     let alternateSettingsRevision: String?
+    /// A missing value denotes a published Settings client that predates the
+    /// durable native learning-data logical view declaration.
+    let nativeLearningDataVersion: UInt?
 
     init(
       transactionID: UUID,
@@ -196,7 +202,8 @@ enum LinnetSettingsContract {
       expectedActiveGeneration: Int? = nil,
       expectedActiveStateSHA256: String? = nil,
       expectedSettingsRevision: String? = nil,
-      alternateSettingsRevision: String? = nil
+      alternateSettingsRevision: String? = nil,
+      nativeLearningDataVersion: UInt? = LinnetSettingsContract.nativeLearningDataVersion
     ) {
       self.transactionID = transactionID
       self.command = command
@@ -207,6 +214,7 @@ enum LinnetSettingsContract {
       self.expectedActiveStateSHA256 = expectedActiveStateSHA256
       self.expectedSettingsRevision = expectedSettingsRevision
       self.alternateSettingsRevision = alternateSettingsRevision
+      self.nativeLearningDataVersion = nativeLearningDataVersion
     }
   }
 

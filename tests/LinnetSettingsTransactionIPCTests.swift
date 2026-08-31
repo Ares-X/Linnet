@@ -135,6 +135,14 @@ struct LinnetSettingsTransactionIPCTests {
           reply(.init(
             transactionID: request.transactionID, status: .terminating,
             code: .coreActivationAccepted, detail: "Core activation accepted", health: nil))
+        } else if request.command == .pause {
+          reply(.init(
+            transactionID: request.transactionID, status: .paused,
+            code: .runtimePaused, detail: "runtime paused", health: nil))
+        } else if request.command == .diagnose {
+          reply(.init(
+            transactionID: request.transactionID, status: .running,
+            code: .diagnosticsReady, detail: "diagnostics ready", health: nil))
         } else if request.command == .reloadConfiguration {
           reply(.init(
             transactionID: request.transactionID, status: .activated,
@@ -208,12 +216,17 @@ struct LinnetSettingsTransactionIPCTests {
       let arguments = Array(CommandLine.arguments.dropFirst())
       guard let mode = arguments.first,
         [
-          "--request-success", "--request-reload", "--expect-rejection",
+          "--request-success", "--request-reload", "--expect-rejection", "--request-pause",
+          "--request-diagnose",
           "--request-core-activation",
           "--request-timeout-recovery",
         ].contains(mode),
         (mode == "--request-timeout-recovery"
-          ? arguments.count == 4 : arguments.count == 2 || arguments.count == 3)
+          ? arguments.count == 4
+          : arguments.count >= 2 && Set(arguments.dropFirst(2)).isSubset(of: [
+            "--expect-rejection", "--forged-requester-pid",
+            "--legacy-native-learning-data", "--unknown-native-learning-data",
+          ]))
       else { throw TestFailure.invalidInvocation }
       if mode == "--request-timeout-recovery" {
         try await runTimeoutRecovery(
@@ -221,19 +234,32 @@ struct LinnetSettingsTransactionIPCTests {
           firstReadMarker: URL(fileURLWithPath: arguments[3]))
         return
       }
-      let forgedRequesterPID = arguments.count == 3 && arguments[2] == "--forged-requester-pid"
+      let options = Set(arguments.dropFirst(2))
+      let forgedRequesterPID = options.contains("--forged-requester-pid")
       let reload = mode == "--request-reload"
+      let pause = mode == "--request-pause"
+      let diagnose = mode == "--request-diagnose"
       let coreActivation = mode == "--request-core-activation"
+      let expectsRejection = mode == "--expect-rejection" || options.contains("--expect-rejection")
+      let nativeLearningDataVersion: UInt? = if options.contains("--legacy-native-learning-data") {
+        nil
+      } else if options.contains("--unknown-native-learning-data") {
+        LinnetSettingsContract.nativeLearningDataVersion + 1
+      } else {
+        LinnetSettingsContract.nativeLearningDataVersion
+      }
       let request = LinnetSettingsContract.DataRequest(
         transactionID: UUID(),
-        command: coreActivation ? .activateCore : (reload ? .reloadConfiguration : .activate),
+        command: coreActivation ? .activateCore
+          : (reload ? .reloadConfiguration : (pause ? .pause : (diagnose ? .diagnose : .activate))),
         candidate:
-          coreActivation ? nil : (reload
+          coreActivation || pause || diagnose ? nil : (reload
           ? URL(fileURLWithPath: "/tmp/linnet-ipc-configuration-candidate", isDirectory: true)
           : URL(fileURLWithPath: "/tmp/linnet-ipc-candidate", isDirectory: true)),
         requesterPID: forgedRequesterPID ? getpid() + 1 : getpid(),
         deadline: Date().addingTimeInterval(10),
-        expectedSettingsRevision: reload ? ConfigurationFixture.baseRevision : nil)
+        expectedSettingsRevision: reload ? ConfigurationFixture.baseRevision : nil,
+        nativeLearningDataVersion: nativeLearningDataVersion)
 
       do {
         let client = LinnetSettingsTransactionIPC.Client(startingAt: .main)
@@ -241,13 +267,34 @@ struct LinnetSettingsTransactionIPCTests {
         let terminal = try await client.request(request, timeout: 2) {
           progress.append($0)
         }
-        guard mode != "--expect-rejection" else {
-          throw TestFailure.untrustedPeerAccepted
+        if expectsRejection {
+          guard terminal.transactionID == request.transactionID,
+            terminal.status == .rejected,
+            terminal.code == .requesterUnavailable,
+            progress.snapshot().isEmpty
+          else { throw TestFailure.untrustedPeerAccepted }
+          return
         }
         if coreActivation {
           guard terminal.transactionID == request.transactionID,
             terminal.status == .terminating,
             terminal.code == .coreActivationAccepted,
+            progress.snapshot().isEmpty
+          else { throw TestFailure.legitimateFlow }
+          return
+        }
+        if pause {
+          guard terminal.transactionID == request.transactionID,
+            terminal.status == .paused,
+            terminal.code == .runtimePaused,
+            progress.snapshot().isEmpty
+          else { throw TestFailure.legitimateFlow }
+          return
+        }
+        if diagnose {
+          guard terminal.transactionID == request.transactionID,
+            terminal.status == .running,
+            terminal.code == .diagnosticsReady,
             progress.snapshot().isEmpty
           else { throw TestFailure.legitimateFlow }
           return
@@ -258,7 +305,7 @@ struct LinnetSettingsTransactionIPCTests {
           progress.snapshot().map(\.status) == (reload ? [] : [.verifying])
         else { throw TestFailure.legitimateFlow }
       } catch is LinnetSettingsTransactionIPC.Failure {
-        guard mode == "--expect-rejection" else { throw TestFailure.legitimateFlow }
+        guard expectsRejection else { throw TestFailure.legitimateFlow }
       }
     }
 

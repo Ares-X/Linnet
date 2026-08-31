@@ -35,8 +35,7 @@
     <pkg-ref id="io.github.ares-x.inputmethod.Linnet.profile.pkg"/>
   </choice>
   <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"
-    version="@CORE_VERSION@" auth="none"
-    onConclusion="RequireLogout">Linnet-Core.component.pkg</pkg-ref>
+    version="@CORE_VERSION@" auth="none">Linnet-Core.component.pkg</pkg-ref>
   <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.chinese.pkg"
     version="@CHINESE_SEQUENCE@" auth="none">Linnet-Chinese.component.pkg</pkg-ref>
   <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.english.pkg"

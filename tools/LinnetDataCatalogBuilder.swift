@@ -16,6 +16,7 @@ enum LinnetDataCatalogBuilder {
     let manifest: LinnetPackContract.Manifest
     let bytes: UInt64
     let containerSHA256: String
+    var deltas: [LinnetDataChannel.Delta]?
   }
 
   enum Failure: LocalizedError, Equatable {
@@ -60,7 +61,8 @@ enum LinnetDataCatalogBuilder {
         contentSHA256: manifest.contentSHA256,
         bytes: published.bytes,
         containerSHA256: published.containerSHA256,
-        url: url)
+        url: url,
+        deltas: published.deltas)
     }
 
     let sharedKinds: [LinnetPackContract.Kind] = [.chinese, .english, .lts]

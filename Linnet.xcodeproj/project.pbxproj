@@ -61,6 +61,9 @@
 		E71000000000000000000002 /* LinnetDataRegistryStorage.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000003 /* LinnetDataRegistryStorage.swift */; };
 		E71100000000000000000001 /* LinnetDataRegistryTransactions.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */; };
 		E71100000000000000000002 /* LinnetDataRegistryTransactions.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */; };
+		E71400000000000000000001 /* LinnetDirectoryDelta.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = E71400000000000000000003 /* LinnetDirectoryDelta.swift */; };
+		E71400000000000000000002 /* LinnetDirectoryDelta.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71400000000000000000003 /* LinnetDirectoryDelta.swift */; };
+		E71400000000000000000004 /* LinnetCloudRecoveryArchive.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71400000000000000000005 /* LinnetCloudRecoveryArchive.swift */; };
 		D50000000000000000000001 /* LinnetPackContract.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000003 /* LinnetPackContract.swift */; };
 		D50000000000000000000002 /* LinnetPackContract.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000003 /* LinnetPackContract.swift */; };
 		D60000000000000000000001 /* LinnetDataChannel.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000003 /* LinnetDataChannel.swift */; };
@@ -225,6 +228,8 @@
 		D40000000000000000000003 /* LinnetDataRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataRegistry.swift; path = sources/LinnetDataRegistry.swift; sourceTree = "<group>"; };
 		E71000000000000000000003 /* LinnetDataRegistryStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataRegistryStorage.swift; path = sources/LinnetDataRegistryStorage.swift; sourceTree = "<group>"; };
 		E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataRegistryTransactions.swift; path = sources/LinnetDataRegistryTransactions.swift; sourceTree = "<group>"; };
+		E71400000000000000000003 /* LinnetDirectoryDelta.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDirectoryDelta.swift; path = sources/LinnetDirectoryDelta.swift; sourceTree = "<group>"; };
+		E71400000000000000000005 /* LinnetCloudRecoveryArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCloudRecoveryArchive.swift; path = sources/LinnetSettings/LinnetCloudRecoveryArchive.swift; sourceTree = "<group>"; };
 		D50000000000000000000003 /* LinnetPackContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPackContract.swift; path = sources/LinnetPackContract.swift; sourceTree = "<group>"; };
 		D60000000000000000000003 /* LinnetDataChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetDataChannel.swift; path = sources/LinnetDataChannel.swift; sourceTree = "<group>"; };
 		D30000000000000000000015 /* HallelujahSubstitutionImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HallelujahSubstitutionImporter.swift; path = sources/LinnetSettings/HallelujahSubstitutionImporter.swift; sourceTree = "<group>"; };
@@ -305,6 +310,7 @@
 				D30000000000000000000050 /* LinnetSettings */,
 				D40000000000000000000003 /* LinnetDataRegistry.swift */,
 				E71100000000000000000003 /* LinnetDataRegistryTransactions.swift */,
+				E71400000000000000000003 /* LinnetDirectoryDelta.swift */,
 				E71000000000000000000003 /* LinnetDataRegistryStorage.swift */,
 				D50000000000000000000003 /* LinnetPackContract.swift */,
 				D60000000000000000000003 /* LinnetDataChannel.swift */,
@@ -371,6 +377,7 @@
 				A12E56000000000000000001 /* LinnetStableRowTextBinding.swift */,
 				D30000000000000000000019 /* LinnetBackupStore.swift */,
 				E71000000000000000000005 /* LinnetBackupStoreSupport.swift */,
+				E71400000000000000000005 /* LinnetCloudRecoveryArchive.swift */,
 				F60000000000000000000002 /* LinnetPortableJSONBudget.swift */,
 				D3000000000000000000001A /* RimeUserDataBridge.swift */,
 				D3000000000000000000001B /* LinnetSettingsDocument.swift */,
@@ -652,6 +659,7 @@
 				D60000000000000000000002 /* LinnetDataChannel.swift in Settings Sources */,
 				D40000000000000000000002 /* LinnetDataRegistry.swift in Settings Sources */,
 				E71100000000000000000002 /* LinnetDataRegistryTransactions.swift in Settings Sources */,
+				E71400000000000000000002 /* LinnetDirectoryDelta.swift in Settings Sources */,
 				E71000000000000000000002 /* LinnetDataRegistryStorage.swift in Settings Sources */,
 				D30000000000000000000003 /* SettingsContract.swift in Settings Sources */,
 				F50000000000000000000001 /* LinnetSettingsTransactionIPC.swift in Settings Sources */,
@@ -676,6 +684,7 @@
 				A12E56000000000000000002 /* LinnetStableRowTextBinding.swift in Settings Sources */,
 				D30000000000000000000009 /* LinnetBackupStore.swift in Settings Sources */,
 				E71000000000000000000004 /* LinnetBackupStoreSupport.swift in Settings Sources */,
+				E71400000000000000000004 /* LinnetCloudRecoveryArchive.swift in Settings Sources */,
 				F60000000000000000000001 /* LinnetPortableJSONBudget.swift in Settings Sources */,
 				D3000000000000000000000A /* RimeUserDataBridge.swift in Settings Sources */,
 				D3000000000000000000000B /* LinnetSettingsDocument.swift in Settings Sources */,
@@ -706,6 +715,7 @@
 				D60000000000000000000001 /* LinnetDataChannel.swift in Linnet Sources */,
 				D40000000000000000000001 /* LinnetDataRegistry.swift in Linnet Sources */,
 				E71100000000000000000001 /* LinnetDataRegistryTransactions.swift in Linnet Sources */,
+				E71400000000000000000001 /* LinnetDirectoryDelta.swift in Linnet Sources */,
 				E71000000000000000000001 /* LinnetDataRegistryStorage.swift in Linnet Sources */,
 				B39771292BEDAF4A0093A49B /* SquirrelView.swift in Sources */,
 				A11E55060000000000000002 /* SquirrelView+CandidateDrawing.swift in Sources */,

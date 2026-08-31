@@ -1,10 +1,12 @@
+import Darwin
 import Foundation
 
 /// Owns bounded backup snapshot/copy, immutable manifests and portable formats.
 /// It never mutates the live source directory or initializes librime.
 enum LinnetBackupStore {
   static let portableFormatVersion = 1
-  static let backupFormatVersion = 3
+  static let backupFormatVersion = 4
+  static let tableBackupFormatVersion = 3
   static let legacyBackupFormatVersion = 2
   static let portableExtension = "linnet-data"
 
@@ -249,14 +251,9 @@ enum LinnetBackupStore {
 
   static func replacement(
     currentPersonalData: LinnetPersonalData,
-    currentLearning: [String: String],
     archive: PortableArchive
   ) throws -> Replacement {
     try validate(archive)
-    let allowedSchemas = Set(Category.allCases.compactMap(\.learningSchema))
-    guard Set(currentLearning.keys).isSubset(of: allowedSchemas) else {
-      throw Failure.invalidCategory("unknown current learning schema")
-    }
 
     var personal = currentPersonalData
     for artifact in archive.personal {
@@ -276,13 +273,9 @@ enum LinnetBackupStore {
       }
     }
 
-    var learning = currentLearning
-    for artifact in archive.learning {
-      learning[artifact.schema] = artifact.contents
-    }
     return Replacement(
       personalData: try LinnetPersonalDataStore.normalized(personal),
-      learning: learning
+      learning: Dictionary(uniqueKeysWithValues: archive.learning.map { ($0.schema, $0.contents) })
     )
   }
 
@@ -500,6 +493,7 @@ extension LinnetBackupStore {
       throw Failure.invalidDocument("manifest")
     }
     guard manifest.formatVersion == backupFormatVersion
+      || manifest.formatVersion == tableBackupFormatVersion
       || manifest.formatVersion == legacyBackupFormatVersion
     else {
       throw Failure.unsupportedVersion(manifest.formatVersion)
@@ -603,8 +597,7 @@ extension LinnetBackupStore {
     try FileManager.default.removeItem(at: expected.transactionDirectory)
   }
 
-  /// Creates the stable half of an automatic backup without following links or
-  /// copying a byte beyond the canonical per-file and aggregate limits.
+  /// Creates the stable half of a local COW backup without following links.
   static func snapshotStable(from live: URL, to backup: URL) throws
     -> LinnetPersonalDataStore.Snapshot {
     try requireDirectory(live)
@@ -622,7 +615,7 @@ extension LinnetBackupStore {
     }
     for source in canonicalURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
     where FileManager.default.fileExists(atPath: source.path) {
-      _ = try copyBoundedRegularFile(
+      _ = try cloneBoundedRegularFile(
         source,
         to: backup.appending(path: source.lastPathComponent),
         limit: stableArtifactLimit(source.lastPathComponent)
@@ -636,7 +629,7 @@ extension LinnetBackupStore {
     }
     let liveDocument = live.appending(path: LinnetSettingsDocumentStore.fileName)
     if FileManager.default.fileExists(atPath: liveDocument.path) {
-      _ = try copyBoundedRegularFile(
+      _ = try cloneBoundedRegularFile(
         liveDocument,
         to: backup.appending(path: LinnetSettingsDocumentStore.fileName),
         limit: LinnetSettingsDocumentStore.maximumDocumentBytes
@@ -667,7 +660,7 @@ extension LinnetBackupStore {
       let name = source.lastPathComponent
       guard stableSourceNameIsAllowed(name) else { throw Failure.unsafeArtifact(name) }
       let remaining = maximumBackupBytes - copiedBytes
-      let copied = try copyBoundedRegularFile(
+      let copied = try cloneBoundedRegularFile(
         source,
         to: backup.appending(path: name),
         limit: min(stableArtifactLimit(name), remaining)
@@ -695,7 +688,7 @@ extension LinnetBackupStore {
       var copiedBytes = 0
       for file in stable.files {
         let remaining = maximumBackupBytes - copiedBytes
-        let copied = try copyBoundedRegularFile(
+        let copied = try cloneBoundedRegularFile(
           file,
           to: destination.appending(path: file.lastPathComponent),
           limit: min(stableArtifactLimit(file.lastPathComponent), remaining)
@@ -704,6 +697,30 @@ extension LinnetBackupStore {
       }
     case .legacyV2:
       try normalizeLegacyV2Stable(stable.files, from: source, to: destination)
+    }
+  }
+
+  /// The Host has closed Rime before this boundary. Each snapshot is a complete
+  /// independent database; APFS shares unchanged blocks, never mutable inodes.
+  static func cloneLearningDictionaries(from source: URL, to destination: URL) throws {
+    try requireDirectory(source)
+    try requireDirectory(destination)
+    var copiedBytes = 0
+    for name in learningDirectories.sorted() {
+      let database = source.appending(path: name, directoryHint: .isDirectory)
+      var info = stat()
+      if lstat(database.path, &info) != 0 {
+        guard errno == ENOENT else { throw Failure.unsafeArtifact(name) }
+        continue
+      }
+      let files = try databaseFiles(in: database)
+      let target = destination.appending(path: name, directoryHint: .isDirectory)
+      try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+      for file in files {
+        copiedBytes += try cloneBoundedRegularFile(
+          file, to: target.appending(path: file.lastPathComponent),
+          limit: min(maximumBackupArtifactBytes, maximumBackupBytes - copiedBytes))
+      }
     }
   }
 

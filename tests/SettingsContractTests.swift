@@ -14,6 +14,7 @@ struct SettingsContractTests {
       testCoreActivationGate()
       try testLegacyRuntimeHealthWithoutIdentity()
       try testLegacyCoreActivationBlockerWireCodes()
+      try testNativeLearningDataVersionWireCompatibility()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
         testProductIdentity(host: host, settings: settings)
@@ -188,6 +189,31 @@ struct SettingsContractTests {
       else {
         fail("published 0.1.9 blocker wire code \(fixture.wireCode) changed meaning")
       }
+    }
+  }
+
+  private static func testNativeLearningDataVersionWireCompatibility() throws {
+    let legacy = LinnetSettingsContract.DataRequest(
+      transactionID: UUID(), command: .pause, candidate: nil,
+      requesterPID: getpid(), deadline: Date().addingTimeInterval(10),
+      nativeLearningDataVersion: nil)
+    let legacyData = try JSONEncoder().encode(legacy)
+    let legacyDocument = try JSONSerialization.jsonObject(with: legacyData) as? [String: Any]
+    let decodedLegacy = try JSONDecoder().decode(
+      LinnetSettingsContract.DataRequest.self, from: legacyData)
+    let current = LinnetSettingsContract.DataRequest(
+      transactionID: UUID(), command: .pause, candidate: nil,
+      requesterPID: getpid(), deadline: Date().addingTimeInterval(10))
+    let decodedCurrent = try JSONDecoder().decode(
+      LinnetSettingsContract.DataRequest.self,
+      from: JSONEncoder().encode(current))
+    guard legacyDocument?["nativeLearningDataVersion"] == nil,
+      decodedLegacy.nativeLearningDataVersion == nil,
+      decodedCurrent == current,
+      decodedCurrent.nativeLearningDataVersion
+        == LinnetSettingsContract.nativeLearningDataVersion
+    else {
+      fail("native learning-data capability wire compatibility changed")
     }
   }
 
