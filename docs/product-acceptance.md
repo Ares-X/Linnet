@@ -170,6 +170,48 @@ exact reconstructed tree without modifying its base. This establishes local
 mechanism feasibility, not product-format, cross-macOS, install or backup
 acceptance. No new dependency or resident updater was installed.
 
+### English definition cross-review — 2026-08-31
+
+Base `61ed072`, working-ledger SHA-256
+`beaae14ac1cf6692418a0d43852a5b793f2cf62ef574da5d0033313979f11196`.
+The prior 18-family review is not whole-dictionary acceptance. This milestone
+profiles all 69,013 curated rows and 143,461 effective definitions, then assigns
+frequency/risk-stratified batches to three independent `gpt-5.6-terra` / `high`
+reviewers and rotates their proposed corrections for cross-review. A mechanical
+flag is never a semantic verdict; legitimate shortening, proper-name omissions,
+technical senses and valid verbal nouns must be preserved.
+
+Only the existing final TSV owns translations (1 -> 1); the generator and
+runtime consume it unchanged. No translation fallback, ranking rule, new
+dictionary or service is added. Main alone applies agreed corrections against
+the exact old text. The existing projection test, quality record, pack content
+identity and unreleased changelog consume the same accepted batch. Core delta,
+backup, installer and other dirty files are frozen. Target: one bounded review
+window (up to three hours), zero production-code growth, existing data owners,
+and no second review ledger loaded by the product. Uncertain and unreviewed
+words remain explicit; no correction-count target justifies invented meanings.
+Require red old-gloss cases, reviewed replacements, generated-index parity,
+unchanged word/frequency bytes and pack-hash validation. Installed UI remains
+NOT_EXERCISED; no install, release or remote CI follows from a data-audit PASS.
+
+Data-only result: final TSV SHA-256
+`56dadfe2b903dbc33938cfc1549afde7ed3dc374655291871a0093a23faefeb7`.
+The unique semantic queue contains 9,849 entries; every adopted correction was
+cross-reviewed, and 300 retained decisions were sampled independently. Adopted:
+1,882 corrections (1,771 existing overrides and 111 existing fallback words
+made explicit). Deferred unchanged: 264; these are not confirmed-defect claims.
+The 133,612 entries outside this semantic queue were mechanically profiled only.
+The existing 86-case source/index contract has 25 RED cases before correction
+and zero afterward. Full projection comparison verifies all 1,882 replacements,
+141,579 unchanged other glosses, and identical vocabulary, keys, weights,
+pinyin, IPA, skip, fuzzy and next-word data. Generated smart DB size grew 0.105%.
+Native English container build/verification and the package architecture gate
+pass. The unpublished `0.4.18` / sequence 23 identity is retained with its new
+content hash; no Core version, runtime code, installer or update action changed.
+Exact hashes, deferred terms and reference coverage are recorded in the existing
+[translation quality record](../data/chinese/reports/translation_quality_audit.json).
+Installed-product and complete-App acceptance remain NOT_EXERCISED for this batch.
+
 | Fact / boundary | Canonical owner retained | Interpretation to retire |
 | --- | --- | --- |
 | Core activation | UpdateChecker + Host activation decision | read-only refresh cancels mutation; Host emits legacy UI blockers |

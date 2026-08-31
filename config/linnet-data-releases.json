@@ -14,7 +14,7 @@
       "sequence": 23,
       "data_abi": 1,
       "min_core": "0.1.1",
-      "content_sha256": "956047684f118e1335d6872ddbf2720ea2c736227857a80247d48b0a784e72c7"
+      "content_sha256": "14c6bb377df2db78ca4c95877f8bf50a603799405bf64b7cb9c6e5cc3ccb9473"
     },
     "lts": {
       "version": "c5fca7cf43af",
