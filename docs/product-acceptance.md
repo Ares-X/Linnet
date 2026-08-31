@@ -346,6 +346,15 @@ Logs are retained under `build/release-0.1.11.cOlf1m/`. No installed-product,
 actual iCloud-provider, Action-artifact or publication PASS follows from these
 local checks.
 
+Signed-package preflight at `ae1283f`, 2026-08-31 22:47 CST, passed CMS and
+candidate lifecycle but rejected Core at the Distribution verifier. A minimal
+system `pkgbuild`/`productbuild` reproduction proves that after removing the
+must-close reference, size attributes belong to the primary pkg-ref; the old
+verifier still expected them on a second Core reference. Correct that one
+artifact consumer and delete both Core-specific placement branches (2->0),
+keeping exact attribute/value validation. This changes no App or Rime behavior;
+full signed-package verification and a fresh source receipt are still required.
+
 The differential candidate's cross-version data boundary was corrected before
 the final source freeze. On 2026-08-31, base `c53df52` plus this candidate,
 an old Settings pause request was accepted by the new Host because IPC checked

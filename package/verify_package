@@ -117,7 +117,7 @@ ruby -rjson -rrexml/document -e '
     abort "unexpected #{name} mapping" unless element&.name == name && attrs.call(element).empty? && children.call(element).empty?
   }
   leaf = ->(element, name, expected_attrs, text = nil) {
-    abort "unexpected #{name} contract" unless element&.name == name &&
+    abort "unexpected #{name} contract: expected #{expected_attrs.inspect}, got #{element && attrs.call(element)}" unless element&.name == name &&
       attrs.call(element) == expected_attrs && children.call(element).empty? &&
       (text.nil? || element.text.to_s.strip == text)
   }
@@ -235,21 +235,13 @@ ruby -rjson -rrexml/document -e '
   components.each do |kind|
     primary = nodes.shift
     primary_attributes = {"id" => ids.fetch(kind), "version" => versions.fetch(kind),
-      "auth" => "none"}
-    if edition == "complete" && kind != "core"
-      primary_attributes["installKBytes"] = install_kbytes.fetch(kind)
-      primary_attributes["updateKBytes"] = "0"
-    end
+      "auth" => "none", "installKBytes" => install_kbytes.fetch(kind), "updateKBytes" => "0"}
     leaf.call(primary, "pkg-ref", primary_attributes,
       "#Linnet-#{names.fetch(kind)}.component.pkg")
   end
   components.each do |kind|
     secondary = nodes.shift
     secondary_attributes = {"id" => ids.fetch(kind)}
-    if kind == "core"
-      secondary_attributes["installKBytes"] = install_kbytes.fetch(kind)
-      secondary_attributes["updateKBytes"] = "0"
-    end
     abort "secondary pkg-ref mismatch" unless secondary&.name == "pkg-ref" &&
       attrs.call(secondary) == secondary_attributes
     secondary_nodes = children.call(secondary)
