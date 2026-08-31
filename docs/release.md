@@ -20,11 +20,12 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
 - App 与嵌套 Settings、动态库、插件均由仓库钉住的同一 CMS leaf 签名，并通过
   严格 codesign 结构校验；
 - PKG 明确为 `Status: no signature`，且不能含 Installer Signature 记录；
-- 候选目录只有 8 个验证产物；正式 Release 精确发布 1 个完整安装包，Core
-  更新频道发布 Core、卸载器和 Catalog 3 个文件，数据频道只发布 4 个不可变词包；
+- 候选目录精确匹配 `package/release_asset_manifest`；正式 Release 只有 1 个完整安装包，Core
+  更新频道包含 Core、卸载器和 Catalog，数据频道包含 4 个不可变词包及已绑定基线的差分；
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
 - Complete 只拥有首次注册和受支持损坏安装的注册修复；首次安装最多要求一次注销，
-  健康安装之后始终使用 Core，Core 更新不要求注销。
+  匹配已公布基线的健康安装使用 Core，Core 更新不要求注销；不匹配时明确使用
+  Complete 修复 App，已有健康词包、个人数据及输入源注册保持不变。
 
 ## 本地预检与 Action 正式候选
 
@@ -54,51 +55,83 @@ export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release-preflight.XXX
 预检出现密码框，应取消并排查。由于 CMS 签名时间会改变字节，本地预检输出不得作为
 安装验收或正式发布候选。
 
-正式候选由精确 revision 的
-`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动。同一个 macOS job 只做一次
-checkout、一次锁定 cache restore、一次 hydrate，并串行执行 strict lint、发布 owner、
-Swift、Rime 和 Periphery 门；不再要求先运行第二个完整 CI。随后 Action 使用
+正式候选只能由 `scripts/release-control candidate` 创建携带本地验收收据的
+annotated `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动；裸标签会被拒绝。
+先运行 `scripts/release-control verify-local`：恢复锁定输入并构建，再串行完成
+strict lint、发布 owner、App/Swift/Rime、Periphery。验证期间不得编辑源码；临时
+Git index 绑定完整源 tree，不改变暂存区。收据只保存在 ignored
+`build/linnet-source-verification.json`；合并提交不同但 tree 完全相同时可复用。
+这是可信维护者的验收声明，不宣称 Action 独立重跑了本地测试。
+
+Settings UI 只在合法隔离桌面及 Developer Mode 下本地执行，否则明确记录
+`NOT_EXERCISED`，由 candidate Action 补测；本地 PASS 时不重跑。
+同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
+标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
 `community-signing` Environment 中的 P12 和密码创建临时 Keychain，并只运行一次
 `make archive`。同一次 Make 调用只编译一份 `build/linnet-pack`；
 `make_package` 在产物边界验证两个 PKG，最终
-`package/verify_publication_artifacts` 再验证完整八文件集合。中间的 archive
+`package/verify_publication_artifacts` 再验证完整 manifest 集合。中间的 archive
 投影不重复验证同一 PKG。
 
-候选 Action 把这 8 个原字节直接写入三个 Draft GitHub Releases：Core 3 件、data
-4 件、public 1 件。GitHub Actions artifact 不是发布传输或存储 owner，因此不会再
+候选 Action 把 manifest 的原字节直接写入三个 Draft GitHub Releases：Core 3 件、data
+4 个完整词包及对应差分、public 1 件。GitHub Actions artifact 不是发布传输或存储 owner，因此不会再
 上传约 906 MB artifact、随后在另一个 job 下载并解压同一份数据。
 Core 与 public Draft 必须精确绑定当前候选 revision；data Draft 由固定 tag、标题、
-预发布状态及四个 pack 的精确文件名、字节数和 SHA-256 拥有。其 target 必须是完整的
+预发布状态及词包、差分的精确文件名、字节数和 SHA-256 拥有。其 target 必须是完整的
 direct commit，但 byte-identical 的不可变 pack 可以跨候选 revision 复用，且不得删除、
 重建或重新上传。
 
+### 差分基线与可复用产物
+
+`config/linnet-update-baselines.json` 锁定前一公开 Complete 的 revision、字节数和
+SHA-256，以及每个目标词包对应的基线内容身份。`package/prepare_update_baseline`
+通过现有下载 owner 获取同仓库资产并缓存；旧 App 按它自己的已发布 revision 验证
+CMS 和资源，不能拿当前源码重新推算旧版 metadata。Core 基线与词包基线独立推进，
+修改 Core 不能隐式增加任何词包的 sequence。
+
+Core 包只携带差分和安装工具；已有词包下载与其内容匹配的 `.linnetdelta`，没有变化
+的词包直接复用。差分经系统 rsync 回放到 APFS 写时复制副本，核对完整目标后才发表。
+传输按差异块生成；本地保留未改变文件的 COW 副本，仅重建发生变化的文件。
+被修改文件使用 rsync 的临时文件替换，不使用 `--inplace`，以保持只读词包权限；
+因此单个被修改文件的临时空间仍按其完整大小计算，不能把网络差分大小当作磁盘峰值。
+失败保留原始安装，只有明确确认 Complete/完整词包修复后才允许全量传输。
+安装器与 Settings 复用一个数据 mutation lease，不关闭任何应用。
+
+rsync batch 是系统维护的非确定性传输格式；可验证的是精确目标内容，不是重复构建得到
+同一 batch。首次生成后冻结其原字节并验收。在后续 Core-only 候选中，将已发布 delta
+的同仓库 URL、revision、bytes/SHA-256 加入 `sources`，并在相应 `pack_baselines`
+记录中指定 `delta_source`；构建复用该资产，不能重生成另一个 delta 覆盖已公开 data
+Release。新 pack sequence 才选择新的基线并生成新的差分。当前阶段此基线锁更新由
+维护者在发布准备时完成，并非后台自动改写。
+
 ## GitHub 发布
 
-构建、签名、候选暂存和最终公开都由 GitHub Actions 完成；维护者 Mac 只消费
-Action 生成的原字节做安装验收，并在验收后创建一个不可变授权标签：
+正式产物的构建、签名、候选暂存和最终公开都由 GitHub Actions 完成；维护者 Mac
+负责源码验收与 Action 原字节安装验收，并在验收后创建不可变授权标签：
 
-1. 本地完整 composite、安装前门和版本身份通过后，从 clean、精确远端 `main`
-   创建并推送 `linnet-candidate/v<VERSION>-<FULL_REVISION>`；
-2. 等待唯一 macOS candidate job 成功。它自行串行完成全部候选门，只构建、签名一次，并把八件产物直接放入
+1. 运行 `scripts/release-control verify-local`，提交其绑定的相同 source tree，
+   在 clean、精确远端 `main` 运行 `scripts/release-control candidate`；
+2. 等待唯一 macOS candidate job 成功。它复用源码收据，补齐未执行的 Settings UI，
+   只构建、签名一次，并把 manifest 中的全部产物直接放入
    `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
 3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
-   candidate job summary 的 revision 与八文件集合摘要，并在本地重新运行最终 verifier；
+   candidate job summary 的 revision 与产物集合摘要，并在本地重新运行最终 verifier；
 4. 在真实账号用该目录完成“两轮同 leaf Core”：从前一公开版升级到候选，再重装
    同一原字节。两轮都须无注销、无 Keychain 密码提示、Host PID 不变且
    `AXHidden=false`，并保留 enabled/selected、UserData、输入菜单、Settings 和真实输入；
 5. 验收通过后运行
    `scripts/release-control authorize "$ARCHIVE_OUTPUT_DIR"`。本地命令只能重新验证
-   八文件和三个远端 Release 的 SHA-256/size，并通过 SSH 创建
+   全部 manifest 文件和三个远端 Release 的 SHA-256/size，并通过 SSH 创建
    `linnet-publication/v<VERSION>-<FULL_REVISION>-h<SET_SHA256>`；它不能构建、
    上传、编辑 Release 或推进 Catalog；
-6. 授权标签启动 Ubuntu publisher job。它从 GitHub Release metadata 验证完整八文件
+6. 授权标签启动 Ubuntu publisher job。它从 GitHub Release metadata 验证完整 manifest
    集合，只下载约 4 KB 的 `Linnet-Data-Channel.json`，然后按
    Core → data → 非强制快进 Catalog → Public / Latest 的顺序发布。大型资产不再下载。
 
 更新锁定 LTS 模型时，显式
 `linnet-data-seed/v<VERSION>-<SEQUENCE>-<FULL_REVISION>` 标签启动同一个 macOS
 构建 owner。它从 `upstreams.lock.json` 的上游 URL 下载并验证固定 bytes/SHA-256，
-完成完整八文件构建与最终 verifier，但只暂存并公开四件 data 预发布资产；不得发布
+完成完整候选构建与最终 verifier，但只暂存并公开 manifest 中的 data 预发布资产；不得发布
 Core/Public，也不得推进 Catalog。随后只有同一 revision 可快进到 `main`，再走正常
 candidate 流程。正常版本不运行 seed 模式。
 
@@ -106,7 +139,7 @@ candidate 流程。正常版本不运行 seed 模式。
 字节本身有误时，修复必须形成新的 revision；只有已验收版本推进时才增加 build，
 数据内容变化时才增加必要的数据 sequence，再由
 macOS Action 生成新候选。`v<VERSION>` 只标识公开版本，两个控制标签分别只授权
-显式 data seed 或已验收的八文件集合。
+显式 data seed 或已验收的产物集合。
 
 词包身份变化时序号必须严格递增，身份不变时序号必须保持不变。合并或 squash
 可能一次包含多次合法修订，因此基线比较不要求序号恰好加一；不得为了合并检查

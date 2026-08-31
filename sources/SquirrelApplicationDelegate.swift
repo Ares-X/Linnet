@@ -79,29 +79,23 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     loadConfiguration: {
       let syncDirectory: URL?
       if LinnetSettingsContract.cloudSyncEnabled() {
-        do {
-          syncDirectory = try LinnetCloudSyncLocation.productLocation()
-            .prepareLearningDirectory()
-        } catch {
-          syncDirectory = nil
-          print("The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription)")
-        }
+        syncDirectory = try LinnetCloudSyncLocation.productLocation()
+          .prepareLearningDirectory()
       } else {
         syncDirectory = nil
       }
       return .init(
-        userDirectory: SquirrelApp.userDir,
         syncDirectory: syncDirectory,
         lastAttempt: LinnetSettingsContract.cloudSyncLastAttempt())
     },
     recordAttempt: { LinnetSettingsContract.setCloudSyncLastAttempt($0) },
-    operation: { [weak self] in self?.performRimeUserDataSync() ?? .failed }
+    operation: { [weak self] directory in self?.performRimeUserDataSync(directory: directory) ?? .failed },
+    cancelOperation: { [weak self] in _ = self?.rimeAPI.sync_user_data_step(nil) }
   )
   func applicationWillFinishLaunching(_ notification: Notification) {
     panel = SquirrelPanel(position: .zero)
     addObservers()
     refreshStatusItem()
-    rimeSyncController.start()
   }
   deinit {
     removeObservers()

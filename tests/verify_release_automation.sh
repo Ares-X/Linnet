@@ -29,6 +29,22 @@ fail() {
 
 [[ -f "${release_workflow}" && ! -L "${release_workflow}" ]] ||
   fail "the GitHub release workflow is missing"
+if ruby -ryaml -e '
+  steps = YAML.load_file(ARGV.fetch(0)).fetch("jobs").fetch("build-candidate").fetch("steps")
+  ui_condition = "steps.request.outputs.mode == '\''candidate'\'' && " \
+    "steps.request.outputs.settings_ui == '\''NOT_EXERCISED'\''"
+  ui_steps = steps.select { |step| step.fetch("run", "").include?("verify_visible_settings_fixture.sh --ui-test") }
+  exit(0) unless ui_steps.size == 1 && ui_steps.first["if"] == ui_condition
+  exit(steps.any? do |step|
+    source_repeat = step["if"] != "steps.request.outputs.mode == '\''data-seed'\''" &&
+      step.fetch("run", "").match?(/verify_development\.sh (swift|rime)|run_periphery\.sh|run_swiftlint\.sh/)
+    ui_repeat = step.fetch("run", "").include?("verify_visible_settings_fixture.sh --ui-test") &&
+      step["if"] != ui_condition
+    source_repeat || ui_repeat
+  end ? 0 : 1)
+' "${release_workflow}"; then
+  fail "candidate Action repeats source/UI tests already verified on the exact local source tree"
+fi
 for owner in "${control}" "${stager}" "${publisher}" "${identity}"; do
   [[ -f "${owner}" && ! -L "${owner}" && -x "${owner}" ]] ||
     fail "release owner is missing: ${owner##*/}"
@@ -76,9 +92,9 @@ for required in \
     'scripts/fetch-locked-release-asset upstreams.lock.json' \
     './action-install.sh' \
     'scripts/run_swiftlint.sh' \
-    'tests/verify_development.sh swift' \
     'tests/verify_development.sh rime' \
-    'scripts/run_periphery.sh' \
+    'scripts/release-control verify-source' \
+    'steps.request.outputs.settings_ui' \
     'make --no-print-directory archive' \
     'package/verify_publication_artifacts' \
     'for channel in core data public' \
@@ -116,6 +132,26 @@ for required in \
   rg -Fq -- "${required}" "${control}" ||
     fail "local UAT authorization boundary is incomplete: ${required}"
 done
+for required in \
+    'source_tree()' \
+    'GIT_INDEX_FILE=' \
+    'verify_receipt()' \
+    'cat-file tag' \
+    'tag --annotate' \
+    './action-build.sh release' \
+    'scripts/run_swiftlint.sh' \
+    'tests/verify_development.sh all' \
+    'scripts/run_periphery.sh' \
+    'settings_ui=NOT_EXERCISED' \
+    'LINNET_ISOLATED_UI_TEST_DESKTOP' \
+    'source changed during local verification'; do
+  rg -Fq -- "${required}" "${control}" ||
+    fail "local source verification owner is incomplete: ${required}"
+done
+if rg -n 'CI=true|workflow_dispatch|workflow_run|build/swift-unit-cache' "${release_workflow}" ||
+    rg -n 'CI=true' "${control}"; then
+  fail "candidate verification regained a fake UI environment or redundant test transport"
+fi
 if rg -n 'stage_github_release" stage|package/publish_github_release|release (create|upload|edit|delete)|refs/heads/data-channel' \
     "${control}"; then
   fail "the maintainer Mac can still build, upload, or publish release state"
@@ -376,5 +412,148 @@ for rejection in dirty wrong-main wrong-existing-tag; do
     fail "early rejection reached a build or remote boundary"
   fi
 done
+
+# Exercise source identity with real Git objects and a local-only bare remote.
+# Only expensive tool/test execution is stubbed; these are owner-contract tests,
+# not claims that the fixture App or UI was tested.
+source_repo="${fixture}/source-repo"
+source_remote="${fixture}/source-remote.git"
+source_bin="${fixture}/source-bin"
+real_git="$(command -v git)"
+mkdir -p "${source_repo}/scripts" "${source_repo}/tests" "${source_repo}/config" "${source_bin}"
+cp "${control}" "${source_repo}/scripts/release-control"
+printf 'build/\n' >"${source_repo}/.gitignore"
+printf 'MARKETING_VERSION = 0.1.8\n' >"${source_repo}/config/LinnetProduct.xcconfig"
+printf 'base\n' >"${source_repo}/source.txt"
+for phase in action-build.sh scripts/run_swiftlint.sh scripts/run_periphery.sh \
+    tests/verify_release_automation.sh tests/verify_publication_owner.sh \
+    tests/verify_development.sh tests/verify_visible_settings_fixture.sh; do
+  cat >"${source_repo}/${phase}" <<'FAKE_SOURCE_PHASE'
+#!/usr/bin/env bash
+set -euo pipefail
+name="${0##*/}"
+printf '%s %s\n' "${name}" "$*" >>"${FAKE_SOURCE_LOG:?}"
+[[ "${FAKE_FAIL_PHASE:-}" != "${name}" ]] || exit 1
+if [[ "${FAKE_CHANGE_SOURCE:-}" == 1 && "${name}" == run_periphery.sh ]]; then
+  printf 'changed during verification\n' >>source.txt
+fi
+FAKE_SOURCE_PHASE
+  chmod 755 "${source_repo}/${phase}"
+done
+for tool in xcodebuild xcrun sw_vers; do
+  printf '#!/usr/bin/env bash\necho "fixture-toolchain"\n' >"${source_bin}/${tool}"
+done
+cat >"${source_bin}/DevToolsSecurity" <<'FAKE_DEVELOPER_MODE'
+#!/usr/bin/env bash
+printf 'Developer mode is currently %s.\n' "${FAKE_DEVELOPER_MODE:-disabled}"
+FAKE_DEVELOPER_MODE
+cat >"${source_bin}/git" <<'LOCAL_ONLY_GIT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == -C && "${3:-}" == remote && "${4:-}" == get-url ]]; then
+  echo git@github.com:Ares-X/Linnet.git
+else
+  exec "${FAKE_REAL_GIT:?}" "$@"
+fi
+LOCAL_ONLY_GIT
+chmod 755 "${source_bin}/"*
+"${real_git}" init -q --initial-branch=main "${source_repo}"
+"${real_git}" -C "${source_repo}" config user.name Fixture
+"${real_git}" -C "${source_repo}" config user.email fixture@example.invalid
+"${real_git}" -C "${source_repo}" config commit.gpgSign false
+"${real_git}" -C "${source_repo}" config core.hooksPath /dev/null
+dependency_repo="${fixture}/dependency"
+"${real_git}" init -q --initial-branch=main "${dependency_repo}"
+printf 'dependency\n' >"${dependency_repo}/input.txt"
+"${real_git}" -C "${dependency_repo}" add input.txt
+"${real_git}" -C "${dependency_repo}" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  -c commit.gpgSign=false -c core.hooksPath=/dev/null commit -qm dependency
+"${real_git}" -C "${source_repo}" -c protocol.file.allow=always submodule add -q \
+  "${dependency_repo}" dependencies/pinned
+"${real_git}" -C "${source_repo}" add --all
+"${real_git}" -C "${source_repo}" commit -qm base
+"${real_git}" init -q --bare "${source_remote}"
+"${real_git}" -C "${source_repo}" remote add origin "${source_remote}"
+source_command="${source_repo}/scripts/release-control"
+source_receipt="${source_repo}/build/linnet-source-verification.json"
+export FAKE_REAL_GIT="${real_git}" FAKE_SOURCE_LOG="${fixture}/source-calls.log"
+source_path="${source_bin}:${PATH}"
+printf 'staged\n' >"${source_repo}/source.txt"
+"${real_git}" -C "${source_repo}" add source.txt
+printf 'working\n' >"${source_repo}/source.txt"
+printf 'new\n' >"${source_repo}/addition.txt"
+index_before="$(shasum -a 256 "${source_repo}/.git/index")"
+LINNET_ISOLATED_UI_TEST_DESKTOP=0 PATH="${source_path}" "${source_command}" verify-local >/dev/null
+[[ "$(shasum -a 256 "${source_repo}/.git/index")" == "${index_before}" ]] ||
+  fail "source verification changed the real staging index"
+[[ "$(ruby -rjson -e 'print JSON.parse(File.read(ARGV[0])).fetch("profiles").fetch("settings_ui")' \
+    "${source_receipt}")" == NOT_EXERCISED ]] || fail "unrun local UI was reported as PASS"
+if grep -q '^verify_visible_settings_fixture.sh' "${FAKE_SOURCE_LOG}"; then
+  fail "source verification ran UI on a nonisolated desktop"
+fi
+[[ "$(cat "${FAKE_SOURCE_LOG}")" == \
+  $'action-build.sh release\nrun_swiftlint.sh \nverify_release_automation.sh \nverify_publication_owner.sh \nverify_development.sh all\nrun_periphery.sh ' ]] ||
+  fail "local source acceptance did not execute each required owner once in order"
+
+"${real_git}" -C "${source_repo}" add --all
+"${real_git}" -C "${source_repo}" commit -qm accepted-source
+# A merge/rebase-equivalent new commit with the exact same tree reuses acceptance.
+"${real_git}" -C "${source_repo}" commit --allow-empty -qm same-source-tree
+"${real_git}" -C "${source_repo}" push -q origin HEAD:refs/heads/main
+source_revision="$("${real_git}" -C "${source_repo}" rev-parse HEAD)"
+source_ref="refs/tags/linnet-candidate/v0.1.8-${source_revision}"
+PATH="${source_path}" "${source_command}" candidate >/dev/null
+[[ "$(PATH="${source_path}" "${source_command}" verify-source \
+    "${source_ref}" "${source_revision}")" == NOT_EXERCISED ]] ||
+  fail "the Action did not receive the exact source tree and missing UI status"
+PATH="${source_path}" "${source_command}" candidate >/dev/null
+[[ "$("${real_git}" -C "${source_repo}" cat-file -t "${source_ref}")" == tag ]] ||
+  fail "candidate request used the retired lightweight tag"
+printf 'dirty dependency\n' >>"${source_repo}/dependencies/pinned/input.txt"
+if PATH="${source_path}" "${source_command}" verify-local >/dev/null 2>&1; then
+  fail "a Git tree receipt accepted dirty dependency bytes outside the gitlink"
+fi
+printf 'dependency\n' >"${source_repo}/dependencies/pinned/input.txt"
+
+for rejected in lightweight wrong-tree missing-profile ui-unknown; do
+  bad_ref="refs/tags/linnet-candidate/v0.1.$((20 + ${#rejected}))-${source_revision}"
+  # Each fixture has its own ref even when labels have equal lengths.
+  "${real_git}" -C "${source_repo}" tag -d "${bad_ref#refs/tags/}" >/dev/null 2>&1 || true
+  if [[ "${rejected}" == lightweight ]]; then
+    "${real_git}" -C "${source_repo}" tag "${bad_ref#refs/tags/}" "${source_revision}"
+  else
+    ruby -rjson -e '
+      receipt = JSON.parse(File.read(ARGV.fetch(0)))
+      case ARGV.fetch(1)
+      when "wrong-tree" then receipt["source_tree"] = "f" * 40
+      when "missing-profile" then receipt["profiles"].delete("rime")
+      when "ui-unknown" then receipt["profiles"]["settings_ui"] = "SKIPPED"
+      end
+      puts JSON.generate(receipt)
+    ' "${source_receipt}" "${rejected}" >"${fixture}/bad-receipt.json"
+    "${real_git}" -C "${source_repo}" -c tag.gpgSign=false tag --annotate \
+      "${bad_ref#refs/tags/}" "${source_revision}" --file "${fixture}/bad-receipt.json"
+  fi
+  if PATH="${source_path}" "${source_command}" verify-source "${bad_ref}" \
+      "${source_revision}" >/dev/null 2>&1; then
+    fail "invalid candidate source proof was accepted: ${rejected}"
+  fi
+done
+for failure in command source-change; do
+  if [[ "${failure}" == command ]]; then
+    if FAKE_FAIL_PHASE=verify_development.sh PATH="${source_path}" \
+        "${source_command}" verify-local >/dev/null 2>&1; then
+      fail "failed source tests issued acceptance"
+    fi
+  elif FAKE_CHANGE_SOURCE=1 PATH="${source_path}" \
+      "${source_command}" verify-local >/dev/null 2>&1; then
+    fail "a changing source tree issued acceptance"
+  fi
+  [[ ! -e "${source_receipt}" ]] || fail "failed source verification retained an old receipt"
+done
+LINNET_ISOLATED_UI_TEST_DESKTOP=1 FAKE_DEVELOPER_MODE=enabled PATH="${source_path}" \
+  "${source_command}" verify-local >/dev/null
+[[ "$(ruby -rjson -e 'print JSON.parse(File.read(ARGV[0])).fetch("profiles").fetch("settings_ui")' \
+    "${source_receipt}")" == PASS ]] || fail "completed isolated UI was not recorded"
 
 echo "Linnet Action release automation: PASS (macOS build + Draft transport + local authorization + Action publish)"

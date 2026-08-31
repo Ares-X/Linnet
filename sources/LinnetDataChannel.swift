@@ -1,6 +1,77 @@
 import CryptoKit
 import Foundation
 
+// The transport choice owns the verified pack to reuse or reconstruct.
+extension LinnetDataChannel {
+  struct Delta: Codable, Equatable, Sendable {
+    let baseContentSHA256: String
+    let bytes: UInt64
+    let sha256: String
+    let url: URL
+
+    enum CodingKeys: String, CodingKey {
+      case bytes, sha256, url
+      case baseContentSHA256 = "base_content_sha256"
+    }
+
+    func assetName(for kind: LinnetPackContract.Kind) -> String {
+      kind.releaseAssetName.replacingOccurrences(
+        of: ".linnetpack", with: "-from-\(baseContentSHA256).linnetdelta")
+    }
+  }
+
+  enum PackTransfer: Equatable, Sendable {
+    case current(LinnetDataRegistry.ActivePack)
+    case delta(Delta, base: LinnetDataRegistry.ActivePack)
+    case complete
+    case requiresCompleteRepair
+  }
+
+  struct Artifact: Codable, Equatable, Sendable {
+    let kind: LinnetPackContract.Kind
+    let version: String
+    let sequence: UInt64
+    let dataABI: UInt32
+    let minCore: String
+    let contentSHA256: String
+    let bytes: UInt64
+    let containerSHA256: String
+    let url: URL
+    var deltas: [Delta]?
+
+    enum CodingKeys: String, CodingKey {
+      case kind, version, sequence, bytes, url, deltas
+      case dataABI = "data_abi"
+      case minCore = "min_core"
+      case contentSHA256 = "content_sha256"
+      case containerSHA256 = "container_sha256"
+    }
+
+    func matches(_ pack: LinnetDataRegistry.ActivePack) -> Bool {
+      kind == pack.kind
+        && version == pack.version
+        && sequence == pack.sequence
+        && dataABI == pack.dataABI
+        && minCore == pack.minCore
+        && contentSHA256 == pack.contentSHA256
+    }
+
+    /// Normal updates may reuse or reconstruct; only a first baseline or an
+    /// explicit new repair operation can authorize a complete download.
+    func transfer(
+      from installed: LinnetDataRegistry.ActivePack?, allowCompleteRepair: Bool = false
+    ) -> PackTransfer {
+      guard let installed else { return .complete }
+      if matches(installed) { return .current(installed) }
+      if allowCompleteRepair { return .complete }
+      guard installed.kind == kind, installed.dataABI == dataABI,
+        let delta = deltas?.first(where: { $0.baseContentSHA256 == installed.contentSHA256 })
+      else { return .requiresCompleteRepair }
+      return .delta(delta, base: installed)
+    }
+  }
+}
+
 /// The replay-resistant selection boundary for independently published
 /// language packs. A catalog fetched from the canonical HTTPS endpoint names a
 /// complete compatible Standard or Full Active set. Each entry binds the exact
@@ -16,41 +87,14 @@ enum LinnetDataChannel {
   enum Failure: LocalizedError, Equatable {
     case invalidCatalog(String)
     case invalidArtifact(String)
+    case completeRepairRequired
 
     var errorDescription: String? {
       switch self {
       case .invalidCatalog(let detail): "Invalid Linnet data catalog: \(detail)."
       case .invalidArtifact(let detail): "Invalid Linnet data artifact: \(detail)."
+      case .completeRepairRequired: "A complete language-data repair needs your confirmation."
       }
-    }
-  }
-
-  struct Artifact: Codable, Equatable, Sendable {
-    let kind: LinnetPackContract.Kind
-    let version: String
-    let sequence: UInt64
-    let dataABI: UInt32
-    let minCore: String
-    let contentSHA256: String
-    let bytes: UInt64
-    let containerSHA256: String
-    let url: URL
-
-    enum CodingKeys: String, CodingKey {
-      case kind, version, sequence, bytes, url
-      case dataABI = "data_abi"
-      case minCore = "min_core"
-      case contentSHA256 = "content_sha256"
-      case containerSHA256 = "container_sha256"
-    }
-
-    func matches(_ pack: LinnetDataRegistry.ActivePack) -> Bool {
-      kind == pack.kind
-        && version == pack.version
-        && sequence == pack.sequence
-        && dataABI == pack.dataABI
-        && minCore == pack.minCore
-        && contentSHA256 == pack.contentSHA256
     }
   }
 
@@ -222,17 +266,32 @@ enum LinnetDataChannel {
     return try encoder.encode(catalog)
   }
 
+  /// Pack sequence owns both immutable activation sets, not the independently
+  /// changing Core pointer. The full Catalog digest remains its byte identity.
+  static func packSnapshotDigest(_ catalog: Catalog) throws -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    let packsOnly = catalog.activationSets.map { set in
+      ActivationSet(edition: set.edition, packs: set.packs.map { pack in
+        var identity = pack
+        identity.deltas = nil
+        return identity
+      })
+    }
+    return try sha256(encoder.encode(packsOnly))
+  }
+
   /// The canonical catalog binds the complete downloaded container before the
   /// pack contract inspects its manifest and payload.
-  static func verifyDownloadedArtifact(_ artifact: Artifact, at file: URL) throws {
-    guard artifact.bytes > 0,
-      artifact.bytes <= LinnetPackContract.maximumContainerBytes
+  static func verifyDownloadedArtifact(bytes: UInt64, sha256: String, at file: URL) throws {
+    guard bytes > 0,
+      bytes <= LinnetPackContract.maximumContainerBytes
     else { throw Failure.invalidArtifact("size") }
     let values = try file.resourceValues(
       forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
     let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
     guard values.isRegularFile == true, values.isSymbolicLink != true,
-      (attributes[.size] as? NSNumber)?.uint64Value == artifact.bytes
+      (attributes[.size] as? NSNumber)?.uint64Value == bytes
     else { throw Failure.invalidArtifact("size") }
     let handle = try FileHandle(forReadingFrom: file)
     defer { try? handle.close() }
@@ -241,7 +300,7 @@ enum LinnetDataChannel {
       hasher.update(data: chunk)
     }
     let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    guard digest == artifact.containerSHA256 else {
+    guard digest == sha256 else {
       throw Failure.invalidArtifact("SHA-256")
     }
   }
@@ -275,12 +334,30 @@ enum LinnetDataChannel {
           isImmutableReleaseURL(
             pack.url, kind: pack.kind, catalogSequence: catalog.sequence)
         else { throw Failure.invalidCatalog("pack \(pack.kind.rawValue)") }
+        try validateDeltas(pack, catalogSequence: catalog.sequence)
         if pack.kind == .lts || pack.kind == .extended {
           guard pack.dataABI == chinese.dataABI else {
             throw Failure.invalidCatalog("Chinese ABI")
           }
         }
       }
+    }
+  }
+
+  private static func validateDeltas(_ pack: Artifact, catalogSequence: UInt64) throws {
+    guard let deltas = pack.deltas else { return }
+    guard !deltas.isEmpty, deltas.count <= 16,
+      Set(deltas.map(\.baseContentSHA256)).count == deltas.count else {
+      throw Failure.invalidCatalog("delta base set")
+    }
+    for delta in deltas {
+      guard isSHA256(delta.baseContentSHA256), isSHA256(delta.sha256),
+        delta.baseContentSHA256 != pack.contentSHA256,
+        delta.bytes > 0, delta.bytes <= LinnetPackContract.maximumContainerBytes,
+        delta.url.scheme == "https", delta.url.host?.lowercased() == "github.com",
+        delta.url.query == nil, delta.url.fragment == nil,
+        delta.url.path == "/Ares-X/Linnet/releases/download/data-\(catalogSequence)/" + delta.assetName(for: pack.kind)
+      else { throw Failure.invalidCatalog("delta \(pack.kind.rawValue)") }
     }
   }
 
@@ -336,5 +413,95 @@ enum LinnetDataChannel {
 
   private static func sha256(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+// Registry admission owns receipt migration at begin/prepare; storage reads
+// never rewrite an older receipt or infer an unrecorded pack snapshot.
+extension LinnetDataRegistry {
+  private static let dataChannelReceiptFormat = "io.github.ares-x.linnet.data-channel-receipt.v1"
+
+  func receiptForCatalog(
+    _ catalog: LinnetDataChannel.Verified
+  ) throws -> DataChannelReceipt {
+    guard catalog.catalog.sequence > 0, Self.isSHA256(catalog.digest) else {
+      throw Failure.invalidActiveState
+    }
+    return .init(format: Self.dataChannelReceiptFormat,
+      sequence: catalog.catalog.sequence, digest: catalog.digest,
+      packSnapshotDigest: try LinnetDataChannel.packSnapshotDigest(catalog.catalog))
+  }
+
+  func validateDataChannelReceipt(
+    _ candidate: DataChannelReceipt, artifacts: [LinnetDataChannel.Artifact]
+  ) throws {
+    guard validDataChannelReceipt(candidate) else { throw Failure.invalidActiveState }
+    let committed = try committedActiveState()
+    guard let previous = committed.acceptedCatalog else { return }
+    guard candidate.sequence >= previous.sequence else { throw Failure.staleDataChannel }
+    switch (previous.packSnapshotDigest, candidate.packSnapshotDigest) {
+    case (.some(let accepted), .some(let proposed)):
+      guard candidate.sequence > previous.sequence || accepted == proposed else {
+        throw Failure.staleDataChannel
+      }
+    case (.some, .none):
+      throw Failure.staleDataChannel
+    case (.none, .none):
+      // An already-downloading old transaction retains the shipped contract.
+      guard candidate.sequence > previous.sequence || candidate.digest == previous.digest else {
+        throw Failure.staleDataChannel
+      }
+    case (.none, .some):
+      // Old receipts bound the entire Catalog. Only exact committed pack
+      // identities authorize same-sequence migration. Historical uninstalled
+      // editions are unknown; the current Catalog authenticates their artifacts.
+      if candidate.sequence == previous.sequence {
+        guard committed.packs.allSatisfy({ installed in
+          artifacts.contains { $0.matches(installed) }
+        }) else { throw Failure.staleDataChannel }
+      }
+    }
+  }
+
+  func committedActiveState() throws -> ActiveState {
+    let active = try loadActiveStateDocument().state
+    if active.publication == .committed { return active }
+    guard let transactionID = active.transactionID else { throw Failure.invalidActiveState }
+    let previous = transactionsDirectory.appending(
+      path: transactionID.uuidString, directoryHint: .isDirectory).appending(
+      path: "language-active", directoryHint: .isDirectory)
+    let previousState = try loadActiveStateDocument(at: previous).state
+    guard previousState.publication == .committed else { throw Failure.invalidActiveState }
+    return previousState
+  }
+
+  func validDataChannelReceipt(_ receipt: DataChannelReceipt?) -> Bool {
+    guard let receipt else { return true }
+    return receipt.format == Self.dataChannelReceiptFormat
+      && receipt.sequence > 0 && Self.isSHA256(receipt.digest)
+      && receipt.packSnapshotDigest.map(Self.isSHA256) != false
+  }
+
+  func validatedPreparationRecord(
+    update: DataChannelUpdateTransaction,
+    transaction: URL,
+    snapshot: RuntimeSnapshot,
+    packs: [ActivePack],
+    edition: Edition
+  ) throws -> LanguageTransactionRecord {
+    guard update.downloadDirectory.standardizedFileURL
+      == downloadsDirectory.appending(
+        path: update.transactionID.uuidString, directoryHint: .isDirectory).standardizedFileURL,
+      let record = validatedLanguageTransaction(at: transaction, now: Date()),
+      record.phase == .downloading,
+      record.baseRevision == snapshot.activeRevision,
+      record.edition == edition,
+      record.artifacts.count == packs.count,
+      record.artifacts.allSatisfy({ artifact in
+        packs.contains(where: { artifact.matches($0) })
+      })
+    else { throw Failure.invalidActiveState }
+    try validateDataChannelReceipt(record.catalog, artifacts: record.artifacts)
+    return record
   }
 }

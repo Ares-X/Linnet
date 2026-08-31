@@ -19,6 +19,70 @@ for script in package/build_data_pack package/build_activation_profile \
   bash -n "${script}"
 done
 
+ruby -rrexml/document -e '
+  root = REXML::Document.new(File.read("package/Distribution.xml")).root
+  abort "Complete repair forces another logout" unless
+    root.get_elements("pkg-ref").all? { |item| item.attributes["onConclusion"].nil? }
+' || fail "Complete regained an unconditional session restart"
+
+ruby -e '
+  source = File.read("package/make_package")
+  core_builder = source.split(/^pkgbuild /, 2).fetch(1).split(/^pkgbuild /, 2).first
+  abort "normal Core update still carries the complete App payload" if
+    core_builder.include?(%q{--root "${core_payload}"})
+  abort "Core update is not a scripts-only differential component" unless
+    core_builder.include?("--nopayload")
+' || fail "Core differential payload boundary is missing"
+if rg -n 'expected_core_scripts=|def manifest\(root\)' package/verify_package; then
+  fail "package verification regained a duplicate inventory or tree-digest owner"
+fi
+
+fixture="$(mktemp -d /tmp/linnet-package-architecture.XXXXXX)"
+cleanup() {
+  exit_code=$?
+  trap - EXIT INT TERM HUP
+  chmod -R u+w "${fixture}" 2>/dev/null || true
+  find "${fixture}" -depth -delete 2>/dev/null || true
+  exit "${exit_code}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+mkdir "${fixture}/resources"
+for resource in WELCOME.md LICENSE.txt NOTICE.md Conclusion-summary.txt; do
+  printf 'Installer structure fixture\n' >"${fixture}/resources/${resource}"
+done
+ruby -e 'File.write(ARGV.fetch(1), File.read(ARGV.fetch(0)).gsub("@CORE_VERSION@", "0.1.0"))' \
+  package/Distribution-Core.xml "${fixture}/Distribution.xml"
+pkgbuild --info package/PackageInfo --compression latest --min-os-version 13.0 --nopayload \
+  --identifier io.github.ares-x.inputmethod.Linnet.core.pkg --version 0.1.0 \
+  --install-location '/Library/Input Methods' --scripts package/core-installer-scripts \
+  "${fixture}/Linnet-Core.component.pkg" >/dev/null
+productbuild --distribution "${fixture}/Distribution.xml" --resources "${fixture}/resources" \
+  --package-path "${fixture}" "${fixture}/Core.pkg" >/dev/null
+pkgutil --expand-full "${fixture}/Core.pkg" "${fixture}/expanded"
+ruby -rrexml/document -e '
+  root = ARGV.fetch(0)
+  component = File.join(root, "Linnet-Core.component.pkg")
+  abort "scripts-only Core gained payload bytes" if File.exist?(File.join(component, "Payload"))
+  info = REXML::Document.new(File.read(File.join(component, "PackageInfo"))).root
+  abort "scripts-only Core gained payload or bundle mappings" if
+    info.elements["payload"] || info.elements["bundle"] || info.elements["upgrade-bundle/bundle"]
+  distribution = REXML::Document.new(File.read(File.join(root, "Distribution"))).root
+  abort "Core Distribution retained a must-close mapping" unless
+    distribution.get_elements("pkg-ref/must-close").empty?
+  ref = distribution.get_elements("pkg-ref").find { |item| item.attributes["version"] }
+  abort "scripts-only Core product shape mismatch" unless
+    ref.attributes["installKBytes"] == "0" && ref.attributes["updateKBytes"] == "0" &&
+    ref.get_elements("bundle-version/bundle").empty?
+' "${fixture}/expanded" || fail "Apple scripts-only Core metadata changed"
+if [[ "${1:-}" == --core-delta-structure ]]; then
+  echo "Core differential Installer structure: PASS"
+  exit 0
+fi
+
 if rg -n -i 'installation-uat|\buat\b' \
     package/make_package package/verify_package; then
   fail "the installable package path retained the retired UAT identity"
@@ -120,19 +184,6 @@ rg -Fq 'container_sha256' package/make_archive ||
   fail "archive does not bind pack containers to the Catalog"
 rg -Fq 'verify-catalog' package/make_archive ||
   fail "archive does not verify the Catalog"
-
-fixture="$(mktemp -d /tmp/linnet-package-architecture.XXXXXX)"
-cleanup() {
-  exit_code=$?
-  trap - EXIT INT TERM HUP
-  chmod -R u+w "${fixture}" 2>/dev/null || true
-  find "${fixture}" -depth -delete 2>/dev/null || true
-  exit "${exit_code}"
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-trap 'exit 129' HUP
 
 tool="${repo_root}/build/linnet-pack"
 runtime_inspector="${repo_root}/build/linnet-runtime-inspector"
@@ -259,7 +310,7 @@ mkdir "${absent_support}"
 preserved_support="${fixture}/preserved-support"
 preserved_root="${preserved_support}/Linnet"
 mkdir -p "${preserved_root}/UserData" "${preserved_root}/Backups" \
-  "${preserved_root}/Transactions"
+  "${preserved_root}/Transactions" "${preserved_root}/State"
 preserved_before="${fixture}/preserved-probe-before"
 preserved_after="${fixture}/preserved-probe-after"
 snapshot_runtime_tree "${preserved_root}" "${preserved_before}"
@@ -269,7 +320,7 @@ snapshot_runtime_tree "${preserved_root}" "${preserved_after}"
 cmp "${preserved_before}" "${preserved_after}" ||
   fail "missing Runtime probe changed preserved data or metadata"
 
-for preserved_name in UserData Backups Transactions; do
+for preserved_name in UserData Backups Transactions State; do
   unsafe_preserved_support="${fixture}/unsafe-preserved-${preserved_name}"
   mkdir -p "${unsafe_preserved_support}/Linnet" \
     "${unsafe_preserved_support}/external"
@@ -297,7 +348,7 @@ for preserved_name in UserData Backups Transactions; do
   fi
 done
 
-for generated_root in Data Runtime Build Downloads State Profiles; do
+for generated_root in Data Runtime Build Downloads Profiles; do
   incomplete_support="${fixture}/incomplete-${generated_root}"
   mkdir -p "${incomplete_support}/Linnet/${generated_root}"
   if "${runtime_inspector}" probe 0.1.0 "${incomplete_support}" \

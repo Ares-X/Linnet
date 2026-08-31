@@ -49,6 +49,10 @@ extension SettingsDataCoordinator {
       }
       try requireWritableDestination(destination)
       return .export(categories, destination: destination)
+    case .exportCloudRecovery(let categories, let cloudFolder, let repair):
+      guard !categories.isEmpty else { throw Failure.invalidOperation("no export category") }
+      try requireDirectory(cloudFolder)
+      return .cloudRecovery(categories, cloudFolder: cloudFolder, repair: repair)
     case .importPortable(let candidate, let revision):
       guard !revision.isEmpty else { throw Failure.invalidOperation("empty revision") }
       return .portable(candidate.archive, baseRevision: revision)
@@ -119,11 +123,12 @@ extension SettingsDataCoordinator {
       progress(.snapshotting)
       try requireDirectory(environment.live)
       let personal = try LinnetPersonalDataStore.snapshot(from: environment.live)
-      let files = try bridge.snapshotCurrent(
+      let files = try bridge.exportPortableLearning(
         from: environment.live,
         to: learningDirectory,
         shared: environment.shared,
-        product: environment.product
+        product: environment.product,
+        schemas: Set(categories.compactMap(\.learningSchema))
       )
       try Task.checkCancellation()
       var learning = try learningContents(files)
@@ -188,6 +193,41 @@ extension SettingsDataCoordinator {
     }
   }
 
+  /// Stages the existing portable external format only locally, then delegates
+  /// cloud object publication to the immutable recovery archive owner.
+  func exportCloudRecovery(
+    categories: Set<LinnetBackupStore.Category>,
+    cloudFolder: URL,
+    repair: Bool,
+    environment: Environment,
+    personalEffect: PersonalEffect,
+    progress: @escaping @Sendable (Phase) -> Void
+  ) async throws -> Outcome {
+    let scratch = fileManager.temporaryDirectory.appending(
+      path: "CloudRecoveryExport-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try ensureDirectory(scratch)
+    defer { try? fileManager.removeItem(at: scratch) }
+    let portable = scratch.appending(
+      path: "recovery.\(LinnetBackupStore.portableExtension)", directoryHint: .notDirectory)
+    let snapshot = try await exportPortable(
+      categories: categories,
+      destination: portable,
+      environment: environment,
+      personalEffect: personalEffect,
+      progress: progress)
+    let recovery = try LinnetCloudRecoveryArchive.publish(
+      portable: Data(contentsOf: portable), in: cloudFolder, repair: repair)
+    return .init(
+      backupDirectory: snapshot.backupDirectory,
+      personalSnapshot: snapshot.personalSnapshot,
+      personalEffect: snapshot.personalEffect,
+      documentEffect: snapshot.documentEffect,
+      importReport: snapshot.importReport,
+      legacyImportedCount: snapshot.legacyImportedCount,
+      diagnostics: snapshot.diagnostics,
+      cloudRecovery: recovery)
+  }
+
   struct MutationContext {
     let transactionID: UUID
     let deadline: Date
@@ -198,7 +238,6 @@ extension SettingsDataCoordinator {
   struct MutationSnapshot {
     let backup: URL
     let currentPersonal: LinnetPersonalDataStore.Snapshot
-    let currentLearningFiles: [RimeUserDataBridge.LearningFile]
   }
 
   struct MutationMaterialization {
@@ -220,6 +259,7 @@ extension SettingsDataCoordinator {
     try ensureDirectory(environment.transactionsRoot)
     try ensureDirectory(environment.backupsRoot)
     try requireSameVolume(environment.live, environment.transactionsRoot)
+    try requireSameVolume(environment.live, environment.backupsRoot)
     let observedPersonal = try LinnetPersonalDataStore.snapshot(from: environment.live)
     let observedDocument: LinnetSettingsDocumentStore.Snapshot?
     switch operation {
@@ -261,12 +301,7 @@ extension SettingsDataCoordinator {
       let currentDocument = try LinnetSettingsDocumentStore.snapshot(from: stableBackup)
       try requireRevision(observedDocument.revision, current: currentDocument.revision)
     }
-    let currentLearningFiles = try bridge.snapshotCurrent(
-      from: environment.live,
-      to: learningBackup,
-      shared: environment.shared,
-      product: environment.product
-    )
+    try LinnetBackupStore.cloneLearningDictionaries(from: environment.live, to: learningBackup)
     var protectedTransactions: Set<UUID> = [context.transactionID]
     if case .restore(_, let sourceManifest) = operation {
       protectedTransactions.insert(sourceManifest.transactionID)
@@ -285,8 +320,7 @@ extension SettingsDataCoordinator {
     ))
     return .init(
       backup: backup,
-      currentPersonal: currentPersonal,
-      currentLearningFiles: currentLearningFiles
+      currentPersonal: currentPersonal
     )
   }
 
@@ -299,21 +333,25 @@ extension SettingsDataCoordinator {
     let stableBackup = snapshot.backup.appending(path: "stable", directoryHint: .isDirectory)
     let inputs = context.transaction.appending(path: "inputs", directoryHint: .isDirectory)
     let candidate = context.transaction.appending(path: "candidate", directoryHint: .isDirectory)
-    var imports = snapshot.currentLearningFiles.map {
-      RimeUserDataBridge.LearningImport(schema: $0.schema, file: $0.file)
-    }
+    var imports: [RimeUserDataBridge.LearningImport] = []
     var report: HallelujahSubstitutionImporter.Report?
     var legacyImportedCount = 0
     var materializedPersonal: LinnetPersonalData?
     var materializedDocument: LinnetSettingsDocument?
 
+    if case .restore = operation {
+      // The selected backup, not current live learning, owns restore contents.
+    } else {
+      try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
+      try LinnetBackupStore.cloneLearningDictionaries(
+        from: snapshot.backup.appending(path: "user-dictionaries", directoryHint: .isDirectory),
+        to: candidate)
+    }
     switch operation {
     case .apply(let data, let document, _, _, _):
-      try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
       materializedPersonal = data
       materializedDocument = document
     case .legacy(let hallelujah, let legacyDirectory):
-      try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
       if let legacyDirectory {
         let legacyInputs = inputs.appending(path: "legacy-rime", directoryHint: .isDirectory)
         try ensureDirectory(legacyInputs)
@@ -326,7 +364,7 @@ extension SettingsDataCoordinator {
         legacyImportedCount = legacy.importedRows
         imports = legacy.files.map {
           .init(schema: $0.schema, file: $0.file)
-        } + imports
+        }
       }
       if let hallelujah {
         report = try HallelujahSubstitutionImporter.merge(
@@ -336,13 +374,12 @@ extension SettingsDataCoordinator {
         )
       }
     case .portable(let archive, _):
-      try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
       let replacement = try LinnetBackupStore.replacement(
         currentPersonalData: snapshot.currentPersonal.data,
-        currentLearning: try learningContents(snapshot.currentLearningFiles),
         archive: archive
       )
       materializedPersonal = replacement.personalData
+      try removeCandidateLearning(Set(replacement.learning.keys), from: candidate)
       imports = try stagedLearningImports(
         replacement.learning,
         at: inputs.appending(path: "portable", directoryHint: .isDirectory)
@@ -356,19 +393,20 @@ extension SettingsDataCoordinator {
         from: sourceBackup.appending(path: "stable", directoryHint: .isDirectory),
         to: candidate
       )
-      imports = try learningImports(
-        from: sourceBackup.appending(
-          path: "user-dictionaries", directoryHint: .isDirectory),
-        manifest: verified
-      )
+      let learning = sourceBackup.appending(path: "user-dictionaries", directoryHint: .isDirectory)
+      if verified.formatVersion == LinnetBackupStore.backupFormatVersion {
+        try LinnetBackupStore.cloneLearningDictionaries(from: learning, to: candidate)
+      } else {
+        imports = try legacyBackupLearningImports(from: learning, manifest: verified)
+      }
     case .clear(let domains):
-      try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
-      let cleared = Set(domains.map(\.schema))
-      imports.removeAll { cleared.contains($0.schema) }
+      try removeCandidateLearning(Set(domains.map(\.schema)), from: candidate)
     case .removeBackup:
       throw Failure.invalidOperation("backup removal mutation")
     case .export:
       throw Failure.invalidOperation("export mutation")
+    case .cloudRecovery:
+      throw Failure.invalidOperation("cloud recovery mutation")
     case .diagnose:
       throw Failure.invalidOperation("diagnose mutation")
     }

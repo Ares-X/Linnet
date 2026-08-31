@@ -17,6 +17,8 @@ namespace {
 
 constexpr std::size_t kMaxLookupWords = 64, kMaxStaticWords = 1024;
 constexpr std::size_t kPhonexDistanceThreshold = 6;
+constexpr std::size_t kMaxCorrectionKeys = 64, kMaxCorrectionInput = 64;
+constexpr std::size_t kMinCrossBucketCorrectionLength = 8;
 
 std::size_t KeyboardSubstitutionCost(char left, char right) {
   if (left == right) return 0;
@@ -236,20 +238,69 @@ std::string SmartEnglishIndex::EncodePhonex(const std::string& input) {
 std::vector<SmartEnglishWord> SmartEnglishIndex::LookupCorrections(
     const std::string& input) const {
   std::vector<SmartEnglishWord> result;
-  if (!IsLowerWord(input) || input.size() <= 3) return result;
+  if (!engine_ || !IsLowerWord(input) || input.size() <= 3) return result;
   const std::string code = EncodePhonex(input);
-  if (code.empty() || !LookupWords("f/" + code, kMaxLookupWords, WordShape::kLowerWord, &result)) return {};
-  result.erase(std::remove_if(result.begin(), result.end(), [&](const auto& word) {
-    return SmartEnglishDistance(input, word.text, kPhonexDistanceThreshold) >
-           kPhonexDistanceThreshold;
-  }), result.end());
-  std::stable_sort(result.begin(), result.end(), [&](const auto& left, const auto& right) {
-    const auto left_distance = SmartEnglishDistance(input, left.text, kPhonexDistanceThreshold);
-    const auto right_distance = SmartEnglishDistance(input, right.text, kPhonexDistanceThreshold);
-    if (left_distance != right_distance) return left_distance < right_distance;
-    if (left.weight != right.weight) return left.weight > right.weight;
-    return left.text < right.text;
+  if (code.empty()) return result;
+
+  // Phonex is lossy: a single neighboring-key typo can change its bucket.
+  // Plan bounded lookups in the same immutable index, rather than scanning
+  // the dictionary or allocating a second correction index. The caller only
+  // enters this path for Smart English's zz_english segment.
+  std::vector<std::string> keys{code};
+  std::set<std::string> seen_keys{code};
+  const auto add_variant = [&](const std::string& variant) {
+    if (keys.size() >= kMaxCorrectionKeys) return;
+    const std::string key = EncodePhonex(variant);
+    if (!key.empty() && seen_keys.insert(key).second) keys.push_back(key);
+  };
+  if (input.size() >= kMinCrossBucketCorrectionLength &&
+      input.size() <= kMaxCorrectionInput) {
+    for (std::size_t position = 0;
+         position < input.size() && keys.size() < kMaxCorrectionKeys;
+         ++position) {
+      std::string variant(input);
+      for (char replacement = 'a'; replacement <= 'z'; ++replacement) {
+        if (KeyboardSubstitutionCost(input[position], replacement) != 1) continue;
+        variant[position] = replacement;
+        add_variant(variant);
+      }
+      if (position + 1 < input.size()) {
+        variant = input;
+        std::swap(variant[position], variant[position + 1]);
+        add_variant(variant);
+      }
+    }
+  }
+
+  struct RankedWord {
+    SmartEnglishWord word;
+    std::size_t distance;
+  };
+  std::vector<RankedWord> ranked;
+  std::set<std::string> seen_words;
+  for (const auto& key : keys) {
+    std::vector<SmartEnglishWord> words;
+    if (!LookupWords("f/" + key, kMaxLookupWords, WordShape::kLowerWord, &words)) continue;
+    for (auto& word : words) {
+      if (!seen_words.insert(word.text).second) continue;
+      const auto length_difference = std::max(input.size(), word.text.size()) -
+                                     std::min(input.size(), word.text.size());
+      if (length_difference > kPhonexDistanceThreshold / 2) continue;
+      const auto distance = SmartEnglishDistance(input, word.text, kPhonexDistanceThreshold);
+      if (distance <= kPhonexDistanceThreshold) ranked.push_back({std::move(word), distance});
+    }
+  }
+  // Each candidate's distance is computed once, not on every sort comparison.
+  std::stable_sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
+    if (left.distance != right.distance) return left.distance < right.distance;
+    if (left.word.weight != right.word.weight) return left.word.weight > right.word.weight;
+    return left.word.text < right.word.text;
   });
+  result.reserve(std::min(ranked.size(), kMaxLookupWords));
+  for (auto& item : ranked) {
+    if (result.size() == kMaxLookupWords) break;
+    result.push_back(std::move(item.word));
+  }
   return result;
 }
 

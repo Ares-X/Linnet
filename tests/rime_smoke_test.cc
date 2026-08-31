@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -18,11 +19,15 @@
 #include "rime_api.h"
 #include <rime/candidate.h>
 #include <rime/context.h>
+#include <rime/dict/user_dictionary.h>
+#include <rime/dict/level_db.h>
+#include <rime/deployer.h>
 #include <rime/gear/translator_commons.h>
 #include <rime/key_table.h>
 #include <rime/language.h>
 #include <rime/menu.h>
 #include <rime/predict/predict_engine.h>
+#include <rime/registry.h>
 #include <rime/schema.h>
 #include <rime/segmentation.h>
 #include <rime/service.h>
@@ -551,6 +556,117 @@ CandidateOriginView ExpectAmbiguousEnglishPreservesChinese(
   return *chinese;
 }
 
+RimeSessionId CreateSchemaSession(RimeApi_stdbool* api,
+                                  const char* schema_id);
+
+void ExpectSpellingDerivedEnglishPreservesChinese(RimeApi_stdbool* api) {
+  struct Case {
+    const char* schema_id;
+    const char* input;
+    const char* english;
+    bool chinese_collision;
+  };
+  // CandidateOrigins(64) confirmed these complete rows against the frozen
+  // profile set. The three aer rows without a Chinese reading deliberately
+  // assert only that the derived English table candidate stays reachable.
+  constexpr std::array<Case, 24> kCases{{
+      {"linnet_zh_pinyin", "teh", "the", true},
+      {"linnet_zh_pinyin", "aer", "are", true},
+      {"linnet_zh_pinyin", "oen", "one", true},
+      {"linnet_zh", "teh", "the", true},
+      {"linnet_zh", "aer", "are", true},
+      {"linnet_zh", "oen", "one", true},
+      {"linnet_zh_flypy", "teh", "the", true},
+      {"linnet_zh_flypy", "aer", "are", true},
+      {"linnet_zh_flypy", "oen", "one", true},
+      {"linnet_zh_mspy", "teh", "the", true},
+      {"linnet_zh_mspy", "aer", "are", false},
+      {"linnet_zh_mspy", "oen", "one", true},
+      {"linnet_zh_sogou", "teh", "the", true},
+      {"linnet_zh_sogou", "aer", "are", false},
+      {"linnet_zh_sogou", "oen", "one", true},
+      {"linnet_zh_abc", "teh", "the", true},
+      {"linnet_zh_abc", "aer", "are", true},
+      {"linnet_zh_abc", "oen", "one", true},
+      {"linnet_zh_ziguang", "teh", "the", true},
+      {"linnet_zh_ziguang", "aer", "are", true},
+      {"linnet_zh_ziguang", "oen", "one", true},
+      {"linnet_zh_jiajia", "teh", "the", true},
+      {"linnet_zh_jiajia", "aer", "are", false},
+      {"linnet_zh_jiajia", "oen", "one", true},
+  }};
+  for (const auto& test : kCases) {
+    const RimeSessionId session = CreateSchemaSession(api, test.schema_id);
+    Enter(api, session, test.input);
+    const auto candidates = CandidateOrigins(session);
+    const auto english = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return candidate.genuine_type == "table" &&
+                 candidate.genuine_language == "linnet_en" &&
+                 BaseText(candidate.text) == test.english &&
+                 candidate.start == 0 &&
+                 candidate.end == std::strlen(test.input);
+        });
+    const auto chinese = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return candidate.genuine_language == "linnet_zh" &&
+                 candidate.start == 0 &&
+                 candidate.end == std::strlen(test.input);
+        });
+    if (english == candidates.end() ||
+        (test.chinese_collision &&
+         (chinese == candidates.end() || chinese != candidates.begin() ||
+          english == candidates.begin()))) {
+      std::cerr << "Origins for spelling-derived English '" << test.input
+                << "' in " << test.schema_id << ":";
+      for (const auto& candidate : candidates) {
+        std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                  << candidate.genuine_type << ":" << candidate.genuine_language
+                  << ":" << candidate.start << "-" << candidate.end << "]";
+      }
+      std::cerr << '\n';
+      api->destroy_session(session);
+      Fail("spelling-derived English regression changed table reachability or Chinese priority");
+    }
+    api->destroy_session(session);
+  }
+  for (const auto& schema_id : RuntimeChineseSchemaIDs(api)) {
+    const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
+    for (const char* exact : {"the", "agent"}) {
+      ExpectExactEnglishFirst(api, session, schema_id, exact);
+    }
+    api->destroy_session(session);
+  }
+}
+
+void ExpectSmartEnglishSpellingDerivedCandidate(RimeApi_stdbool* api) {
+  const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+  Enter(api, session, "teh");
+  const auto candidates = CandidateOrigins(session);
+  const auto english = std::find_if(
+      candidates.begin(), candidates.end(), [](const auto& candidate) {
+        return candidate.genuine_type == "table" &&
+               candidate.genuine_language == "linnet_en" &&
+               BaseText(candidate.text) == "the";
+      });
+  const bool raw_first = !candidates.empty() &&
+      BaseText(candidates.front().text) == "teh" &&
+      (candidates.front().type == kForcedRawCandidateType ||
+       candidates.front().genuine_type == kForcedRawCandidateType);
+  if (!raw_first || english == candidates.end()) {
+    std::cerr << "Origins for Smart English spelling-derived input teh:";
+    for (const auto& candidate : candidates) {
+      std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                << candidate.genuine_type << ":" << candidate.genuine_language
+                << "]";
+    }
+    std::cerr << '\n';
+    api->destroy_session(session);
+    Fail("Smart English lost raw-first spelling-derived input or table reachability");
+  }
+  api->destroy_session(session);
+}
+
 void ExpectPartialSelectionRanksCurrentSegment(RimeApi_stdbool* api) {
   constexpr char kSchema[] = "linnet_zh";
   constexpr char kInputPrefix[] = "xwvb";
@@ -711,10 +827,10 @@ void ExpectGlobalAmbiguousEnglishFirstWithoutChinese(RimeApi_stdbool* api,
 
 RimeSessionId CreateSchemaSession(RimeApi_stdbool* api,
                                   const char* schema_id);
-std::string TakeCommit(RimeApi_stdbool* api, RimeSessionId session);
 std::string TakeCommit(RimeApi_stdbool* api,
                        RimeSessionId session,
-                       const std::string& reason);
+                       const std::string& reason = {},
+                       unsigned source_line = __builtin_LINE());
 void ExpectNoCommit(RimeApi_stdbool* api,
                     RimeSessionId session,
                     const std::string& reason);
@@ -1401,28 +1517,6 @@ void ExpectAutomaticPinyinOrder(
   }
 }
 
-void ExpectFullSpanCandidateAbsent(RimeApi_stdbool* api,
-                                   RimeSessionId session,
-                                   const std::string& input,
-                                   const std::string& forbidden,
-                                   const std::string& expected_schema) {
-  ExpectCurrentSchema(api, session, expected_schema,
-                      "disabled-correction input");
-  Enter(api, session, input);
-  ExpectCurrentSchema(api, session, expected_schema,
-                      "disabled-correction composition");
-  const auto origins = CandidateOrigins(session);
-  ExpectCurrentSchema(api, session, expected_schema,
-                      "disabled-correction candidate preparation");
-  for (const auto& candidate : origins) {
-    if (BaseText(candidate.text) == forbidden && candidate.start == 0 &&
-        candidate.end == input.size()) {
-      Fail("disabled full-span correction remained visible for input '" +
-           input + "'");
-    }
-  }
-}
-
 void ExpectCurrentCandidateAbsent(RimeApi_stdbool* api,
                                   RimeSessionId session,
                                   const std::string& forbidden) {
@@ -1879,6 +1973,7 @@ void BenchmarkSchema(RimeApi_stdbool* api,
       std::chrono::duration_cast<Nanoseconds>(std::chrono::milliseconds(15))
           .count();
   std::cout << "rime_smoke_test: latency schema=" << schema_id
+            << " sequence=" << sequence
             << " samples=" << kLatencySamples << " p95_ns=" << p95
             << " p99_ns=" << p99 << '\n';
   if (enforce_contract && (p95 > p95_limit || p99 > p99_limit)) {
@@ -2078,24 +2173,19 @@ void ExpectCommit(RimeApi_stdbool* api,
   }
 }
 
-std::string TakeCommit(RimeApi_stdbool* api, RimeSessionId session) {
-  RimeCommit commit = {};
-  RIME_STRUCT_INIT(RimeCommit, commit);
-  if (!api->get_commit(session, &commit)) {
-    Fail("expected a Rime commit");
-  }
-  const std::string text = commit.text ? commit.text : "";
-  api->free_commit(&commit);
-  return text;
-}
-
 std::string TakeCommit(RimeApi_stdbool* api,
                        RimeSessionId session,
-                       const std::string& reason) {
+                       const std::string& reason,
+                       unsigned source_line) {
   RimeCommit commit = {};
   RIME_STRUCT_INIT(RimeCommit, commit);
   if (!api->get_commit(session, &commit)) {
-    Fail("expected a Rime commit after " + reason);
+    char schema[128] = {};
+    api->get_current_schema(session, schema, sizeof(schema));
+    const char* input = api->get_input(session);
+    Fail("expected a Rime commit at line " + std::to_string(source_line) +
+         ", schema=" + schema + ", input='" + (input ? input : "") +
+         "'" + (reason.empty() ? "" : ", after " + reason));
   }
   const std::string text = commit.text ? commit.text : "";
   api->free_commit(&commit);
@@ -5502,7 +5592,6 @@ void WriteFastReloadProjection(const std::filesystem::path& user_directory,
       << "  \"linnet_english_interaction/show_ipa\": false\n"
       << "  \"linnet_english_interaction/show_translation\": false\n"
       << "  \"switches/@1/reset\": 0\n"
-      << "  \"linnet_english_interaction/spelling_correction\": false\n"
       << "  \"translator/enable_user_dict\": false\n"
       << "  \"linnet_english_interaction/learning_enabled\": false\n";
   WritePinnedFile(user_directory / "linnet_en.custom.yaml", english.str(),
@@ -5626,9 +5715,7 @@ void ExpectFastConfigurationReload(RimeApi_stdbool* api,
   bool value = true;
   std::string tab_behavior;
   if (api->get_option(english_session, "prediction") ||
-      !config->GetBool("linnet_english_interaction/spelling_correction",
-                       &value) ||
-      value ||
+      config->GetBool("linnet_english_interaction/spelling_correction", &value) ||
       !config->GetBool("linnet_english_interaction/show_ipa", &value) ||
       value ||
       !config->GetBool("linnet_english_interaction/show_translation", &value) ||
@@ -5938,9 +6025,575 @@ void ExpectFormalProfileKeyMatrix(RimeApi_stdbool* api) {
   }
 }
 
+class SyncFaultDb : public rime::UserDbWrapper<rime::LevelDb> {
+ public:
+  SyncFaultDb(const rime::path& directory, const std::string& name)
+      : UserDbWrapper(directory / (name + ".userdb"), name) {}
+  int writes_until_throw = 0;
+  bool Update(const std::string& key, const std::string& value) override {
+    if (writes_until_throw > 0 && --writes_until_throw == 0)
+      throw std::runtime_error("injected sync write exception");
+    return rime::LevelDb::Update(key, value);
+  }
+};
+
+class SyncFaultDbFactory : public rime::Db::Component {
+ public:
+  rime::Db* Create(const std::string& name) override {
+    return new SyncFaultDb(rime::Service::instance().deployer().user_data_dir, name);
+  }
+};
+
+void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
+  static_assert(offsetof(RimeApi_stdbool, sync_user_data_step) >
+                offsetof(RimeApi_stdbool, commit_raw_input), "Rime API additions must be append-only");
+  if (api->start_maintenance(false)) api->join_maintenance_thread();
+  const auto chinese = CreateSchemaSession(api, "linnet_zh_pinyin");
+  const auto english = CreateSchemaSession(api, "linnet_en");
+  auto* component = dynamic_cast<rime::UserDictionaryComponent*>(
+      rime::UserDictionary::Require("user_dictionary"));
+  if (!component) Fail("user dictionary component unavailable");
+  const auto database = component->FindDb("linnet_zh");
+  auto* transaction = dynamic_cast<rime::Transactional*>(database.get());
+  if (!transaction) Fail("the live dictionary is not transactional");
+  // A cooperative merge must agree with one uninterrupted upstream merger
+  // even when pre-existing, equally weighted rows span several work slices.
+  // The reference uses the real implementation, not a copied decay formula.
+  constexpr size_t existing_rows = 129;
+  const std::string local_value = "c=7 d=5 t=10";
+  const std::string remote_value = "c=7 d=1 t=1000";
+  std::vector<std::pair<std::string, std::string>> expected_existing;
+  std::vector<std::string> recovery_failures;
+  using SyncRows = std::map<std::string, std::string>;
+  auto read_rows = [](rime::Db* db) {
+    SyncRows rows;
+    for (const char* prefix : {"tong bu bi dui \t", "yun tong bu ce shi \t"}) {
+      const auto query = db->Query(prefix);
+      if (!query) Fail("cannot query the isolated learning rows");
+      std::string key, value;
+      while (query->GetNextRecord(&key, &value)) rows.emplace(key, value);
+    }
+    return rows;
+  };
+  auto record_failure = [&](const std::string& message) {
+    recovery_failures.push_back(message);
+    std::cerr << "live-sync regression: " << message << '\n';
+  };
+  auto expect_view = [&](const std::string& label, rime::Db* db,
+                         const SyncRows& expected, const std::string& expected_tick) {
+    size_t mismatches = 0;
+    std::string value, clock;
+    for (const auto& [key, wanted] : expected)
+      if (!db->Fetch(key, &value) || value != wanted) ++mismatches;
+    const auto queried = read_rows(db);
+    db->MetaFetch("/tick", &clock);
+    if (mismatches || queried != expected || clock != expected_tick)
+      record_failure(label + ": Fetch mismatches=" + std::to_string(mismatches) +
+          "/" + std::to_string(expected.size()) + ", Query rows=" +
+          std::to_string(queried.size()) + ", Query equals oracle=" +
+          (queried == expected ? "true" : "false") + ", tick=" + clock +
+          ", expected tick=" + expected_tick);
+  };
+  auto existing_key = [](size_t index) {
+    return "tong bu bi dui \t同步对照" + std::to_string(1000 + index) + "\"\\尾";
+  };
+  auto remote_key = [](size_t index) {
+    return "yun tong bu ce shi \t云同步测试" + std::to_string(index);
+  };
+  SyncRows expected_visible;
+  auto* db_factory = rime::Db::Require("userdb");
+  if (!db_factory) Fail("upstream user database factory unavailable");
+  {
+    std::unique_ptr<rime::Db> reference(db_factory->Create("linnet-sync-merge-oracle"));
+    if (!reference || reference->Exists() || !reference->Open())
+      Fail("cannot create an isolated upstream merge oracle");
+    if (!database->MetaUpdate("/tick", "10") || !reference->MetaUpdate("/tick", "10"))
+      Fail("cannot seed the independent local clocks");
+    for (size_t index = 0; index < existing_rows; ++index) {
+      const auto key = existing_key(index);
+      if (!database->Update(key, local_value) || !reference->Update(key, local_value))
+        Fail("cannot seed equal pre-existing local learning");
+    }
+    {
+      rime::UserDbMerger oracle(reference.get());
+      if (!oracle.MetaPut("/tick", "1000")) Fail("cannot seed the remote oracle clock");
+      for (size_t index = 0; index < existing_rows; ++index)
+        if (!oracle.Put(existing_key(index), remote_value)) Fail("upstream merge oracle failed");
+      for (size_t index = 0; index < 4096; ++index)
+        if (!oracle.Put(remote_key(index), remote_value)) Fail("upstream new-row oracle failed");
+      if (!oracle.CloseMerge()) Fail("upstream merge oracle did not finish");
+    }
+    for (size_t index = 0; index < existing_rows; ++index) {
+      const auto key = existing_key(index);
+      std::string expected;
+      if (!reference->Fetch(key, &expected)) Fail("upstream oracle lost an existing row");
+      expected_existing.emplace_back(key, expected);
+    }
+    expected_visible = read_rows(reference.get());
+    if (!reference->Close() || !reference->Remove())
+      Fail("cannot remove the fixture-owned oracle before cloud discovery");
+  }
+  const auto directory = rime::Service::instance().deployer().user_data_dir / "online-sync";
+  const auto peer = directory / "other-device";
+  std::filesystem::create_directories(peer);
+  const auto remote = peer / "linnet_zh.userdb.txt";
+  {
+    std::ofstream output(remote);
+    output << "# Rime user dictionary\n#@/db_name\tlinnet_zh\n"
+              "#@/db_type\tuserdb\n#@/user_id\tother-device\n#@/tick\t1000\n";
+    for (size_t index = 0; index < existing_rows; ++index)
+      output << existing_key(index) << '\t' << remote_value << '\n';
+    for (int index = 0; index < 4096; ++index)
+      output << remote_key(index) << '\t' << remote_value << '\n';
+  }
+  const std::string sync_directory = directory.string();
+  size_t samples = 0;
+  std::vector<LatencySample> step_latency;
+  std::vector<LatencySample> key_latency;
+  std::vector<LatencySample> typing_latency;
+  bool activation_checked = false;
+  auto step = [&] {
+    const auto before = std::chrono::steady_clock::now();
+    const int result = api->sync_user_data_step(sync_directory.c_str());
+    step_latency.push_back(std::chrono::duration_cast<Nanoseconds>(
+        std::chrono::steady_clock::now() - before).count());
+    if (!api->find_session(chinese) || !api->find_session(english) ||
+        api->is_maintenance_mode())
+      Fail("learning sync destroyed live input sessions or entered maintenance");
+    if (std::string(api->get_input(chinese)) != "niha" ||
+        std::string(api->get_input(english)) != "workin")
+      Fail("learning sync changed a live composition");
+    std::string clock;
+    if (!activation_checked && database->MetaFetch("/tick", &clock) && clock == "1000") {
+      activation_checked = true;
+      expect_view("first activation", database.get(), expected_visible, "1000");
+    }
+    return result;
+  };
+  auto tick = [&] {
+    // Measure every physical key, not only the final pair after the sync step.
+    for (const auto& [session, letters] : {
+        std::make_pair(chinese, "niha"), std::make_pair(english, "workin")}) {
+      if (const char* active = api->get_input(session); active && *active)
+        api->clear_composition(session);
+      for (const char* letter = letters; *letter; ++letter)
+        typing_latency.push_back(MeasureKey(api, session, *letter));
+    }
+    const int result = step();
+    const auto key_start = std::chrono::steady_clock::now();
+    api->process_key(chinese, 'o', 0);
+    api->process_key(english, 'g', 0);
+    key_latency.push_back(std::chrono::duration_cast<Nanoseconds>(
+        std::chrono::steady_clock::now() - key_start).count());
+    CandidateIndex(api, chinese, "你好");
+    NormalizedCandidateIndex(api, english, "working");
+    ++samples;
+    return result;
+  };
+  auto finish = [&](std::optional<int> expected_result = 0) {
+    const auto started = std::chrono::steady_clock::now();
+    const auto initial_samples = samples;
+    const auto deadline = started + std::chrono::seconds(20);
+    int result;
+    do {
+      result = tick();
+      if (result != 1) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    if (expected_result && result != *expected_result) {
+      std::string state, clock;
+      database->Fetch("\x02", &state);
+      database->MetaFetch("/tick", &clock);
+      size_t pending = 0;
+      auto records = database->Query("\x02/");
+      std::string key, value;
+      while (records && records->GetNextRecord(&key, &value)) ++pending;
+      std::cerr << "sync timeout state=" << state << " pending=" << pending
+                << " tick=" << clock << " transaction=" << transaction->in_transaction()
+                << " samples=" << samples - initial_samples
+                << " step_p99_ns=" << NearestRank(&step_latency, 99)
+                << " step_max_ns=" << step_latency.back()
+                << " two_keys_p99_ns=" << NearestRank(&key_latency, 99) << '\n';
+      Fail("online learning sync returned " + std::to_string(result) +
+           ", expected " + std::to_string(*expected_result));
+    }
+    std::cout << "live-sync cycle: result=" << result
+              << " samples=" << samples - initial_samples << " elapsed_ms="
+              << std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - started).count() << std::endl;
+    return result;
+  };
+  // Pending reversible learning must not be committed, aborted or mixed into.
+  // Prepare input first: normal input handling may finish an earlier learning
+  // transaction independently of sync. No synthetic composition reset belongs
+  // inside this undo boundary; concurrent typing is exercised by tick below.
+  Enter(api, chinese, "niha");
+  Enter(api, english, "workin");
+  if (!transaction->BeginTransaction()) Fail("cannot create pending learning");
+  database->Update("yun tong bu \t未提交", "c=1 d=1 t=2");
+  for (int index = 0; index < 30; ++index) {
+    if (step() != 1) Fail("sync completed across a pending learning transaction");
+    if (!transaction->in_transaction())
+      Fail("pending learning ended inside the sync step");
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (!transaction->in_transaction() || !transaction->AbortTransaction())
+    Fail("sync consumed the user's reversible learning transaction");
+  std::string value;
+  if (database->Fetch("yun tong bu \t未提交", &value))
+    Fail("aborted local learning became durable during sync");
+  finish();
+  if (!activation_checked) record_failure("the initial merge never published tick 1000");
+  size_t differing_rows = 0;
+  std::string first_difference;
+  for (const auto& [key, expected] : expected_existing) {
+    if (!database->Fetch(key, &value)) Fail("online sync lost pre-existing local learning");
+    if (value != expected) {
+      ++differing_rows;
+      if (first_difference.empty())
+        first_difference = key + ": expected " + expected + "; actual " + value;
+    }
+  }
+  if (differing_rows != 0)
+    Fail("cooperative sync differs from one upstream merge for " +
+         std::to_string(differing_rows) + "/" + std::to_string(existing_rows) +
+         " pre-existing rows (local tick 10, remote tick 1000): " + first_difference);
+  if (!database->Fetch("yun tong bu ce shi \t云同步测试4095", &value) ||
+      rime::UserDbValue(value).commits != 7)
+    Fail("online sync did not import the last upstream-format row");
+  std::string clock;
+  database->MetaFetch("/tick", &clock);
+  const auto imported_tick = std::stoull(clock);
+  {
+    std::unique_ptr<rime::UserDictionary> learning(component->Create("linnet_zh", "userdb"));
+    if (!learning->Load() || !learning->NewTransaction()) Fail("learning unavailable after sync");
+    rime::DictEntry entry;
+    entry.text = "同步后学习";
+    entry.custom_code = "tong bu hou xue xi ";
+    learning->UpdateEntry(entry, 1);
+    entry.text = "第二次学习";
+    learning->UpdateEntry(entry, 1);
+    if (!learning->CommitPendingTransaction()) Fail("cannot persist post-sync learning");
+  }
+  database->MetaFetch("/tick", &clock);
+  if (std::stoull(clock) != imported_tick + 2)
+    Fail("sync clock overwrote transaction-local learning increments");
+  finish();
+  const auto published = directory / rime::Service::instance().deployer().user_id /
+                         "linnet_zh.userdb.txt";
+  const auto written_at = std::filesystem::last_write_time(published);
+  std::ifstream before_stream(published);
+  const std::string before_contents((std::istreambuf_iterator<char>(before_stream)), {});
+  finish();
+  if (std::filesystem::last_write_time(published) != written_at) {
+    std::ifstream after_stream(published);
+    const std::string after_contents((std::istreambuf_iterator<char>(after_stream)), {});
+    const auto mismatch = std::mismatch(before_contents.begin(), before_contents.end(),
+                                        after_contents.begin(), after_contents.end());
+    const auto offset = std::distance(before_contents.begin(), mismatch.first);
+    std::cerr << "snapshot difference at " << offset << ": before="
+              << before_contents.substr(offset, 180) << " after="
+              << after_contents.substr(std::min<size_t>(offset, after_contents.size()), 180) << '\n';
+    Fail("unchanged learning rewrote the cloud snapshot");
+  }
+  // Cold dictionaries cannot trigger a full open/close on an input callback.
+  const std::string cold_name = "linnet_sync_cold";
+  std::unique_ptr<rime::Db> cold(db_factory->Create(cold_name));
+  if (!cold->Open()) Fail("cannot seed the isolated cold dictionary");
+  for (int index = 0; index < 512; ++index)
+    cold->Update("leng ci ku \t冷词库" + std::to_string(index), "c=2 d=1 t=2");
+  cold->Close();
+  auto cold_files = [&] {
+    std::map<std::string, std::pair<uintmax_t, std::filesystem::file_time_type>> files;
+    for (const auto& entry : std::filesystem::directory_iterator(cold->file_path()))
+      files.emplace(entry.path().filename().string(),
+                    std::make_pair(entry.file_size(), entry.last_write_time()));
+    return files;
+  };
+  const auto cold_before = cold_files();
+  finish(2);
+  if (component->FindDb(cold_name) || cold_files() != cold_before)
+    Fail("online sync opened or rewrote an inactive dictionary");
+  {
+    std::unique_ptr<rime::UserDictionary> active(component->Create(cold_name, "userdb"));
+    if (!active->Load()) Fail("cannot naturally activate the deferred dictionary");
+    finish();
+    if (!std::filesystem::exists(published.parent_path() / (cold_name + ".userdb.txt")))
+      Fail("naturally activated learning was not included in the next sync");
+  }
+  if (!cold->Remove()) Fail("cannot remove the fixture-owned cold dictionary");
+
+  // An exception after one successful write must abort exactly that sync batch.
+  const std::string fault_name = "linnet_sync_fault";
+  rime::Registry::instance().Register(fault_name, new SyncFaultDbFactory);
+  const auto fault_remote = peer / (fault_name + ".userdb.txt");
+  {
+    std::unique_ptr<rime::UserDictionary> learning(component->Create(fault_name, fault_name));
+    if (!learning->Load()) Fail("cannot create the fault-injection dictionary");
+    auto fault = std::dynamic_pointer_cast<SyncFaultDb>(component->FindDb(fault_name));
+    {
+      std::ofstream output(fault_remote);
+      output << "#@/db_name\t" << fault_name << "\n#@/db_type\tuserdb\n#@/tick\t10\n"
+                "ce shi \t异常前\tc=2 d=1 t=10\nce shi \t异常时\tc=2 d=1 t=10\n";
+    }
+    fault->writes_until_throw = 2;
+    finish(-1);
+    if (fault->in_transaction() || fault->Fetch("ce shi \t异常前", &value))
+      Fail("failed sync left a transaction or partial durable learning");
+    rime::DictEntry entry;
+    entry.text = "正常学习"; entry.custom_code = "zheng chang xue xi ";
+    if (!learning->NewTransaction() || !learning->UpdateEntry(entry, 1) ||
+        !learning->CommitPendingTransaction() || fault->Fetch("ce shi \t异常前", &value))
+      Fail("subsequent learning committed an aborted sync batch");
+  }
+  rime::Registry::instance().Unregister(fault_name);
+  std::filesystem::remove(fault_remote);
+  std::unique_ptr<rime::Db> fault_cleanup(db_factory->Create(fault_name));
+  if (!fault_cleanup->Remove()) Fail("cannot remove the fixture-owned fault dictionary");
+
+  enum class IncomingChange { missing, replaced, earlierPeer, unchanged };
+  enum class LocalEdit { none, learn, erase, undo };
+  struct RecoveryCase {
+    const char* label;
+    bool reopen;
+    IncomingChange incoming;
+    LocalEdit edit;
+    bool staging = false;
+  };
+  const auto oracle_directory = directory / "one-shot-reference";
+  std::filesystem::create_directories(oracle_directory);
+  for (const auto& item : {
+      RecoveryCase{"staging_missing", false, IncomingChange::missing, LocalEdit::none, true},
+      RecoveryCase{"staging_reopen_replaced", true, IncomingChange::replaced, LocalEdit::none, true},
+      RecoveryCase{"resume_missing", false, IncomingChange::missing, LocalEdit::none},
+      RecoveryCase{"reopen_missing", true, IncomingChange::missing, LocalEdit::none},
+      RecoveryCase{"resume_replaced", false, IncomingChange::replaced, LocalEdit::none},
+      RecoveryCase{"reopen_replaced", true, IncomingChange::replaced, LocalEdit::none},
+      RecoveryCase{"resume_peer_first", false, IncomingChange::earlierPeer, LocalEdit::none},
+      RecoveryCase{"reopen_peer_first", true, IncomingChange::earlierPeer, LocalEdit::none},
+      RecoveryCase{"tail_learn", false, IncomingChange::unchanged, LocalEdit::learn},
+      RecoveryCase{"tail_delete", false, IncomingChange::unchanged, LocalEdit::erase},
+      RecoveryCase{"tail_undo", false, IncomingChange::unchanged, LocalEdit::undo}}) {
+    const std::string name = std::string("linnet_sync_") + item.label;
+    std::unique_ptr<rime::Db> cleanup(db_factory->Create(name));
+    if (cleanup->Exists()) Fail("interrupted-sync fixture already exists");
+    std::unique_ptr<rime::UserDictionary> learning(component->Create(name, "userdb"));
+    if (!learning->Load()) Fail("cannot load the interrupted-sync dictionary");
+    auto resumed_db = component->FindDb(name);
+    rime::an<rime::Db> reference(new rime::UserDbWrapper<rime::LevelDb>(
+        oracle_directory / (name + ".userdb"), name));
+    if (!reference->Open() || !resumed_db->MetaUpdate("/tick", "10") ||
+        !reference->MetaUpdate("/tick", "10")) Fail("cannot seed interrupted-sync clocks");
+    for (size_t index = 0; index < existing_rows; ++index) {
+      if (!resumed_db->Update(existing_key(index), local_value) ||
+          !reference->Update(existing_key(index), local_value))
+        Fail("cannot seed interrupted-sync learning");
+    }
+    const auto before_activation = read_rows(reference.get());
+    auto merge_oracle = [&](const std::string& remote_tick, const std::string& contents) {
+      rime::UserDbMerger oracle(reference.get());
+      if (!oracle.MetaPut("/tick", remote_tick)) Fail("cannot seed recovery oracle clock");
+      // The extra row is absent locally and must appear in Query at activation.
+      for (size_t index = 0; index <= existing_rows; ++index)
+        if (!oracle.Put(existing_key(index), contents)) Fail("recovery oracle merge failed");
+      if (!oracle.CloseMerge()) Fail("recovery oracle did not finish");
+    };
+    if (!item.staging) merge_oracle("1000", remote_value);
+    const auto incoming = peer / (name + ".userdb.txt");
+    auto write_incoming = [&](const std::filesystem::path& file, const std::string& remote_tick,
+                               const std::string& contents) {
+      std::ofstream output(file);
+      output << "#@/db_name\t" << name << "\n#@/db_type\tuserdb\n#@/tick\t" << remote_tick << '\n';
+      for (size_t index = 0; index <= existing_rows; ++index)
+        output << existing_key(index) << '\t' << contents << '\n';
+      if (!output) Fail("cannot write the recovery snapshot");
+    };
+    write_incoming(incoming, "1000", remote_value);
+    // Publication of the new clock, not physical row count/write_revision,
+    // is the observable boundary. No caller may see a half-merged dictionary.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    bool activated = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+      const int result = tick();
+      resumed_db->MetaFetch("/tick", &clock);
+      if (item.staging) {
+        auto pending = resumed_db->Query("\x02/");
+        if (pending && !pending->exhausted() && clock == "10") { activated = true; break; }
+      } else if (clock == "1000") { activated = true; break; }
+      expect_view(name + " staging", resumed_db.get(), before_activation, "10");
+      if (result != 1) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!activated) Fail("recovery fixture never reached the atomic activation boundary");
+    const std::string activation_clock = item.staging ? "10" : "1000";
+    expect_view(name + " activation", resumed_db.get(), read_rows(reference.get()), activation_clock);
+    if (!item.staging) {
+      // Move the durable range once before cancellation, reopening or editing
+      // the tail. Fetch/Query cover keys before, at and after that lower bound.
+      if (tick() != 1) Fail("active recovery fixture completed before a materialization slice");
+      expect_view(name + " partial materialization", resumed_db.get(), read_rows(reference.get()), "1000");
+    }
+
+    const auto other_peer = directory / "before-active-peer";
+    const auto other_incoming = other_peer / (name + ".userdb.txt");
+    if (item.edit != LocalEdit::none) {
+      // Index 128 lies beyond a 64-row materialization slice. Use exactly the
+      // same real UserDictionary operation against the one-shot reference.
+      rime::UserDictionary reference_learning(name, reference);
+      if (!reference_learning.Load() || !learning->NewTransaction() ||
+          !reference_learning.NewTransaction()) Fail("tail learning transaction unavailable");
+      rime::DictEntry entry;
+      const auto key = existing_key(existing_rows - 1);
+      const auto separator = key.find('\t');
+      entry.custom_code = key.substr(0, separator);
+      entry.text = key.substr(separator + 1);
+      const int commits = item.edit == LocalEdit::erase ? -1 : 1;
+      if (!learning->UpdateEntry(entry, commits) || !reference_learning.UpdateEntry(entry, commits))
+        Fail("cannot apply identical tail learning operations");
+      reference->MetaFetch("/tick", &clock);
+      expect_view(name + " user transaction", resumed_db.get(), read_rows(reference.get()), clock);
+      if (item.edit == LocalEdit::undo) {
+        if (!learning->RevertRecentTransaction() || !reference_learning.RevertRecentTransaction())
+          Fail("cannot undo identical tail learning operations");
+        expect_view(name + " undo learning", resumed_db.get(), read_rows(reference.get()), "1000");
+        // Erase must suppress an active intent too, and undo must restore it.
+        if (!learning->NewTransaction() || !reference_learning.NewTransaction() ||
+            !resumed_db->Erase(key) || !reference->Erase(key)) Fail("cannot erase the tail transactionally");
+        expect_view(name + " erased tail", resumed_db.get(), read_rows(reference.get()), "1000");
+        if (!learning->RevertRecentTransaction() || !reference_learning.RevertRecentTransaction())
+          Fail("cannot undo identical tail erasures");
+        if (!learning->NewTransaction() || !reference_learning.NewTransaction() ||
+            !resumed_db->Erase(key) || !reference->Erase(key) ||
+            !learning->CommitPendingTransaction() || !reference_learning.CommitPendingTransaction())
+          Fail("cannot commit identical tail erasures");
+        expect_view(name + " committed erase", resumed_db.get(), read_rows(reference.get()), "1000");
+      } else if (!learning->CommitPendingTransaction() || !reference_learning.CommitPendingTransaction()) {
+        Fail("cannot persist identical tail learning operations");
+      }
+    } else {
+      api->sync_user_data_step(nullptr);
+      if (item.incoming == IncomingChange::missing || item.incoming == IncomingChange::earlierPeer)
+        std::filesystem::remove(incoming);
+      if (item.incoming == IncomingChange::replaced || item.incoming == IncomingChange::earlierPeer) {
+        // Keep B weaker than A so its later clock cannot mask an unfinished A.
+        const std::string newer = "c=3 d=0.25 t=2000";
+        if (item.incoming == IncomingChange::earlierPeer) {
+          // A is no longer in cloud discovery, so B is guaranteed to be the
+          // first incoming snapshot; correctness cannot rely on directory order.
+          std::filesystem::create_directories(other_peer);
+          write_incoming(other_incoming, "2000", newer);
+        } else {
+          write_incoming(incoming, "2000", newer);
+        }
+        merge_oracle("2000", newer);
+      }
+      if (item.reopen) {
+        resumed_db.reset();
+        learning.reset();
+        if (component->FindDb(name)) Fail("cancel retained the interrupted live Db");
+        learning.reset(component->Create(name, "userdb"));
+        if (!learning->Load()) Fail("cannot naturally reopen the interrupted dictionary");
+        resumed_db = component->FindDb(name);
+      }
+    }
+    finish();
+    reference->MetaFetch("/tick", &clock);
+    expect_view(name + " recovered", resumed_db.get(), read_rows(reference.get()), clock);
+    resumed_db.reset();
+    learning.reset();
+    if (!reference->Close() || !reference->Remove()) Fail("cannot remove the recovery oracle");
+    if (!cleanup->Remove()) Fail("cannot remove the fixture-owned interrupted dictionary");
+    std::filesystem::remove(incoming);
+    std::filesystem::remove(other_incoming);
+    std::filesystem::remove(published.parent_path() / (name + ".userdb.txt"));
+  }
+
+  // A successful writer must never replace a readable snapshot with bytes
+  // rejected by its own next read. Exercise actual Rime serialization.
+  const std::string large_name = "linnet_sync_large";
+  std::unique_ptr<rime::Db> large_cleanup(db_factory->Create(large_name));
+  if (large_cleanup->Exists()) Fail("large-sync fixture already exists");
+  {
+    std::unique_ptr<rime::UserDictionary> learning(component->Create(large_name, "userdb"));
+    if (!learning->Load()) Fail("cannot load the large-sync dictionary");
+    auto large_db = component->FindDb(large_name);
+    if (!large_db->Update("da ci ku \t旧快照", "c=1 d=1 t=1")) Fail("cannot seed old snapshot");
+    finish();
+    const auto target = published.parent_path() / (large_name + ".userdb.txt");
+    const auto old_time = std::filesystem::last_write_time(target);
+    std::ifstream old_stream(target);
+    const std::string old_bytes((std::istreambuf_iterator<char>(old_stream)), {});
+    auto* large_transaction = dynamic_cast<rime::Transactional*>(large_db.get());
+    if (!large_transaction || !large_transaction->BeginTransaction())
+      Fail("cannot seed a real large learning transaction");
+    const std::string prefix = "da ci ku \t" + std::string(64 * 1024, 'x');
+    for (int index = 0; index < 272; ++index)
+      if (!large_db->Update(prefix + std::to_string(index), "c=1 d=1 t=1"))
+        Fail("cannot seed the large learning fixture");
+    if (!large_transaction->CommitTransaction()) Fail("cannot commit the large learning fixture");
+    const auto serialized = directory / "large-fixture.userdb.txt";
+    if (!large_db->Backup(serialized)) Fail("cannot serialize the large learning fixture");
+    const auto serialized_bytes = std::filesystem::file_size(serialized);
+    if (serialized_bytes <= 16 * 1024 * 1024 || serialized_bytes >= 32 * 1024 * 1024)
+      Fail("large-sync fixture is outside its required serialized-size boundary");
+    std::filesystem::remove(serialized);
+    const int result = finish(std::nullopt);
+    std::ifstream actual_stream(target);
+    const std::string actual_bytes((std::istreambuf_iterator<char>(actual_stream)), {});
+    if (result != -1 || actual_bytes != old_bytes ||
+        std::filesystem::last_write_time(target) != old_time) {
+      const int read_back = finish(std::nullopt);
+      recovery_failures.push_back("oversized snapshot " + std::to_string(serialized_bytes) +
+          " bytes: write returned " + std::to_string(result) + ", next read returned " +
+          std::to_string(read_back) + "; previous readable snapshot preserved=" +
+          (actual_bytes == old_bytes ? "true" : "false"));
+      std::cerr << "live-sync regression: " << recovery_failures.back() << '\n';
+    }
+    std::filesystem::remove(target);
+  }
+  if (!large_cleanup->Remove()) Fail("cannot remove the fixture-owned large dictionary");
+  if (!recovery_failures.empty()) {
+    std::ostringstream report;
+    report << "live synchronization recovery contract failed:";
+    for (const auto& failure : recovery_failures) report << "\n  " << failure;
+    Fail(report.str());
+  }
+
+  // Malformed remote rows must fail, without damaging input or our last file.
+  { std::ofstream corrupt(remote, std::ios::app); corrupt << "broken-row\n"; }
+  int failed = 1;
+  for (int index = 0; index < 100 && failed == 1; ++index) {
+    failed = tick();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (failed != -1 || std::filesystem::last_write_time(published) != written_at)
+    Fail("corrupt remote learning reported success or overwrote a valid snapshot");
+  api->sync_user_data_step(sync_directory.c_str());
+  api->sync_user_data_step(nullptr);
+  Enter(api, chinese, "nihao");
+  CandidateIndex(api, chinese, "你好");
+  std::sort(step_latency.begin(), step_latency.end());
+  std::sort(key_latency.begin(), key_latency.end());
+  const auto p99_step = step_latency[step_latency.size() * 99 / 100];
+  const auto p99_key = key_latency[key_latency.size() * 99 / 100];
+  const auto p95_typing = NearestRank(&typing_latency, 95);
+  const auto p99_typing = NearestRank(&typing_latency, 99);
+  if (p99_step > 5'000'000 || p99_key > 15'000'000 ||
+      p95_typing > 5'000'000 || p99_typing > 15'000'000)
+    Fail("online sync exceeded the input latency budget");
+  std::cout << "rime_smoke_test: live sync samples=" << samples
+            << " step_p99_ns=" << p99_step << " step_max_ns=" << step_latency.back()
+            << " two_keys_p99_ns=" << p99_key
+            << " all_keys_p95_ns=" << p95_typing << " all_keys_p99_ns=" << p99_typing << '\n';
+  api->destroy_session(chinese);
+  api->destroy_session(english);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  const bool live_sync_probe =
+      argc == 4 && std::strcmp(argv[3], "--live-sync-probe") == 0;
   const bool input_options_probe =
       argc == 4 && std::strcmp(argv[3], "--input-options-probe") == 0;
   const bool input_switches_probe =
@@ -5987,7 +6640,7 @@ int main(int argc, char** argv) {
       !mixed_input_probe &&
       !mixed_learning_on_probe &&
       !mixed_learning_off_probe &&
-      !mixed_latency_probe && !warm_session_probe && !cold_client_probe) {
+      !mixed_latency_probe && !warm_session_probe && !cold_client_probe && !live_sync_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|"
          "--profile-key-matrix-probe|"
@@ -6040,6 +6693,12 @@ int main(int argc, char** argv) {
     Fail("octagram module was not loaded");
   }
   ExpectSchemaList(api);
+  if (live_sync_probe) {
+    ExpectLiveUserDataSync(api);
+    api->finalize();
+    std::cout << "rime_smoke_test: live user dictionary sync: PASS\n";
+    return 0;
+  }
   std::string expected_fresh_schema = "linnet_zh_pinyin";
   if (english_profile_probe) {
     expected_fresh_schema = argv[5];
@@ -6074,6 +6733,8 @@ int main(int argc, char** argv) {
     ExpectNineCandidateSelectKeys(api, "linnet_en", "a");
     ExpectFormalSingleLetterMatrix(api);
     ExpectNaturalSingleKeyDefaultRanking(api);
+    ExpectSpellingDerivedEnglishPreservesChinese(api);
+    ExpectSmartEnglishSpellingDerivedCandidate(api);
     ExpectCandidateArrowNavigation(api);
     ExpectSingleSyllablePreferenceLearning(api);
     ExpectPartialSelectionRanksCurrentSegment(api);
@@ -6251,8 +6912,7 @@ int main(int argc, char** argv) {
     if (api->get_option(settings_off, "prediction")) {
       Fail("the deployed graphical prediction setting remained enabled");
     }
-    ExpectFullSpanCandidateAbsent(api, settings_off, "cloudd", "cloud",
-                                  "linnet_en");
+    ExpectCandidate(api, settings_off, "cloudd", "cloud");
     ExpectCommentEmpty(api, settings_off, "cloud", "cloud");
     SelectNormalizedCandidate(api, settings_off, "i", "I");
     ContinueAndSelectNormalizedCandidate(api, settings_off, "do", "do");
@@ -6364,13 +7024,12 @@ int main(int argc, char** argv) {
   ExpectImmediateEnglishSpaceCommit(api);
   ExpectCommentContains(api, english, "Dejavu", "Déjà vu", "似曾", "相识");
   ExpectCommentContains(api, english, "jwt", "jwt", "JSON Web Token", "令牌");
-  ExpectCommentIncludesExcludes(
-      api, english, "serialization", "serialization", "序列化", "连载");
+  ExpectCommentContains(api, english, "serialization", "serialization",
+                        "序列化", "连载");
   ExpectCommentIncludesExcludes(
       api, english, "deserialization", "deserialization", "反序列化",
       "串并");
-  ExpectCommentIncludesExcludes(api, english, "agent", "agent", "智能体",
-                                "代理");
+  ExpectCommentContains(api, english, "agent", "agent", "智能体", "代理人");
   ExpectCommentIncludesExcludes(api, english, "websocket", "websocket",
                                 "WebSocket 协议", "网页套接字");
   ExpectCommentEmpty(api, english, "Kubernetes", "Kubernetes");
@@ -6594,10 +7253,11 @@ int main(int argc, char** argv) {
                           test_case.second, "smart-complete commit");
     api->destroy_session(tab_complete);
   }
-  SetSchemaBool(api, "linnet_en",
-                "linnet_english_interaction/spelling_correction", false);
   const RimeSessionId tab_pinyin_phrase =
       CreateSchemaSession(api, "linnet_en");
+  // Ordinary English input also offers pinyin translations. Select that
+  // candidate without suppressing correction or assuming its rank; explicit
+  // reverse lookup is a different segment and is not smart-complete input.
   Enter(api, tab_pinyin_phrase, "yunjisuan");
   const auto pinyin_before_tab = CandidateOrigins(tab_pinyin_phrase, 256);
   const auto pinyin_target = std::find_if(
@@ -6606,17 +7266,19 @@ int main(int argc, char** argv) {
         return BaseText(candidate.text) == "cloud computing" &&
                candidate.genuine_type == "linnet_pinyin";
       });
-  if (pinyin_target == pinyin_before_tab.end() ||
-      std::distance(pinyin_before_tab.begin(), pinyin_target) != 1) {
-    Fail("isolated pinyin smart-complete fixture lost its first ranked smart candidate");
+  if (pinyin_target == pinyin_before_tab.end()) {
+    Fail("pinyin smart-complete fixture lost its multi-word candidate");
+  }
+  const size_t target_index = static_cast<size_t>(
+      std::distance(pinyin_before_tab.begin(), pinyin_target));
+  if (!api->highlight_candidate(tab_pinyin_phrase, target_index)) {
+    Fail("could not highlight the automatic multi-word pinyin candidate");
   }
   const bool pinyin_tab_handled =
       api->process_key(tab_pinyin_phrase, kTab, 0);
   const std::string pinyin_tab_commit =
       BaseText(TakeCommit(api, tab_pinyin_phrase));
   if (!pinyin_tab_handled || pinyin_tab_commit != "cloud computing") {
-    const size_t target_index = static_cast<size_t>(
-        std::distance(pinyin_before_tab.begin(), pinyin_target));
     std::cerr << "Candidates before pinyin smart-complete Tab:";
     for (const auto& candidate : pinyin_before_tab) {
       std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
@@ -6624,7 +7286,7 @@ int main(int argc, char** argv) {
     }
     std::cerr << "\nTab handled=" << pinyin_tab_handled << ", commit='"
               << pinyin_tab_commit << "'\n";
-    Fail("smart-complete Tab skipped the automatic multi-word pinyin result " +
+    Fail("smart-complete Tab skipped the highlighted automatic multi-word pinyin result " +
          std::to_string(target_index) + "/" +
          std::to_string(pinyin_before_tab.size()));
   }
@@ -6632,8 +7294,6 @@ int main(int argc, char** argv) {
                               kPredictContextProperty,
                               "multi-word pinyin smart-complete");
   api->destroy_session(tab_pinyin_phrase);
-  SetSchemaBool(api, "linnet_en",
-                "linnet_english_interaction/spelling_correction", true);
   const RimeSessionId tab_table_phrase =
       CreateSchemaSession(api, "linnet_en");
   Enter(api, tab_table_phrase, "earlyaccess");
@@ -6679,14 +7339,20 @@ int main(int argc, char** argv) {
 
   ExpectChineseTabPolicy(api);
 
-  for (const auto& kind : {"correction_insertion", "correction_deletion",
-                           "correction_substitution",
-                           "correction_transposition"}) {
-    const auto& test_case = acceptance_cases.at(kind);
+  const std::vector<AcceptanceCase> correction_cases = {
+      acceptance_cases.at("correction_insertion"),
+      acceptance_cases.at("correction_deletion"),
+      acceptance_cases.at("correction_substitution"),
+      acceptance_cases.at("correction_transposition"),
+      {"developmebt", "development"},
+      {"implemenration", "implementation"},
+      {"configuratiob", "configuration"},
+  };
+  for (const auto& test_case : correction_cases) {
     Enter(api, english, test_case.query);
     const auto candidates = Candidates(api, english);
     if (candidates.empty() || candidates.front().text != test_case.query) {
-      Fail(std::string("correction did not preserve raw input first: ") + kind);
+      Fail("correction did not preserve raw input first: " + test_case.query);
     }
     NormalizedCandidateIndex(api, english, test_case.expected);
   }
@@ -6879,6 +7545,8 @@ int main(int argc, char** argv) {
         api, profile_session, profile.input, profile.expected_chinese);
     api->destroy_session(profile_session);
   }
+  ExpectSpellingDerivedEnglishPreservesChinese(api);
+  ExpectSmartEnglishSpellingDerivedCandidate(api);
   // A partially confirmed composition has its own remaining Segment. Bilingual
   // intent must be classified from that segment, not from the full historical
   // input that still contains the confirmed prefix.
@@ -7458,6 +8126,9 @@ int main(int argc, char** argv) {
   api->destroy_session(english);
 
   BenchmarkSchema(api, "linnet_en", "cloud");
+  BenchmarkSchema(api, "linnet_en", "developmebt");
+  BenchmarkSchema(api, "linnet_en", "implemenration");
+  BenchmarkSchema(api, "linnet_en", "configuratiob");
   BenchmarkSchema(api, "linnet_zh", "nihk");
 
   const RimeSessionId fresh_wa = CreateSchemaSession(api, "linnet_en");

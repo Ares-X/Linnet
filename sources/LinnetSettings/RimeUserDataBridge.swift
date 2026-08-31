@@ -91,19 +91,24 @@ struct RimeUserDataBridge {
     }
   }
 
-  func snapshotCurrent(
+  func exportPortableLearning(
     from userDirectory: URL,
     to destination: URL,
     shared: URL,
-    product: String
+    product: String,
+    schemas: Set<String>
   ) throws -> [LearningFile] {
+    guard schemas.isSubset(of: Self.learningSchemas) else {
+      throw Failure.invalidSchema("portable export")
+    }
+    guard !schemas.isEmpty else { return [] }
     try requireDirectory(destination)
     return try snapshot(
       from: userDirectory,
       to: destination,
       shared: shared,
       product: product,
-      mappings: [Self.chineseSchema: Self.chineseSchema, Self.englishSchema: Self.englishSchema],
+      mappings: Dictionary(uniqueKeysWithValues: schemas.map { ($0, $0) }),
       prepared: nil
     ).files
   }

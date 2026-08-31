@@ -35,10 +35,12 @@ ENGLISH_DATA_GENERATOR_SOURCES = tools/LinnetEnglishDataSources.swift \
 LINNET_DATA_REGISTRY_SOURCES = sources/LinnetPackContract.swift \
 	sources/LinnetDataChannel.swift \
 	sources/LinnetDataRegistry.swift \
+	sources/LinnetDirectoryDelta.swift \
 	sources/LinnetDataRegistryTransactions.swift \
 	sources/LinnetDataRegistryStorage.swift
 LINNET_PACK_TOOL = build/linnet-pack
 LINNET_PACK_TOOL_SOURCES = $(LINNET_DATA_REGISTRY_SOURCES) \
+	sources/LinnetSettings/LinnetSettingsMutationLease.swift \
 	tools/LinnetDataCatalogBuilder.swift \
 	tools/LinnetPackEncoder.swift \
 	tools/LinnetPackTool.swift

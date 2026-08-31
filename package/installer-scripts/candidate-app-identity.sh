@@ -9,7 +9,6 @@ readonly host_bundle_id='io.github.ares-x.inputmethod.Linnet'
 readonly script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly metadata_path="${script_root}/candidate-app-identity.json"
 readonly user_home="${HOME:-}"
-readonly app_path="${user_home}/Library/Input Methods/Linnet.app"
 readonly current_uid="$(/usr/bin/id -u)"
 readonly legacy_max_version='0.1.11'
 readonly legacy_max_build='28'
@@ -127,10 +126,23 @@ semver_compare() {
   printf '%s\n' 0
 }
 
-[[ "$#" -eq 1 ]] || fail_identity "usage: existing | installed"
+[[ "$#" -ge 1 ]] || fail_identity "usage: existing | installed | staged APP"
 readonly verification_mode="$1"
 case "${verification_mode}" in
-  existing|installed) ;;
+  existing|installed)
+    [[ "$#" -eq 1 ]] || fail_identity "unexpected App path"
+    readonly app_path="${user_home}/Library/Input Methods/Linnet.app"
+    ;;
+  staged)
+    [[ "$#" -eq 2 && ( "$2" == \
+      "${user_home}/Library/Input Methods/.linnet-core."??????"/Linnet.app" || \
+      "$2" == "${user_home}/Library/Application Support/Linnet/.linnet-complete/App/Linnet.app" ) ]] ||
+      fail_identity "staged App is outside the package transaction"
+    readonly app_path="$2"
+    secure_owned_path "${app_path%/*}" directory &&
+      [[ "$(cd "${app_path%/*}" && pwd -P)" == "${app_path%/*}" ]] ||
+      fail_identity "staged App parent is unsafe"
+    ;;
   *) fail_identity "verification mode is invalid" ;;
 esac
 
@@ -311,7 +323,7 @@ community-adhoc)
   ;;
 esac
 
-if [[ "${verification_mode}" == installed ]]; then
+if [[ "${verification_mode}" != existing ]]; then
   [[ "${actual_version}" == "${expected_version}" &&
     "${actual_build}" == "${expected_build}" &&
     "${embedded_revision}" == "${expected_revision}" ]] ||

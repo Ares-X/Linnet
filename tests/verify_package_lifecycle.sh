@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+trap 'echo "Package lifecycle failed at line ${LINENO}." >&2' ERR
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
@@ -45,22 +46,43 @@ set -euo pipefail
 [[ "$#" == 3 && "$1" == probe &&
   "$2" == 0.1.0 && "$3" == "${HOME}/Library/Application Support" ]]
 [[ -z "${LINNET_FAKE_RUNTIME_LOG:-}" ]] || printf '%s\n' "$*" >>"${LINNET_FAKE_RUNTIME_LOG}"
+if [[ -n "${LINNET_FAKE_RUNTIME_BUILD_LOG:-}" ]]; then
+  /usr/bin/plutil -extract CFBundleVersion raw -o - \
+    "${HOME}/Library/Input Methods/Linnet.app/Contents/Info.plist" >>"${LINNET_FAKE_RUNTIME_BUILD_LOG}"
+fi
 case "${LINNET_FAKE_RUNTIME_STATE:-auto}" in
   healthy)
     [[ -f "$3/Linnet/Runtime/Active/activation.json" ]] || exit 1
     printf 'healthy\n'
     ;;
   missing)
+    [[ ! -e "$3/Linnet/Data" && ! -L "$3/Linnet/Data" && \
+      ! -e "$3/Linnet/Runtime" && ! -L "$3/Linnet/Runtime" ]] || exit 1
+    printf 'missing\n'
+    ;;
+  missing-then-invalid)
+    [[ ! -e "$3/Linnet/Data" && ! -L "$3/Linnet/Data" && \
+      ! -e "$3/Linnet/Runtime" && ! -L "$3/Linnet/Runtime" ]] || exit 1
     printf 'missing\n'
     ;;
   invalid)
     exit 1
     ;;
+  target-invalid)
+    [[ -f "$3/Linnet/Runtime/Active/activation.json" ]]
+    installed_build="$(/usr/bin/plutil -extract CFBundleVersion raw -o - \
+      "${HOME}/Library/Input Methods/Linnet.app/Contents/Info.plist")"
+    [[ "${installed_build}" != "${LINNET_FAKE_RUNTIME_TARGET_BUILD}" ]] || exit 1
+    printf 'healthy\n'
+    ;;
   auto)
     if [[ -f "$3/Linnet/Runtime/Active/activation.json" ]]; then
       printf 'healthy\n'
-    else
+    elif [[ ! -e "$3/Linnet/Data" && ! -L "$3/Linnet/Data" && \
+      ! -e "$3/Linnet/Runtime" && ! -L "$3/Linnet/Runtime" ]]; then
       printf 'missing\n'
+    else
+      exit 1
     fi
     ;;
   *) exit 1 ;;
@@ -289,31 +311,31 @@ fi
 rg -Fq 'clean-complete-install' package/core-installer-scripts/preinstall \
   package/installer-scripts/candidate-app-identity.sh
 for visible_installer_text in package/WELCOME.md package/Conclusion-summary.txt; do
-  rg -Fq 'Complete is the sole registration owner' "${visible_installer_text}"
-  rg -Fq 'supported, signature-verified App repair.' "${visible_installer_text}"
-  rg -Fq 'Complete 是全新首次安装或受支持、已验证签名 App 修复的' \
-    "${visible_installer_text}"
-  rg -Fq 'Healthy installations use Core for routine updates.' \
-    "${visible_installer_text}"
-  rg -Fq '健康安装的常规升级只使用 Core。' "${visible_installer_text}"
-  rg -Fq 'If Core reports only a missing registration, run Complete to repair it.' \
-    "${visible_installer_text}"
-  rg -Fq '若 Core 仅报告输入源未注册，请运行 Complete 修复。' \
-    "${visible_installer_text}"
-  rg -Fq 'If Core reports duplicate, conflicting, or unverifiable registration remnants,' \
-    "${visible_installer_text}"
-  rg -Fq 'run the official uninstaller first, then install Complete.' \
-    "${visible_installer_text}"
-  rg -Fq '若 Core 报告重复、冲突或无法验证的注册残留，' \
-    "${visible_installer_text}"
-  rg -Fq '请先运行官方卸载器，再安装 Complete。' "${visible_installer_text}"
+  visible_installer_contents="$(tr '\n' ' ' <"${visible_installer_text}" | tr -s ' ')"
+  for required_text in \
+    'Complete is the sole registration owner' \
+    'supported, signature-verified App repair.' \
+    'Complete 是全新首次安装或受支持、已验证签名 App 修复的' \
+    'Healthy installations use Core for routine updates.' \
+    '健康安装的常规升级只使用 Core。' \
+    'If Core reports a non-matching published baseline or a missing registration,' \
+    '若 Core 报告未匹配精确发布基线或输入源未注册' \
+    'If Core reports duplicate, conflicting, or unverifiable registration remnants,' \
+    'run the official uninstaller first, then install Complete.' \
+    '若 Core 报告重复、冲突或无法验证的注册残留，' \
+    '请先运行官方卸载器，再安装 Complete。'; do
+    [[ "${visible_installer_contents}" == *"${required_text}"* ]] || {
+      echo "Installer-visible contract missing from ${visible_installer_text}: ${required_text}" >&2
+      exit 1
+    }
+  done
 done
 if rg -n 'A first Complete installation registers|Complete rejects an existing App|首次 Complete 只注册|Complete 会拒绝.*已有 App' \
     package/WELCOME.md package/Conclusion-summary.txt; then
   echo "Installer-visible text restored the clean-install-only Complete contract." >&2
   exit 1
 fi
-if rg -n 'historical client|历史客户端应用|关闭本次登录期间使用过 Linnet' \
+if rg -n 'historical client|历史客户端应用|关闭本次登录期间使用过 Linnet|Installer closes|Installer 只关闭|开关.*拼写纠错|prediction, spelling' \
     package/WELCOME.md package/Conclusion-summary.txt; then
   echo "Installer-visible text restored application quiescence or client-history requirements." >&2
   exit 1
@@ -323,9 +345,6 @@ for visible_installer_text in package/WELCOME.md package/Conclusion-summary.txt;
   rg -Fq '其他应用保持打开' "${visible_installer_text}"
   rg -Fq 'Settings' "${visible_installer_text}"
 done
-rg -Fq 'Registration mutation is exclusively a Complete clean-install or' \
-  package/installer-scripts/postinstall
-rg -Fq 'supported-repair boundary.' package/installer-scripts/postinstall
 rg -Fq 'if model.operationActive {' sources/LinnetSettings/SettingsApplication.swift
 rg -Fq 'return .terminateCancel' sources/LinnetSettings/SettingsApplication.swift
 rg -Fq 'guard model.pendingChanges else { return .terminateNow }' \
@@ -571,36 +590,40 @@ else
   echo "Package lifecycle: signed candidate identity behavior NOT_EXERCISED" >&2
 fi
 
-# Complete owns first registration and still requires one fresh login. The
-# Core-only product is update-only: it closes Settings but deliberately leaves
-# the live InputMethodKit Host and its per-application connections untouched.
+# Complete owns first registration; its instructions explain the first login.
+# Neither a Complete repair nor a Core update unconditionally forces logout. Its
+# static Distribution template retains the complete close mapping solely until
+# make_package removes it from the generated Complete artifact; the Core-only
+# product also leaves every Linnet process and per-application connection open.
 ruby -rrexml/document -e '
   component = REXML::Document.new(File.binread(ARGV.shift)).root
   abort "component duplicates the product conclusion owner" if
     component&.attributes&.key?("postinstall-action")
   complete, core = ARGV
-  documents = [complete, core].map do |path|
-    REXML::Document.new(File.binread(path)).root
-  end
-  complete_ref = documents[0].get_elements("pkg-ref")
+  complete_document = REXML::Document.new(File.binread(complete)).root
+  core_document = REXML::Document.new(File.binread(core)).root
+  complete_ref = complete_document.get_elements("pkg-ref")
     .find { |ref| ref.attributes["version"] }
-  core_ref = documents[1].get_elements("pkg-ref")
+  core_ref = core_document.get_elements("pkg-ref")
     .find { |ref| ref.attributes["version"] }
-  abort "Complete stopped requiring its first-login boundary" unless
-    complete_ref&.attributes&.[]("onConclusion") == "RequireLogout"
+  abort "Complete repair still requires an unnecessary logout" if
+    complete_ref&.attributes&.key?("onConclusion")
   abort "Core update still requires an unnecessary logout" if
     core_ref&.attributes&.key?("onConclusion")
-  documents.each_with_index do |document, index|
-    close = document.get_elements("pkg-ref/must-close")
-    abort "Core payload must have one Apple must-close contract" unless close.length == 1
-    ids = close.first.get_elements("app").map { |app| app.attributes["id"] }
-    expected = index.zero? ? %w[
-      io.github.ares-x.inputmethod.Linnet
-      io.github.ares-x.inputmethod.Linnet.settings
-    ] : %w[io.github.ares-x.inputmethod.Linnet.settings]
-    abort "must-close does not own the edition lifecycle" unless ids == expected
-  end
+  close = complete_document.get_elements("pkg-ref/must-close")
+  abort "Complete Distribution template must retain one explicit close mapping" unless close.length == 1
+  ids = close.first.get_elements("app").map { |app| app.attributes["id"] }
+  abort "Complete Distribution template close mapping changed" unless ids == %w[
+    io.github.ares-x.inputmethod.Linnet
+    io.github.ares-x.inputmethod.Linnet.settings
+  ]
+  abort "Core Distribution retained a must-close mapping" unless
+    core_document.get_elements("pkg-ref/must-close").empty?
 ' package/PackageInfo package/Distribution.xml package/Distribution-Core.xml
+rg -Fq 'source = source.sub(complete_must_close, "")' package/make_package || {
+  echo "Complete artifact no longer removes the static must-close template." >&2
+  exit 1
+}
 rg -Fq 'cp -X "${project_root}/package/installer-scripts/postinstall"' \
   package/make_package || {
   echo "Core update lost its post-payload identity verification." >&2
@@ -651,7 +674,6 @@ printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
 SH
   chmod 755 "${app}/Contents/MacOS/Linnet"
   printf '{}\n' >"${support}/Runtime/Active/activation.json"
-  ln -s ../Runtime/Active/activation.json "${support}/State/active.json"
 }
 
 prepare_signed_postinstall_home() {
@@ -661,12 +683,22 @@ prepare_signed_postinstall_home() {
   copy_candidate_app "${home}"
   mkdir -p "${support}/Runtime/Active" "${support}/State"
   printf '{}\n' >"${support}/Runtime/Active/activation.json"
-  ln -s ../Runtime/Active/activation.json "${support}/State/active.json"
   cat >"${fake_executable}" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
 SH
   chmod 755 "${fake_executable}"
+}
+
+stage_complete_candidate() {
+  local home="$1"
+  local root="${home}/Library/Application Support/Linnet/.linnet-complete"
+  local stage="${root}/App/Linnet.app"
+  mkdir -p "${stage%/*}" "${root}/Data/Packs" "${root}/Runtime/Active"
+  COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${candidate_fixture}" "${stage}"
+  printf 'staged language data\n' >"${root}/Data/Packs/staged"
+  printf '{}\n' >"${root}/Runtime/Active/activation.json"
+  ln -s ../../Data/Packs "${root}/Runtime/Active/Packs"
 }
 
 assert_postinstall_rejects_parent_symlink() {
@@ -738,11 +770,17 @@ fi
 # Postinstall is the distinct post-payload identity boundary. Complete performs
 # the only first-install registration; Core must make no Host CLI call.
 if [[ "${candidate_fixture_available}" == true ]]; then
+  delta_tool="${repo_root}/build/linnet-pack"
+  [[ -x "${delta_tool}" ]] || { echo "Canonical pack CLI must be built before lifecycle tests." >&2; exit 1; }
+  cp -X "${delta_tool}" "${scripts_root}/linnet-pack"
+  chmod 0755 "${scripts_root}/linnet-pack"
   postinstall_home="${test_root}/postinstall-positive/home"
   postinstall_log="${test_root}/postinstall-positive/host-invocations"
   postinstall_runtime_log="${test_root}/postinstall-positive/runtime-inspections"
   prepare_signed_postinstall_home "${postinstall_home}"
-  HOME="${postinstall_home}" LINNET_FAKE_HOST_LOG="${postinstall_log}" \
+  stage_complete_candidate "${postinstall_home}"
+  HOME="${postinstall_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
+    LINNET_FAKE_HOST_LOG="${postinstall_log}" \
     LINNET_FAKE_RUNTIME_LOG="${postinstall_runtime_log}" \
     LINNET_TEST_EXECUTABLE="${postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
@@ -756,9 +794,60 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     exit 1
   }
 
+  # Registry classifies missing only when neither language baseline tree
+  # exists. Complete then publishes Data before Runtime, whose Active view may
+  # legally refer back to Data/Packs; it must not route Runtime through the
+  # App-directory delta inventory.
+  missing_complete_home="${test_root}/postinstall-missing-runtime/home"
+  missing_complete_log="${test_root}/postinstall-missing-runtime/host-invocations"
+  copy_candidate_app "${missing_complete_home}"
+  mkdir -p "${missing_complete_home}/Library/Application Support/Linnet/State"
+  stage_complete_candidate "${missing_complete_home}"
+  HOME="${missing_complete_home}" \
+      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_HOST_LOG="${missing_complete_log}" \
+      "${scripts_root}/postinstall"
+  [[ -f "${missing_complete_home}/Library/Application Support/Linnet/Data/Packs/staged" && \
+    -f "${missing_complete_home}/Library/Application Support/Linnet/Runtime/Active/activation.json" && \
+    -L "${missing_complete_home}/Library/Application Support/Linnet/Runtime/Active/Packs" && \
+    "$(readlink "${missing_complete_home}/Library/Application Support/Linnet/Runtime/Active/Packs")" == ../../Data/Packs ]] || {
+    echo "Complete missing-runtime repair did not publish Data before its Runtime projection." >&2
+    exit 1
+  }
+  [[ ! -e "${missing_complete_home}/Library/Application Support/Linnet/.linnet-complete" && \
+    ( ! -e "${missing_complete_log}" || ! -s "${missing_complete_log}" ) ]] || {
+    echo "Complete missing-runtime repair retained staging or re-registered an exact source." >&2
+    exit 1
+  }
+
+  # A final Runtime validation failure rolls the first-install baseline back in
+  # reverse order and restores the exact preexisting App pair.
+  rollback_complete_home="${test_root}/postinstall-missing-runtime-rollback/home"
+  rollback_complete_support="${rollback_complete_home}/Library/Application Support/Linnet"
+  copy_candidate_app "${rollback_complete_home}"
+  mkdir -p "${rollback_complete_support}/State"
+  printf 'original App bytes\n' \
+    >"${rollback_complete_home}/Library/Input Methods/Linnet.app/Contents/rollback-before"
+  stage_complete_candidate "${rollback_complete_home}"
+  if HOME="${rollback_complete_home}" \
+      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_RUNTIME_STATE=missing-then-invalid \
+      "${scripts_root}/postinstall" >/dev/null 2>&1; then
+    echo "Complete accepted a Runtime projection that failed final validation." >&2
+    exit 1
+  fi
+  [[ -f "${rollback_complete_home}/Library/Input Methods/Linnet.app/Contents/rollback-before" && \
+    ! -e "${rollback_complete_support}/Data" && ! -L "${rollback_complete_support}/Data" && \
+    ! -e "${rollback_complete_support}/Runtime" && ! -L "${rollback_complete_support}/Runtime" && \
+    ! -e "${rollback_complete_support}/.linnet-complete" ]] || {
+    echo "Complete Runtime failure did not reverse its baseline publication and App replacement." >&2
+    exit 1
+  }
+
   invalid_runtime_home="${test_root}/postinstall-invalid-runtime/home"
   invalid_runtime_log="${test_root}/postinstall-invalid-runtime/host-invocations"
   prepare_signed_postinstall_home "${invalid_runtime_home}"
+  stage_complete_candidate "${invalid_runtime_home}"
   if HOME="${invalid_runtime_home}" LINNET_FAKE_HOST_LOG="${invalid_runtime_log}" \
       LINNET_TEST_EXECUTABLE="${invalid_runtime_home}/fake-Linnet" \
       LINNET_FAKE_RUNTIME_STATE=invalid \
@@ -776,12 +865,225 @@ fi
 # existing TIS identity. The replacement activates on a natural Host launch.
 printf 'core-update\n' >"${scripts_root}/install-mode"
 if [[ "${candidate_fixture_available}" == true ]]; then
+  delta_tool="${repo_root}/build/linnet-pack"
+  [[ -x "${delta_tool}" ]] || { echo "Canonical pack CLI must be built before lifecycle tests." >&2; exit 1; }
+  cp -X "${delta_tool}" "${scripts_root}/linnet-pack"
+  chmod 0755 "${scripts_root}/linnet-pack"
+  delta_base_home="${test_root}/delta-base/home"
+  prepare_signed_postinstall_home "${delta_base_home}"
+  configure_installed_identity "${delta_base_home}" same-community-cms-leaf
+  delta_base_app="${delta_base_home}/Library/Input Methods/Linnet.app"
+  "${delta_tool}" build-delta --base "${delta_base_app}" --target "${candidate_fixture}" \
+    --output "${scripts_root}/core.linnetdelta"
+  chmod 0644 "${scripts_root}/core.linnetdelta"
+  cp -X "${scripts_root}/core.linnetdelta" "${test_root}/accepted.linnetdelta"
+  target_tree="$("${delta_tool}" tree-digest --root "${candidate_fixture}")"
+
+  # Core must classify the immutable delta boundary before PackageKit can
+  # mutate any payload path. A valid CMS/registered/runtime App is still not a
+  # Core baseline unless its complete tree matches the published delta base.
+  for preflight_case in base target wrong-base; do
+    preflight_home="${test_root}/delta-preflight-${preflight_case}/home"
+    preflight_app="${preflight_home}/Library/Input Methods/Linnet.app"
+    prepare_signed_postinstall_home "${preflight_home}"
+    case "${preflight_case}" in
+      base) configure_installed_identity "${preflight_home}" same-community-cms-leaf ;;
+      target) ;;
+      wrong-base)
+        configure_installed_identity "${preflight_home}" same-community-cms-leaf
+        printf 'unexpected bytes\n' >"${preflight_app}/Contents/unexpected"
+        ;;
+    esac
+    before_tree="$("${delta_tool}" tree-digest --root "${preflight_app}")"
+    if HOME="${preflight_home}" "${scripts_root}/preinstall" \
+        >"${test_root}/delta-preflight-${preflight_case}/result.log" 2>&1; then
+      [[ "${preflight_case}" != wrong-base ]] || {
+        echo "Core preinstall accepted a non-baseline App tree." >&2; exit 1;
+      }
+    else
+      [[ "${preflight_case}" == wrong-base ]] || {
+        cat "${test_root}/delta-preflight-${preflight_case}/result.log" >&2; exit 1;
+      }
+      grep -Fq 'exact published baseline' \
+        "${test_root}/delta-preflight-${preflight_case}/result.log" || {
+        echo "Core wrong-base exit did not explain the exact baseline contract." >&2; exit 1;
+      }
+    fi
+    [[ "$("${delta_tool}" tree-digest --root "${preflight_app}")" == "${before_tree}" ]] || {
+      echo "Core preinstall changed App bytes before its delta decision." >&2; exit 1;
+    }
+  done
+
+  snapshot_app() {
+    ruby -e '
+      root = ARGV.fetch(0)
+      ([root] + Dir.glob("#{root}/**/*", File::FNM_DOTMATCH)).sort.each do |path|
+        next if %w[. ..].include?(File.basename(path))
+        stat = File.lstat(path)
+        puts [path.delete_prefix(root), stat.ino, stat.mode, stat.size, stat.mtime.to_r, stat.ctime.to_r].join("\t")
+      end
+    ' "$1"
+  }
+
+  # Settings download holds this same Registry lease for its whole transfer.
+  # An Installer must fail before its child dispatcher can move either live App
+  # or language trees; this uses the production lease CLI rather than a second
+  # test lock.
+  hold_download_lease() {
+    local home="$1"
+    local ready="$2"
+    local release="$3"
+    rm -f "${ready}" "${release}"
+    "${delta_tool}" with-settings-mutation-lease \
+      --application-support "${home}/Library/Application Support" \
+      --core-version 0.1.0 --timeout-seconds 0 -- /bin/bash -c '
+        printf ready >"$1"
+        while [[ ! -e "$2" ]]; do /bin/sleep 0.05; done
+      ' -- "${ready}" "${release}" &
+    download_lease_pid=$!
+    for _ in $(seq 1 100); do
+      [[ -e "${ready}" ]] && return 0
+      /bin/sleep 0.05
+    done
+    wait "${download_lease_pid}" || true
+    echo "Settings download lease did not become ready." >&2
+    exit 1
+  }
+
+  release_download_lease() {
+    local release="$1"
+    : >"${release}"
+    wait "${download_lease_pid}"
+  }
+
+  # Complete otherwise has a valid signed App, exact registration, staged App,
+  # Data and Runtime. A concurrent Settings download must leave every live
+  # tree intact rather than relying on a must-close or a silent repair path.
+  printf 'complete\n' >"${scripts_root}/install-mode"
+  lease_complete_home="${test_root}/lease-complete/home"
+  prepare_signed_postinstall_home "${lease_complete_home}"
+  configure_installed_identity "${lease_complete_home}" same-community-cms-leaf
+  mkdir -p "${lease_complete_home}/Library/Application Support/Linnet/Data"
+  printf 'live data\n' >"${lease_complete_home}/Library/Application Support/Linnet/Data/sentinel"
+  stage_complete_candidate "${lease_complete_home}"
+  lease_complete_app_before="$(snapshot_app "${lease_complete_home}/Library/Input Methods/Linnet.app")"
+  lease_complete_data_before="$("${delta_tool}" tree-digest --root \
+    "${lease_complete_home}/Library/Application Support/Linnet/Data")"
+  lease_complete_runtime_before="$("${delta_tool}" tree-digest --root \
+    "${lease_complete_home}/Library/Application Support/Linnet/Runtime")"
+  lease_complete_ready="${test_root}/lease-complete/ready"
+  lease_complete_release="${test_root}/lease-complete/release"
+  hold_download_lease "${lease_complete_home}" "${lease_complete_ready}" "${lease_complete_release}"
+  if HOME="${lease_complete_home}" LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_RUNTIME_STATE=healthy "${scripts_root}/postinstall" >/dev/null 2>&1; then
+    release_download_lease "${lease_complete_release}"
+    echo "Complete changed state while a Settings download held the mutation lease." >&2
+    exit 1
+  fi
+  [[ "$(snapshot_app "${lease_complete_home}/Library/Input Methods/Linnet.app")" == \
+    "${lease_complete_app_before}" && \
+    "$("${delta_tool}" tree-digest --root \
+      "${lease_complete_home}/Library/Application Support/Linnet/Data")" == \
+      "${lease_complete_data_before}" && \
+    "$("${delta_tool}" tree-digest --root \
+      "${lease_complete_home}/Library/Application Support/Linnet/Runtime")" == \
+      "${lease_complete_runtime_before}" ]] || {
+    release_download_lease "${lease_complete_release}"
+    echo "Complete mutated a live App or language tree before lease admission." >&2
+    exit 1
+  }
+  release_download_lease "${lease_complete_release}"
+
+  # Core uses the same dispatcher, even though its exact delta writes only the
+  # App. The shared lease keeps that App replacement outside a data download.
+  printf 'core-update\n' >"${scripts_root}/install-mode"
+  lease_core_home="${test_root}/lease-core/home"
+  prepare_signed_postinstall_home "${lease_core_home}"
+  configure_installed_identity "${lease_core_home}" same-community-cms-leaf
+  mkdir -p "${lease_core_home}/Library/Application Support/Linnet/Data"
+  printf 'live data\n' >"${lease_core_home}/Library/Application Support/Linnet/Data/sentinel"
+  cp -X "${test_root}/accepted.linnetdelta" "${scripts_root}/core.linnetdelta"
+  lease_core_app_before="$(snapshot_app "${lease_core_home}/Library/Input Methods/Linnet.app")"
+  lease_core_data_before="$("${delta_tool}" tree-digest --root \
+    "${lease_core_home}/Library/Application Support/Linnet/Data")"
+  lease_core_ready="${test_root}/lease-core/ready"
+  lease_core_release="${test_root}/lease-core/release"
+  hold_download_lease "${lease_core_home}" "${lease_core_ready}" "${lease_core_release}"
+  if HOME="${lease_core_home}" LINNET_FAKE_RUNTIME_STATE=healthy \
+      "${scripts_root}/postinstall" >/dev/null 2>&1; then
+    release_download_lease "${lease_core_release}"
+    echo "Core changed state while a Settings download held the mutation lease." >&2
+    exit 1
+  fi
+  [[ "$(snapshot_app "${lease_core_home}/Library/Input Methods/Linnet.app")" == \
+    "${lease_core_app_before}" && \
+    "$("${delta_tool}" tree-digest --root \
+      "${lease_core_home}/Library/Application Support/Linnet/Data")" == \
+      "${lease_core_data_before}" ]] || {
+    release_download_lease "${lease_core_release}"
+    echo "Core mutated a live App or language tree before lease admission." >&2
+    exit 1
+  }
+  release_download_lease "${lease_core_release}"
+  printf 'core-update\n' >"${scripts_root}/install-mode"
+  for delta_case in success wrong-base corrupt staged-identity rollback; do
+    delta_home="${test_root}/delta-${delta_case}/home"
+    delta_app="${delta_home}/Library/Input Methods/Linnet.app"
+    delta_runtime_log="${test_root}/delta-${delta_case}/runtime-build"
+    prepare_signed_postinstall_home "${delta_home}"
+    configure_installed_identity "${delta_home}" same-community-cms-leaf
+    cp -X "${test_root}/accepted.linnetdelta" "${scripts_root}/core.linnetdelta"
+    case "${delta_case}" in
+      wrong-base) printf 'unexpected bytes\n' >"${delta_app}/Contents/unexpected" ;;
+      corrupt)
+        ruby -e 'File.open(ARGV.fetch(0), "r+b") { |file| file.seek(-1, IO::SEEK_END); byte = file.read(1).ord; file.seek(-1, IO::SEEK_END); file.write((byte ^ 1).chr) }' \
+          "${scripts_root}/core.linnetdelta"
+        ;;
+      staged-identity)
+        write_candidate_identity "${candidate_version}" "${candidate_build}" \
+          "${wrong_revision}" "${candidate_leaf}"
+        ;;
+    esac
+    before_tree="$("${delta_tool}" tree-digest --root "${delta_app}")"
+    before_app="$(snapshot_app "${delta_app}")"
+    before_build="$(plutil -extract CFBundleVersion raw -o - "${delta_app}/Contents/Info.plist")"
+    runtime_state=healthy
+    [[ "${delta_case}" != rollback ]] || runtime_state=target-invalid
+    if HOME="${delta_home}" LINNET_FAKE_RUNTIME_STATE="${runtime_state}" \
+        LINNET_FAKE_RUNTIME_TARGET_BUILD="${candidate_build}" \
+        LINNET_FAKE_RUNTIME_BUILD_LOG="${delta_runtime_log}" \
+        "${scripts_root}/postinstall" >"${test_root}/delta-${delta_case}/result.log" 2>&1; then
+      [[ "${delta_case}" == success ]] || { echo "Core delta accepted ${delta_case}" >&2; exit 1; }
+      [[ "$("${delta_tool}" tree-digest --root "${delta_app}")" == "${target_tree}" ]]
+    else
+      [[ "${delta_case}" != success ]] || { cat "${test_root}/delta-${delta_case}/result.log" >&2; exit 1; }
+      [[ "$("${delta_tool}" tree-digest --root "${delta_app}")" == "${before_tree}" ]]
+      if [[ "${delta_case}" == rollback ]]; then
+        [[ "$(cat "${delta_runtime_log}")" == "${before_build}"$'\n'"${candidate_build}" ]] || {
+          echo "Runtime failure did not exercise the installed target before rollback." >&2; exit 1;
+        }
+      else
+        [[ "$(snapshot_app "${delta_app}")" == "${before_app}" ]]
+      fi
+    fi
+    [[ -z "$(find "${delta_home}/Library/Input Methods" -maxdepth 1 -name '.linnet-core.*' -print)" ]]
+    write_candidate_identity "${candidate_version}" "${candidate_build}" \
+      "${candidate_revision}" "${candidate_leaf}"
+  done
+  cp -X "${test_root}/accepted.linnetdelta" "${scripts_root}/core.linnetdelta"
+  [[ "$("${delta_tool}" delta-state --base "${delta_base_app}" \
+    --delta "${scripts_root}/core.linnetdelta")" == base ]]
+
   core_postinstall_home="${test_root}/postinstall-core/home"
   core_postinstall_log="${test_root}/postinstall-core/host-invocations"
   prepare_signed_postinstall_home "${core_postinstall_home}"
+  before_app="$(snapshot_app "${core_postinstall_home}/Library/Input Methods/Linnet.app")"
   HOME="${core_postinstall_home}" LINNET_FAKE_HOST_LOG="${core_postinstall_log}" \
     LINNET_TEST_EXECUTABLE="${core_postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
+  [[ "$(snapshot_app "${core_postinstall_home}/Library/Input Methods/Linnet.app")" == "${before_app}" ]] || {
+    echo "An exact Core target reinstall rewrote the App." >&2; exit 1;
+  }
   [[ ! -e "${core_postinstall_log}" || ! -s "${core_postinstall_log}" ]] || {
     echo "Core postinstall invoked the live Host or input-source registration." >&2
     exit 1
@@ -920,8 +1222,6 @@ missing_app_home="${test_root}/complete-missing-app-repair/home"
 mkdir -p "${missing_app_home}/Library/Application Support/Linnet/Runtime/Active" \
   "${missing_app_home}/Library/Application Support/Linnet/State"
 printf '{}\n' >"${missing_app_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
-ln -s ../Runtime/Active/activation.json \
-  "${missing_app_home}/Library/Application Support/Linnet/State/active.json"
 for repair_registration in missing registered:bundle-match:path-unknown; do
   HOME="${missing_app_home}" LINNET_FAKE_REGISTRATION_STATE="${repair_registration}" \
     "${scripts_root}/preinstall" || {
@@ -938,35 +1238,45 @@ for rejected_registration in duplicate:2 conflict:source-or-bundle-id unknown:bu
   fi
 done
 
-# Complete is a first-install and damaged-state repair owner, not an alternate
-# routine updater. A fully healthy signed App, exact TIS registration and
-# validated immutable runtime must use Core so an installed user is never sent
-# through Complete's one-time logout boundary again.
+# The separately selected Complete installer is the explicit full-repair
+# boundary. A healthy CMS App with one verified TIS source may be repaired, but
+# its postinstall must preserve that registration rather than re-register it.
 if [[ "${candidate_fixture_available}" == true ]]; then
   healthy_complete_home="${test_root}/complete-healthy/home"
-  healthy_complete_error="${test_root}/complete-healthy/error"
-  copy_candidate_app "${healthy_complete_home}"
-  mkdir -p "${healthy_complete_home}/Library/Application Support/Linnet/Runtime/Active" \
-    "${healthy_complete_home}/Library/Application Support/Linnet/State"
-  printf '{}\n' \
-    >"${healthy_complete_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
-  ln -s ../Runtime/Active/activation.json \
-    "${healthy_complete_home}/Library/Application Support/Linnet/State/active.json"
-  if HOME="${healthy_complete_home}" \
+  prepare_signed_postinstall_home "${healthy_complete_home}"
+  HOME="${healthy_complete_home}" \
       LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy \
-      "${scripts_root}/preinstall" >/dev/null 2>"${healthy_complete_error}"; then
-    echo "Complete accepted a fully healthy installation and would require another logout." >&2
-    exit 1
-  fi
-  grep -Fq 'Core' "${healthy_complete_error}" || {
-    echo "Complete healthy-install rejection did not direct the user to Core." >&2
+      "${scripts_root}/preinstall" || {
+    echo "Complete preinstall rejected the explicitly selected healthy repair." >&2
     exit 1
   }
+  complete_repair_log="${test_root}/complete-healthy/host-invocations"
+  printf 'old complete bytes\n' \
+    >"${healthy_complete_home}/Library/Input Methods/Linnet.app/Contents/repair-before"
+  stage_complete_candidate "${healthy_complete_home}"
   HOME="${healthy_complete_home}" \
-    LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
-    LINNET_FAKE_RUNTIME_STATE=invalid \
-    "${scripts_root}/preinstall" >/dev/null 2>&1 && {
+      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_RUNTIME_STATE=healthy \
+      LINNET_FAKE_HOST_LOG="${complete_repair_log}" \
+      LINNET_TEST_EXECUTABLE="${healthy_complete_home}/fake-Linnet" \
+      "${scripts_root}/postinstall" || {
+    echo "Complete postinstall could not atomically repair a healthy App." >&2
+    exit 1
+  }
+  [[ ! -e "${healthy_complete_home}/Library/Input Methods/Linnet.app/Contents/repair-before" ]] || {
+    echo "Complete repair did not publish the staged candidate App." >&2; exit 1;
+  }
+  [[ ! -e "${complete_repair_log}" || ! -s "${complete_repair_log}" ]] || {
+    echo "Complete re-registered an already exact input source." >&2; exit 1;
+  }
+  [[ ! -e "${healthy_complete_home}/Library/Application Support/Linnet/.linnet-complete" ]] || {
+    echo "Complete repair retained its staging App." >&2; exit 1;
+  }
+  HOME="${healthy_complete_home}" \
+      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_RUNTIME_STATE=invalid \
+      "${scripts_root}/preinstall" >/dev/null 2>&1 && {
     echo "Complete accepted corrupt Runtime bytes as a repairable missing state." >&2
     exit 1
   }
@@ -994,7 +1304,6 @@ cat >"${support_root}/Runtime/Active/activation.json" <<'JSON'
   ]
 }
 JSON
-ln -s ../Runtime/Active/activation.json "${support_root}/State/active.json"
 core_missing_app_error="${test_root}/core-missing-app-error"
 if HOME="${user_home}" "${scripts_root}/preinstall" \
     >/dev/null 2>"${core_missing_app_error}"; then
@@ -1044,12 +1353,21 @@ done
   exit 1
 }
 
-# The signing migration remains an App identity decision only; it must not gain
-# an input-source enablement or selection transaction.
+# A legacy signing transition is valid only for the explicitly selected
+# Complete repair: Core still requires its one published delta baseline.
 if [[ "${candidate_fixture_available}" == true ]]; then
   configure_installed_identity "${user_home}" legacy-community-adhoc
+  legacy_core_error="${test_root}/core-legacy-baseline-error"
+  if HOME="${user_home}" "${scripts_root}/preinstall" >"${legacy_core_error}" 2>&1; then
+    echo "Core update accepted a legacy App outside its published delta baseline." >&2
+    exit 1
+  fi
+  grep -Fq 'exact published baseline' "${legacy_core_error}" || {
+    echo "Core legacy-baseline rejection did not explain the Complete repair boundary." >&2
+    exit 1
+  }
+  configure_installed_identity "${user_home}" same-community-cms-leaf
   HOME="${user_home}" "${scripts_root}/preinstall"
-  configure_installed_identity "${user_home}" exact-community-cms
 fi
 
 if [[ "${candidate_fixture_available}" == true ]]; then

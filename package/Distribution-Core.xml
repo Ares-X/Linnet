@@ -16,9 +16,4 @@
   </choice>
   <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"
     version="@CORE_VERSION@" auth="none">Linnet-Core.component.pkg</pkg-ref>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg">
-    <must-close>
-      <app id="io.github.ares-x.inputmethod.Linnet.settings"/>
-    </must-close>
-  </pkg-ref>
 </installer-gui-script>

@@ -86,15 +86,15 @@ struct LinnetSettingsDownloadTransport: @unchecked Sendable {
     return data
   }
 
-  func downloadPack(_ artifact: LinnetDataChannel.Artifact, to destination: URL) async throws {
-    guard artifact.bytes > 0,
-      artifact.bytes <= LinnetPackContract.maximumContainerBytes
+  func downloadArtifact(from url: URL, expectedBytes: UInt64, to destination: URL) async throws {
+    guard expectedBytes > 0,
+      expectedBytes <= LinnetPackContract.maximumContainerBytes
     else { throw Failure.responseTooLarge }
     let configuration = try configuredSession()
     let transfer = try Transfer(
-      request: request(for: artifact.url, source: source),
+      request: request(for: url, source: source),
       source: source,
-      mode: .pack(expectedBytes: artifact.bytes, destination: destination),
+      mode: .pack(expectedBytes: expectedBytes, destination: destination),
       configuration: configuration,
       idleNanoseconds: Self.nanoseconds(policy.idleTimeout),
       deadlineUptimeNanoseconds: try deadline(maximum: policy.operationTimeout),

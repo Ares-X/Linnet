@@ -21,9 +21,21 @@ struct LinnetDataChannelTests {
       LinnetDataChannel.minimumCatalogSequence == 4,
       "Core catalog replay floor drifted from the first public data release")
     let catalog = makeCatalog()
+    try differentialCatalogContract(catalog)
     let data = try catalogData(catalog)
     let verified = try LinnetDataChannel.verify(data, coreVersion: "1.0.0")
     require(verified.catalog.sequence == 5, "valid canonical catalog")
+    let nextCore = LinnetDataChannel.Core(
+      version: catalog.core.version, build: catalog.core.build + 1,
+      revision: String(repeating: "d", count: 40), bytes: catalog.core.bytes + 1,
+      sha256: String(repeating: "e", count: 64),
+      packageURL: catalog.core.packageURL, releaseURL: catalog.core.releaseURL)
+    let coreOnly = try LinnetDataChannel.verify(catalogData(.init(
+      format: catalog.format, sequence: catalog.sequence, core: nextCore,
+      activationSets: catalog.activationSets)), coreVersion: "1.0.0")
+    require(coreOnly.digest != verified.digest, "full Catalog identity lost Core bytes")
+    require(try LinnetDataChannel.packSnapshotDigest(coreOnly.catalog)
+      == LinnetDataChannel.packSnapshotDigest(catalog), "Core-only change altered immutable pack identity")
     require(
       verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 7)
         == .available,
@@ -181,21 +193,21 @@ struct LinnetDataChannelTests {
       LinnetTestFailure.fail("old Core was accepted")
     } catch {}
 
-    let file = FileManager.default.temporaryDirectory.appending(
+    let file = LinnetTestScratch.directory.appending(
       path: "LinnetDataChannelTests-\(UUID().uuidString).linnetpack")
     defer { try? FileManager.default.removeItem(at: file) }
     try Data("four".utf8).write(to: file)
     let artifact = catalog.activationSets[0].packs[0]
-    try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+    try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
     try Data("evil".utf8).write(to: file)
     do {
-      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
       LinnetTestFailure.fail("same-size artifact tampering was accepted")
     } catch {}
     try FileManager.default.removeItem(at: file)
     try Data("short".utf8).write(to: file)
     do {
-      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
       LinnetTestFailure.fail("wrong artifact size was accepted")
     } catch {}
     try FileManager.default.removeItem(at: file)
@@ -206,10 +218,77 @@ struct LinnetDataChannelTests {
     try FileManager.default.createSymbolicLink(
       atPath: file.path, withDestinationPath: target.path)
     do {
-      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
       LinnetTestFailure.fail("artifact verifier followed a destination symlink")
     } catch {}
     print("LinnetDataChannelTests: PASS")
+  }
+
+  private static func differentialCatalogContract(_ catalog: LinnetDataChannel.Catalog) throws {
+    var document = try JSONSerialization.jsonObject(with: catalogData(catalog)) as! [String: Any]
+    let base = String(repeating: "c", count: 64)
+    var sets = document["activation_sets"] as! [[String: Any]]
+    for index in sets.indices {
+      var packs = sets[index]["packs"] as! [[String: Any]]
+      for packIndex in packs.indices {
+        let kind = LinnetPackContract.Kind(rawValue: packs[packIndex]["kind"] as! String)!
+        let name = kind.releaseAssetName.replacingOccurrences(of: ".linnetpack", with: "-from-\(base).linnetdelta")
+        packs[packIndex]["deltas"] = [[
+          "base_content_sha256": base, "bytes": 128,
+          "sha256": String(repeating: "d", count: 64),
+          "url": "https://github.com/Ares-X/Linnet/releases/download/data-5/\(name)"
+        ]]
+      }
+      sets[index]["packs"] = packs
+    }
+    document["activation_sets"] = sets
+    let data = try JSONSerialization.data(withJSONObject: document)
+    let verified = try LinnetDataChannel.verifyPublished(data)
+    let canonical = try LinnetDataChannel.canonicalCatalogData(verified.catalog)
+    let roundTrip = try JSONSerialization.jsonObject(with: canonical) as! [String: Any]
+    let roundTripSets = roundTrip["activation_sets"] as! [[String: Any]]
+    let firstPack = (roundTripSets[0]["packs"] as! [[String: Any]])[0]
+    require(firstPack["deltas"] != nil, "authenticated Catalog discarded its differential artifact identity")
+    require(try LinnetDataChannel.packSnapshotDigest(verified.catalog) == LinnetDataChannel.packSnapshotDigest(catalog),
+      "delta transport metadata changed immutable pack identity")
+    let artifact = verified.catalog.activationSets[0].packs[0]
+    let current = installedPacks(from: [artifact])[0]
+    let previous = LinnetDataRegistry.ActivePack(
+      packID: current.packID, kind: current.kind, version: "2026.08.09", sequence: 4,
+      dataABI: current.dataABI, contentSHA256: base, minCore: current.minCore,
+      requirements: current.requirements, relativePath: current.relativePath,
+      manifestSHA256: current.manifestSHA256)
+    require(artifact.transfer(from: nil) == .complete, "first installation needs its baseline")
+    require(artifact.transfer(from: current) == .current(current), "unchanged pack must not download")
+    require(artifact.transfer(from: previous) == .delta(artifact.deltas![0], base: previous),
+      "normal update must select the exact base-bound delta")
+    var noDelta = artifact
+    noDelta.deltas = nil
+    require(noDelta.transfer(from: previous) == .requiresCompleteRepair, "missing delta silently authorized a full download")
+    require(noDelta.transfer(from: previous, allowCompleteRepair: true) == .complete,
+      "explicit repair was not accepted")
+    require(noDelta.transfer(from: current, allowCompleteRepair: true) == .current(current),
+      "repair must still reuse unchanged packs")
+    let invalidFields: [(String, Any)] = [
+      ("base_content_sha256", artifact.contentSHA256),
+      ("base_content_sha256", "invalid"), ("bytes", 0), ("sha256", "invalid"),
+      ("url", "https://example.com/update.linnetdelta"),
+      ("url", artifact.deltas![0].url.absoluteString + "?alternate=1")
+    ]
+    for (field, value) in invalidFields {
+      var invalid = document
+      var invalidSets = invalid["activation_sets"] as! [[String: Any]]
+      var invalidPacks = invalidSets[0]["packs"] as! [[String: Any]]
+      var invalidDeltas = invalidPacks[0]["deltas"] as! [[String: Any]]
+      invalidDeltas[0][field] = value
+      invalidPacks[0]["deltas"] = invalidDeltas
+      invalidSets[0]["packs"] = invalidPacks
+      invalid["activation_sets"] = invalidSets
+      do {
+        _ = try LinnetDataChannel.verifyPublished(JSONSerialization.data(withJSONObject: invalid))
+        LinnetTestFailure.fail("invalid differential Catalog \(field) was accepted")
+      } catch LinnetDataChannel.Failure.invalidCatalog { }
+    }
   }
 
   private static func catalogData(_ catalog: LinnetDataChannel.Catalog) throws -> Data {

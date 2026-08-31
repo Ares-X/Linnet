@@ -47,7 +47,6 @@ struct InteractionOptions {
   bool sentence_capitalization = false;
   bool show_ipa = true;
   bool show_translation = true;
-  bool spelling_correction = true;
   bool learning_enabled = true;
   bool space_adds_trailing_space = true;
   TabBehavior tab_behavior = TabBehavior::kSmartComplete;
@@ -61,8 +60,6 @@ struct InteractionOptions {
     config->GetBool("linnet_english_interaction/show_ipa", &result.show_ipa);
     config->GetBool("linnet_english_interaction/show_translation",
                     &result.show_translation);
-    config->GetBool("linnet_english_interaction/spelling_correction",
-                    &result.spelling_correction);
     config->GetBool("linnet_english_interaction/learning_enabled",
                     &result.learning_enabled);
     config->GetBool("linnet_english_interaction/space_adds_trailing_space",

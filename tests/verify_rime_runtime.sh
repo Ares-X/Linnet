@@ -14,10 +14,11 @@ if [[ "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --mixed-latency-probe ||
       "${1:-}" == --warm-session-probe ||
       "${1:-}" == --cold-client-probe ||
-      "${1:-}" == --profile-key-matrix-probe ]]; then
+      "${1:-}" == --profile-key-matrix-probe ||
+      "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe]" >&2
+  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -109,7 +110,7 @@ sdk="$(xcrun --show-sdk-path)"
 "${swiftc}" -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
@@ -214,6 +215,8 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime cold-client first-key latency: PASS"
   elif [[ "${runtime_probe}" == --profile-key-matrix-probe ]]; then
     echo "Linnet native Rime formal eight-profile key matrix: PASS"
+  elif [[ "${runtime_probe}" == --live-sync-probe ]]; then
+    echo "Linnet native Rime live synchronization: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi
@@ -234,19 +237,15 @@ sync_root="${scratch}/rime-sync"
 device_a="${scratch}/device-a"
 device_b="${scratch}/device-b"
 mkdir "${sync_root}" "${device_a}" "${device_b}"
-"${swiftc}" -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetSettings/LinnetRimeSyncController.swift \
-  tests/LinnetRimeSyncProjectionFixture.swift \
-  -o "${scratch}/rime-sync-projection"
 for dictionary in linnet_zh linnet_en; do
   test -d "${user}/${dictionary}.userdb"
   cp -R "${user}/${dictionary}.userdb" "${device_a}/${dictionary}.userdb"
   cp -R "${user}/${dictionary}.userdb" "${device_b}/${dictionary}.userdb"
 done
-printf 'installation_id: device-a\n' >"${device_a}/installation.yaml"
-printf 'installation_id: device-b\n' >"${device_b}/installation.yaml"
-"${scratch}/rime-sync-projection" "${device_a}" "${sync_root}"
-"${scratch}/rime-sync-projection" "${device_b}" "${sync_root}"
+printf 'installation_id: device-a\nsync_dir: "%s"\nbackup_config_files: false\n' \
+  "${sync_root}" >"${device_a}/installation.yaml"
+printf 'installation_id: device-b\nsync_dir: "%s"\nbackup_config_files: false\n' \
+  "${sync_root}" >"${device_b}/installation.yaml"
 printf '# Rime user dictionary export\n云同步甲\tyun tong bu jia\t7\nlinnetclouda\tlinnetclouda\t7\n' \
   >"${scratch}/device-a-rows.txt"
 printf '# Rime user dictionary export\n云同步乙\tyun tong bu yi\t9\nlinnetcloudb\tlinnetcloudb\t9\n' \
@@ -286,6 +285,11 @@ for dictionary in linnet_zh linnet_en; do
   rg -Fq $'linnetcloudb\t' "${export_file}"
 done
 echo "Linnet upstream multi-device user dictionary sync: PASS"
+live_sync_user="${scratch}/live-sync-user"
+mkdir "${live_sync_user}"
+cp -R "${user}/." "${live_sync_user}/"
+DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+  "${scratch}/rime-smoke" "${shared}" "${live_sync_user}" --live-sync-probe
 end_phase "verify upstream user-dictionary sync"
 
 # Exercise the production-shaped exact-11 configuration reload in its own
@@ -356,7 +360,10 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
 rg -Fq 'prism: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'reset: 0' "${user}/build/linnet_en.schema.yaml"
-rg -Fq 'spelling_correction: false' "${user}/build/linnet_en.schema.yaml"
+if rg -q 'spelling_correction:' "${user}/build/linnet_en.schema.yaml"; then
+  echo "retired English correction switch returned to the deployed schema" >&2
+  exit 1
+fi
 rg -Fq 'show_ipa: false' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'show_translation: false' "${user}/build/linnet_en.schema.yaml"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \

@@ -76,11 +76,14 @@ if rg -n 'createDirIfNotExist' \
     sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift; then
   fail "the retired check-then-create directory wrapper returned"
 fi
-if rg -n 'GrammarProfile|grammarProfile|hostUserDirectory|dataTransactionsRoot|static func backupsRoot' \
+if rg -n 'GrammarProfile|grammarProfile|hostUserDirectory|dataTransactionsRoot|static func backupsRoot|coreActivationReplyCode|coreActivationDiagnostic|acceptedDataChannelReceipt' \
     sources; then
   fail "a retired constant projection, directory wrapper, or reachability mirror returned"
 fi
 swiftc_path="$(xcrun --find swiftc)"
+if rg -n 'spellingCorrection|spelling_correction' sources plugins/smart_english; then
+  fail "English correction regained a retired disabling option"
+fi
 swift_host_library="$(cd "$(dirname "${swiftc_path}")/../lib/swift/host" && pwd -P)"
 swift_sources=()
 while IFS= read -r swift_source; do
@@ -1558,7 +1561,8 @@ ruby -e '
       selection.include?("return .unknown") &&
       selection.include?("? .linnet : .other") &&
       gate.include?("selectedInputSource: LinnetInputSourceSelection") &&
-      gate.include?("case .unknown:") && gate.include?(".unknownClient")
+      gate.include?("case .unknown:") && gate.include?(".coreActivationInputSourceUnavailable") &&
+      !gate.include?(".unknownClient")
   abort "the retired process-lifetime client ledger returned" if
     combined.include?("LinnetInputClientLedger") ||
       combined.include?("coreActivationClientLedger")
@@ -1582,7 +1586,9 @@ ruby -e '
     combined.match?(/currentInputSourceID\(\)\s*(?:==|!=|\?\?)/)
   abort "Settings can activate an unverified or substituted Host" unless
     settings.include?("reply.code == .coreActivationAccepted") &&
-      settings.include?("health.productIdentity == installedIdentity") &&
+      settings.include?("health.productIdentity == identity") &&
+      settings.include?("health.state == .running") &&
+      settings.include?("health.phase == .running") &&
       settings.include?("allowsRunningApplicationSubstitution = false")
   initializer = settings[/  init\(.*?\n  \}/m]
   check = settings[/  func check\(\).*?\n  \}/m]
@@ -1691,17 +1697,20 @@ test -f sources/LinnetRimeWarmSession.swift ||
 ruby -e '
   owner = File.read(ARGV.fetch(0))
   abort "the warm-session owner does not retain exactly one session" unless
-    owner.scan("private(set) var identifier: RimeSessionId = 0").length == 1 &&
+    owner.scan("private var lease: LinnetRimeSessionLease?").length == 1 &&
+      owner.include?("var identifier: RimeSessionId { lease?.identifier ?? 0 }") &&
       owner.scan("api.create_session()").length == 1
   abort "the warm-session owner does not prime the real candidate path" unless
     owner.scan(%q{"ceshi".withCString}).length == 1 &&
       owner.scan(%q{api.simulate_key_sequence(created, $0)}).length == 1 &&
       owner.scan("api.clear_composition(created)").length == 1
   abort "the warm-session owner can be recycled as stale" unless
-    owner.scan("api.find_session(identifier)").length == 1
+    owner.include?("LinnetRimeSessionLease.acquire(identifier: created)") &&
+      owner.include?("lease.isCurrent(sessionExists:") &&
+      owner.include?("lease?.retire()")
   abort "warm-session failure cleanup is not owned locally" unless
     owner.scan("discard(using: api)").length == 1 &&
-      owner.scan("api.destroy_session(discarded)").length == 1 &&
+      owner.scan("api.destroy_session(discarded.identifier)").length == 1 &&
       owner.scan("api.destroy_session").length == 1
 ' sources/LinnetRimeWarmSession.swift ||
   fail "the retained Rime resource-session contract changed"
@@ -1744,7 +1753,7 @@ ruby -e '
   host = ARGV.map { |path| File.read(path) }.join("\n")
   cleaner = host[/private func startStaleSessionCleaner\(\) \{.*?\n  \}/m]
   invalidate = host[/private func invalidateRimeSessions\(\) \{.*?\n  \}/m]
-  sync = host[/\n  func performRimeUserDataSync\(\).*?\n  \}/m]
+  sync = host[/\n  func performRimeUserDataSync\(directory: URL\).*?\n  \}/m]
   activation = host[/private func activatePublishedSettings\(.*?\n  \}\n\n  private func validConfigurationCandidate/m]
   reload = activation && activation[/case \.configuration:.*?\n      return true/m]
   abort "the warm-session lifecycle consumers are missing" unless
@@ -1752,20 +1761,18 @@ ruby -e '
   refresh = cleaner.index("warmRimeSession.refresh(using: rimeAPI)")
   cleanup_stale = cleaner.index("rimeAPI.cleanup_stale_sessions()")
   retire = invalidate.index("warmRimeSession.retire()")
+  retire_all = invalidate.index("LinnetRimeSessionLease.retireAll()")
   cleanup_all = invalidate.index("rimeAPI.cleanup_all_sessions()")
   abort "stale cleanup can recycle the retained resource owner" unless
     refresh && cleanup_stale && refresh < cleanup_stale
   abort "runtime invalidation can leave a recycled warm identifier" unless
-    retire && cleanup_all && retire < cleanup_all
-  sync_retire = sync.index("warmRimeSession.retire()")
-  synchronize = sync.index("rimeAPI.sync_user_data()")
-  sync_join = sync.index("rimeAPI.join_maintenance_thread()")
-  sync_prepare = sync.index("warmRimeSession.prepare(using: rimeAPI)")
-  sync_reopen = sync.index("reopenRimeInput()", sync_join || 0)
-  abort "user-data sync can retain a destroyed warm identifier" unless
-    [sync_retire, synchronize, sync_join, sync_prepare, sync_reopen].all? &&
-      sync_retire < synchronize && synchronize < sync_join &&
-      sync_join < sync_prepare && sync_prepare < sync_reopen
+    retire && retire_all && cleanup_all && retire < retire_all && retire_all < cleanup_all
+  abort "learning sync returned to input-runtime maintenance" unless
+    sync.include?("rimeAPI.sync_user_data_step") &&
+      !sync.match?(/join_maintenance|retire|isRimeInputSuspended|prepareForRimeMaintenance|reopenRimeInput|panel/)
+  cancel_sync = invalidate.index("rimeSyncController.stop()")
+  abort "runtime cleanup can retain an online sync iterator" unless
+    cancel_sync && cancel_sync < retire_all
   abort "configuration reload regained a second readiness-session path" unless
     reload.scan("warmRimeSession.prepare(using: rimeAPI)").length == 1 &&
       reload.scan("warmRimeSession.discard(using: rimeAPI)").length == 1 &&
@@ -2243,22 +2250,31 @@ test -f sources/LinnetSettings/SettingsWindowCloseGuard.swift ||
   fail "Settings has no native pending-change close boundary"
 
 # Rime remains the only learned-word merge owner. Linnet contributes one Host
-# scheduler and one learning-only installation projection, never a second
-# userdb parser or an automatic portable/config backup path.
-test "$(rg -F -o 'rimeAPI.sync_user_data()' sources | wc -l | tr -d ' ')" -eq 1 ||
-  fail "Rime user-data synchronization regained another runtime caller"
-rg -Fq 'rimeAPI.sync_user_data()' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||
-  fail "the Host stopped owning the single upstream Rime synchronization call"
+# scheduler with an explicit directory, never an installation-file writer,
+# second userdb parser or automatic portable/config backup path.
+if rg -n 'rimeAPI.sync_user_data\(\)|prepareForRimeMaintenance' sources; then
+  fail "automatic learning sync regained the destructive offline maintenance path"
+fi
+test "$(rg -F -o 'rimeAPI.sync_user_data_step($0)' sources | wc -l | tr -d ' ')" -eq 1 ||
+  fail "the Host stopped owning the single online Rime synchronization call"
 rg -Fq 'static let automaticInterval: TimeInterval = 60 * 60' \
   sources/LinnetSettings/LinnetRimeSyncController.swift ||
   fail "automatic learning synchronization is no longer hourly"
-test "$(rg -F -o 'backup_config_files: false' \
-  sources/LinnetSettings/LinnetRimeSyncController.swift | wc -l | tr -d ' ')" -eq 1 ||
-  fail "the installation projection no longer disables Rime automatic config backup"
-if rg -Fq 'backup_config_files: true' \
+if rg -n 'LinnetRimeSyncInstallation|installation[.]yaml|backup_config_files|sync_dir:' \
     sources/LinnetSettings/LinnetRimeSyncController.swift; then
-  fail "the learning-sync owner re-enabled Rime automatic config backup"
+  fail "the learning scheduler regained the retired Rime installation writer"
 fi
+ruby -e '
+  patch = File.read("patches/librime-linnet-core-interactions.patch")
+  step = patch[/^\+struct LiveSync \{.*?(?=^\+the<LiveSync>)/m]
+  abort "online sync step is missing" unless step
+  abort "online sync can reopen or retain a live database" if
+    step.match?(/->(?:Open|Close)\(|an<Db> database;/)
+  abort "online sync regained a RAM-only clock or partially visible merge" if
+    step.match?(/TickCount merge_tick|UserDbMerger merger\(/)
+  abort "online export lost its stable-snapshot boundary" unless
+    step.include?("snapshot_revision != level->write_revision()")
+' || fail "online synchronization regained blocking database maintenance"
 if rg -n 'userdb[.]txt|UserDbMerger|commit_count|dynamic_weight' \
     sources/LinnetSettings/LinnetRimeSyncController.swift; then
   fail "Linnet regained a second user-dictionary merge implementation"
@@ -2334,7 +2350,9 @@ ruby -rjson -e '
   retired_keys = [
     "Deploy", "Logs...", "Advanced", "Change Folder…",
     "Choose a folder inside iCloud Drive to connect this Mac.", "Choose Folder…",
-    "Disconnect", "No sync folder selected",
+    "Disconnect", "No sync folder selected", "Suggest spelling corrections",
+    "Upload Full Backup…", "Review Full Backup…", "Upload and Replace",
+    "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed.",
     "This replaces Linnet-Full-Backup.linnet-data in the selected folder. Local data is not changed."
   ]
   returned = retired_keys & catalog.fetch("strings", {}).keys
@@ -2343,7 +2361,8 @@ ruby -rjson -e '
     "Sync learned words with iCloud Drive", "Location",
     "iCloud Drive is unavailable. Check iCloud Drive in System Settings.",
     "Linnet always uses iCloud Drive/Linnet; no folder selection is required.",
-    "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed."
+    "The first upload creates a full recovery baseline. Later uploads add an immutable delta only. Local data is not changed.",
+    "Upload Incremental Backup…", "Review Recovery Backup…", "Create Full Repair Backup"
   ]
   absent_cloud_keys = required_cloud_keys - catalog.fetch("strings", {}).keys
   abort "fixed iCloud localization keys are missing: #{absent_cloud_keys.join(", ")}" unless absent_cloud_keys.empty?
@@ -2354,6 +2373,13 @@ ruby -rjson -e '
   end
   abort "Simplified Chinese localization is missing or empty: #{missing.join(", ")}" unless missing.empty?
 ' || fail "Settings localization coverage regressed"
+if rg -n 'cloudBackupArchiveAvailable|cloudBackupArchive:|cloudBackupName' sources/LinnetSettings; then
+  fail "the retired whole-file cloud backup owner returned"
+fi
+if rg -n 'LinnetCloudSyncLocation\.productLocation|\.prepareLearningDirectory\(' \
+    sources/LinnetSettings/SettingsMain.swift sources/LinnetSettings/SettingsModelPresentation.swift; then
+  fail "Settings regained main-actor iCloud filesystem preparation"
+fi
 ruby -e '
   source = File.read("sources/InputSource.swift")
   registration = File.read("sources/LinnetInputSourceRegistration.swift")

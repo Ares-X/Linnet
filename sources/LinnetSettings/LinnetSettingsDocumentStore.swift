@@ -83,8 +83,10 @@ enum LinnetSettingsDocumentStore {
   static func write(_ document: LinnetSettingsDocument, to directory: URL) throws {
     try requireDirectory(directory)
     let data = try encoded(document)
+    let file = directory.appending(path: fileName)
+    if try boundedDataIfPresent(file)?.data == data { return }
     do {
-      try data.write(to: directory.appending(path: fileName), options: .atomic)
+      try data.write(to: file, options: .atomic)
     } catch {
       throw Failure.unsafePath(fileName)
     }

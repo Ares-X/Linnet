@@ -135,11 +135,21 @@ focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有�
 release identity。定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并
 上游或发布。
 
-正常正式候选必须是 clean、精确远端 `main` revision，并先在本地通过完整 composite
-与安装前门。显式 `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动唯一 macOS
-release Action；该 job 一次 checkout/cache/hydrate，串行执行 lint、owner、Swift、
-Rime、Periphery 和候选 App/package 门，再使用临时 Keychain 构建、签名、打包和最终
-验证一次。互不重叠的 Core 3 件、data 4 件和 public 1 件直接写入三个 Draft GitHub
+正常正式候选先由 `scripts/release-control verify-local` 恢复并校验锁定依赖、构建，
+串行完成 strict lint、发布 owner、App/Swift/Rime 和 Periphery。验证期间冻结修改；
+临时 Git index 将待提交文件、删除、权限和 gitlink 绑定到一个 Git tree，不改真实
+暂存区；首尾 tree 必须相同。唯一收据位于 ignored
+`build/linnet-source-verification.json`，是维护者的本地验收声明，不是云端独立测试证明。
+Settings UI 仅在显式隔离桌面和 Developer Mode 可用时运行，否则记录 `NOT_EXERCISED`。
+
+提交相同 tree 后，在 clean、精确远端 `main` 上执行
+`scripts/release-control candidate`，创建携带收据的 annotated
+`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签；不再手动推送裸标签。
+唯一 macOS release Action 验证标签、commit、tree 和必需测试结果，一次
+checkout/cache/hydrate，保留历史相关的版本单调性检查及实际签名 App/package 门。
+不重跑已本地通过的源码测试；仅当收据的 Settings UI 未执行时补测这一项。
+它使用临时 Keychain 构建、签名、打包和最终验证一次。
+互不重叠的 Core 3 件、data 4 个完整词包及对应差分和 public 1 件直接写入三个 Draft GitHub
 Releases。候选传输
 不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
 
@@ -152,7 +162,7 @@ identity。由于未来 `data-N` 尚不存在，只有显式
 
 - macOS Action 只在这个显式模式从上游锁定 URL 下载原始模型，并先验证 lock 中的
   bytes/SHA-256；
-- 同一个 Action 完成正式的完整八文件构建和
+- 同一个 Action 完成正式的完整 manifest 产物构建和
   `package/verify_publication_artifacts`，但只暂存并公开四件 data 预发布资产；
 - seed 不创建 Core/Public Release，不写 `data-channel`，因此已安装用户看不到它；
 - 只有同一个 `candidate_revision` 可以快进到 `main`；随后正常 candidate Action
@@ -160,14 +170,16 @@ identity。由于未来 `data-N` 尚不存在，只有显式
 
 进入安装验收时，本地只下载 candidate Action 的三个 Draft Release 原字节。验收人
 运行 `scripts/release-control authorize /absolute/release-directory` 后，本地 owner
-重新验证八文件、远端 SHA-256/size 和精确 main，只创建非 force 的
+重新验证 manifest 中全部文件、远端 SHA-256/size 和精确 main，只创建非 force 的
 `linnet-publication/*` 标签。该标签启动 Ubuntu Action；publisher 不下载大型资产，
 只读取 GitHub metadata 和约 4 KB Catalog，按 Core → data → 非强制快进 Catalog →
 public / Latest 发布。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖、经 fingerprint 和 inventory digest
 验证的原生 Rime 编译 transport、固定 Periphery binary，以及英文生成数据。手动
-commit CI 是 build cache 的唯一 writer；PR 与候选只读该 cache。Swift owner tests
+commit CI 是共享 build cache 的 writer；PR、正式候选和 data-seed 只读 main cache。
+GitHub [不允许不同标签相互读取各自的 cache](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)，因此候选不再写只能由同标签复用的副本，
+也不搬运或编译已本地验证的 Swift 测试 cache。Swift owner tests
 只使用 `tests/swift_test_cache.sh` 的独立内容指纹 cache，不存在第二个静态模块编译
 owner。缓存不是版本或发布权威：
 每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、内部 fingerprint 与产物
@@ -254,7 +266,7 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 `archive` 会沿同一链生成并验证固定 CMS leaf 的 App、未签名的 Complete/Core
 PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修补输出。由于 CMS
 签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载
-`release-ci` 直接写入三个 Draft GitHub Releases 的同一八文件原字节。
+`release-ci` 直接写入三个 Draft GitHub Releases 的同一 manifest 产物原字节。
 
 ### 本地安装验收与 macOS 安全检查
 
@@ -287,8 +299,8 @@ Host 连续性和 TIS 不变性不从这份历史指纹推断，统一由当前 
 enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移不
 授权同 leaf Core 重新 register、enable 或 select。Core preinstall 只验证候选、已安装
 App、Active data 与 package-owned read-only typed TIS 状态；脚本不关闭 Host 或任何
-用户应用，也不调用 `osascript`。Distribution 的 Apple `must-close` 只关闭正在被替换的
-Linnet Settings 自身窗口；运行中的 Host 必须保持同一
+用户应用，也不调用 `osascript`。Core 与 Complete 均不声明 `must-close`；安装过程
+持有 Settings 数据事务共用的 mutation lease，不关闭 Settings。运行中的 Host 必须保持同一
 PID，更新前已连接的应用与更新后新打开的应用都要继续输入。安装完成后，Settings
 必须分别显示磁盘与运行中的 version/build/revision；只有切换离开 Linnet、没有未完成
 composition 或数据事务时，Host 的 typed activation owner 才能接受自行退出。Settings
@@ -303,7 +315,7 @@ Dock，并在最后一个窗口关闭后退出。
 安装器、系统设置、授权提示、输入菜单、菜单栏状态、真实候选和 Settings 的教程截图都必须来自同一冻结候选完成的这次安装 UAT。可以保留品牌图，但不能用 mock、其他 revision、局部测试窗口或另一台机器的提示冒充当前步骤；未实际出现的提示不写成已观察事实。
 
 PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出
-精确 commit、八文件集合摘要、逐文件 SHA-256、实际通过的验证和未执行项。
+精确 commit、manifest 集合摘要、逐文件 SHA-256、实际通过的验证和未执行项。
 安装验收不会自行创建公开版本 tag 或稳定 Release；只有验收人显式运行
 `scripts/release-control authorize /absolute/release-directory` 后，本地才会用
 Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
@@ -365,6 +377,13 @@ tests/verify_swift_units.sh
 ```
 
 只运行受影响的最小集合，先证明缺陷用例，再证明它转绿。
+
+Swift 夹具通过 `LinnetTestScratch.directory` 使用本轮测试专属目录；不要直接使用
+Foundation 的 `temporaryDirectory`（macOS 上不会随 `TMPDIR` 重定向）。
+`verify_swift_units.sh` 负责在成功、失败退出或 INT/TERM 中断后回收目录，包括只读
+词包；删除失败会使测试门失败，不会静默忽略。编译缓存不在回收范围内。
+清理回归已纳入该门，也可单独运行 `bash tests/verify_swift_scratch.sh`。
+强制杀死父进程（SIGKILL）或断电无法执行退出清理，不在此保证内。
 
 主题卡片渲染或 OCR 失败时，可单独运行
 `tests/verify_swift_units.sh --appearance-preview`。它复用同一测试与编译缓存，

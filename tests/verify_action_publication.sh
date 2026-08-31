@@ -43,7 +43,7 @@ for required in \
     'publication authorization differs from candidate bytes' \
     'data-seed authorization differs from candidate identity' \
     'Catalog not promoted' \
-    'staged candidate inventory is not the exact eight-file set' \
+    'staged candidate inventory differs from the canonical asset set' \
     'publish_channel core' \
     'publish_channel data' \
     'promote_catalog' \
@@ -68,13 +68,15 @@ fixture_assets="${fixture}/assets"
 fake_bin="${fixture}/bin"
 publisher_state="${fixture}/publisher-state"
 stager_state="${fixture}/stager-state"
-mkdir -p "${fixture_repo}/package" "${fixture_assets}" "${fake_bin}" \
+mkdir -p "${fixture_repo}/package" "${fixture_repo}/config" "${fixture_assets}" "${fake_bin}" \
   "${publisher_state}/releases" "${publisher_state}/tags" \
   "${stager_state}/releases" "${stager_state}/tags"
 cp "${stager}" "${fixture_repo}/package/stage_github_release"
 cp "${publisher}" "${fixture_repo}/package/publish_github_release"
 cp "${manifest}" "${fixture_repo}/package/release_asset_manifest"
 cp "${identity_owner}" "${fixture_repo}/package/release_candidate_identity"
+cp "${repo_root}/config/linnet-data-releases.json" "${fixture_repo}/config/"
+cp "${repo_root}/config/linnet-update-baselines.json" "${fixture_repo}/config/"
 cp "${repo_root}/CHANGELOG.md" "${fixture_repo}/CHANGELOG.md"
 chmod 755 "${fixture_repo}/package/"*
 
@@ -94,9 +96,11 @@ for kind in Chinese English Extended LTS; do
 done
 
 ruby -rjson -rdigest - "${fixture_assets}" "${version}" \
-    "${catalog_sequence}" "${candidate_revision}" <<'RUBY'
-root, version, sequence, revision = ARGV
+    "${catalog_sequence}" "${candidate_revision}" "${fixture_repo}/config" <<'RUBY'
+root, version, sequence, revision, config = ARGV
 sequence = Integer(sequence, 10)
+baselines = JSON.parse(File.binread(File.join(config, "linnet-update-baselines.json"))).fetch("pack_baselines")
+releases = JSON.parse(File.binread(File.join(config, "linnet-data-releases.json"))).fetch("packs")
 asset = lambda do |name|
   path = File.join(root, name)
   {
@@ -115,12 +119,26 @@ packs = {
 pack = lambda do |kind|
   name = packs.fetch(kind)
   identity = asset.call(name)
-  {
+  entry = {
     "kind" => kind,
     "bytes" => identity.fetch("bytes"),
     "container_sha256" => identity.fetch("container_sha256"),
+    "content_sha256" => releases.fetch(kind).fetch("content_sha256"),
     "url" => "https://github.com/Ares-X/Linnet/releases/download/data-#{sequence}/#{name}",
   }
+  base = baselines.fetch(kind).fetch("content_sha256")
+  unless base == entry.fetch("content_sha256")
+    delta_name = name.sub(/\.linnetpack\z/, "-from-#{base}.linnetdelta")
+    File.binwrite(File.join(root, delta_name), "delta:#{kind}:#{base}\n")
+    delta = asset.call(delta_name)
+    entry["deltas"] = [{
+      "base_content_sha256" => base,
+      "bytes" => delta.fetch("bytes"),
+      "sha256" => delta.fetch("container_sha256"),
+      "url" => "https://github.com/Ares-X/Linnet/releases/download/data-#{sequence}/#{delta_name}",
+    }]
+  end
+  entry
 end
 catalog = {
   "format" => 1,
@@ -411,6 +429,7 @@ unset GITHUB_ACTIONS
 write_release() {
   local state="$1" channel="$2" tag="$3" prerelease="$4" draft="$5"
   local release_revision="${6:-${candidate_revision}}"
+  local bytes_revision="${7:-current}"
   local release_title
   case "${channel}" in
     core) release_title="Linnet Core update ${version}" ;;
@@ -420,15 +439,17 @@ write_release() {
   ruby -rjson -rdigest - "${state}" "${fixture_assets}" \
       "${fixture_repo}/package/release_asset_manifest" "${channel}" \
       "${tag}" "${prerelease}" "${draft}" "${version}" \
-      "${catalog_sequence}" "${release_revision}" "${release_title}" <<'RUBY'
-state, root, manifest, channel, tag, prerelease, draft, version, sequence, revision, title = ARGV
+      "${catalog_sequence}" "${release_revision}" "${release_title}" "${bytes_revision}" <<'RUBY'
+state, root, manifest, channel, tag, prerelease, draft, version, sequence, revision, title, bytes_revision = ARGV
 names = IO.popen([manifest, channel, version, sequence], &:read).lines(chomp: true)
 assets = names.map do |name|
   path = File.join(root, name)
+  bytes = File.binread(path)
+  bytes = "previous candidate\n#{bytes}" if bytes_revision == "previous"
   {
     "name" => name,
-    "digest" => "sha256:#{Digest::SHA256.file(path).hexdigest}",
-    "size" => File.size(path),
+    "digest" => "sha256:#{Digest::SHA256.hexdigest(bytes)}",
+    "size" => bytes.bytesize,
   }
 end
 document = {
@@ -486,7 +507,7 @@ core_release="${stager_state}/releases/core-v${version}.json"
 cp "${core_release}" "${fixture}/exact-core-release.json"
 old_candidate_revision=89abcdef0123456789abcdef0123456789abcdef
 write_release "${stager_state}" core "core-v${version}" true true \
-  "${old_candidate_revision}"
+  "${old_candidate_revision}" previous
 : >"${stager_state}/mutations.log"
 GITHUB_ACTIONS=true run_stager "${stager_state}" stage core >/dev/null ||
   fail "same-version Core Draft from an older revision was not retired"
@@ -501,7 +522,7 @@ ruby -rjson -e '
   fail "replacement Core Draft does not own the current candidate"
 
 write_release "${stager_state}" public "v${version}" false true \
-  "${old_candidate_revision}"
+  "${old_candidate_revision}" previous
 : >"${stager_state}/mutations.log"
 GITHUB_ACTIONS=true run_stager "${stager_state}" stage public >/dev/null ||
   fail "same-version public Draft from an older revision was not retired"
@@ -666,13 +687,16 @@ GITHUB_ACTIONS=true run_publisher data-seed "${seed_tag}" >/dev/null ||
 [[ ! -e "${publisher_state}/data-channel/ref" ]] ||
   fail "data seed exposed an unaccepted stable Catalog"
 
-# Reset only the temporary fixture so the normal full-publication path still
-# proves that data is published in the ordered Core -> data transition.
-write_release "${publisher_state}" data "data-${catalog_sequence}" true true
+# Consume a Draft accepted by the real stager, including the earlier-revision
+# immutable data owner. This must remain valid all the way through publication.
+write_release "${publisher_state}" data "data-${catalog_sequence}" true true \
+  "${old_candidate_revision}"
 find "${publisher_state}/tags/data-${catalog_sequence}" -delete
 : >"${publisher_state}/mutations.log"
+run_stager "${publisher_state}" verify data >/dev/null ||
+  fail "stager rejected the earlier-revision data Draft before publication"
 run_publisher verify >/dev/null ||
-  fail "publisher rejected exact Action-staged draft metadata"
+  fail "publisher rejected the byte-identical earlier-revision data Draft accepted by staging"
 [[ ! -s "${publisher_state}/mutations.log" ]] ||
   fail "read-only publication verification changed GitHub state"
 

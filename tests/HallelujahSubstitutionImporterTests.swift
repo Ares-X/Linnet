@@ -484,7 +484,7 @@ struct HallelujahSubstitutionImporterTests {
   }
 
   private static func inTemporaryDirectory(_ body: (URL) throws -> Void) throws {
-    let directory = FileManager.default.temporaryDirectory
+    let directory = LinnetTestScratch.directory
       .appendingPathComponent("LinnetImporterTests-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: directory) }

@@ -40,7 +40,7 @@ struct SettingsSessionStateTests {
   }
 
   private static func testDocumentStoreRevisions() {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "linnet-document-revision-\(UUID().uuidString)", directoryHint: .isDirectory)
     do {
       try FileManager.default.createDirectory(

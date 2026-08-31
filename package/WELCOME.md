@@ -18,21 +18,29 @@ checksum differs or macOS reports damage or malware.
 
 After installation:
 
-- Complete is the sole registration owner for a clean first installation or a
-  supported, signature-verified App repair.
-  It registers a missing source idempotently but never enables or selects it
-  for you. Healthy installations use Core for routine updates. Core neither
+- `Linnet.pkg` is the full install/repair package the user explicitly selects
+  and confirms in Installer; Core never falls back to it automatically.
+  Complete is the sole registration owner for a clean first installation or a
+  supported, signature-verified App repair. It registers only a missing source
+  idempotently and never enables or selects it; an exact existing source is
+  preserved during full repair. Healthy installations use Core for routine
+  updates. Core neither
   re-registers the source nor stops the live InputMethodKit Host. Existing
-  applications keep their input connections. During installation, macOS closes
-  only Linnet's own Settings window whose files are being replaced; other
-  applications stay open.
+  applications keep their input connections. Complete repair stages and
+  atomically replaces the App without forcing either Linnet window to close.
+  Other applications stay open.
   Settings can apply an installed Core after you switch away from Linnet and
   finish the current composition or data operation. Other applications stay open;
   Settings starts and verifies the new Core without another logout.
+  After upgrading from 0.1.10, reopen a Settings window that was already open
+  before using data operations. The old window cannot read the new incremental
+  learning format; its data requests are rejected. Other applications stay open.
 - For a clean first installation, save open work, log out of macOS once, and
   log in again. Core preserves the same input-source identity and current
   client connections without requesting another logout.
-- If Core reports only a missing registration, run Complete to repair it.
+- If Core reports a non-matching published baseline or a missing registration,
+  explicitly run `Linnet.pkg` for Complete repair; Core never triggers that
+  fallback silently.
   If Core reports duplicate, conflicting, or unverifiable registration remnants,
   run the official uninstaller first, then install Complete.
   Do not use Complete for a routine healthy upgrade or to bypass a rejected
@@ -48,8 +56,8 @@ After installation:
   is not installed as a separate product, does not remain in the Dock, and
   exits when its last window closes.
 
-Settings can independently enable Smart English context prediction, spelling
-correction, and selection learning; choose simplified or traditional Chinese
+Smart English always provides spelling correction and fuzzy matching. Settings
+can independently enable context prediction and selection learning; choose simplified or traditional Chinese
 output; and set a 12–32 pt candidate font size. Every font preset uses fonts
 built into macOS; Linnet does not download or require third-party fonts.
 
@@ -92,17 +100,21 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 
 安装完成后：
 
-- Complete 是全新首次安装或受支持、已验证签名 App 修复的
-  唯一输入源注册责任方。它会幂等注册缺失的输入源，但不会程序化启用或选择输入源。
-  健康安装的常规升级只使用 Core。
+- `Linnet.pkg` 是用户明确选择并在 Installer 最终确认的完整安装/修复包；Core
+  不会自动切换到它。Complete 是全新首次安装或受支持、已验证签名 App 修复的
+  唯一输入源注册责任方。它只在输入源缺失时幂等注册，不会程序化启用或选择输入源；
+  已验证的现有输入源在完整修复中保持不变。健康安装的常规升级只使用 Core。
   macOS 14 及以上必须在系统设置中手动添加并允许一次。Core 不会重新注册或停止
-  正在服务的 InputMethodKit Host；安装时只关闭正在被替换的 Linnet Settings 自身窗口，
-  其他应用保持打开并保留输入连接。用户先切换到其他输入法，
+  正在服务的 InputMethodKit Host；Complete 修复会暂存并原子替换 App，不强制关闭
+  任何 Linnet 窗口；其他应用保持打开并保留输入连接。用户先切换到其他输入法，
   且没有未完成组合或数据事务时，可在 Settings 中主动应用新 Core；其他应用保持打开；
   否则新 Core 会在下次登录或重启后接管，也不会再次弹出启用授权。
+  从 0.1.10 升级后，备份、导入或修改数据前，请关闭并重新打开升级前已打开的
+  Settings 窗口。旧窗口不认识新的增量学习格式，其数据操作会被拒绝；其他应用无需退出。
 - 全新首次安装时，保存工作，注销一次 macOS，再登录同一账户。Core 保持同一个
   输入源身份和当前连接，常规升级不请求再次注销。
-- 若 Core 仅报告输入源未注册，请运行 Complete 修复。
+- 若 Core 报告未匹配精确发布基线或输入源未注册，请由用户主动运行 `Linnet.pkg`
+  完整修复；它不会由 Core 静默回退触发。
   若 Core 报告重复、冲突或无法验证的注册残留，
   请先运行官方卸载器，再安装 Complete。
   不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。
@@ -115,7 +127,7 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 - 从原生 Linnet 输入菜单打开 Settings。它内嵌于 Linnet，不作为独立产品
   安装、不常驻 Dock，并在最后一个窗口关闭后退出。
 
-Settings 可分别开关智能英文的上下文预测、拼写纠错和选词学习，选择默认
+智能英文始终提供拼写纠错和模糊匹配。Settings 可分别开关上下文预测和选词学习，选择默认
 简体或繁体输出，并把候选字号设为 12–32 pt。所有字体预设只使用 macOS
 内置字体，不会下载或依赖第三方字体。
 
@@ -125,7 +137,7 @@ Core 仍需用户确认安装；语言数据只在用户从 Settings 主动发�
 Catalog、容器和每个文件。第三方镜像可能看到 IP、请求时间和公开文件 URL，
 但不会收到个人词典、学习数据或凭据。
 
-安装和首次输入完成前，请保留安装包、卸载器及两份 SHA-256 sidecar。
+安装和首次输入完成前，请保留安装包，并核对同一 Release 说明中的 SHA-256。
 使用、隐私、升级与卸载说明见 Linnet Release 页面。
 
 卸载前先切换到其他输入法。卸载器不会执行已安装的 Host；若精确 Host 或

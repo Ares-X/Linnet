@@ -304,9 +304,6 @@ private extension LinnetSettingsProjectionRenderer {
     if !english.predictionEnabled {
       entries.append(("switches/@\(englishPredictionSwitchIndex)/reset", "0"))
     }
-    if !english.spellingCorrection {
-      entries.append(("linnet_english_interaction/spelling_correction", "false"))
-    }
     appendEnglishLearningOptions(english, includeUserDictionary: true, to: &entries)
     guard !entries.isEmpty else { return nil }
     return renderPatch(entries)

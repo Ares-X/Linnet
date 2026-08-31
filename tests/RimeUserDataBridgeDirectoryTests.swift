@@ -4,7 +4,7 @@ import Foundation
 @main
 struct RimeUserDataBridgeDirectoryTests {
   static func main() throws {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "RimeUserDataBridgeDirectoryTests-\(UUID().uuidString)",
       directoryHint: .isDirectory)
     defer { try? FileManager.default.removeItem(at: root) }

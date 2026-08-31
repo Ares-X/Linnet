@@ -305,7 +305,7 @@ extension SettingsDataCoordinator {
 
   func mutationRequiresLease(_ operation: DataOperation) -> Bool {
     switch operation {
-    case .exportPortable, .diagnose:
+    case .exportPortable, .exportCloudRecovery, .diagnose:
       false
     case .publishAppearance, .applyConfiguration, .importLegacy,
       .importPortable, .restoreBackup, .removeBackupRecord, .clearLearning:
@@ -324,6 +324,7 @@ extension SettingsDataCoordinator {
     case .removeBackup: throw Failure.invalidOperation("backup removal backup")
     case .clear: .clearLearning
     case .export: throw Failure.invalidOperation("export backup")
+    case .cloudRecovery: throw Failure.invalidOperation("cloud recovery backup")
     case .diagnose: throw Failure.invalidOperation("diagnostics backup")
     }
   }
@@ -366,11 +367,15 @@ extension SettingsDataCoordinator {
     }
   }
 
-  func learningImports(
+  /// Only explicitly imported v2/v3 backups use the old portable table codec.
+  func legacyBackupLearningImports(
     from directory: URL,
     manifest: LinnetBackupStore.BackupManifest
   ) throws
     -> [RimeUserDataBridge.LearningImport] {
+    guard [LinnetBackupStore.legacyBackupFormatVersion, LinnetBackupStore.tableBackupFormatVersion]
+      .contains(manifest.formatVersion)
+    else { throw Failure.invalidOperation("legacy backup learning version") }
     try requireDirectory(directory)
     let prefix = "user-dictionaries/"
     return try manifest.artifacts.compactMap { artifact in
@@ -389,6 +394,22 @@ extension SettingsDataCoordinator {
       }
       return .init(schema: schema, file: file)
     }.sorted { $0.schema < $1.schema }
+  }
+
+  func removeCandidateLearning(_ schemas: Set<String>, from candidate: URL) throws {
+    guard schemas.isSubset(of: RimeUserDataBridge.learningSchemas) else {
+      throw Failure.invalidOperation("learning replacement schema")
+    }
+    for schema in schemas {
+      let database = candidate.appending(path: "\(schema).userdb", directoryHint: .isDirectory)
+      var info = stat()
+      if lstat(database.path, &info) != 0 {
+        guard errno == ENOENT else { throw Failure.unsafePath(database.path) }
+        continue
+      }
+      try requireDirectory(database)
+      try FileManager.default.removeItem(at: database)
+    }
   }
 
   func requireRevision(_ expected: String, current: String) throws {

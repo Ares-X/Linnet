@@ -275,7 +275,6 @@ final class SettingsUITests: XCTestCase {
       "Show IPA pronunciation",
       "Show Chinese definitions",
       "Show Smart English context suggestions",
-      "Suggest spelling corrections",
       "Capitalize sentence starts",
       "Learn from English selections",
       "Add a trailing space when Space accepts a candidate",
@@ -497,9 +496,6 @@ final class SettingsUITests: XCTestCase {
       isolatedHomeURL,
       FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL,
       "Settings UI tests must never use the real user home")
-    XCTAssertTrue(FileManager.default.fileExists(
-      atPath: isolatedHomeURL.appending(
-        path: "Library/Application Support/Linnet/State/active.json").path))
     XCTAssertTrue(FileManager.default.fileExists(
       atPath: isolatedHomeURL.appending(
         path: "Library/Application Support/Linnet/UserData/linnet_settings.json").path))

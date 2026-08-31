@@ -111,8 +111,31 @@ struct LinnetSettingsUpdateCheckerStateTests {
         "a failed Host request became eligible for immediate activation"
       )
 
-      // Remove this table with the 0.1.9 blocker wire cases when the minimum
-      // Core becomes 0.1.10 for the public 0.1.11 release.
+      let activatingRequester = RuntimeRequester(health: health(productIdentity: older))
+      let activatingChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: activatingRequester)
+      activatingChecker.refreshRuntime()
+      await waitUntil("known running Core did not expose the update") {
+        activatingChecker.runtimeVersionState == .pending(installed: installed, running: older)
+      }
+      activatingChecker.activateInstalledCore()
+      activatingChecker.refreshRuntime()
+      require(
+        activatingChecker.runtimeVersionState == .applying(installed: installed, running: older),
+        "a read-only refresh cancelled a user-requested Core activation"
+      )
+      activatingChecker.check()
+      require(!activatingChecker.active, "Core activation allowed an unrelated network refresh")
+      await waitUntil("protected activation did not finish its original Host request") {
+        activatingChecker.runtimeVersionState == .blocked(
+          installed: installed, running: older, issue: .inputSourceActive)
+      }
+      require(activatingRequester.commands == [.diagnose, .activateCore],
+        "refresh replaced the activation request instead of preserving its lifecycle")
+
+      // The wire contract also covers published 0.1.10's unknown-TIS producer;
+      // SettingsContract owns the supported-Host removal condition.
       let legacyBlockers: [(
         code: LinnetSettingsContract.RuntimeReplyCode,
         issue: LinnetSettingsContract.CoreActivationBlocker
@@ -225,7 +248,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
   private static func makeBundleFixture(
     identity: LinnetSettingsContract.ProductIdentity
   ) throws -> BundleFixture {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "LinnetSettingsUpdateCheckerTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )

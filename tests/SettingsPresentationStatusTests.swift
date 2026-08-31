@@ -25,9 +25,9 @@ struct SettingsPresentationStatusTests {
       chinese
     )
     expect(
-      .cloudBackupUploaded,
-      en: "Full recovery backup uploaded.",
-      zh: "已上传完整恢复备份。",
+      .cloudBackupUploaded(Date(timeIntervalSince1970: 0)),
+      en: "Incremental recovery backup verified at \(Date(timeIntervalSince1970: 0).formatted()).",
+      zh: "增量恢复备份已于 \(Date(timeIntervalSince1970: 0).formatted()) 校验完成。",
       english,
       chinese
     )

@@ -313,6 +313,7 @@ verify_product() (
   set -euo pipefail
   local host_app="$1"
   local standalone_settings_app="${2:-}"
+  local published_revision="${3:-}"
   local embedded_settings_app
   local expected_leaf
   local actual_leaf
@@ -468,15 +469,22 @@ verify_product() (
   ' "${host_app}/Contents/Resources/LinnetRelease/VERSION.json" \
     "${signing_profile}" "${expected_leaf}" "${product_version}" "${product_build}")" ||
     fail_identity "signed release metadata is invalid"
-  "${project_root}/scripts/generate-release-metadata" \
-    "${project_root}/upstreams.lock.json" \
-    "${verification_scratch}/expected-release-metadata" \
-    "${product_version}" "${product_build}" 1704067200 \
-    "${metadata_projection}" >/dev/null ||
-    fail_identity "canonical release metadata cannot be projected"
-  diff -qr "${verification_scratch}/expected-release-metadata" \
-    "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||
-    fail_identity "signed release metadata differs from the canonical projection"
+  if [[ -n "${published_revision}" ]]; then
+    # The caller has pinned the historical package bytes. Verify that signed
+    # metadata names that exact revision, not a projection of today's inputs.
+    [[ "$(printf '%s' "${metadata_projection}" | plutil -extract candidate_revision raw -o - -)" == \
+      "${published_revision}" ]] || fail_identity "published App revision differs from its pinned baseline"
+  else
+    "${project_root}/scripts/generate-release-metadata" \
+      "${project_root}/upstreams.lock.json" \
+      "${verification_scratch}/expected-release-metadata" \
+      "${product_version}" "${product_build}" 1704067200 \
+      "${metadata_projection}" >/dev/null ||
+      fail_identity "canonical release metadata cannot be projected"
+    diff -qr "${verification_scratch}/expected-release-metadata" \
+      "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||
+      fail_identity "signed release metadata differs from the canonical projection"
+  fi
   printf '%s\n' "${metadata_projection}"
 )
 
@@ -559,7 +567,12 @@ case "${command}" in
       fail_identity "usage: verify-product HOST_APP [STANDALONE_SETTINGS_APP]"
     verify_product "$2" "${3:-}"
     ;;
+  verify-published)
+    [[ "$#" -eq 3 && "$3" =~ ^[0-9a-f]{40}$ ]] ||
+      fail_identity "usage: verify-published HOST_APP EXACT_REVISION"
+    verify_product "$2" "" "$3"
+    ;;
   *)
-    fail_identity "usage: preflight | inspect-contract | sign-product HOST_APP STANDALONE_SETTINGS_APP | verify-product HOST_APP [STANDALONE_SETTINGS_APP]"
+    fail_identity "usage: preflight | inspect-contract | sign-product HOST_APP STANDALONE_SETTINGS_APP | verify-product HOST_APP [STANDALONE_SETTINGS_APP] | verify-published HOST_APP EXACT_REVISION"
     ;;
 esac

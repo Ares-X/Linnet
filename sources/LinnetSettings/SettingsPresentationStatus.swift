@@ -4,6 +4,7 @@ enum SettingsOperationKind: Equatable {
   case apply
   case legacy
   case portableExport
+  case cloudBackup
   case portableImport
   case restore
   case removeBackup
@@ -108,7 +109,9 @@ enum SettingsPresentationStatus: Equatable {
   case portableImported
   case cloudSyncEnabled
   case cloudSyncRequested
-  case cloudBackupUploaded
+  case cloudBackupUploaded(Date)
+  case cloudBackupUnchanged(Date)
+  case cloudBackupRepairRequired
   case cloudSyncDisabled
   case backupRestored
   case backupRecordRemoved
@@ -190,8 +193,18 @@ enum SettingsPresentationStatus: Equatable {
       pair = ("iCloud Drive learning synchronization enabled.", "已启用 iCloud Drive 学习词同步。")
     case .cloudSyncRequested:
       pair = ("Learning synchronization requested.", "已请求同步学习词。")
-    case .cloudBackupUploaded:
-      pair = ("Full recovery backup uploaded.", "已上传完整恢复备份。")
+    case .cloudBackupUploaded(let verifiedAt):
+      pair = (
+        "Incremental recovery backup verified at \(verifiedAt.formatted()).",
+        "增量恢复备份已于 \(verifiedAt.formatted()) 校验完成。")
+    case .cloudBackupUnchanged(let verifiedAt):
+      pair = (
+        "Recovery data is unchanged; the verified backup is from \(verifiedAt.formatted()).",
+        "恢复数据没有变化；已校验备份时间为 \(verifiedAt.formatted())。")
+    case .cloudBackupRepairRequired:
+      pair = (
+        "The incremental recovery chain is unavailable. Confirm full repair to create a new baseline.",
+        "增量恢复链不可用。请确认完整修复以创建新基线。")
     case .cloudSyncDisabled:
       pair = (
         "iCloud Drive learning synchronization disabled. No data was deleted.",
@@ -283,6 +296,7 @@ enum SettingsPresentationStatus: Equatable {
       .cloudSyncEnabled,
       .cloudSyncRequested,
       .cloudBackupUploaded,
+      .cloudBackupUnchanged,
       .cloudSyncDisabled,
       .backupRestored,
       .backupRecordRemoved,
@@ -297,6 +311,7 @@ enum SettingsPresentationStatus: Equatable {
       .success
     case .operationProgress,
       .cancellingOperation,
+      .cloudBackupRepairRequired,
       .publishingAppearance,
       .appearanceStaleRetry,
       .pack(_, .downloading),
@@ -455,6 +470,7 @@ private func operationName(_ kind: SettingsOperationKind) -> SettingsLocalizedPa
   case .apply: ("Apply settings", "应用设置")
   case .legacy: ("Import existing data", "导入现有数据")
   case .portableExport: ("Export portable data", "导出迁移数据")
+  case .cloudBackup: ("Back up recovery data", "备份恢复数据")
   case .portableImport: ("Import portable data", "导入迁移数据")
   case .restore: ("Restore backup", "恢复备份")
   case .removeBackup: ("Remove backup record", "移除备份记录")

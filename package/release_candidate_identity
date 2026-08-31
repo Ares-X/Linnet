@@ -2,7 +2,7 @@
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Canonical byte identity for the exact eight-file community release set.
+# Canonical byte identity for the exact channel-routed community release set.
 
 set -euo pipefail
 
@@ -34,7 +34,8 @@ expected="$("${project_root}/package/release_asset_manifest" \
 actual="$(find "${release_dir}" -mindepth 1 -maxdepth 1 -type f ! -type l \
   -exec basename {} \; | LC_ALL=C sort)"
 [[ "${actual}" == "${expected}" &&
-  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 8 ]] ||
+  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == \
+  "$(printf '%s\n' "${expected}" | wc -l | tr -d ' ')" ]] ||
   fail_identity "candidate channel inventory is not exact"
 
 manifest=""

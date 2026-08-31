@@ -5,13 +5,14 @@
 /// dictionaries, grammar, and bilingual indexes are initialized off the first
 /// client key path. Client composition remains owned by each IMK controller.
 final class LinnetRimeWarmSession {
-  private(set) var identifier: RimeSessionId = 0
+  private var lease: LinnetRimeSessionLease?
+  var identifier: RimeSessionId { lease?.identifier ?? 0 }
 
   func prepare(using api: RimeApi_stdbool) -> RimeSessionId? {
     guard identifier == 0 else { return nil }
     let created = api.create_session()
-    guard created != 0 else { return nil }
-    identifier = created
+    guard let acquired = LinnetRimeSessionLease.acquire(identifier: created) else { return nil }
+    lease = acquired
 
     let primed = "ceshi".withCString {
       api.simulate_key_sequence(created, $0)
@@ -26,23 +27,25 @@ final class LinnetRimeWarmSession {
 
   @discardableResult
   func refresh(using api: RimeApi_stdbool) -> Bool {
-    guard identifier != 0, api.find_session(identifier) else {
-      identifier = 0
+    guard let lease, lease.isCurrent(sessionExists: { api.find_session($0) }) else {
+      retire()
       return false
     }
     return true
   }
 
   func discard(using api: RimeApi_stdbool) {
-    let discarded = identifier
-    identifier = 0
-    if discarded != 0 {
-      _ = api.destroy_session(discarded)
+    guard let discarded = lease else { return }
+    let isCurrent = discarded.isCurrent(sessionExists: { api.find_session($0) })
+    retire()
+    if isCurrent {
+      _ = api.destroy_session(discarded.identifier)
     }
   }
 
   /// cleanup_all_sessions owns destruction at runtime-generation boundaries.
   func retire() {
-    identifier = 0
+    lease?.retire()
+    lease = nil
   }
 }

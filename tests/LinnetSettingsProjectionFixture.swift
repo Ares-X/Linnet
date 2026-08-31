@@ -44,7 +44,6 @@ struct LinnetSettingsProjectionFixture {
       document.english.showIPA = false
       document.english.showTranslation = false
       document.english.predictionEnabled = false
-      document.english.spellingCorrection = false
       directory = URL(filePath: arguments[2], directoryHint: .isDirectory)
     case "input-options":
       guard arguments.count == 3 else { fail() }

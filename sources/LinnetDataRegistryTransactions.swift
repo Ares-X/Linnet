@@ -37,10 +37,10 @@ extension LinnetDataRegistry {
   ) throws -> DataChannelUpdateTransaction {
     try prepareMutableDirectories()
     let receipt = try receiptForCatalog(catalog)
-    try validateDataChannelReceipt(receipt)
     guard let set = catalog.catalog.activationSet(for: edition) else {
       throw Failure.invalidActiveState
     }
+    try validateDataChannelReceipt(receipt, artifacts: set.packs)
     let snapshot = try runtimeSnapshot(reconcilingStorage: false)
     switch set.updateSelection(installedPacks: snapshot.state.packs) {
     case .localAhead: throw Failure.staleDataChannel
@@ -179,11 +179,11 @@ extension LinnetDataRegistry {
       stateSHA256: Self.sha256(document.data))
   }
 
-  /// The only installation boundary for a catalog-selected `.linnetpack`.
-  /// The canonical catalog authenticates the exact container; this method then
-  /// validates compatibility, the manifest and every payload byte once.
+  /// Catalog-selected download authentication and immutable pack staging.
+  /// Full or differential transport must reconstruct the same manifest/files.
   func verifyAndStagePack(
-    package: URL, artifact: LinnetDataChannel.Artifact
+    package: URL, artifact: LinnetDataChannel.Artifact,
+    transfer: LinnetDataChannel.PackTransfer
   ) throws -> ActivePack {
     try prepareMutableDirectories()
     let resolvedPackage = package.resolvingSymlinksInPath().standardizedFileURL
@@ -194,21 +194,26 @@ extension LinnetDataRegistry {
       Self.isSecureOwnedDirectory(downloadOwner) else {
       throw Failure.unsafePath(package.path)
     }
-    let values = try resolvedPackage.resourceValues(
-      forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-    guard values.isRegularFile == true, values.isSymbolicLink != true else {
-      throw Failure.unsafePath(package.path)
+    let values = try resolvedPackage.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+    guard values.isRegularFile == true, values.isSymbolicLink != true else { throw Failure.unsafePath(package.path) }
+    switch transfer {
+    case .complete:
+      try LinnetDataChannel.verifyDownloadedArtifact(
+        bytes: artifact.bytes, sha256: artifact.containerSHA256, at: resolvedPackage)
+    case .delta(let delta, let base):
+      guard artifact.deltas?.contains(delta) == true, Self.validPackIdentity(base),
+        base.kind == artifact.kind, base.contentSHA256 == delta.baseContentSHA256 else {
+        throw Failure.invalidActiveState
+      }
+      try LinnetDataChannel.verifyDownloadedArtifact(
+        bytes: delta.bytes, sha256: delta.sha256, at: resolvedPackage)
+    case .current, .requiresCompleteRepair:
+      throw Failure.invalidActiveState
     }
-    try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: resolvedPackage)
-    let kindRoot = packsDirectory.appending(
-      path: artifact.kind.rawValue, directoryHint: .isDirectory)
+    let kindRoot = packsDirectory.appending(path: artifact.kind.rawValue, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(
-      at: kindRoot, withIntermediateDirectories: true,
-      attributes: [.posixPermissions: 0o700]
-    )
-    guard Self.isSecureOwnedDirectory(kindRoot) else {
-      throw Failure.unsafePath(kindRoot.path)
-    }
+      at: kindRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    guard Self.isSecureOwnedDirectory(kindRoot) else { throw Failure.unsafePath(kindRoot.path) }
     let identity = Self.packIdentity(sequence: artifact.sequence, version: artifact.version)
     let final = kindRoot.appending(path: identity, directoryHint: .isDirectory)
     if FileManager.default.fileExists(atPath: final.path) {
@@ -217,27 +222,31 @@ extension LinnetDataRegistry {
       return installed
     }
 
-    let partial = kindRoot.appending(
-      path: ".\(identity).partial-\(UUID().uuidString)",
-      directoryHint: .isDirectory
-    )
-    try FileManager.default.createDirectory(
-      at: partial, withIntermediateDirectories: false,
-      attributes: [.posixPermissions: 0o700]
-    )
+    let partial = kindRoot.appending(path: ".\(identity).partial-\(UUID().uuidString)", directoryHint: .isDirectory)
     do {
-      let staged = try LinnetPackContract.verify(
-        package: resolvedPackage,
-        coreVersion: self.coreVersion,
-        extractingTo: partial
-      )
-      let active = Self.activePack(
-        from: staged.manifest, manifestSHA256: staged.manifestSHA256)
+      let manifest: LinnetPackContract.Manifest, manifestData: Data
+      switch transfer {
+      case .delta(_, let base):
+        let baseRoot = rootDirectory.appending(path: base.relativePath, directoryHint: .isDirectory)
+        let baseManifest = try readOwnedFile(baseRoot.appending(path: "manifest.json"))
+        guard Self.sha256(baseManifest) == base.manifestSHA256 else { throw Failure.invalidActiveState }
+        try LinnetDirectoryDelta.apply(base: baseRoot, delta: resolvedPackage, output: partial)
+        let staged = try verifiedInstalledManifest(at: partial)
+        (manifest, manifestData) = (staged.manifest, staged.manifestData)
+      case .complete:
+        try FileManager.default.createDirectory(
+          at: partial, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let staged = try LinnetPackContract.verify(
+          package: resolvedPackage, coreVersion: self.coreVersion, extractingTo: partial)
+        (manifest, manifestData) = (staged.manifest, staged.manifestData)
+        try manifestData.write(to: partial.appending(path: "manifest.json"), options: .withoutOverwriting)
+      case .current, .requiresCompleteRepair:
+        throw Failure.invalidActiveState
+      }
+      let active = Self.activePack(from: manifest, manifestSHA256: Self.sha256(manifestData))
       guard artifact.matches(active) else {
         throw LinnetPackContract.Failure.invalidManifest("catalog artifact identity")
       }
-      try staged.manifestData.write(
-        to: partial.appending(path: "manifest.json"), options: .withoutOverwriting)
       try makeImmutable(partial)
       try FileManager.default.moveItem(at: partial, to: final)
       return active
@@ -323,29 +332,6 @@ extension LinnetDataRegistry {
       throw Failure.invalidActiveState
     }
     return (packs, edition)
-  }
-
-  func validatedPreparationRecord(
-    update: DataChannelUpdateTransaction,
-    transaction: URL,
-    snapshot: RuntimeSnapshot,
-    packs: [ActivePack],
-    edition: Edition
-  ) throws -> LanguageTransactionRecord {
-    guard update.downloadDirectory.standardizedFileURL
-      == downloadsDirectory.appending(
-        path: update.transactionID.uuidString, directoryHint: .isDirectory).standardizedFileURL,
-      let record = validatedLanguageTransaction(at: transaction, now: Date()),
-      record.phase == .downloading,
-      record.baseRevision == snapshot.activeRevision,
-      record.edition == edition,
-      record.artifacts.count == packs.count,
-      record.artifacts.allSatisfy({ artifact in
-        packs.contains(where: { artifact.matches($0) })
-      })
-    else { throw Failure.invalidActiveState }
-    try validateDataChannelReceipt(record.catalog)
-    return record
   }
 
   func materializeActivationCandidate(
@@ -479,7 +465,20 @@ extension LinnetDataRegistry {
     for directory in transactionPlan.scratch { try? FileManager.default.removeItem(at: directory) }
     let protected = transactionPlan.pendingPackPaths.union(cleanupFailures)
     for cleanup in packCleanups where !protected.contains(cleanup.relativePath) {
-      try? FileManager.default.removeItem(at: cleanup.directory)
+      guard let tree = preflightedTrees[cleanup.directory.standardizedFileURL.path] else { continue }
+      do {
+        // Only retired, preflighted pack directories lose their read-only bit.
+        // Files remain immutable; lchmod never follows a directory symlink.
+        for entry in [cleanup.directory] + tree {
+          var info = stat()
+          guard lstat(entry.path, &info) == 0 else { throw Failure.invalidActiveState }
+          if (info.st_mode & S_IFMT) == S_IFDIR {
+            guard info.st_uid == getuid(), (info.st_mode & (S_IWGRP | S_IWOTH)) == 0,
+              lchmod(entry.path, info.st_mode | S_IWUSR) == 0 else { throw Failure.invalidActiveState }
+          }
+        }
+        try FileManager.default.removeItem(at: cleanup.directory)
+      } catch { continue }
     }
   }
 

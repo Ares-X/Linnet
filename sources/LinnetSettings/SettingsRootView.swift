@@ -57,16 +57,44 @@ struct SettingsRootView: View {
       if model.diagnostics == nil { model.refreshDiagnostics() }
     }
     .confirmationDialog(
-      "Upload a full recovery backup?",
+      "Upload an incremental recovery backup?",
       isPresented: $pendingCloudBackupUpload,
       titleVisibility: .visible
     ) {
-      Button("Upload and Replace", role: .destructive) { model.uploadCloudBackupArchive() }
+      Button("Upload Recovery Backup") { model.uploadCloudBackupArchive() }
       Button("Cancel", role: .cancel) {}
     } message: {
       Text(
-        "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed."
+        "The first upload creates a full recovery baseline. Later uploads add an immutable delta only. Local data is not changed."
       )
+    }
+    .confirmationDialog(
+      "Repair cloud recovery backup?",
+      isPresented: $model.cloudRecoveryRepairConfirmationRequired,
+      titleVisibility: .visible
+    ) {
+      Button("Create Full Repair Backup", role: .destructive) {
+        model.uploadCloudBackupArchive(repair: true)
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "The existing incremental recovery chain cannot be verified. This creates a new complete baseline; previous cloud objects are left unchanged."
+      )
+    }
+    .confirmationDialog(
+      "Repair language data with complete packs?",
+      isPresented: presented($model.languageDataRepairTarget),
+      titleVisibility: .visible
+    ) {
+      Button("Download Complete Changed Packs") {
+        if let target = model.languageDataRepairTarget {
+          model.downloadLanguageData(target, allowCompleteRepair: true)
+        }
+      }
+      Button("Cancel", role: .cancel) { model.languageDataRepairTarget = nil }
+    } message: {
+      Text("The differential update could not finish. Installed data is unchanged. Retry later, or confirm a full download of changed packs. Unchanged packs and personal data are kept.")
     }
     .confirmationDialog(
       "Import existing Rime / Hallelujah data?",

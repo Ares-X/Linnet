@@ -121,7 +121,7 @@ extension SettingsModel {
     }
   }
 
-  private func downloadLanguageData(_ target: SettingsLanguageDataUpdateTarget) {
+  func downloadLanguageData(_ target: SettingsLanguageDataUpdateTarget, allowCompleteRepair: Bool = false) {
     guard languageDataUpdatesAvailable, !packDownloadActive, !operationActive else {
       if !languageDataUpdatesAvailable { finishLanguageDataUpdate(target, failure: .unavailable) }
       return
@@ -131,6 +131,7 @@ extension SettingsModel {
       return
     }
     languageDataUpdateTarget = target
+    languageDataRepairTarget = nil
     packDownloadProgress = 0
     setLanguageDataUpdateState(target, .downloading)
     let coordinator = coordinator
@@ -160,18 +161,35 @@ extension SettingsModel {
         var targetPacks: [LinnetDataRegistry.ActivePack] = []
         for artifact in selected.packs {
           try Task.checkCancellation()
-          if let installed = snapshot.state.packs.first(where: { artifact.matches($0) }) {
-            targetPacks.append(installed)
+          let installed = snapshot.state.packs.first { $0.kind == artifact.kind }
+          let transfer = artifact.transfer(from: installed, allowCompleteRepair: allowCompleteRepair)
+          let url: URL, bytes: UInt64
+          switch transfer {
+          case .current(let pack):
+            targetPacks.append(pack)
             continue
+          case .delta(let delta, _): (url, bytes) = (delta.url, delta.bytes)
+          case .complete: (url, bytes) = (artifact.url, artifact.bytes)
+          case .requiresCompleteRepair: throw LinnetDataChannel.Failure.completeRepairRequired
           }
           let package = downloadDirectory.appending(
-            path: "\(artifact.kind.rawValue)-\(artifact.sequence)-\(artifact.contentSHA256).linnetpack")
-          await self?.setLanguageDataUpdateState(target, .downloading)
-          try await transport.downloadPack(artifact, to: package)
-          try Task.checkCancellation()
-          await self?.setLanguageDataUpdateState(target, .verifying)
-          let staged = try registry.verifyAndStagePack(package: package, artifact: artifact)
-          targetPacks.append(staged)
+            path: url.lastPathComponent)
+          do {
+            await self?.setLanguageDataUpdateState(target, .downloading)
+            try await transport.downloadArtifact(from: url, expectedBytes: bytes, to: package)
+            try Task.checkCancellation()
+            await self?.setLanguageDataUpdateState(target, .verifying)
+            let staged = try registry.verifyAndStagePack(package: package, artifact: artifact, transfer: transfer)
+            targetPacks.append(staged)
+          } catch {
+            try Task.checkCancellation()
+            switch transfer {
+            case .delta:
+              print("Language-data delta failed: \(error.localizedDescription)")
+              throw LinnetDataChannel.Failure.completeRepairRequired
+            default: throw error
+            }
+          }
           await self?.setPackDownloadProgress(
             Double(targetPacks.count) / Double(selected.packs.count))
           try Task.checkCancellation()
@@ -182,6 +200,8 @@ extension SettingsModel {
         try Task.checkCancellation()
         try await coordinator.activateLanguage(activation)
         await self?.finishLanguageDataUpdate(target)
+      } catch LinnetDataChannel.Failure.completeRepairRequired {
+        await self?.finishLanguageDataRepairRequest(target)
       } catch is CancellationError {
         await self?.finishPackDownloadCancellation(target)
       } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
@@ -192,6 +212,11 @@ extension SettingsModel {
           target, failure: Self.packUpdateFailure(for: error))
       }
     }
+  }
+
+  private func finishLanguageDataRepairRequest(_ target: SettingsLanguageDataUpdateTarget) {
+    finishLanguageDataUpdate(target, failure: .verificationFailed)
+    languageDataRepairTarget = target
   }
 
   private func setPackDownloadProgress(_ progress: Double) {

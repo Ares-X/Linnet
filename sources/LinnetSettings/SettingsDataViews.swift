@@ -13,11 +13,15 @@ extension DataTabView {
         "Sync learned words with iCloud Drive",
         isOn: Binding(
           get: { model.cloudSyncEnabled },
-          set: { model.setCloudSyncEnabled($0) })
+          set: { enabled in Task { await model.setCloudSyncEnabled(enabled) } })
       )
-      .disabled(model.operationActive)
+      .disabled(model.operationActive || model.cloudSyncPreparing)
 
-      if let location = model.cloudSyncLocation {
+      if model.cloudSyncPreparing {
+        ProgressView()
+          .controlSize(.small)
+          .accessibilityLabel("Sync learned words with iCloud Drive")
+      } else if let location = model.cloudSyncLocation {
         LabeledContent("Location") {
           Text(verbatim: location.displayName)
         }
@@ -41,20 +45,20 @@ extension DataTabView {
 
       HStack {
         Button("Sync Learning Now") { model.synchronizeLearningNow() }
-          .disabled(model.cloudSyncLocation == nil || model.operationActive)
-        Button("Upload Full Backup…") { pendingCloudBackupUpload = true }
-          .disabled(model.cloudSyncLocation == nil || model.operationActive)
-        Button("Review Full Backup…") {
+          .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
+        Button("Upload Incremental Backup…") { pendingCloudBackupUpload = true }
+          .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
+        Button("Review Recovery Backup…") {
           Task {
             pendingPortableImport = await model.inspectCloudBackupArchive()
           }
         }
         .disabled(
           model.cloudSyncLocation == nil || !model.configuration.canPersist
-            || model.operationActive || model.portableInspectionActive)
+            || model.operationActive || model.portableInspectionActive || model.cloudSyncPreparing)
       }
       Text(
-        "The full backup also includes personal words, disabled words, and Text Expander data. It is a manual recovery archive, not a second learning-sync engine."
+        "Recovery backups also include personal words, disabled words, and Text Expander data. The first upload creates a baseline; later uploads are incremental and manual."
       )
       .font(.caption2)
       .foregroundStyle(.secondary)
@@ -209,7 +213,7 @@ extension DataTabView {
         Label("The installed Core was not activated", systemImage: "xmark.circle")
           .foregroundStyle(.red)
         coreIdentityRows(installed: installed, running: running)
-        Text("The current Host was left in place. Check the runtime before trying again.")
+        Text("Core activation could not be verified. Check the runtime before trying again.")
           .font(.caption2)
           .foregroundStyle(.secondary)
         Button("Check Runtime Again") { updateChecker.refreshRuntime() }
@@ -317,6 +321,8 @@ extension DataTabView {
     switch issue {
     case .inputSourceActive:
       "Use the macOS input menu to select another input source, then try again."
+    case .inputSourceUnavailable:
+      "The selected input source could not be read. Select another input source in the macOS input menu, then try again."
     case .compositionActive:
       "Finish or cancel the current composition, then try again."
     case .dataTransactionActive:
@@ -364,7 +370,7 @@ extension DataTabView {
         Button("View Core Update") { updateChecker.openCoreUpdate() }
       }
       Button("Check Again") { updateChecker.check() }
-        .disabled(updateChecker.active)
+        .disabled(updateChecker.active || updateChecker.activationInProgress)
     }
   }
 

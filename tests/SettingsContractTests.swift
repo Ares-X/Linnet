@@ -14,6 +14,7 @@ struct SettingsContractTests {
       testCoreActivationGate()
       try testLegacyRuntimeHealthWithoutIdentity()
       try testLegacyCoreActivationBlockerWireCodes()
+      try testNativeLearningDataVersionWireCompatibility()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
         testProductIdentity(host: host, settings: settings)
@@ -105,10 +106,13 @@ struct SettingsContractTests {
       dataTransactionIsActive: false,
       requesterIsAlive: true
     )
-    guard activeSource.blocker == .inputSourceActive,
-      activeComposition.blocker == .compositionActive,
-      activeTransaction.blocker == .dataTransactionActive,
-      unknownSource.blocker == .unknownClient
+    guard unknownSource != .blocked(.coreActivationUnknownClient) else {
+      fail("the current Host emitted a legacy unknown-client diagnosis for unavailable TIS state")
+    }
+    guard activeSource == .blocked(.coreActivationInputSourceActive),
+      activeComposition == .blocked(.coreActivationCompositionActive),
+      activeTransaction == .blocked(.coreActivationDataTransactionActive),
+      unknownSource == .blocked(.coreActivationInputSourceUnavailable)
     else {
       fail("Core activation no longer fails closed at every Host mutation boundary")
     }
@@ -118,7 +122,7 @@ struct SettingsContractTests {
       compositionIsActive: false,
       dataTransactionIsActive: false,
       requesterIsAlive: false
-    ).blocker == .requesterUnavailable else {
+    ) == .blocked(.coreActivationRequesterUnavailable) else {
       fail("a missing Settings requester did not block Core activation")
     }
   }
@@ -156,8 +160,8 @@ struct SettingsContractTests {
     }
   }
 
-  /// Remove with the two 0.1.9 RuntimeReplyCode cases when the minimum Core
-  /// becomes 0.1.10 for the public 0.1.11 release.
+  /// Retain until the legacy producers, including published 0.1.10's
+  /// unknown-TIS path, have left the supported Host range.
   private static func testLegacyCoreActivationBlockerWireCodes() throws {
     let fixtures: [(wireCode: String, code: LinnetSettingsContract.RuntimeReplyCode)] = [
       ("core_activation_applications_running", .coreActivationApplicationsRunning),
@@ -185,6 +189,31 @@ struct SettingsContractTests {
       else {
         fail("published 0.1.9 blocker wire code \(fixture.wireCode) changed meaning")
       }
+    }
+  }
+
+  private static func testNativeLearningDataVersionWireCompatibility() throws {
+    let legacy = LinnetSettingsContract.DataRequest(
+      transactionID: UUID(), command: .pause, candidate: nil,
+      requesterPID: getpid(), deadline: Date().addingTimeInterval(10),
+      nativeLearningDataVersion: nil)
+    let legacyData = try JSONEncoder().encode(legacy)
+    let legacyDocument = try JSONSerialization.jsonObject(with: legacyData) as? [String: Any]
+    let decodedLegacy = try JSONDecoder().decode(
+      LinnetSettingsContract.DataRequest.self, from: legacyData)
+    let current = LinnetSettingsContract.DataRequest(
+      transactionID: UUID(), command: .pause, candidate: nil,
+      requesterPID: getpid(), deadline: Date().addingTimeInterval(10))
+    let decodedCurrent = try JSONDecoder().decode(
+      LinnetSettingsContract.DataRequest.self,
+      from: JSONEncoder().encode(current))
+    guard legacyDocument?["nativeLearningDataVersion"] == nil,
+      decodedLegacy.nativeLearningDataVersion == nil,
+      decodedCurrent == current,
+      decodedCurrent.nativeLearningDataVersion
+        == LinnetSettingsContract.nativeLearningDataVersion
+    else {
+      fail("native learning-data capability wire compatibility changed")
     }
   }
 
@@ -471,7 +500,7 @@ struct SettingsContractTests {
   private static func inTemporaryBundleTree(
     _ body: (Bundle, Bundle, String, String) throws -> Void
   ) throws {
-    let directory = FileManager.default.temporaryDirectory
+    let directory = LinnetTestScratch.directory
       .appendingPathComponent(
         "LinnetSettingsContractTests-\(UUID().uuidString)", isDirectory: true)
     let hostURL = directory.appendingPathComponent("Host.app", isDirectory: true)

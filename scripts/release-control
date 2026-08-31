@@ -2,9 +2,9 @@
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# The maintainer Mac consumes the exact bytes staged by the candidate Action.
-# After installed-product acceptance, one byte-bound SSH tag authorizes the
-# GitHub Action publisher. Local code cannot upload or publish release bytes.
+# Local source acceptance is a maintainer statement bound to one Git tree.
+# The candidate Action builds and verifies release bytes; installed-product
+# acceptance then authorizes their publication. Local code never uploads bytes.
 
 set -euo pipefail
 
@@ -12,21 +12,134 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 repository="Ares-X/Linnet"
 command_name="${1:-}"
 release_dir="${2:-}"
+source_receipt="${repo_root}/build/linnet-source-verification.json"
 
 fail() {
   echo "release-control: $*" >&2
   exit 1
 }
 
-[[ "${command_name}" == authorize && "$#" -eq 2 ]] || {
+usage() {
   echo "usage: scripts/release-control authorize ABSOLUTE_RELEASE_DIRECTORY" >&2
+  echo "       scripts/release-control {verify-local|candidate}" >&2
+  echo "       scripts/release-control verify-source CANDIDATE_REF COMMIT" >&2
   exit 64
 }
+case "${command_name}" in
+  verify-local|candidate) [[ "$#" -eq 1 ]] || usage ;;
+  verify-source) [[ "$#" -eq 3 ]] || usage ;;
+  authorize) [[ "$#" -eq 2 ]] || usage ;;
+  *) usage ;;
+esac
+
+# A separate index collects the working bytes, including pending additions and
+# deletions, without changing the developer's staged changes. Git owns the hash,
+# modes and gitlinks; generated dependencies remain action-install's boundary.
+source_tree() (
+  set -e
+  [[ ! -L "${repo_root}/build" ]] || fail "build directory is a symlink"
+  mkdir -p "${repo_root}/build"
+  snapshot_dir="$(mktemp -d "${repo_root}/build/source-index.XXXXXX")"
+  trap 'find "${snapshot_dir}" -depth -delete' EXIT
+  export GIT_INDEX_FILE="${snapshot_dir}/index"
+  git -C "${repo_root}" read-tree HEAD
+  git -C "${repo_root}" submodule foreach --quiet --recursive \
+    'unset GIT_INDEX_FILE; test -z "$(git status --porcelain=v1 --untracked-files=all)"' ||
+    fail "a dependency checkout has unverified local changes"
+  git -C "${repo_root}" add --all -- .
+  git -C "${repo_root}" write-tree
+)
+
+# One decoder is used by both the local candidate request and the Action.
+# This records trusted-maintainer acceptance, not independent cloud execution.
+verify_receipt() {
+  ruby -rjson -e '
+    receipt = JSON.parse(STDIN.read)
+    abort "invalid source receipt" unless receipt.keys.sort ==
+      %w[format profiles source_tree toolchain verified_at] && receipt.fetch("format") == 1 &&
+      receipt.fetch("source_tree") == ARGV.fetch(0) &&
+      receipt.fetch("source_tree").match?(/\A[0-9a-f]{40}\z/)
+    profiles = receipt.fetch("profiles")
+    abort "incomplete source acceptance" unless profiles.keys.sort ==
+      %w[app lint periphery rime settings_ui swift] &&
+      %w[app lint periphery rime swift].all? { |name| profiles[name] == "PASS" } &&
+      %w[PASS NOT_EXERCISED].include?(profiles["settings_ui"])
+    tools = receipt.fetch("toolchain")
+    abort "missing toolchain evidence" unless tools.keys.sort == %w[macos swift xcode] &&
+      tools.values.all? { |value| value.is_a?(String) && !value.empty? } &&
+      receipt.fetch("verified_at").is_a?(String) && !receipt["verified_at"].empty?
+    puts profiles.fetch("settings_ui")
+  ' "$1"
+}
+
+verify_source_tag() {
+  local reference="$1" expected_revision="$2" tag_object tree
+  [[ "${expected_revision}" =~ ^[0-9a-f]{40}$ &&
+    "${reference}" =~ ^refs/tags/linnet-candidate/v[0-9]+\.[0-9]+\.[0-9]+-${expected_revision}$ ]] ||
+    fail "invalid source verification request"
+  [[ "$(git -C "${repo_root}" rev-parse --verify HEAD^{commit})" == "${expected_revision}" ]] ||
+    fail "source verification checkout differs from the requested commit"
+  # cat-file tag rejects the retired lightweight candidate path.
+  tag_object="$(git -C "${repo_root}" cat-file tag "${reference}")" ||
+    fail "candidate requires an annotated source-verification tag"
+  [[ "${tag_object}" == "object ${expected_revision}"$'\n'"type commit"$'\n'* &&
+    "$(git -C "${repo_root}" rev-parse --verify "${reference}^{commit}")" == "${expected_revision}" ]] ||
+    fail "candidate tag does not name the exact commit"
+  tree="$(git -C "${repo_root}" rev-parse --verify "${expected_revision}^{tree}")"
+  printf '%s\n' "${tag_object#*$'\n\n'}" | verify_receipt "${tree}"
+}
+
+if [[ "${command_name}" == verify-source ]]; then
+  verify_source_tag "$2" "$3"
+  exit
+fi
+
+if [[ "${command_name}" == verify-local ]]; then
+  cd "${repo_root}"
+  before_tree="$(source_tree)"
+  [[ ! -L "${source_receipt}" ]] || fail "source receipt is a symlink"
+  rm -f -- "${source_receipt}"
+  xcode_version="$(xcodebuild -version)"
+  swift_version="$(xcrun swiftc --version)"
+  macos_version="$(sw_vers -buildVersion)"
+  ./action-build.sh release
+  scripts/run_swiftlint.sh
+  tests/verify_release_automation.sh
+  tests/verify_publication_owner.sh
+  tests/verify_development.sh all
+  scripts/run_periphery.sh
+  settings_ui=NOT_EXERCISED
+  if [[ "${LINNET_ISOLATED_UI_TEST_DESKTOP:-}" == 1 ]] &&
+    [[ "$(DevToolsSecurity -status 2>&1)" == *enabled* ]]; then
+    tests/verify_visible_settings_fixture.sh --ui-test
+    settings_ui=PASS
+  fi
+  [[ "$(source_tree)" == "${before_tree}" ]] ||
+    fail "source changed during local verification; no receipt was issued"
+  receipt_stage="$(mktemp "${source_receipt}.XXXXXX")"
+  trap 'rm -f -- "${receipt_stage}"' EXIT
+  ruby -rjson -rtime -e '
+    puts JSON.pretty_generate({
+      format: 1, source_tree: ARGV.fetch(0), verified_at: Time.now.utc.iso8601,
+      profiles: { app: "PASS", swift: "PASS", rime: "PASS", lint: "PASS",
+                  periphery: "PASS", settings_ui: ARGV.fetch(1) },
+      toolchain: { xcode: ARGV.fetch(2), swift: ARGV.fetch(3), macos: ARGV.fetch(4) }
+    })
+  ' "${before_tree}" "${settings_ui}" "${xcode_version}" \
+    "${swift_version}" "${macos_version}" >"${receipt_stage}"
+  verify_receipt "${before_tree}" <"${receipt_stage}" >/dev/null
+  mv "${receipt_stage}" "${source_receipt}"
+  echo "Local source acceptance: ${before_tree}; Settings UI: ${settings_ui}"
+  exit
+fi
+
+if [[ "${command_name}" == authorize ]]; then
 [[ "${release_dir}" == /* && -d "${release_dir}" && ! -L "${release_dir}" ]] ||
   fail "release directory is unsafe"
 release_dir="$(cd "${release_dir}" && pwd -P)"
+fi
 
-for required_command in gh git make ruby; do
+for required_command in git ruby; do
   command -v "${required_command}" >/dev/null 2>&1 ||
     fail "${required_command} is unavailable"
 done
@@ -47,6 +160,34 @@ version="$(sed -n \
   "${repo_root}/config/LinnetProduct.xcconfig")"
 [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
   fail "product version is invalid"
+
+if [[ "${command_name}" == candidate ]]; then
+  [[ -f "${source_receipt}" && ! -L "${source_receipt}" ]] ||
+    fail "run verify-local before requesting a candidate"
+  tree="$(git -C "${repo_root}" rev-parse --verify HEAD^{tree})"
+  verify_receipt "${tree}" <"${source_receipt}" >/dev/null
+  candidate_ref="refs/tags/linnet-candidate/v${version}-${revision}"
+  if ! git -C "${repo_root}" show-ref --verify --quiet "${candidate_ref}"; then
+    git -C "${repo_root}" -c tag.gpgSign=false tag --annotate \
+      "${candidate_ref#refs/tags/}" "${revision}" --file "${source_receipt}"
+  fi
+  verify_source_tag "${candidate_ref}" "${revision}" >/dev/null
+  candidate_object="$(git -C "${repo_root}" rev-parse --verify "${candidate_ref}")"
+  existing="$(git -C "${repo_root}" ls-remote origin "${candidate_ref}")" ||
+    fail "candidate request lookup failed"
+  if [[ -z "${existing}" ]]; then
+    git -C "${repo_root}" push origin "${candidate_ref}:${candidate_ref}"
+  elif [[ "${existing}" != "${candidate_object}"$'\t'"${candidate_ref}" ]]; then
+    fail "candidate request already names another tag object"
+  fi
+  echo "Action candidate requested for source tree ${tree} at ${revision}"
+  exit
+fi
+
+for required_command in gh make; do
+  command -v "${required_command}" >/dev/null 2>&1 ||
+    fail "${required_command} is unavailable"
+done
 catalog_sequence="$("${repo_root}/package/data_release_metadata" \
   get-catalog-sequence "${repo_root}/config/linnet-data-releases.json")"
 
@@ -69,7 +210,7 @@ authorization_ref="refs/tags/${authorization_tag}"
 gh auth status --hostname github.com >/dev/null
 # Authorization never uploads or repairs bytes after installed acceptance. It
 # proves that all three Action-staged drafts still contain the accepted
-# eight-file set, then creates the immutable tag consumed by release-ci.yml.
+# manifest-owned set, then creates the immutable tag consumed by release-ci.yml.
 for channel in core data public; do
   GITHUB_REPOSITORY="${repository}" \
     "${repo_root}/package/stage_github_release" verify \

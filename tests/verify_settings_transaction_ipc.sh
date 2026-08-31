@@ -150,6 +150,16 @@ run_rejection() {
   wait_for_host "${log}"
 }
 
+run_compatibility_rejection() {
+  local label="$1"
+  local capability="$2"
+  local endpoint="${fixture}/${label}.sock"
+  local log="${fixture}/${label}.host.log"
+  start_host --serve-rejection "${endpoint}" "${log}"
+  run_settings "${endpoint}" --request-pause "${capability}" --expect-rejection
+  wait_for_host "${log}"
+}
+
 # Positive: two distinct compiled executable paths/processes owned by the same
 # user exchange a real progress + terminal reply sequence.
 positive_endpoint="${fixture}/positive.sock"
@@ -233,4 +243,29 @@ rg -Fq \
 
 run_rejection forged-requester-pid --forged-requester-pid
 
-echo "LinnetSettingsTransactionIPCTwoProcessTests: PASS (activate + Core termination + reload + active/stale owner classification + live Core replacement + 3s timeout/recovery generation + owner-only socket + peer UID/PID + forged-pid)"
+# Published Settings does not declare a native learning-data logical view, so
+# it may still diagnose and request Core activation but cannot pause Rime.
+run_compatibility_rejection missing-native-learning-data-version \
+  --legacy-native-learning-data
+run_compatibility_rejection unknown-native-learning-data-version \
+  --unknown-native-learning-data
+
+pause_endpoint="${fixture}/pause.sock"
+pause_log="${fixture}/pause.host.log"
+start_host --serve-success "${pause_endpoint}" "${pause_log}"
+run_settings "${pause_endpoint}" --request-pause
+wait_for_host "${pause_log}"
+
+legacy_diagnose_endpoint="${fixture}/legacy-diagnose.sock"
+legacy_diagnose_log="${fixture}/legacy-diagnose.host.log"
+start_host --serve-success "${legacy_diagnose_endpoint}" "${legacy_diagnose_log}"
+run_settings "${legacy_diagnose_endpoint}" --request-diagnose --legacy-native-learning-data
+wait_for_host "${legacy_diagnose_log}"
+
+legacy_core_endpoint="${fixture}/legacy-core-activation.sock"
+legacy_core_log="${fixture}/legacy-core-activation.host.log"
+start_host --serve-core-activation "${legacy_core_endpoint}" "${legacy_core_log}"
+run_settings "${legacy_core_endpoint}" --request-core-activation --legacy-native-learning-data
+wait_for_host "${legacy_core_log}"
+
+echo "LinnetSettingsTransactionIPCTwoProcessTests: PASS (activate + Core termination + reload + current pause capability + legacy/unknown pause rejection + legacy diagnose/Core + active/stale owner classification + live Core replacement + 3s timeout/recovery generation + owner-only socket + peer UID/PID + forged-pid)"

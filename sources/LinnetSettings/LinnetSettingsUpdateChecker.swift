@@ -77,6 +77,11 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   @Published private(set) var runtimeVersionState: RuntimeVersionState =
     .checking(installed: nil)
 
+  var activationInProgress: Bool {
+    if case .applying = runtimeVersionState { return true }
+    return false
+  }
+
   private let identityBundle: Bundle
   private let hostBundleURL: URL?
   private let hostBundleIdentifier: String?
@@ -113,6 +118,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   }
 
   func refreshRuntime() {
+    guard !activationInProgress else { return }
     refreshInstalledIdentity()
     runtimeTask?.cancel()
     runtimeCycle &+= 1
@@ -177,7 +183,7 @@ extension LinnetSettingsUpdateChecker {
         hostAcceptedActivation = true
         try await awaitHostExit()
         try await launchCanonicalHost()
-        let health = try await awaitInstalledHost()
+        let health = try await awaitInstalledHost(identity: identities.installed)
         finishRuntimeApplied(health, cycle: activeCycle)
       } catch is CancellationError {
         return
@@ -198,7 +204,7 @@ extension LinnetSettingsUpdateChecker {
   }
 
   private func startCheck(replacingCurrent: Bool) {
-    guard replacingCurrent || !active else { return }
+    guard !activationInProgress, replacingCurrent || !active else { return }
     refreshInstalledIdentity()
     task?.cancel()
     cycle &+= 1
@@ -308,13 +314,15 @@ extension LinnetSettingsUpdateChecker {
     }
   }
 
-  private func awaitInstalledHost() async throws -> LinnetSettingsContract.RuntimeHealth {
-    guard let installedIdentity else { throw ActivationFailure.missingInstalledHost }
+  private func awaitInstalledHost(
+    identity: LinnetSettingsContract.ProductIdentity
+  ) async throws -> LinnetSettingsContract.RuntimeHealth {
     for _ in 0..<80 {
       try Task.checkCancellation()
       if let reply = try? await request(.diagnose, timeout: 1),
         let health = reply.health,
-        health.productIdentity == installedIdentity {
+        health.productIdentity == identity,
+        health.state == .running, health.phase == .running {
         return health
       }
       try await Task.sleep(nanoseconds: 100_000_000)
@@ -365,12 +373,13 @@ extension LinnetSettingsUpdateChecker {
   private func coreActivationIssue(
     for code: LinnetSettingsContract.RuntimeReplyCode
   ) -> LinnetSettingsContract.CoreActivationBlocker? {
-    // The two 0.1.9 legacy blockers below are consumed before Host acceptance,
+    // The legacy blockers below are consumed before Host acceptance,
     // so they cannot enter process observation, Host exit, launch, or success.
-    // Remove both mappings with their wire cases when 0.1.11 raises the
-    // minimum Core to 0.1.10.
+    // SettingsContract owns their removal condition; published 0.1.10 still
+    // emits the legacy unknown-client code for unavailable TIS state.
     switch code {
     case .coreActivationInputSourceActive: .inputSourceActive
+    case .coreActivationInputSourceUnavailable: .inputSourceUnavailable
     case .coreActivationCompositionActive: .compositionActive
     case .coreActivationDataTransactionActive: .dataTransactionActive
     case .coreActivationApplicationsRunning: .applicationsStillRunning

@@ -3,43 +3,6 @@ import Darwin
 import Foundation
 
 extension LinnetDataRegistry {
-  func receiptForCatalog(
-    _ catalog: LinnetDataChannel.Verified
-  ) throws -> DataChannelReceipt {
-    guard catalog.catalog.sequence > 0, Self.isSHA256(catalog.digest) else {
-      throw Failure.invalidActiveState
-    }
-    return .init(format: "io.github.ares-x.linnet.data-channel-receipt.v1",
-      sequence: catalog.catalog.sequence, digest: catalog.digest)
-  }
-
-  func validateDataChannelReceipt(_ candidate: DataChannelReceipt?) throws {
-    guard let candidate else { return }
-    guard validDataChannelReceipt(candidate) else { throw Failure.invalidActiveState }
-    guard let previous = try acceptedDataChannelReceipt() else { return }
-    guard candidate.sequence > previous.sequence
-      || (candidate.sequence == previous.sequence && candidate.digest == previous.digest)
-    else { throw Failure.staleDataChannel }
-  }
-
-  func acceptedDataChannelReceipt() throws -> DataChannelReceipt? {
-    let active = try loadActiveStateDocument().state
-    if active.publication == .committed { return active.acceptedCatalog }
-    guard let transactionID = active.transactionID else { throw Failure.invalidActiveState }
-    let previous = transactionsDirectory.appending(
-      path: transactionID.uuidString, directoryHint: .isDirectory).appending(
-      path: "language-active", directoryHint: .isDirectory)
-    let previousState = try loadActiveStateDocument(at: previous).state
-    guard previousState.publication == .committed else { throw Failure.invalidActiveState }
-    return previousState.acceptedCatalog
-  }
-
-  func validDataChannelReceipt(_ receipt: DataChannelReceipt?) -> Bool {
-    guard let receipt else { return true }
-    return receipt.format == "io.github.ares-x.linnet.data-channel-receipt.v1"
-      && receipt.sequence > 0 && Self.isSHA256(receipt.digest)
-  }
-
   func loadActiveStateDocument() throws -> (state: ActiveState, data: Data) {
     try loadActiveStateDocument(at: activeSharedDataDirectory)
   }
@@ -588,7 +551,9 @@ extension LinnetDataRegistry {
       }
       _ = try Self.validateOwnedDirectory(info, at: directory)
       guard info.st_dev == rootDevice else { throw Failure.unsafePath(directory.path) }
-      if name != "UserData" && name != "Backups" && name != "Transactions" { found = true }
+      // Settings IPC and its mutation lease may precede the first language
+      // installation. Administrative State is not a language-data baseline.
+      if name != "UserData" && name != "Backups" && name != "Transactions" && name != "State" { found = true }
     }
     return found
   }

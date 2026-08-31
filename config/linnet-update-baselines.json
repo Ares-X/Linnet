@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "core_source": "release_0_1_10",
+  "sources": {
+    "release_0_1_10": {
+      "repository": "https://github.com/Ares-X/Linnet.git",
+      "release": "v0.1.10",
+      "revision": "56cb640678fa3e726d95c9e208505e2f90f71df9",
+      "asset": "Linnet.pkg",
+      "asset_download_url": "https://github.com/Ares-X/Linnet/releases/download/v0.1.10/Linnet.pkg",
+      "bytes": 425627486,
+      "sha256": "9d6068cda43e8dfc5f4538d4b9de6f6109ead570f06f837adb94bce865956a88"
+    }
+  },
+  "pack_baselines": {
+    "chinese": {
+      "source": "release_0_1_10",
+      "target_sequence": 35,
+      "content_sha256": "2a826ca1f59563ba3d00a8e90bca6b006e84fb73ca02b0cbbd422144643e09d3"
+    },
+    "english": {
+      "source": "release_0_1_10",
+      "target_sequence": 23,
+      "content_sha256": "aa54511b26d3c595d7e8d66c4f63767fd473fa244963b643d8d8c3d8ab69f7d7"
+    },
+    "lts": {
+      "source": "release_0_1_10",
+      "target_sequence": 5,
+      "content_sha256": "c5fca7cf43af7314c76c802903679eb7642892ebb8cdcf8b75100aa9ae0deecc"
+    },
+    "extended": {
+      "source": "release_0_1_10",
+      "target_sequence": 8,
+      "content_sha256": "8df604e4e5447abbd3ea45274c7b685a3556a0c238635d3b01f8e81c8837f84d"
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Final byte-integrity boundary for the eight channel-routed community assets.
+# Final byte-integrity boundary for the channel-routed community assets.
 # This verifies already finalized bytes before the stable, Core and data
 # Releases consume the canonical manifest; it never signs, repairs or discovers
 # a replacement artifact. User approval is the explicit macOS trust boundary.
@@ -45,7 +45,8 @@ expected_files="$("${project_root}/package/release_asset_manifest" \
 actual_files="$(find "${release_dir}" -mindepth 1 -maxdepth 1 -type f ! -type l \
   -exec basename {} \; | LC_ALL=C sort)"
 [[ "${actual_files}" == "${expected_files}" &&
-  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 8 ]] ||
+  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == \
+  "$(printf '%s\n' "${expected_files}" | wc -l | tr -d ' ')" ]] ||
   fail_publication "candidate channel inventory is not exact"
 
 work_root="$(mktemp -d "${TMPDIR:-/tmp}/linnet-publication-artifacts.XXXXXX")"
@@ -73,16 +74,16 @@ complete_pkg="${release_dir}/Linnet.pkg"
 verify_unsigned_installer "${core_pkg}"
 verify_unsigned_installer "${complete_pkg}"
 
-archive_root="${work_root}/expanded-core"
-pkgutil --expand-full "${core_pkg}" "${archive_root}"
+archive_root="${work_root}/expanded-complete"
+pkgutil --expand-full "${complete_pkg}" "${archive_root}"
 archive_apps=()
 while IFS= read -r app; do archive_apps+=("${app}"); done < <(
   find "${archive_root}" -type d -name Linnet.app ! -type l)
 [[ "${#archive_apps[@]}" -eq 1 ]] ||
-  fail_publication "Core package does not contain exactly one Linnet App"
+  fail_publication "Complete package does not contain exactly one target Linnet App"
 archive_identity="$("${project_root}/scripts/linnet-code-identity" verify-product \
   "${archive_apps[0]}")" ||
-  fail_publication "Core package publication identity is invalid"
+  fail_publication "Complete target publication identity is invalid"
 
 for spec in "core:${core_pkg}" "complete:${complete_pkg}"; do
   edition="${spec%%:*}"; package="${spec#*:}"

@@ -227,6 +227,19 @@ struct LinnetDataRegistry: Sendable {
     let format: String
     let sequence: UInt64
     let digest: String
+    let packSnapshotDigest: String?
+
+    enum CodingKeys: String, CodingKey {
+      case format, sequence, digest
+      case packSnapshotDigest = "pack_snapshot_digest"
+    }
+
+    init(format: String, sequence: UInt64, digest: String, packSnapshotDigest: String? = nil) {
+      self.format = format
+      self.sequence = sequence
+      self.digest = digest
+      self.packSnapshotDigest = packSnapshotDigest
+    }
   }
 
   struct PackDeletionIdentity: Codable {

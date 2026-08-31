@@ -88,8 +88,8 @@ struct LinnetSettingsDownloadTransportTests {
     let oversizedDestination = root.appending(path: "oversized.linnetpack")
     try await expect(.responseTooLarge, requiresStop: false) {
       StubURLProtocol.install([.response(headers: [:]), .finish])
-      try await transport().downloadPack(
-        artifact(bytes: LinnetPackContract.maximumContainerBytes + 1),
+      try await transport().downloadArtifact(
+        from: artifact(bytes: 1).url, expectedBytes: LinnetPackContract.maximumContainerBytes + 1,
         to: oversizedDestination)
     }
     try assertUnpublished(oversizedDestination, root: root, label: "oversized artifact")
@@ -201,7 +201,7 @@ struct LinnetSettingsDownloadTransportTests {
     let appearedTransport = transport()
     let appearedArtifact = artifact(bytes: 4)
     let appearedTask = Task.detached {
-      try await appearedTransport.downloadPack(appearedArtifact, to: destination)
+      try await appearedTransport.downloadArtifact(from: appearedArtifact.url, expectedBytes: appearedArtifact.bytes, to: destination)
     }
     do {
       try await waitForPartial(in: root)
@@ -261,7 +261,7 @@ struct LinnetSettingsDownloadTransportTests {
     let destination = root.appending(path: "redirect-rejected.linnetpack")
     try await expect(.invalidURL) {
       StubURLProtocol.install([.redirect(URL(string: "https://example.com/pack")!)])
-      try await transport().downloadPack(artifact(bytes: 4), to: destination)
+      try await transport().downloadArtifact(from: artifact(bytes: 4).url, expectedBytes: 4, to: destination)
     }
     try assertUnpublished(destination, root: root, label: "rejected pack redirect")
   }
@@ -291,8 +291,8 @@ struct LinnetSettingsDownloadTransportTests {
     StubURLProtocol.install([
       .response(headers: ["Content-Length": "4"]), .data(Data("pack".utf8)), .finish,
     ])
-    try await transport(source: source).downloadPack(
-      artifact(bytes: 4), to: destination)
+    try await transport(source: source).downloadArtifact(
+      from: artifact(bytes: 4).url, expectedBytes: 4, to: destination)
     try require(try Data(contentsOf: destination) == Data("pack".utf8), "mirror pack")
     try require(
       StubURLProtocol.requests.count == 1,
@@ -339,8 +339,8 @@ struct LinnetSettingsDownloadTransportTests {
     StubURLProtocol.install([
       .response(headers: ["Content-Length": "4"]), .data(Data("pack".utf8)), .finish,
     ])
-    try await transport(source: source).downloadPack(
-      artifact(bytes: 4), to: destination)
+    try await transport(source: source).downloadArtifact(
+      from: artifact(bytes: 4).url, expectedBytes: 4, to: destination)
     try require(
       try Data(contentsOf: destination) == Data("pack".utf8),
       "public mirror pack")
@@ -432,7 +432,7 @@ struct LinnetSettingsDownloadTransportTests {
     let cancellationTransport = transport()
     let cancellationArtifact = artifact(bytes: 4)
     let task = Task.detached {
-      try await cancellationTransport.downloadPack(cancellationArtifact, to: destination)
+      try await cancellationTransport.downloadArtifact(from: cancellationArtifact.url, expectedBytes: cancellationArtifact.bytes, to: destination)
     }
     try await Task.sleep(nanoseconds: 80_000_000)
     task.cancel()
@@ -457,8 +457,8 @@ struct LinnetSettingsDownloadTransportTests {
       .response(headers: [:]), .suspend,
     ])
     try await expectTimeout(generation: idlePackGeneration) {
-      try await transport(policy: idle).downloadPack(
-        artifact(bytes: 4), to: idleDestination)
+      try await transport(policy: idle).downloadArtifact(
+        from: artifact(bytes: 4).url, expectedBytes: 4, to: idleDestination)
     }
     try assertUnpublished(idleDestination, root: root, label: "idle timeout")
 
@@ -483,8 +483,8 @@ struct LinnetSettingsDownloadTransportTests {
       .delayedData(Data("ck".utf8), 0.4), .finish,
     ])
     try await expectTimeout(generation: totalPackGeneration) {
-      try await transport(policy: total).downloadPack(
-        artifact(bytes: 4), to: totalDestination)
+      try await transport(policy: total).downloadArtifact(
+        from: artifact(bytes: 4).url, expectedBytes: 4, to: totalDestination)
     }
     try assertUnpublished(totalDestination, root: root, label: "total timeout")
   }
@@ -522,7 +522,7 @@ struct LinnetSettingsDownloadTransportTests {
     _ events: StubURLProtocol.Event...
   ) async throws {
     StubURLProtocol.install(events)
-    try await transport().downloadPack(artifact(bytes: UInt64(expected.count)), to: destination)
+    try await transport().downloadArtifact(from: artifact(bytes: 1).url, expectedBytes: UInt64(expected.count), to: destination)
   }
 
   private static func artifact(bytes: UInt64) -> LinnetDataChannel.Artifact {
@@ -669,7 +669,7 @@ struct LinnetSettingsDownloadTransportTests {
   }
 
   private static func temporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appending(
+    let url = LinnetTestScratch.directory.appending(
       path: "linnet-download-\(UUID().uuidString)", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(
       at: url, withIntermediateDirectories: false,
