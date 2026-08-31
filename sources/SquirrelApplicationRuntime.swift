@@ -125,6 +125,7 @@ extension SquirrelApplicationDelegate {
       inputController.resetModifierEpoch()
     }
     isRimeInputSuspended = false
+    rimeSyncController.start()
   }
   private func startStaleSessionCleaner() {
     staleSessionCleaner?.invalidate()
@@ -282,33 +283,19 @@ extension SquirrelApplicationDelegate {
 }
 
 extension SquirrelApplicationDelegate {
-  func performRimeUserDataSync() -> LinnetRimeSyncOutcome {
+  func performRimeUserDataSync(directory: URL) -> LinnetRimeSyncOutcome {
     guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
-    let activeController = panel?.inputController
-    if panel?.isVisible == true || activeController?.hasPendingRimeInput == true {
-      return .busy
+    switch directory.path.withCString({ rimeAPI.sync_user_data_step($0) }) {
+    case 0: return .completed
+    case 1: return .inProgress
+    case 2: return .deferred
+    default: return .failed
     }
-    isRimeInputSuspended = true
-    activeController?.prepareForRimeMaintenance()
-    panel?.hide()
-    // librime sync owns CleanupAllSessions. The warm session is the single
-    // process-level preload owner; it never owns an application's composition,
-    // caret, or candidate publication state. Retire its identifier before the
-    // cleanup boundary so no stale session survives. Once sync finishes,
-    // recreate only that resource owner before reopening input; every client
-    // session continues to be created by its own InputMethodKit controller.
-    warmRimeSession.retire()
-    let synchronized = rimeAPI.sync_user_data()
-    if synchronized {
-      rimeAPI.join_maintenance_thread()
-    }
-    let resourcesReady = warmRimeSession.prepare(using: rimeAPI) != nil
-    reopenRimeInput()
-    return synchronized && resourcesReady ? .completed : .failed
   }
   // Finish the one current composition, close the input gate, then invalidate
   // every controller's Rime generation. Controllers recover on their next key.
   private func invalidateRimeSessions() {
+    rimeSyncController.stop()
     if let inputController = panel?.inputController {
       if canAcceptRimeInput {
         inputController.commitCurrentComposition()
@@ -317,6 +304,7 @@ extension SquirrelApplicationDelegate {
     isRimeInputSuspended = true
     panel?.hide()
     warmRimeSession.retire()
+    LinnetRimeSessionLease.retireAll()
     rimeAPI.cleanup_all_sessions()
   }
   // Tear down the runtime in the order librime-lua requires: destroy every
@@ -380,12 +368,12 @@ extension SquirrelApplicationDelegate {
       return
     }
     let decision = coreActivationDecision(requesterPID: request.requesterPID)
-    guard decision.isReady else {
+    if case .blocked(let code) = decision {
       reply(
         to: request.transactionID,
         status: .rejected,
-        code: coreActivationReplyCode(for: decision.blocker),
-        detail: coreActivationDiagnostic(decision.blocker)
+        code: code,
+        detail: "The explicit Core activation drain is not safe: \(code.rawValue)."
       )
       return
     }
@@ -417,25 +405,6 @@ extension SquirrelApplicationDelegate {
       dataTransactionIsActive: activeDataTransaction != nil,
       requesterIsAlive: LinnetSettingsContract.requesterIsAlive(requesterPID)
     )
-  }
-
-  private func coreActivationReplyCode(
-    for blocker: LinnetSettingsContract.CoreActivationBlocker?
-  ) -> LinnetSettingsContract.RuntimeReplyCode {
-    switch blocker {
-    case .inputSourceActive: .coreActivationInputSourceActive
-    case .compositionActive: .coreActivationCompositionActive
-    case .dataTransactionActive: .coreActivationDataTransactionActive
-    case .applicationsStillRunning: .coreActivationApplicationsRunning
-    case .unknownClient: .coreActivationUnknownClient
-    case .requesterUnavailable, nil: .coreActivationRequesterUnavailable
-    }
-  }
-
-  private func coreActivationDiagnostic(
-    _ blocker: LinnetSettingsContract.CoreActivationBlocker?
-  ) -> String {
-    "The explicit Core activation drain is not safe: \(blocker?.rawValue ?? "unknown")."
   }
 
   private enum SettingsPublicationScope: Equatable {

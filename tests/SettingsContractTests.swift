@@ -105,10 +105,13 @@ struct SettingsContractTests {
       dataTransactionIsActive: false,
       requesterIsAlive: true
     )
-    guard activeSource.blocker == .inputSourceActive,
-      activeComposition.blocker == .compositionActive,
-      activeTransaction.blocker == .dataTransactionActive,
-      unknownSource.blocker == .unknownClient
+    guard unknownSource != .blocked(.coreActivationUnknownClient) else {
+      fail("the current Host emitted a legacy unknown-client diagnosis for unavailable TIS state")
+    }
+    guard activeSource == .blocked(.coreActivationInputSourceActive),
+      activeComposition == .blocked(.coreActivationCompositionActive),
+      activeTransaction == .blocked(.coreActivationDataTransactionActive),
+      unknownSource == .blocked(.coreActivationInputSourceUnavailable)
     else {
       fail("Core activation no longer fails closed at every Host mutation boundary")
     }
@@ -118,7 +121,7 @@ struct SettingsContractTests {
       compositionIsActive: false,
       dataTransactionIsActive: false,
       requesterIsAlive: false
-    ).blocker == .requesterUnavailable else {
+    ) == .blocked(.coreActivationRequesterUnavailable) else {
       fail("a missing Settings requester did not block Core activation")
     }
   }
@@ -156,8 +159,8 @@ struct SettingsContractTests {
     }
   }
 
-  /// Remove with the two 0.1.9 RuntimeReplyCode cases when the minimum Core
-  /// becomes 0.1.10 for the public 0.1.11 release.
+  /// Retain until the legacy producers, including published 0.1.10's
+  /// unknown-TIS path, have left the supported Host range.
   private static func testLegacyCoreActivationBlockerWireCodes() throws {
     let fixtures: [(wireCode: String, code: LinnetSettingsContract.RuntimeReplyCode)] = [
       ("core_activation_applications_running", .coreActivationApplicationsRunning),

@@ -9,6 +9,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -61,6 +62,7 @@ final class SettingsModel: ObservableObject {
   private var appearancePublishTask: Task<Void, Never>?
   private var backupRefreshTask: Task<Void, Never>?
   private var legacyInspectionTask: Task<Void, Never>?
+  private var updateObservation: AnyCancellable?
   private let personalValidationExecutor = SettingsPersonalValidationExecutor()
   private var pendingAppearance: LinnetSettingsDocument.Appearance?
   private var initialStatePrepared = false
@@ -134,6 +136,9 @@ final class SettingsModel: ObservableObject {
       }
     }
     schedulePersonalValidation()
+    updateObservation = updateChecker.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
   }
 }
 

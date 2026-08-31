@@ -134,11 +134,12 @@ enum LinnetSettingsContract {
     case requesterExited = "requester_exited"
     case coreActivationAccepted = "core_activation_accepted"
     case coreActivationInputSourceActive = "core_activation_input_source_active"
+    case coreActivationInputSourceUnavailable = "core_activation_input_source_unavailable"
     case coreActivationCompositionActive = "core_activation_composition_active"
     case coreActivationDataTransactionActive = "core_activation_data_transaction_active"
-    /// Decode-only compatibility for the published 0.1.9 Host. Remove these
-    /// two wire cases and their cross-version fixtures when the minimum Core
-    /// becomes 0.1.10 for the public 0.1.11 release.
+    /// Decode-only compatibility for published older Hosts, including 0.1.10's
+    /// unknown-TIS reply. Retire with the fixtures only when every supported
+    /// Host uses the current input-source-unavailable code and no legacy blocker.
     case coreActivationApplicationsRunning = "core_activation_applications_running"
     case coreActivationUnknownClient = "core_activation_unknown_client"
     case coreActivationRequesterUnavailable = "core_activation_requester_unavailable"
@@ -146,6 +147,7 @@ enum LinnetSettingsContract {
 
   enum CoreActivationBlocker: String, Codable, Equatable, Sendable {
     case inputSourceActive = "input_source_active"
+    case inputSourceUnavailable = "input_source_unavailable"
     case compositionActive = "composition_active"
     case dataTransactionActive = "data_transaction_active"
     case applicationsStillRunning = "applications_still_running"
@@ -471,10 +473,11 @@ enum LinnetInputSourceSelection: Equatable, Sendable {
 /// Switching away from Linnet ends active input ownership; inactive client
 /// processes do not need to exit before the Host replaces itself.
 enum LinnetCoreActivationGate {
-  struct Decision: Equatable, Sendable {
-    let blocker: LinnetSettingsContract.CoreActivationBlocker?
+  enum Decision: Equatable, Sendable {
+    case ready
+    case blocked(LinnetSettingsContract.RuntimeReplyCode)
 
-    var isReady: Bool { blocker == nil }
+    var isReady: Bool { self == .ready }
   }
 
   static func evaluate(
@@ -484,22 +487,22 @@ enum LinnetCoreActivationGate {
     requesterIsAlive: Bool
   ) -> Decision {
     if dataTransactionIsActive {
-      return .init(blocker: .dataTransactionActive)
+      return .blocked(.coreActivationDataTransactionActive)
     }
     switch selectedInputSource {
     case .linnet:
-      return .init(blocker: .inputSourceActive)
+      return .blocked(.coreActivationInputSourceActive)
     case .unknown:
-      return .init(blocker: .unknownClient)
+      return .blocked(.coreActivationInputSourceUnavailable)
     case .other:
       break
     }
     if compositionIsActive {
-      return .init(blocker: .compositionActive)
+      return .blocked(.coreActivationCompositionActive)
     }
     guard requesterIsAlive else {
-      return .init(blocker: .requesterUnavailable)
+      return .blocked(.coreActivationRequesterUnavailable)
     }
-    return .init(blocker: nil)
+    return .ready
   }
 }

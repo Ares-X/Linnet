@@ -37,10 +37,10 @@ extension LinnetDataRegistry {
   ) throws -> DataChannelUpdateTransaction {
     try prepareMutableDirectories()
     let receipt = try receiptForCatalog(catalog)
-    try validateDataChannelReceipt(receipt)
     guard let set = catalog.catalog.activationSet(for: edition) else {
       throw Failure.invalidActiveState
     }
+    try validateDataChannelReceipt(receipt, artifacts: set.packs)
     let snapshot = try runtimeSnapshot(reconcilingStorage: false)
     switch set.updateSelection(installedPacks: snapshot.state.packs) {
     case .localAhead: throw Failure.staleDataChannel
@@ -325,29 +325,6 @@ extension LinnetDataRegistry {
     return (packs, edition)
   }
 
-  func validatedPreparationRecord(
-    update: DataChannelUpdateTransaction,
-    transaction: URL,
-    snapshot: RuntimeSnapshot,
-    packs: [ActivePack],
-    edition: Edition
-  ) throws -> LanguageTransactionRecord {
-    guard update.downloadDirectory.standardizedFileURL
-      == downloadsDirectory.appending(
-        path: update.transactionID.uuidString, directoryHint: .isDirectory).standardizedFileURL,
-      let record = validatedLanguageTransaction(at: transaction, now: Date()),
-      record.phase == .downloading,
-      record.baseRevision == snapshot.activeRevision,
-      record.edition == edition,
-      record.artifacts.count == packs.count,
-      record.artifacts.allSatisfy({ artifact in
-        packs.contains(where: { artifact.matches($0) })
-      })
-    else { throw Failure.invalidActiveState }
-    try validateDataChannelReceipt(record.catalog)
-    return record
-  }
-
   func materializeActivationCandidate(
     candidate: URL,
     transaction: URL,
@@ -479,7 +456,20 @@ extension LinnetDataRegistry {
     for directory in transactionPlan.scratch { try? FileManager.default.removeItem(at: directory) }
     let protected = transactionPlan.pendingPackPaths.union(cleanupFailures)
     for cleanup in packCleanups where !protected.contains(cleanup.relativePath) {
-      try? FileManager.default.removeItem(at: cleanup.directory)
+      guard let tree = preflightedTrees[cleanup.directory.standardizedFileURL.path] else { continue }
+      do {
+        // Only retired, preflighted pack directories lose their read-only bit.
+        // Files remain immutable; lchmod never follows a directory symlink.
+        for entry in [cleanup.directory] + tree {
+          var info = stat()
+          guard lstat(entry.path, &info) == 0 else { throw Failure.invalidActiveState }
+          if (info.st_mode & S_IFMT) == S_IFDIR {
+            guard info.st_uid == getuid(), (info.st_mode & (S_IWGRP | S_IWOTH)) == 0,
+              lchmod(entry.path, info.st_mode | S_IWUSR) == 0 else { throw Failure.invalidActiveState }
+          }
+        }
+        try FileManager.default.removeItem(at: cleanup.directory)
+      } catch { continue }
     }
   }
 

@@ -74,6 +74,7 @@ extension SettingsModel {
 
   var operationActive: Bool {
     activeOperation != nil || packDownloadActive || appearancePublishActive
+      || updateChecker.activationInProgress
   }
 
   var migrationAvailable: Bool {

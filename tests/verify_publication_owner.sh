@@ -257,7 +257,7 @@ then
   fail "the durable legacy-to-CMS migration acceptance contract is invalid"
 fi
 
-printf '%s\n' config/LinnetProduct.xcconfig |
+printf '%s\n' config/LinnetProduct.xcconfig data/linnet/lua/auto_phrase.lua |
   "${repo_root}/package/data_release_metadata" check-source-change >/dev/null
 if printf '%s\n' data/linnet/default.yaml |
     "${repo_root}/package/data_release_metadata" check-source-change \
@@ -377,7 +377,7 @@ ruby -e '
   abort unless release_uses.count(local_cache) == 1
   abort unless commit_uses.count(pinned_cache) == 1
   abort unless pull_request_uses.count(pinned_restore) == 1
-  abort unless release_uses.count(pinned_cache) == 1
+  abort unless release_uses.count(pinned_cache) == 0
   abort unless cache_uses == [pinned_cache, pinned_restore, pinned_cache, pinned_restore]
   abort unless commit.scan(/^\s*save:\s*true\s*$/).size == 1
   abort unless pull_request.scan(/^\s*save:\s*false\s*$/).size == 1
@@ -434,17 +434,19 @@ ruby -e '
   abort unless release.scan(%r{scripts/run_swiftlint\.sh}).size == 1
   abort unless release.scan(%r{tests/verify_release_automation\.sh}).size == 1
   abort unless release.scan(%r{tests/verify_publication_owner\.sh}).size == 1
-  abort unless release.scan(%r{tests/verify_development\.sh swift}).size == 1
+  abort unless release.scan(%r{tests/verify_development\.sh swift}).empty?
   abort unless release.scan(%r{tests/verify_development\.sh rime}).size == 1
-  abort unless release.scan(%r{scripts/run_periphery\.sh}).size == 1
+  abort unless release.scan(%r{scripts/run_periphery\.sh}).empty?
+  abort unless release.scan(%r{scripts/release-control verify-source}).size == 1
+  abort unless release.include?("steps.request.outputs.settings_ui == \x27NOT_EXERCISED\x27")
+  abort if release.include?("build/swift-unit-cache")
   abort unless release.scan(/^\s*make --no-print-directory archive\s*$/).size == 1
   ordered.call(release,
+    "scripts/release-control verify-source",
     "./action-install.sh",
     "scripts/run_swiftlint.sh",
     "tests/verify_publication_owner.sh",
-    "tests/verify_development.sh swift",
     "tests/verify_development.sh rime",
-    "scripts/run_periphery.sh",
     "make --no-print-directory archive")
   abort unless development_gate.include?("[all|app|swift|rime]")
   abort unless development_gate.scan(/^if \[\[ "\$\{run_app\}" -eq 1 \]\]; then$/).size == 1

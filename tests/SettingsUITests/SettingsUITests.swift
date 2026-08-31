@@ -275,7 +275,6 @@ final class SettingsUITests: XCTestCase {
       "Show IPA pronunciation",
       "Show Chinese definitions",
       "Show Smart English context suggestions",
-      "Suggest spelling corrections",
       "Capitalize sentence starts",
       "Learn from English selections",
       "Add a trailing space when Space accepts a candidate",

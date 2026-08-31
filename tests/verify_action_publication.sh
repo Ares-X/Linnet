@@ -411,6 +411,7 @@ unset GITHUB_ACTIONS
 write_release() {
   local state="$1" channel="$2" tag="$3" prerelease="$4" draft="$5"
   local release_revision="${6:-${candidate_revision}}"
+  local bytes_revision="${7:-current}"
   local release_title
   case "${channel}" in
     core) release_title="Linnet Core update ${version}" ;;
@@ -420,15 +421,17 @@ write_release() {
   ruby -rjson -rdigest - "${state}" "${fixture_assets}" \
       "${fixture_repo}/package/release_asset_manifest" "${channel}" \
       "${tag}" "${prerelease}" "${draft}" "${version}" \
-      "${catalog_sequence}" "${release_revision}" "${release_title}" <<'RUBY'
-state, root, manifest, channel, tag, prerelease, draft, version, sequence, revision, title = ARGV
+      "${catalog_sequence}" "${release_revision}" "${release_title}" "${bytes_revision}" <<'RUBY'
+state, root, manifest, channel, tag, prerelease, draft, version, sequence, revision, title, bytes_revision = ARGV
 names = IO.popen([manifest, channel, version, sequence], &:read).lines(chomp: true)
 assets = names.map do |name|
   path = File.join(root, name)
+  bytes = File.binread(path)
+  bytes = "previous candidate\n#{bytes}" if bytes_revision == "previous"
   {
     "name" => name,
-    "digest" => "sha256:#{Digest::SHA256.file(path).hexdigest}",
-    "size" => File.size(path),
+    "digest" => "sha256:#{Digest::SHA256.hexdigest(bytes)}",
+    "size" => bytes.bytesize,
   }
 end
 document = {
@@ -486,7 +489,7 @@ core_release="${stager_state}/releases/core-v${version}.json"
 cp "${core_release}" "${fixture}/exact-core-release.json"
 old_candidate_revision=89abcdef0123456789abcdef0123456789abcdef
 write_release "${stager_state}" core "core-v${version}" true true \
-  "${old_candidate_revision}"
+  "${old_candidate_revision}" previous
 : >"${stager_state}/mutations.log"
 GITHUB_ACTIONS=true run_stager "${stager_state}" stage core >/dev/null ||
   fail "same-version Core Draft from an older revision was not retired"
@@ -501,7 +504,7 @@ ruby -rjson -e '
   fail "replacement Core Draft does not own the current candidate"
 
 write_release "${stager_state}" public "v${version}" false true \
-  "${old_candidate_revision}"
+  "${old_candidate_revision}" previous
 : >"${stager_state}/mutations.log"
 GITHUB_ACTIONS=true run_stager "${stager_state}" stage public >/dev/null ||
   fail "same-version public Draft from an older revision was not retired"
@@ -666,13 +669,16 @@ GITHUB_ACTIONS=true run_publisher data-seed "${seed_tag}" >/dev/null ||
 [[ ! -e "${publisher_state}/data-channel/ref" ]] ||
   fail "data seed exposed an unaccepted stable Catalog"
 
-# Reset only the temporary fixture so the normal full-publication path still
-# proves that data is published in the ordered Core -> data transition.
-write_release "${publisher_state}" data "data-${catalog_sequence}" true true
+# Consume a Draft accepted by the real stager, including the earlier-revision
+# immutable data owner. This must remain valid all the way through publication.
+write_release "${publisher_state}" data "data-${catalog_sequence}" true true \
+  "${old_candidate_revision}"
 find "${publisher_state}/tags/data-${catalog_sequence}" -delete
 : >"${publisher_state}/mutations.log"
+run_stager "${publisher_state}" verify data >/dev/null ||
+  fail "stager rejected the earlier-revision data Draft before publication"
 run_publisher verify >/dev/null ||
-  fail "publisher rejected exact Action-staged draft metadata"
+  fail "publisher rejected the byte-identical earlier-revision data Draft accepted by staging"
 [[ ! -s "${publisher_state}/mutations.log" ]] ||
   fail "read-only publication verification changed GitHub state"
 

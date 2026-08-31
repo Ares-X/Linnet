@@ -212,7 +212,6 @@ verify_release_asset_subset() {
 }
 
 snapshot_release_assets
-verify_release_asset_subset
 
 release_state="$(ruby -rjson -e '
   release = JSON.parse(File.binread(ARGV.fetch(0)))
@@ -249,7 +248,11 @@ if [[ "${release_state}" == true ]]; then
           release.fetch("databaseId").positive? &&
           release.fetch("name") == ARGV.fetch(2) &&
           names.uniq == names &&
-          (names - expected_names).empty?
+          (names - expected_names).empty? &&
+          assets.all? { |asset|
+            asset.fetch("digest").match?(/\Asha256:[0-9a-f]{64}\z/) &&
+              asset.fetch("size").is_a?(Integer) && asset.fetch("size").positive?
+          }
       ' "${release_json}" "${expected}" "${title}" ||
         fail_stage "${tag} older Draft is not exact Linnet-owned state"
       gh release delete "${tag}" --repo "${repository}" --yes
@@ -266,7 +269,6 @@ if [[ "${release_state}" == true ]]; then
         "${candidate_revision}")" ||
         fail_stage "${tag} replacement Draft identity is invalid"
       snapshot_release_assets
-      verify_release_asset_subset
     fi
   fi
 else
@@ -278,6 +280,10 @@ else
     fail_stage "${tag} published tag resolves to another revision"
   fi
 fi
+
+# Old unpublished Core/Public bytes may be retired above. Every retained or
+# newly created release must match the exact candidate before any upload.
+verify_release_asset_subset
 
 if [[ "${release_state}" == true && "${mode}" == stage ]]; then
   while IFS=$'\t' read -r name _ _; do

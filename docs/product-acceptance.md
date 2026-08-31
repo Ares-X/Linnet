@@ -1,11 +1,207 @@
 # Linnet product acceptance
 
+## 2026-08-31 post-release repair candidate (in progress)
+
+Source baseline: `05dce7b`; this section does not supersede the published
+`0.1.10` acceptance below. The current task repairs existing behavior and local
+verification reuse; it does not authorize a new public release or input-source
+registration. Chinese `teh` ranking is explicitly deferred to product review.
+Smart English correction/fuzzy matching is a core capability, not a switch.
+
+2026-08-31 live-sync repair, base `05dce7b` plus the accepted uncommitted
+post-release candidate: the hourly main-run-loop callback enters
+`performRimeUserDataSync -> sync_user_data -> CleanupAllSessions / StartMaintenance`
+and then joins that worker. The first wrong owner transition is treating a
+learning merge as input-runtime maintenance; moving only the join off-thread
+would leave input unavailable. This repair replaces that runtime path, not the
+Rime merge rule or the hourly schedule. Cloud I/O must stay off the input thread,
+active database work must yield in bounded slices, and reversible learning must
+not be committed or aborted by synchronization. Live sessions and the input gate
+must remain unchanged throughout success, failure, cancellation and offline retry.
+
+Scope: the existing pinned librime interaction patch and its digest, the Host's
+sync call, and its existing scheduler (no new dependency version, daemon,
+registration, application restart or merge implementation). One sync scheduler
+and one Rime merge authority remain one each; the maintenance/join input path
+goes from one to zero. Work is bounded to eight tracked production paths and
+about 500 non-mechanical lines before redesign. Reuse `UserDbMerger` and the
+upstream snapshot format; retain the transaction boundary for reversible local
+learning, cancellation at the runtime lifetime boundary, and atomic cloud-file
+publication. Acceptance requires a RED/ GREEN live-session regression, slow-sync
+concurrent typing, merge/undo/clock/cancel checks and the integrated local gates.
+Installed IMK behavior is not established by native or scheduler fixtures.
+
+Final-review correction freeze: a sync step must only borrow a naturally loaded
+Db, never open or retain it across input callbacks. Cold dictionaries are
+explicitly deferred until naturally used; one cold dictionary must not prevent
+other active dictionaries from syncing. Export uses the Db's actual write
+generation (including deletion, not the learning clock) to reject a snapshot
+changed between slices. A source merge retains its original local learning
+clock across slices while never lowering the current durable clock. Every
+batch aborts on exceptions. One background worker owns snapshot destruction as
+well as file I/O until cancellation/publication is acknowledged. The obsolete
+Swift installation-file projection is deleted, not protected by another lock.
+
+Focused evidence on 2026-08-31, native patch SHA-256
+`c3c184fefeb0d2dc50a466ea4b060f8227b9746edb83cb6fc80ce3c65ccc316c`:
+the original offline API failed the live-session invariant; an early sliced
+candidate failed 65/129 pre-existing-word comparisons against one real upstream
+merge. Both regressions now pass. `--live-sync-probe` passed 1,116 continuous
+Chinese/English input samples, 4,096 imported rows, all 129 reference rows,
+pending-learning rollback, learning-clock increments, unchanged-file identity,
+cold-Db deferral/natural activation, injected second-write exception rollback,
+malformed-file rejection and cancellation. Step p99 was 0.157 ms, maximum
+0.817 ms; paired-key p99 was 1.251 ms (`build/live-sync-native.x9b8oT`). The
+Swift scheduler suite passed slow configuration I/O, cancellation, unchanged
+installation bytes, hourly limits and deferred scheduling. Final source review
+closed the five identified boundaries above. These are component/isolated-engine
+results; only a fresh complete source receipt can establish composite acceptance,
+and neither establishes installed IMK or two-Mac iCloud transport acceptance.
+
+Sync subtraction: merge authority and Db pool remain 1→1; automatic maintenance
+and joins, cold-Db open paths, cross-callback live-Db retention, and Swift
+installation writes are each 1→0. The LevelDb write-generation owner is a new
+single provider fact for export consistency, not a second learning clock.
+
+Pre-install review on 2026-08-31 blocks the previously verified source tree
+`f9e77ffd0ce02b80b1c632c485b9468b5494b1ab` from installation. A real native RED
+cancelled after 64 committed merge rows: both retry with the Db still loaded and
+retry after natural close/reopen changed 65/129 reference rows from `d=5` to
+`d=1`. The earliest wrong owner is the merge clock: the database tick was already
+advanced, but cancellation discarded its original in-memory baseline. A second
+RED published a 17,832,937-byte snapshot successfully, overwrote the old readable
+snapshot, then rejected its own output on the next read (16 MiB reader limit).
+The source receipt above proves its recorded suites, not these newly added rows.
+
+The proposed per-peer clock marker was rejected before production edits: if B
+merges before interrupted A resumes, B can already destroy the unprocessed local
+weights using the raised clock. A later restoration of A's baseline is too late.
+Thus recovery needs a Db-wide unfinished-merge order and stable resumable input,
+including source changes/disappearance; a RAM marker or peer-keyed clock is not
+a complete fix. This is a native transaction redesign boundary, not permission
+to add another Swift compensation or restart. No implementation of that redesign
+has been accepted yet. The size correction belongs in the existing worker:
+apply the reader's exact serialized-size limit before cloud rename and preserve
+the last readable snapshot on failure. Both real regressions must turn GREEN
+before a new complete source receipt, commit or local install.
+
+2026-08-31 authorized recovery redesign (same `05dce7b` dirty candidate):
+the user authorized completing the native transaction repair before commit and
+Core installation. The full state map is read -> stage -> activate -> materialize
+-> complete. Stage holds only incoming records in a private namespace of the
+existing LevelDb, with no live-record or learning-clock change. One small atomic
+activation freezes the local/remote clocks and makes the original `UserDbMerger`
+result visible. Existing Fetch/range accessors read this single logical view,
+including remote-only keys. Physical materialization does not change that view.
+User learning/deletion writes and consumes the corresponding pending record in
+the same existing undo transaction. Cancellation drops incomplete staging or
+leaves an activated transaction recoverable from the Db; source replacement,
+disappearance and a different peer cannot replace its frozen input. No sidecar,
+second Db, full local backup, background live-Db owner, or new merge formula.
+
+Recovery authority/subtraction ledger: merge formula remains 1->1 (extract the
+existing calculation, delete its old inline body); record-read authority remains
+1->1 (upgrade the existing LevelDb Fetch/accessor, no outer wrapper); unfinished
+merge authority moves RAM-only 1->0, durable Db transaction 0->1. Original clock
+and pending remote rows form one native transaction, not independent clock
+fallbacks. Sync's batch writer is replaced, not retained alongside the new path.
+The existing local undo transaction, bounded input-thread work, worker-owned
+cloud I/O and atomic cloud rename protect distinct mutation/time boundaries.
+Serialized output must satisfy the same 16 MiB limit as input before rename.
+
+Allowed implementation: native LevelDb, UserDbMerger and incremental manager in
+the existing patch, its lock digest, focused native regressions and this ledger;
+at most eight native production files/about 500 non-mechanical added lines and
+three hours, with two corrective loops before another design review. No changes
+to English/Chinese ranking policy, registration, user applications, or release
+public versions. Internal build becomes 70 for the new durable merge capability;
+the existing installer downgrade check then rejects old build-69 packages. There
+is no automatic old-Core fallback. Manually replacing the App or opening an
+active redo with an older native tool is not a supported rollback; restore/use
+the same-capability Core so it can materialize that transaction first. Required
+rows: staging/active cancellation, close/reopen, changed or
+absent source, peer ordering, lookup of new keys, learning/deletion/undo before
+materialization, failure rollback, unchanged cloud files, oversized output and
+continuous input latency. Then one exact local composite/receipt, bounded final
+review, commit, fixed-identity Core archive and typed installed activation.
+
+Review keeps upstream's buffered-transaction visibility: reads do not expose
+uncommitted WriteBatch writes. The acceptance oracle is the real uninterrupted
+merger plus the same UserDictionary/Commit/Abort operations, not a new
+read-your-writes isolation contract or a second transaction-value cache.
+
+Recovery correction 1, 2026-08-31 14:49, native patch `1fbdaa60`: the first
+two sync cycles finished in 2.536/5.864 seconds; the third exceeded the unchanged
+20-second fixture deadline with 673 pending records. Process 59589 sampling
+placed 947 main-thread samples in candidate lookup's pending LevelDb iterator
+seek, scanning materialized-record tombstones. The earliest wrong boundary is
+the redo range: after materializing a prefix, readers still seek from its old
+start. Persist the monotonic remaining-range cursor in the same transaction as
+materialization; both the existing accessor and drain start there. Cancellation
+and reopen read that same cursor. This adds one progress fact to the existing
+transaction, not a cache or another Db owner; consolidate the three journal
+state writers into one. No forced compaction, retained live iterator, relaxed
+deadline, or input/application restart is permitted.
+
+Focused GREEN, 2026-08-31, patch SHA-256
+`a3032c77a784260b1dc0ac44f4414a49861e2395aef0dc809b43683b72d7cbb1`:
+`tests/verify_rime_runtime.sh --live-sync-probe` passed against the rebuilt
+native library (`build/linnet-live-sync-cursor-green.log`). All 4,225 records
+were visible as one uninterrupted merge at activation. Staging cancellation,
+active cancellation, close/reopen, missing/replaced sources, interleaved peers,
+learning/deletion/undo after partial materialization, quoted/Unicode cursors,
+fault rollback and oversized-output preservation passed. The previously
+timed-out repeated cycle finished in 3.371 seconds. Across 8,794 typing cycles,
+all-key p95/p99 were 0.924/1.138 ms; sync-step p99 was 0.398 ms, observed maximum
+7.336 ms. The fixture's 20-second deadline and input-latency limits were not
+relaxed. This is isolated-engine/component evidence, not installed IMK or
+second-Mac iCloud acceptance.
+
+New user requirement, 2026-08-31: normal Core installation, backups and language
+updates must become genuine differential operations. Core/whole-pack selection
+does not satisfy file/block delta. Installation is paused while this additional
+contract is designed; current source does not claim these three paths are
+already differential. First installation or an explicitly requested repair may
+need a complete baseline; normal updates must not silently fall back to full
+copies/downloads. An isolated system-tool probe verified APFS `fclonefileat`
+plus `/usr/bin/rsync` protocol-29 batch generation/replay: a 4 MiB binary with a
+64-byte edit plus file addition/deletion produced a 10,530-byte batch and an
+exact reconstructed tree without modifying its base. This establishes local
+mechanism feasibility, not product-format, cross-macOS, install or backup
+acceptance. No new dependency or resident updater was installed.
+
+| Fact / boundary | Canonical owner retained | Interpretation to retire |
+| --- | --- | --- |
+| Core activation | UpdateChecker + Host activation decision | read-only refresh cancels mutation; Host emits legacy UI blockers |
+| Phrase learning | selected Rime Phrase code + existing userdb | shared text/comment-to-pronunciation cache |
+| Rime lifetime | existing Host maintenance and session lease | leases surviving actual all-session maintenance cleanup |
+| Learning sync | one Host scheduler + Rime UserDbMerger | sync as maintenance, main-thread cloud I/O/join, unchanged snapshot rewrites; unavailable directory equals disabled |
+| Catalog acceptance | DataChannel + Registry receipt transaction | pack sequence requires identical whole-Catalog bytes |
+| Draft retry | existing stage/publish owners | stage accepts identities final publish rejects |
+| Source verification | local release-control, exact source identity | full source/UI suites repeated by candidate Action |
+| Native test isolation | existing path-exact lifecycle check | inherited stdin/stdout/stderr logs treated as loaded runtime resources |
+
+Each boundary is limited to eight production files/about 500 non-mechanical
+lines before redesign; runtime work has a three-hour budget, ordinary fixes one
+hour, with at most two correction loops per defect. Focused regressions must
+fail before the corresponding fix and pass afterwards. Shared suites run
+serially once on the integrated candidate. Source, isolated engine, signed
+artifact and installed-product results remain separate. Existing signing,
+immutable published assets, atomic data rollback and input-source registration
+boundaries stay in place; no new client ledger, fallback or signing identity.
+Rollback is reverting the exact unshipped candidate, not resetting user data.
+
 Current policy: except for the isolated cold-build `data-seed` boundary below,
-one clean exact-main revision first passes the complete local composite and
-installation-preflight gates. Its candidate tag starts one macOS release job:
-one checkout/cache/hydrate, serial lint/owner/Swift/Rime/Periphery gates, then
-one CMS-signed archive build. No second full-CI workflow qualifies the same
-revision. A passing `package/verify_publication_artifacts` run freezes exactly
+the maintainer verifies one frozen source tree locally through the existing
+build, lint, owner, app/Swift/Rime and Periphery entrypoints. The ignored local
+receipt is a maintainer statement, not proof of a cloud test run. An annotated
+candidate tag binds that receipt to the clean exact-main commit and its Git
+tree. The macOS job validates the binding and history-sensitive metadata,
+restores locked build inputs and builds the CMS-signed archive; it does not
+repeat source tests recorded as PASS for that tree. Settings UI acceptance is
+either a real local isolated-desktop PASS or explicitly NOT_EXERCISED; only
+the latter runs in the candidate Action. No skipped row becomes a PASS.
+A passing `package/verify_publication_artifacts` run freezes exactly
 eight files: three Core-channel assets (Core PKG, uninstaller and raw Catalog),
 four immutable language packs and one public `Linnet.pkg`. The same job stages
 or verifies the candidate-bound Core/Public Drafts and the byte-bound data
@@ -19,6 +215,20 @@ set digest. That tag authorizes the Ubuntu Action's ordered
 Core/data/Catalog/public publication chain without a large-asset redownload or
 rebuild. Installation acceptance remains separate evidence and must name the
 exact revision, build, set digest and file hashes exercised.
+
+The data receipt remains the shipped v1 shape and whole-Catalog digest meaning.
+New writers additionally record one pack-snapshot digest. Readers migrate its
+absence only at begin/prepare from committed installed packs; ordinary reads
+do not repair state. A published 0.1.10 Host may discard this optional field on
+commit, so that handoff must remain visibly unmigrated. Registry owns this
+compatibility until the minimum supported Core requires the new receipt writer.
+
+Legacy activation blocker decoding is a separate compatibility boundary:
+published `0.1.10` source `56cb640` still emits `core_activation_unknown_client`
+for unknown TIS state. SettingsContract owns removal of these wire cases only
+after every supported Host has the current input-source-unavailable producer;
+merely raising the minimum Core to `0.1.10` is not sufficient. This does not
+extend the older identity-free-health compatibility branch.
 
 The historical UAT9 summary below is retained only as static evidence from
 2026-08-12; its former artifact directory has been removed from versioned
@@ -508,7 +718,7 @@ Chinese schema custom files plus the English schema custom file.
 | Panel | Current typed controls | Current evidence |
 | --- | --- | --- |
 | Appearance | seven candidate-window theme families (Xuan/Moon/Slate/Clay/Mist/Glass/Ink), each with Light/Dark twins while Settings keeps the native macOS appearance; 12–32 pt candidate font size, five macOS-native bilingual font presets, independent Chinese/English horizontal-or-vertical layouts, 3/5/7/9 candidates per page, scrolling-only or disclosure-enabled browsing, and a persistent local candidate preview | the right-column selector renders all seven Light/Dark pairs from the canonical bundled Catalog, and the preview uses the selected point size without scale-down or truncation. The typed renderer and canonical-preview parser cover all 14 variants and 21 family/mode projections. The disclosure state is transient per composition: when enabled, it exposes up to three real Rime pages with a 27-item hard cap and uses absolute candidate indices; it is not a third layout. Mist and neutral Glass share the one native material implementation, while the other five remain opaque. The optional current-client appearance capability is isolated behind one typed resolver and falls back to the macOS appearance when absent or malformed. Cross-application Light/Dark behavior, real-window theme comparison, disclosure mouse/AX interaction, material/contrast, Increase Contrast and Reduce Transparency review remain UAT / `NOT_EXERCISED` |
-| Input | Chinese profile (full pinyin or one of seven double-pinyin schemes), Emoji default, simplified/traditional output default, Chinese/English punctuation default, auxiliary-code single-character preference, default `\|` or explicit `;` pinyin-reverse trigger, enhanced/standard/off Chinese learning strategy, plus Smart English capitalization, IPA, definitions, prediction, correction, learning, Space and Tab behavior. The typed Settings document is the one profile owner: a fresh document defaults to full pinyin, while an existing explicit profile is preserved. Configuration Apply deterministically places it first in the Rime schema list and projects the same value to Smart English reverse lookup and direct-Shift return. `user.yaml` history is non-authoritative | native engine acceptance proves all eight profile projections and fresh-session ownership, direct Shift into Smart English and exact same-profile return, including two interleaved sessions, plus Shift+letter, held Shift, Caps Lock raw ASCII and Caps-on Shift pass-through. The document projection is exercised through deploy and fresh sessions for traditional output, reverse trigger, sentence capitalization and Tab; the separate personal runtime writer is exercised for disabled words. Installed fresh-default/profile preservation, key handling and the other seven profiles' learning rows remain UAT / `NOT_EXERCISED` |
+| Input | Chinese profile (full pinyin or one of seven double-pinyin schemes), Emoji default, simplified/traditional output default, Chinese/English punctuation default, auxiliary-code single-character preference, default `\|` or explicit `;` pinyin-reverse trigger, enhanced/standard/off Chinese learning strategy, plus Smart English capitalization, IPA, definitions, prediction, learning, Space and Tab behavior. English correction and fuzzy matching are always-on capabilities, not configurable switches. The typed Settings document is the one profile owner: a fresh document defaults to full pinyin, while an existing explicit profile is preserved. Configuration Apply deterministically places it first in the Rime schema list and projects the same value to Smart English reverse lookup and direct-Shift return. `user.yaml` history is non-authoritative | native engine acceptance proves all eight profile projections and fresh-session ownership, direct Shift into Smart English and exact same-profile return, including two interleaved sessions, plus Shift+letter, held Shift, Caps Lock raw ASCII and Caps-on Shift pass-through. The document projection is exercised through deploy and fresh sessions for traditional output, reverse trigger, sentence capitalization and Tab; the separate personal runtime writer is exercised for disabled words. Installed fresh-default/profile preservation, key handling and the other seven profiles' learning rows remain UAT / `NOT_EXERCISED` |
 | Dictionary | custom words, disabled English words and Text Expander | codec/transaction/engine probes pass; table editing and error-state visual audit pending |
 | Data & Updates | installed/running Core identity, always-present activation card, Catalog-bound pack update/cancel, GitHub direct/default, built-in GH-Proxy public mirror (third-party), advanced custom compatible HTTPS mirror, iCloud incremental learning sync, manual full backup/restore, transaction recovery history, edition repair, legacy import, learning reset, portable data and diagnostics | current source/component gates cover the selector, bilingual copy, no automatic fallback, one Catalog identity owner and one 0.1.9-to-0.1.10 identity-free Host compatibility branch. That branch must disappear at 0.1.11. Visible failure recovery, VoiceOver, real mirror transfer and installed lifecycle evidence are pending |
 
@@ -528,7 +738,7 @@ locale. Localization completeness alone is not visual proof.
 | J04 | left/right Shift tap, chord, hold and active composition | C, E, I | replay/engine covers exact-once raw-letter commit rather than candidate/completion selection in every Chinese profile and Smart English; active full-pinyin composition explicitly exercises both `Shift_L` and `Shift_R`. The required six-application installed workflow (Terminal, VS Code, Chrome, Apple Notes, Word and Teams) is `NOT_EXERCISED` |
 | J05 | Caps Lock, passwords, URLs, paths and code identifiers | E, I | The E regression gate covers Caps Lock down/type/up entering and leaving raw ASCII in both Chinese and Smart English. Current exact serial E execution and installed Terminal/password-field behavior remain pending. |
 | J06 | full pinyin and all seven double-pinyin profiles, including the live Chinese/English candidate boundary | E, I | The local freeze passes the complete serial Release/development composite, all eight 222-case Golden profiles, the native overlap/key/page-tail matrix and its mapping-mutation negative. Warm p95 is 0.510 ms for English and 1.392 ms for Chinese. E is passed for this source freeze; installed profile selection remains `NOT_EXERCISED`. |
-| J07 | Smart English completion, correction, ranking, independently configurable IPA/definition, prediction, correction and selection learning | C, E, I | The local freeze passes the complete serial owner and native rows for Space behavior, arrow and `1–9` selection, passive-prediction labels, `Esc`, selection learning and static-context spacing. Current C/E are passed; installed interaction remains `NOT_EXERCISED`. |
+| J07 | Smart English completion, always-on correction/fuzzy matching and ranking; independently configurable IPA/definition, prediction and selection learning | C, E, I | The local freeze passes the complete serial owner and native rows for Space behavior, arrow and `1–9` selection, passive-prediction labels, `Esc`, selection learning and static-context spacing. Current C/E are passed; installed interaction remains `NOT_EXERCISED`. |
 | J08 | Chinese and English user learning, including enhanced/standard/off Chinese policy and isolated QA phrase `云杉码` for `yunshanma` | C, E, I | The local freeze passes complete Swift, native Rime, package architecture, unsigned Release and development composite rows for enhanced/standard/off Chinese policy, full-pinyin restore, enabled/disabled English learning and upstream multi-device dictionary sync. Current C/E are passed; signed installation, fresh-login persistence and all I evidence remain `NOT_EXERCISED`. |
 | J09 | application focus changes preserve standard Squirrel/Rime session behavior without a Linnet mode ledger | C, I | source guard proves the private persistence/transition owner is absent; real application switching remains pending |
 | J10 | Settings defaults, bilingual copy and every editable control | C, V, I | The local freeze passes typed controls, bilingual copy, preview projection, download-source state, four-page layout, foreground/minimized owner tests and the isolated fixed-home fixture. Two full Settings UI attempts on 2026-08-30 were `ENVIRONMENT_INVALID` before any product test: macOS first reported an active system-authentication session, then timed out enabling XCTest automation mode; both isolated homes and preference domains were removed and protected real-user bytes stayed unchanged. Signed product, real-window/AX, VoiceOver, keyboard interaction, installation and fresh-login behavior remain `NOT_EXERCISED`; no V or I PASS is claimed. |

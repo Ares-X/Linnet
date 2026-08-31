@@ -367,12 +367,8 @@ struct InputTabView: View {
         "Show Smart English context suggestions",
         isOn: $model.configuration.documentDraft.english.predictionEnabled
       )
-      Toggle(
-        "Suggest spelling corrections",
-        isOn: $model.configuration.documentDraft.english.spellingCorrection
-      )
       Text(
-        "IPA and Chinese definitions can be hidden independently. Smart English suggestions and correction change candidate generation; all settings take effect after Apply Changes."
+        "IPA, Chinese definitions, and context suggestions can be hidden. English correction and fuzzy matching are always available. Changes take effect after Apply Changes."
       )
       .font(.caption)
       .foregroundStyle(.secondary)

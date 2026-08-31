@@ -144,15 +144,15 @@ while IFS=$'\t' read -r term gloss; do
   }
 done <<'LINNET_GLOSSES'
 WebSocket	n. WebSocket 协议
-agent	n. 智能体
-agents	n. 智能体
+agent	n. 智能体；代理人；代理商；特工；药剂
+agents	n. 智能体；代理人；代理商；特工；药剂
 asynchronously	adv. 异步地
-client	n. 客户端
-clients	n. 客户端
+client	n. 客户端；客户；委托人
+clients	n. 客户端；客户；委托人
 cluster	n. 集群
-commit	v. 提交
-commits	n. 提交；v. 提交
-committing	v. 提交
+commit	v. 提交；犯（罪）；承诺；托付；致力于
+commits	n. 提交记录；v. 提交；犯（罪）；承诺；托付；致力于
+committing	v. 提交；犯（罪）；承诺；托付；致力于
 compilation	n. 编译
 concurrency	n. 并发
 coroutine	n. 协程
@@ -167,8 +167,8 @@ hashing	n. 哈希计算
 logging	n. 日志记录
 migrate	v. 迁移
 migration	n. 迁移
-package	n. 软件包
-packages	n. 软件包
+package	n. 软件包；包裹；一揽子方案；v. 打包；包装
+packages	n. 软件包；包裹；一揽子方案；v. 打包；包装
 parser	n. 解析器
 pipeline	n. 流水线
 process	n. 进程
@@ -192,8 +192,8 @@ runtime	n. 运行时
 schema	n. 模式
 serialized	adj. 已序列化
 serializing	v. 序列化
-thread	n. 线程
-threads	n. 线程
+thread	n. 线程；线；线索；思路；螺纹；帖子；v. 穿线
+threads	n. 线程；线；线索；思路；螺纹；帖子；v. 穿线
 token	n. 词元
 tokens	n. 词元
 tokenization	n. 词元化

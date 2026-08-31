@@ -135,11 +135,21 @@ focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有�
 release identity。定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并
 上游或发布。
 
-正常正式候选必须是 clean、精确远端 `main` revision，并先在本地通过完整 composite
-与安装前门。显式 `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动唯一 macOS
-release Action；该 job 一次 checkout/cache/hydrate，串行执行 lint、owner、Swift、
-Rime、Periphery 和候选 App/package 门，再使用临时 Keychain 构建、签名、打包和最终
-验证一次。互不重叠的 Core 3 件、data 4 件和 public 1 件直接写入三个 Draft GitHub
+正常正式候选先由 `scripts/release-control verify-local` 恢复并校验锁定依赖、构建，
+串行完成 strict lint、发布 owner、App/Swift/Rime 和 Periphery。验证期间冻结修改；
+临时 Git index 将待提交文件、删除、权限和 gitlink 绑定到一个 Git tree，不改真实
+暂存区；首尾 tree 必须相同。唯一收据位于 ignored
+`build/linnet-source-verification.json`，是维护者的本地验收声明，不是云端独立测试证明。
+Settings UI 仅在显式隔离桌面和 Developer Mode 可用时运行，否则记录 `NOT_EXERCISED`。
+
+提交相同 tree 后，在 clean、精确远端 `main` 上执行
+`scripts/release-control candidate`，创建携带收据的 annotated
+`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签；不再手动推送裸标签。
+唯一 macOS release Action 验证标签、commit、tree 和必需测试结果，一次
+checkout/cache/hydrate，保留历史相关的版本单调性检查及实际签名 App/package 门。
+不重跑已本地通过的源码测试；仅当收据的 Settings UI 未执行时补测这一项。
+它使用临时 Keychain 构建、签名、打包和最终验证一次。
+互不重叠的 Core 3 件、data 4 件和 public 1 件直接写入三个 Draft GitHub
 Releases。候选传输
 不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
 
@@ -167,7 +177,9 @@ public / Latest 发布。稳定 Catalog 仍只有一个 owner 和一个 URL。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖、经 fingerprint 和 inventory digest
 验证的原生 Rime 编译 transport、固定 Periphery binary，以及英文生成数据。手动
-commit CI 是 build cache 的唯一 writer；PR 与候选只读该 cache。Swift owner tests
+commit CI 是共享 build cache 的 writer；PR、正式候选和 data-seed 只读 main cache。
+GitHub [不允许不同标签相互读取各自的 cache](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)，因此候选不再写只能由同标签复用的副本，
+也不搬运或编译已本地验证的 Swift 测试 cache。Swift owner tests
 只使用 `tests/swift_test_cache.sh` 的独立内容指纹 cache，不存在第二个静态模块编译
 owner。缓存不是版本或发布权威：
 每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、内部 fingerprint 与产物

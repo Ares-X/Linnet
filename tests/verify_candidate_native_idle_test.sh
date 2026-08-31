@@ -55,7 +55,9 @@ macos_sdk="$(xcrun --show-sdk-path)"
 codesign --verify --strict "${outside_root}/rime_deployer"
 codesign --verify --strict "${inside_root}/rime_deployer"
 
-"${outside_root}/rime_deployer" 30 &
+# Inherited build logs are not evidence that this unrelated process has
+# loaded candidate runtime bytes or owns one of its resources.
+"${outside_root}/rime_deployer" 30 >"${inside_root}/diagnostic.log" 2>&1 &
 outside_pid=$!
 sleep 0.2
 kill -0 "${outside_pid}"

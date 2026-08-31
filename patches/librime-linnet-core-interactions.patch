@@ -1,5 +1,5 @@
 diff --git a/src/rime/context.cc b/src/rime/context.cc
-index ec840a3e..c83c0d2d 100644
+index ec840a3..c83c0d2 100644
 --- a/src/rime/context.cc
 +++ b/src/rime/context.cc
 @@ -25,6 +25,29 @@ bool Context::Commit() {
@@ -33,7 +33,7 @@ index ec840a3e..c83c0d2d 100644
    if (get_option("dumb"))
      return string();
 diff --git a/src/rime/context.h b/src/rime/context.h
-index d5261300..55605cf9 100644
+index d526130..55605cf 100644
 --- a/src/rime/context.h
 +++ b/src/rime/context.h
 @@ -29,6 +29,7 @@ class RIME_DLL Context {
@@ -45,7 +45,7 @@ index d5261300..55605cf9 100644
    string GetScriptText() const;
    Preedit GetPreedit() const;
 diff --git a/src/rime/dict/dictionary.cc b/src/rime/dict/dictionary.cc
-index 58f21a34..fd166514 100644
+index 58f21a3..fd16651 100644
 --- a/src/rime/dict/dictionary.cc
 +++ b/src/rime/dict/dictionary.cc
 @@ -66,6 +66,24 @@ struct Chunk {
@@ -116,7 +116,7 @@ index 58f21a34..fd166514 100644
    if (exhausted()) {
      return false;
 diff --git a/src/rime/dict/dictionary.h b/src/rime/dict/dictionary.h
-index f1127e5a..61d78764 100644
+index f1127e5..61d7876 100644
 --- a/src/rime/dict/dictionary.h
 +++ b/src/rime/dict/dictionary.h
 @@ -36,6 +36,7 @@ class RIME_DLL DictEntryIterator : public DictEntryFilterBinder {
@@ -128,7 +128,7 @@ index f1127e5a..61d78764 100644
    bool Skip(size_t num_entries);
    bool exhausted() const;
 diff --git a/src/rime/gear/ascii_composer.cc b/src/rime/gear/ascii_composer.cc
-index e49dc387..aa04631a 100644
+index e49dc38..aa04631 100644
 --- a/src/rime/gear/ascii_composer.cc
 +++ b/src/rime/gear/ascii_composer.cc
 @@ -51,18 +51,23 @@ static void load_bindings(const an<ConfigMap>& src,
@@ -288,7 +288,7 @@ index e49dc387..aa04631a 100644
    if (!ctx->IsComposing()) {
      connection_.disconnect();
 diff --git a/src/rime/gear/ascii_composer.h b/src/rime/gear/ascii_composer.h
-index 756771ff..15f1145b 100644
+index 756771f..15f1145 100644
 --- a/src/rime/gear/ascii_composer.h
 +++ b/src/rime/gear/ascii_composer.h
 @@ -8,6 +8,7 @@
@@ -327,7 +327,7 @@ index 756771ff..15f1145b 100644
  
  }  // namespace rime
 diff --git a/src/rime/gear/chord_composer.cc b/src/rime/gear/chord_composer.cc
-index 789697b7..165c42ad 100644
+index 789697b..165c42a 100644
 --- a/src/rime/gear/chord_composer.cc
 +++ b/src/rime/gear/chord_composer.cc
 @@ -65,8 +65,7 @@ bool ChordComposer::CommitRawInput(Context* ctx) {
@@ -341,7 +341,7 @@ index 789697b7..165c42ad 100644
  }
  
 diff --git a/src/rime/gear/editor.cc b/src/rime/gear/editor.cc
-index 37b3dda6..0e57a970 100644
+index 37b3dda..0e57a97 100644
 --- a/src/rime/gear/editor.cc
 +++ b/src/rime/gear/editor.cc
 @@ -111,8 +111,7 @@ bool Editor::CommitScriptText(Context* ctx) {
@@ -355,7 +355,7 @@ index 37b3dda6..0e57a970 100644
  }
  
 diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
-index 963dd796..696c14c1 100644
+index 963dd79..696c14c 100644
 --- a/src/rime/gear/poet.cc
 +++ b/src/rime/gear/poet.cc
 @@ -27,6 +27,7 @@ struct Line {
@@ -545,7 +545,7 @@ index 963dd796..696c14c1 100644
    }
    return results;
 diff --git a/src/rime/gear/poet.h b/src/rime/gear/poet.h
-index 1bd82ca5..6749166e 100644
+index 1bd82ca..6749166 100644
 --- a/src/rime/gear/poet.h
 +++ b/src/rime/gear/poet.h
 @@ -27,6 +27,12 @@ class Poet {
@@ -574,7 +574,7 @@ index 1bd82ca5..6749166e 100644
    template <class TranslatorT>
    an<Translation> ContextualWeighted(an<Translation> translation,
 diff --git a/src/rime/gear/punctuator.cc b/src/rime/gear/punctuator.cc
-index 0c20b922..71d992a6 100644
+index 0c20b92..71d992a 100644
 --- a/src/rime/gear/punctuator.cc
 +++ b/src/rime/gear/punctuator.cc
 @@ -7,6 +7,7 @@
@@ -604,7 +604,7 @@ index 0c20b922..71d992a6 100644
  
  inline static bool ends_with_digit(const string& text) {
 diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translator.cc
-index aef62178..7f50cf3a 100644
+index aef6217..0214027 100644
 --- a/src/rime/gear/script_translator.cc
 +++ b/src/rime/gear/script_translator.cc
 @@ -75,6 +75,8 @@ static bool syllabify_dfs(SyllabifyTask* task,
@@ -851,7 +851,7 @@ index aef62178..7f50cf3a 100644
      sentence->Offset(start_);
      sentence->set_syllabifier(syllabifier_);
 diff --git a/src/rime/gear/script_translator.h b/src/rime/gear/script_translator.h
-index e5b60a7a..361b6080 100644
+index e5b60a7..361b608 100644
 --- a/src/rime/gear/script_translator.h
 +++ b/src/rime/gear/script_translator.h
 @@ -50,6 +50,9 @@ class ScriptTranslator : public Translator,
@@ -873,7 +873,7 @@ index e5b60a7a..361b6080 100644
    the<Poet> poet_;
    vector<an<Phrase>> queue_;
 diff --git a/src/rime/gear/translator_commons.h b/src/rime/gear/translator_commons.h
-index 6217e5a7..8d51190a 100644
+index 6217e5a..8d51190 100644
 --- a/src/rime/gear/translator_commons.h
 +++ b/src/rime/gear/translator_commons.h
 @@ -7,6 +7,7 @@
@@ -922,7 +922,7 @@ index 6217e5a7..8d51190a 100644
  
  //
 diff --git a/src/rime/service.cc b/src/rime/service.cc
-index d30f991e..2ffbc488 100644
+index d30f991..2ffbc48 100644
 --- a/src/rime/service.cc
 +++ b/src/rime/service.cc
 @@ -9,6 +9,7 @@
@@ -994,7 +994,7 @@ index d30f991e..2ffbc488 100644
        ++count;
      } else {
 diff --git a/src/rime/service.h b/src/rime/service.h
-index a69ae741..af515175 100644
+index a69ae74..af51517 100644
 --- a/src/rime/service.h
 +++ b/src/rime/service.h
 @@ -37,8 +37,10 @@ class Session {
@@ -1017,25 +1017,59 @@ index a69ae741..af515175 100644
  
    the<Engine> engine_;
 diff --git a/src/rime_api.h b/src/rime_api.h
-index 2fccde0f..4d69a237 100644
+index 2fccde0..2fce13b 100644
 --- a/src/rime_api.h
 +++ b/src/rime_api.h
-@@ -505,6 +505,10 @@ typedef struct RIME_FLAVORED(rime_api_t) {
+@@ -505,6 +505,12 @@ typedef struct RIME_FLAVORED(rime_api_t) {
                                                size_t index);
  
    Bool (*change_page)(RimeSessionId session_id, Bool backward);
-+
 +  // End an external client lifecycle by preserving the exact raw input.
 +  // Return True if this call committed raw input.
 +  Bool (*commit_raw_input)(RimeSessionId session_id);
++  // Linnet: append-only ABI; nullptr cancels. 1=pending, 0=done,
++  // 2=deferred (inactive/changing dictionary), -1=failed.
++  int (*sync_user_data_step)(const char* sync_directory);
  } RIME_FLAVORED(RimeApi);
  
  //! API entry
 diff --git a/src/rime_api_impl.h b/src/rime_api_impl.h
-index 30f4514f..4d2f7979 100644
+index 30f4514..9368c75 100644
 --- a/src/rime_api_impl.h
 +++ b/src/rime_api_impl.h
-@@ -184,6 +184,13 @@ RIME_DEPRECATED Bool RimeCommitComposition(RimeSessionId session_id) {
+@@ -9,6 +9,7 @@
+ #include <rime/context.h>
+ #include <rime/deployer.h>
+ #include <rime/key_event.h>
++#include <rime/lever/user_dict_manager.h>
+ #include <rime/menu.h>
+ #include <rime/module.h>
+ #include <rime/registry.h>
+@@ -56,6 +57,7 @@ RIME_DEPRECATED void RimeInitialize(RimeTraits* traits) {
+ }
+ 
+ RIME_DEPRECATED void RimeFinalize() {
++  UserDictManager::SynchronizeIncrementally(nullptr);
+   Service::instance().deployer().JoinMaintenanceThread();
+   Service::instance().StopService();
+   Registry::instance().Clear();
+@@ -63,6 +65,7 @@ RIME_DEPRECATED void RimeFinalize() {
+ }
+ 
+ RIME_DEPRECATED Bool RimeStartMaintenance(Bool full_check) {
++  UserDictManager::SynchronizeIncrementally(nullptr);
+   LoadModules(kDeployerModules);
+   Deployer& deployer(Service::instance().deployer());
+   deployer.RunTask("clean_old_log_files");
+@@ -136,6 +139,7 @@ RIME_DEPRECATED Bool RimeDeployConfigFile(const char* file_name,
+ }
+ 
+ RIME_DEPRECATED Bool RimeSyncUserData() {
++  UserDictManager::SynchronizeIncrementally(nullptr);
+   Service::instance().CleanupAllSessions();
+   Deployer& deployer(Service::instance().deployer());
+   deployer.ScheduleTask("installation_update");
+@@ -184,6 +188,13 @@ RIME_DEPRECATED Bool RimeCommitComposition(RimeSessionId session_id) {
    return Bool(session->CommitComposition());
  }
  
@@ -1049,11 +1083,1053 @@ index 30f4514f..4d2f7979 100644
  RIME_DEPRECATED void RimeClearComposition(RimeSessionId session_id) {
    an<Session> session(Service::instance().GetSession(session_id));
    if (!session)
-@@ -1232,6 +1239,7 @@ RIME_API RIME_FLAVORED(RimeApi) * RIME_FLAVORED(rime_get_api)() {
+@@ -1232,6 +1243,8 @@ RIME_API RIME_FLAVORED(RimeApi) * RIME_FLAVORED(rime_get_api)() {
      s_api.highlight_candidate_on_current_page =
          &RimeHighlightCandidateOnCurrentPage;
      s_api.change_page = &RimeChangePage;
++    s_api.sync_user_data_step = &UserDictManager::SynchronizeIncrementally;
 +    s_api.commit_raw_input = &RimeCommitRawInput;
    }
    return &s_api;
  }
+diff --git a/src/rime/dict/user_dictionary.h b/src/rime/dict/user_dictionary.h
+index 5ebeac0..db984de 100644
+--- a/src/rime/dict/user_dictionary.h
++++ b/src/rime/dict/user_dictionary.h
+@@ -111,6 +111,7 @@ class UserDictionaryComponent : public UserDictionary::Component {
+   UserDictionaryComponent();
+   UserDictionary* Create(const Ticket& ticket);
+   UserDictionary* Create(const string& dict_name, const string& db_class);
++  an<Db> FindDb(const string& dict_name);
+ 
+  private:
+   hash_map<string, weak<Db>> db_pool_;
+diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
+index 2944c2d..1a5486a 100644
+--- a/src/rime/dict/user_dictionary.cc
++++ b/src/rime/dict/user_dictionary.cc
+@@ -360,6 +360,7 @@ size_t UserDictionary::LookupWords(UserDictEntryIterator* result,
+                                    bool predictive,
+                                    size_t limit,
+                                    string* resume_key) {
++  FetchTickCount();
+   TickCount present_tick = tick_ + 1;
+   size_t len = input.length();
+   size_t start = result->cache_size();
+@@ -425,6 +426,9 @@ bool UserDictionary::UpdateEntry(const DictEntry& entry, int commits) {
+ bool UserDictionary::UpdateEntry(const DictEntry& entry,
+                                  int commits,
+                                  const string& new_entry_prefix) {
++  auto transaction = As<Transactional>(db_);
++  if (!transaction || !transaction->in_transaction())
++    FetchTickCount();
+   string code_str(entry.custom_code);
+   if (code_str.empty() && !TranslateCodeToString(entry.code, &code_str))
+     return false;
+@@ -488,6 +492,7 @@ bool UserDictionary::NewTransaction() {
+   if (!db)
+     return false;
+   CommitPendingTransaction();
++  FetchTickCount();
+   transaction_time_ = time(NULL);
+   return db->BeginTransaction();
+ }
+@@ -585,6 +590,12 @@ UserDictionary* UserDictionaryComponent::Create(const string& dict_name,
+   return new UserDictionary(dict_name, db);
+ }
+ 
++an<Db> UserDictionaryComponent::FindDb(const string& dict_name) {
++  const auto found = db_pool_.find(dict_name);
++  auto db = found == db_pool_.end() ? nullptr : found->second.lock();
++  return db && db->loaded() ? db : nullptr;
++}
++
+ UserDictionary* UserDictionaryComponent::Create(const Ticket& ticket) {
+   if (!ticket.schema)
+     return NULL;
+diff --git a/src/rime/dict/user_db.h b/src/rime/dict/user_db.h
+index 6740e99..3b9f6ba 100644
+--- a/src/rime/dict/user_db.h
++++ b/src/rime/dict/user_db.h
+@@ -64,7 +64,7 @@ class UserDbHelper {
+   RIME_DLL bool UpdateUserInfo();
+   RIME_DLL static bool IsUniformFormat(const path& file_path);
+   RIME_DLL bool UniformBackup(const path& snapshot_file);
+-  RIME_DLL bool UniformRestore(const path& snapshot_file);
++  RIME_DLL bool UniformRestore(const path& snapshot_file, bool strict = false);
+ 
+   bool IsUserDb();
+   string GetDbName();
+@@ -111,19 +111,24 @@ class UserDbComponent : public UserDb::Component, protected DbComponentBase {
+ class UserDbMerger : public Sink {
+  public:
+   explicit UserDbMerger(Db* db);
++  static TickCount ReadTick(Db* db, TickCount missing_tick = 1);
++  // One merge rule for both stored and not-yet-materialized records.
++  static string MergeValue(const string& local, const string& remote,
++                           TickCount local_tick, TickCount remote_tick,
++                           TickCount output_tick);
+   virtual ~UserDbMerger();
+ 
+   virtual bool MetaPut(const string& key, const string& value);
+   virtual bool Put(const string& key, const string& value);
+ 
+-  void CloseMerge();
++  bool CloseMerge();
+ 
+  protected:
+   Db* db_;
+   TickCount our_tick_;
+   TickCount their_tick_;
+   TickCount max_tick_;
+-  int merged_entries_;
++  int merged_entries_ = 0;
+ };
+ 
+ class UserDbImporter : public Sink {
+diff --git a/src/rime/dict/user_db.cc b/src/rime/dict/user_db.cc
+index e8f6788..b4123b9 100644
+--- a/src/rime/dict/user_db.cc
++++ b/src/rime/dict/user_db.cc
+@@ -126,10 +126,11 @@ bool UserDbHelper::UniformBackup(const path& snapshot_file) {
+   return true;
+ }
+ 
+-bool UserDbHelper::UniformRestore(const path& snapshot_file) {
++bool UserDbHelper::UniformRestore(const path& snapshot_file, bool strict) {
+   LOG(INFO) << "restoring userdb '" << db_->name() << "' from "
+             << snapshot_file;
+   TsvReader reader(snapshot_file, plain_userdb_format.parser);
++  reader.strict = strict;
+   DbSink sink(db_);
+   try {
+     reader >> sink;
+@@ -169,7 +170,7 @@ string UserDbHelper::GetRimeVersion() {
+   return version;
+ }
+ 
+-static TickCount get_tick_count(Db* db) {
++TickCount UserDbMerger::ReadTick(Db* db, TickCount missing_tick) {
+   string tick;
+   if (db && db->MetaFetch("/tick", &tick)) {
+     try {
+@@ -177,11 +178,11 @@ static TickCount get_tick_count(Db* db) {
+     } catch (...) {
+     }
+   }
+-  return 1;
++  return missing_tick;
+ }
+ 
+ UserDbMerger::UserDbMerger(Db* db) : db_(db) {
+-  our_tick_ = get_tick_count(db);
++  our_tick_ = ReadTick(db);
+   their_tick_ = 0;
+   max_tick_ = our_tick_;
+ }
+@@ -194,49 +195,64 @@ bool UserDbMerger::MetaPut(const string& key, const string& value) {
+   if (key == "/tick") {
+     try {
+       their_tick_ = std::stoul(value);
+-      max_tick_ = (std::max)(our_tick_, their_tick_);
++      max_tick_ = (std::max)(max_tick_, their_tick_);
+     } catch (...) {
+     }
+   }
+   return true;
+ }
+ 
+-bool UserDbMerger::Put(const string& key, const string& value) {
+-  if (!db_)
+-    return false;
++string UserDbMerger::MergeValue(const string& our_value, const string& value,
++                               TickCount our_tick, TickCount their_tick,
++                               TickCount output_tick) {
+   UserDbValue v(value);
+-  if (v.tick < their_tick_) {
+-    v.dee = algo::formula_d(0, (double)their_tick_, v.dee, (double)v.tick);
++  if (v.tick < their_tick) {
++    v.dee = algo::formula_d(0, (double)their_tick, v.dee, (double)v.tick);
+   }
+   UserDbValue o;
+-  string our_value;
+-  if (db_->Fetch(key, &our_value)) {
++  if (!our_value.empty()) {
++    // The same record at the same database clock is already merged. Eagerly
++    // materializing its decay only rounds the value and rewrites an unchanged
++    // snapshot; lookup applies that same decay without modifying the record.
++    if (their_tick == our_tick && value == our_value)
++      return our_value;
+     o.Unpack(our_value);
+   }
+-  if (o.tick < our_tick_) {
+-    o.dee = algo::formula_d(0, (double)our_tick_, o.dee, (double)o.tick);
++  if (o.tick < our_tick) {
++    o.dee = algo::formula_d(0, (double)our_tick, o.dee, (double)o.tick);
+   }
+   if (std::abs(o.commits) < std::abs(v.commits))
+     o.commits = v.commits;
+   o.dee = (std::max)(o.dee, v.dee);
+-  o.tick = max_tick_;
+-  return db_->Update(key, o.Pack()) && ++merged_entries_;
++  o.tick = output_tick;
++  return o.Pack();
+ }
+ 
+-void UserDbMerger::CloseMerge() {
++bool UserDbMerger::Put(const string& key, const string& value) {
++  if (!db_) return false;
++  string our_value;
++  db_->Fetch(key, &our_value);
++  const auto merged = MergeValue(our_value, value, our_tick_, their_tick_, max_tick_);
++  return merged == our_value || (db_->Update(key, merged) && ++merged_entries_);
++}
++
++bool UserDbMerger::CloseMerge() {
+   if (!db_ || !merged_entries_)
+-    return;
++    return true;
+   Deployer& deployer(Service::instance().deployer());
++  const auto merged_entries = merged_entries_;
++  merged_entries_ = 0;
+   try {
+-    db_->MetaUpdate("/tick", std::to_string(max_tick_));
+-    db_->MetaUpdate("/user_id", deployer.user_id);
++    if (!db_->MetaUpdate("/tick", std::to_string(max_tick_)) ||
++        !db_->MetaUpdate("/user_id", deployer.user_id))
++      return false;
+   } catch (...) {
+     LOG(ERROR) << "failed to update tick count.";
+-    return;
++    return false;
+   }
+-  LOG(INFO) << "total " << merged_entries_
++  LOG(INFO) << "total " << merged_entries
+             << " entries merged, tick = " << max_tick_;
+-  merged_entries_ = 0;
++  return true;
+ }
+ 
+ UserDbImporter::UserDbImporter(Db* db) : db_(db) {}
+diff --git a/src/rime/dict/tsv.h b/src/rime/dict/tsv.h
+index 9efabf9..8c8910e 100644
+--- a/src/rime/dict/tsv.h
++++ b/src/rime/dict/tsv.h
+@@ -27,6 +27,7 @@ class TsvReader {
+       : file_path_(file_path), parser_(parser) {}
+   // return number of records read
+   int operator()(Sink* sink);
++  bool strict = false;
+ 
+  protected:
+   path file_path_;
+diff --git a/src/rime/dict/tsv.cc b/src/rime/dict/tsv.cc
+index e859ab0..d81e3e6 100644
+--- a/src/rime/dict/tsv.cc
++++ b/src/rime/dict/tsv.cc
+@@ -17,6 +17,8 @@ int TsvReader::operator()(Sink* sink) {
+     return 0;
+   LOG(INFO) << "reading tsv file: " << file_path_;
+   std::ifstream fin(file_path_.c_str());
++  if (!fin.is_open()) throw std::ios_base::failure("cannot open TSV input");
++  fin.exceptions(std::ios::badbit);
+   string line, key, value;
+   Tsv row;
+   int line_no = 0;
+@@ -34,6 +36,7 @@ int TsvReader::operator()(Sink* sink) {
+         line.erase(0, 2);
+         boost::algorithm::split(row, line, boost::algorithm::is_any_of("\t"));
+         if (row.size() != 2 || !sink->MetaPut(row[0], row[1])) {
++          if (strict) throw std::runtime_error("invalid TSV metadata");
+           LOG(WARNING) << "invalid metadata at line " << line_no
+                        << " in file: " << file_path_ << ".";
+         }
+@@ -46,6 +49,7 @@ int TsvReader::operator()(Sink* sink) {
+     // read a tsv entry
+     boost::algorithm::split(row, line, boost::algorithm::is_any_of("\t"));
+     if (!parser_(row, &key, &value) || !sink->Put(key, value)) {
++      if (strict) throw std::runtime_error("invalid TSV entry");
+       LOG(WARNING) << "invalid entry at line " << line_no
+                    << " in file: " << file_path_ << ".";
+       continue;
+@@ -61,6 +65,7 @@ int TsvWriter::operator()(Source* source) {
+     return 0;
+   LOG(INFO) << "writing tsv file: " << file_path_;
+   std::ofstream fout(file_path_.c_str());
++  fout.exceptions(std::ios::badbit | std::ios::failbit);
+   if (!file_description.empty()) {
+     fout << "# " << file_description << std::endl;
+   }
+diff --git a/src/rime/lever/user_dict_manager.h b/src/rime/lever/user_dict_manager.h
+index 3cefa8f..843f943 100644
+--- a/src/rime/lever/user_dict_manager.h
++++ b/src/rime/lever/user_dict_manager.h
+@@ -36,6 +36,11 @@ class RIME_DLL UserDictManager {
+   bool Synchronize(const string& dict_name);
+   bool SynchronizeAll();
+ 
++  // Main-thread cooperative learning sync. 1=pending, 0=done,
++  // 2=deferred (inactive/changing dictionary), -1=failed.
++  // nullptr cancels uncommitted work without waiting for cloud I/O.
++  static int SynchronizeIncrementally(const char* sync_directory);
++
+  protected:
+   Deployer* deployer_;
+   path path_;
+diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_manager.cc
+index e0331e4..d2ea2cf 100644
+--- a/src/rime/lever/user_dict_manager.cc
++++ b/src/rime/lever/user_dict_manager.cc
+@@ -224,3 +224,310 @@ bool UserDictManager::SynchronizeAll() {
+ }
+ 
+ }  // namespace rime
++
++// Copyright RIME Developers. Distributed under the BSD License.
++// Linnet's online scheduling boundary. Parsing and merging remain Rime-owned.
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <filesystem>
++#include <mutex>
++#include <thread>
++#include <rime/deployer.h>
++#include <rime/dict/text_db.h>
++#include <rime/dict/level_db.h>
++#include <rime/dict/user_dictionary.h>
++#include <rime/lever/user_dict_manager.h>
++#include <rime/service.h>
++
++namespace rime {
++namespace {
++namespace fs = std::filesystem;
++using Clock = std::chrono::steady_clock;
++
++// An isolated upstream-format snapshot, never a second live database.
++class SyncSnapshot : public UserDbWrapper<TextDb> {
++ public:
++  explicit SyncSnapshot(const string& name) : UserDbWrapper<TextDb>({}, name) {
++    loaded_ = true;
++  }
++  ~SyncSnapshot() { loaded_ = modified_ = false; }
++  bool Update(const string& key, const string& value) override {
++    UserDbValue entry;
++    return entry.Unpack(value) && TextDb::Update(key, value);
++  }
++  bool Equals(const SyncSnapshot& other) const {
++    return metadata_ == other.metadata_ && data_ == other.data_;
++  }
++};
++
++struct SyncIO {
++  enum class Work { waiting, publish, cancel };
++  path directory;
++  path user_directory;
++  string user_id;
++  vector<string> names;
++  vector<an<SyncSnapshot>> incoming;
++  vector<an<SyncSnapshot>> outgoing;
++  vector<an<SyncSnapshot>> discarded;
++  std::mutex mutex;
++  std::condition_variable ready;
++  Work work = Work::waiting;
++  // 0=snapshots ready, 1=I/O pending, 2=worker finished, -1=failed.
++  std::atomic<int> result{1};
++  // 0=active, 1=publication committed, 2=cancelled. Cancellation cannot
++  // retract a rename that has already won this commit point.
++  std::atomic<int> publication{0};
++  void Request(Work next) {
++    { std::lock_guard<std::mutex> lock(mutex); work = next; }
++    ready.notify_one();
++  }
++  void ReleaseSnapshots() { incoming.clear(); outgoing.clear(); discarded.clear(); names.clear(); }
++};
++
++an<SyncSnapshot> ReadSnapshot(const path& file, const string& name) {
++  if (!fs::is_regular_file(fs::symlink_status(file)) ||
++      fs::file_size(file) > 16 * 1024 * 1024)
++    throw std::runtime_error("invalid or oversized learning snapshot");
++  auto snapshot = New<SyncSnapshot>(name);
++  UserDbHelper helper(snapshot);
++  if (!helper.UniformRestore(file, true) || !helper.IsUserDb() ||
++      helper.GetDbName() != name)
++    throw std::runtime_error("invalid learning snapshot identity");
++  return snapshot;
++}
++
++void ReadCloud(SyncIO& io) {
++  if (!fs::is_directory(io.directory))
++    throw std::runtime_error("learning sync directory is unavailable");
++  for (const auto& entry : fs::directory_iterator(io.user_directory)) {
++    const auto name = entry.path().filename().u8string();
++    if (entry.is_directory() && !entry.is_symlink() &&
++        name.size() > 7 && name.substr(name.size() - 7) == ".userdb")
++      io.names.push_back(name.substr(0, name.size() - 7));
++  }
++  size_t bytes = 0;
++  for (const auto& peer : fs::directory_iterator(io.directory)) {
++    if (!peer.is_directory() || peer.is_symlink()) continue;
++    for (const auto& name : io.names) {
++      if (io.publication == 2) return;
++      const auto file = peer.path() / (name + UserDb::snapshot_extension());
++      if (!fs::exists(file)) continue;
++      bytes += fs::file_size(file);
++      if (bytes > 32 * 1024 * 1024)
++        throw std::runtime_error("learning sync window exceeds 32 MiB");
++      io.incoming.push_back(ReadSnapshot(file, name));
++    }
++  }
++}
++
++void WriteCloud(SyncIO& io) {
++  const auto directory = io.directory / io.user_id;
++  if (io.publication == 2) return;
++  fs::create_directories(directory);
++  for (const auto& snapshot : io.outgoing) {
++    if (io.publication == 2) return;
++    const auto target = directory / (snapshot->name() + UserDb::snapshot_extension());
++    if (fs::exists(target) && snapshot->Equals(*ReadSnapshot(target, snapshot->name())))
++      continue;  // No changed learning: no cloud-file rewrite.
++    const auto temporary = directory / ("." + snapshot->name() + ".pending");
++    try {
++      if (!snapshot->Backup(temporary))
++        throw std::runtime_error("learning snapshot write failed");
++      // Publication must satisfy the exact reader contract, including the
++      // serialized-size bound. A failure never replaces the last readable file.
++      ReadSnapshot(temporary, snapshot->name());
++      int expected = 0;
++      if (!io.publication.compare_exchange_strong(expected, 1)) {
++        fs::remove(temporary);
++        return;
++      }
++      fs::rename(temporary, target);
++      expected = 1;
++      io.publication.compare_exchange_strong(expected, 0);
++    } catch (...) {
++      std::error_code ignored;
++      fs::remove(temporary, ignored);
++      throw;
++    }
++  }
++}
++
++void StartIO(const an<SyncIO>& io) {
++  try {
++    std::thread([io] {
++    int result = 2;
++    try {
++      ReadCloud(*io);
++      io->result.store(0, std::memory_order_release);
++      std::unique_lock<std::mutex> lock(io->mutex);
++      io->ready.wait(lock, [&] { return io->work != SyncIO::Work::waiting; });
++      const bool publish = io->work == SyncIO::Work::publish;
++      lock.unlock();
++      if (publish) WriteCloud(*io);
++    } catch (const std::exception& error) {
++      LOG(ERROR) << "learning sync: " << error.what();
++      result = -1;
++    }
++    // The worker retains the final heavy-data reference until it has observed
++    // publication/cancellation. No ready/cancel interleaving frees maps on main.
++    io->ReleaseSnapshots();
++    io->result.store(result, std::memory_order_release);
++    }).detach();
++  } catch (...) {
++    io->result.store(-1, std::memory_order_release);
++    throw;
++  }
++}
++
++struct LiveSync {
++  an<SyncIO> io;
++  size_t imported = 0;
++  size_t exported = 0;
++  the<DbSource> source;  // Only a worker-owned in-memory incoming snapshot.
++  bool source_complete = false;
++  an<SyncSnapshot> snapshot;
++  weak<Db> snapshot_owner;
++  uint64_t snapshot_revision = 0;
++  string cursor;
++  bool writing = false;
++  bool deferred = false;
++  size_t exported_bytes = 0;
++
++  int Step() {
++    const int result = io->result.load(std::memory_order_acquire);
++    if (result == -1 || result == 1) return result;
++    if (writing) return result == 2 ? (deferred ? 2 : 0) : 1;
++    const auto deadline = Clock::now() + std::chrono::milliseconds(1);
++    auto* component = dynamic_cast<UserDictionaryComponent*>(
++        UserDictionary::Require("user_dictionary"));
++    if (!component) return -1;
++    string key, value;
++    if (imported < io->incoming.size()) {
++      const auto& incoming = io->incoming[imported];
++      auto database = component->FindDb(incoming->name());
++      if (!database) {
++        deferred = true; source.reset(); ++imported;
++        return 1;
++      }
++      auto* level = dynamic_cast<LevelDb*>(database.get());
++      if (!level) return -1;
++      if (level->in_transaction()) return 1;  // Preserve local undo.
++      if (!source && level->merge_phase() != UserDbMergePhase::none)
++        return level->DrainUserDbMerge(deadline) ? 1 : -1;
++      if (!level->BeginTransaction()) return -1;
++      BOOST_SCOPE_EXIT(level) {
++        if (level->in_transaction()) level->AbortTransaction();
++      } BOOST_SCOPE_EXIT_END
++      if (!source) {
++        if (!level->StartUserDbMerge(UserDbMerger::ReadTick(incoming.get(), 0)) ||
++            !level->CommitTransaction()) return -1;
++        source = std::make_unique<DbSource>(incoming.get());
++        source_complete = false;
++        return 1;
++      }
++      if (source_complete) {
++        if (!level->ActivateUserDbMerge() || !level->CommitTransaction()) return -1;
++        source.reset(); ++imported;
++        return 1;
++      }
++      for (size_t count = 0; count < 64; ++count) {
++        if (!source->Get(&key, &value)) { source_complete = true; break; }
++        if (!level->StageUserDbMerge(key, value)) return -1;
++        if (Clock::now() >= deadline) break;
++      }
++      return level->CommitTransaction() ? 1 : -1;
++    }
++    if (exported < io->names.size()) {
++      const auto& name = io->names[exported];
++      auto database = component->FindDb(name);
++      auto* level = database ? dynamic_cast<LevelDb*>(database.get()) : nullptr;
++      if (database && !level) return -1;
++      if (level && level->merge_phase() != UserDbMergePhase::none) {
++        if (level->in_transaction()) return 1;
++        return level->DrainUserDbMerge(deadline) ? 1 : -1;
++      }
++      if (!database || (snapshot && (snapshot_owner.lock() != database ||
++                                    snapshot_revision != level->write_revision()))) {
++        deferred = true;
++        if (snapshot) io->discarded.push_back(std::move(snapshot));
++        cursor.clear(); ++exported;
++        return 1;
++      }
++      if (!snapshot) {
++        if (level->in_transaction()) return 1;
++        snapshot = New<SyncSnapshot>(name);
++        snapshot_owner = database;
++        snapshot_revision = level->write_revision();
++        DbSource metadata(database.get());
++        while (metadata.MetaGet(&key, &value)) snapshot->MetaUpdate(key, value);
++        snapshot->MetaUpdate("/user_id", io->user_id);
++      }
++      auto records = database->QueryAll();
++      if (!records || (!cursor.empty() && !records->Jump(cursor))) return -1;
++      for (size_t count = 0; count < 64; ++count) {
++        if (!records->GetNextRecord(&key, &value)) {
++          io->outgoing.push_back(std::move(snapshot));
++          cursor.clear(); ++exported;
++          break;
++        }
++        if (key == cursor) continue;
++        if (!snapshot->Update(key, value)) return -1;
++        cursor = key;
++        exported_bytes += key.size() + value.size();
++        if (exported_bytes > 32 * 1024 * 1024) return -1;
++        if (Clock::now() >= deadline) break;
++      }
++      return 1;
++    }
++    writing = true;
++    io->result.store(1, std::memory_order_release);
++    io->Request(SyncIO::Work::publish);
++    return 1;
++  }
++};
++
++the<LiveSync> live_sync;
++// The next cycle cannot overtake an already-committed old publication.
++an<SyncIO> outstanding_io;
++}  // namespace
++
++int UserDictManager::SynchronizeIncrementally(const char* sync_directory) {
++  if (!sync_directory) {
++    if (outstanding_io) outstanding_io->publication.exchange(2);
++    if (live_sync) {
++      if (live_sync->snapshot)
++        outstanding_io->discarded.push_back(std::move(live_sync->snapshot));
++    }
++    live_sync.reset();
++    if (outstanding_io) outstanding_io->Request(SyncIO::Work::cancel);
++    return 0;
++  }
++  try {
++    if (!live_sync) {
++      if (outstanding_io) {
++        const int pending = outstanding_io->result.load(std::memory_order_acquire);
++        if (pending == 0 || pending == 1) return 1;
++      }
++      auto io = New<SyncIO>();
++      const auto& deployer = Service::instance().deployer();
++      io->directory = path(sync_directory);
++      io->user_directory = deployer.user_data_dir;
++      io->user_id = deployer.user_id;
++      if (io->user_id.empty() || path(io->user_id).filename() != path(io->user_id) ||
++          io->user_id == "." || io->user_id == "..") return -1;
++      live_sync = std::make_unique<LiveSync>();
++      live_sync->io = outstanding_io = io;
++      StartIO(io);
++      return 1;
++    }
++    const int result = live_sync->Step();
++    if (result != 1) SynchronizeIncrementally(nullptr);
++    return result;
++  } catch (const std::exception& error) {
++    LOG(ERROR) << "learning sync: " << error.what();
++    SynchronizeIncrementally(nullptr);
++    return -1;
++  }
++}
++}  // namespace rime
+diff --git a/src/rime/dict/level_db.h b/src/rime/dict/level_db.h
+index 578ed05..0d75c68 100644
+--- a/src/rime/dict/level_db.h
++++ b/src/rime/dict/level_db.h
+@@ -7,19 +7,25 @@
+ #ifndef RIME_LEVEL_DB_H_
+ #define RIME_LEVEL_DB_H_
+ 
++#include <cstdint>
++#include <chrono>
+ #include <rime/dict/db.h>
+ 
+ namespace rime {
+ 
+ struct LevelDbCursor;
+ struct LevelDbWrapper;
++struct UserDbMergeState;
+ 
+ class LevelDb;
++enum class UserDbMergePhase { none, staging, active };
+ 
+ class LevelDbAccessor : public DbAccessor {
+  public:
+   LevelDbAccessor();
+-  LevelDbAccessor(LevelDbCursor* cursor, const string& prefix);
++  LevelDbAccessor(LevelDbCursor* cursor, const string& prefix,
++                  LevelDbCursor* pending = nullptr,
++                  uint64_t local_tick = 0, uint64_t remote_tick = 0);
+   virtual ~LevelDbAccessor();
+ 
+   bool Reset() override;
+@@ -28,7 +34,12 @@ class LevelDbAccessor : public DbAccessor {
+   bool exhausted() override;
+ 
+  private:
++  bool HasBase();
++  bool HasPending();
+   the<LevelDbCursor> cursor_;
++  the<LevelDbCursor> pending_;
++  uint64_t local_tick_ = 0;
++  uint64_t remote_tick_ = 0;
+   bool is_metadata_query_ = false;
+ };
+ 
+@@ -66,11 +77,25 @@ class LevelDb : public Db, public Recoverable, public Transactional {
+   bool AbortTransaction() override;
+   bool CommitTransaction() override;
+ 
++  // Process-local snapshot validity, including deletions and metadata writes.
++  // Unlike the userdb learning clock this advances on every durable mutation.
++  uint64_t write_revision() const { return write_revision_; }
++
++  // A single recoverable userdb merge. Stage/activation participate in the
++  // caller's transaction; draining owns one bounded transaction of its own.
++  UserDbMergePhase merge_phase() const;
++  bool StartUserDbMerge(uint64_t remote_tick);
++  bool StageUserDbMerge(const string& key, const string& value);
++  bool ActivateUserDbMerge();
++  bool DrainUserDbMerge(std::chrono::steady_clock::time_point deadline);
++
+  private:
+   void Initialize();
++  bool StoreUserDbMergeState(const UserDbMergeState& state);
+ 
+   the<LevelDbWrapper> db_;
+   string db_type_;
++  uint64_t write_revision_ = 0;
+ };
+ 
+ }  // namespace rime
+diff --git a/src/rime/dict/level_db.cc b/src/rime/dict/level_db.cc
+index 9a2eb3d..385d080 100644
+--- a/src/rime/dict/level_db.cc
++++ b/src/rime/dict/level_db.cc
+@@ -7,6 +7,10 @@
+ 
+ #include <leveldb/db.h>
+ #include <leveldb/write_batch.h>
++#include <iomanip>
++#include <optional>
++#include <sstream>
++#include <boost/scope_exit.hpp>
+ #include <rime/common.h>
+ #include <rime/service.h>
+ #include <rime/dict/level_db.h>
+@@ -15,11 +19,22 @@
+ namespace rime {
+ 
+ static const char* kMetaCharacter = "\x01";
++// Neither metadata exports (\x01) nor ordinary records (>= space) include redo.
++static const string kMergeHeader = "\x02";
++static const string kMergeRecords = "\x02/";
++
++struct UserDbMergeState {
++  UserDbMergePhase phase = UserDbMergePhase::none;
++  uint64_t local_tick = 0;
++  uint64_t remote_tick = 0;
++  string cursor;
++};
+ 
+ struct LevelDbCursor {
+   leveldb::Iterator* iterator = nullptr;
++  const string floor;
+ 
+-  LevelDbCursor(leveldb::DB* db) {
++  LevelDbCursor(leveldb::DB* db, const string& lower_bound) : floor(lower_bound) {
+     leveldb::ReadOptions options;
+     options.fill_cache = false;
+     iterator = db->NewIterator(options);
+@@ -37,7 +52,7 @@ struct LevelDbCursor {
+     if (!iterator) {
+       return false;
+     }
+-    iterator->Seek(key);
++    iterator->Seek((std::max)(key, floor));
+     return true;
+   }
+ 
+@@ -50,11 +65,33 @@ struct LevelDbCursor {
+ struct LevelDbWrapper {
+   leveldb::DB* ptr = nullptr;
+   leveldb::WriteBatch batch;
++  UserDbMergeState merge;
++  std::optional<UserDbMergeState> next_merge;
+ 
+   leveldb::Status Open(const path& file_path, bool readonly) {
+     leveldb::Options options;
+     options.create_if_missing = !readonly;
+-    return leveldb::DB::Open(options, file_path.string(), &ptr);
++    auto status = leveldb::DB::Open(options, file_path.string(), &ptr);
++    if (!status.ok()) return status;
++    string value;
++    status = ptr->Get(leveldb::ReadOptions(), kMergeHeader, &value);
++    if (status.IsNotFound()) return leveldb::Status::OK();
++    if (!status.ok()) return status;
++    std::istringstream fields(value);
++    string phase, extra;
++    if (fields >> phase >> merge.remote_tick) {
++      if (phase == "staging" && (fields >> std::quoted(merge.cursor)) &&
++          !(fields >> extra)) {
++        merge.phase = UserDbMergePhase::staging;
++        return leveldb::Status::OK();
++      }
++      if (phase == "active" &&
++          (fields >> merge.local_tick >> std::quoted(merge.cursor)) && !(fields >> extra)) {
++        merge.phase = UserDbMergePhase::active;
++        return leveldb::Status::OK();
++      }
++    }
++    return leveldb::Status::Corruption("invalid userdb merge transaction");
+   }
+ 
+   void Release() {
+@@ -62,7 +99,9 @@ struct LevelDbWrapper {
+     ptr = nullptr;
+   }
+ 
+-  LevelDbCursor* CreateCursor() { return new LevelDbCursor(ptr); }
++  LevelDbCursor* CreateCursor(const string& floor = "") {
++    return new LevelDbCursor(ptr, floor);
++  }
+ 
+   bool Fetch(const string& key, string* value) {
+     auto status = ptr->Get(leveldb::ReadOptions(), key, value);
+@@ -70,27 +109,44 @@ struct LevelDbWrapper {
+   }
+ 
+   bool Update(const string& key, const string& value, bool write_batch) {
++    const bool consume = merge.phase == UserDbMergePhase::active && key >= " ";
+     if (write_batch) {
+       batch.Put(key, value);
++      if (consume) batch.Delete(kMergeRecords + key);
+       return true;
+     }
++    if (consume) {
++      leveldb::WriteBatch update;
++      update.Put(key, value);
++      update.Delete(kMergeRecords + key);
++      return ptr->Write(leveldb::WriteOptions(), &update).ok();
++    }
+     auto status = ptr->Put(leveldb::WriteOptions(), key, value);
+     return status.ok();
+   }
+ 
+   bool Erase(const string& key, bool write_batch) {
++    const bool consume = merge.phase == UserDbMergePhase::active && key >= " ";
+     if (write_batch) {
+       batch.Delete(key);
++      if (consume) batch.Delete(kMergeRecords + key);
+       return true;
+     }
++    if (consume) {
++      leveldb::WriteBatch update;
++      update.Delete(key);
++      update.Delete(kMergeRecords + key);
++      return ptr->Write(leveldb::WriteOptions(), &update).ok();
++    }
+     auto status = ptr->Delete(leveldb::WriteOptions(), key);
+     return status.ok();
+   }
+ 
+-  void ClearBatch() { batch.Clear(); }
++  void ClearBatch() { batch.Clear(); next_merge.reset(); }
+ 
+   bool CommitBatch() {
+     auto status = ptr->Write(leveldb::WriteOptions(), &batch);
++    if (status.ok() && next_merge) merge = *next_merge;
+     return status.ok();
+   }
+ };
+@@ -99,28 +155,58 @@ struct LevelDbWrapper {
+ 
+ LevelDbAccessor::LevelDbAccessor() {}
+ 
+-LevelDbAccessor::LevelDbAccessor(LevelDbCursor* cursor, const string& prefix)
++LevelDbAccessor::LevelDbAccessor(LevelDbCursor* cursor, const string& prefix,
++                               LevelDbCursor* pending,
++                               uint64_t local_tick, uint64_t remote_tick)
+     : DbAccessor(prefix),
+       cursor_(cursor),
++      pending_(pending),
++      local_tick_(local_tick),
++      remote_tick_(remote_tick),
+       is_metadata_query_(prefix == kMetaCharacter) {
+   Reset();
+ }
+ 
+ LevelDbAccessor::~LevelDbAccessor() {
+-  cursor_->Release();
++  if (cursor_) cursor_->Release();
++  if (pending_) pending_->Release();
+ }
+ 
+ bool LevelDbAccessor::Reset() {
+-  return cursor_->Jump(prefix_);
++  return Jump(prefix_);
+ }
+ 
+ bool LevelDbAccessor::Jump(const string& key) {
+-  return cursor_->Jump(key);
++  return cursor_->Jump(key) && (!pending_ || pending_->Jump(kMergeRecords + key));
++}
++
++bool LevelDbAccessor::HasBase() {
++  return cursor_ && cursor_->IsValid() && MatchesPrefix(cursor_->GetKey());
++}
++
++bool LevelDbAccessor::HasPending() {
++  if (!pending_ || !pending_->IsValid()) return false;
++  const auto key = pending_->GetKey();
++  return key.compare(0, kMergeRecords.size(), kMergeRecords) == 0 &&
++         MatchesPrefix(key.substr(kMergeRecords.size()));
+ }
+ 
+ bool LevelDbAccessor::GetNextRecord(string* key, string* value) {
+-  if (!cursor_->IsValid() || !key || !value)
++  if (!key || !value)
+     return false;
++  const bool base = HasBase(), pending = HasPending();
++  if (!base && !pending) return false;
++  const string pending_key = pending ? pending_->GetKey().substr(kMergeRecords.size()) : "";
++  if (pending && (!base || pending_key <= cursor_->GetKey())) {
++    const bool same = base && pending_key == cursor_->GetKey();
++    *key = pending_key;
++    *value = UserDbMerger::MergeValue(same ? cursor_->GetValue() : "",
++        pending_->GetValue(), local_tick_, remote_tick_,
++        (std::max)(local_tick_, remote_tick_));
++    pending_->Next();
++    if (same) cursor_->Next();
++    return true;
++  }
+   *key = cursor_->GetKey();
+   if (!MatchesPrefix(*key)) {
+     return false;
+@@ -134,7 +220,7 @@ bool LevelDbAccessor::GetNextRecord(string* key, string* value) {
+ }
+ 
+ bool LevelDbAccessor::exhausted() {
+-  return !cursor_->IsValid() || !MatchesPrefix(cursor_->GetKey());
++  return !HasBase() && !HasPending();
+ }
+ 
+ // LevelDb members
+@@ -167,27 +253,47 @@ an<DbAccessor> LevelDb::QueryAll() {
+ an<DbAccessor> LevelDb::Query(const string& key) {
+   if (!loaded())
+     return nullptr;
+-  return New<LevelDbAccessor>(db_->CreateCursor(), key);
++  const bool merged = db_->merge.phase == UserDbMergePhase::active &&
++                      (key.empty() || key >= " ");
++  const auto floor = kMergeRecords + db_->merge.cursor;
++  const bool journal = key.compare(0, kMergeRecords.size(), kMergeRecords) == 0;
++  return New<LevelDbAccessor>(db_->CreateCursor(journal ? floor : ""), key,
++      merged ? db_->CreateCursor(floor) : nullptr,
++      db_->merge.local_tick, db_->merge.remote_tick);
+ }
+ 
+ bool LevelDb::Fetch(const string& key, string* value) {
+   if (!value || !loaded())
+     return false;
+-  return db_->Fetch(key, value);
++  const bool found = db_->Fetch(key, value);
++  string remote;
++  if (db_->merge.phase == UserDbMergePhase::active && key >= " " &&
++      key >= db_->merge.cursor &&
++      db_->Fetch(kMergeRecords + key, &remote)) {
++    *value = UserDbMerger::MergeValue(found ? *value : "", remote,
++        db_->merge.local_tick, db_->merge.remote_tick,
++        (std::max)(db_->merge.local_tick, db_->merge.remote_tick));
++    return true;
++  }
++  return found;
+ }
+ 
+ bool LevelDb::Update(const string& key, const string& value) {
+   if (!loaded() || readonly())
+     return false;
+   DLOG(INFO) << "update db entry: " << key << " => " << value;
+-  return db_->Update(key, value, in_transaction());
++  const bool success = db_->Update(key, value, in_transaction());
++  if (success && !in_transaction()) ++write_revision_;
++  return success;
+ }
+ 
+ bool LevelDb::Erase(const string& key) {
+   if (!loaded() || readonly())
+     return false;
+   DLOG(INFO) << "erase db entry: " << key;
+-  return db_->Erase(key, in_transaction());
++  const bool success = db_->Erase(key, in_transaction());
++  if (success && !in_transaction()) ++write_revision_;
++  return success;
+ }
+ 
+ bool LevelDb::Backup(const path& snapshot_file) {
+@@ -256,6 +362,7 @@ bool LevelDb::Open() {
+       }
+     }
+   } else {
++    db_->Release();
+     LOG(ERROR) << "Error opening db '" << name() << "': " << status.ToString();
+   }
+   return loaded_;
+@@ -270,6 +377,7 @@ bool LevelDb::OpenReadOnly() {
+   loaded_ = status.ok();
+ 
+   if (!loaded_) {
++    db_->Release();
+     LOG(ERROR) << "Error opening db '" << name() << "' read-only.";
+   }
+   return loaded_;
+@@ -281,6 +389,8 @@ bool LevelDb::Close() {
+ 
+   db_->Release();
+ 
++  ++write_revision_;
++
+   LOG(INFO) << "closed db '" << name() << "'.";
+   loaded_ = false;
+   readonly_ = false;
+@@ -320,11 +430,81 @@ bool LevelDb::CommitTransaction() {
+   if (!loaded() || !in_transaction())
+     return false;
+   bool ok = db_->CommitBatch();
++  if (ok) ++write_revision_;
+   db_->ClearBatch();
+   in_transaction_ = false;
+   return ok;
+ }
+ 
++UserDbMergePhase LevelDb::merge_phase() const {
++  return loaded() ? db_->merge.phase : UserDbMergePhase::none;
++}
++
++bool LevelDb::StartUserDbMerge(uint64_t remote_tick) {
++  if (!in_transaction() || merge_phase() != UserDbMergePhase::none) return false;
++  return StoreUserDbMergeState({UserDbMergePhase::staging, 0, remote_tick, ""});
++}
++
++bool LevelDb::StoreUserDbMergeState(const UserDbMergeState& state) {
++  if (!in_transaction()) return false;
++  if (state.phase == UserDbMergePhase::none) {
++    if (!Erase(kMergeHeader)) return false;
++  } else {
++    std::ostringstream header;
++    header << (state.phase == UserDbMergePhase::staging ? "staging " : "active ")
++           << state.remote_tick << ' ';
++    if (state.phase == UserDbMergePhase::active) header << state.local_tick << ' ';
++    header << std::quoted(state.cursor);
++    if (!Update(kMergeHeader, header.str())) return false;
++  }
++  db_->next_merge = state;
++  return true;
++}
++
++bool LevelDb::StageUserDbMerge(const string& key, const string& value) {
++  return in_transaction() && merge_phase() == UserDbMergePhase::staging &&
++         key >= " " && Update(kMergeRecords + key, value);
++}
++
++bool LevelDb::ActivateUserDbMerge() {
++  if (!in_transaction() || merge_phase() != UserDbMergePhase::staging) return false;
++  auto records = Query(kMergeRecords);
++  if (!records) return false;
++  string first, value;
++  if (!records->GetNextRecord(&first, &value)) return StoreUserDbMergeState({});
++  const auto local_tick = UserDbMerger::ReadTick(this);
++  const auto remote_tick = db_->merge.remote_tick;
++  if (!MetaUpdate("/tick", std::to_string((std::max)(local_tick, remote_tick))) ||
++      !MetaUpdate("/user_id", Service::instance().deployer().user_id)) return false;
++  return StoreUserDbMergeState({UserDbMergePhase::active, local_tick, remote_tick,
++                               first.substr(kMergeRecords.size())});
++}
++
++bool LevelDb::DrainUserDbMerge(std::chrono::steady_clock::time_point deadline) {
++  if (in_transaction() || merge_phase() == UserDbMergePhase::none ||
++      !BeginTransaction()) return false;
++  BOOST_SCOPE_EXIT(this_) {
++    if (this_->in_transaction()) this_->AbortTransaction();
++  } BOOST_SCOPE_EXIT_END
++  auto records = Query(kMergeRecords);
++  if (!records) return false;
++  auto next = db_->merge;
++  string key, value;
++  for (size_t count = 0; count < 64; ++count) {
++    if (!records->GetNextRecord(&key, &value)) break;
++    // A strict lower bound skips every obsolete version of the last consumed
++    // key. Reads and drain share this durable range, not a tombstone scan.
++    next.cursor = key.substr(kMergeRecords.size()) + '\0';
++    if (merge_phase() == UserDbMergePhase::active) {
++      key.erase(0, kMergeRecords.size());
++      if (!Fetch(key, &value) || !Update(key, value)) return false;
++    } else if (!Erase(key)) return false;  // Unactivated staging has no effect.
++    if (std::chrono::steady_clock::now() >= deadline) break;
++  }
++  if (records->exhausted()) next = {};
++  return StoreUserDbMergeState(next) && CommitTransaction();
++}
++
+ template <>
+ RIME_DLL string UserDbComponent<LevelDb>::extension() const {
+   return ".userdb";

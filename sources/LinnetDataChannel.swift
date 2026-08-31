@@ -222,6 +222,14 @@ enum LinnetDataChannel {
     return try encoder.encode(catalog)
   }
 
+  /// Pack sequence owns both immutable activation sets, not the independently
+  /// changing Core pointer. The full Catalog digest remains its byte identity.
+  static func packSnapshotDigest(_ catalog: Catalog) throws -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    return try sha256(encoder.encode(catalog.activationSets))
+  }
+
   /// The canonical catalog binds the complete downloaded container before the
   /// pack contract inspects its manifest and payload.
   static func verifyDownloadedArtifact(_ artifact: Artifact, at file: URL) throws {
@@ -336,5 +344,95 @@ enum LinnetDataChannel {
 
   private static func sha256(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+// Registry admission owns receipt migration at begin/prepare; storage reads
+// never rewrite an older receipt or infer an unrecorded pack snapshot.
+extension LinnetDataRegistry {
+  private static let dataChannelReceiptFormat = "io.github.ares-x.linnet.data-channel-receipt.v1"
+
+  func receiptForCatalog(
+    _ catalog: LinnetDataChannel.Verified
+  ) throws -> DataChannelReceipt {
+    guard catalog.catalog.sequence > 0, Self.isSHA256(catalog.digest) else {
+      throw Failure.invalidActiveState
+    }
+    return .init(format: Self.dataChannelReceiptFormat,
+      sequence: catalog.catalog.sequence, digest: catalog.digest,
+      packSnapshotDigest: try LinnetDataChannel.packSnapshotDigest(catalog.catalog))
+  }
+
+  func validateDataChannelReceipt(
+    _ candidate: DataChannelReceipt, artifacts: [LinnetDataChannel.Artifact]
+  ) throws {
+    guard validDataChannelReceipt(candidate) else { throw Failure.invalidActiveState }
+    let committed = try committedActiveState()
+    guard let previous = committed.acceptedCatalog else { return }
+    guard candidate.sequence >= previous.sequence else { throw Failure.staleDataChannel }
+    switch (previous.packSnapshotDigest, candidate.packSnapshotDigest) {
+    case (.some(let accepted), .some(let proposed)):
+      guard candidate.sequence > previous.sequence || accepted == proposed else {
+        throw Failure.staleDataChannel
+      }
+    case (.some, .none):
+      throw Failure.staleDataChannel
+    case (.none, .none):
+      // An already-downloading old transaction retains the shipped contract.
+      guard candidate.sequence > previous.sequence || candidate.digest == previous.digest else {
+        throw Failure.staleDataChannel
+      }
+    case (.none, .some):
+      // Old receipts bound the entire Catalog. Only exact committed pack
+      // identities authorize same-sequence migration. Historical uninstalled
+      // editions are unknown; the current Catalog authenticates their artifacts.
+      if candidate.sequence == previous.sequence {
+        guard committed.packs.allSatisfy({ installed in
+          artifacts.contains { $0.matches(installed) }
+        }) else { throw Failure.staleDataChannel }
+      }
+    }
+  }
+
+  func committedActiveState() throws -> ActiveState {
+    let active = try loadActiveStateDocument().state
+    if active.publication == .committed { return active }
+    guard let transactionID = active.transactionID else { throw Failure.invalidActiveState }
+    let previous = transactionsDirectory.appending(
+      path: transactionID.uuidString, directoryHint: .isDirectory).appending(
+      path: "language-active", directoryHint: .isDirectory)
+    let previousState = try loadActiveStateDocument(at: previous).state
+    guard previousState.publication == .committed else { throw Failure.invalidActiveState }
+    return previousState
+  }
+
+  func validDataChannelReceipt(_ receipt: DataChannelReceipt?) -> Bool {
+    guard let receipt else { return true }
+    return receipt.format == Self.dataChannelReceiptFormat
+      && receipt.sequence > 0 && Self.isSHA256(receipt.digest)
+      && receipt.packSnapshotDigest.map(Self.isSHA256) != false
+  }
+
+  func validatedPreparationRecord(
+    update: DataChannelUpdateTransaction,
+    transaction: URL,
+    snapshot: RuntimeSnapshot,
+    packs: [ActivePack],
+    edition: Edition
+  ) throws -> LanguageTransactionRecord {
+    guard update.downloadDirectory.standardizedFileURL
+      == downloadsDirectory.appending(
+        path: update.transactionID.uuidString, directoryHint: .isDirectory).standardizedFileURL,
+      let record = validatedLanguageTransaction(at: transaction, now: Date()),
+      record.phase == .downloading,
+      record.baseRevision == snapshot.activeRevision,
+      record.edition == edition,
+      record.artifacts.count == packs.count,
+      record.artifacts.allSatisfy({ artifact in
+        packs.contains(where: { artifact.matches($0) })
+      })
+    else { throw Failure.invalidActiveState }
+    try validateDataChannelReceipt(record.catalog, artifacts: record.artifacts)
+    return record
   }
 }

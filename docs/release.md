@@ -54,10 +54,18 @@ export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release-preflight.XXX
 预检出现密码框，应取消并排查。由于 CMS 签名时间会改变字节，本地预检输出不得作为
 安装验收或正式发布候选。
 
-正式候选由精确 revision 的
-`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动。同一个 macOS job 只做一次
-checkout、一次锁定 cache restore、一次 hydrate，并串行执行 strict lint、发布 owner、
-Swift、Rime 和 Periphery 门；不再要求先运行第二个完整 CI。随后 Action 使用
+正式候选只能由 `scripts/release-control candidate` 创建携带本地验收收据的
+annotated `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动；裸标签会被拒绝。
+先运行 `scripts/release-control verify-local`：恢复锁定输入并构建，再串行完成
+strict lint、发布 owner、App/Swift/Rime、Periphery。验证期间不得编辑源码；临时
+Git index 绑定完整源 tree，不改变暂存区。收据只保存在 ignored
+`build/linnet-source-verification.json`；合并提交不同但 tree 完全相同时可复用。
+这是可信维护者的验收声明，不宣称 Action 独立重跑了本地测试。
+
+Settings UI 只在合法隔离桌面及 Developer Mode 下本地执行，否则明确记录
+`NOT_EXERCISED`，由 candidate Action 补测；本地 PASS 时不重跑。
+同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
+标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
 `community-signing` Environment 中的 P12 和密码创建临时 Keychain，并只运行一次
 `make archive`。同一次 Make 调用只编译一份 `build/linnet-pack`；
 `make_package` 在产物边界验证两个 PKG，最终
@@ -74,12 +82,13 @@ direct commit，但 byte-identical 的不可变 pack 可以跨候选 revision �
 
 ## GitHub 发布
 
-构建、签名、候选暂存和最终公开都由 GitHub Actions 完成；维护者 Mac 只消费
-Action 生成的原字节做安装验收，并在验收后创建一个不可变授权标签：
+正式产物的构建、签名、候选暂存和最终公开都由 GitHub Actions 完成；维护者 Mac
+负责源码验收与 Action 原字节安装验收，并在验收后创建不可变授权标签：
 
-1. 本地完整 composite、安装前门和版本身份通过后，从 clean、精确远端 `main`
-   创建并推送 `linnet-candidate/v<VERSION>-<FULL_REVISION>`；
-2. 等待唯一 macOS candidate job 成功。它自行串行完成全部候选门，只构建、签名一次，并把八件产物直接放入
+1. 运行 `scripts/release-control verify-local`，提交其绑定的相同 source tree，
+   在 clean、精确远端 `main` 运行 `scripts/release-control candidate`；
+2. 等待唯一 macOS candidate job 成功。它复用源码收据，补齐未执行的 Settings UI，
+   只构建、签名一次，并把八件产物直接放入
    `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
 3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
    candidate job summary 的 revision 与八文件集合摘要，并在本地重新运行最终 verifier；

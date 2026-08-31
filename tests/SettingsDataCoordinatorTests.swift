@@ -1824,6 +1824,7 @@ struct SettingsDataCoordinatorTests {
 
       let rolledBackEnglishPack = try makeLanguagePack(
         .english, version: "settings-english-v2", sequence: 2, registry: registry)
+      print("Coordinator scenario: rolled-back English activation")
       let rolledBackEnglish = try activationReplacing(
         rolledBackEnglishPack, registry: registry)
       requestOrder.armLanguageStatus(.rolledBack)
@@ -2061,17 +2062,32 @@ struct SettingsDataCoordinatorTests {
     registry: LinnetDataRegistry
   ) throws -> LinnetDataRegistry.ActivationCandidate {
     let activeData = try Data(contentsOf: registry.activeSharedDataDirectory.appending(path: "activation.json"))
-    var target = try JSONDecoder().decode(LinnetDataRegistry.ActiveState.self, from: activeData).packs
+    let active = try JSONDecoder().decode(LinnetDataRegistry.ActiveState.self, from: activeData)
+    var target = active.packs
     target.removeAll { $0.kind == replacement.kind }
     target.append(replacement)
-    let sequence = target.map(\.sequence).max() ?? 1
+    // Catalog publication advances independently from each pack's sequence.
+    let sequence = (active.acceptedCatalog?.sequence ?? 0) + 1
+    let document = dataChannelCatalog(for: target, sequence: sequence)
     let catalog = LinnetDataChannel.Verified(
-      catalog: dataChannelCatalog(for: target, sequence: sequence),
-      digest: String(repeating: String(format: "%x", sequence % 16), count: 64))
+      catalog: document,
+      digest: LinnetPackContract.sha256(try LinnetDataChannel.canonicalCatalogData(document)))
+    let receipt = try registry.receiptForCatalog(catalog)
+    print("Language fixture \(replacement.kind.rawValue) \(replacement.version), pack \(replacement.sequence): "
+      + "Catalog \(active.acceptedCatalog?.sequence ?? 0) -> \(sequence); "
+      + "snapshot \(active.acceptedCatalog?.packSnapshotDigest ?? "none") -> \(receipt.packSnapshotDigest ?? "none")")
     let edition: LinnetDataRegistry.Edition = target.contains { $0.kind == .extended }
       ? .full : .standard
-    let update = try registry.beginDataChannelUpdate(accepting: catalog, edition: edition)
-    return try registry.prepareDataChannelUpdate(update, target: target)
+    var phase = "begin"
+    do {
+      let update = try registry.beginDataChannelUpdate(accepting: catalog, edition: edition)
+      phase = "prepare"
+      return try registry.prepareDataChannelUpdate(update, target: target)
+    } catch {
+      print("Language fixture failed at \(phase): \(replacement.kind.rawValue) "
+        + "\(replacement.version), pack sequence \(replacement.sequence), catalog sequence \(sequence): \(error)")
+      throw error
+    }
   }
 
   private static func dataChannelCatalog(

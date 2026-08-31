@@ -1,6 +1,6 @@
 import Foundation
 
-/// Binds a pointer-shaped librime identifier to the controller that acquired
+/// Binds a pointer-shaped librime identifier to the resource that acquired
 /// it. Reuse transfers ownership immediately, so a delayed callback or deinit
 /// from the previous controller cannot mutate the new session at that address.
 struct LinnetRimeSessionLease: Equatable {
@@ -10,6 +10,12 @@ struct LinnetRimeSessionLease: Equatable {
   static func acquire(identifier: RimeSessionId) -> Self? {
     guard identifier != 0 else { return nil }
     return LinnetRimeSessionLeaseRegistry.acquire(identifier: identifier)
+  }
+
+  /// Every librime all-session cleanup also ends the ownership generation,
+  /// including controllers that are inactive and therefore receive no callback.
+  static func retireAll() {
+    LinnetRimeSessionLeaseRegistry.retireAll()
   }
 
   func isCurrent(
@@ -50,5 +56,11 @@ private enum LinnetRimeSessionLeaseRegistry {
     if owners[lease.identifier] == lease.ownership {
       owners.removeValue(forKey: lease.identifier)
     }
+  }
+
+  static func retireAll() {
+    lock.lock()
+    defer { lock.unlock() }
+    owners.removeAll(keepingCapacity: true)
   }
 }

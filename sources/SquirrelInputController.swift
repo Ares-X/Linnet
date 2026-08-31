@@ -345,14 +345,6 @@ extension SquirrelInputController {
     _ = sessionIsCurrent()
   }
 
-  /// Rime's upstream synchronization owns session cleanup. Retire this
-  /// controller's stale generation before that maintenance boundary.
-  func prepareForRimeMaintenance() {
-    retireSessionLease()
-    preedit = ""
-    clearChord()
-    hidePalettes()
-  }
 }
 
 extension SquirrelInputController {

@@ -40,7 +40,11 @@ while IFS=$'\t' read -r process_id command_line; do
     if lsof_output="$(/usr/sbin/lsof -nP -a -p "${process_id}" -Ffn 2>/dev/null)"; then
       if printf '%s\n' "${lsof_output}" | awk -v prefix="n${repo_root}/" '
           /^f/ { descriptor = substr($0, 2); next }
-          descriptor != "cwd" && index($0, prefix) == 1 { found = 1 }
+          # A test or build can inherit stdio logs under this worktree without
+          # loading its runtime. Actual executables, mappings and resource
+          # descriptors still establish candidate ownership.
+          descriptor != "cwd" && descriptor !~ /^[012]$/ &&
+            index($0, prefix) == 1 { found = 1 }
           END { exit(found ? 0 : 1) }
         '; then
         owns_candidate=1

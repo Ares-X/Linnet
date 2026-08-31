@@ -15,6 +15,8 @@
 //   delete <code> <index>           Delete the candidate at <index> via the
 //                                   public API, then print the remaining
 //                                   candidates.
+//   identity                       Exercise per-selection pronunciation and
+//                                   overlapping session lifecycle boundaries.
 //
 // Output markers:
 //   LIST\t<code>\n<RANK>\t<text>\t<comment>\nEND
@@ -95,34 +97,38 @@ class Probe {
     // Real-user flow: type the full code first, then pick each character or
     // word segment from pageable menus.  express_editor may auto-commit the
     // final selection; otherwise Space confirms what remains.
-    if (!api_->simulate_key_sequence(session_, full_code.c_str())) {
-      Fail("learn: key sequence rejected: " + full_code);
+    Begin(full_code);
+    for (size_t i = 0; i < selections.size(); ++i) {
+      Select(selections[i], i + 1);
+    }
+    Finish(word);
+  }
+
+  void Begin(const std::string& code) {
+    if (!api_->simulate_key_sequence(session_, code.c_str())) {
+      Fail("learn: key sequence rejected: " + code);
+    }
+  }
+
+  void Select(const std::string& selection, size_t step = 1) {
+    const int index = FindCandidate(selection);
+    std::cout << "LEARN\t" << step << '\t' << selection << '\t'
+              << index << '\n';
+    if (index < 0) {
+      Fail("learn: candidate not found: " + selection);
     }
     const int page_size = CurrentPageSize();
-    for (size_t i = 0; i < selections.size(); ++i) {
-      const auto& selection = selections[i];
-      int index = FindCandidate(selection);
-      std::cout << "LEARN\t" << (i + 1) << '\t' << selection << '\t'
-                << index << '\n';
-      if (index < 0) {
-        std::cout << "LEARN_FAIL\t" << selection << " not found\n";
-        return;
+    for (int page = 0; page < index / page_size; ++page) {
+      if (!api_->process_key(session_, kPageDown, 0)) {
+        Fail("learn: page-down failed");
       }
-      // Candidate digit keys act on the schema-owned current page size.
-      const int page = index / page_size;
-      for (int p = 0; p < page; ++p) {
-        if (!api_->process_key(session_, kPageDown, 0)) {
-          Fail("learn: page-down failed");
-        }
-      }
-      const int digit_keycode = '1' + (index % page_size);
-      if (!api_->process_key(session_, digit_keycode, 0)) {
-        Fail("learn: digit key rejected");
-      }
-      std::cerr << "PROBE selected " << selection << " at " << index
-                << " (page " << page << ", digit " << (index % page_size + 1)
-                << ")\n";
     }
+    if (!api_->process_key(session_, '1' + index % page_size, 0)) {
+      Fail("learn: digit key rejected");
+    }
+  }
+
+  void Finish(const std::string& word) {
     // express_editor auto-commits when the final selected segment reaches the
     // end of the input.  Only send Space when a composition really remains;
     // an idle Space belongs to the host application.
@@ -213,6 +219,59 @@ class Probe {
   RimeSessionId session_;
 };
 
+void VerifySelectionIdentity(RimeApi_stdbool* api, const std::string& schema) {
+  const auto session = api->create_session();
+  if (!session) {
+    Fail("identity: primary session unavailable");
+  }
+  Probe primary(api, session, schema);
+  primary.Learn("长码在长大", "changmazai'zhangda", {"长", "码", "在", "长", "大"});
+
+  struct Case {
+    const char* boundary;
+    const char* code;
+    const char* suffix;
+  };
+  for (const auto& item : {
+           Case{"browse", "xingma", "码"}, Case{"commit", "xingzhan", "栈"},
+           Case{"abort", "xingshan", "杉"}, Case{"fini", "xingqiao", "桥"},
+           Case{"delete", "xinghu", "湖"}}) {
+    const auto other_session = api->create_session();
+    if (!other_session) {
+      Fail("identity: secondary session unavailable");
+    }
+    Probe other(api, other_session, schema);
+    primary.Begin(item.code);
+    primary.Select("行");
+    other.Begin("hang");
+    const int other_index = other.FindCandidate("行");
+    if (other_index < 0) {
+      Fail("identity: alternate pronunciation unavailable");
+    }
+    const std::string event(item.boundary);
+    if (event == "commit") {
+      other.Select("行");
+      other.Finish("行");
+    } else if (event == "abort") {
+      api->clear_composition(other_session);
+    } else if (event == "delete") {
+      if (!api->delete_candidate(other_session, other_index)) {
+        Fail("identity: delete candidate failed");
+      }
+    } else if (event == "fini") {
+      api->destroy_session(other_session);
+    }
+    primary.Select(item.suffix);
+    primary.Finish(std::string("行") + item.suffix);
+    api->clear_composition(session);
+    if (event != "fini") {
+      api->destroy_session(other_session);
+    }
+    std::cout << "IDENTITY\t" << event << '\n';
+  }
+  api->destroy_session(session);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -247,6 +306,10 @@ int main(int argc, char** argv) {
     std::string command;
     input >> command;
     if (command.empty() || command[0] == '#') {
+      continue;
+    }
+    if (command == "identity") {
+      VerifySelectionIdentity(api, schema_name);
       continue;
     }
     RimeSessionId session = api->create_session();

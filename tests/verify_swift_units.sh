@@ -169,7 +169,8 @@ compile_run macos-keycodes -target "${target}" -framework AppKit \
 compile_run rime-session-lease -target "${target}" \
   -import-objc-header sources/Squirrel-Bridging-Header.h \
   -I librime/dist/include \
-  sources/LinnetRimeSessionLease.swift tests/LinnetRimeSessionLeaseTests.swift
+  sources/LinnetRimeSessionLease.swift sources/LinnetRimeWarmSession.swift \
+  tests/LinnetRimeSessionLeaseTests.swift
 compile_run input-activation-policy \
   sources/LinnetInputActivationPolicy.swift tests/LinnetInputActivationPolicyTests.swift
 compile_run input-source-lifecycle -parse-as-library -framework InputMethodKit -framework Carbon \

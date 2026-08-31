@@ -379,7 +379,6 @@ extension LinnetSettingsDocument {
     var showIPA: Bool
     var showTranslation: Bool
     var predictionEnabled: Bool
-    var spellingCorrection: Bool
     var learnFromSelections: Bool
     var spaceAddsTrailingSpace: Bool
 
@@ -389,7 +388,6 @@ extension LinnetSettingsDocument {
       showIPA: true,
       showTranslation: true,
       predictionEnabled: true,
-      spellingCorrection: true,
       learnFromSelections: true,
       spaceAddsTrailingSpace: true
     )
@@ -400,7 +398,6 @@ extension LinnetSettingsDocument {
       showIPA: Bool = true,
       showTranslation: Bool = true,
       predictionEnabled: Bool = true,
-      spellingCorrection: Bool = true,
       learnFromSelections: Bool = true,
       spaceAddsTrailingSpace: Bool = true
     ) {
@@ -409,7 +406,6 @@ extension LinnetSettingsDocument {
       self.showIPA = showIPA
       self.showTranslation = showTranslation
       self.predictionEnabled = predictionEnabled
-      self.spellingCorrection = spellingCorrection
       self.learnFromSelections = learnFromSelections
       self.spaceAddsTrailingSpace = spaceAddsTrailingSpace
     }
@@ -425,8 +421,6 @@ extension LinnetSettingsDocument {
       showTranslation = try container.decodeIfPresent(Bool.self, forKey: .showTranslation) ?? true
       predictionEnabled =
         try container.decodeIfPresent(Bool.self, forKey: .predictionEnabled) ?? true
-      spellingCorrection =
-        try container.decodeIfPresent(Bool.self, forKey: .spellingCorrection) ?? true
       learnFromSelections =
         try container.decodeIfPresent(Bool.self, forKey: .learnFromSelections) ?? true
       spaceAddsTrailingSpace =

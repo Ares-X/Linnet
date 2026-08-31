@@ -539,21 +539,30 @@ struct LinnetSettingsProjectionRendererTests {
   }
 
   private static func testEnglishExperienceProjections() {
+    do {
+      let legacy = Data("{\"english\":{\"spellingCorrection\":false}}".utf8)
+      let restored = try JSONDecoder().decode(LinnetSettingsDocument.self, from: legacy)
+      let encoded = try JSONEncoder().encode(restored)
+      guard !String(decoding: encoded, as: UTF8.self).contains("spellingCorrection"),
+        LinnetSettingsProjectionRenderer.renderProjections(document: restored).values.allSatisfy({
+          !$0.contains("spelling_correction")
+        })
+      else { fail("a retired English correction switch survived import or runtime projection") }
+    } catch { fail("legacy English preferences did not migrate: \(error)") }
     var document = LinnetSettingsDocument.default
     document.english.showIPA = false
     document.english.showTranslation = false
     document.english.predictionEnabled = false
-    document.english.spellingCorrection = false
     document.english.spaceAddsTrailingSpace = false
     let projections = LinnetSettingsProjectionRenderer.renderProjections(document: document)
     guard let english = projections[LinnetSettingsProjectionRenderer.englishCustomFile],
       english.contains("\"linnet_english_interaction/show_ipa\": false"),
       english.contains("\"linnet_english_interaction/show_translation\": false"),
       english.contains("\"switches/@1/reset\": 0"),
-      english.contains("\"linnet_english_interaction/spelling_correction\": false"),
+      !english.contains("spelling_correction"),
       english.contains("\"linnet_english_interaction/space_adds_trailing_space\": false")
     else {
-      fail("English display, prediction, or correction settings were not projected")
+      fail("English display, prediction, or trailing-space settings were not projected")
     }
     for file in LinnetSettingsProjectionRenderer.chineseCustomFiles {
       guard let contents = projections[file],
@@ -638,7 +647,6 @@ struct LinnetSettingsProjectionRendererTests {
         decoded.english.showIPA,
         decoded.english.showTranslation,
         decoded.english.predictionEnabled,
-        decoded.english.spellingCorrection,
         decoded.english.spaceAddsTrailingSpace
       else {
         fail("an older settings document did not adopt the shipped behavior defaults")

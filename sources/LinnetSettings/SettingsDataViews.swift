@@ -209,7 +209,7 @@ extension DataTabView {
         Label("The installed Core was not activated", systemImage: "xmark.circle")
           .foregroundStyle(.red)
         coreIdentityRows(installed: installed, running: running)
-        Text("The current Host was left in place. Check the runtime before trying again.")
+        Text("Core activation could not be verified. Check the runtime before trying again.")
           .font(.caption2)
           .foregroundStyle(.secondary)
         Button("Check Runtime Again") { updateChecker.refreshRuntime() }
@@ -317,6 +317,8 @@ extension DataTabView {
     switch issue {
     case .inputSourceActive:
       "Use the macOS input menu to select another input source, then try again."
+    case .inputSourceUnavailable:
+      "The selected input source could not be read. Select another input source in the macOS input menu, then try again."
     case .compositionActive:
       "Finish or cancel the current composition, then try again."
     case .dataTransactionActive:
@@ -364,7 +366,7 @@ extension DataTabView {
         Button("View Core Update") { updateChecker.openCoreUpdate() }
       }
       Button("Check Again") { updateChecker.check() }
-        .disabled(updateChecker.active)
+        .disabled(updateChecker.active || updateChecker.activationInProgress)
     }
   }
 

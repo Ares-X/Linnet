@@ -1,4 +1,6 @@
 {
+  "evidence_status": "historical_snapshot",
+  "scope_note": "Counts and findings below apply only to the exact source_identity and verdict date, not the current curated ledger. Later glossary corrections require current projection tests; this file is not a current-release quality verdict.",
   "source_identity": {
     "final_decisions_sha256": "6c503b126199513c39681c3d80b5f0e22470571feaf7cecf16176e3ea772e357",
     "historical_verdict_date": "2026-08-07"

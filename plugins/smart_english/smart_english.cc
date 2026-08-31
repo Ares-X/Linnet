@@ -776,13 +776,11 @@ class SmartEnglishTranslator : public Translator {
     }
     if (!segment.HasTag("zz_english")) return result;
     const string normalized = LowerAsciiWord(input);
-    if (options_.spelling_correction) {
-      for (const auto& word : index_.LookupCorrections(normalized)) {
-        if (word.text == normalized) continue;
-        auto candidate = New<SimpleCandidate>(kCorrectionCandidateType, segment.start, segment.end, word.text);
-        candidate->set_quality(word.weight);
-        result->Append(candidate);
-      }
+    for (const auto& word : index_.LookupCorrections(normalized)) {
+      if (word.text == normalized) continue;
+      auto candidate = New<SimpleCandidate>(kCorrectionCandidateType, segment.start, segment.end, word.text);
+      candidate->set_quality(word.weight);
+      result->Append(candidate);
     }
     for (const auto& word : PinyinWords(normalized)) {
       auto candidate = New<SimpleCandidate>("linnet_pinyin", segment.start,

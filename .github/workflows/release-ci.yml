@@ -48,6 +48,7 @@ jobs:
           test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
           test "${GITHUB_ACTOR}" = Ares-X
           [[ "${CANDIDATE_REVISION}" =~ ^[0-9a-f]{40}$ ]]
+          CANDIDATE_REVISION="$(git rev-parse --verify "${CANDIDATE_REVISION}^{commit}")"
           candidate_pattern='^refs/tags/linnet-candidate/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})$'
           seed_pattern='^refs/tags/linnet-data-seed/v([0-9]+\.[0-9]+\.[0-9]+)-([1-9][0-9]*)-([0-9a-f]{40})$'
           requested_sequence=""
@@ -71,11 +72,16 @@ jobs:
           tag_record="$(gh api \
             "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
             --jq '[.object.type, .object.sha] | @tsv')"
-          test "${tag_record}" = $'commit\t'"${CANDIDATE_REVISION}"
+          settings_ui=NOT_EXERCISED
           if [[ "${request_mode}" == candidate ]]; then
+            test "${tag_record}" = $'tag\t'"$(git rev-parse --verify "${CANDIDATE_REF}")"
+            settings_ui="$(scripts/release-control verify-source \
+              "${CANDIDATE_REF}" "${CANDIDATE_REVISION}")"
             remote_main="$(gh api \
               "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
             test "${remote_main}" = "${CANDIDATE_REVISION}"
+          else
+            test "${tag_record}" = $'commit\t'"${CANDIDATE_REVISION}"
           fi
 
           product_version="$(sed -n \
@@ -96,6 +102,7 @@ jobs:
             echo "version=${version}"
             echo "revision=${CANDIDATE_REVISION}"
             echo "catalog_sequence=${catalog_sequence}"
+            echo "settings_ui=${settings_ui}"
           } >>"${GITHUB_OUTPUT}"
 
       - name: Restore locked build cache once
@@ -103,16 +110,15 @@ jobs:
         with:
           save: false
 
-      - name: Restore and save incremental Swift owner tests
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
-        with:
-          path: build/swift-unit-cache
-          key: linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: |
-            linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
-
       - name: Install declared build tools once
-        run: scripts/install_ci_build_tools.sh quality
+        env:
+          REQUEST_MODE: ${{ steps.request.outputs.mode }}
+        run: |
+          if [[ "${REQUEST_MODE}" == data-seed ]]; then
+            scripts/install_ci_build_tools.sh quality
+          else
+            scripts/install_ci_build_tools.sh release
+          fi
 
       - name: Bootstrap an exact future LTS data seed
         if: steps.request.outputs.mode == 'data-seed'
@@ -140,12 +146,9 @@ jobs:
       - name: Prepare locked dependencies and generated data
         run: ./action-install.sh
 
-      - name: Verify strict source and publication owners
-        env:
-          REQUEST_MODE: ${{ steps.request.outputs.mode }}
+      - name: Verify history-sensitive publication metadata
         run: |
           set -euo pipefail
-          scripts/run_swiftlint.sh
           if git cat-file -e 'HEAD^' 2>/dev/null; then
             changed="$(mktemp)"
             previous="$(mktemp)"
@@ -158,19 +161,14 @@ jobs:
                 "${previous}" config/linnet-data-releases.json
             fi
           fi
+
+      - name: Verify the independently built data seed
+        if: steps.request.outputs.mode == 'data-seed'
+        run: |
+          scripts/run_swiftlint.sh
           tests/verify_release_automation.sh
           tests/verify_publication_owner.sh
-
-      - name: Verify Swift owner contracts
-        if: steps.request.outputs.mode == 'candidate'
-        run: tests/verify_development.sh swift
-
-      - name: Verify Rime and all input profiles
-        run: tests/verify_development.sh rime
-
-      - name: Check unused production code
-        if: steps.request.outputs.mode == 'candidate'
-        run: scripts/run_periphery.sh
+          tests/verify_development.sh rime
 
       - name: Import the pinned community signing identity
         env:
@@ -228,8 +226,8 @@ jobs:
               "${{ steps.request.outputs.version }}" \
               "${LINNET_CANDIDATE_REVISION}"
 
-      - name: Verify visible Settings workflow
-        if: steps.request.outputs.mode == 'candidate'
+      - name: Complete Settings UI acceptance when not exercised locally
+        if: steps.request.outputs.mode == 'candidate' && steps.request.outputs.settings_ui == 'NOT_EXERCISED'
         run: tests/verify_visible_settings_fixture.sh --ui-test
 
       - name: Stage exact GitHub Release bytes

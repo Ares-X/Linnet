@@ -21,12 +21,17 @@ struct LinnetCloudSyncLocationTests {
     let cloudDocuments = try makeCloudDocuments(in: library)
     let location = try LinnetCloudSyncLocation.productLocation(libraryDirectory: library)
     let learningDirectory = try location.prepareLearningDirectory()
+    let expectedFolder = cloudDocuments.appending(component: "Linnet", directoryHint: .isDirectory)
+      .standardizedFileURL.resolvingSymlinksInPath()
     guard location.folder.standardizedFileURL
-        == cloudDocuments.appending(component: "Linnet", directoryHint: .isDirectory),
+        == expectedFolder,
       learningDirectory.lastPathComponent == "Linnet-Rime-Sync",
       learningDirectory.hasDirectoryPath,
       location.displayName == "iCloud Drive/Linnet"
     else {
+      print("actual=\(location.folder.absoluteString)")
+      print("expected=\(expectedFolder.absoluteString)")
+      print("learning=\(learningDirectory.absoluteString), directory=\(learningDirectory.hasDirectoryPath)")
       fail("the product-owned iCloud Drive location was not derived deterministically")
     }
   }
@@ -77,9 +82,8 @@ struct LinnetCloudSyncLocationTests {
   }
 
   private static func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {
-    var template = Array("/tmp/linnet-cloud-sync.XXXXXX".utf8CString)
-    guard let path = mkdtemp(&template) else { throw POSIXError(.EIO) }
-    let root = URL(fileURLWithPath: String(cString: path), isDirectory: true)
+    let root = LinnetTestScratch.directory.appending(component: UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
     try body(root)
   }

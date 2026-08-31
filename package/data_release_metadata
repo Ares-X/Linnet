@@ -86,7 +86,8 @@ def check_source_change(paths)
     path.start_with?("/") || path.split("/").include?("..")
   end
   source_changed = normalized.any? do |path|
-    RELEASE_SOURCE_PREFIXES.any? { |prefix| path.start_with?(prefix) }
+    !path.start_with?("data/linnet/lua/") &&
+      RELEASE_SOURCE_PREFIXES.any? { |prefix| path.start_with?(prefix) }
   end
   metadata_changed = normalized.include?(RELEASE_METADATA_PATH)
   if source_changed && !metadata_changed

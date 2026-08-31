@@ -24,6 +24,17 @@ struct LinnetDataChannelTests {
     let data = try catalogData(catalog)
     let verified = try LinnetDataChannel.verify(data, coreVersion: "1.0.0")
     require(verified.catalog.sequence == 5, "valid canonical catalog")
+    let nextCore = LinnetDataChannel.Core(
+      version: catalog.core.version, build: catalog.core.build + 1,
+      revision: String(repeating: "d", count: 40), bytes: catalog.core.bytes + 1,
+      sha256: String(repeating: "e", count: 64),
+      packageURL: catalog.core.packageURL, releaseURL: catalog.core.releaseURL)
+    let coreOnly = try LinnetDataChannel.verify(catalogData(.init(
+      format: catalog.format, sequence: catalog.sequence, core: nextCore,
+      activationSets: catalog.activationSets)), coreVersion: "1.0.0")
+    require(coreOnly.digest != verified.digest, "full Catalog identity lost Core bytes")
+    require(try LinnetDataChannel.packSnapshotDigest(coreOnly.catalog)
+      == LinnetDataChannel.packSnapshotDigest(catalog), "Core-only change altered immutable pack identity")
     require(
       verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 7)
         == .available,

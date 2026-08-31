@@ -117,11 +117,13 @@ load_and_verify_release() {
 
   ruby -rjson -e '
     release = JSON.parse(File.binread(ARGV.fetch(0)))
-    tag, revision, prerelease, expected_path, output = ARGV.drop(1)
+    tag, revision, prerelease, expected_path, output, channel = ARGV.drop(1)
     abort unless release.fetch("tagName") == tag
     abort unless release.fetch("isPrerelease") == (prerelease == "true")
     if release.fetch("isDraft")
-      abort unless release.fetch("targetCommitish") == revision
+      target = release.fetch("targetCommitish")
+      abort unless target.match?(/\A[0-9a-f]{40}\z/) && target != "0" * 40
+      abort unless channel == "data" || target == revision
     end
     expected = File.readlines(expected_path, chomp: true).reject(&:empty?).sort
     assets = release.fetch("assets")
@@ -138,7 +140,7 @@ load_and_verify_release() {
       rows.each { |row| file.puts(row.join("\t")) }
     end
   ' "${json}" "${tag}" "${candidate_revision}" "${expected_prerelease}" \
-    "${expected}" "${actual}" ||
+    "${expected}" "${actual}" "${channel}" ||
     fail_publish "${tag} draft metadata or asset identity is invalid"
 
   if [[ "$(ruby -rjson -e 'puts JSON.parse(File.binread(ARGV.fetch(0))).fetch("isDraft")' \
