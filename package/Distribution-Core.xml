@@ -12,8 +12,8 @@
     <line choice="core"/>
   </choices-outline>
   <choice id="core" visible="false">
-    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"/>
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.update.core.pkg"/>
   </choice>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.update.core.pkg"
     version="@CORE_VERSION@" auth="none">Linnet-Core.component.pkg</pkg-ref>
 </installer-gui-script>

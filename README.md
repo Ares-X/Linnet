@@ -15,7 +15,7 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 
 本文对应本分支版本；正式可下载版本以 Latest Release 为准。
 本次重点修复同步期间的输入停顿，改进英文纠错、中文候选优先级和词义，并加入 Core、词包及手动恢复备份的差分更新。
-完整内容见[本次变更记录](CHANGELOG.md#0111--2026-08-31)。
+完整内容见[本次变更记录](CHANGELOG.md#0111--2026-09-01)。
 
 [产品体验](#产品体验) · [安装](#安装) · [使用指南](#使用指南) · [设置](#设置) · [隐私](#隐私) · [参与贡献](#参与贡献)
 
@@ -302,7 +302,7 @@ no_download=1 ./action-build.sh release
 
 ## 版本、来源与许可证
 
-当前公开版本见 [Latest Release](https://github.com/Ares-X/Linnet/releases/latest)；本分支版本为 **0.1.11**（2026-08-31）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前公开版本见 [Latest Release](https://github.com/Ares-X/Linnet/releases/latest)；本分支版本为 **0.1.11**（2026-09-01）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 
