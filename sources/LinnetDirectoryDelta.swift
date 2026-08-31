@@ -110,24 +110,34 @@ enum LinnetDirectoryDelta {
 
   /// The same exact pair supports install and rollback; arbitrary or modified
   /// trees cannot be exchanged. The installer still owns CMS/runtime checks.
-  static func exchange(installed: URL, staged: URL, delta: URL) throws {
+  static func exchangeApp(installed: URL, staged: URL, delta: URL) throws {
     let header = try read(delta, extracting: nil)
-    try exchange(installed: installed, staged: staged,
+    try exchangeApp(installed: installed, staged: staged,
       baseSHA256: header.baseSHA256, targetSHA256: header.targetSHA256)
   }
 
   /// Complete repair has verified full target bytes rather than a delta. Both
   /// transports publish and roll back through this single exact-pair boundary.
-  static func exchange(installed: URL, staged: URL, baseSHA256: String, targetSHA256: String) throws {
+  static func exchangeApp(installed: URL, staged: URL, baseSHA256: String, targetSHA256: String) throws {
     let first = try digest(installed), second = try digest(staged)
     guard (first == baseSHA256 && second == targetSHA256)
       || (first == targetSHA256 && second == baseSHA256) else {
       throw Failure.invalid("exchange pair")
     }
-    try requireDirectory(installed.deletingLastPathComponent())
-    try requireDirectory(staged.deletingLastPathComponent())
+    // LaunchServices/InputMethodKit can retain references to the registered
+    // App directory. Exchange its complete Contents, never the App inode: the
+    // old registered object must not move to staging and then get deleted.
+    for app in [installed, staged] {
+      guard app.pathExtension == "app",
+        try FileManager.default.contentsOfDirectory(atPath: app.path) == ["Contents"] else {
+        throw Failure.invalid("App publication layout")
+      }
+      try requireDirectory(app.appending(path: "Contents"))
+    }
+    let installedContents = installed.appending(path: "Contents")
+    let stagedContents = staged.appending(path: "Contents")
     guard renameatx_np(
-      AT_FDCWD, installed.path, AT_FDCWD, staged.path,
+      AT_FDCWD, installedContents.path, AT_FDCWD, stagedContents.path,
       UInt32(RENAME_SWAP | RENAME_NOFOLLOW_ANY)) == 0 else {
       throw Failure.filesystem("atomic exchange", errno)
     }

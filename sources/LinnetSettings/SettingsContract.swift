@@ -353,9 +353,14 @@ enum LinnetSettingsContract {
 extension LinnetSettingsContract {
   static func productIdentity(startingAt bundle: Bundle = .main) -> ProductIdentity? {
     guard let host = hostBundle(startingAt: bundle),
-      let version = host.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+      // Bundle caches Info.plist for the process lifetime. Installed identity
+      // must read both files from disk; Host captures this result once at start.
+      let infoData = try? Data(contentsOf: host.bundleURL.appending(path: "Contents/Info.plist")),
+      let info = try? PropertyListSerialization.propertyList(
+        from: infoData, options: [], format: nil) as? [String: Any],
+      let version = info["CFBundleShortVersionString"] as? String,
       !version.isEmpty,
-      let buildText = host.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+      let buildText = info["CFBundleVersion"] as? String,
       let build = UInt64(buildText), build > 0,
       let data = try? Data(contentsOf: host.bundleURL.appending(
         path: "Contents/Resources/LinnetRelease/VERSION.json")),

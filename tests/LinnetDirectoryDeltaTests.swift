@@ -3,6 +3,7 @@ import Foundation
 
 extension LinnetPackTests {
   static func directoryDeltaRoundTrip() throws {
+    try applicationPublicationPreservesDirectoryIdentity()
     let root = LinnetTestScratch.directory.appending(path: "directory-delta-\(UUID().uuidString)")
     let fileManager = FileManager.default
     try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
@@ -53,12 +54,6 @@ extension LinnetPackTests {
     precondition(restoredDigest == targetDigest && baseAfter == originalDigest)
     let targetState = try LinnetDirectoryDelta.state(base: restored, delta: delta)
     precondition(targetState == .target)
-    try LinnetDirectoryDelta.exchange(installed: base, staged: restored, delta: delta)
-    let installedDigest = try LinnetDirectoryDelta.digest(base)
-    precondition(installedDigest == targetDigest)
-    try LinnetDirectoryDelta.exchange(installed: base, staged: restored, delta: delta)
-    let rolledBackDigest = try LinnetDirectoryDelta.digest(base)
-    precondition(rolledBackDigest == originalDigest)
     let modifiedClone = restored.appending(path: "unchanged.txt")
     precondition(chmod(modifiedClone.path, 0o644) == 0)
     try changed.write(to: modifiedClone)
@@ -77,6 +72,59 @@ extension LinnetPackTests {
     }
     precondition(!fileManager.fileExists(atPath: rejected.path))
     print("Directory delta: PASS (\(deltaBytes) bytes / \(original.count), exact modes/add/delete/link/COW/rollback/corruption)")
+  }
+
+  private static func applicationPublicationPreservesDirectoryIdentity() throws {
+    let root = LinnetTestScratch.directory.appending(path: "app-delta-\(UUID().uuidString)")
+    let manager = FileManager.default
+    try manager.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? manager.removeItem(at: root) }
+    let installed = root.appending(path: "Installed.app", directoryHint: .isDirectory)
+    let candidate = root.appending(path: "Candidate.app", directoryHint: .isDirectory)
+    let staged = root.appending(path: "Staged.app", directoryHint: .isDirectory)
+    for (app, contents) in [(installed, "old"), (candidate, "new")] {
+      try manager.createDirectory(at: app.appending(path: "Contents"), withIntermediateDirectories: true)
+      try Data(contents.utf8).write(to: app.appending(path: "Contents/payload"))
+    }
+    let delta = root.appending(path: "core.linnetdelta")
+    try LinnetDirectoryDelta.build(base: installed, target: candidate, output: delta)
+    try LinnetDirectoryDelta.apply(base: installed, delta: delta, output: staged)
+    var before = stat()
+    precondition(lstat(installed.path, &before) == 0)
+    let bookmark = try installed.bookmarkData(options: .minimalBookmark)
+    let baseDigest = try LinnetDirectoryDelta.digest(installed)
+    let targetDigest = try LinnetDirectoryDelta.digest(candidate)
+    for expectedContents in ["new", "old"] {
+      if expectedContents == "new" {
+        try LinnetDirectoryDelta.exchangeApp(installed: installed, staged: staged, delta: delta)
+      } else {
+        try LinnetDirectoryDelta.exchangeApp(installed: installed, staged: staged,
+          baseSHA256: baseDigest, targetSHA256: targetDigest)
+      }
+      let payload = try Data(contentsOf: installed.appending(path: "Contents/payload"))
+      precondition(payload == Data(expectedContents.utf8), "App publication did not exchange exact contents")
+      var after = stat()
+      precondition(lstat(installed.path, &after) == 0)
+      guard before.st_dev == after.st_dev, before.st_ino == after.st_ino else {
+        LinnetTestFailure.fail("Core publication replaced the registered App directory identity")
+      }
+      var stale = false
+      let resolved = try URL(resolvingBookmarkData: bookmark, options: .withoutUI,
+        bookmarkDataIsStale: &stale)
+      guard resolved.standardizedFileURL == installed.standardizedFileURL else {
+        LinnetTestFailure.fail("Core publication moved the existing App bookmark into staging")
+      }
+    }
+    let unexpected = installed.appending(path: "outside-Contents")
+    try Data("invalid App layout".utf8).write(to: unexpected)
+    let invalidDigest = try LinnetDirectoryDelta.digest(installed)
+    try expectDeltaFailure {
+      try LinnetDirectoryDelta.exchangeApp(installed: installed, staged: staged,
+        baseSHA256: invalidDigest, targetSHA256: targetDigest)
+    }
+    let afterRejection = try LinnetDirectoryDelta.digest(installed)
+    precondition(afterRejection == invalidDigest, "rejected App layout was mutated")
+    print("Core publication: stable App inode and bookmark across update/rollback")
   }
 
   private static func expectDeltaFailure(_ operation: () throws -> Void) throws {

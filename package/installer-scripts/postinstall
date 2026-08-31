@@ -151,7 +151,7 @@ publish_complete_app() {
   require_installed_app || return 1
   base="$("${delta_tool}" tree-digest --root "${app_path}")" || return 1
   target="$("${delta_tool}" tree-digest --root "${complete_staged_app}")" || return 1
-  "${delta_tool}" exchange-trees --installed "${app_path}" --staged "${complete_staged_app}" \
+  "${delta_tool}" exchange-app --installed "${app_path}" --staged "${complete_staged_app}" \
     --base-sha256 "${base}" --target-sha256 "${target}" || return 1
   published_action=swapped
   published_base="${base}"
@@ -162,7 +162,7 @@ rollback_complete_app() {
   case "${complete_app_action}" in
     none) ;;
     created) /bin/mv "${app_path}" "${complete_staged_app}" ;;
-    swapped) "${delta_tool}" exchange-trees --installed "${app_path}" --staged "${complete_staged_app}" \
+    swapped) "${delta_tool}" exchange-app --installed "${app_path}" --staged "${complete_staged_app}" \
       --base-sha256 "${complete_app_base}" --target-sha256 "${complete_app_target}" ;;
     *) return 1 ;;
   esac
@@ -207,7 +207,7 @@ if [[ "${install_mode}" == core-update ]]; then
             exit 1
           }
           if [[ "${current_state}" == target ]]; then
-            "${delta_tool}" exchange-delta --installed "${app_path}" \
+            "${delta_tool}" exchange-app-delta --installed "${app_path}" \
               --staged "${staged_app}" --delta "${delta_file}" || {
               echo "Linnet postinstall: rollback failed; retained recovery at ${update_root}" >&2
               exit 1
@@ -225,7 +225,7 @@ if [[ "${install_mode}" == core-update ]]; then
       "${delta_tool}" apply-delta --base "${app_path}" --delta "${delta_file}" \
         --output "${staged_app}"
       "${identity_helper}" staged "${staged_app}"
-      "${delta_tool}" exchange-delta --installed "${app_path}" \
+      "${delta_tool}" exchange-app-delta --installed "${app_path}" \
         --staged "${staged_app}" --delta "${delta_file}"
       ;;
     *) echo "Linnet postinstall: invalid differential state" >&2; exit 1 ;;

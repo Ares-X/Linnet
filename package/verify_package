@@ -575,7 +575,7 @@ if [[ "${edition}" != core ]]; then
   grep -Fq '"${identity_helper}" installed' \
     "${profile_component}/Scripts/postinstall" ||
     fail_verification "Complete installed identity gate is incomplete"
-  grep -Fq 'exchange-trees --installed "${app_path}"' \
+  grep -Fq 'exchange-app --installed "${app_path}"' \
     "${profile_component}/Scripts/postinstall" ||
     fail_verification "Complete atomic publication gate is incomplete"
   grep -Fq 'with-settings-mutation-lease' \

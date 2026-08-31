@@ -96,6 +96,10 @@ Core 包只携带差分和安装工具；已有词包下载与其内容匹配的
 因此单个被修改文件的临时空间仍按其完整大小计算，不能把网络差分大小当作磁盘峰值。
 失败保留原始安装，只有明确确认 Complete/完整词包修复后才允许全量传输。
 安装器与 Settings 复用一个数据 mutation lease，不关闭任何应用。
+Core 与已有安装的 Complete 修复必须保留 `Linnet.app` 目录的文件身份，
+只原子交换完整 `Contents`；不能将已注册 App 根目录换到暂存区再删除。
+Settings 的已安装版本读取同一磁盘安装的 Info.plist 与 VERSION.json，
+不能与进程缓存的旧 Bundle 元数据混用；Host 的运行版本仍是启动时的不可变快照。
 
 差分 Core 使用独立的 `update.core.pkg` receipt；Complete 的 App、词包和激活投影
 使用 `complete.*.pkg` receipts，只指向隐藏暂存目录。不能复用旧版全量安装的

@@ -41,7 +41,7 @@ struct LinnetPackTool {
       case "build-catalog": try buildCatalog(options)
       case "verify-catalog": try verifyCatalog(options)
       case "inspect-catalog": try inspectCatalog(options)
-      case "build-delta", "apply-delta", "delta-state", "tree-digest", "exchange-delta", "exchange-trees":
+      case "build-delta", "apply-delta", "delta-state", "tree-digest", "exchange-app-delta", "exchange-app":
         try directoryDelta(command, options: options)
       default: throw ToolFailure.usage(help)
       }
@@ -75,8 +75,8 @@ struct LinnetPackTool {
       linnet-pack apply-delta --base DIR --delta FILE --output DIR
       linnet-pack delta-state --base DIR --delta FILE
       linnet-pack tree-digest --root DIR
-      linnet-pack exchange-delta --installed DIR --staged DIR --delta FILE
-      linnet-pack exchange-trees --installed DIR --staged DIR --base-sha256 SHA --target-sha256 SHA
+      linnet-pack exchange-app-delta --installed APP --staged APP --delta FILE
+      linnet-pack exchange-app --installed APP --staged APP --base-sha256 SHA --target-sha256 SHA
       linnet-pack with-settings-mutation-lease --application-support DIR --core-version VERSION
         --timeout-seconds N -- EXECUTABLE [ARGUMENTS...]
     """
@@ -109,10 +109,10 @@ struct LinnetPackTool {
 
   static func directoryDelta(_ command: String, options: [String: String]) throws {
     switch command {
-    case "exchange-trees":
+    case "exchange-app":
       guard options.count == 4, let base = options["base-sha256"], let target = options["target-sha256"],
         isSHA256(base), isSHA256(target) else { throw ToolFailure.usage(help) }
-      try LinnetDirectoryDelta.exchange(installed: requiredURL("installed", options), staged: requiredURL("staged", options),
+      try LinnetDirectoryDelta.exchangeApp(installed: requiredURL("installed", options), staged: requiredURL("staged", options),
         baseSHA256: base, targetSHA256: target)
     case "tree-digest":
       guard options.count == 1 else { throw ToolFailure.usage(help) }
@@ -131,7 +131,7 @@ struct LinnetPackTool {
         base: requiredURL("base", options), delta: requiredURL("delta", options), output: requiredURL("output", options))
     default:
       guard options.count == 3 else { throw ToolFailure.usage(help) }
-      try LinnetDirectoryDelta.exchange(
+      try LinnetDirectoryDelta.exchangeApp(
         installed: requiredURL("installed", options), staged: requiredURL("staged", options), delta: requiredURL("delta", options))
     }
   }

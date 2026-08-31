@@ -1036,6 +1036,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     esac
     before_tree="$("${delta_tool}" tree-digest --root "${delta_app}")"
     before_app="$(snapshot_app "${delta_app}")"
+    before_app_identity="$(stat -f '%d:%i' "${delta_app}")"
     before_build="$(plutil -extract CFBundleVersion raw -o - "${delta_app}/Contents/Info.plist")"
     runtime_state=healthy
     [[ "${delta_case}" != rollback ]] || runtime_state=target-invalid
@@ -1056,6 +1057,9 @@ if [[ "${candidate_fixture_available}" == true ]]; then
         [[ "$(snapshot_app "${delta_app}")" == "${before_app}" ]]
       fi
     fi
+    [[ "$(stat -f '%d:%i' "${delta_app}")" == "${before_app_identity}" ]] || {
+      echo "Core ${delta_case} replaced the registered App directory." >&2; exit 1;
+    }
     [[ -z "$(find "${delta_home}/Library/Input Methods" -maxdepth 1 -name '.linnet-core.*' -print)" ]]
     write_candidate_identity "${candidate_version}" "${candidate_build}" \
       "${candidate_revision}" "${candidate_leaf}"
@@ -1245,6 +1249,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   printf 'old complete bytes\n' \
     >"${healthy_complete_home}/Library/Input Methods/Linnet.app/Contents/repair-before"
   stage_complete_candidate "${healthy_complete_home}"
+  before_app_identity="$(stat -f '%d:%i' "${healthy_complete_home}/Library/Input Methods/Linnet.app")"
   HOME="${healthy_complete_home}" \
       LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy \
@@ -1253,6 +1258,9 @@ if [[ "${candidate_fixture_available}" == true ]]; then
       "${scripts_root}/postinstall" || {
     echo "Complete postinstall could not atomically repair a healthy App." >&2
     exit 1
+  }
+  [[ "$(stat -f '%d:%i' "${healthy_complete_home}/Library/Input Methods/Linnet.app")" == "${before_app_identity}" ]] || {
+    echo "Complete repair replaced the registered App directory." >&2; exit 1;
   }
   [[ ! -e "${healthy_complete_home}/Library/Input Methods/Linnet.app/Contents/repair-before" ]] || {
     echo "Complete repair did not publish the staged candidate App." >&2; exit 1;

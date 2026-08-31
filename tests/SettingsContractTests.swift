@@ -29,6 +29,7 @@ struct SettingsContractTests {
           hostIdentifier: hostIdentifier,
           productName: productName
         )
+        try testInstalledIdentityAfterUpdate(host: host, settings: settings)
       }
       print("SettingsContractTests: PASS")
     } catch {
@@ -237,6 +238,41 @@ struct SettingsContractTests {
       LinnetSettingsContract.productIdentity(startingAt: settings) == expected
     else {
       fail("installed and running product identity did not share one bundle owner")
+    }
+  }
+
+  private static func testInstalledIdentityAfterUpdate(host: Bundle, settings: Bundle) throws {
+    let running = LinnetSettingsContract.productIdentity(startingAt: host)
+    guard var info = host.infoDictionary, running?.build == 7 else {
+      throw TestFailure.invalidFixture
+    }
+    // Keep the same Bundle instances alive, as Host and Settings do during an
+    // update. Foundation caches Info.plist, while VERSION.json is read afresh.
+    info["CFBundleShortVersionString"] = "1.0.1"
+    info["CFBundleVersion"] = "8"
+    try writeInfoPlist(at: host.bundleURL, values: info)
+    let document: [String: Any] = [
+      "version": "1.0.1", "build": "8",
+      "source": ["candidate_revision": String(repeating: "b", count: 40)],
+    ]
+    let releaseURL = host.bundleURL.appendingPathComponent("Contents/Resources/LinnetRelease/VERSION.json")
+    try JSONSerialization.data(withJSONObject: document).write(to: releaseURL, options: .atomic)
+    let installed = LinnetSettingsContract.ProductIdentity(
+      version: "1.0.1", build: 8, revision: String(repeating: "b", count: 40))
+    guard LinnetSettingsContract.productIdentity(startingAt: settings) == installed,
+      running?.build == 7 else {
+      fail("an open Settings process lost the installed identity after a Core update")
+    }
+    // Missing and inconsistent on-disk metadata must still be rejected; a stale
+    // Bundle cache is not a fallback source of installed product identity.
+    info["CFBundleVersion"] = "9"
+    try writeInfoPlist(at: host.bundleURL, values: info)
+    guard LinnetSettingsContract.productIdentity(startingAt: settings) == nil else {
+      fail("inconsistent installed product metadata was accepted")
+    }
+    try FileManager.default.removeItem(at: releaseURL)
+    guard LinnetSettingsContract.productIdentity(startingAt: settings) == nil else {
+      fail("missing installed product metadata was replaced with a cached identity")
     }
   }
 

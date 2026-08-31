@@ -12,6 +12,18 @@ fail() {
   exit 1
 }
 
+if rg -n 'LinnetDirectoryDelta\.exchange\(|"exchange-(delta|trees)"|AT_FDCWD, installed\.path, AT_FDCWD, staged\.path' \
+    sources tools package; then
+  fail "Core publication can again replace the registered App directory"
+fi
+ruby -e '
+  source = File.read(ARGV.fetch(0))
+  reader = source[/static func productIdentity\(.*?^  \}/m]
+  abort "installed identity reader missing or uses cached Bundle metadata" unless
+    reader && !reader.include?("object(forInfoDictionaryKey:")
+' sources/LinnetSettings/SettingsContract.swift ||
+  fail "installed Core identity regained cached process metadata"
+
 test -x tests/verify_candidate_native_idle.sh ||
   fail "the exact candidate-native lifecycle owner is missing"
 test -x tests/verify_candidate_native_idle_test.sh ||
