@@ -26,7 +26,7 @@ for retired in package/publication_plan package/publish_release \
     fail "retired approval-commit publication path returned: ${retired}"
 done
 
-for owner in "${asset_manifest}" "${candidate_identity_owner}" "${stager}" "${publisher}"; do
+for owner in "${verifier}" "${asset_manifest}" "${candidate_identity_owner}" "${stager}" "${publisher}"; do
   [[ -f "${owner}" && ! -L "${owner}" && -x "${owner}" ]] ||
     fail "release channel owner is missing: ${owner##*/}"
   bash -n "${owner}"

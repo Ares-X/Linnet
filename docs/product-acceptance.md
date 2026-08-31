@@ -355,6 +355,12 @@ artifact consumer and delete both Core-specific placement branches (2->0),
 keeping exact attribute/value validation. This changes no App or Rime behavior;
 full signed-package verification and a fresh source receipt are still required.
 
+The `5d9eff2` signed preflight then passes both actual PKGs and differential
+packs. Its final publication-byte gate exposes a Bash continuation error in the
+inventory comparison, before it examines artifacts. Fix that continuation and
+include this existing verifier in the centralized shell-syntax owner list;
+the previous list omitted it. No manifest rule or byte check is relaxed.
+
 The differential candidate's cross-version data boundary was corrected before
 the final source freeze. On 2026-08-31, base `c53df52` plus this candidate,
 an old Settings pause request was accepted by the new Host because IPC checked

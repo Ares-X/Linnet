@@ -45,7 +45,7 @@ expected_files="$("${project_root}/package/release_asset_manifest" \
 actual_files="$(find "${release_dir}" -mindepth 1 -maxdepth 1 -type f ! -type l \
   -exec basename {} \; | LC_ALL=C sort)"
 [[ "${actual_files}" == "${expected_files}" &&
-  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" ==
+  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == \
   "$(printf '%s\n' "${expected_files}" | wc -l | tr -d ' ')" ]] ||
   fail_publication "candidate channel inventory is not exact"
 
