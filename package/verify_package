@@ -94,11 +94,11 @@ ruby -rjson -rrexml/document -e '
   components = edition == "core" ? %w[core] : %w[core chinese english lts extended profile]
   names = {"core" => "Core", "chinese" => "Chinese", "english" => "English",
     "lts" => "LTS", "extended" => "Extended", "profile" => "Profile"}
-  ids = {"core" => "io.github.ares-x.inputmethod.Linnet.core.pkg"}
+  ids = {"core" => "io.github.ares-x.inputmethod.Linnet.#{edition == "core" ? "update" : "complete"}.core.pkg"}
   %w[chinese english lts extended].each do |kind|
-    ids[kind] = "io.github.ares-x.inputmethod.Linnet.data.#{kind}.pkg"
+    ids[kind] = "io.github.ares-x.inputmethod.Linnet.complete.data.#{kind}.pkg"
   end
-  ids["profile"] = "io.github.ares-x.inputmethod.Linnet.profile.pkg"
+  ids["profile"] = "io.github.ares-x.inputmethod.Linnet.complete.profile.pkg"
   locations = components.to_h do |kind|
     location = if edition == "complete" && kind == "core"
       "/Library/Application Support/Linnet/.linnet-complete/App"
@@ -494,7 +494,6 @@ done < <(find "${payload_core_app}" -type f -print0)
 verify_data_component() {
   local filename="$1"
   local kind="$2"
-  local receipt="$3"
   local component="${expanded}/${filename}"
   [[ ! -d "${component}/Scripts" ]] || fail_verification "data component carries scripts"
   local base="${component}/Payload/Data/Packs/${kind}"
@@ -529,13 +528,11 @@ verify_data_component() {
   ruby -rjson -rrexml/document -e '
     payload = File.realpath(ARGV.fetch(0))
     kind = ARGV.fetch(1)
-    receipt = ARGV.fetch(2)
-    identity = ARGV.fetch(3)
-    manifest = JSON.parse(File.read(ARGV.fetch(4)))
+    identity = ARGV.fetch(2)
+    manifest = JSON.parse(File.read(ARGV.fetch(3)))
     abort "pack format mismatch" unless manifest.fetch("format") == 2
     abort "pack product mismatch" unless manifest.fetch("product") == "io.github.ares-x.inputmethod.Linnet"
     abort "pack kind mismatch" unless manifest.fetch("kind") == kind
-    abort "pack receipt mismatch" unless manifest.fetch("pack_id") == receipt.delete_suffix(".pkg")
     abort "pack sequence mismatch" unless manifest.fetch("sequence").is_a?(Integer) &&
       manifest.fetch("sequence").positive?
     expected_identity = "#{manifest.fetch("sequence")}-#{manifest.fetch("version")}"
@@ -545,19 +542,15 @@ verify_data_component() {
       package_info.attributes["version"] == manifest.fetch("sequence").to_s
     abort "pack data ABI mismatch" unless manifest.fetch("data_abi").is_a?(Integer) &&
       manifest.fetch("data_abi").positive?
-  ' "${component}/Payload" "${kind}" "${receipt}" "${identity}" "${inspected}" ||
+  ' "${component}/Payload" "${kind}" "${identity}" "${inspected}" ||
     fail_verification "${kind} pack verification failed"
 }
 
 if [[ "${edition}" != core ]]; then
-  verify_data_component Linnet-Chinese.component.pkg chinese \
-    io.github.ares-x.inputmethod.Linnet.data.chinese.pkg
-  verify_data_component Linnet-English.component.pkg english \
-    io.github.ares-x.inputmethod.Linnet.data.english.pkg
-  verify_data_component Linnet-LTS.component.pkg lts \
-    io.github.ares-x.inputmethod.Linnet.data.lts.pkg
-  verify_data_component Linnet-Extended.component.pkg extended \
-    io.github.ares-x.inputmethod.Linnet.data.extended.pkg
+  verify_data_component Linnet-Chinese.component.pkg chinese
+  verify_data_component Linnet-English.component.pkg english
+  verify_data_component Linnet-LTS.component.pkg lts
+  verify_data_component Linnet-Extended.component.pkg extended
 
   profile_file="Linnet-Profile.component.pkg"
   profile_component="${expanded}/${profile_file}"
@@ -644,12 +637,12 @@ if [[ "${edition}" != core ]]; then
       .select { |ref| ref.attributes["version"] }
       .to_h { |ref| [ref.attributes["id"], ref.attributes["version"]] }
     packs.each do |pack|
-      receipt = "io.github.ares-x.inputmethod.Linnet.data.#{pack.fetch("kind")}.pkg"
+      receipt = "io.github.ares-x.inputmethod.Linnet.complete.data.#{pack.fetch("kind")}.pkg"
       abort "Distribution data receipt is not the monotonic sequence" unless
         receipt_versions.fetch(receipt) == pack.fetch("sequence").to_s
     end
     abort "Distribution profile receipt is not the sequence composite" unless
-      receipt_versions.fetch("io.github.ares-x.inputmethod.Linnet.profile.pkg") ==
+      receipt_versions.fetch("io.github.ares-x.inputmethod.Linnet.complete.profile.pkg") ==
         expected_profile_version
     %w[default.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml
        linnet_en.schema.yaml].each do |required|

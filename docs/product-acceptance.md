@@ -1,5 +1,58 @@
 # Linnet product acceptance
 
+## 2026-09-01 Installer receipt migration (in progress)
+
+Exact rejected candidate: `6bd253c90c99f54ef49803375169a42aefcca0b5`, Core
+SHA-256 `a884a518a976834d5909a7b9c1fc763c5cf517af71538fb93724c35513bcd360`.
+At 2026-08-31 23:58:09 +08, native PackageKit selected receipt-based obsoleting
+for the shipped `Linnet.core.pkg` receipt, whose 0.1.10 BOM owns the live App.
+The new scripts-only component reused that receipt. Preinstall passed; at
+23:58:12 PackageKit removed the omitted App payload, before postinstall could
+apply its delta. Postinstall rejected the absent App at 23:58:13. The first
+wrong owner is package receipt identity, not delta reconstruction or TIS.
+The private native Installer regression repeats this deletion without touching
+the product installation. Script fixtures and archive expansion did not exercise
+PackageKit receipt migration and cannot count as installed acceptance.
+
+Recovery restored the already verified public 0.1.10 App from its immutable
+baseline (tree `414b00491ebb8c1b1741c94f86defa1094309a1de744833577de377458c7dd96`).
+The original Complete postinstall repair entry then reported the source already
+registered. Runtime stayed healthy; activation SHA-256
+`336602598224759103e7eac5d8da4543a373fd0ded35efe5ba364efc22ae1b7b`, Host PID 83075
+and Settings PID 84783 remained unchanged. No application was closed, no Host
+restart or manual input-source activation was performed. Public 0.1.11 remains
+blocked; the rejected Draft must never be promoted.
+
+Frozen correction: five production files (`make_package`, both Distribution
+templates, `verify_package`, `uninstall-linnet`), under 150 non-mechanical lines,
+one correction followed by native receipt, package/lifecycle and exact installed
+acceptance. No App, Rime, data sequence, signing credential or input-source
+changes. Existing `release/0.1.11` remains the implementation branch.
+
+Authority/subtraction ledger: PackageKit may deliver only scripts or hidden
+Complete staging; the existing postinstall transaction alone publishes live
+App/data. Competing live-payload mutation paths go 2→1. The six legacy payload
+receipts retire from all builders; seven stable, disjoint update/staging receipts
+describe their actual payload locations (Core update and Complete are different
+operations). Legacy IDs remain only in uninstaller cleanup for shipped installs,
+never as installation or Runtime authority. The pack-ID-from-receipt inference
+goes 1→0; the verified pack manifest remains authoritative. The obsolete
+must-close-template/removal path goes 1→0. No wrappers, fallback, runtime
+compatibility branch or second mutation lease is added. Retained checks protect
+distinct boundaries: package metadata, signed target bytes, atomic publication,
+and native PackageKit execution. The native matrix covers legacy→delta,
+delta reinstall, legacy→Complete staging, Complete→delta and Complete reinstall;
+real product activation/input still requires fresh user acceptance.
+
+Focused evidence: the native regression first failed with `PackageKit deleted
+live payload: core`; the same matrix passed after receipt separation, including
+Complete reinstall after its staging directory had been consumed. Existing
+package architecture and lifecycle fixtures passed. The bounded read-only
+review found no P0/P1 source defect; actual corrected-package installation and
+real input remain NOT_EXERCISED. Removing the previous template close mapping
+also retired its old characterization test; the governing assertion now rejects
+must-close in both Core and Complete rather than requiring and then stripping it.
+
 ## 2026-08-31 post-release repair candidate (in progress)
 
 Historical repair baseline: `05dce7b`; the latest delivery freeze below uses

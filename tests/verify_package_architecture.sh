@@ -23,7 +23,17 @@ ruby -rrexml/document -e '
   root = REXML::Document.new(File.read("package/Distribution.xml")).root
   abort "Complete repair forces another logout" unless
     root.get_elements("pkg-ref").all? { |item| item.attributes["onConclusion"].nil? }
-' || fail "Complete regained an unconditional session restart"
+  core = REXML::Document.new(File.read("package/Distribution-Core.xml")).root
+  complete_ids = root.get_elements("choice/pkg-ref").map { |item| item.attributes["id"] }
+  core_ids = core.get_elements("choice/pkg-ref").map { |item| item.attributes["id"] }
+  abort "Core and Complete share a PackageKit payload receipt" unless (complete_ids & core_ids).empty?
+  retired = /io\.github\.ares-x\.inputmethod\.Linnet\.(?:core|profile|data\.(?:chinese|english|lts|extended))\.pkg/
+  abort "an installer still owns a legacy live-payload receipt" if
+    (complete_ids + core_ids).any? { |identifier| retired.match?(identifier) } ||
+      retired.match?(File.read("package/make_package"))
+  abort "pack identity is inferred from an Installer receipt" if
+    File.read("package/verify_package").include?(%q{receipt.delete_suffix(".pkg")})
+' || fail "Installer conclusion or receipt ownership is invalid"
 
 ruby -e '
   source = File.read("package/make_package")
@@ -37,7 +47,12 @@ if rg -n 'expected_core_scripts=|def manifest\(root\)' package/verify_package; t
   fail "package verification regained a duplicate inventory or tree-digest owner"
 fi
 
-fixture="$(mktemp -d /tmp/linnet-package-architecture.XXXXXX)"
+if [[ "${1:-}" == --native-receipt-upgrade ]]; then
+  mkdir -p "${repo_root}/build"
+  fixture="$(mktemp -d "${repo_root}/build/receipt-upgrade.XXXXXX")"
+else
+  fixture="$(mktemp -d /tmp/linnet-package-architecture.XXXXXX)"
+fi
 cleanup() {
   exit_code=$?
   trap - EXIT INT TERM HUP
@@ -50,6 +65,111 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
+if [[ "${1:-}" == --native-receipt-upgrade ]]; then
+  # Execute PackageKit itself in a private current-user destination. Running
+  # pre/postinstall directly cannot reproduce receipt-based payload obsoleting.
+  ruby -rfileutils -rrexml/document -e '
+    root, project = ARGV
+    home = Dir.home
+    abort "ENVIRONMENT_INVALID: fixture must be below the current user home" unless root.start_with?(home + "/")
+    prefix = "io.github.ares-x.inputmethod.Linnet."
+    private_prefix = "io.github.ares-x.linnet-receipt-test.#{File.basename(root)}."
+    receipts = []
+    run = ->(*args) { system(*args) || abort("native receipt command failed: #{args.first}") }
+    private_id = ->(identifier) {
+      abort "unexpected product receipt" unless identifier.start_with?(prefix)
+      private_prefix + identifier.delete_prefix(prefix)
+    }
+    component = ->(name, identifier, location, payload) {
+      receipt = private_id.call(identifier)
+      receipts << receipt unless receipts.include?(receipt)
+      path = File.join(root, name + ".pkg")
+      args = ["/usr/bin/pkgbuild", "--identifier", receipt, "--version", "1.0",
+              "--install-location", location]
+      args += payload ? ["--root", payload] : ["--nopayload"]
+      run.call(*args, path)
+      [receipt, path]
+    }
+    product = ->(name, components) {
+      xml = REXML::Document.new
+      doc = xml.add_element("installer-gui-script", {"minSpecVersion" => "2"})
+      doc.add_element("title").text = "Linnet isolated receipt test"
+      doc.add_element("options", {"customize" => "never", "require-scripts" => "false"})
+      doc.add_element("domains", {"enable_localSystem" => "false",
+        "enable_currentUserHome" => "true", "enable_anywhere" => "false"})
+      outline = doc.add_element("choices-outline")
+      components.each_with_index do |(receipt, path), index|
+        choice = "item-#{index}"
+        outline.add_element("line", {"choice" => choice})
+        doc.add_element("choice", {"id" => choice, "visible" => "false"})
+          .add_element("pkg-ref", {"id" => receipt})
+        doc.add_element("pkg-ref", {"id" => receipt, "version" => "1.0", "auth" => "none"})
+          .text = File.basename(path)
+      end
+      distribution = File.join(root, name + ".xml")
+      File.write(distribution, xml.to_s)
+      package = File.join(root, name + ".pkg")
+      run.call("/usr/bin/productbuild", "--distribution", distribution,
+        "--package-path", root, package)
+      package
+    }
+    install = ->(package) {
+      run.call("/usr/sbin/installer", "-pkg", package, "-target", "CurrentUserHomeDirectory")
+    }
+    kinds = %w[core chinese english lts extended profile]
+    live = File.join(root, "live")
+    location = "/" + live.delete_prefix(home + "/")
+    preserve = ->(label) {
+      missing = kinds.reject { |kind| File.read(File.join(live, kind)) == kind rescue false }
+      abort "#{label}: PackageKit deleted live payload: #{missing.join(",")}" unless missing.empty?
+      puts "#{label}: live App, packs and activation preserved"
+    }
+    begin
+      legacy = kinds.map do |kind|
+        identifier = prefix + (kind == "core" || kind == "profile" ? kind : "data.#{kind}") + ".pkg"
+        payload = File.join(root, "payload-#{kind}")
+        FileUtils.mkdir_p(payload)
+        File.write(File.join(payload, kind), kind)
+        component.call("old-#{kind}", identifier, location, payload)
+      end
+      install.call(product.call("legacy", legacy))
+      preserve.call("legacy seed")
+      core = REXML::Document.new(File.read(File.join(project, "package/Distribution-Core.xml"))).root
+      core_id = core.elements["choice/pkg-ref"].attributes["id"]
+      delta = product.call("delta", [component.call("new-core", core_id, location, nil)])
+      install.call(delta)
+      preserve.call("legacy to differential")
+      install.call(delta)
+      preserve.call("same-leaf differential reinstall")
+      complete = REXML::Document.new(File.read(File.join(project, "package/Distribution.xml"))).root
+      staged = complete.get_elements("choice").map do |choice|
+        kind = choice.attributes["id"]
+        component.call("staged-#{kind}", choice.elements["pkg-ref"].attributes["id"],
+          location.sub(/live\z/, "staged"), File.join(root, "payload-#{kind}"))
+      end
+      complete_package = product.call("complete", staged)
+      install.call(complete_package)
+      preserve.call("legacy to staged Complete")
+      staged_root = File.join(root, "staged")
+      kinds.each { |kind| abort "Complete staging payload missing" unless File.read(File.join(staged_root, kind)) == kind }
+      FileUtils.remove_entry_secure(staged_root)
+      install.call(delta)
+      preserve.call("Complete to differential")
+      install.call(complete_package)
+      preserve.call("differential to Complete reinstall")
+      kinds.each { |kind| abort "Complete reinstall payload missing" unless File.read(File.join(staged_root, kind)) == kind }
+    ensure
+      receipts.each do |receipt|
+        abort "unsafe fixture receipt" unless receipt.start_with?(private_prefix)
+        system("/usr/sbin/pkgutil", "--volume", home, "--forget", receipt,
+          out: File::NULL, err: File::NULL)
+      end
+    end
+  ' "${fixture}" "${repo_root}"
+  echo "Native current-user Installer receipt migration: PASS"
+  exit 0
+fi
+
 mkdir "${fixture}/resources"
 for resource in WELCOME.md LICENSE.txt NOTICE.md Conclusion-summary.txt; do
   printf 'Installer structure fixture\n' >"${fixture}/resources/${resource}"
@@ -57,7 +177,7 @@ done
 ruby -e 'File.write(ARGV.fetch(1), File.read(ARGV.fetch(0)).gsub("@CORE_VERSION@", "0.1.0"))' \
   package/Distribution-Core.xml "${fixture}/Distribution.xml"
 pkgbuild --info package/PackageInfo --compression latest --min-os-version 13.0 --nopayload \
-  --identifier io.github.ares-x.inputmethod.Linnet.core.pkg --version 0.1.0 \
+  --identifier io.github.ares-x.inputmethod.Linnet.update.core.pkg --version 0.1.0 \
   --install-location '/Library/Input Methods' --scripts package/core-installer-scripts \
   "${fixture}/Linnet-Core.component.pkg" >/dev/null
 productbuild --distribution "${fixture}/Distribution.xml" --resources "${fixture}/resources" \

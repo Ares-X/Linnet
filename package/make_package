@@ -8,12 +8,15 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 app_path="${1:-}"
 output_dir="${2:-}"
 source_epoch="${SOURCE_DATE_EPOCH:-1704067200}"
-core_receipt="io.github.ares-x.inputmethod.Linnet.core.pkg"
-chinese_receipt="io.github.ares-x.inputmethod.Linnet.data.chinese.pkg"
-english_receipt="io.github.ares-x.inputmethod.Linnet.data.english.pkg"
-lts_receipt="io.github.ares-x.inputmethod.Linnet.data.lts.pkg"
-extended_receipt="io.github.ares-x.inputmethod.Linnet.data.extended.pkg"
-profile_receipt="io.github.ares-x.inputmethod.Linnet.profile.pkg"
+# Reusing a legacy payload receipt for scripts/staging lets PackageKit obsolete
+# live files before postinstall. Each receipt owns one stable transport layout.
+core_receipt="io.github.ares-x.inputmethod.Linnet.update.core.pkg"
+complete_core_receipt="io.github.ares-x.inputmethod.Linnet.complete.core.pkg"
+chinese_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.chinese.pkg"
+english_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.english.pkg"
+lts_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.lts.pkg"
+extended_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.extended.pkg"
+profile_receipt="io.github.ares-x.inputmethod.Linnet.complete.profile.pkg"
 core_install_location="/Library/Input Methods"
 complete_staging_name=".linnet-complete"
 support_install_location="/Library/Application Support/Linnet"
@@ -386,14 +389,6 @@ generate_distribution() {
         "@EXTENDED_SEQUENCE@" => ENV.fetch("EXTENDED_SEQUENCE"),
       }
       replacements.each { |key, value| source = source.gsub(key, value) }
-      complete_must_close = "  <pkg-ref id=\"io.github.ares-x.inputmethod.Linnet.core.pkg\">\n" \
-        "    <must-close>\n" \
-        "      <app id=\"io.github.ares-x.inputmethod.Linnet\"/>\n" \
-        "      <app id=\"io.github.ares-x.inputmethod.Linnet.settings\"/>\n" \
-        "    </must-close>\n" \
-        "  </pkg-ref>\n"
-      abort "Complete Distribution lost its replacement-free contract" unless source.include?(complete_must_close)
-      source = source.sub(complete_must_close, "")
       abort "unexpanded Distribution token" if source.include?("@")
       File.write(ARGV.fetch(1), source)
     ' "${project_root}/package/Distribution.xml" "${destination}"
@@ -424,7 +419,7 @@ unlink "${core_component}"
 pkgbuild --info "${project_root}/package/PackageInfo" --compression latest \
   --min-os-version 13.0 --root "${core_payload}" \
   --component-plist "${project_root}/package/Linnet-component.plist" \
-  --identifier "${core_receipt}" --version "${version}" \
+  --identifier "${complete_core_receipt}" --version "${version}" \
   --install-location "${complete_app_staging_location}" --scripts "${complete_core_scripts}" \
   "${core_component}" >/dev/null
 productbuild --distribution "${distribution}" --resources "${metadata_root}" \

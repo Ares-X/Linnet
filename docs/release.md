@@ -97,6 +97,15 @@ Core 包只携带差分和安装工具；已有词包下载与其内容匹配的
 失败保留原始安装，只有明确确认 Complete/完整词包修复后才允许全量传输。
 安装器与 Settings 复用一个数据 mutation lease，不关闭任何应用。
 
+差分 Core 使用独立的 `update.core.pkg` receipt；Complete 的 App、词包和激活投影
+使用 `complete.*.pkg` receipts，只指向隐藏暂存目录。不能复用旧版全量安装的
+live-payload receipt，否则 PackageKit 会在 preinstall 与 postinstall 之间删除本版
+未携带的旧文件。旧 receipts 仅由卸载器清理，升级不修改或遗忘它们。
+变更安装组件布局时，先在本地运行
+`tests/verify_package_architecture.sh --native-receipt-upgrade`；它用独立安装路径和
+测试 receipts 验证真实 PackageKit 的旧版迁移、重复安装与 Core/Complete 交替，
+不替代后续精确候选的产品安装和输入验收。
+
 rsync batch 是系统维护的非确定性传输格式；可验证的是精确目标内容，不是重复构建得到
 同一 batch。首次生成后冻结其原字节并验收。在后续 Core-only 候选中，将已发布 delta
 的同仓库 URL、revision、bytes/SHA-256 加入 `sources`，并在相应 `pack_baselines`

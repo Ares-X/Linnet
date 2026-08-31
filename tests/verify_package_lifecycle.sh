@@ -592,9 +592,8 @@ fi
 
 # Complete owns first registration; its instructions explain the first login.
 # Neither a Complete repair nor a Core update unconditionally forces logout. Its
-# static Distribution template retains the complete close mapping solely until
-# make_package removes it from the generated Complete artifact; the Core-only
-# product also leaves every Linnet process and per-application connection open.
+# Distribution templates and products leave every Linnet process and
+# per-application connection open.
 ruby -rrexml/document -e '
   component = REXML::Document.new(File.binread(ARGV.shift)).root
   abort "component duplicates the product conclusion owner" if
@@ -610,20 +609,11 @@ ruby -rrexml/document -e '
     complete_ref&.attributes&.key?("onConclusion")
   abort "Core update still requires an unnecessary logout" if
     core_ref&.attributes&.key?("onConclusion")
-  close = complete_document.get_elements("pkg-ref/must-close")
-  abort "Complete Distribution template must retain one explicit close mapping" unless close.length == 1
-  ids = close.first.get_elements("app").map { |app| app.attributes["id"] }
-  abort "Complete Distribution template close mapping changed" unless ids == %w[
-    io.github.ares-x.inputmethod.Linnet
-    io.github.ares-x.inputmethod.Linnet.settings
-  ]
+  abort "Complete Distribution retained a must-close mapping" unless
+    complete_document.get_elements("pkg-ref/must-close").empty?
   abort "Core Distribution retained a must-close mapping" unless
     core_document.get_elements("pkg-ref/must-close").empty?
 ' package/PackageInfo package/Distribution.xml package/Distribution-Core.xml
-rg -Fq 'source = source.sub(complete_must_close, "")' package/make_package || {
-  echo "Complete artifact no longer removes the static must-close template." >&2
-  exit 1
-}
 rg -Fq 'cp -X "${project_root}/package/installer-scripts/postinstall"' \
   package/make_package || {
   echo "Core update lost its post-payload identity verification." >&2
@@ -1837,6 +1827,13 @@ receipt_log="${test_root}/user-volume-receipts"
 HOME="${empty_home}" LINNET_FAKE_PKGUTIL_LOG="${receipt_log}" \
   "${uninstall_fixture}" >/dev/null
 for receipt in \
+  io.github.ares-x.inputmethod.Linnet.update.core.pkg \
+  io.github.ares-x.inputmethod.Linnet.complete.core.pkg \
+  io.github.ares-x.inputmethod.Linnet.complete.data.chinese.pkg \
+  io.github.ares-x.inputmethod.Linnet.complete.data.english.pkg \
+  io.github.ares-x.inputmethod.Linnet.complete.data.lts.pkg \
+  io.github.ares-x.inputmethod.Linnet.complete.data.extended.pkg \
+  io.github.ares-x.inputmethod.Linnet.complete.profile.pkg \
   io.github.ares-x.inputmethod.Linnet.core.pkg \
   io.github.ares-x.inputmethod.Linnet.data.chinese.pkg \
   io.github.ares-x.inputmethod.Linnet.data.english.pkg \
@@ -1846,7 +1843,7 @@ for receipt in \
   grep -Fxq -- "--volume ${empty_home} --pkg-info ${receipt}" "${receipt_log}"
   grep -Fxq -- "--volume ${empty_home} --forget ${receipt}" "${receipt_log}"
 done
-test "$(wc -l <"${receipt_log}" | tr -d ' ')" = 12
+test "$(wc -l <"${receipt_log}" | tr -d ' ')" = 26
 
 # Packaging must not invoke LaunchServices' private registration utility.
 if rg -n 'LaunchServices\.framework/Support/lsregister|[[:space:]]lsregister[[:space:]]+-[uf]' \

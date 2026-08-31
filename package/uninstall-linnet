@@ -11,6 +11,15 @@ preferences_root="${user_home}/Library/Preferences"
 host_bundle_id="io.github.ares-x.inputmethod.Linnet"
 settings_bundle_id="${host_bundle_id}.settings"
 receipts=(
+  io.github.ares-x.inputmethod.Linnet.update.core.pkg
+  io.github.ares-x.inputmethod.Linnet.complete.core.pkg
+  io.github.ares-x.inputmethod.Linnet.complete.data.chinese.pkg
+  io.github.ares-x.inputmethod.Linnet.complete.data.english.pkg
+  io.github.ares-x.inputmethod.Linnet.complete.data.lts.pkg
+  io.github.ares-x.inputmethod.Linnet.complete.data.extended.pkg
+  io.github.ares-x.inputmethod.Linnet.complete.profile.pkg
+  # Shipped payload receipts are retired from installers, not forgotten during
+  # an upgrade. Uninstall still removes their current-user bookkeeping.
   io.github.ares-x.inputmethod.Linnet.core.pkg
   io.github.ares-x.inputmethod.Linnet.data.chinese.pkg
   io.github.ares-x.inputmethod.Linnet.data.english.pkg
