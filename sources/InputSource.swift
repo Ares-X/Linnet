@@ -44,13 +44,17 @@ final class SquirrelInstaller {
       .unavailableCapabilities, .unknownAvailability, .unknownBundleIdentifier:
       throw Failure.registrationStateRejected(inspection.state.wireValue)
     }
-    if inspection.state == .enablementRequired {
-      guard let inputSource = inspection.inputSource else {
-        throw Failure.registrationStateRejected(inspection.state.wireValue)
-      }
-      let enableStatus = TISEnableInputSource(inputSource)
-      guard enableStatus == noErr else { throw Failure.enableFailed(enableStatus) }
+    guard let inputSource = inspection.inputSource else {
+      throw Failure.registrationStateRejected(inspection.state.wireValue)
     }
+    // HIToolbox's isEnabled property is only a process-local observation. It
+    // can remain true after an App replacement even when the persistent Input
+    // menu has dropped Linnet. Re-submit the idempotent standard enablement at
+    // every explicit Complete boundary; the stable production identity keeps
+    // an existing authorization silent, while macOS prompts only when the user
+    // has never authorized that identity. Selection remains user-owned.
+    let enableStatus = TISEnableInputSource(inputSource)
+    guard enableStatus == noErr else { throw Failure.enableFailed(enableStatus) }
     print("Input source authorization request is ready: \(identifier)")
   }
 

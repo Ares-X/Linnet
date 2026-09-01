@@ -8,7 +8,11 @@ install: install-release
 RIME_BIN_DIR = librime/dist/bin
 RIME_LIB_DIR = librime/dist/lib
 DERIVED_DATA_PATH = build
-XCODE_DESTINATION ?= generic/platform=macOS
+LOCAL_DERIVED_DATA_PATH = $(abspath $(DERIVED_DATA_PATH)/Local)
+LOCAL_RELEASE_PRODUCTS = $(LOCAL_DERIVED_DATA_PATH)/Build/Products/Release
+CANDIDATE_RELEASE_PRODUCTS = $(abspath $(DERIVED_DATA_PATH)/Candidate/Release)
+CANDIDATE_RELEASE_APP = $(CANDIDATE_RELEASE_PRODUCTS)/Linnet.candidate
+CANDIDATE_RELEASE_SETTINGS = $(CANDIDATE_RELEASE_PRODUCTS)/Settings.candidate
 ARCHIVE_OUTPUT_DIR ?= $(abspath package/release)
 
 RIME_LIBRARY_FILE_NAME = librime.1.dylib
@@ -244,36 +248,77 @@ endef
 
 define build-linnet-app
 	@set -e; set -o pipefail; \
-	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Linnet.app)"; \
-	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app)"; \
+	app_path="$(LOCAL_DERIVED_DATA_PATH)/Build/Products/$(1)/Linnet.app"; \
+	settings_app_path="$(LOCAL_DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
-	products_root="$(abspath $(DERIVED_DATA_PATH)/Build/Products)"; \
-	build_stamp="$${products_root}/$(1)/.linnet-build-complete"; \
-	local_app_cleanup='scripts/unregister-local-apps'; \
+	build_stamp="$(LOCAL_DERIVED_DATA_PATH)/Build/Products/$(1)/.linnet-build-complete"; \
+	production_bundle_identifier="$$(sed -n 's/^LINNET_BUNDLE_IDENTIFIER = //p' config/LinnetProduct.xcconfig)"; \
+	[[ "$${production_bundle_identifier}" =~ ^[A-Za-z0-9.-]+$$ ]] || { \
+		echo 'Linnet build: canonical bundle identifier is unavailable' >&2; exit 1; \
+	}; \
+	local_bundle_identifier="$${production_bundle_identifier}.local-build"; \
+	rewrite_bundle_identifier() { \
+		local bundle_path="$$1" identifier="$$2" info_path; \
+		if [ ! -e "$${bundle_path}" ] && [ ! -L "$${bundle_path}" ]; then return 0; fi; \
+		info_path="$${bundle_path}/Contents/Info.plist"; \
+		[ -d "$${bundle_path}" ] && [ ! -L "$${bundle_path}" ] && \
+			[ -f "$${info_path}" ] && [ ! -L "$${info_path}" ] || { \
+			echo "Linnet build: unsafe App identity boundary: $${bundle_path}" >&2; return 1; \
+		}; \
+		/usr/bin/plutil -replace CFBundleIdentifier -string "$${identifier}" "$${info_path}"; \
+		[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${info_path}")" = \
+			"$${identifier}" ]; \
+	}; \
 	if [ -L "$${build_stamp}" ]; then unlink "$${build_stamp}"; \
 	else /bin/rm -f -- "$${build_stamp}"; fi; \
-	trap '"$${local_app_cleanup}" "$${products_root}" "$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}" >/dev/null 2>&1 || true' EXIT INT TERM HUP; \
-		xcodebuild -project Linnet.xcodeproj -configuration $(1) -scheme Linnet \
-			-destination '$(XCODE_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) \
-			-showBuildTimingSummary $(BUILD_SETTINGS) build; \
 	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
+	rewrite_bundle_identifier "$${app_path}" "$${local_bundle_identifier}"; \
+	rewrite_bundle_identifier "$${settings_app_path}" "$${local_bundle_identifier}.settings"; \
+	rewrite_bundle_identifier "$${embedded_settings_app_path}" "$${local_bundle_identifier}.settings"; \
+	scripts/build-linnet-app "$(1)" "$(LOCAL_DERIVED_DATA_PATH)" \
+		$(BUILD_SETTINGS) LINNET_BUNDLE_IDENTIFIER="$${local_bundle_identifier}"; \
 	scripts/build-privacy sanitize-localizations \
 		"$${app_path}" "$${embedded_settings_app_path}" "$${settings_app_path}"; \
-	"$${local_app_cleanup}" "$${products_root}" \
-		"$${app_path}" "$${settings_app_path}" "$${embedded_settings_app_path}"; \
+	[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${app_path}/Contents/Info.plist")" = \
+		"$${local_bundle_identifier}" ]; \
+	[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${settings_app_path}/Contents/Info.plist")" = \
+		"$${local_bundle_identifier}.settings" ]; \
+	[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${embedded_settings_app_path}/Contents/Info.plist")" = \
+		"$${local_bundle_identifier}.settings" ]; \
 	/usr/bin/touch "$${build_stamp}"; \
-	trap - EXIT INT TERM HUP; \
 	echo "Linnet $(1) App: BUILT (local, unsigned)"
 endef
 
 define finalize-linnet-candidate
-	@set -e; \
-	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)"; \
-	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Settings.app)"; \
+	@set -e; set -o pipefail; \
+	local_products="$(LOCAL_RELEASE_PRODUCTS)"; \
+	candidate_products="$(CANDIDATE_RELEASE_PRODUCTS)"; \
+	candidate_parent="$${candidate_products%/*}"; \
+	candidate_intermediates="$${candidate_parent}/Intermediates.noindex"; \
+	production_bundle_identifier="$$(sed -n 's/^LINNET_BUNDLE_IDENTIFIER = //p' config/LinnetProduct.xcconfig)"; \
+	[[ "$${production_bundle_identifier}" =~ ^[A-Za-z0-9.-]+$$ ]] || { \
+		echo 'Linnet candidate: canonical bundle identifier is unavailable' >&2; exit 1; \
+	}; \
+	mkdir -p "$${candidate_intermediates}"; \
+	[ -d "$${candidate_intermediates}" ] && [ ! -L "$${candidate_intermediates}" ] || { \
+		echo 'Linnet candidate: unsafe candidate intermediates' >&2; exit 1; \
+	}; \
+	staging_products="$$(mktemp -d "$${candidate_intermediates}/Release.XXXXXX")"; \
+	cleanup_staging() { \
+		if [[ -n "$${staging_products:-}" && \
+			"$${staging_products}" == "$${candidate_intermediates}/Release."* ]]; then \
+			chmod -R u+w "$${staging_products}" 2>/dev/null || true; \
+			/bin/rm -rf -- "$${staging_products}"; \
+		fi; \
+	}; \
+	trap cleanup_staging EXIT INT TERM HUP; \
+	scripts/stage-linnet-candidate "$${local_products}" "$${staging_products}" \
+		"$${production_bundle_identifier}"; \
+	app_path="$${staging_products}/Linnet.app"; \
+	settings_app_path="$${staging_products}/Settings.app"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
 	release_metadata_root="$${app_path}/Contents/Resources/LinnetRelease"; \
 	code_identity_projection="$$(scripts/linnet-code-identity inspect-contract)"; \
-	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
 	product_version="$$(plutil -extract CFBundleShortVersionString raw -o - "$${app_path}/Contents/Info.plist")"; \
 	product_build="$$(plutil -extract CFBundleVersion raw -o - "$${app_path}/Contents/Info.plist")"; \
 	scripts/generate-release-metadata "$(abspath upstreams.lock.json)" \
@@ -282,6 +327,20 @@ define finalize-linnet-candidate
 	scripts/linnet-code-identity sign-product "$${app_path}" "$${settings_app_path}"; \
 	scripts/build-privacy scan "$${app_path}"; \
 	scripts/linnet-code-identity verify-product "$${app_path}" "$${settings_app_path}" >/dev/null; \
+	/bin/mv "$${app_path}" "$${staging_products}/Linnet.candidate"; \
+	/bin/mv "$${settings_app_path}" "$${staging_products}/Settings.candidate"; \
+	if [ -L "$${candidate_products}" ]; then \
+		echo 'Linnet candidate: refusing to replace a symlink candidate' >&2; exit 1; \
+	elif [ -e "$${candidate_products}" ]; then \
+		[ -d "$${candidate_products}" ] || { \
+			echo 'Linnet candidate: existing candidate is not a directory' >&2; exit 1; \
+		}; \
+		chmod -R u+w "$${candidate_products}"; \
+		/bin/rm -rf -- "$${candidate_products}"; \
+	fi; \
+	/bin/mv "$${staging_products}" "$${candidate_products}"; \
+	staging_products=''; \
+	trap - EXIT INT TERM HUP; \
 	echo "Linnet Release Candidate: PASS (community-cms signed, metadata bound, privacy scanned)"
 endef
 
@@ -309,7 +368,7 @@ package: community-verified linnet-pack-tool linnet-runtime-inspector \
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
 	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_package \
-		"$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)" \
+		"$(CANDIDATE_RELEASE_APP)" \
 		"$(ARCHIVE_OUTPUT_DIR)"
 
 # Keep the portable ZIP as a second, manual per-user distribution. The PKG is
@@ -318,7 +377,7 @@ archive: package
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
 	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_archive \
-		"$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)" \
+		"$(CANDIDATE_RELEASE_APP)" \
 		"$(ARCHIVE_OUTPUT_DIR)"
 
 # No build target may mutate the developer machine. Users install the produced

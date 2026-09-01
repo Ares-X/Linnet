@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 # Builds one canonical four-pack Runtime fixture below CFFIXED_USER_HOME.
-# --verify checks the real embedded Settings bundle against a disposable home;
+# --verify checks the real embedded Settings bytes against a disposable home;
+# a frozen candidate is copied to a disposable standard App path because
+# production Settings intentionally recognizes only installed `.app` Hosts.
 # --ui-test runs SettingsUITests with a separate UAT bundle identity and the
 # one fixed home required by the UI-test contract. Installed-product UAT is a
 # later artifact boundary and is not claimed by either mode.
@@ -12,22 +14,28 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 [[ "$#" -le 2 ]] || {
-  echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name,...]]" >&2
+  echo "usage: tests/verify_visible_settings_fixture.sh [--verify [local|candidate]|--ui-test [test-name,...]]" >&2
   exit 2
 }
 mode="${1:---verify}"
-ui_test_name="${2:-}"
+mode_argument="${2:-}"
+ui_test_name=""
 run_ui_tests=false
+product_profile=local
 case "${mode}" in
   --verify)
-    [[ -z "${ui_test_name}" ]] || {
-      echo "--verify does not accept a UI test name" >&2
+    product_profile="${mode_argument:-local}"
+    [[ "${product_profile}" == local || "${product_profile}" == candidate ]] || {
+      echo "--verify accepts only local or candidate" >&2
       exit 2
     }
     ;;
-  --ui-test) run_ui_tests=true ;;
+  --ui-test)
+    run_ui_tests=true
+    ui_test_name="${mode_argument}"
+    ;;
   *)
-    echo "usage: tests/verify_visible_settings_fixture.sh [--verify|--ui-test [test-name,...]]" >&2
+    echo "usage: tests/verify_visible_settings_fixture.sh [--verify [local|candidate]|--ui-test [test-name,...]]" >&2
     exit 2
     ;;
 esac
@@ -116,7 +124,22 @@ if [[ "${run_ui_tests}" == true ]]; then
   done
 fi
 
-host_app="${repo_root}/build/Build/Products/Release/Linnet.app"
+case "${product_profile}" in
+  local)
+    product_root="${repo_root}/build/Local/Build/Products/Release"
+    standalone_name="Settings.app"
+    expected_host_identifier="io.github.ares-x.inputmethod.Linnet.local-build"
+    expected_settings_identifier="io.github.ares-x.inputmethod.Linnet.local-build.settings"
+    ;;
+  candidate)
+    product_root="${repo_root}/build/Candidate/Release"
+    host_name="Linnet.candidate"
+    standalone_name="Settings.candidate"
+    expected_host_identifier="io.github.ares-x.inputmethod.Linnet"
+    expected_settings_identifier="io.github.ares-x.inputmethod.Linnet.settings"
+    ;;
+esac
+host_app="${product_root}/${host_name:-Linnet.app}"
 settings_app="${host_app}/Contents/Applications/Settings.app"
 settings_executable="${settings_app}/Contents/MacOS/Settings"
 [[ -d "${host_app}" && ! -L "${host_app}" ]] || fail "fresh Release Linnet.app is missing"
@@ -125,14 +148,14 @@ settings_executable="${settings_app}/Contents/MacOS/Settings"
   fail "embedded Settings executable is missing"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
   "${settings_app}/Contents/Info.plist")" == \
-  io.github.ares-x.inputmethod.Linnet.settings ]] || fail "unexpected Settings bundle identity"
+  "${expected_settings_identifier}" ]] || fail "unexpected Settings bundle identity"
 
 cmp -s data/squirrel.yaml "${settings_app}/Contents/Resources/squirrel.yaml" ||
   fail "embedded Settings squirrel.yaml is stale"
 cmp -s data/squirrel.yaml "${host_app}/Contents/Resources/squirrel.yaml" ||
   fail "Core and Settings must ship the same canonical UI configuration"
 embedded_uuid="$(dwarfdump --uuid "${settings_executable}" | awk '{print $2 ":" $3}')"
-standalone_executable="${repo_root}/build/Build/Products/Release/Settings.app/Contents/MacOS/Settings"
+standalone_executable="${product_root}/${standalone_name}/Contents/MacOS/Settings"
 [[ -x "${standalone_executable}" ]] || fail "standalone Settings build product is missing"
 standalone_uuid="$(dwarfdump --uuid "${standalone_executable}" | awk '{print $2 ":" $3}')"
 [[ "${embedded_uuid}" == "${standalone_uuid}" ]] ||
@@ -460,11 +483,19 @@ LINNET_RELEASE_TOOL="${release_tool}" \
   package/build_activation_profile complete "${runtime_root}" \
     "${pack_roots[0]}" "${pack_roots[1]}" "${pack_roots[2]}" "${pack_roots[3]}"
 
-canonical_settings_identifier="io.github.ares-x.inputmethod.Linnet.settings"
-canonical_host_identifier="io.github.ares-x.inputmethod.Linnet"
+probe_settings_app="${settings_app}"
+if [[ "${product_profile}" == candidate ]]; then
+  probe_host_app="${fixture}/Candidate/Linnet.app"
+  mkdir -p "${probe_host_app%/*}"
+  COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${host_app}" "${probe_host_app}"
+  probe_settings_app="${probe_host_app}/Contents/Applications/Settings.app"
+  [[ -d "${probe_settings_app}" && ! -L "${probe_settings_app}" ]] ||
+    fail "disposable candidate App projection is incomplete"
+fi
+
 HOME="${isolated_home}" CFFIXED_USER_HOME="${isolated_home}" TMPDIR="${isolated_tmp}/" \
-  "${probe}" "${settings_app}" "${isolated_home}" \
-    "${canonical_settings_identifier}" "${canonical_host_identifier}"
+  "${probe}" "${probe_settings_app}" "${isolated_home}" \
+    "${expected_settings_identifier}" "${expected_host_identifier}"
 [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||
   fail "fixed-home probe changed a protected real-user path"
 [[ "$(content_fingerprint)" == "${before_content_fingerprint}" ]] ||

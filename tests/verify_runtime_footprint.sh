@@ -2401,7 +2401,8 @@ ruby -e '
       request.scan("TISEnableInputSource").length == 1 &&
       request.scan("TISSelectInputSource").empty? &&
       request.include?("LinnetInputSourceRegistration.inspect(identifier:") &&
-      !request.include?("finalState")
+      !request.include?("finalState") &&
+      !request.include?("if inspection.state == .enablementRequired")
   forbidden = %w[
     TISDisableInputSource
     refreshAfterCoreUpdate desiredInputSourceAfterCoreUpdate
@@ -2735,28 +2736,60 @@ rg -Fq 'if [[ "${install_mode}" == complete ]]' \
 if rg -n -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
   fail "Core update regained a live InputMethodKit Host termination path"
 fi
-test "$(rg -F -c -- 'scripts/unregister-local-apps' Makefile)" = 1 ||
-  fail "local App registration cleanup has multiple Makefile owners"
-test "$(rg -F -c -- '"$${local_app_cleanup}" "$${products_root}"' Makefile)" = 2 ||
-  fail "local builds do not clean exact App registrations on success and failure"
-if rg -n 'REGISTER_WITH_LAUNCH_SERVICES|launch_services_register|unregister_local_builds|lsregister' \
-    Makefile; then
-  fail "local builds regained an ineffective or duplicated registration owner"
+[[ -x scripts/build-linnet-app ]] ||
+  fail "the input-source-safe local App build owner is missing"
+test "$(rg -F -c -- 'scripts/build-linnet-app' Makefile)" = 1 ||
+  fail "local App construction does not use one input-source-safe build owner"
+test "$(rg -F -c -- 'scripts/build-linnet-app' scripts/run_periphery.sh)" = 1 ||
+  fail "Periphery does not use the same input-source-safe App build owner"
+rg -Fq 'local_bundle_identifier="$${production_bundle_identifier}.local-build"' Makefile ||
+  fail "local builds do not derive a non-production bundle identity"
+rg -Fq 'LINNET_BUNDLE_IDENTIFIER="$${local_bundle_identifier}"' Makefile ||
+  fail "Xcode local builds can still register the production Linnet identity"
+rg -Fq 'rewrite_bundle_identifier "$${settings_app_path}" "$${local_bundle_identifier}.settings"' Makefile ||
+  fail "incremental Settings builds are not normalized to the local identity"
+if rg -Fq 'rewrite_bundle_identifier "$${app_path}" "$${production_bundle_identifier}"' Makefile ||
+    rg -Fq 'rewrite_bundle_identifier "$${settings_app_path}" "$${production_bundle_identifier}.settings"' Makefile; then
+  fail "Xcode build products can still be rewritten to the production identity in place"
 fi
-[[ -x scripts/unregister-local-apps ]] ||
-  fail "the local App registration cleanup owner is not executable"
-rg -Fq '[[ "${products_root}" == /*/Build/Products' scripts/unregister-local-apps ||
-  fail "local App cleanup lost its Build/Products boundary"
-rg -Fq 'grep -Fqx -- "${app}"' scripts/unregister-local-apps ||
-  fail "local App cleanup does not verify final LaunchServices state"
-rg -Fq '"${lsregister}" -u -R "${path}"' scripts/unregister-local-apps ||
-  fail "local App cleanup is not symmetric with Xcode recursive registration"
-rg -Fq 'for pass in 1 2' scripts/unregister-local-apps &&
-  rg -Fq '[[ "${pass}" -eq 2 ]] || sleep 1' scripts/unregister-local-apps ||
-  fail "local App cleanup does not retire delayed embedded registrations"
-rg -Fq 'registered_paths_for_bundle_identifiers' scripts/unregister-local-apps &&
-  rg -Fq 'Library/Input Methods/Linnet.app' scripts/unregister-local-apps ||
-  fail "local App cleanup does not retire stale same-identity build registrations"
+rg -Fq 'LOCAL_DERIVED_DATA_PATH = $(abspath $(DERIVED_DATA_PATH)/Local)' Makefile &&
+  rg -Fq 'LOCAL_RELEASE_PRODUCTS = $(LOCAL_DERIVED_DATA_PATH)/Build/Products/Release' Makefile ||
+  fail "local Xcode products can still reuse the historically registered path"
+rg -Fq 'CANDIDATE_RELEASE_PRODUCTS = $(abspath $(DERIVED_DATA_PATH)/Candidate/Release)' Makefile ||
+  fail "the production candidate does not have one path outside Xcode products"
+rg -Fq 'CANDIDATE_RELEASE_APP = $(CANDIDATE_RELEASE_PRODUCTS)/Linnet.candidate' Makefile &&
+  rg -Fq 'CANDIDATE_RELEASE_SETTINGS = $(CANDIDATE_RELEASE_PRODUCTS)/Settings.candidate' Makefile ||
+  fail "the frozen production candidate can still persist as a discoverable App"
+[[ -x scripts/stage-linnet-candidate ]] ||
+  fail "the local-to-production candidate staging owner is missing"
+test "$(rg -F -c -- 'scripts/stage-linnet-candidate' Makefile)" = 1 ||
+  fail "candidate identity staging does not have one Makefile caller"
+rg -Fq '"$(CANDIDATE_RELEASE_APP)"' Makefile &&
+  rg -Fq 'build/Candidate/Release/Settings.candidate' tests/verify_product.sh ||
+  fail "candidate verification and packaging do not consume the isolated production path"
+if rg -n 'Build/Products/Release/Linnet\.app.*(make_package|make_archive)|make_(package|archive).*Build/Products/Release/Linnet\.app' Makefile; then
+  fail "packaging can still consume the Xcode local-identity product"
+fi
+rg -Fq 'com.apple.product-type.bundle' scripts/build-linnet-app &&
+  rg -Fq 'MACH_O_TYPE=mh_execute' scripts/build-linnet-app &&
+  rg -Fq 'PACKAGE_TYPE=com.apple.package-type.wrapper.application' scripts/build-linnet-app &&
+  rg -Fq 'GENERATE_PKGINFO_FILE=YES' scripts/build-linnet-app ||
+  fail "the local build owner does not preserve the standard executable App shape"
+rg -Fq '8D1107260486CEB800E47090' scripts/build-linnet-app ||
+  fail "the local build owner does not transform the Host exactly"
+if rg -Fq 'D30000000000000000000030' scripts/build-linnet-app; then
+  fail "the local build owner can break the standard Settings App product"
+fi
+rg -Fq 'WRAPPER_EXTENSION=app' scripts/build-linnet-app ||
+  fail "the local build owner can emit a non-App Settings wrapper"
+rg -Fq '"-target", "Linnet"' scripts/build-linnet-app ||
+  fail "the local build owner can fall back to the application Scheme"
+if rg -n 'lsregister|unregister-local-apps' \
+    Makefile scripts/build-linnet-app scripts/run_periphery.sh; then
+  fail "a local or analysis build can explicitly mutate Launch Services"
+fi
+[[ ! -e scripts/unregister-local-apps ]] ||
+  fail "the retired Launch Services cleanup owner still exists"
 rg -Fq 'unregister_fixture_apps' tests/verify_visible_settings_fixture.sh ||
   fail "Settings UI tests can leave fixture Apps registered with LaunchServices"
 # The live Rime session is the sole mode owner. Do not restore the locally

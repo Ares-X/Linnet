@@ -16,7 +16,8 @@ fail_archive() {
 [[ "$#" -eq 2 ]] || fail_archive "usage: APP OUTPUT_DIRECTORY"
 [[ "${app_path}" == /* && -d "${app_path}" && ! -L "${app_path}" ]] ||
   fail_archive "APP must be an absolute, non-symlink App bundle"
-[[ "${app_path##*/}" == Linnet.app ]] || fail_archive "unexpected App name"
+[[ "${app_path##*/}" == Linnet.candidate ]] ||
+  fail_archive "unexpected frozen candidate name"
 for tool in awk cmp cp find git mkdir mktemp mv pkgutil plutil ruby sort stat tr wc; do
   command -v "${tool}" >/dev/null 2>&1 || fail_archive "required tool is unavailable: ${tool}"
 done

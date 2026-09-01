@@ -17,9 +17,13 @@ if [[ -z "${app_path}" ]]; then
   fail "APP_PATH must name the built input-method App"
 fi
 app_path="${app_path%/}"
-if [[ ! -d "${app_path}" || "${app_path##*/}" != *.app ]]; then
+if [[ ! -d "${app_path}" || -L "${app_path}" ]]; then
   fail "APP_PATH is not an App bundle"
 fi
+case "${app_path##*/}" in
+  Linnet.app|Linnet.candidate) ;;
+  *) fail "APP_PATH is not an accepted Linnet product bundle" ;;
+esac
 if [[ -z "${language_data_root}" || ! -d "${language_data_root}" ]]; then
   fail "LANGUAGE_DATA_ROOT must name the staged language-pack payload"
 fi

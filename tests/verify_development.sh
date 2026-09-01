@@ -28,8 +28,8 @@ case "${profile}" in
 esac
 
 if [[ "${run_app}" -eq 1 ]]; then
-  host_app="${repo_root}/build/Build/Products/Release/Linnet.app"
-  standalone_settings="${repo_root}/build/Build/Products/Release/Settings.app"
+  host_app="${repo_root}/build/Local/Build/Products/Release/Linnet.app"
+  standalone_settings="${repo_root}/build/Local/Build/Products/Release/Settings.app"
   embedded_settings="${host_app}/Contents/Applications/Settings.app"
   for app in "${host_app}" "${standalone_settings}" "${embedded_settings}"; do
     [[ -d "${app}" && ! -L "${app}" ]] || {
@@ -43,9 +43,24 @@ if [[ "${run_app}" -eq 1 ]]; then
     }
   done
 
+  [[ "$(plutil -extract CFBundleIdentifier raw -o - \
+    "${host_app}/Contents/Info.plist")" == \
+    io.github.ares-x.inputmethod.Linnet.local-build ]] || {
+    echo "verify_development: local Host regained the production identity" >&2
+    exit 1
+  }
+  for settings_app in "${standalone_settings}" "${embedded_settings}"; do
+    [[ "$(plutil -extract CFBundleIdentifier raw -o - \
+      "${settings_app}/Contents/Info.plist")" == \
+      io.github.ares-x.inputmethod.Linnet.local-build.settings ]] || {
+      echo "verify_development: local Settings regained the production identity" >&2
+      exit 1
+    }
+  done
+
 # A local unsigned composite has no clean candidate revision to bind. The
 # successful composite build owns one completion marker after Xcode, resource
-# sanitization and local registration cleanup all finish.
+# sanitization and local-identity verification all finish.
   host_executable="${host_app}/Contents/MacOS/Linnet"
   settings_executables=(
     "${standalone_settings}/Contents/MacOS/Settings"
@@ -58,7 +73,7 @@ if [[ "${run_app}" -eq 1 ]]; then
     }
   done
 
-  build_stamp="${repo_root}/build/Build/Products/Release/.linnet-build-complete"
+  build_stamp="${repo_root}/build/Local/Build/Products/Release/.linnet-build-complete"
   [[ -f "${build_stamp}" && ! -L "${build_stamp}" ]] || {
     echo "verify_development: missing successful Release build marker" >&2
     exit 1
@@ -88,7 +103,7 @@ verify_inputs_predate() {
   bash -n action-build.sh action-install.sh package/installer-scripts/postinstall
   tests/verify_runtime_footprint.sh
   LINNET_LIFECYCLE_CANDIDATE_APP="${host_app}" tests/verify_package_lifecycle.sh
-  tests/verify_visible_settings_fixture.sh --verify
+  tests/verify_visible_settings_fixture.sh --verify local
   tests/verify_release_metadata.sh
   tests/verify_package_architecture.sh
   make --no-print-directory english-data-generator

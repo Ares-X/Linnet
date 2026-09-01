@@ -215,6 +215,20 @@ no_download=1 ./action-build.sh release
 - 不安装、注册、启用或选择输入源；
 - 不创建公开 PKG，也不授权发布。
 
+本地构建保留正式 `Linnet.xcodeproj` 的标准 App target，只在 DerivedData 中生成一份
+构建投影：Host target 使用不产生 Launch Services 注册任务的 bundle product type，
+同时强制输出 `.app`、`APPL`、Mach-O executable 和 `PkgInfo`；Settings 继续使用标准
+App target 与独立的 `.local-build.settings` 身份。构建前后不会调用 `lsregister` 清理，
+也不会触碰已安装 Linnet 的 TIS 授权。Periphery 复用同一个构建 owner。
+
+`build/Local/Build/Products` 永远只保存 unsigned 的 `.local-build` 身份，不会再被原地改写成
+生产输入源，也不会被打包。`community` 只在 `build/Candidate/Intermediates.noindex` 中短暂
+建立 `.app` staging，复制本地产物后才投影正式 bundle ID、release metadata 与固定 CMS
+签名；全部校验通过后以不可发现的 `Linnet.candidate` / `Settings.candidate` 目录冻结。
+`verify_product`、PKG 和 ZIP 只消费这份候选，打包时才在一次性工作目录中重建
+`Linnet.app`。因此构建树不会留下第二个可被 Launch Services 发现的生产 App，Xcode
+产物路径和可安装生产身份也不会在两种身份间切换。
+
 普通贡献者运行到 `release` 即可，不需要证书或 Keychain。正式 `archive` lane
 由 macOS release Action 使用仓库钉住的固定 community CMS leaf；缺少精确身份时
 会在打包前失败，不会回退到 ad-hoc。维护者 Mac 上的同身份 `archive` 只作预检，

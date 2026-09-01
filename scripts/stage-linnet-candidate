@@ -1,0 +1,94 @@
+#!/usr/bin/env ruby
+
+require "English"
+
+def fail_stage(message)
+  warn "stage-linnet-candidate: FAIL: #{message}"
+  exit 1
+end
+
+def require_directory(path, label)
+  fail_stage("#{label} is missing") unless File.directory?(path)
+  fail_stage("#{label} is a symlink") if File.symlink?(path)
+end
+
+def info_path(bundle)
+  File.join(bundle, "Contents", "Info.plist")
+end
+
+def bundle_identifier(bundle)
+  info = info_path(bundle)
+  fail_stage("missing Info.plist: #{bundle}") unless File.file?(info) && !File.symlink?(info)
+  output = IO.popen(
+    ["/usr/bin/plutil", "-extract", "CFBundleIdentifier", "raw", "-o", "-", info],
+    err: [:child, :out], &:read
+  )
+  fail_stage("cannot read bundle identifier: #{bundle}") unless $CHILD_STATUS.success?
+  output.strip
+end
+
+def rewrite_bundle_identifier(bundle, identifier)
+  info = info_path(bundle)
+  system("/usr/bin/plutil", "-replace", "CFBundleIdentifier", "-string", identifier, info) ||
+    fail_stage("cannot rewrite bundle identifier: #{bundle}")
+  fail_stage("bundle identifier rewrite did not persist: #{bundle}") unless
+    bundle_identifier(bundle) == identifier
+end
+
+def copy_bundle(source, destination)
+  system("/usr/bin/ditto", "--noqtn", source, destination) ||
+    fail_stage("cannot copy #{File.basename(source)}")
+end
+
+local_products_argument, staging_products_argument, production_identifier = ARGV
+fail_stage("usage: LOCAL_PRODUCTS EMPTY_STAGING_PRODUCTS PRODUCTION_BUNDLE_IDENTIFIER") unless
+  ARGV.length == 3
+fail_stage("invalid production bundle identifier") unless
+  production_identifier.match?(/\A[A-Za-z0-9.-]+\z/)
+
+local_products = File.expand_path(local_products_argument)
+staging_products = File.expand_path(staging_products_argument)
+require_directory(local_products, "local products root")
+require_directory(staging_products, "candidate staging root")
+fail_stage("local and candidate roots must differ") if local_products == staging_products
+fail_stage("candidate staging root must be empty") unless Dir.empty?(staging_products)
+
+local_host = File.join(local_products, "Linnet.app")
+local_settings = File.join(local_products, "Settings.app")
+local_embedded_settings = File.join(
+  local_host, "Contents", "Applications", "Settings.app"
+)
+local_identifier = "#{production_identifier}.local-build"
+local_settings_identifier = "#{local_identifier}.settings"
+{
+  local_host => local_identifier,
+  local_settings => local_settings_identifier,
+  local_embedded_settings => local_settings_identifier,
+}.each do |bundle, expected_identifier|
+  require_directory(bundle, "local bundle #{File.basename(bundle)}")
+  fail_stage("local bundle has a production identity: #{bundle}") unless
+    bundle_identifier(bundle) == expected_identifier
+  signature = File.join(bundle, "Contents", "_CodeSignature")
+  fail_stage("local bundle retained a code signature: #{bundle}") if File.exist?(signature)
+end
+release_metadata = File.join(local_host, "Contents", "Resources", "LinnetRelease")
+fail_stage("local Host retained release metadata") if File.exist?(release_metadata)
+
+candidate_host = File.join(staging_products, "Linnet.app")
+candidate_settings = File.join(staging_products, "Settings.app")
+copy_bundle(local_host, candidate_host)
+copy_bundle(local_settings, candidate_settings)
+candidate_embedded_settings = File.join(
+  candidate_host, "Contents", "Applications", "Settings.app"
+)
+rewrite_bundle_identifier(candidate_host, production_identifier)
+rewrite_bundle_identifier(candidate_settings, "#{production_identifier}.settings")
+rewrite_bundle_identifier(candidate_embedded_settings, "#{production_identifier}.settings")
+
+fail_stage("candidate staging changed the local Host identity") unless
+  bundle_identifier(local_host) == local_identifier
+fail_stage("candidate staging changed the local Settings identity") unless
+  bundle_identifier(local_settings) == local_settings_identifier &&
+    bundle_identifier(local_embedded_settings) == local_settings_identifier
+
+puts "stage-linnet-candidate: PASS (local identity preserved; production identity isolated)"

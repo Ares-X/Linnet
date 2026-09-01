@@ -223,6 +223,23 @@ require_bundle() {
     fail_identity "unsafe or unexpected App bundle: ${expected_name}"
 }
 
+require_verification_bundle() {
+  local bundle="$1"
+  local product="$2"
+  local accepted_names
+  case "${product}" in
+    host) accepted_names='Linnet.app|Linnet.candidate' ;;
+    settings) accepted_names='Settings.app|Settings.candidate' ;;
+    *) fail_identity "unknown product verification boundary" ;;
+  esac
+  [[ "${bundle}" == /* && -d "${bundle}" && ! -L "${bundle}" ]] ||
+    fail_identity "unsafe product verification bundle"
+  case "${product}:${bundle##*/}" in
+    host:Linnet.app|host:Linnet.candidate|settings:Settings.app|settings:Settings.candidate) ;;
+    *) fail_identity "unexpected product verification bundle: ${accepted_names}" ;;
+  esac
+}
+
 bundle_identifier() {
   plutil -extract CFBundleIdentifier raw -o - "$1/Contents/Info.plist" 2>/dev/null
 }
@@ -322,7 +339,7 @@ verify_product() (
   local product_version
   local product_build
 
-  require_bundle "${host_app}" Linnet.app
+  require_verification_bundle "${host_app}" host
   embedded_settings_app="${host_app}/Contents/Applications/Settings.app"
   require_bundle "${embedded_settings_app}" Settings.app
   [[ "$(bundle_identifier "${host_app}")" == "${host_bundle_id}" ]] ||
@@ -342,7 +359,7 @@ verify_product() (
     "${signing_profile}" ]] || fail_identity "embedded Settings code-signing profile mismatch"
   require_inventory "${host_app}" "${host_inventory}"
   if [[ -n "${standalone_settings_app}" ]]; then
-    require_bundle "${standalone_settings_app}" Settings.app
+    require_verification_bundle "${standalone_settings_app}" settings
     [[ "$(bundle_identifier "${standalone_settings_app}")" == "${settings_bundle_id}" ]] ||
       fail_identity "standalone Settings signing identifier input is invalid"
     [[ "$(plutil -extract LinnetCodeSigningProfile raw -o - \

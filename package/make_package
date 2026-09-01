@@ -36,7 +36,8 @@ fail_package() {
 [[ "$#" -eq 2 ]] || fail_package "usage: APP OUTPUT_DIRECTORY"
 [[ "${app_path}" == /* && -d "${app_path}" && ! -L "${app_path}" ]] ||
   fail_package "APP must be an absolute, non-symlink App bundle"
-[[ "${app_path##*/}" == "Linnet.app" ]] || fail_package "unexpected App name"
+[[ "${app_path##*/}" == "Linnet.candidate" ]] ||
+  fail_package "unexpected frozen candidate name"
 [[ "${source_epoch}" =~ ^[0-9]+$ ]] || fail_package "invalid SOURCE_DATE_EPOCH"
 
 for required_tool in awk bash chmod cmp codesign cp date ditto find git grep lipo mkdir mktemp mv \

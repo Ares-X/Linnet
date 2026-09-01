@@ -35,8 +35,8 @@ assert_clean_checkout() {
   exit 2
 }
 
-app="${repo_root}/build/Build/Products/Release/Linnet.app"
-settings="${repo_root}/build/Build/Products/Release/Settings.app"
+app="${repo_root}/build/Candidate/Release/Linnet.candidate"
+settings="${repo_root}/build/Candidate/Release/Settings.candidate"
 [[ -d "${app}" && ! -L "${app}" && -d "${settings}" && ! -L "${settings}" ]] || {
   echo "verify_product: frozen Release App and Settings App are required" >&2
   exit 1
@@ -130,7 +130,7 @@ for retired in ComponentInputModeDict PrimaryInputModeIdentifier; do
 done
 
 run_phase "fixed-home signed Settings bundle" \
-  tests/verify_visible_settings_fixture.sh --verify
+  tests/verify_visible_settings_fixture.sh --verify candidate
 run_phase "signed package lifecycle" env \
   LINNET_LIFECYCLE_CANDIDATE_APP="${app}" tests/verify_package_lifecycle.sh
 run_phase "offline candidate process" env \

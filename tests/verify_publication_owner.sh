@@ -123,7 +123,7 @@ analysis_identity =
 build_identity = 'LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}"'
 analysis_name = 'readonly analysis_product_name="${product_name}Periphery"'
 build_name = 'LINNET_PRODUCT_NAME="${analysis_product_name}"'
-registration_cleanup = '"${local_app_cleanup}" "${products}"'
+input_source_safe_build = 'scripts/build-linnet-app Debug "${derived_data}"'
 abort unless periphery.include?(
   'product_bundle_identifier="$(read_product_setting LINNET_BUNDLE_IDENTIFIER)"') &&
   periphery.include?('product_name="$(read_product_setting LINNET_PRODUCT_NAME)"') &&
@@ -131,9 +131,9 @@ abort unless periphery.include?(
   periphery.include?(analysis_name) &&
   periphery.scan(build_identity).size == 1 &&
   periphery.scan(build_name).size == 1 &&
-  periphery.scan(registration_cleanup).size == 1 &&
-  periphery.scan("cleanup_local_registrations").size == 3 &&
-  periphery.include?(%q{-derivedDataPath "${derived_data}"}) &&
+  periphery.scan(input_source_safe_build).size == 1 &&
+  !periphery.include?("lsregister") &&
+  !periphery.include?("unregister-local-apps") &&
   periphery.include?(%q{--generic-project-config "${generic_config}"}) &&
   periphery.include?(%q{"test_targets": []}) &&
   periphery.include?(%q{SWIFTC="${indexed_swiftc}" linnet-runtime-inspector}) &&
@@ -647,7 +647,7 @@ ruby -e '
       "tests/verify_runtime_footprint.sh" => 1,
       "LINNET_LIFECYCLE_CANDIDATE_APP=" => 1,
       "tests/verify_package_lifecycle.sh" => 1,
-      "tests/verify_visible_settings_fixture.sh --verify" => 1,
+      "tests/verify_visible_settings_fixture.sh --verify local" => 1,
       "tests/verify_release_metadata.sh" => 1,
       "tests/verify_package_architecture.sh" => 1,
       "english-data-generator" => 1,

@@ -38,25 +38,9 @@ readonly analysis_product_name="${product_name}Periphery"
 
 periphery_root="${project_root}/build/tools/periphery-${periphery_version}"
 periphery_binary="${periphery_root}/periphery"
-readonly local_app_cleanup="${project_root}/scripts/unregister-local-apps"
 analysis_root="$(mktemp -d /private/tmp/linnet-periphery-analysis.XXXXXX)"
 derived_data="${analysis_root}/DerivedData"
 products="${derived_data}/Build/Products"
-
-cleanup_local_registrations() {
-  local required="${1:-false}"
-  local analysis_app settings_app embedded_settings_app retired_app
-  if [[ ! -d "${products}" ]]; then
-    [[ "${required}" != true ]]
-    return
-  fi
-  analysis_app="${products}/Debug/${analysis_product_name}.app"
-  settings_app="${products}/Debug/Settings.app"
-  embedded_settings_app="${analysis_app}/Contents/Applications/Settings.app"
-  retired_app="${products}/Debug/${product_name}.app"
-  "${local_app_cleanup}" "${products}" \
-    "${analysis_app}" "${settings_app}" "${embedded_settings_app}" "${retired_app}"
-}
 
 remove_analysis_root() {
   [[ "${analysis_root}" == /private/tmp/linnet-periphery-analysis.* &&
@@ -66,7 +50,6 @@ remove_analysis_root() {
 }
 
 cleanup() {
-  cleanup_local_registrations false >/dev/null 2>&1 || true
   remove_analysis_root >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM HUP
@@ -97,9 +80,7 @@ printf '%s  %s\n' "${periphery_binary_sha256}" "${periphery_binary}" |
   shasum -a 256 -c - >/dev/null
 
 echo "Periphery: indexing Linnet and Settings"
-xcodebuild -project Linnet.xcodeproj -scheme Linnet -configuration Debug \
-  -destination 'platform=macOS' -derivedDataPath "${derived_data}" \
-  -showBuildTimingSummary -quiet \
+scripts/build-linnet-app Debug "${derived_data}" -quiet \
   LINNET_BUNDLE_IDENTIFIER="${analysis_bundle_identifier}" \
   LINNET_PRODUCT_NAME="${analysis_product_name}" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
@@ -145,7 +126,6 @@ EOF
 echo "Periphery: analyzing every production entrypoint"
 "${periphery_binary}" scan --generic-project-config "${generic_config}"
 
-cleanup_local_registrations true
 remove_analysis_root
 analysis_root=""
 trap - EXIT INT TERM HUP
