@@ -45,27 +45,28 @@ struct LinnetInputSourceLifecycleTests {
     guard LinnetInputSourceRegistration.classify([], identifier: identifier) == .missing else {
       fatalError("zero matching sources did not classify as missing")
     }
-    let available = LinnetInputSourceRegistration.classify(
+    let enabledObservation = LinnetInputSourceRegistration.classify(
       [matchingSource], identifier: identifier)
-    guard available == .available,
-      available.wireValue == "available:bundle-match:enabled:selectable:path-unknown"
-    else { fatalError("one enabled and selectable source was not available") }
+    guard enabledObservation == .enabledObservation,
+      enabledObservation.wireValue ==
+        "registered:enabled-observation:selectable:path-unknown"
+    else { fatalError("one enabled source was not retained as an observation") }
     let disabledSource = source(
       identifier: identifier,
       bundleIdentifier: identifier,
       isEnabled: false)
-    let disabled = LinnetInputSourceRegistration.classify(
+    let enablementRequired = LinnetInputSourceRegistration.classify(
       [disabledSource], identifier: identifier)
-    guard disabled == .disabled,
-      disabled.wireValue == "disabled:bundle-match:enable-capable:path-unknown"
-    else { fatalError("an installed but disabled source was presented as available") }
+    guard enablementRequired == .enablementRequired,
+      enablementRequired.wireValue == "registered:enablement-required:path-unknown"
+    else { fatalError("a registered source lost its user-enablement requirement") }
     let selectedSource = source(
       identifier: identifier,
       bundleIdentifier: identifier,
       isSelected: true)
     guard LinnetInputSourceRegistration.classify(
-      [selectedSource], identifier: identifier) == .selected
-    else { fatalError("the current Linnet source was not classified as selected") }
+      [selectedSource], identifier: identifier) == .selectedObservation
+    else { fatalError("the current Linnet source was not retained as an observation") }
     guard LinnetInputSourceRegistration.classify([
       source(identifier: identifier, bundleIdentifier: identifier, category: "invalid")
     ], identifier: identifier) == .conflictingKind else {

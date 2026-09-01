@@ -8,9 +8,11 @@ private let downloadOwner =
 private let inputSourceMutationSymbols = Set([
   "TISRegisterInputSource",
   "TISEnableInputSource",
+])
+private let forbiddenMutationSymbols = Set([
+  "TISDisableInputSource",
   "TISSelectInputSource",
 ])
-private let forbiddenMutationSymbols = Set(["TISDisableInputSource"])
 private let forbiddenNetworkSymbols = Set([
   "CFNetwork",
   "NWConnection",
@@ -59,8 +61,8 @@ for path in CommandLine.arguments.dropFirst() {
   inspect(Syntax(Parser.parse(source: source)), path: path)
 }
 
-guard registrationUses == [registrationOwner, registrationOwner, registrationOwner] else {
-  fatalError("TIS repair escaped its single owner: \(registrationUses)")
+guard registrationUses == [registrationOwner, registrationOwner] else {
+  fatalError("TIS authorization request escaped its single owner: \(registrationUses)")
 }
 guard Set(downloadUses) == [downloadOwner] else {
   fatalError("URLSession escaped its single download owner: \(downloadUses)")

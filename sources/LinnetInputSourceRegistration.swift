@@ -5,9 +5,10 @@
 
 import Carbon
 
-/// The single read-only owner for Linnet's HIToolbox registration and
-/// availability state. HIToolbox publishes no authoritative bundle URL, so
-/// every accepted result deliberately makes no path claim.
+/// The single read-only owner for Linnet's HIToolbox registration observation.
+/// HIToolbox publishes neither an authoritative bundle URL nor a durable user-
+/// authorization result, so enabled/selected properties remain observations
+/// and every accepted result deliberately makes no path claim.
 enum LinnetInputSourceRegistration {
   struct Source: Equatable {
     let identifier: String?
@@ -22,9 +23,9 @@ enum LinnetInputSourceRegistration {
 
   enum State: Equatable {
     case missing
-    case disabled
-    case available
-    case selected
+    case enablementRequired
+    case enabledObservation
+    case selectedObservation
     case duplicate(count: Int)
     case conflictingIdentity
     case conflictingKind
@@ -35,9 +36,9 @@ enum LinnetInputSourceRegistration {
     var wireValue: String {
       switch self {
       case .missing: "missing"
-      case .disabled: "disabled:bundle-match:enable-capable:path-unknown"
-      case .available: "available:bundle-match:enabled:selectable:path-unknown"
-      case .selected: "selected:bundle-match:enabled:selectable:path-unknown"
+      case .enablementRequired: "registered:enablement-required:path-unknown"
+      case .enabledObservation: "registered:enabled-observation:selectable:path-unknown"
+      case .selectedObservation: "registered:selected-observation:selectable:path-unknown"
       case .duplicate(let count): "duplicate:\(count)"
       case .conflictingIdentity: "conflict:source-or-bundle-id"
       case .conflictingKind: "conflict:source-category-or-type"
@@ -79,8 +80,8 @@ enum LinnetInputSourceRegistration {
       let isSelected = source.isSelected
     else { return .unknownAvailability }
     guard isEnableCapable, isSelectCapable else { return .unavailableCapabilities }
-    guard isEnabled else { return .disabled }
-    return isSelected ? .selected : .available
+    guard isEnabled else { return .enablementRequired }
+    return isSelected ? .selectedObservation : .enabledObservation
   }
 
   static func state(identifier: String) -> State {
@@ -104,7 +105,7 @@ enum LinnetInputSourceRegistration {
     let state = classify(sources, identifier: identifier)
     let inputSource: TISInputSource?
     switch state {
-    case .disabled, .available, .selected:
+    case .enablementRequired, .enabledObservation, .selectedObservation:
       inputSource = zip(sourceList, sources).first {
         $0.1.identifier == identifier && $0.1.bundleIdentifier == identifier
       }?.0

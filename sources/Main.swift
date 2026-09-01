@@ -68,11 +68,11 @@ struct SquirrelApp {
       if args.count > 1 {
         do {
           switch args[1] {
-          case "--repair-input-source":
+          case "--request-input-source-authorization":
             guard args.count == 2 else {
-              configurationFailure("Repair accepts no input source identifier")
+              configurationFailure("Authorization request accepts no input source identifier")
             }
-            try installer.repair()
+            try installer.requestAuthorization()
             return true
           case "--help":
             print(helpDoc)
@@ -138,7 +138,7 @@ struct SquirrelApp {
     """
     Supported arguments:
     Manage \(productName):
-      --repair-input-source               repair and select input source
+      --request-input-source-authorization request macOS user authorization
     """
   }
 }

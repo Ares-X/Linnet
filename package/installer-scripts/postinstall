@@ -321,28 +321,34 @@ fi
   exit 1
 }
 
-# The standard register/enable/select transition is exclusively a Complete
-# clean-install or explicit repair boundary. It makes Linnet current once so
-# macOS records it in the user's Input menu. Core never mutates TIS or stops the
-# live InputMethodKit Host: later updates preserve the user's own selection.
+# Complete may register Linnet and submit one standard enablement request.
+# macOS owns the asynchronous user approval and later menu selection, so this
+# script accepts only a safe registered observation and never claims either
+# user-owned transition completed. Core never mutates TIS.
 if [[ "${install_mode}" == complete ]]; then
-  "${executable}" --repair-input-source
+  "${executable}" --request-input-source-authorization
   registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
-    echo "Linnet postinstall: input-source availability is unavailable" >&2
+    echo "Linnet postinstall: input-source registration observation is unavailable" >&2
     exit 1
   }
-  [[ "${registration_state}" == selected:bundle-match:enabled:selectable:path-unknown ]] || {
-    echo "Linnet postinstall: Complete did not make the input source selectable" >&2
-    exit 1
-  }
+  case "${registration_state}" in
+    registered:enablement-required:path-unknown|\
+registered:enabled-observation:selectable:path-unknown|\
+registered:selected-observation:selectable:path-unknown) ;;
+    *)
+      echo "Linnet postinstall: Complete did not retain one safe registered input source" >&2
+      exit 1
+      ;;
+  esac
 else
   registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
     echo "Linnet postinstall: input-source availability is unavailable" >&2
     exit 1
   }
   case "${registration_state}" in
-    available:bundle-match:enabled:selectable:path-unknown|\
-selected:bundle-match:enabled:selectable:path-unknown) ;;
+    registered:enablement-required:path-unknown|\
+registered:enabled-observation:selectable:path-unknown|\
+registered:selected-observation:selectable:path-unknown) ;;
     *)
       echo "Linnet postinstall: Core update lost input-source availability" >&2
       exit 1

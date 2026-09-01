@@ -2395,14 +2395,13 @@ fi
 ruby -e '
   source = File.read("sources/InputSource.swift")
   registration = File.read("sources/LinnetInputSourceRegistration.swift")
-  repair = source[/func repair\(\) throws \{.*?\n  \}/m]
-  abort "the sole Complete input-source repair owner is missing" unless
-    repair && repair.scan("TISRegisterInputSource").length == 1 &&
-      repair.scan("TISEnableInputSource").length == 1 &&
-      repair.scan("TISSelectInputSource").length == 1 &&
-      repair.include?("LinnetInputSourceRegistration.inspect(identifier:") &&
-      repair.include?("let finalState = LinnetInputSourceRegistration.state(identifier:") &&
-      repair.include?("guard finalState == .selected")
+  request = source[/func requestAuthorization\(\) throws \{.*?\n  \}/m]
+  abort "the sole Complete input-source authorization owner is missing" unless
+    request && request.scan("TISRegisterInputSource").length == 1 &&
+      request.scan("TISEnableInputSource").length == 1 &&
+      request.scan("TISSelectInputSource").empty? &&
+      request.include?("LinnetInputSourceRegistration.inspect(identifier:") &&
+      !request.include?("finalState")
   forbidden = %w[
     TISDisableInputSource
     refreshAfterCoreUpdate desiredInputSourceAfterCoreUpdate
@@ -2417,9 +2416,9 @@ ruby -e '
     registration.scan("static func classify(_ sources:").length == 1 &&
       registration.scan("static func state").length == 1 &&
       registration.scan("static func currentInputSourceID()").length == 1 &&
-      registration.include?("available:bundle-match:enabled:selectable:path-unknown") &&
-      registration.include?("disabled:bundle-match:enable-capable:path-unknown") &&
-      registration.include?("case selected") &&
+      registration.include?("registered:enabled-observation:selectable:path-unknown") &&
+      registration.include?("registered:enablement-required:path-unknown") &&
+      registration.include?("case selectedObservation") &&
       registration.include?("case duplicate(count: Int)") &&
       registration.include?("case conflictingIdentity") &&
       registration.include?("case unknownBundleIdentifier")
@@ -2430,7 +2429,7 @@ ruby -e '
   abort "TIS mutation escaped the single Complete owner" unless
     source.scan("TISRegisterInputSource").length == 1 &&
       source.scan("TISEnableInputSource").length == 1 &&
-      source.scan("TISSelectInputSource").length == 1 &&
+      source.scan("TISSelectInputSource").empty? &&
       !registration.include?("TISRegisterInputSource") &&
       !registration.include?("TISEnableInputSource") &&
       !registration.include?("TISSelectInputSource")
@@ -2689,14 +2688,15 @@ if rg -n "Rime's menu|Rime 菜单" \
   fail "user guidance still advertises the retired Rime options menu"
 fi
 if rg -n 'func install\(\)|afterRegistration|Thread\.sleep' sources/InputSource.swift ||
-    rg -n -- '--install-input-source' sources/Main.swift package/installer-scripts/postinstall; then
+    rg -n -- '--install-input-source|--repair-input-source' \
+      sources/Main.swift package/installer-scripts/postinstall; then
   fail "a combined or delayed private input-source installation path remains"
 fi
 if rg -n 'struct Source|sourceProvider|registerInputSource:' sources/InputSource.swift; then
   fail "a test-only adapter remains between the input lifecycle owner and HIToolbox"
 fi
-rg -Fq -- '--repair-input-source' sources/Main.swift ||
-  fail "Complete input-source repair command is missing"
+rg -Fq -- '--request-input-source-authorization' sources/Main.swift ||
+  fail "Complete input-source authorization command is missing"
 if rg -Fq -- '--inspect-input-source-registration' sources/Main.swift; then
   fail "the retired installed-Host inspection entrypoint returned"
 fi
@@ -2711,16 +2711,24 @@ if rg -Fq -- '"${executable}" --inspect-input-source-registration' \
     package/core-installer-scripts/preinstall; then
   fail "Core preinstall can still invoke an incompatible installed Host"
 fi
-if rg -n -- '--repair-input-source|TISRegisterInputSource|TISEnableInputSource|TISSelectInputSource' \
+if rg -n -- '--request-input-source-authorization|TISRegisterInputSource|TISEnableInputSource|TISSelectInputSource' \
     package/core-installer-scripts/preinstall; then
   fail "Core preinstall regained a TIS mutation path"
 fi
-test "$(rg -F -c -- '"${executable}" --repair-input-source' \
+test "$(rg -F -c -- '"${executable}" --request-input-source-authorization' \
   package/installer-scripts/postinstall)" = 1 ||
-  fail "Complete postinstall no longer repairs the installed input source exactly once"
-test "$(rg -F -c -- '[[ "${registration_state}" == selected:bundle-match:enabled:selectable:path-unknown ]]' \
-  package/installer-scripts/postinstall)" = 1 ||
-  fail "Complete postinstall no longer requires a selected input source"
+  fail "Complete postinstall no longer requests input-source authorization exactly once"
+for observed_state in \
+    registered:enablement-required:path-unknown \
+    registered:enabled-observation:selectable:path-unknown \
+    registered:selected-observation:selectable:path-unknown; do
+  rg -Fq -- "${observed_state}" package/installer-scripts/postinstall ||
+    fail "postinstall lost a safe registered input-source observation: ${observed_state}"
+done
+if rg -n 'registration_state.*==.*selected|Complete.*selected input source' \
+    package/installer-scripts/postinstall; then
+  fail "Complete postinstall again treated immediate selection as persistent authorization"
+fi
 rg -Fq 'if [[ "${install_mode}" == complete ]]' \
   package/installer-scripts/postinstall ||
   fail "input-source registration escaped the Complete-only boundary"
@@ -2741,11 +2749,14 @@ rg -Fq '[[ "${products_root}" == /*/Build/Products' scripts/unregister-local-app
   fail "local App cleanup lost its Build/Products boundary"
 rg -Fq 'grep -Fqx -- "${app}"' scripts/unregister-local-apps ||
   fail "local App cleanup does not verify final LaunchServices state"
-rg -Fq '"${lsregister}" -u -R "${app}"' scripts/unregister-local-apps ||
+rg -Fq '"${lsregister}" -u -R "${path}"' scripts/unregister-local-apps ||
   fail "local App cleanup is not symmetric with Xcode recursive registration"
 rg -Fq 'for pass in 1 2' scripts/unregister-local-apps &&
   rg -Fq '[[ "${pass}" -eq 2 ]] || sleep 1' scripts/unregister-local-apps ||
   fail "local App cleanup does not retire delayed embedded registrations"
+rg -Fq 'registered_paths_for_bundle_identifiers' scripts/unregister-local-apps &&
+  rg -Fq 'Library/Input Methods/Linnet.app' scripts/unregister-local-apps ||
+  fail "local App cleanup does not retire stale same-identity build registrations"
 rg -Fq 'unregister_fixture_apps' tests/verify_visible_settings_fixture.sh ||
   fail "Settings UI tests can leave fixture Apps registered with LaunchServices"
 # The live Rime session is the sole mode owner. Do not restore the locally

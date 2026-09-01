@@ -150,7 +150,7 @@ inspect_runtime() {
 # A clean install has no executable from which to read TIS. A repair must first
 # pass the same installed-App signature transition as Core, then consume the
 # package-owned helper's read-only typed TIS state. Complete postinstall owns
-# the standard register/enable/select repair after its atomic App publication.
+# one standard registration/authorization request after atomic App publication.
 if [[ "${install_mode}" == complete ]]; then
   if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
     [[ "${identity_transition}" == clean-complete-install ]] || {
@@ -176,9 +176,9 @@ if [[ "${install_mode}" == complete ]]; then
     exit 1
   }
   case "${registration_state}" in
-    missing|disabled:bundle-match:enable-capable:path-unknown|\
-available:bundle-match:enabled:selectable:path-unknown|\
-selected:bundle-match:enabled:selectable:path-unknown) exit 0 ;;
+    missing|registered:enablement-required:path-unknown|\
+registered:enabled-observation:selectable:path-unknown|\
+registered:selected-observation:selectable:path-unknown) exit 0 ;;
     *)
       echo "Linnet Complete found conflicting or unverifiable input-source registration (${registration_state}). Uninstall Linnet first." >&2
       exit 1
@@ -202,21 +202,18 @@ case "${identity_transition}" in
 esac
 
 # Core can replace bytes only when TIS resolves exactly one source with Linnet's
-# source and bundle IDs. HIToolbox exposes no authoritative bundle path, so the
-# typed state explicitly records path-unknown. Core performs no TIS mutation.
+# source and bundle IDs. Enablement is user-owned and may be pending; Core does
+# not reinterpret or mutate it.
 inspect_input_source_registration || {
   echo "Linnet Core update could not inspect input-source registration. Uninstall Linnet first." >&2
   exit 1
 }
 case "${registration_state}" in
-  available:bundle-match:enabled:selectable:path-unknown|\
-selected:bundle-match:enabled:selectable:path-unknown) ;;
+  registered:enablement-required:path-unknown|\
+registered:enabled-observation:selectable:path-unknown|\
+registered:selected-observation:selectable:path-unknown) ;;
   missing)
     echo "Linnet Core update requires a registered input source. Run Linnet Complete to repair it." >&2
-    exit 1
-    ;;
-  disabled:bundle-match:enable-capable:path-unknown)
-    echo "Linnet Core update requires an enabled input source. Run Linnet Complete to repair it." >&2
     exit 1
     ;;
   *)

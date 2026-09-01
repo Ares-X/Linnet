@@ -45,10 +45,10 @@ cat >"${scripts_root}/input-source-registration-inspector" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ "$#" == 1 && "$1" == io.github.ares-x.inputmethod.Linnet ]]
-if [[ -f "${HOME}/.linnet-test-input-source-selected" ]]; then
-  printf 'selected:bundle-match:enabled:selectable:path-unknown\n'
+if [[ -f "${HOME}/.linnet-test-input-source-authorization-requested" ]]; then
+  printf 'registered:enablement-required:path-unknown\n'
 else
-  printf '%s\n' "${LINNET_FAKE_REGISTRATION_STATE:-available:bundle-match:enabled:selectable:path-unknown}"
+  printf '%s\n' "${LINNET_FAKE_REGISTRATION_STATE:-registered:enabled-observation:selectable:path-unknown}"
 fi
 SH
 cat >"${scripts_root}/linnet-runtime-inspector" <<'SH'
@@ -301,7 +301,7 @@ if rg -n 'core-update-selection|prior_enablement|TISDisable|--activate-input-sou
 fi
 test "$(rg -F -c 'TISRegisterInputSource' sources/InputSource.swift)" = 1
 test "$(rg -F -c 'TISEnableInputSource' sources/InputSource.swift)" = 1
-test "$(rg -F -c 'TISSelectInputSource' sources/InputSource.swift)" = 1
+! rg -Fq 'TISSelectInputSource' sources/InputSource.swift
 legacy_revisions=(
   755f69612ddd529ae5178a940498a2f2f9ac7cbf
   3a48e4853674b27cfd49b6bddcf9f6c9d6ee0999
@@ -333,7 +333,7 @@ if rg -n 'semver_at_least|check_active_core|packs\.\$\{index\}\.min_core' \
   echo "Installer retained a second shell owner for installed Runtime compatibility." >&2
   exit 1
 fi
-test "$(rg -F -c -- '"${executable}" --repair-input-source' \
+test "$(rg -F -c -- '"${executable}" --request-input-source-authorization' \
   package/installer-scripts/postinstall)" = 1
 if rg -n 'missing-app-install' package/core-installer-scripts/preinstall \
     package/installer-scripts/candidate-app-identity.sh; then
@@ -391,8 +391,8 @@ copy_candidate_app() {
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${candidate_fixture}" "${destination}"
   cat >"${fake_executable}" <<'SH'
 #!/usr/bin/env bash
-[[ "$*" == --repair-input-source ]]
-: >"${HOME}/.linnet-test-input-source-selected"
+[[ "$*" == --request-input-source-authorization ]]
+: >"${HOME}/.linnet-test-input-source-authorization-requested"
 printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
 SH
   chmod 755 "${fake_executable}"
@@ -700,8 +700,8 @@ prepare_postinstall_home() {
   mkdir -p "${app}/Contents/MacOS" "${support}/Runtime/Active" "${support}/State"
 cat >"${app}/Contents/MacOS/Linnet" <<'SH'
 #!/usr/bin/env bash
-[[ "$*" == --repair-input-source ]]
-: >"${HOME}/.linnet-test-input-source-selected"
+[[ "$*" == --request-input-source-authorization ]]
+: >"${HOME}/.linnet-test-input-source-authorization-requested"
 printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
 SH
   chmod 755 "${app}/Contents/MacOS/Linnet"
@@ -810,8 +810,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     LINNET_FAKE_RUNTIME_LOG="${postinstall_runtime_log}" \
     LINNET_TEST_EXECUTABLE="${postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
-  [[ "$(cat "${postinstall_log}")" == '--repair-input-source' ]] || {
-    echo "Complete postinstall did not perform exactly one input-source repair." >&2
+  [[ "$(cat "${postinstall_log}")" == '--request-input-source-authorization' ]] || {
+    echo "Complete postinstall did not submit exactly one input-source authorization request." >&2
     exit 1
   }
   grep -Fxq "probe 0.1.0 ${postinstall_home}/Library/Application Support" \
@@ -830,7 +830,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   mkdir -p "${missing_complete_home}/Library/Application Support/Linnet/State"
   stage_complete_candidate "${missing_complete_home}"
   HOME="${missing_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_HOST_LOG="${missing_complete_log}" \
       "${scripts_root}/postinstall"
   [[ -f "${missing_complete_home}/Library/Application Support/Linnet/Data/Packs/staged" && \
@@ -841,8 +841,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     exit 1
   }
   [[ ! -e "${missing_complete_home}/Library/Application Support/Linnet/.linnet-complete" && \
-    "$(cat "${missing_complete_log}")" == '--repair-input-source' ]] || {
-    echo "Complete missing-runtime repair did not finish one standard input-source repair." >&2
+    "$(cat "${missing_complete_log}")" == '--request-input-source-authorization' ]] || {
+    echo "Complete missing-runtime repair did not finish one authorization request." >&2
     exit 1
   }
 
@@ -856,7 +856,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     >"${rollback_complete_home}/Library/Input Methods/Linnet.app/Contents/rollback-before"
   stage_complete_candidate "${rollback_complete_home}"
   if HOME="${rollback_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=missing-then-invalid \
       "${scripts_root}/postinstall" >/dev/null 2>&1; then
     echo "Complete accepted a Runtime projection that failed final validation." >&2
@@ -1000,7 +1000,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   lease_complete_ready="${test_root}/lease-complete/ready"
   lease_complete_release="${test_root}/lease-complete/release"
   hold_download_lease "${lease_complete_home}" "${lease_complete_ready}" "${lease_complete_release}"
-  if HOME="${lease_complete_home}" LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
+  if HOME="${lease_complete_home}" LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy "${scripts_root}/postinstall" >/dev/null 2>&1; then
     release_download_lease "${lease_complete_release}"
     echo "Complete changed state while a Settings download held the mutation lease." >&2
@@ -1233,7 +1233,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     exit 1
   }
   HOME="${app_only_home}" \
-    LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
+    LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
     "${scripts_root}/preinstall" || {
     echo "Complete preinstall rejected an idempotent signed-App repair." >&2
     exit 1
@@ -1253,9 +1253,9 @@ mkdir -p "${missing_app_home}/Library/Application Support/Linnet/Runtime/Active"
   "${missing_app_home}/Library/Application Support/Linnet/State"
 printf '{}\n' >"${missing_app_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
 for repair_registration in missing \
-    disabled:bundle-match:enable-capable:path-unknown \
-    available:bundle-match:enabled:selectable:path-unknown \
-    selected:bundle-match:enabled:selectable:path-unknown; do
+    registered:enablement-required:path-unknown \
+    registered:enabled-observation:selectable:path-unknown \
+    registered:selected-observation:selectable:path-unknown; do
   HOME="${missing_app_home}" LINNET_FAKE_REGISTRATION_STATE="${repair_registration}" \
     "${scripts_root}/preinstall" || {
     echo "Complete could not repair a missing App with safe product state." >&2
@@ -1273,12 +1273,12 @@ done
 
 # The separately selected Complete installer is the explicit full-repair
 # boundary. A healthy CMS App with one verified TIS source may be repaired, but
-# its postinstall must preserve that registration rather than re-register it.
+# its postinstall must preserve that registration and never select it.
 if [[ "${candidate_fixture_available}" == true ]]; then
   healthy_complete_home="${test_root}/complete-healthy/home"
   prepare_signed_postinstall_home "${healthy_complete_home}"
   HOME="${healthy_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy \
       "${scripts_root}/preinstall" || {
     echo "Complete preinstall rejected the explicitly selected healthy repair." >&2
@@ -1290,7 +1290,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   stage_complete_candidate "${healthy_complete_home}"
   before_app_identity="$(stat -f '%d:%i' "${healthy_complete_home}/Library/Input Methods/Linnet.app")"
   HOME="${healthy_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy \
       LINNET_FAKE_HOST_LOG="${complete_repair_log}" \
       LINNET_TEST_EXECUTABLE="${healthy_complete_home}/fake-Linnet" \
@@ -1304,14 +1304,14 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   [[ ! -e "${healthy_complete_home}/Library/Input Methods/Linnet.app/Contents/repair-before" ]] || {
     echo "Complete repair did not publish the staged candidate App." >&2; exit 1;
   }
-  [[ "$(cat "${complete_repair_log}")" == '--repair-input-source' ]] || {
-    echo "Complete did not repair and select the exact input source once." >&2; exit 1;
+  [[ "$(cat "${complete_repair_log}")" == '--request-input-source-authorization' ]] || {
+    echo "Complete did not request authorization for the exact input source once." >&2; exit 1;
   }
   [[ ! -e "${healthy_complete_home}/Library/Application Support/Linnet/.linnet-complete" ]] || {
     echo "Complete repair retained its staging App." >&2; exit 1;
   }
   HOME="${healthy_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=invalid \
       "${scripts_root}/preinstall" >/dev/null 2>&1 && {
     echo "Complete accepted corrupt Runtime bytes as a repairable missing state." >&2
@@ -1464,7 +1464,7 @@ fi
 # helper's typed, read-only TIS classification and never mutates TIS.
 rg -Fq 'case registrationFailed(OSStatus)' sources/InputSource.swift
 if ! rg -Fq 'static func classify' sources/LinnetInputSourceRegistration.swift ||
-    ! rg -Fq 'available:bundle-match:enabled:selectable:path-unknown' \
+    ! rg -Fq 'registered:enabled-observation:selectable:path-unknown' \
       sources/LinnetInputSourceRegistration.swift; then
   echo "The typed, read-only TIS owner is missing." >&2
   exit 1
