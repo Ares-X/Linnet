@@ -2399,7 +2399,7 @@ ruby -e '
   abort "the sole first-install input-source authorization owner is missing" unless
     request && request.scan("TISRegisterInputSource").length == 1 &&
       request.scan("TISEnableInputSource").length == 1 &&
-      request.scan("TISSelectInputSource").empty? &&
+      request.scan("TISSelectInputSource").length == 1 &&
       request.include?("LinnetInputSourceRegistration.inspect(identifier:") &&
       !request.include?("finalState") &&
       !request.include?("if inspection.state == .enablementRequired")
@@ -2430,7 +2430,7 @@ ruby -e '
   abort "TIS mutation escaped the single Complete owner" unless
     source.scan("TISRegisterInputSource").length == 1 &&
       source.scan("TISEnableInputSource").length == 1 &&
-      source.scan("TISSelectInputSource").empty? &&
+      source.scan("TISSelectInputSource").length == 1 &&
       !registration.include?("TISRegisterInputSource") &&
       !registration.include?("TISEnableInputSource") &&
       !registration.include?("TISSelectInputSource")

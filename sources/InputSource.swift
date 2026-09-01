@@ -12,6 +12,7 @@ final class SquirrelInstaller {
   enum Failure: Error, Equatable, CustomStringConvertible {
     case registrationFailed(OSStatus)
     case enableFailed(OSStatus)
+    case selectFailed(OSStatus)
     case registrationStateRejected(String)
 
     var description: String {
@@ -20,6 +21,8 @@ final class SquirrelInstaller {
         "Input source registration failed (OSStatus \(status))."
       case .enableFailed(let status):
         "Input source enablement failed (OSStatus \(status))."
+      case .selectFailed(let status):
+        "Input source selection failed (OSStatus \(status))."
       case .registrationStateRejected(let state):
         "Input source registration state cannot request authorization: \(state)."
       }
@@ -27,10 +30,11 @@ final class SquirrelInstaller {
   }
 
   /// Only publication of the first installed App may register Linnet and ask
-  /// macOS for user authorization. Existing-App Complete repairs and Core
-  /// updates preserve the App inode and never call this path. macOS owns the
-  /// user's final approval and menu selection; an immediate HIToolbox property
-  /// must never be promoted to either fact.
+  /// macOS for user authorization and perform the one initial selection that
+  /// publishes the source into the system switch cycle. Existing-App Complete
+  /// repairs and Core updates preserve the App inode and never call this path.
+  /// An immediate HIToolbox property remains only an observation; it is never
+  /// promoted to durable authorization evidence.
   func requestFirstInstallAuthorization() throws {
     let identifier = SquirrelApp.bundleIdentifier
     var inspection = LinnetInputSourceRegistration.inspect(identifier: identifier)
@@ -50,12 +54,15 @@ final class SquirrelInstaller {
     }
     // A stale registration can survive an earlier uninstall, so first install
     // still submits the standard enablement request after validating the one
-    // exact source. No update or repair path may infer authorization from this
-    // process-local observation or resubmit the request. Selection remains
-    // user-owned.
+    // exact source. No update path may infer authorization from this
+    // process-local observation or resubmit the request. The explicit first-
+    // install/identity-repair action also selects once because enablement alone
+    // does not publish a newly authorized source into macOS's switch cycle.
     let enableStatus = TISEnableInputSource(inputSource)
     guard enableStatus == noErr else { throw Failure.enableFailed(enableStatus) }
-    print("Input source authorization request is ready: \(identifier)")
+    let selectStatus = TISSelectInputSource(inputSource)
+    guard selectStatus == noErr else { throw Failure.selectFailed(selectStatus) }
+    print("Input source authorization and initial selection are ready: \(identifier)")
   }
 
   /// An InputMethodKit Host is valid only from the per-user installation
