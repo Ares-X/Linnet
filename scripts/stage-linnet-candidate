@@ -74,8 +74,8 @@ end
 release_metadata = File.join(local_host, "Contents", "Resources", "LinnetRelease")
 fail_stage("local Host retained release metadata") if File.exist?(release_metadata)
 
-candidate_host = File.join(staging_products, "Linnet.app")
-candidate_settings = File.join(staging_products, "Settings.app")
+candidate_host = File.join(staging_products, "Linnet.candidate")
+candidate_settings = File.join(staging_products, "Settings.candidate")
 copy_bundle(local_host, candidate_host)
 copy_bundle(local_settings, candidate_settings)
 candidate_embedded_settings = File.join(

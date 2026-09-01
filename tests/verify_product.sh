@@ -35,8 +35,8 @@ assert_clean_checkout() {
   exit 2
 }
 
-app="${repo_root}/build/Candidate/Release/Linnet.candidate"
-settings="${repo_root}/build/Candidate/Release/Settings.candidate"
+app="${repo_root}/build/Candidate.noindex/Release/Linnet.candidate"
+settings="${repo_root}/build/Candidate.noindex/Release/Settings.candidate"
 [[ -d "${app}" && ! -L "${app}" && -d "${settings}" && ! -L "${settings}" ]] || {
   echo "verify_product: frozen Release App and Settings App are required" >&2
   exit 1

@@ -129,10 +129,10 @@ ruby -e '
     verifier.include?(%q{require_verification_bundle "${host_app}" host}) &&
       verifier.include?(%q{require_verification_bundle "${standalone_settings_app}" settings})
   signer_owner = signer[/^sign_product\(\) \{\n(?<body>.*?)(?=^\}\n)/m, :body]
-  abort "signing no longer requires standard App bundle names" unless
+  abort "signing and verification no longer share the frozen bundle-name owner" unless
     signer_owner &&
-      signer_owner.include?(%q{require_bundle "${host_app}" Linnet.app}) &&
-      signer_owner.include?(%q{require_bundle "${standalone_settings_app}" Settings.app})
+      signer_owner.include?(%q{require_verification_bundle "${host_app}" host}) &&
+      signer_owner.include?(%q{require_verification_bundle "${standalone_settings_app}" settings})
 ' "${provisioner}" "${signer}"
 
 [[ "$(rg -Fc '$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path})' \

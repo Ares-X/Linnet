@@ -10,7 +10,7 @@ RIME_LIB_DIR = librime/dist/lib
 DERIVED_DATA_PATH = build
 LOCAL_DERIVED_DATA_PATH = $(abspath $(DERIVED_DATA_PATH)/Local)
 LOCAL_RELEASE_PRODUCTS = $(LOCAL_DERIVED_DATA_PATH)/Build/Products/Release
-CANDIDATE_RELEASE_PRODUCTS = $(abspath $(DERIVED_DATA_PATH)/Candidate/Release)
+CANDIDATE_RELEASE_PRODUCTS = $(abspath $(DERIVED_DATA_PATH)/Candidate.noindex/Release)
 CANDIDATE_RELEASE_APP = $(CANDIDATE_RELEASE_PRODUCTS)/Linnet.candidate
 CANDIDATE_RELEASE_SETTINGS = $(CANDIDATE_RELEASE_PRODUCTS)/Settings.candidate
 ARCHIVE_OUTPUT_DIR ?= $(abspath package/release)
@@ -314,8 +314,8 @@ define finalize-linnet-candidate
 	trap cleanup_staging EXIT INT TERM HUP; \
 	scripts/stage-linnet-candidate "$${local_products}" "$${staging_products}" \
 		"$${production_bundle_identifier}"; \
-	app_path="$${staging_products}/Linnet.app"; \
-	settings_app_path="$${staging_products}/Settings.app"; \
+	app_path="$${staging_products}/Linnet.candidate"; \
+	settings_app_path="$${staging_products}/Settings.candidate"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
 	release_metadata_root="$${app_path}/Contents/Resources/LinnetRelease"; \
 	code_identity_projection="$$(scripts/linnet-code-identity inspect-contract)"; \
@@ -327,8 +327,6 @@ define finalize-linnet-candidate
 	scripts/linnet-code-identity sign-product "$${app_path}" "$${settings_app_path}"; \
 	scripts/build-privacy scan "$${app_path}"; \
 	scripts/linnet-code-identity verify-product "$${app_path}" "$${settings_app_path}" >/dev/null; \
-	/bin/mv "$${app_path}" "$${staging_products}/Linnet.candidate"; \
-	/bin/mv "$${settings_app_path}" "$${staging_products}/Settings.candidate"; \
 	if [ -L "$${candidate_products}" ]; then \
 		echo 'Linnet candidate: refusing to replace a symlink candidate' >&2; exit 1; \
 	elif [ -e "$${candidate_products}" ]; then \

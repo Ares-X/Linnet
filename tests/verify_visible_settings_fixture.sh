@@ -132,7 +132,7 @@ case "${product_profile}" in
     expected_settings_identifier="io.github.ares-x.inputmethod.Linnet.local-build.settings"
     ;;
   candidate)
-    product_root="${repo_root}/build/Candidate/Release"
+    product_root="${repo_root}/build/Candidate.noindex/Release"
     host_name="Linnet.candidate"
     standalone_name="Settings.candidate"
     expected_host_identifier="io.github.ares-x.inputmethod.Linnet"

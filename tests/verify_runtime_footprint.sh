@@ -2759,8 +2759,8 @@ fi
 rg -Fq 'LOCAL_DERIVED_DATA_PATH = $(abspath $(DERIVED_DATA_PATH)/Local)' Makefile &&
   rg -Fq 'LOCAL_RELEASE_PRODUCTS = $(LOCAL_DERIVED_DATA_PATH)/Build/Products/Release' Makefile ||
   fail "local Xcode products can still reuse the historically registered path"
-rg -Fq 'CANDIDATE_RELEASE_PRODUCTS = $(abspath $(DERIVED_DATA_PATH)/Candidate/Release)' Makefile ||
-  fail "the production candidate does not have one path outside Xcode products"
+rg -Fq 'CANDIDATE_RELEASE_PRODUCTS = $(abspath $(DERIVED_DATA_PATH)/Candidate.noindex/Release)' Makefile ||
+  fail "the production candidate is not isolated from Xcode products and LaunchServices discovery"
 rg -Fq 'CANDIDATE_RELEASE_APP = $(CANDIDATE_RELEASE_PRODUCTS)/Linnet.candidate' Makefile &&
   rg -Fq 'CANDIDATE_RELEASE_SETTINGS = $(CANDIDATE_RELEASE_PRODUCTS)/Settings.candidate' Makefile ||
   fail "the frozen production candidate can still persist as a discoverable App"
@@ -2769,8 +2769,19 @@ rg -Fq 'CANDIDATE_RELEASE_APP = $(CANDIDATE_RELEASE_PRODUCTS)/Linnet.candidate' 
 test "$(rg -F -c -- 'scripts/stage-linnet-candidate' Makefile)" = 1 ||
   fail "candidate identity staging does not have one Makefile caller"
 rg -Fq '"$(CANDIDATE_RELEASE_APP)"' Makefile &&
-  rg -Fq 'build/Candidate/Release/Settings.candidate' tests/verify_product.sh ||
+  rg -Fq 'build/Candidate.noindex/Release/Settings.candidate' tests/verify_product.sh ||
   fail "candidate verification and packaging do not consume the isolated production path"
+rg -Fq 'candidate_host = File.join(staging_products, "Linnet.candidate")' \
+    scripts/stage-linnet-candidate &&
+  rg -Fq 'candidate_settings = File.join(staging_products, "Settings.candidate")' \
+    scripts/stage-linnet-candidate &&
+  rg -Fq 'app_path="$${staging_products}/Linnet.candidate"' Makefile &&
+  rg -Fq 'settings_app_path="$${staging_products}/Settings.candidate"' Makefile ||
+  fail "candidate staging can expose a transient production-identity App to LaunchServices"
+if rg -Fq '/bin/mv "$${app_path}" "$${staging_products}/Linnet.candidate"' Makefile ||
+    rg -Fq '/bin/mv "$${settings_app_path}" "$${staging_products}/Settings.candidate"' Makefile; then
+  fail "candidate staging still creates registerable App names before isolation"
+fi
 if rg -n 'Build/Products/Release/Linnet\.app.*(make_package|make_archive)|make_(package|archive).*Build/Products/Release/Linnet\.app' Makefile; then
   fail "packaging can still consume the Xcode local-identity product"
 fi

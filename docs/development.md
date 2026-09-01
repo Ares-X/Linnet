@@ -222,7 +222,7 @@ App target 与独立的 `.local-build.settings` 身份。构建前后不会调�
 也不会触碰已安装 Linnet 的 TIS 授权。Periphery 复用同一个构建 owner。
 
 `build/Local/Build/Products` 永远只保存 unsigned 的 `.local-build` 身份，不会再被原地改写成
-生产输入源，也不会被打包。`community` 只在 `build/Candidate/Intermediates.noindex` 中短暂
+生产输入源，也不会被打包。`community` 只在 `build/Candidate.noindex/Intermediates.noindex` 中短暂
 建立 `.app` staging，复制本地产物后才投影正式 bundle ID、release metadata 与固定 CMS
 签名；全部校验通过后以不可发现的 `Linnet.candidate` / `Settings.candidate` 目录冻结。
 `verify_product`、PKG 和 ZIP 只消费这份候选，打包时才在一次性工作目录中重建

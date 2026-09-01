@@ -517,8 +517,8 @@ sign_product() {
   local expected_projection
   local actual_projection
 
-  require_bundle "${host_app}" Linnet.app
-  require_bundle "${standalone_settings_app}" Settings.app
+  require_verification_bundle "${host_app}" host
+  require_verification_bundle "${standalone_settings_app}" settings
   require_bundle "${embedded_settings_app}" Settings.app
   [[ "$(bundle_identifier "${host_app}")" == "${host_bundle_id}" &&
     "$(bundle_identifier "${standalone_settings_app}")" == "${settings_bundle_id}" &&
