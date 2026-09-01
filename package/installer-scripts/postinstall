@@ -321,21 +321,30 @@ fi
   exit 1
 }
 
-# Registration mutation is exclusively a Complete clean-install or
-# missing-registration repair boundary. A Complete repair with the exact TIS
-# source preserves it after atomic App replacement. Core never touches TIS or
-# stops the live InputMethodKit Host: connected applications retain their
-# process, and the new executable activates at a natural Host launch.
+# The standard register/enable/select transition is exclusively a Complete
+# clean-install or explicit repair boundary. It makes Linnet current once so
+# macOS records it in the user's Input menu. Core never mutates TIS or stops the
+# live InputMethodKit Host: later updates preserve the user's own selection.
 if [[ "${install_mode}" == complete ]]; then
+  "${executable}" --repair-input-source
   registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
-    echo "Linnet postinstall: input-source registration is unavailable" >&2
+    echo "Linnet postinstall: input-source availability is unavailable" >&2
+    exit 1
+  }
+  [[ "${registration_state}" == selected:bundle-match:enabled:selectable:path-unknown ]] || {
+    echo "Linnet postinstall: Complete did not make the input source selectable" >&2
+    exit 1
+  }
+else
+  registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
+    echo "Linnet postinstall: input-source availability is unavailable" >&2
     exit 1
   }
   case "${registration_state}" in
-    registered:bundle-match:path-unknown) ;;
-    missing) "${executable}" --register-input-source ;;
+    available:bundle-match:enabled:selectable:path-unknown|\
+selected:bundle-match:enabled:selectable:path-unknown) ;;
     *)
-      echo "Linnet postinstall: input-source registration changed during Complete repair" >&2
+      echo "Linnet postinstall: Core update lost input-source availability" >&2
       exit 1
       ;;
   esac

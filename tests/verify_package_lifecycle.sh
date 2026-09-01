@@ -20,6 +20,13 @@ trap cleanup EXIT
 scripts_root="${test_root}/scripts"
 user_home="${test_root}/home"
 mkdir -p "${scripts_root}" "${user_home}/Library"
+delta_tool="${repo_root}/build/linnet-pack"
+[[ -x "${delta_tool}" ]] || {
+  echo "Canonical pack CLI must be built before lifecycle tests." >&2
+  exit 1
+}
+cp -X "${delta_tool}" "${scripts_root}/linnet-pack"
+chmod 0755 "${scripts_root}/linnet-pack"
 [[ -x package/installer-scripts/candidate-app-identity.sh ]] || {
   echo "Package lifecycle has no candidate App identity owner." >&2
   exit 1
@@ -38,7 +45,11 @@ cat >"${scripts_root}/input-source-registration-inspector" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ "$#" == 1 && "$1" == io.github.ares-x.inputmethod.Linnet ]]
-printf '%s\n' "${LINNET_FAKE_REGISTRATION_STATE:-registered:bundle-match:path-unknown}"
+if [[ -f "${HOME}/.linnet-test-input-source-selected" ]]; then
+  printf 'selected:bundle-match:enabled:selectable:path-unknown\n'
+else
+  printf '%s\n' "${LINNET_FAKE_REGISTRATION_STATE:-available:bundle-match:enabled:selectable:path-unknown}"
+fi
 SH
 cat >"${scripts_root}/linnet-runtime-inspector" <<'SH'
 #!/usr/bin/env bash
@@ -110,18 +121,14 @@ cat >"${fake_codesign}" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 target=
-certificate_prefix=
 for argument in "$@"; do
   target="${argument}"
-  case "${argument}" in
-    --extract-certificates=*) certificate_prefix="${argument#*=}" ;;
-  esac
 done
 fixture="${target}/Contents/Resources/LinnetLifecycleFixture"
 kind="$(cat "${fixture}/signature-kind")"
 case " $* " in
   *' --verify '*)
-    [[ "${kind}" != invalid ]]
+    [[ "${kind}" == legacy-community-adhoc ]]
     ;;
   *' -dvvv '*)
     case "${kind}" in
@@ -133,21 +140,20 @@ case " $* " in
       *) exit 1 ;;
     esac
     ;;
-  *)
-    if [[ -n "${certificate_prefix}" ]]; then
-      case "${kind}" in
-        community-cms|unknown-cms)
-          cp "${fixture}/certificate" "${certificate_prefix}0"
-          ;;
-        wrong-community-cms)
-          cp "${fixture}/wrong-certificate" "${certificate_prefix}0"
-          ;;
-        *) exit 1 ;;
-      esac
-    else
-      exit 1
-    fi
+  *' -r- '*)
+    case "${kind}" in
+      community-cms|unknown-cms)
+        leaf="${fixture}/certificate"
+        ;;
+      wrong-community-cms)
+        leaf="${fixture}/wrong-certificate"
+        ;;
+      *) exit 1 ;;
+    esac
+    sha1="$(/usr/bin/shasum "${leaf}" | /usr/bin/awk '{print $1}')"
+    printf '%s\n' "designated => identifier \"io.github.ares-x.inputmethod.Linnet\" and certificate leaf = H\"${sha1}\""
     ;;
+  *) exit 1 ;;
 esac
 SH
 chmod 755 "${fake_codesign}"
@@ -158,7 +164,7 @@ sed -i '' "s#/usr/bin/codesign#${fake_codesign}#g" \
 # The production script has no executable override. This isolated test copy
 # redirects only the final Host CLI calls after the real finalized App has passed
 # the package-owned identity gate.
-sed -i '' 's#^executable="${app_path}/Contents/MacOS/Linnet"$#executable="${LINNET_TEST_EXECUTABLE:-${app_path}/Contents/MacOS/Linnet}"#' \
+sed -i '' 's#^executable="${app_path}/Contents/MacOS/Linnet"$#executable="${LINNET_TEST_EXECUTABLE:-${HOME}/fake-Linnet}"#' \
   "${scripts_root}/postinstall"
 printf '0.1.0\n' >"${scripts_root}/candidate-core-version"
 
@@ -169,7 +175,7 @@ candidate_build=31
 candidate_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 candidate_leaf=553fb445ae10b48c395ee01aad3630f03c05d3da40f84db89b97d91039e72aff
 wrong_candidate_leaf=bb696adf3a500641c2b5fef7af6436a10ed7a4552302d5d77066fd44099d48f0
-candidate_identity_format=3
+candidate_identity_format=4
 candidate_profile=community-cms
 candidate_trust_model=
 candidate_version_file="${candidate_fixture}/Contents/Resources/LinnetRelease/VERSION.json"
@@ -221,6 +227,8 @@ write_candidate_identity() {
   local format="${5:-${candidate_identity_format}}"
   local trust_model="${6:-${candidate_trust_model}}"
   local profile="${7:-${candidate_profile}}"
+  local tree="${8:-${candidate_tree}}"
+  local leaf_sha1="${9:-${candidate_leaf_sha1}}"
   ruby -rjson -e '
     document = {
       "format" => Integer(ARGV.fetch(0), 10),
@@ -235,14 +243,23 @@ write_candidate_identity() {
     when 3
       document["profile"] = ARGV.fetch(6)
       document["leaf_certificate_sha256"] = ARGV.fetch(4)
+    when 4
+      document["profile"] = ARGV.fetch(6)
+      document["leaf_certificate_sha256"] = ARGV.fetch(4)
+      document["app_tree_sha256"] = ARGV.fetch(7)
+      document["leaf_certificate_sha1"] = ARGV.fetch(8)
     else abort
     end
-    File.binwrite(ARGV.fetch(7), JSON.generate(document) + "\n")
+    File.binwrite(ARGV.fetch(9), JSON.generate(document) + "\n")
   ' "${format}" "${version}" "${build}" "${revision}" "${leaf}" \
-    "${trust_model}" "${profile}" \
+    "${trust_model}" "${profile}" "${tree}" "${leaf_sha1}" \
     "${scripts_root}/candidate-app-identity.json"
   chmod 0644 "${scripts_root}/candidate-app-identity.json"
 }
+candidate_tree="$("${delta_tool}" tree-digest --root "${candidate_fixture}")"
+candidate_leaf_sha1="$(/usr/bin/shasum \
+  "${candidate_fixture}/Contents/Resources/LinnetLifecycleFixture/certificate" | \
+  /usr/bin/awk '{print toupper($1)}')"
 write_candidate_identity "${candidate_version}" "${candidate_build}" \
   "${candidate_revision}" "${candidate_leaf}"
 
@@ -261,15 +278,30 @@ rg -Fq '"${identity_helper}" existing' package/core-installer-scripts/preinstall
 rg -Fq '"${identity_helper}" installed' package/installer-scripts/postinstall
 rg -Fq 'community-cms' package/make_package package/verify_package \
   package/installer-scripts/candidate-app-identity.sh
-rg -Fq 'document["format"] = 3' package/make_package
-rg -Fq 'candidate_identity["format"] = 3' package/verify_package
-if rg -n 'core-update-selection|prior_enablement|TISDisable|TISEnableInputSource|TISSelectInputSource|--activate-input-source|--disable-input-source|--select-input-source|--refresh-core-input-source' \
-    package/core-installer-scripts/preinstall package/installer-scripts \
-    sources/InputSource.swift sources/Main.swift; then
-  echo "Installer regained a user-owned input-source state path." >&2
+rg -Fq 'document["format"] = 4' package/make_package
+rg -Fq 'candidate_identity["format"] = 4' package/verify_package
+ruby -e '
+  source = File.binread(ARGV.fetch(0))
+  prefix, profiles = source.split(/^case "\$\{embedded_profile\}" in\n/, 2)
+  cms = profiles&.match(/\Acommunity-cms\).*?^  ;;$/m)&.[](0)
+  legacy = profiles&.match(/^community-adhoc\).*?^  ;;$/m)&.[](0)
+  verify = %q{/usr/bin/codesign --verify --deep --strict}
+  abort unless prefix && cms && legacy &&
+    !prefix.include?(verify) && !cms.include?(verify) &&
+    legacy.scan(verify).size == 1 &&
+    !source.include?(%q{--extract-certificates})
+' package/installer-scripts/candidate-app-identity.sh || {
+  echo "Current community installation regained a user trust-store dependency." >&2
+  exit 1
+}
+if rg -n 'core-update-selection|prior_enablement|TISDisable|--activate-input-source|--disable-input-source|--select-input-source|--refresh-core-input-source' \
+    package/core-installer-scripts/preinstall package/installer-scripts sources/Main.swift; then
+  echo "Core or shell Installer regained a user-owned input-source state path." >&2
   exit 1
 fi
 test "$(rg -F -c 'TISRegisterInputSource' sources/InputSource.swift)" = 1
+test "$(rg -F -c 'TISEnableInputSource' sources/InputSource.swift)" = 1
+test "$(rg -F -c 'TISSelectInputSource' sources/InputSource.swift)" = 1
 legacy_revisions=(
   755f69612ddd529ae5178a940498a2f2f9ac7cbf
   3a48e4853674b27cfd49b6bddcf9f6c9d6ee0999
@@ -301,7 +333,7 @@ if rg -n 'semver_at_least|check_active_core|packs\.\$\{index\}\.min_core' \
   echo "Installer retained a second shell owner for installed Runtime compatibility." >&2
   exit 1
 fi
-test "$(rg -F -c -- '"${executable}" --register-input-source' \
+test "$(rg -F -c -- '"${executable}" --repair-input-source' \
   package/installer-scripts/postinstall)" = 1
 if rg -n 'missing-app-install' package/core-installer-scripts/preinstall \
     package/installer-scripts/candidate-app-identity.sh; then
@@ -313,7 +345,7 @@ rg -Fq 'clean-complete-install' package/core-installer-scripts/preinstall \
 for visible_installer_text in package/WELCOME.md package/Conclusion-summary.txt; do
   visible_installer_contents="$(tr '\n' ' ' <"${visible_installer_text}" | tr -s ' ')"
   for required_text in \
-    'Complete is the sole registration owner' \
+    'Complete is the sole input-source repair owner' \
     'supported, signature-verified App repair.' \
     'Complete 是全新首次安装或受支持、已验证签名 App 修复的' \
     'Healthy installations use Core for routine updates.' \
@@ -354,8 +386,16 @@ rg -Fq 'return .terminateLater' sources/LinnetSettings/SettingsApplication.swift
 copy_candidate_app() {
   local home="$1"
   local destination="${home}/Library/Input Methods/Linnet.app"
+  local fake_executable="${home}/fake-Linnet"
   mkdir -p "$(dirname "${destination}")"
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${candidate_fixture}" "${destination}"
+  cat >"${fake_executable}" <<'SH'
+#!/usr/bin/env bash
+[[ "$*" == --repair-input-source ]]
+: >"${HOME}/.linnet-test-input-source-selected"
+printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
+SH
+  chmod 755 "${fake_executable}"
 }
 
 configure_installed_identity() {
@@ -660,6 +700,8 @@ prepare_postinstall_home() {
   mkdir -p "${app}/Contents/MacOS" "${support}/Runtime/Active" "${support}/State"
 cat >"${app}/Contents/MacOS/Linnet" <<'SH'
 #!/usr/bin/env bash
+[[ "$*" == --repair-input-source ]]
+: >"${HOME}/.linnet-test-input-source-selected"
 printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
 SH
   chmod 755 "${app}/Contents/MacOS/Linnet"
@@ -669,15 +711,9 @@ SH
 prepare_signed_postinstall_home() {
   local home="$1"
   local support="${home}/Library/Application Support/Linnet"
-  local fake_executable="${home}/fake-Linnet"
   copy_candidate_app "${home}"
   mkdir -p "${support}/Runtime/Active" "${support}/State"
   printf '{}\n' >"${support}/Runtime/Active/activation.json"
-  cat >"${fake_executable}" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
-SH
-  chmod 755 "${fake_executable}"
 }
 
 stage_complete_candidate() {
@@ -758,7 +794,7 @@ if HOME="${unsafe_mode_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
 fi
 
 # Postinstall is the distinct post-payload identity boundary. Complete performs
-# the only first-install registration; Core must make no Host CLI call.
+# the only register/enable/select repair; Core must make no Host CLI call.
 if [[ "${candidate_fixture_available}" == true ]]; then
   delta_tool="${repo_root}/build/linnet-pack"
   [[ -x "${delta_tool}" ]] || { echo "Canonical pack CLI must be built before lifecycle tests." >&2; exit 1; }
@@ -774,8 +810,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     LINNET_FAKE_RUNTIME_LOG="${postinstall_runtime_log}" \
     LINNET_TEST_EXECUTABLE="${postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
-  [[ "$(cat "${postinstall_log}")" == '--register-input-source' ]] || {
-    echo "Complete postinstall did not perform exactly first registration." >&2
+  [[ "$(cat "${postinstall_log}")" == '--repair-input-source' ]] || {
+    echo "Complete postinstall did not perform exactly one input-source repair." >&2
     exit 1
   }
   grep -Fxq "probe 0.1.0 ${postinstall_home}/Library/Application Support" \
@@ -794,7 +830,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   mkdir -p "${missing_complete_home}/Library/Application Support/Linnet/State"
   stage_complete_candidate "${missing_complete_home}"
   HOME="${missing_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
       LINNET_FAKE_HOST_LOG="${missing_complete_log}" \
       "${scripts_root}/postinstall"
   [[ -f "${missing_complete_home}/Library/Application Support/Linnet/Data/Packs/staged" && \
@@ -805,8 +841,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     exit 1
   }
   [[ ! -e "${missing_complete_home}/Library/Application Support/Linnet/.linnet-complete" && \
-    ( ! -e "${missing_complete_log}" || ! -s "${missing_complete_log}" ) ]] || {
-    echo "Complete missing-runtime repair retained staging or re-registered an exact source." >&2
+    "$(cat "${missing_complete_log}")" == '--repair-input-source' ]] || {
+    echo "Complete missing-runtime repair did not finish one standard input-source repair." >&2
     exit 1
   }
 
@@ -820,7 +856,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     >"${rollback_complete_home}/Library/Input Methods/Linnet.app/Contents/rollback-before"
   stage_complete_candidate "${rollback_complete_home}"
   if HOME="${rollback_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=missing-then-invalid \
       "${scripts_root}/postinstall" >/dev/null 2>&1; then
     echo "Complete accepted a Runtime projection that failed final validation." >&2
@@ -964,7 +1000,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   lease_complete_ready="${test_root}/lease-complete/ready"
   lease_complete_release="${test_root}/lease-complete/release"
   hold_download_lease "${lease_complete_home}" "${lease_complete_ready}" "${lease_complete_release}"
-  if HOME="${lease_complete_home}" LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+  if HOME="${lease_complete_home}" LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy "${scripts_root}/postinstall" >/dev/null 2>&1; then
     release_download_lease "${lease_complete_release}"
     echo "Complete changed state while a Settings download held the mutation lease." >&2
@@ -1197,7 +1233,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     exit 1
   }
   HOME="${app_only_home}" \
-    LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+    LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
     "${scripts_root}/preinstall" || {
     echo "Complete preinstall rejected an idempotent signed-App repair." >&2
     exit 1
@@ -1216,7 +1252,10 @@ missing_app_home="${test_root}/complete-missing-app-repair/home"
 mkdir -p "${missing_app_home}/Library/Application Support/Linnet/Runtime/Active" \
   "${missing_app_home}/Library/Application Support/Linnet/State"
 printf '{}\n' >"${missing_app_home}/Library/Application Support/Linnet/Runtime/Active/activation.json"
-for repair_registration in missing registered:bundle-match:path-unknown; do
+for repair_registration in missing \
+    disabled:bundle-match:enable-capable:path-unknown \
+    available:bundle-match:enabled:selectable:path-unknown \
+    selected:bundle-match:enabled:selectable:path-unknown; do
   HOME="${missing_app_home}" LINNET_FAKE_REGISTRATION_STATE="${repair_registration}" \
     "${scripts_root}/preinstall" || {
     echo "Complete could not repair a missing App with safe product state." >&2
@@ -1239,7 +1278,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   healthy_complete_home="${test_root}/complete-healthy/home"
   prepare_signed_postinstall_home "${healthy_complete_home}"
   HOME="${healthy_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy \
       "${scripts_root}/preinstall" || {
     echo "Complete preinstall rejected the explicitly selected healthy repair." >&2
@@ -1251,7 +1290,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   stage_complete_candidate "${healthy_complete_home}"
   before_app_identity="$(stat -f '%d:%i' "${healthy_complete_home}/Library/Input Methods/Linnet.app")"
   HOME="${healthy_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=healthy \
       LINNET_FAKE_HOST_LOG="${complete_repair_log}" \
       LINNET_TEST_EXECUTABLE="${healthy_complete_home}/fake-Linnet" \
@@ -1265,14 +1304,14 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   [[ ! -e "${healthy_complete_home}/Library/Input Methods/Linnet.app/Contents/repair-before" ]] || {
     echo "Complete repair did not publish the staged candidate App." >&2; exit 1;
   }
-  [[ ! -e "${complete_repair_log}" || ! -s "${complete_repair_log}" ]] || {
-    echo "Complete re-registered an already exact input source." >&2; exit 1;
+  [[ "$(cat "${complete_repair_log}")" == '--repair-input-source' ]] || {
+    echo "Complete did not repair and select the exact input source once." >&2; exit 1;
   }
   [[ ! -e "${healthy_complete_home}/Library/Application Support/Linnet/.linnet-complete" ]] || {
     echo "Complete repair retained its staging App." >&2; exit 1;
   }
   HOME="${healthy_complete_home}" \
-      LINNET_FAKE_REGISTRATION_STATE=registered:bundle-match:path-unknown \
+      LINNET_FAKE_REGISTRATION_STATE=available:bundle-match:enabled:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=invalid \
       "${scripts_root}/preinstall" >/dev/null 2>&1 && {
     echo "Complete accepted corrupt Runtime bytes as a repairable missing state." >&2
@@ -1421,11 +1460,11 @@ if rg -Fq '"${host_cli}" --disable-input-source' package/uninstall-linnet; then
   exit 1
 fi
 
-# Registration mutation is a Complete boundary. Core consumes the package
-# helper's typed, read-only TIS classification and never registers.
+# Input-source mutation is a Complete boundary. Core consumes the package
+# helper's typed, read-only TIS classification and never mutates TIS.
 rg -Fq 'case registrationFailed(OSStatus)' sources/InputSource.swift
 if ! rg -Fq 'static func classify' sources/LinnetInputSourceRegistration.swift ||
-    ! rg -Fq 'registered:bundle-match:path-unknown' \
+    ! rg -Fq 'available:bundle-match:enabled:selectable:path-unknown' \
       sources/LinnetInputSourceRegistration.swift; then
   echo "The typed, read-only TIS owner is missing." >&2
   exit 1

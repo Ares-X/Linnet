@@ -68,11 +68,11 @@ struct SquirrelApp {
       if args.count > 1 {
         do {
           switch args[1] {
-          case "--register-input-source":
+          case "--repair-input-source":
             guard args.count == 2 else {
-              configurationFailure("Register accepts no input source identifier")
+              configurationFailure("Repair accepts no input source identifier")
             }
-            try installer.register()
+            try installer.repair()
             return true
           case "--help":
             print(helpDoc)
@@ -138,7 +138,7 @@ struct SquirrelApp {
     """
     Supported arguments:
     Manage \(productName):
-      --register-input-source             register input source
+      --repair-input-source               repair and select input source
     """
   }
 }

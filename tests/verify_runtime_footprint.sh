@@ -2395,11 +2395,14 @@ fi
 ruby -e '
   source = File.read("sources/InputSource.swift")
   registration = File.read("sources/LinnetInputSourceRegistration.swift")
-  register = source[/func register\(\) throws \{.*?\n  \}/m]
-  abort "the sole first-install registration owner is missing" unless
-    register && register.scan("TISRegisterInputSource").length == 1 &&
-      register.include?("LinnetInputSourceRegistration.state(identifier:") &&
-      register.include?("already registered")
+  repair = source[/func repair\(\) throws \{.*?\n  \}/m]
+  abort "the sole Complete input-source repair owner is missing" unless
+    repair && repair.scan("TISRegisterInputSource").length == 1 &&
+      repair.scan("TISEnableInputSource").length == 1 &&
+      repair.scan("TISSelectInputSource").length == 1 &&
+      repair.include?("LinnetInputSourceRegistration.inspect(identifier:") &&
+      repair.include?("let finalState = LinnetInputSourceRegistration.state(identifier:") &&
+      repair.include?("guard finalState == .selected")
   forbidden = %w[
     TISDisableInputSource
     refreshAfterCoreUpdate desiredInputSourceAfterCoreUpdate
@@ -2414,7 +2417,9 @@ ruby -e '
     registration.scan("static func classify(_ sources:").length == 1 &&
       registration.scan("static func state").length == 1 &&
       registration.scan("static func currentInputSourceID()").length == 1 &&
-      registration.include?("registered:bundle-match:path-unknown") &&
+      registration.include?("available:bundle-match:enabled:selectable:path-unknown") &&
+      registration.include?("disabled:bundle-match:enable-capable:path-unknown") &&
+      registration.include?("case selected") &&
       registration.include?("case duplicate(count: Int)") &&
       registration.include?("case conflictingIdentity") &&
       registration.include?("case unknownBundleIdentifier")
@@ -2422,12 +2427,13 @@ ruby -e '
     registration.include?("CurrentSelection") ||
       registration.include?("classifyCurrentSelection") ||
       registration.include?("currentSelection(identifier:")
-  forbidden_mutations = %w[TISEnableInputSource TISSelectInputSource]
-  returned_mutations = forbidden_mutations.select do |name|
-    source.include?(name) || registration.include?(name)
-  end
-  abort "programmatic input-source activation returned: #{returned_mutations.join(", ")}" unless
-    returned_mutations.empty?
+  abort "TIS mutation escaped the single Complete owner" unless
+    source.scan("TISRegisterInputSource").length == 1 &&
+      source.scan("TISEnableInputSource").length == 1 &&
+      source.scan("TISSelectInputSource").length == 1 &&
+      !registration.include?("TISRegisterInputSource") &&
+      !registration.include?("TISEnableInputSource") &&
+      !registration.include?("TISSelectInputSource")
 ' || fail "install-boundary input-source availability regressed"
 if [[ -e package/installer-scripts/quit-applications-clean.jxa ]] ||
     rg -n '/usr/bin/osascript|quit-applications-clean\.jxa' \
@@ -2689,8 +2695,8 @@ fi
 if rg -n 'struct Source|sourceProvider|registerInputSource:' sources/InputSource.swift; then
   fail "a test-only adapter remains between the input lifecycle owner and HIToolbox"
 fi
-rg -Fq -- '--register-input-source' sources/Main.swift ||
-  fail "install-boundary input-source registration command is missing"
+rg -Fq -- '--repair-input-source' sources/Main.swift ||
+  fail "Complete input-source repair command is missing"
 if rg -Fq -- '--inspect-input-source-registration' sources/Main.swift; then
   fail "the retired installed-Host inspection entrypoint returned"
 fi
@@ -2705,13 +2711,16 @@ if rg -Fq -- '"${executable}" --inspect-input-source-registration' \
     package/core-installer-scripts/preinstall; then
   fail "Core preinstall can still invoke an incompatible installed Host"
 fi
-if rg -n -- '--register-input-source|TISRegisterInputSource' \
+if rg -n -- '--repair-input-source|TISRegisterInputSource|TISEnableInputSource|TISSelectInputSource' \
     package/core-installer-scripts/preinstall; then
   fail "Core preinstall regained a TIS mutation path"
 fi
-test "$(rg -F -c -- '"${executable}" --register-input-source' \
+test "$(rg -F -c -- '"${executable}" --repair-input-source' \
   package/installer-scripts/postinstall)" = 1 ||
-  fail "postinstall no longer ensures the installed input source exactly once"
+  fail "Complete postinstall no longer repairs the installed input source exactly once"
+test "$(rg -F -c -- '[[ "${registration_state}" == selected:bundle-match:enabled:selectable:path-unknown ]]' \
+  package/installer-scripts/postinstall)" = 1 ||
+  fail "Complete postinstall no longer requires a selected input source"
 rg -Fq 'if [[ "${install_mode}" == complete ]]' \
   package/installer-scripts/postinstall ||
   fail "input-source registration escaped the Complete-only boundary"

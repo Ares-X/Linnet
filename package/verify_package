@@ -88,9 +88,11 @@ core_version="$(plutil -extract CFBundleShortVersionString raw -o - \
   "${source_core_app}/Contents/Info.plist")"
 core_build="$(plutil -extract CFBundleVersion raw -o - \
   "${source_core_app}/Contents/Info.plist")"
+core_tree_sha256="$("${release_tool}" tree-digest --root "${source_core_app}")" ||
+  fail_verification "accepted Core tree identity is unavailable"
 ruby -rjson -rrexml/document -e '
   expanded, edition, core_version, product_build, project, source_app,
-    verification_scope, release_tool = ARGV
+    verification_scope, release_tool, core_tree_sha256 = ARGV
   components = edition == "core" ? %w[core] : %w[core chinese english lts extended profile]
   names = {"core" => "Core", "chinese" => "Chinese", "english" => "English",
     "lts" => "LTS", "extended" => "Extended", "profile" => "Profile"}
@@ -298,10 +300,18 @@ ruby -rjson -rrexml/document -e '
       distribution.fetch("notarized") == false &&
       distribution.fetch("publication_eligible") == true &&
       distribution.fetch("trust_model") == "manual-user-approval"
-    candidate_identity["format"] = 3
+    signing_contract = JSON.parse(File.binread(File.join(
+      project, "config/linnet-community-signing.json")))
+    leaf_sha1 = signing_contract.fetch("certificate_sha1")
+    abort "community signing requirement mismatch" unless
+      leaf_sha1.match?(/\A[0-9A-F]{40}\z/) &&
+      core_tree_sha256.match?(/\A[0-9a-f]{64}\z/)
+    candidate_identity["format"] = 4
     candidate_identity["profile"] = "community-cms"
     candidate_identity["leaf_certificate_sha256"] =
       signature.fetch("leaf_certificate_sha256")
+    candidate_identity["leaf_certificate_sha1"] = leaf_sha1
+    candidate_identity["app_tree_sha256"] = core_tree_sha256
   else
     abort "unsupported candidate identity"
   end
@@ -316,13 +326,13 @@ ruby -rjson -rrexml/document -e '
     "candidate-app-identity.sh" => [0o755, identity_helper],
     "candidate-core-version" => [0o644, "#{core_version}\n"],
     "input-source-registration-inspector" => [0o755, registration_inspector],
+    "linnet-pack" => [0o755, File.binread(release_tool)],
     "linnet-runtime-inspector" => [0o755, runtime_inspector],
     "install-mode" => [0o644, edition == "core" ? "core-update\n" : "complete\n"],
     "preinstall" => [0o755, File.binread(File.join(project, "package/core-installer-scripts/preinstall"))]}
   if edition == "core"
     core_scripts["postinstall"] = [0o755,
       File.binread(File.join(project, "package/installer-scripts/postinstall"))]
-    core_scripts["linnet-pack"] = [0o755, File.binread(release_tool)]
     core_scripts["core.linnetdelta"] = [0o644, nil]
   end
   script_contracts = {
@@ -354,7 +364,8 @@ ruby -rjson -rrexml/document -e '
     end
   end
 ' "${expanded}" "${edition}" "${core_version}" "${core_build}" "${project_root}" \
-  "${source_core_app}" "${verification_scope}" "${release_tool}" ||
+  "${source_core_app}" "${verification_scope}" "${release_tool}" \
+  "${core_tree_sha256}" ||
   fail_verification "canonical Installer metadata contract failed"
 
 [[ "$(installer -query RestartAction -pkg "${package_path}")" == \

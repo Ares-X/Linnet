@@ -17,15 +17,22 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
 没有 Developer ID 不表示没有验证。正式产物仍必须满足：
 
 - 标签、源码 revision、App 内嵌 metadata 和产物清单一致；
-- App 与嵌套 Settings、动态库、插件均由仓库钉住的同一 CMS leaf 签名，并通过
-  严格 codesign 结构校验；
+- App 与嵌套 Settings、动态库、插件均由仓库钉住的同一 CMS leaf 签名，并在构建、
+  暂存和发布边界通过严格 codesign 结构校验；
 - PKG 明确为 `Status: no signature`，且不能含 Installer Signature 记录；
 - 候选目录精确匹配 `package/release_asset_manifest`；正式 Release 只有 1 个完整安装包，Core
   更新频道包含 Core、卸载器和 Catalog，数据频道包含 4 个不可变词包及已绑定基线的差分；
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
-- Complete 只拥有首次注册和受支持损坏安装的注册修复；首次安装最多要求一次注销，
+- Complete 只拥有首次安装和受支持损坏安装的输入源修复：缺失时注册，并通过 macOS
+  标准 API 启用、选中一次以建立输入菜单记录；已有正确记录不重复注册。首次安装最多要求一次注销，
   匹配已公布基线的健康安装使用 Core，Core 更新不要求注销；不匹配时明确使用
-  Complete 修复 App，已有健康词包、个人数据及输入源注册保持不变。
+  Complete 修复 App，已有健康词包与个人数据保持不变；Core 不触碰输入源状态。
+
+用户安装边界不依赖维护者 Keychain，也不把自签证书是否进入用户系统信任根当作
+App 完整性事实。Core 在写入前核对已公布的精确差分基线；Core 与 Complete 在写入后
+核对包内固定 designated requirement、发布 metadata 和候选 App 整树 SHA-256。任何
+一项不匹配都会保留原安装并失败；固定 CMS 的完整链与嵌套代码结构仍只由构建、暂存和
+发布 owner 严格验证一次。
 
 ## 本地预检与 Action 正式候选
 
@@ -200,6 +207,8 @@ Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 c
 修复；重复、冲突、未知 bundle 或任何残留身份必须先走官方卸载，不能猜测或覆盖用户
 状态。发布 Keychain 密码永远不属于用户安装流程；历史首次身份迁移若由
 macOS 显示输入源安全确认，它是一次系统授权，不是 Keychain 密码。
+安装脚本也不得调用依赖用户系统信任根的深度验签来判断 App 是否损坏；用户侧只核对
+冻结的 designated requirement、发布 metadata、差分基线和精确目标整树。
 
 任何校验和、产物清单、App metadata 或安装状态不一致都应停止发布；不得用
 重新签名、手工复制 App、清缓存或降低验证门来制造通过结果。

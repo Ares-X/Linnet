@@ -207,7 +207,134 @@ current_uid_binding = "readonly current_uid=\"$(/usr/bin/id -u)\"\n"
 historical_app_binding = "readonly app_path=\"${user_home}/Library/Input Methods/Linnet.app\"\n"
 staged_exact_candidate_gate = "if [[ \"${verification_mode}\" != existing ]]; then"
 historical_installed_candidate_gate = "if [[ \"${verification_mode}\" == installed ]]; then"
+release_tool_binding = 'readonly release_tool="${script_root}/linnet-pack"' + "\n"
+target_identity_reads = <<~'BASH'
+  expected_leaf_sha1="$(read_value "${metadata_path}" leaf_certificate_sha1)" ||
+    fail_identity "candidate signing leaf requirement is unavailable"
+  expected_tree="$(read_value "${metadata_path}" app_tree_sha256)" ||
+    fail_identity "candidate App tree identity is unavailable"
+BASH
+current_target_shape = <<'BASH'
+  "${expected_revision}" =~ ^[0-9a-f]{40}$ &&
+  "${expected_leaf}" =~ ^[0-9a-f]{64}$ &&
+  "${expected_leaf_sha1}" =~ ^[0-9A-F]{40}$ &&
+  "${expected_tree}" =~ ^[0-9a-f]{64}$ ]] ||
+BASH
+historical_target_shape = <<'BASH'
+  "${expected_revision}" =~ ^[0-9a-f]{40}$ &&
+  "${expected_leaf}" =~ ^[0-9a-f]{64}$ ]] ||
+BASH
+current_cms_validation = <<~'BASH'
+  community-cms)
+    [[ "${actual_profile}" == community-cms &&
+      "${embedded_kind}" == external-cms ]] ||
+      fail_identity "installed App is not a community CMS release"
+    # Publication verifies the complete CMS chain before packaging. Installation
+    # must not require the maintainer certificate in the user's trust store; it
+    # binds the packaged bytes to the same fixed leaf through the designated
+    # requirement, then verifies the exact target tree below.
+    expected_requirement="designated => identifier \"${host_bundle_id}\" and certificate leaf = H\"$(
+      /usr/bin/tr '[:upper:]' '[:lower:]' <<<"${expected_leaf_sha1}")\""
+    actual_requirement="$(/usr/bin/codesign -d -r- "${app_path}" 2>&1 |
+      /usr/bin/grep '^designated => ')" ||
+      fail_identity "installed App signing requirement is unavailable"
+    [[ "${actual_requirement}" == "${expected_requirement}" ]] ||
+      fail_identity "installed App signing requirement does not match"
+    embedded_leaf="$(read_value "${version_path}" \
+      distribution.application_code_signature.leaf_certificate_sha256)" ||
+      fail_identity "installed release signing leaf is unavailable"
+    embedded_same_leaf="$(read_value "${version_path}" \
+      distribution.application_code_signature.host_settings_same_leaf)" ||
+      fail_identity "installed release signing policy is unavailable"
+    [[ "${embedded_leaf}" == "${expected_leaf}" &&
+      "${embedded_same_leaf}" == true ]] ||
+      fail_identity "installed release signing leaf does not match"
+    identity_transition=same-community-cms-leaf
+    ;;
+BASH
+historical_cms_validation = <<~'BASH'
+  community-cms)
+    [[ "${actual_profile}" == community-cms &&
+      "${embedded_kind}" == external-cms ]] ||
+      fail_identity "installed App is not a community CMS release"
+    scratch_root="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P)" ||
+      fail_identity "temporary root is unavailable"
+    scratch="$(/usr/bin/mktemp -d "${scratch_root}/linnet-candidate-app-identity.XXXXXX")" ||
+      fail_identity "temporary identity directory cannot be created"
+    cleanup_identity() {
+      if [[ "${scratch%/*}" == "${scratch_root}" &&
+        "${scratch##*/}" == linnet-candidate-app-identity.* &&
+        -d "${scratch}" && ! -L "${scratch}" ]]; then
+        /bin/rm -rf -- "${scratch}"
+      fi
+    }
+    trap cleanup_identity EXIT INT TERM HUP
+    certificate_prefix="${scratch}/leaf"
+    /usr/bin/codesign -d --extract-certificates="${certificate_prefix}" \
+      "${app_path}" >/dev/null 2>&1 ||
+      fail_identity "installed App signing certificate is unavailable"
+    [[ -s "${certificate_prefix}0" && ! -L "${certificate_prefix}0" ]] ||
+      fail_identity "installed App signing certificate is missing"
+    actual_leaf="$(/usr/bin/shasum -a 256 "${certificate_prefix}0" | \
+      /usr/bin/awk '{print $1}')" ||
+      fail_identity "installed App signing leaf cannot be read"
+    embedded_leaf="$(read_value "${version_path}" \
+      distribution.application_code_signature.leaf_certificate_sha256)" ||
+      fail_identity "installed release signing leaf is unavailable"
+    embedded_same_leaf="$(read_value "${version_path}" \
+      distribution.application_code_signature.host_settings_same_leaf)" ||
+      fail_identity "installed release signing policy is unavailable"
+    [[ "${actual_leaf}" == "${expected_leaf}" &&
+      "${embedded_leaf}" == "${actual_leaf}" &&
+      "${embedded_same_leaf}" == true ]] ||
+      fail_identity "installed release signing leaf does not match"
+    identity_transition=same-community-cms-leaf
+    ;;
+BASH
+current_legacy_integrity = <<'BASH'
+  # This one-time legacy edge has no certificate trust chain. Verify its ad-hoc
+  # code integrity without imposing that check on current community CMS users.
+  /usr/bin/codesign --verify --deep --strict "${app_path}" >/dev/null 2>&1 ||
+    fail_identity "legacy App code signature is invalid"
+BASH
+historical_common_integrity = <<~'BASH'
+  /usr/bin/codesign --verify --deep --strict "${app_path}" >/dev/null 2>&1 ||
+    fail_identity "installed App code signature is invalid"
+
+BASH
+identity_file_gate = <<~'BASH'
+  secure_owned_path "${info_path}" file && secure_owned_path "${version_path}" file ||
+    fail_identity "installed App identity files are unsafe"
+
+BASH
+target_tree_validation = <<'BASH'
+  secure_owned_path "${release_tool}" file && [[ -x "${release_tool}" ]] ||
+    fail_identity "candidate tree verifier is unavailable or unsafe"
+  actual_tree="$("${release_tool}" tree-digest --root "${app_path}")" ||
+    fail_identity "candidate App tree cannot be verified"
+  [[ "${actual_tree}" == "${expected_tree}" ]] ||
+    fail_identity "candidate App tree differs from the packaged target"
+BASH
 legacy_projection = lambda do |content|
+  if content.include?(release_tool_binding)
+    abort unless content.scan(release_tool_binding).size == 1 &&
+      content.scan(target_identity_reads).size == 1 &&
+      content.scan(current_target_shape).size == 1 &&
+      content.scan(current_cms_validation).size == 1 &&
+      content.scan(current_legacy_integrity).size == 1 &&
+      content.scan(historical_common_integrity).empty? &&
+      content.scan(identity_file_gate).size == 1 &&
+      content.scan(target_tree_validation).size == 1 &&
+      content.scan('"${expected_format}" == 4').size == 1
+    content = content.sub(release_tool_binding, "")
+      .sub(target_identity_reads, "")
+      .sub('"${expected_format}" == 4', '"${expected_format}" == 3')
+      .sub(current_target_shape, historical_target_shape)
+      .sub(current_cms_validation, historical_cms_validation)
+      .sub(current_legacy_integrity, "")
+      .sub(identity_file_gate, identity_file_gate + historical_common_integrity)
+      .sub(target_tree_validation, "")
+  end
   if content.include?(staged_identity_dispatch)
     abort unless content.scan(staged_identity_dispatch).size == 1 &&
       content.scan(historical_identity_dispatch).empty? &&

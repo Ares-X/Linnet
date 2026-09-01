@@ -20,11 +20,12 @@ After installation:
 
 - `Linnet.pkg` is the full install/repair package the user explicitly selects
   and confirms in Installer; Core never falls back to it automatically.
-  Complete is the sole registration owner for a clean first installation or a
-  supported, signature-verified App repair. It registers only a missing source
-  idempotently and never enables or selects it; an exact existing source is
-  preserved during full repair. Healthy installations use Core for routine
-  updates. Core neither
+  Complete is the sole input-source repair owner for a clean first installation or a
+  supported, signature-verified App repair. It registers a missing source, then
+  uses macOS's standard enable/select transition once so Linnet is recorded in
+  the current user's Input menu. An exact existing source is not re-registered;
+  Complete selects it once to repair a missing menu entry. Healthy installations
+  use Core for routine updates. Core neither
   re-registers the source nor stops the live InputMethodKit Host. Existing
   applications keep their input connections. Complete repair stages and
   atomically replaces the App without forcing either Linnet window to close.
@@ -45,8 +46,8 @@ After installation:
   run the official uninstaller first, then install Complete.
   Do not use Complete for a routine healthy upgrade or to bypass a rejected
   App identity or version.
-- Open System Settings > Keyboard > Text Input > Edit, add and allow Linnet if
-  macOS asks, then select Linnet from the menu-bar input menu.
+- Complete selects Linnet once. If macOS asks for first-use approval, allow it;
+  afterward Linnet should be present in the menu-bar input menu.
 - A fresh installation defaults to full pinyin. Choose it or one of seven
   double-pinyin profiles in Settings > Input, then apply the change. Linnet does
   not reserve F4 or Control+grave.
@@ -102,9 +103,10 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 
 - `Linnet.pkg` 是用户明确选择并在 Installer 最终确认的完整安装/修复包；Core
   不会自动切换到它。Complete 是全新首次安装或受支持、已验证签名 App 修复的
-  唯一输入源注册责任方。它只在输入源缺失时幂等注册，不会程序化启用或选择输入源；
-  已验证的现有输入源在完整修复中保持不变。健康安装的常规升级只使用 Core。
-  macOS 14 及以上必须在系统设置中手动添加并允许一次。Core 不会重新注册或停止
+  唯一输入源修复责任方。它在缺失时注册，并通过 macOS 标准 API 启用和选中一次，
+  让系统把 Linnet 记录进当前用户的输入菜单；已存在的正确输入源不会重复注册，
+  但 Complete 会选中一次以修复缺失的菜单项。健康安装的常规升级只使用 Core。
+  Core 不会重新注册、启用、选择或停止
   正在服务的 InputMethodKit Host；Complete 修复会暂存并原子替换 App，不强制关闭
   任何 Linnet 窗口；其他应用保持打开并保留输入连接。用户先切换到其他输入法，
   且没有未完成组合或数据事务时，可在 Settings 中主动应用新 Core；其他应用保持打开；
@@ -118,8 +120,8 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
   若 Core 报告重复、冲突或无法验证的注册残留，
   请先运行官方卸载器，再安装 Complete。
   不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。
-- 打开 系统设置 → 键盘 → 文本输入 → 编辑；添加 Linnet，并在 macOS 请求时
-  选择允许，然后从菜单栏输入菜单选择 Linnet。
+- Complete 会选中 Linnet 一次；若 macOS 首次请求允许，请确认。完成后 Linnet
+  应出现在菜单栏输入菜单中。
 - 全新安装默认全拼；可在 Settings → 输入选择全拼或七种双拼之一并应用更改。
   Linnet 不占用 F4 或 Control+grave。
 - 轻按 Shift 在当前中文方案与智能英文之间切换；Caps Lock 用于原始 ASCII，

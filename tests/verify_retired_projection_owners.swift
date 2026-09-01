@@ -5,11 +5,12 @@ import SwiftSyntax
 private let registrationOwner = "sources/InputSource.swift"
 private let downloadOwner =
   "sources/LinnetSettings/LinnetSettingsDownloadTransport.swift"
-private let forbiddenMutationSymbols = Set([
-  "TISDisableInputSource",
+private let inputSourceMutationSymbols = Set([
+  "TISRegisterInputSource",
   "TISEnableInputSource",
   "TISSelectInputSource",
 ])
+private let forbiddenMutationSymbols = Set(["TISDisableInputSource"])
 private let forbiddenNetworkSymbols = Set([
   "CFNetwork",
   "NWConnection",
@@ -31,7 +32,7 @@ private func inspect(_ syntax: Syntax, path: String) {
     }
     guard case .identifier(let name) = token.tokenKind else { continue }
     switch name {
-    case "TISRegisterInputSource":
+    case let name where inputSourceMutationSymbols.contains(name):
       registrationUses.append(path)
     case "URLSession":
       downloadUses.append(path)
@@ -58,8 +59,8 @@ for path in CommandLine.arguments.dropFirst() {
   inspect(Syntax(Parser.parse(source: source)), path: path)
 }
 
-guard registrationUses == [registrationOwner] else {
-  fatalError("TIS registration escaped its single owner: \(registrationUses)")
+guard registrationUses == [registrationOwner, registrationOwner, registrationOwner] else {
+  fatalError("TIS repair escaped its single owner: \(registrationUses)")
 }
 guard Set(downloadUses) == [downloadOwner] else {
   fatalError("URLSession escaped its single download owner: \(downloadUses)")

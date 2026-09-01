@@ -5,31 +5,52 @@
 
 import Carbon
 
-/// The single read-only owner for Linnet's HIToolbox registration state.
-/// HIToolbox publishes source and bundle identifiers, but no authoritative
-/// bundle URL, so a registered result deliberately makes no path claim.
+/// The single read-only owner for Linnet's HIToolbox registration and
+/// availability state. HIToolbox publishes no authoritative bundle URL, so
+/// every accepted result deliberately makes no path claim.
 enum LinnetInputSourceRegistration {
   struct Source: Equatable {
     let identifier: String?
     let bundleIdentifier: String?
+    let category: String?
+    let type: String?
+    let isEnableCapable: Bool?
+    let isSelectCapable: Bool?
+    let isEnabled: Bool?
+    let isSelected: Bool?
   }
 
   enum State: Equatable {
     case missing
-    case registered
+    case disabled
+    case available
+    case selected
     case duplicate(count: Int)
     case conflictingIdentity
+    case conflictingKind
+    case unavailableCapabilities
+    case unknownAvailability
     case unknownBundleIdentifier
 
     var wireValue: String {
       switch self {
       case .missing: "missing"
-      case .registered: "registered:bundle-match:path-unknown"
+      case .disabled: "disabled:bundle-match:enable-capable:path-unknown"
+      case .available: "available:bundle-match:enabled:selectable:path-unknown"
+      case .selected: "selected:bundle-match:enabled:selectable:path-unknown"
       case .duplicate(let count): "duplicate:\(count)"
       case .conflictingIdentity: "conflict:source-or-bundle-id"
+      case .conflictingKind: "conflict:source-category-or-type"
+      case .unavailableCapabilities: "unavailable:input-source-capabilities"
+      case .unknownAvailability: "unknown:availability-properties"
       case .unknownBundleIdentifier: "unknown:bundle-id"
       }
     }
+  }
+
+  struct Inspection {
+    let state: State
+    let inputSource: TISInputSource?
   }
 
   static func classify(_ sources: [Source], identifier: String) -> State {
@@ -49,18 +70,48 @@ enum LinnetInputSourceRegistration {
       return .unknownBundleIdentifier
     }
     guard bundleIdentifier == identifier else { return .conflictingIdentity }
-    return .registered
+    guard source.category == kTISCategoryKeyboardInputSource as String,
+      source.type == kTISTypeKeyboardInputMethodWithoutModes as String
+    else { return .conflictingKind }
+    guard let isEnableCapable = source.isEnableCapable,
+      let isSelectCapable = source.isSelectCapable,
+      let isEnabled = source.isEnabled,
+      let isSelected = source.isSelected
+    else { return .unknownAvailability }
+    guard isEnableCapable, isSelectCapable else { return .unavailableCapabilities }
+    guard isEnabled else { return .disabled }
+    return isSelected ? .selected : .available
   }
 
   static func state(identifier: String) -> State {
+    inspect(identifier: identifier).state
+  }
+
+  static func inspect(identifier: String) -> Inspection {
     let sourceList = TISCreateInputSourceList(nil, true).takeRetainedValue()
       as! [TISInputSource]
-    let registeredSources = sourceList.map { source in
+    let sources = sourceList.map { source in
       Source(
         identifier: stringProperty(source, key: kTISPropertyInputSourceID),
-        bundleIdentifier: stringProperty(source, key: kTISPropertyBundleID))
+        bundleIdentifier: stringProperty(source, key: kTISPropertyBundleID),
+        category: stringProperty(source, key: kTISPropertyInputSourceCategory),
+        type: stringProperty(source, key: kTISPropertyInputSourceType),
+        isEnableCapable: boolProperty(source, key: kTISPropertyInputSourceIsEnableCapable),
+        isSelectCapable: boolProperty(source, key: kTISPropertyInputSourceIsSelectCapable),
+        isEnabled: boolProperty(source, key: kTISPropertyInputSourceIsEnabled),
+        isSelected: boolProperty(source, key: kTISPropertyInputSourceIsSelected))
     }
-    return classify(registeredSources, identifier: identifier)
+    let state = classify(sources, identifier: identifier)
+    let inputSource: TISInputSource?
+    switch state {
+    case .disabled, .available, .selected:
+      inputSource = zip(sourceList, sources).first {
+        $0.1.identifier == identifier && $0.1.bundleIdentifier == identifier
+      }?.0
+    default:
+      inputSource = nil
+    }
+    return Inspection(state: state, inputSource: inputSource)
   }
 
   /// The sole raw HIToolbox read boundary. Callers must immediately pass this
@@ -75,5 +126,11 @@ enum LinnetInputSourceRegistration {
   private static func stringProperty(_ source: TISInputSource, key: CFString) -> String? {
     let value = TISGetInputSourceProperty(source, key)
     return unsafeBitCast(value, to: CFString?.self) as String?
+  }
+
+  private static func boolProperty(_ source: TISInputSource, key: CFString) -> Bool? {
+    let value = TISGetInputSourceProperty(source, key)
+    guard let boolean = unsafeBitCast(value, to: CFBoolean?.self) else { return nil }
+    return CFBooleanGetValue(boolean)
   }
 }

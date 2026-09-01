@@ -156,6 +156,7 @@ prepare_core_scripts() {
   cp -X "${registration_inspector}" \
     "${destination}/input-source-registration-inspector"
   cp -X "${runtime_inspector}" "${destination}/linnet-runtime-inspector"
+  cp -X "${pack_tool}" "${destination}/linnet-pack"
   if [[ "${install_mode}" == core-update ]]; then
     cp -X "${project_root}/package/installer-scripts/postinstall" "${destination}/postinstall"
     chmod 755 "${destination}/postinstall"
@@ -164,7 +165,7 @@ prepare_core_scripts() {
   printf '%s\n' "${install_mode}" >"${destination}/install-mode"
   chmod 755 "${destination}/preinstall" "${destination}/candidate-app-identity.sh" \
     "${destination}/input-source-registration-inspector" \
-    "${destination}/linnet-runtime-inspector"
+    "${destination}/linnet-runtime-inspector" "${destination}/linnet-pack"
   chmod 644 "${destination}/candidate-app-identity.json" \
     "${destination}/candidate-core-version" "${destination}/install-mode"
 }
@@ -206,6 +207,14 @@ chmod 0755 "${core_app}/Contents/SharedSupport"
 core_code_identity="$(verify_candidate_app "${core_app}")"
 [[ "${source_code_identity}" == "${core_code_identity}" ]] ||
   fail_package "copied App code identity differs from its candidate source"
+candidate_tree_sha256="$("${pack_tool}" tree-digest --root "${core_app}")" ||
+  fail_package "candidate App tree identity cannot be projected"
+candidate_leaf_sha1="$(plutil -extract certificate_sha1 raw -o - \
+  "${project_root}/config/linnet-community-signing.json")" ||
+  fail_package "candidate signing requirement cannot be projected"
+[[ "${candidate_tree_sha256}" =~ ^[0-9a-f]{64}$ &&
+  "${candidate_leaf_sha1}" =~ ^[0-9A-F]{40}$ ]] ||
+  fail_package "candidate App target identity is invalid"
 release_metadata_root="${app_path}/Contents/Resources/LinnetRelease"
 ruby -rjson -e '
   identity = JSON.parse(ARGV.fetch(0))
@@ -223,13 +232,16 @@ ruby -rjson -e '
     identity.fetch("format") == 4 &&
     identity.fetch("profile") == "community-cms" &&
     identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
-  document["format"] = 3
+  document["format"] = 4
   document["profile"] = "community-cms"
   document["leaf_certificate_sha256"] =
     identity.fetch("leaf_certificate_sha256")
-  File.binwrite(ARGV.fetch(5), JSON.generate(document) + "\n")
+  document["leaf_certificate_sha1"] = ARGV.fetch(5)
+  document["app_tree_sha256"] = ARGV.fetch(6)
+  File.binwrite(ARGV.fetch(7), JSON.generate(document) + "\n")
 ' "${source_code_identity}" "${candidate_revision}" "${bundle_id}" \
-  "${version}" "${build}" "${work_root}/candidate-app-identity.json" ||
+  "${version}" "${build}" "${candidate_leaf_sha1}" "${candidate_tree_sha256}" \
+  "${work_root}/candidate-app-identity.json" ||
   fail_package "candidate identity projection is invalid"
 candidate_app_identity="${work_root}/candidate-app-identity.json"
 [[ -d "${release_metadata_root}" && ! -L "${release_metadata_root}" ]] ||
@@ -323,8 +335,6 @@ for payload in "${core_payload}" "${chinese_payload}" "${english_payload}" \
   done < <(find "${payload}" -print0)
 done
 
-cp -X "${pack_tool}" "${core_update_scripts}/linnet-pack"
-chmod 0755 "${core_update_scripts}/linnet-pack"
 "${pack_tool}" build-delta --base "${core_base_app}" --target "${core_app}" \
   --output "${core_update_scripts}/core.linnetdelta"
 chmod 0644 "${core_update_scripts}/core.linnetdelta"
