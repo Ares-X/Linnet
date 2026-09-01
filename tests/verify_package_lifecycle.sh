@@ -827,7 +827,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   HOME="${first_install_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
     LINNET_FAKE_HOST_LOG="${first_install_log}" \
     LINNET_TEST_EXECUTABLE="${first_install_home}/fake-Linnet" \
-    "${scripts_root}/complete-postinstall"
+    "${scripts_root}/complete-postinstall" \
+      "/private/tmp/Linnet-Profile.component.pkg" "/Users/aresx" "/" "/"
   [[ "$(cat "${first_install_log}")" == '--request-first-install-authorization' ]] || {
     echo "First Complete install did not submit exactly one authorization request." >&2
     exit 1

@@ -13,7 +13,7 @@ mode_file="${script_root}/install-mode"
 identity_metadata="${script_root}/candidate-app-identity.json"
 registration_inspector="${script_root}/input-source-registration-inspector"
 
-[[ "$#" -eq 0 && "${user_home}" == /* &&
+[[ "${user_home}" == /* &&
   -f "${lifecycle}" && ! -L "${lifecycle}" && -x "${lifecycle}" &&
   -f "${mode_file}" && ! -L "${mode_file}" &&
   -f "${identity_metadata}" && ! -L "${identity_metadata}" &&
