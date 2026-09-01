@@ -2717,25 +2717,25 @@ if rg -Fq -- '"${executable}" --inspect-input-source-registration' \
   fail "Core preinstall can still invoke an incompatible installed Host"
 fi
 if rg -n -- '--request-first-install-authorization|TISRegisterInputSource|TISEnableInputSource|TISSelectInputSource' \
-    package/core-installer-scripts/preinstall; then
+    package/core-installer-scripts/preinstall package/installer-scripts/postinstall; then
   fail "Core preinstall regained a TIS mutation path"
 fi
 test "$(rg -F -c -- '"${executable}" --request-first-install-authorization' \
-  package/installer-scripts/postinstall)" = 1 ||
+  package/installer-scripts/complete-postinstall)" = 1 ||
   fail "Complete postinstall lost its single first-install authorization request"
 for observed_state in \
     registered:enablement-required:path-unknown \
     registered:enabled-observation:selectable:path-unknown \
     registered:selected-observation:selectable:path-unknown; do
-  rg -Fq -- "${observed_state}" package/installer-scripts/postinstall ||
+  rg -Fq -- "${observed_state}" package/installer-scripts/complete-postinstall ||
     fail "postinstall lost a safe registered input-source observation: ${observed_state}"
 done
 if rg -n 'registration_state.*==.*selected|Complete.*selected input source' \
-    package/installer-scripts/postinstall; then
+    package/installer-scripts/complete-postinstall; then
   fail "Complete postinstall again treated immediate selection as persistent authorization"
 fi
-rg -Fq 'if [[ "${install_mode}" == complete && "${complete_app_action}" == created ]]' \
-  package/installer-scripts/postinstall ||
+rg -Fq 'if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]' \
+  package/installer-scripts/complete-postinstall ||
   fail "input-source authorization escaped the first-App creation boundary"
 if rg -n -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
   fail "Core update regained a live InputMethodKit Host termination path"

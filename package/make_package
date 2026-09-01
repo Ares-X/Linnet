@@ -250,8 +250,10 @@ candidate_app_identity="${work_root}/candidate-app-identity.json"
 
 prepare_core_scripts core-update "${core_update_scripts}"
 prepare_core_scripts complete "${complete_core_scripts}"
-cp -X "${project_root}/package/installer-scripts/postinstall" \
+cp -X "${project_root}/package/installer-scripts/complete-postinstall" \
   "${complete_profile_scripts}/postinstall"
+cp -X "${project_root}/package/installer-scripts/postinstall" \
+  "${complete_profile_scripts}/lifecycle-postinstall"
 cp -X "${project_root}/package/installer-scripts/candidate-app-identity.sh" \
   "${complete_profile_scripts}/candidate-app-identity.sh"
 cp -X "${candidate_app_identity}" \
@@ -264,6 +266,7 @@ cp -X "${pack_tool}" "${complete_profile_scripts}/linnet-pack"
 printf '%s\n' "${version}" >"${complete_profile_scripts}/candidate-core-version"
 printf 'complete\n' >"${complete_profile_scripts}/install-mode"
 chmod 755 "${complete_profile_scripts}/postinstall" \
+  "${complete_profile_scripts}/lifecycle-postinstall" \
   "${complete_profile_scripts}/candidate-app-identity.sh" \
   "${complete_profile_scripts}/linnet-runtime-inspector" \
   "${complete_profile_scripts}/input-source-registration-inspector" \

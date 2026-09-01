@@ -321,41 +321,28 @@ fi
   exit 1
 }
 
-# Only creation of the first installed App may register Linnet and submit one
-# standard enablement request. An existing-App Complete repair and every Core
-# update preserve the registered App inode and never mutate TIS. macOS owns the
-# asynchronous approval and later menu selection, so no process-local
-# observation may turn an update into another authorization request.
-if [[ "${install_mode}" == complete && "${complete_app_action}" == created ]]; then
-  "${executable}" --request-first-install-authorization
-  registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
-    echo "Linnet postinstall: input-source registration observation is unavailable" >&2
-    exit 1
-  }
-  case "${registration_state}" in
-    registered:enablement-required:path-unknown|\
+# This shared lifecycle never mutates TIS. A newly created Complete App may be
+# unregistered until the Complete-only wrapper submits the one standard
+# authorization request after this byte and Runtime transaction succeeds.
+registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
+  echo "Linnet postinstall: input-source availability is unavailable" >&2
+  exit 1
+}
+case "${registration_state}" in
+  registered:enablement-required:path-unknown|\
 registered:enabled-observation:selectable:path-unknown|\
 registered:selected-observation:selectable:path-unknown) ;;
-    *)
-      echo "Linnet postinstall: first install did not retain one safe registered input source" >&2
-      exit 1
-      ;;
-  esac
-else
-  registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
-    echo "Linnet postinstall: input-source availability is unavailable" >&2
-    exit 1
-  }
-  case "${registration_state}" in
-    registered:enablement-required:path-unknown|\
-registered:enabled-observation:selectable:path-unknown|\
-registered:selected-observation:selectable:path-unknown) ;;
-    *)
+  missing)
+    [[ "${install_mode}" == complete && "${complete_app_action}" == created ]] || {
       echo "Linnet postinstall: existing-App update lost input-source availability" >&2
       exit 1
-      ;;
-  esac
-fi
+    }
+    ;;
+  *)
+    echo "Linnet postinstall: existing-App update lost input-source availability" >&2
+    exit 1
+    ;;
+esac
 update_accepted=true
 
 exit 0

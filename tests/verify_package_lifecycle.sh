@@ -39,6 +39,8 @@ if rg -n '/usr/bin/osascript|quit-applications-clean\.jxa' \
 fi
 cp package/core-installer-scripts/preinstall "${scripts_root}/preinstall"
 cp package/installer-scripts/postinstall "${scripts_root}/postinstall"
+cp package/installer-scripts/postinstall "${scripts_root}/lifecycle-postinstall"
+cp package/installer-scripts/complete-postinstall "${scripts_root}/complete-postinstall"
 cp package/installer-scripts/candidate-app-identity.sh \
   "${scripts_root}/candidate-app-identity.sh"
 cat >"${scripts_root}/input-source-registration-inspector" <<'SH'
@@ -165,7 +167,8 @@ sed -i '' "s#/usr/bin/codesign#${fake_codesign}#g" \
 # redirects only the final Host CLI calls after the real finalized App has passed
 # the package-owned identity gate.
 sed -i '' 's#^executable="${app_path}/Contents/MacOS/Linnet"$#executable="${LINNET_TEST_EXECUTABLE:-${HOME}/fake-Linnet}"#' \
-  "${scripts_root}/postinstall"
+  "${scripts_root}/postinstall" "${scripts_root}/lifecycle-postinstall" \
+  "${scripts_root}/complete-postinstall"
 printf '0.1.0\n' >"${scripts_root}/candidate-core-version"
 
 candidate_fixture="${test_root}/fixed-community-cms/Linnet.app"
@@ -333,8 +336,13 @@ if rg -n 'semver_at_least|check_active_core|packs\.\$\{index\}\.min_core' \
   echo "Installer retained a second shell owner for installed Runtime compatibility." >&2
   exit 1
 fi
+if rg -Fq -- '--request-first-install-authorization' \
+    package/installer-scripts/postinstall; then
+  echo "Shared Core lifecycle regained the Complete-only authorization command." >&2
+  exit 1
+fi
 test "$(rg -F -c -- '"${executable}" --request-first-install-authorization' \
-  package/installer-scripts/postinstall)" = 1
+  package/installer-scripts/complete-postinstall)" = 1
 if rg -n 'missing-app-install' package/core-installer-scripts/preinstall \
     package/installer-scripts/candidate-app-identity.sh; then
   echo "The ambiguous missing-App repair transition returned." >&2
@@ -749,7 +757,7 @@ assert_postinstall_rejects_parent_symlink() {
   ln -s "${external}" "${target}"
   printf '%s\n' "${sentinel}" >"${external}/sentinel"
   if HOME="${case_home}" LINNET_FAKE_HOST_LOG="${invocation_log}" \
-      "${scripts_root}/postinstall" >/dev/null 2>&1; then
+      "${scripts_root}/complete-postinstall" >/dev/null 2>&1; then
     echo "Postinstall accepted a symbolic-link ${label} parent." >&2
     exit 1
   fi
@@ -819,7 +827,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   HOME="${first_install_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
     LINNET_FAKE_HOST_LOG="${first_install_log}" \
     LINNET_TEST_EXECUTABLE="${first_install_home}/fake-Linnet" \
-    "${scripts_root}/postinstall"
+    "${scripts_root}/complete-postinstall"
   [[ "$(cat "${first_install_log}")" == '--request-first-install-authorization' ]] || {
     echo "First Complete install did not submit exactly one authorization request." >&2
     exit 1
@@ -835,7 +843,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     LINNET_FAKE_HOST_LOG="${postinstall_log}" \
     LINNET_FAKE_RUNTIME_LOG="${postinstall_runtime_log}" \
     LINNET_TEST_EXECUTABLE="${postinstall_home}/fake-Linnet" \
-    "${scripts_root}/postinstall"
+    "${scripts_root}/complete-postinstall"
   [[ ! -e "${postinstall_log}" || ! -s "${postinstall_log}" ]] || {
     echo "Complete update of an existing App requested input-source authorization." >&2
     exit 1
@@ -858,7 +866,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   HOME="${missing_complete_home}" \
       LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_HOST_LOG="${missing_complete_log}" \
-      "${scripts_root}/postinstall"
+      "${scripts_root}/complete-postinstall"
   [[ -f "${missing_complete_home}/Library/Application Support/Linnet/Data/Packs/staged" && \
     -f "${missing_complete_home}/Library/Application Support/Linnet/Runtime/Active/activation.json" && \
     -L "${missing_complete_home}/Library/Application Support/Linnet/Runtime/Active/Packs" && \
@@ -884,7 +892,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   if HOME="${rollback_complete_home}" \
       LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
       LINNET_FAKE_RUNTIME_STATE=missing-then-invalid \
-      "${scripts_root}/postinstall" >/dev/null 2>&1; then
+      "${scripts_root}/complete-postinstall" >/dev/null 2>&1; then
     echo "Complete accepted a Runtime projection that failed final validation." >&2
     exit 1
   fi
@@ -903,7 +911,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   if HOME="${invalid_runtime_home}" LINNET_FAKE_HOST_LOG="${invalid_runtime_log}" \
       LINNET_TEST_EXECUTABLE="${invalid_runtime_home}/fake-Linnet" \
       LINNET_FAKE_RUNTIME_STATE=invalid \
-      "${scripts_root}/postinstall" >/dev/null 2>&1; then
+      "${scripts_root}/complete-postinstall" >/dev/null 2>&1; then
     echo "Complete postinstall accepted an invalid final Runtime projection." >&2
     exit 1
   fi
@@ -1027,7 +1035,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   lease_complete_release="${test_root}/lease-complete/release"
   hold_download_lease "${lease_complete_home}" "${lease_complete_ready}" "${lease_complete_release}"
   if HOME="${lease_complete_home}" LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
-      LINNET_FAKE_RUNTIME_STATE=healthy "${scripts_root}/postinstall" >/dev/null 2>&1; then
+      LINNET_FAKE_RUNTIME_STATE=healthy \
+      "${scripts_root}/complete-postinstall" >/dev/null 2>&1; then
     release_download_lease "${lease_complete_release}"
     echo "Complete changed state while a Settings download held the mutation lease." >&2
     exit 1
@@ -1170,7 +1179,7 @@ invalid_postinstall_home="${test_root}/postinstall-invalid-mode/home"
 invalid_postinstall_log="${test_root}/postinstall-invalid-mode/host-invocations"
 prepare_postinstall_home "${invalid_postinstall_home}"
 if HOME="${invalid_postinstall_home}" LINNET_FAKE_HOST_LOG="${invalid_postinstall_log}" \
-    "${scripts_root}/postinstall" >/dev/null 2>&1; then
+    "${scripts_root}/complete-postinstall" >/dev/null 2>&1; then
   echo "Postinstall accepted an unknown package lifecycle mode." >&2
   exit 1
 fi
@@ -1319,7 +1328,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
       LINNET_FAKE_RUNTIME_STATE=healthy \
       LINNET_FAKE_HOST_LOG="${complete_repair_log}" \
       LINNET_TEST_EXECUTABLE="${healthy_complete_home}/fake-Linnet" \
-      "${scripts_root}/postinstall" || {
+      "${scripts_root}/complete-postinstall" || {
     echo "Complete postinstall could not atomically repair a healthy App." >&2
     exit 1
   }

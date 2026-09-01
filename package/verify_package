@@ -342,10 +342,12 @@ ruby -rjson -rrexml/document -e '
       "candidate-core-version" => [0o644, "#{core_version}\n"],
       "input-source-registration-inspector" => [0o755, registration_inspector],
       "install-mode" => [0o644, "complete\n"],
+      "lifecycle-postinstall" => [0o755,
+        File.binread(File.join(project, "package/installer-scripts/postinstall"))],
       "linnet-pack" => [0o755, File.binread(release_tool)],
       "linnet-runtime-inspector" => [0o755, runtime_inspector],
       "postinstall" => [0o755,
-        File.binread(File.join(project, "package/installer-scripts/postinstall"))]},
+        File.binread(File.join(project, "package/installer-scripts/complete-postinstall"))]},
   }
   components.each do |kind|
     scripts = File.join(expanded, "Linnet-#{names.fetch(kind)}.component.pkg", "Scripts")
@@ -442,6 +444,10 @@ if otool -L "${runtime_inspector}" | tail -n +2 | awk '{ print $1 }' |
 fi
 if [[ "${edition}" == core ]]; then
   bash -n "${core_component}/Scripts/postinstall"
+  if grep -Fq -- '--request-first-install-authorization' \
+      "${core_component}/Scripts/postinstall"; then
+    fail_verification "Core package carries the Complete-only input-source authorization command"
+  fi
 fi
 [[ "$(cat "${core_component}/Scripts/candidate-core-version")" == "${core_version}" ]] ||
   fail_verification "Core compatibility candidate version mismatch"
@@ -567,13 +573,14 @@ if [[ "${edition}" != core ]]; then
   profile_component="${expanded}/${profile_file}"
   [[ "$(find "${profile_component}/Scripts" -mindepth 1 -maxdepth 1 -type f \
     -exec basename {} \; | LC_ALL=C sort)" == \
-    $'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninput-source-registration-inspector\ninstall-mode\nlinnet-pack\nlinnet-runtime-inspector\npostinstall' ]] ||
+    $'candidate-app-identity.json\ncandidate-app-identity.sh\ncandidate-core-version\ninput-source-registration-inspector\ninstall-mode\nlifecycle-postinstall\nlinnet-pack\nlinnet-runtime-inspector\npostinstall' ]] ||
     fail_verification "profile script allowlist mismatch"
   [[ "$(cat "${profile_component}/Scripts/install-mode")" == complete ]] ||
     fail_verification "profile component installation mode mismatch"
   [[ -x "${profile_component}/Scripts/postinstall" ]] ||
     fail_verification "postinstall is not executable"
   bash -n "${profile_component}/Scripts/postinstall"
+  bash -n "${profile_component}/Scripts/lifecycle-postinstall"
   bash -n "${profile_component}/Scripts/candidate-app-identity.sh"
   cmp -s "${runtime_inspector}" \
     "${profile_component}/Scripts/linnet-runtime-inspector" ||
@@ -584,14 +591,17 @@ if [[ "${edition}" != core ]]; then
   cmp -s "${release_tool}" "${profile_component}/Scripts/linnet-pack" ||
     fail_verification "profile pack CLI differs from the canonical build tool"
   grep -Fq '"${identity_helper}" installed' \
-    "${profile_component}/Scripts/postinstall" ||
+    "${profile_component}/Scripts/lifecycle-postinstall" ||
     fail_verification "Complete installed identity gate is incomplete"
   grep -Fq 'exchange-app --installed "${app_path}"' \
-    "${profile_component}/Scripts/postinstall" ||
+    "${profile_component}/Scripts/lifecycle-postinstall" ||
     fail_verification "Complete atomic publication gate is incomplete"
   grep -Fq 'with-settings-mutation-lease' \
-    "${profile_component}/Scripts/postinstall" ||
+    "${profile_component}/Scripts/lifecycle-postinstall" ||
     fail_verification "Complete mutation lease dispatcher is incomplete"
+  grep -Fq -- '"${executable}" --request-first-install-authorization' \
+    "${profile_component}/Scripts/postinstall" ||
+    fail_verification "Complete first-install authorization owner is missing"
   if grep -REn 'sudo|dscacheutil|/Library/Launch|xattr|spctl|curl|wget' \
       "${profile_component}/Scripts"; then
     fail_verification "profile script crosses its lifecycle boundary"

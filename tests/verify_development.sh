@@ -100,7 +100,8 @@ verify_inputs_predate() {
     } | LC_ALL=C sort -u
   )
 
-  bash -n action-build.sh action-install.sh package/installer-scripts/postinstall
+  bash -n action-build.sh action-install.sh package/installer-scripts/postinstall \
+    package/installer-scripts/complete-postinstall
   tests/verify_runtime_footprint.sh
   LINNET_LIFECYCLE_CANDIDATE_APP="${host_app}" tests/verify_package_lifecycle.sh
   tests/verify_visible_settings_fixture.sh --verify local
