@@ -68,11 +68,11 @@ struct SquirrelApp {
       if args.count > 1 {
         do {
           switch args[1] {
-          case "--request-input-source-authorization":
+          case "--request-first-install-authorization":
             guard args.count == 2 else {
-              configurationFailure("Authorization request accepts no input source identifier")
+              configurationFailure("First-install authorization accepts no input source identifier")
             }
-            try installer.requestAuthorization()
+            try installer.requestFirstInstallAuthorization()
             return true
           case "--help":
             print(helpDoc)
@@ -138,7 +138,7 @@ struct SquirrelApp {
     """
     Supported arguments:
     Manage \(productName):
-      --request-input-source-authorization request macOS user authorization
+      --request-first-install-authorization request initial macOS user authorization
     """
   }
 }

@@ -20,12 +20,10 @@ After installation:
 
 - `Linnet.pkg` is the full install/repair package the user explicitly selects
   and confirms in Installer; Core never falls back to it automatically.
-  Complete is the sole input-source repair owner for a clean first installation or a
-  supported, signature-verified App repair. It registers a missing source, then
-  uses macOS's standard enable/select transition once so Linnet is recorded in
-  the current user's Input menu. An exact existing source is not re-registered;
-  Complete selects it once to repair a missing menu entry. Healthy installations
-  use Core for routine updates. Core neither
+  Only creation of the first installed App registers Linnet and submits one
+  standard macOS enablement request. Complete repair of an existing App and
+  every Core update leave registration, enablement and selection untouched.
+  Healthy installations use Core for routine updates. Core neither
   re-registers the source nor stops the live InputMethodKit Host. Existing
   applications keep their input connections. Complete repair stages and
   atomically replaces the App without forcing either Linnet window to close.
@@ -39,15 +37,17 @@ After installation:
 - For a clean first installation, save open work, log out of macOS once, and
   log in again. Core preserves the same input-source identity and current
   client connections without requesting another logout.
-- If Core reports a non-matching published baseline or a missing registration,
-  explicitly run `Linnet.pkg` for Complete repair; Core never triggers that
-  fallback silently.
+- If Core reports a non-matching published baseline or damaged App bytes,
+  explicitly run `Linnet.pkg` for Complete byte repair; Core never triggers
+  that fallback silently. If Linnet is missing or disabled in the Input menu,
+  add or enable it in System Settings > Keyboard > Text Input > Edit; an
+  existing-App repair never resubmits authorization.
   If Core reports duplicate, conflicting, or unverifiable registration remnants,
   run the official uninstaller first, then install Complete.
   Do not use Complete for a routine healthy upgrade or to bypass a rejected
   App identity or version.
-- Complete selects Linnet once. If macOS asks for first-use approval, allow it;
-  afterward Linnet should be present in the menu-bar input menu.
+- If macOS asks for first-use approval, allow it, then select Linnet yourself
+  and confirm that it is present in the menu-bar input menu.
 - A fresh installation defaults to full pinyin. Choose it or one of seven
   double-pinyin profiles in Settings > Input, then apply the change. Linnet does
   not reserve F4 or Control+grave.
@@ -103,8 +103,9 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 
 - `Linnet.pkg` 是用户明确选择并在 Installer 最终确认的完整安装/修复包；Core
   不会自动切换到它。Complete 是全新首次安装或受支持、已验证签名 App 修复的
-  唯一输入源修复责任方。它在缺失时注册，并在 macOS 尚未保存启用授权时提交一次
-  标准请求；已存在的正确输入源不会重复注册或请求。允许与菜单选择始终由用户完成。
+  字节修复责任方。只有首次创建 App 时才注册并向 macOS 提交一次启用请求；已有
+  App 的 Complete 修复与 Core 更新都不注册、启用或选择输入源。允许与菜单选择
+  始终由用户完成。
   健康安装的常规升级只使用 Core。
   Core 不会重新注册、启用、选择或停止
   正在服务的 InputMethodKit Host；Complete 修复会暂存并原子替换 App，不强制关闭
@@ -115,8 +116,9 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
   Settings 窗口。旧窗口不认识新的增量学习格式，其数据操作会被拒绝；其他应用无需退出。
 - 全新首次安装时，保存工作，注销一次 macOS，再登录同一账户。Core 保持同一个
   输入源身份和当前连接，常规升级不请求再次注销。
-- 若 Core 报告未匹配精确发布基线或输入源未注册，请由用户主动运行 `Linnet.pkg`
-  完整修复；它不会由 Core 静默回退触发。
+- 若 Core 报告未匹配精确发布基线或 App 字节损坏，请由用户主动运行 `Linnet.pkg`
+  完整修复；它不会由 Core 静默回退触发。若输入菜单缺少或停用了 Linnet，请在
+  系统设置 → 键盘 → 文本输入 → 编辑 中添加或启用；已有 App 的修复不会重复申请授权。
   若 Core 报告重复、冲突或无法验证的注册残留，
   请先运行官方卸载器，再安装 Complete。
   不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。

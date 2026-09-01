@@ -333,7 +333,7 @@ if rg -n 'semver_at_least|check_active_core|packs\.\$\{index\}\.min_core' \
   echo "Installer retained a second shell owner for installed Runtime compatibility." >&2
   exit 1
 fi
-test "$(rg -F -c -- '"${executable}" --request-input-source-authorization' \
+test "$(rg -F -c -- '"${executable}" --request-first-install-authorization' \
   package/installer-scripts/postinstall)" = 1
 if rg -n 'missing-app-install' package/core-installer-scripts/preinstall \
     package/installer-scripts/candidate-app-identity.sh; then
@@ -345,13 +345,16 @@ rg -Fq 'clean-complete-install' package/core-installer-scripts/preinstall \
 for visible_installer_text in package/WELCOME.md package/Conclusion-summary.txt; do
   visible_installer_contents="$(tr '\n' ' ' <"${visible_installer_text}" | tr -s ' ')"
   for required_text in \
-    'Complete is the sole input-source repair owner' \
-    'supported, signature-verified App repair.' \
-    'Complete 是全新首次安装或受支持、已验证签名 App 修复的' \
+    'Only creation of the first installed App registers Linnet' \
+    'Complete repair of an existing App and every Core update leave registration, enablement and selection untouched.' \
+    '只有首次创建 App 时' \
+    '已有 App 的 Complete 修复与 Core 更新都不注册、启用或选择输入源' \
     'Healthy installations use Core for routine updates.' \
     '健康安装的常规升级只使用 Core。' \
-    'If Core reports a non-matching published baseline or a missing registration,' \
-    '若 Core 报告未匹配精确发布基线或输入源未注册' \
+    'If Core reports a non-matching published baseline or damaged App bytes,' \
+    'If Linnet is missing or disabled' \
+    '若 Core 报告未匹配精确发布基线或 App 字节损坏' \
+    '若输入菜单缺少或停用了 Linnet' \
     'If Core reports duplicate, conflicting, or unverifiable registration remnants,' \
     'run the official uninstaller first, then install Complete.' \
     '若 Core 报告重复、冲突或无法验证的注册残留，' \
@@ -386,12 +389,17 @@ rg -Fq 'return .terminateLater' sources/LinnetSettings/SettingsApplication.swift
 copy_candidate_app() {
   local home="$1"
   local destination="${home}/Library/Input Methods/Linnet.app"
-  local fake_executable="${home}/fake-Linnet"
   mkdir -p "$(dirname "${destination}")"
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${candidate_fixture}" "${destination}"
+  write_fake_input_source_cli "${home}"
+}
+
+write_fake_input_source_cli() {
+  local home="$1"
+  local fake_executable="${home}/fake-Linnet"
   cat >"${fake_executable}" <<'SH'
 #!/usr/bin/env bash
-[[ "$*" == --request-input-source-authorization ]]
+[[ "$*" == --request-first-install-authorization ]]
 : >"${HOME}/.linnet-test-input-source-authorization-requested"
 printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
 SH
@@ -700,7 +708,7 @@ prepare_postinstall_home() {
   mkdir -p "${app}/Contents/MacOS" "${support}/Runtime/Active" "${support}/State"
 cat >"${app}/Contents/MacOS/Linnet" <<'SH'
 #!/usr/bin/env bash
-[[ "$*" == --request-input-source-authorization ]]
+[[ "$*" == --request-first-install-authorization ]]
 : >"${HOME}/.linnet-test-input-source-authorization-requested"
 printf '%s\n' "$*" >>"${LINNET_FAKE_HOST_LOG:?}"
 SH
@@ -793,25 +801,43 @@ if HOME="${unsafe_mode_home}" "${scripts_root}/preinstall" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Postinstall is the distinct post-payload identity boundary. Complete performs
-# the only register/enable/select repair; Core must make no Host CLI call.
+# Postinstall is the distinct post-payload identity boundary. Only creation of
+# the first App may request registration/enablement; an existing App update and
+# every Core update must make no input-source Host CLI call.
 if [[ "${candidate_fixture_available}" == true ]]; then
   delta_tool="${repo_root}/build/linnet-pack"
   [[ -x "${delta_tool}" ]] || { echo "Canonical pack CLI must be built before lifecycle tests." >&2; exit 1; }
   cp -X "${delta_tool}" "${scripts_root}/linnet-pack"
   chmod 0755 "${scripts_root}/linnet-pack"
+
+  first_install_home="${test_root}/postinstall-first-install/home"
+  first_install_log="${test_root}/postinstall-first-install/host-invocations"
+  mkdir -p "${first_install_home}/Library/Input Methods" \
+    "${first_install_home}/Library/Application Support/Linnet/State"
+  write_fake_input_source_cli "${first_install_home}"
+  stage_complete_candidate "${first_install_home}"
+  HOME="${first_install_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
+    LINNET_FAKE_HOST_LOG="${first_install_log}" \
+    LINNET_TEST_EXECUTABLE="${first_install_home}/fake-Linnet" \
+    "${scripts_root}/postinstall"
+  [[ "$(cat "${first_install_log}")" == '--request-first-install-authorization' ]] || {
+    echo "First Complete install did not submit exactly one authorization request." >&2
+    exit 1
+  }
+
   postinstall_home="${test_root}/postinstall-positive/home"
   postinstall_log="${test_root}/postinstall-positive/host-invocations"
   postinstall_runtime_log="${test_root}/postinstall-positive/runtime-inspections"
   prepare_signed_postinstall_home "${postinstall_home}"
   stage_complete_candidate "${postinstall_home}"
-  HOME="${postinstall_home}" LINNET_FAKE_REGISTRATION_STATE=missing \
+  HOME="${postinstall_home}" \
+    LINNET_FAKE_REGISTRATION_STATE=registered:enabled-observation:selectable:path-unknown \
     LINNET_FAKE_HOST_LOG="${postinstall_log}" \
     LINNET_FAKE_RUNTIME_LOG="${postinstall_runtime_log}" \
     LINNET_TEST_EXECUTABLE="${postinstall_home}/fake-Linnet" \
     "${scripts_root}/postinstall"
-  [[ "$(cat "${postinstall_log}")" == '--request-input-source-authorization' ]] || {
-    echo "Complete postinstall did not submit exactly one input-source authorization request." >&2
+  [[ ! -e "${postinstall_log}" || ! -s "${postinstall_log}" ]] || {
+    echo "Complete update of an existing App requested input-source authorization." >&2
     exit 1
   }
   grep -Fxq "probe 0.1.0 ${postinstall_home}/Library/Application Support" \
@@ -841,8 +867,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     exit 1
   }
   [[ ! -e "${missing_complete_home}/Library/Application Support/Linnet/.linnet-complete" && \
-    "$(cat "${missing_complete_log}")" == '--request-input-source-authorization' ]] || {
-    echo "Complete missing-runtime repair did not finish one authorization request." >&2
+    ( ! -e "${missing_complete_log}" || ! -s "${missing_complete_log}" ) ]] || {
+    echo "Complete data repair of an existing App requested authorization." >&2
     exit 1
   }
 
@@ -1271,9 +1297,8 @@ for rejected_registration in duplicate:2 conflict:source-or-bundle-id unknown:bu
   fi
 done
 
-# The separately selected Complete installer is the explicit full-repair
-# boundary. A healthy CMS App with one verified TIS source may be repaired, but
-# its postinstall must preserve that registration and never select it.
+# Complete may repair bytes of an existing CMS App, but that update must leave
+# its user-owned registration and enablement untouched.
 if [[ "${candidate_fixture_available}" == true ]]; then
   healthy_complete_home="${test_root}/complete-healthy/home"
   prepare_signed_postinstall_home "${healthy_complete_home}"
@@ -1304,8 +1329,8 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   [[ ! -e "${healthy_complete_home}/Library/Input Methods/Linnet.app/Contents/repair-before" ]] || {
     echo "Complete repair did not publish the staged candidate App." >&2; exit 1;
   }
-  [[ "$(cat "${complete_repair_log}")" == '--request-input-source-authorization' ]] || {
-    echo "Complete did not request authorization for the exact input source once." >&2; exit 1;
+  [[ ! -e "${complete_repair_log}" || ! -s "${complete_repair_log}" ]] || {
+    echo "Complete repair of an existing App requested authorization." >&2; exit 1;
   }
   [[ ! -e "${healthy_complete_home}/Library/Application Support/Linnet/.linnet-complete" ]] || {
     echo "Complete repair retained its staging App." >&2; exit 1;

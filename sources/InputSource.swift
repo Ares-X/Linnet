@@ -26,11 +26,12 @@ final class SquirrelInstaller {
     }
   }
 
-  /// Complete is the sole explicit registration and authorization-request
-  /// boundary. macOS owns the user's final approval and menu selection; an
-  /// immediate HIToolbox property must never be promoted to either fact.
-  /// Core updates never call this path.
-  func requestAuthorization() throws {
+  /// Only publication of the first installed App may register Linnet and ask
+  /// macOS for user authorization. Existing-App Complete repairs and Core
+  /// updates preserve the App inode and never call this path. macOS owns the
+  /// user's final approval and menu selection; an immediate HIToolbox property
+  /// must never be promoted to either fact.
+  func requestFirstInstallAuthorization() throws {
     let identifier = SquirrelApp.bundleIdentifier
     var inspection = LinnetInputSourceRegistration.inspect(identifier: identifier)
     switch inspection.state {
@@ -47,12 +48,11 @@ final class SquirrelInstaller {
     guard let inputSource = inspection.inputSource else {
       throw Failure.registrationStateRejected(inspection.state.wireValue)
     }
-    // HIToolbox's isEnabled property is only a process-local observation. It
-    // can remain true after an App replacement even when the persistent Input
-    // menu has dropped Linnet. Re-submit the idempotent standard enablement at
-    // every explicit Complete boundary; the stable production identity keeps
-    // an existing authorization silent, while macOS prompts only when the user
-    // has never authorized that identity. Selection remains user-owned.
+    // A stale registration can survive an earlier uninstall, so first install
+    // still submits the standard enablement request after validating the one
+    // exact source. No update or repair path may infer authorization from this
+    // process-local observation or resubmit the request. Selection remains
+    // user-owned.
     let enableStatus = TISEnableInputSource(inputSource)
     guard enableStatus == noErr else { throw Failure.enableFailed(enableStatus) }
     print("Input source authorization request is ready: \(identifier)")

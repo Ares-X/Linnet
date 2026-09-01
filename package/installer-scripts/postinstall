@@ -321,12 +321,13 @@ fi
   exit 1
 }
 
-# Complete may register Linnet and submit one standard enablement request.
-# macOS owns the asynchronous user approval and later menu selection, so this
-# script accepts only a safe registered observation and never claims either
-# user-owned transition completed. Core never mutates TIS.
-if [[ "${install_mode}" == complete ]]; then
-  "${executable}" --request-input-source-authorization
+# Only creation of the first installed App may register Linnet and submit one
+# standard enablement request. An existing-App Complete repair and every Core
+# update preserve the registered App inode and never mutate TIS. macOS owns the
+# asynchronous approval and later menu selection, so no process-local
+# observation may turn an update into another authorization request.
+if [[ "${install_mode}" == complete && "${complete_app_action}" == created ]]; then
+  "${executable}" --request-first-install-authorization
   registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
     echo "Linnet postinstall: input-source registration observation is unavailable" >&2
     exit 1
@@ -336,7 +337,7 @@ if [[ "${install_mode}" == complete ]]; then
 registered:enabled-observation:selectable:path-unknown|\
 registered:selected-observation:selectable:path-unknown) ;;
     *)
-      echo "Linnet postinstall: Complete did not retain one safe registered input source" >&2
+      echo "Linnet postinstall: first install did not retain one safe registered input source" >&2
       exit 1
       ;;
   esac
@@ -350,7 +351,7 @@ else
 registered:enabled-observation:selectable:path-unknown|\
 registered:selected-observation:selectable:path-unknown) ;;
     *)
-      echo "Linnet postinstall: Core update lost input-source availability" >&2
+      echo "Linnet postinstall: existing-App update lost input-source availability" >&2
       exit 1
       ;;
   esac

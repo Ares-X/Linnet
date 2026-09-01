@@ -23,10 +23,12 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
 - 候选目录精确匹配 `package/release_asset_manifest`；正式 Release 只有 1 个完整安装包，Core
   更新频道包含 Core、卸载器和 Catalog，数据频道包含 4 个不可变词包及已绑定基线的差分；
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
-- Complete 只拥有首次安装和受支持损坏安装的输入源修复：缺失时注册，并在 macOS
-  尚未保存启用授权时提交一次标准请求；允许与菜单选择始终由用户和 macOS 管理，已有正确记录不重复注册或请求。首次安装最多要求一次注销，
+- Complete 只在首次创建 App 时注册输入源并向 macOS 提交一次启用请求；已有 App
+  的 Complete 字节修复与 Core 更新都不注册、启用或选择输入源。允许与菜单选择
+  始终由用户和 macOS 管理。首次安装最多要求一次注销，
   匹配已公布基线的健康安装使用 Core，Core 更新不要求注销；不匹配时明确使用
-  Complete 修复 App，已有健康词包与个人数据保持不变；Core 不触碰输入源状态。
+  Complete 修复 App，已有健康词包与个人数据保持不变；Complete 与 Core 对已有 App
+  都不触碰输入源状态。缺失或停用的输入源只能由用户在系统设置中添加或启用。
 
 用户安装边界不依赖维护者 Keychain，也不把自签证书是否进入用户系统信任根当作
 App 完整性事实。Core 在写入前核对已公布的精确差分基线；Core 与 Complete 在写入后

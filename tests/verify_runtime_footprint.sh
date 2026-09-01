@@ -2395,8 +2395,8 @@ fi
 ruby -e '
   source = File.read("sources/InputSource.swift")
   registration = File.read("sources/LinnetInputSourceRegistration.swift")
-  request = source[/func requestAuthorization\(\) throws \{.*?\n  \}/m]
-  abort "the sole Complete input-source authorization owner is missing" unless
+  request = source[/func requestFirstInstallAuthorization\(\) throws \{.*?\n  \}/m]
+  abort "the sole first-install input-source authorization owner is missing" unless
     request && request.scan("TISRegisterInputSource").length == 1 &&
       request.scan("TISEnableInputSource").length == 1 &&
       request.scan("TISSelectInputSource").empty? &&
@@ -2696,8 +2696,12 @@ fi
 if rg -n 'struct Source|sourceProvider|registerInputSource:' sources/InputSource.swift; then
   fail "a test-only adapter remains between the input lifecycle owner and HIToolbox"
 fi
-rg -Fq -- '--request-input-source-authorization' sources/Main.swift ||
-  fail "Complete input-source authorization command is missing"
+rg -Fq -- '--request-first-install-authorization' sources/Main.swift ||
+  fail "first-install input-source authorization command is missing"
+if rg -Fq -- '--request-input-source-authorization' sources/Main.swift \
+    package/installer-scripts/postinstall; then
+  fail "the ambiguous existing-App authorization command returned"
+fi
 if rg -Fq -- '--inspect-input-source-registration' sources/Main.swift; then
   fail "the retired installed-Host inspection entrypoint returned"
 fi
@@ -2712,13 +2716,13 @@ if rg -Fq -- '"${executable}" --inspect-input-source-registration' \
     package/core-installer-scripts/preinstall; then
   fail "Core preinstall can still invoke an incompatible installed Host"
 fi
-if rg -n -- '--request-input-source-authorization|TISRegisterInputSource|TISEnableInputSource|TISSelectInputSource' \
+if rg -n -- '--request-first-install-authorization|TISRegisterInputSource|TISEnableInputSource|TISSelectInputSource' \
     package/core-installer-scripts/preinstall; then
   fail "Core preinstall regained a TIS mutation path"
 fi
-test "$(rg -F -c -- '"${executable}" --request-input-source-authorization' \
+test "$(rg -F -c -- '"${executable}" --request-first-install-authorization' \
   package/installer-scripts/postinstall)" = 1 ||
-  fail "Complete postinstall no longer requests input-source authorization exactly once"
+  fail "Complete postinstall lost its single first-install authorization request"
 for observed_state in \
     registered:enablement-required:path-unknown \
     registered:enabled-observation:selectable:path-unknown \
@@ -2730,9 +2734,9 @@ if rg -n 'registration_state.*==.*selected|Complete.*selected input source' \
     package/installer-scripts/postinstall; then
   fail "Complete postinstall again treated immediate selection as persistent authorization"
 fi
-rg -Fq 'if [[ "${install_mode}" == complete ]]' \
+rg -Fq 'if [[ "${install_mode}" == complete && "${complete_app_action}" == created ]]' \
   package/installer-scripts/postinstall ||
-  fail "input-source registration escaped the Complete-only boundary"
+  fail "input-source authorization escaped the first-App creation boundary"
 if rg -n -- '--quit-host-clean' sources/Main.swift package/installer-scripts; then
   fail "Core update regained a live InputMethodKit Host termination path"
 fi

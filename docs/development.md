@@ -320,8 +320,8 @@ PID，更新前已连接的应用与更新后新打开的应用都要继续输�
 composition 或数据事务时，Host 的 typed activation owner 才能接受自行退出。Settings
 随后只从 canonical 安装路径启动 Host，并在精确 revision 一致后报告生效；任一前提
 不满足都必须拒绝，不能强杀。Core 遇到 missing App 或 missing TIS registration 必须
-在 payload 前失败；受支持签名 App 的缺失注册由 Complete 修复，重复、冲突或未知 TIS
-残留必须先官方卸载。默认卸载和显式 purge 仍需要独立
+在 payload 前失败；缺失或停用的输入源由用户在系统设置中添加或启用，已有 App 的
+Complete 修复也不触碰 TIS。重复、冲突或未知 TIS 残留必须先官方卸载。默认卸载和显式 purge 仍需要独立
 验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**
 打开设置；它是 `Linnet.app` 内嵌的 accessory App，不作为独立产品安装、不常驻
 Dock，并在最后一个窗口关闭后退出。

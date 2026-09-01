@@ -1,8 +1,8 @@
 双韵（Linnet）安装完成。
 
-Complete 是全新首次安装或受支持、已验证签名 App 修复的唯一输入源修复责任方。
-它在缺失时注册，并在 macOS 尚未保存启用授权时提交一次标准请求；已存在的正确
-输入源不会重复注册或请求授权。允许与菜单选择始终由用户和 macOS 管理。
+只有首次创建 App 时，Complete 才注册输入源并向 macOS 提交一次启用请求。
+已有 App 的 Complete 修复与 Core 更新都不注册、启用或选择输入源；允许与菜单
+选择始终由用户和 macOS 管理。
 健康安装的常规升级只使用 Core。Core 不重新注册输入源，并保留系统状态与现有
 应用的输入连接，不会再次请求启用授权。
 
@@ -13,8 +13,9 @@ Complete 是全新首次安装或受支持、已验证签名 App 修复的唯一
 2. 如果 macOS 首次请求允许 Linnet，请选择“允许”。
 3. 从菜单栏输入菜单中选择 Linnet；安装器不会代替你切换输入源。
 
-若 Core 报告未匹配精确发布基线或输入源未注册，请由用户主动运行 `Linnet.pkg`
-完整修复；Core 不会静默切换到完整安装。
+若 Core 报告未匹配精确发布基线或 App 字节损坏，请由用户主动运行 `Linnet.pkg`
+完整修复；Core 不会静默切换到完整安装。若输入菜单缺少或停用了 Linnet，请在
+系统设置 → 键盘 → 文本输入 → 编辑 中添加或启用；已有 App 的修复不会重复申请授权。
 若 Core 报告重复、冲突或无法验证的注册残留，
 请先运行官方卸载器，再安装 Complete。
 不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。
@@ -57,10 +58,9 @@ Settings 窗口。旧窗口不认识新的增量学习格式，其数据操作�
 
 双韵 (Linnet) installation is complete.
 
-Complete is the sole input-source repair owner for a clean first installation
-or a supported, signature-verified App repair. It registers a missing source,
-then uses macOS's standard enable/select transition once so Linnet enters the
-Input menu; an exact existing source is not re-registered. Healthy installations
+Only creation of the first installed App registers Linnet and submits one
+standard macOS enablement request. Complete repair of an existing App and every
+Core update leave registration, enablement and selection untouched. Healthy installations
 use Core for routine updates. Core does not
 re-register the source or stop the live InputMethodKit Host, so existing
 applications keep their input connections.
@@ -70,10 +70,12 @@ For a first Complete installation:
 1. Save open work, log out of the current macOS account, and log in again.
    Quitting applications alone does not refresh the InputMethodKit source list.
 2. Choose Allow if macOS asks for first-use permission.
-3. Complete selects Linnet once; confirm that it appears in the menu-bar input menu.
+3. Select Linnet yourself and confirm that it appears in the menu-bar input menu.
 
-If Core reports a non-matching published baseline or a missing registration,
+If Core reports a non-matching published baseline or damaged App bytes,
 explicitly run `Linnet.pkg` for Complete repair; Core never falls back silently.
+If Linnet is missing or disabled, add or enable it in System Settings > Keyboard
+> Text Input > Edit; an existing-App repair never resubmits authorization.
 If Core reports duplicate, conflicting, or unverifiable registration remnants,
 run the official uninstaller first, then install Complete.
 Do not use Complete for a routine healthy upgrade or to bypass a rejected App
