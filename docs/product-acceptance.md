@@ -541,8 +541,11 @@ and zero afterward. Full projection comparison verifies all 1,882 replacements,
 141,579 unchanged other glosses, and identical vocabulary, keys, weights,
 pinyin, IPA, skip, fuzzy and next-word data. Generated smart DB size grew 0.105%.
 Native English container build/verification and the package architecture gate
-pass. The unpublished `0.4.18` / sequence 23 identity is retained with its new
-content hash; no Core version, runtime code, installer or update action changed.
+pass. That data-only milestone produced the unpublished `0.4.18` / sequence 23
+identity. The later Smart English full-pinyin routing change altered the English
+pack again, so the current owner advances it to `0.4.19` / sequence 24 and the
+Catalog to sequence 46 instead of reusing the earlier immutable identity. No
+fallback or same-sequence replacement is permitted.
 Exact hashes, deferred terms and reference coverage are recorded in the existing
 [translation quality record](../data/chinese/reports/translation_quality_audit.json).
 Installed-product and complete-App acceptance remain NOT_EXERCISED for this batch.

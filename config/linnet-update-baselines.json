@@ -20,7 +20,7 @@
     },
     "english": {
       "source": "release_0_1_10",
-      "target_sequence": 23,
+      "target_sequence": 24,
       "content_sha256": "aa54511b26d3c595d7e8d66c4f63767fd473fa244963b643d8d8c3d8ab69f7d7"
     },
     "lts": {

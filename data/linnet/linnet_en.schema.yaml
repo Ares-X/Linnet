@@ -4,12 +4,12 @@
 schema:
   schema_id: linnet_en
   name: 双韵 Smart English
-  version: "0.2.0"
+  version: "0.2.1"
   author:
     - Linnet contributors
   description: |
     Standalone English mode with prefix completion, correction, automatic
-    full-pinyin lookup, session prediction, and Rime user learning.
+    automatic full-pinyin lookup, session prediction, and Rime user learning.
 
 # prediction and full_shape are reset-only invariants. Without states they do
 # not add another visible language or shape control to the product switcher.
