@@ -76,19 +76,17 @@ verify_unsigned_installer "${complete_pkg}"
 
 archive_root="${work_root}/expanded-complete"
 pkgutil --expand-full "${complete_pkg}" "${archive_root}"
-archive_apps=()
-while IFS= read -r app; do archive_apps+=("${app}"); done < <(
-  find "${archive_root}" -type d -name Linnet.app ! -type l)
-[[ "${#archive_apps[@]}" -eq 1 ]] ||
-  fail_publication "Complete package does not contain exactly one target Linnet App"
+archive_core_payload="${archive_root}/Linnet-Core.component.pkg/Payload/Linnet.payload"
+[[ -d "${archive_core_payload}" && ! -L "${archive_core_payload}" ]] ||
+  fail_publication "Complete package does not contain its opaque Core payload"
 archive_identity="$("${project_root}/scripts/linnet-code-identity" verify-product \
-  "${archive_apps[0]}")" ||
+  "${archive_core_payload}")" ||
   fail_publication "Complete target publication identity is invalid"
 
 for spec in "core:${core_pkg}" "complete:${complete_pkg}"; do
   edition="${spec%%:*}"; package="${spec#*:}"
   LINNET_RELEASE_TOOL="${release_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
-    "${project_root}/package/verify_package" "${package}" "${archive_apps[0]}" \
+    "${project_root}/package/verify_package" "${package}" "${archive_core_payload}" \
       "${edition}" publication >/dev/null ||
     fail_publication "final ${edition} package contract is invalid"
 done

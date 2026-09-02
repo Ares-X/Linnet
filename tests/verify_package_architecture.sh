@@ -46,6 +46,7 @@ ruby -e '
 ruby -e '
   source = File.read("package/make_package")
   verifier = File.read("package/verify_package")
+  publication = File.read("package/verify_publication_artifacts")
   lifecycle = File.read("package/installer-scripts/postinstall")
   abort "Complete still stages a discoverable App bundle" unless
     source.include?(%q{complete_transport_name="Linnet.payload"}) &&
@@ -54,6 +55,9 @@ ruby -e '
     source.include?(%q{--component-plist "${project_root}/package/Linnet-component.plist"})
   abort "Complete verification still accepts PackageKit bundle mappings" unless
     verifier.include?(%q{Complete Core payload contains a bundle mapping})
+  abort "final publication still searches for a discoverable App transport" unless
+    publication.include?(%q{Linnet-Core.component.pkg/Payload/Linnet.payload}) &&
+      !publication.include?(%q{-name Linnet.app})
 ' || fail "Complete opaque transport boundary is missing"
 if rg -n 'expected_core_scripts=|def manifest\(root\)' package/verify_package; then
   fail "package verification regained a duplicate inventory or tree-digest owner"
