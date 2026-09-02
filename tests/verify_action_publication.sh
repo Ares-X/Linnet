@@ -555,6 +555,22 @@ run_stager "${stager_state}" verify data >/dev/null ||
 data_release="${stager_state}/releases/data-${catalog_sequence}.json"
 cp "${data_release}" "${fixture}/exact-data-release.json"
 
+write_release "${stager_state}" data "data-${catalog_sequence}" true true \
+  "${old_candidate_revision}" previous
+: >"${stager_state}/mutations.log"
+GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null ||
+  fail "same-sequence data Draft from an older revision was not retired"
+[[ "$(sed -n '1p' "${stager_state}/mutations.log")" == \
+    "release-delete data-${catalog_sequence}" ]] ||
+  fail "older non-identical data Draft was not retired before replacement"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort unless document.fetch("isDraft") &&
+    document.fetch("targetCommitish") == ARGV.fetch(1)
+' "${data_release}" "${candidate_revision}" ||
+  fail "replacement data Draft does not own the current candidate"
+cp "${data_release}" "${fixture}/exact-data-release.json"
+
 ruby -rjson -e '
   path = ARGV.fetch(0)
   document = JSON.parse(File.binread(path))

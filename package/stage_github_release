@@ -3,13 +3,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # GitHub Actions transport boundary for a verified candidate. It may create an
-# unpublished GitHub draft and upload missing exact assets. For Core and public
-# channels it may retire an exact Linnet-owned unpublished Draft from an older
-# revision before recreating the same version for the current candidate.
-# Immutable pack assets may be reused from an earlier revision's byte-identical
-# data Release; the Core draft owns the candidate's raw Catalog snapshot. This
-# owner cannot publish a release, create a release tag, or advance the stable
-# Catalog.
+# unpublished GitHub draft and upload missing exact assets. It may retire an
+# exact Linnet-owned unpublished Draft from an older revision before recreating
+# the same version or data sequence for the current candidate. Immutable pack
+# assets may be reused from an earlier revision's byte-identical data Release;
+# the Core draft owns the candidate's raw Catalog snapshot. This owner cannot
+# publish a release, create a release tag, or advance the stable Catalog.
 
 set -euo pipefail
 
@@ -231,10 +230,7 @@ if [[ "${release_state}" == true ]]; then
     puts revision
   ' "${release_json}")" || fail_stage "${tag} draft target is invalid"
   if [[ "${draft_revision}" != "${candidate_revision}" ]]; then
-    if [[ "${channel}" == data ]]; then
-      cmp -s "${expected}" "${actual}" ||
-        fail_stage "${tag} earlier-revision data Draft is not byte-identical"
-    else
+    if [[ "${channel}" != data ]] || ! cmp -s "${expected}" "${actual}"; then
       [[ "${mode}" == stage ]] ||
         fail_stage "${tag} draft targets another revision"
       ruby -rjson -e '

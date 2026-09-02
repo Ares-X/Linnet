@@ -173,12 +173,12 @@ fi
       "${stager}")" -eq 1 ]] ||
   fail "the stager must have one exact owned-Draft retirement action"
 for required in \
-    'if [[ "${channel}" == data ]]' \
-    'earlier-revision data Draft is not byte-identical' \
+    'if [[ "${channel}" != data ]] || ! cmp -s "${expected}" "${actual}"; then' \
     '[[ "${mode}" == stage ]]' \
     'older Draft is not exact Linnet-owned state' \
     'release.fetch("isDraft")' \
-    'release.fetch("targetCommitish") == ARGV.fetch(4)'; do
+    'release.fetch("targetCommitish") == ARGV.fetch(4)' \
+    'only a byte-identical published data seed can be reused'; do
   rg -Fq -- "${required}" "${stager}" ||
     fail "Draft retirement is missing a fail-closed ownership boundary: ${required}"
 done
