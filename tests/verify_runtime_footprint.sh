@@ -867,11 +867,26 @@ rg -Fq 'text_expander: "^x;[-0-9A-Za-z_]*$"' data/linnet/default.yaml ||
 rg -Fq '__include: default.yaml:/linnet/pinyin_reverse_lookup' \
   data/linnet/linnet_zh.schema.yaml ||
   fail "the Chinese root lost the shared reverse-lookup affix contract"
-rg -Fq 'affix_segmentor@linnet_pinyin' data/linnet/linnet_en.schema.yaml ||
-  fail "Smart English lost the standard explicit pinyin segmentor"
+if ! ruby -ryaml -e '
+  english = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  segmentors = english.dig("engine", "segmentors") || []
+  recognizers = english.dig("recognizer", "patterns") || {}
+  abort "explicit affix segmentor" if segmentors.include?("affix_segmentor@linnet_pinyin")
+  abort "explicit recognizer" if recognizers.key?("linnet_pinyin")
+  renderer = File.read(ARGV.fetch(1))
+  function = renderer[/private static func renderEnglishSchemaCustom\(.*?(?=\n  private static func appendEnglishMetadataOptions)/m]
+  abort "English renderer missing" unless function
+  abort "trigger projection" if function.include?("appendPinyinReverseTrigger")
+  fixed_prism = %q{quoted(LinnetSettingsContract.ChineseProfile.fullPinyin.schemaID)}
+  abort "fixed full-pinyin projection missing" unless
+    function.include?(%Q{"linnet_pinyin/prism"}) && function.include?(fixed_prism)
+' data/linnet/linnet_en.schema.yaml \
+    sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift; then
+  fail "Smart English regained an explicit pinyin trigger that captures punctuation"
+fi
 test "$(rg -F -c '__include: default.yaml:/linnet/pinyin_reverse_lookup' \
   data/linnet/linnet_en.schema.yaml)" -eq 1 ||
-  fail "Smart English must reuse exactly one shared pinyin namespace"
+  fail "Smart English must reuse exactly one automatic full-pinyin namespace"
 for decoder_contract in 'dictionary: linnet_zh' 'prism: linnet_zh' 'delimiter: " '\''"'; do
   rg -Fq "  ${decoder_contract}" data/linnet/linnet_en.schema.yaml ||
     fail "Smart English lost its bundled natural-code decoder: ${decoder_contract}"
@@ -2501,7 +2516,7 @@ ruby -e '
   rollback = host[/private func rollbackSettingsPublication\(.*?\n  \}\n\n  private func activatePublishedSettings/m]
   activation = host[/private func activatePublishedSettings\(.*?\n  \}\n\n  private func validConfigurationCandidate/m]
   startup = host[/private func reconcileLiveSettings\(\).*?\n  \}/m]
-  runtime_start = host[/func startRime\(fullCheck: Bool\).*?\n  \}/m]
+  runtime_start = host[/private func startRime\(_ startup: RimeStartup\).*?\n  \}/m]
   abort "atomic settings publication owner is missing" unless
     publication && rollback && activation && startup && runtime_start
   abort "Host publication did not validate one typed candidate" unless
@@ -2602,7 +2617,18 @@ ruby -e '
       personal_prepare.include?("levers.import_user_dict") &&
       !personal_prepare.include?("rime.deploy()")
   abort "personal table preparation no longer owns the exact two dictionaries" unless
-    bridge.scan(/\(name: "linnet_(?:custom_words|text_expander)"/).length == 2
+    bridge.scan(/case (?:customWords|textExpander) = "linnet_(?:custom_words|text_expander)"/).length == 2
+  transactions = File.read("sources/SquirrelApplicationTransactions.swift")
+  runtime = File.read("sources/SquirrelApplicationRuntime.swift")
+  abort "table-only personal activation still runs the full deployment startup" unless
+    transactions.include?("personalTablesOnly(candidate: candidate, live: live)") &&
+      transactions.include?("startReadyRuntimeFromPreparedPersonalData()") &&
+      runtime.include?("func startReadyRuntimeFromPreparedPersonalData()")
+  personal_start = runtime[/func startReadyRuntimeFromPreparedPersonalData\(\).*?\n  \}/m]
+  abort "prepared personal tables can trigger schema deployment" unless
+    personal_start &&
+      !personal_start.include?("start_maintenance") &&
+      !personal_start.include?("deploy_config_file")
 
   personal = File.read("sources/LinnetSettings/PersonalDataStore.swift")
   abort "runtime settings are not a standard custom patch" unless

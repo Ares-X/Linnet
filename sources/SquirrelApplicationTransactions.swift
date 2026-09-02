@@ -150,6 +150,8 @@ extension SquirrelApplicationDelegate {
       )
       return
     }
+    let reusesDeployedConfiguration = !languageActivation
+      && personalTablesOnly(candidate: candidate, live: live)
     active.phase = .activating
     activeDataTransaction = active
     transactionMonitor?.cancel()
@@ -157,7 +159,10 @@ extension SquirrelApplicationDelegate {
 
     guard swapDirectories(live, candidate) else {
       finishDataTransaction()
-      let health = resumeCurrentRuntime()
+      let resumed = reusesDeployedConfiguration
+        ? startReadyRuntimeFromPreparedPersonalData()
+        : startReadyRuntime(fullCheck: false)
+      let health = resumed ? runtimeHealth() : degradedHealth(phase: .recovering)
       reply(
         to: request.transactionID,
         status: .failed,
@@ -182,7 +187,11 @@ extension SquirrelApplicationDelegate {
       detail: "Candidate activated; runtime verification is in progress."
     )
     let setup = !languageActivation || setupRime(tentativeLanguageActivation: true)
-    let started = setup && startReadyRuntime(fullCheck: false)
+    let started = setup && (
+      reusesDeployedConfiguration
+        ? startReadyRuntimeFromPreparedPersonalData()
+        : startReadyRuntime(fullCheck: false)
+    )
     let health = started ? runtimeHealth() : degradedHealth(phase: .verifying)
     var committed = !languageActivation
     if started, health.state == .running, languageActivation {
@@ -224,6 +233,19 @@ extension SquirrelApplicationDelegate {
         health: degradedHealth(phase: .recovering)
       )
     }
+  }
+
+  /// Personal table and learning bytes do not change compiled configuration.
+  /// Disabled-word or document changes keep the existing deployment path.
+  func personalTablesOnly(candidate: URL, live: URL) -> Bool {
+    guard let currentDocument = try? LinnetSettingsDocumentStore.snapshot(from: live),
+      let candidateDocument = try? LinnetSettingsDocumentStore.snapshot(from: candidate),
+      currentDocument.revision == candidateDocument.revision,
+      let currentPersonal = try? LinnetPersonalDataStore.load(from: live),
+      let candidatePersonal = try? LinnetPersonalDataStore.load(from: candidate)
+    else { return false }
+    return currentPersonal.disabledWords.map(\.value)
+      == candidatePersonal.disabledWords.map(\.value)
   }
 
   func startTransactionMonitor() {

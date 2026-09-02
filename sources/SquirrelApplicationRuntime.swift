@@ -3,6 +3,11 @@ import Darwin
 import InputMethodKit
 
 extension SquirrelApplicationDelegate {
+  enum RimeStartup {
+    case deployedConfiguration(fullCheck: Bool)
+    case preparedPersonalData
+  }
+
   func applicationWillTerminate(_ notification: Notification) {
     rimeSyncController.stop()
     removeObservers()
@@ -62,6 +67,11 @@ extension SquirrelApplicationDelegate {
   }
   @discardableResult
   func startRime(fullCheck: Bool) -> Bool {
+    startRime(.deployedConfiguration(fullCheck: fullCheck))
+  }
+
+  @discardableResult
+  private func startRime(_ startup: RimeStartup) -> Bool {
     print("Initializing la rime...")
     // Reconciliation is a pre-start boundary. Mutating projection caches while
     // an existing runtime owns them would publish bytes it has not activated.
@@ -75,13 +85,21 @@ extension SquirrelApplicationDelegate {
     }
     let settingsSnapshot: LinnetSettingsDocumentStore.Snapshot
     do {
-      guard let source = Bundle.main.url(forResource: "squirrel", withExtension: "yaml"),
-        let runtime = runtimeDataSnapshot
-      else { throw LinnetSettingsProjectionRenderer.Failure.unsafeFile("squirrel.yaml") }
-      try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
-        source: source, to: runtime.userDataDirectory,
-        stagingDirectory: runtime.stagingDirectory)
-      settingsSnapshot = try reconcileLiveSettings()
+      switch startup {
+      case .deployedConfiguration:
+        guard let source = Bundle.main.url(forResource: "squirrel", withExtension: "yaml"),
+          let runtime = runtimeDataSnapshot
+        else { throw LinnetSettingsProjectionRenderer.Failure.unsafeFile("squirrel.yaml") }
+        try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+          source: source, to: runtime.userDataDirectory,
+          stagingDirectory: runtime.stagingDirectory)
+        settingsSnapshot = try reconcileLiveSettings()
+      case .preparedPersonalData:
+        guard let directory = runtimeDataSnapshot?.userDataDirectory else {
+          throw LinnetSettingsDocumentStore.Failure.unsafePath("UserData")
+        }
+        settingsSnapshot = try LinnetSettingsDocumentStore.snapshot(from: directory)
+      }
     } catch {
       print("Linnet settings reconciliation failed.")
       isRimeInputSuspended = true
@@ -99,14 +117,16 @@ extension SquirrelApplicationDelegate {
       // instead of silently degrading the product's English contract.
       return failStart("Required Linnet runtime component is unavailable.")
     }
-    // check for configuration updates
-    if rimeAPI.start_maintenance(fullCheck) {
-      // Maintenance disables Service::CreateSession. Do not publish Host
-      // readiness or deploy another config task until its worker has exited.
-      rimeAPI.join_maintenance_thread()
-    }
-    guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else {
-      return failStart("Linnet runtime configuration deployment failed.")
+    if case .deployedConfiguration(let fullCheck) = startup {
+      // check for configuration updates
+      if rimeAPI.start_maintenance(fullCheck) {
+        // Maintenance disables Service::CreateSession. Do not publish Host
+        // readiness or deploy another config task until its worker has exited.
+        rimeAPI.join_maintenance_thread()
+      }
+      guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else {
+        return failStart("Linnet runtime configuration deployment failed.")
+      }
     }
     guard warmRimeSession.prepare(
       using: rimeAPI,
@@ -175,6 +195,19 @@ extension SquirrelApplicationDelegate {
   @discardableResult
   func startReadyRuntime(fullCheck: Bool) -> Bool {
     guard startRime(fullCheck: fullCheck) else { return false }
+    guard loadSettings() else {
+      shutdownRime()
+      return false
+    }
+    return true
+  }
+
+  /// Settings has already built the changed personal table databases in its
+  /// isolated candidate. Reopen librime against those bytes without compiling
+  /// unchanged schemas or publishing configuration caches again.
+  @discardableResult
+  func startReadyRuntimeFromPreparedPersonalData() -> Bool {
+    guard startRime(.preparedPersonalData) else { return false }
     guard loadSettings() else {
       shutdownRime()
       return false

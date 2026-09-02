@@ -702,11 +702,18 @@ extension LinnetBackupStore {
 
   /// The Host has closed Rime before this boundary. Each snapshot is a complete
   /// independent database; APFS shares unchanged blocks, never mutable inodes.
-  static func cloneLearningDictionaries(from source: URL, to destination: URL) throws {
+  static func cloneUserDictionaries(
+    named dictionaries: Set<String>,
+    from source: URL,
+    to destination: URL
+  ) throws {
     try requireDirectory(source)
     try requireDirectory(destination)
     var copiedBytes = 0
-    for name in learningDirectories.sorted() {
+    for name in dictionaries.sorted() {
+      guard name.hasSuffix(".userdb"), safeName(name) else {
+        throw Failure.unsafeArtifact(name)
+      }
       let database = source.appending(path: name, directoryHint: .isDirectory)
       var info = stat()
       if lstat(database.path, &info) != 0 {

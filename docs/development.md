@@ -88,7 +88,7 @@ Linnet 差异只有两个人工 owner：
 
 Settings document 拥有候选外观、中文默认项、反查触发键、学习策略和 Smart English 交互开关；personal store 拥有自定义词、禁用词与 Text Expander。唯一标准 personal runtime patch `linnet_user.custom.yaml` 只投影禁用词；document-owned 句首大写与 Tab 确定性投影到八份中文 schema custom 和一份英文 schema custom。旧 `linnet_user.yaml` 仅作一次性迁移输入并在成功写入后退役。
 
-只改变 document 的 Apply 仅在 `Transactions/<UUID>/configuration-candidate/` 暂存一份 `linnet_settings.json`。Host 校验候选与 expected/base revision，以唯一 live document 为 canonical owner 执行 CAS 和同卷原子交换，再从已发布 document reconcile 可重建 custom YAML、按固定顺序部署 exact 11 份 config（default、九个产品 schema 与 squirrel），使旧 session generation 失效并用 fresh session 验证所选方案。成功必须回报同一 SHA-256 `activeSettingsRevision`；交换、reconcile、部署或健康检查失败时，Host 原子换回旧 document、重新 reconcile/deploy 并验证旧 revision，无法验证则 fail closed。Host 启动也会在 Rime 接受输入前从 canonical document 向前 reconcile。该快速路径不 finalize Rime、不运行 maintenance、不重编词典，也不创建备份。个人数据变更与语言数据激活仍在隔离候选中验证，再通过 Host 的唯一 live runtime owner 原子切换并健康检查。
+只改变 document 的 Apply 仅在 `Transactions/<UUID>/configuration-candidate/` 暂存一份 `linnet_settings.json`。Host 校验候选与 expected/base revision，以唯一 live document 为 canonical owner 执行 CAS 和同卷原子交换，再从已发布 document reconcile 可重建 custom YAML、按固定顺序部署 exact 11 份 config（default、九个产品 schema 与 squirrel），使旧 session generation 失效并用 fresh session 验证所选方案。成功必须回报同一 SHA-256 `activeSettingsRevision`；交换、reconcile、部署或健康检查失败时，Host 原子换回旧 document、重新 reconcile/deploy 并验证旧 revision，无法验证则 fail closed。Host 启动也会在 Rime 接受输入前从 canonical document 向前 reconcile。该快速路径不 finalize Rime、不运行 maintenance、不重编词典，也不创建备份。个人表变更在隔离候选中按内容差异重建对应 stabledb，未变化且有 canonical source 的数据库以 APFS clone 复用；Host 原子交换后只重新打开已部署配置，不运行 schema maintenance。语言数据激活仍执行完整候选部署和健康检查。
 
 Core App 拥有界面主题，但不携带语言数据。`data/squirrel.yaml` 同时进入 Host 和 Settings 的资源包；Host 在 Rime 初始化前由现有 ProjectionRenderer 将其投影到 UserData，再由 Rime 按标准流程应用用户外观选项。只有 Core 主题字节改变时才重建 `Build/squirrel.yaml`，不会清空词典或学习缓存。旧词包可以保留原有不可变主题文件，但不再决定实际界面；新词包不再包含它。
 
@@ -367,7 +367,7 @@ Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Rele
 
 `data/chinese/reports/enriched_pinyin_english.json` 的候选顺序是 rank owner，`pinyin_embargo_remove.tsv` 是精确删除 owner。Smart English 直接查询 full-pinyin key；中文的标准 affix segmentor 去掉触发前缀，当前 profile Prism 只解码完整非纠错路径，再查询同一 key。生成器只把这份审核快照投影到 `p/<pinyin>`，不得自动重写快照或另设运行时排序表。
 
-所有 profile 必须覆盖默认 `|` 和用户可选的 `;`、标准音节分隔符、profile 内部可能使用的分号，以及 64/65 个可达 Prism key 的 fail-closed 边界。默认 idle `/ , . ; ' [ ] - =` 必须到达 host；只有用户显式选择 `;` 作为反查触发键或当前方案把它当作拼写键时，分号才进入组合。
+所有中文 profile 必须覆盖默认 `|` 和用户可选的 `;`、标准音节分隔符、profile 内部可能使用的分号，以及 64/65 个可达 Prism key 的 fail-closed 边界。Smart English 固定使用无前缀、纯字母全拼反查，不继承中文 profile 或触发键。默认 idle `/ , . ; ' [ ] - =` 必须到达 host；英文模式的 `;` 始终透传，中文模式只有用户显式选择 `;` 作为反查触发键或当前方案把它当作拼写键时才进入组合。
 
 ### Rime Core
 

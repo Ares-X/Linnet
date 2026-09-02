@@ -301,7 +301,11 @@ extension SettingsDataCoordinator {
       let currentDocument = try LinnetSettingsDocumentStore.snapshot(from: stableBackup)
       try requireRevision(observedDocument.revision, current: currentDocument.revision)
     }
-    try LinnetBackupStore.cloneLearningDictionaries(from: environment.live, to: learningBackup)
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: LinnetBackupStore.learningDirectories,
+      from: environment.live,
+      to: learningBackup
+    )
     var protectedTransactions: Set<UUID> = [context.transactionID]
     if case .restore(_, let sourceManifest) = operation {
       protectedTransactions.insert(sourceManifest.transactionID)
@@ -343,9 +347,12 @@ extension SettingsDataCoordinator {
       // The selected backup, not current live learning, owns restore contents.
     } else {
       try LinnetBackupStore.copyStable(from: stableBackup, to: candidate)
-      try LinnetBackupStore.cloneLearningDictionaries(
-        from: snapshot.backup.appending(path: "user-dictionaries", directoryHint: .isDirectory),
-        to: candidate)
+      try LinnetBackupStore.cloneUserDictionaries(
+        named: LinnetBackupStore.learningDirectories,
+        from: snapshot.backup.appending(
+          path: "user-dictionaries", directoryHint: .isDirectory),
+        to: candidate
+      )
     }
     switch operation {
     case .apply(let data, let document, _, _, _):
@@ -395,7 +402,11 @@ extension SettingsDataCoordinator {
       )
       let learning = sourceBackup.appending(path: "user-dictionaries", directoryHint: .isDirectory)
       if verified.formatVersion == LinnetBackupStore.backupFormatVersion {
-        try LinnetBackupStore.cloneLearningDictionaries(from: learning, to: candidate)
+        try LinnetBackupStore.cloneUserDictionaries(
+          named: LinnetBackupStore.learningDirectories,
+          from: learning,
+          to: candidate
+        )
       } else {
         imports = try legacyBackupLearningImports(from: learning, manifest: verified)
       }
@@ -410,6 +421,17 @@ extension SettingsDataCoordinator {
     case .diagnose:
       throw Failure.invalidOperation("diagnose mutation")
     }
+
+    // Personal table databases are derived caches, so backups retain only
+    // their canonical text sources. Reuse unchanged databases directly from
+    // the paused live directory with APFS clones; the changed subset is
+    // removed and rebuilt after materialization. A database without its
+    // canonical source is stale legacy state and must not be resurrected.
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: bridge.reusablePersonalDictionaryDirectories(in: environment.live),
+      from: environment.live,
+      to: candidate
+    )
 
     let runtimeDocument = try materializedDocument
       ?? LinnetSettingsDocumentStore.load(from: candidate)
@@ -531,13 +553,19 @@ extension SettingsDataCoordinator {
       // the only live Rime activation owner. Prepare only their two exact
       // table databases in the isolated candidate; a ten-schema deployment is
       // unrelated to this local edit and would block input unnecessarily.
+      let changedPersonalDictionaries = RimeUserDataBridge.changedPersonalDictionaries(
+        from: snapshot.currentPersonal.data,
+        to: materialized.finalPersonal.data
+      )
+      try bridge.preparePersonalDictionaries(
+        candidate: materialized.candidate,
+        shared: environment.shared,
+        product: environment.product,
+        dictionaries: changedPersonalDictionaries
+      )
       switch operation {
       case .apply:
-        try bridge.preparePersonalDictionaries(
-          candidate: materialized.candidate,
-          shared: environment.shared,
-          product: environment.product
-        )
+        break
       default:
         progress(.deploying)
         try bridge.deploy(

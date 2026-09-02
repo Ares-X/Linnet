@@ -5092,61 +5092,79 @@ void ExpectEnglishPinyinProfile(RimeApi_stdbool* api,
                                 const std::string& code,
                                 const std::string& prefix) {
   const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
-  const auto expect_algorithm = [&](const std::string& input,
-                                    const std::string& reason) {
-    Enter(api, session, input);
-    const auto origins = CandidateOrigins(session, 256);
-    if (std::none_of(origins.begin(), origins.end(), [](const auto& item) {
-          return BaseText(item.text) == "algorithm" &&
-                 item.genuine_type == "linnet_pinyin";
-        })) {
-      Fail("Smart English did not decode " + profile + " for " + reason);
-    }
-  };
-  expect_algorithm(code, "automatic reverse lookup");
-  expect_algorithm(prefix + code, "explicit reverse lookup");
-
-  if (profile == "jiajia") {
-    Enter(api, session, code);
-    const auto origins = CandidateOrigins(session, 256);
-    if (std::any_of(origins.begin(), origins.end(), [](const auto& item) {
-          return BaseText(item.text) == "color shading" &&
-                 item.genuine_type == "linnet_pinyin";
-        })) {
-      Fail("Smart English retained raw-full-pinyin semantics for Jiajia");
-    }
-    Enter(api, session, "suanfa");
-    const auto retired_full_pinyin = CandidateOrigins(session, 256);
-    if (std::any_of(retired_full_pinyin.begin(), retired_full_pinyin.end(),
-                    [](const auto& item) {
-                      return BaseText(item.text) == "algorithm" &&
-                             item.genuine_type == "linnet_pinyin";
-                    })) {
-      Fail("Smart English kept full pinyin after Jiajia was selected");
-    }
-  }
-
-  if (profile == "microsoft") {
-    Enter(api, session, prefix + "m;tm");
-    const auto origins = CandidateOrigins(session, 256);
-    if (std::none_of(origins.begin(), origins.end(), [](const auto& item) {
-          return BaseText(item.text) == "tomorrow" &&
-                 item.genuine_type == "linnet_pinyin";
-        })) {
-      Fail("Smart English lost the separator inside Microsoft double pinyin");
-    }
-    if (prefix != ";") {
-      Enter(api, session, ";m;tm");
-      const auto retired = CandidateOrigins(session, 256);
-      if (std::any_of(retired.begin(), retired.end(), [](const auto& item) {
-            return BaseText(item.text) == "tomorrow" &&
-                   item.genuine_type == "linnet_pinyin";
-          })) {
-        Fail("Smart English retained semicolon for a punctuation-bearing Microsoft code");
-      }
-    }
+  Enter(api, session, "suanfa");
+  const auto automatic = CandidateOrigins(session, 256);
+  if (std::none_of(automatic.begin(), automatic.end(), [](const auto& item) {
+        return BaseText(item.text) == "algorithm" &&
+               item.genuine_type == "linnet_pinyin";
+      })) {
+    Fail("Smart English lost its automatic full-pinyin lookup for " + profile);
   }
   api->destroy_session(session);
+
+  const RimeSessionId idle_semicolon = CreateSchemaSession(api, "linnet_en");
+  if (api->process_key(idle_semicolon, ';', 0)) {
+    Fail("Smart English captured an idle semicolon for " + profile);
+  }
+  const auto idle_after = ReadKeyInteractionSnapshot(api, idle_semicolon);
+  ExpectNoCommit(api, idle_semicolon, "idle English semicolon for " + profile);
+  api->destroy_session(idle_semicolon);
+  if (!idle_after.input.empty() || idle_after.composition_size != 0 ||
+      !idle_after.candidates.empty()) {
+    Fail("Smart English retained hidden state after an idle semicolon for " +
+         profile);
+  }
+
+  const RimeSessionId active_semicolon = CreateSchemaSession(api, "linnet_en");
+  Enter(api, active_semicolon, "hello");
+  const auto english_candidates = Candidates(api, active_semicolon);
+  const int selected = HighlightedCandidateIndex(api, active_semicolon);
+  if (selected < 0 ||
+      static_cast<size_t>(selected) >= english_candidates.size()) {
+    Fail("Smart English semicolon fixture has no candidate for " + profile);
+  }
+  const std::string expected_word = english_candidates[selected].text;
+  if (api->process_key(active_semicolon, ';', 0)) {
+    Fail("Smart English captured an active semicolon for " + profile);
+  }
+  if (TakeCommit(api, active_semicolon,
+                 "active English semicolon for " + profile) != expected_word) {
+    Fail("Smart English semicolon did not commit the selected word for " +
+         profile);
+  }
+  const auto active_after = ReadKeyInteractionSnapshot(api, active_semicolon);
+  ExpectNoCommit(api, active_semicolon,
+                 "duplicate active English semicolon for " + profile);
+  api->destroy_session(active_semicolon);
+  if (!active_after.input.empty() || active_after.composition_size != 0 ||
+      !active_after.candidates.empty()) {
+    Fail("Smart English retained hidden state after an active semicolon for " +
+         profile);
+  }
+
+  const RimeSessionId chinese =
+      CreateSchemaSession(api, expected_chinese_schema.c_str());
+  Enter(api, chinese, prefix + code);
+  const auto chinese_lookup = CandidateOrigins(chinese, 256);
+  if (std::none_of(chinese_lookup.begin(), chinese_lookup.end(),
+                   [](const auto& item) {
+                     return BaseText(item.text) == "algorithm" &&
+                            item.genuine_type == "linnet_pinyin";
+                   })) {
+    Fail("Chinese mode lost explicit pinyin reverse lookup for " + profile);
+  }
+  if (profile == "microsoft") {
+    Enter(api, chinese, prefix + "m;tm");
+    const auto punctuation_code = CandidateOrigins(chinese, 256);
+    if (std::none_of(punctuation_code.begin(), punctuation_code.end(),
+                     [](const auto& item) {
+                       return BaseText(item.text) == "tomorrow" &&
+                              item.genuine_type == "linnet_pinyin";
+                     })) {
+      Fail("Chinese Microsoft reverse lookup lost its internal semicolon");
+    }
+  }
+  api->destroy_session(chinese);
 
   const RimeSessionId direct = CreateSchemaSession(api, "linnet_en");
   TapShift(api, direct, XK_Shift_L);
@@ -5582,9 +5600,7 @@ void WriteFastReloadProjection(const std::filesystem::path& user_directory,
   std::ostringstream english;
   english
       << "patch:\n"
-      << "  \"recognizer/patterns/linnet_pinyin\": \"^[|][a-z;']*$\"\n"
-      << "  \"linnet_pinyin/prefix\": \"|\"\n"
-      << "  \"linnet_pinyin/prism\": \"" << schema_id << "\"\n"
+      << "  \"linnet_pinyin/prism\": \"linnet_zh_pinyin\"\n"
       << "  \"linnet_mode_switch/chinese_schema\": \"" << schema_id
       << "\"\n"
       << "  \"linnet_english_interaction/sentence_capitalization\": false\n"
@@ -5730,7 +5746,7 @@ void ExpectFastConfigurationReload(RimeApi_stdbool* api,
       tab_behavior != "pass") {
     Fail("targeted reload lost an English document/runtime setting");
   }
-  ExpectCandidate(api, english_session, "|suanfa", "algorithm");
+  ExpectCandidate(api, english_session, "suanfa", "algorithm");
   api->destroy_session(english_session);
 
   std::cout << "rime_smoke_test: exact-11 targeted config reload samples="
@@ -6809,14 +6825,14 @@ int main(int argc, char** argv) {
       Fail("the deployed graphical traditional-Chinese default remained disabled");
     }
     ExpectFirstCandidate(api, chinese, "ceshi", "測試");
-    // Letter-only codes remain eligible for automatic Smart English lookup;
-    // the punctuation-bearing Microsoft profile matrix above is the
-    // authoritative retired-trigger negative.
+    // Chinese mode keeps the explicit reverse-lookup command.
     ExpectCandidate(api, chinese, "|suanfa", "algorithm");
     api->destroy_session(chinese);
 
     const RimeSessionId english = CreateSchemaSession(api, "linnet_en");
-    ExpectCandidate(api, english, "|suanfa", "algorithm");
+    // Smart English provides the same lookup automatically for letter-only
+    // full pinyin; its punctuation remains host-owned.
+    ExpectCandidate(api, english, "suanfa", "algorithm");
     const auto live_english = rime::Service::instance().GetSession(english);
     bool capitalization = true;
     bool space_adds_trailing_space = true;

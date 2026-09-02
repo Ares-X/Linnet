@@ -8,10 +8,35 @@ struct RimeUserDataBridge {
   static let chineseSchema = "linnet_zh"
   static let englishSchema = "linnet_en"
   static let learningSchemas = Set([chineseSchema, englishSchema])
-  private static let personalDictionaries = [
-    (name: "linnet_custom_words", file: LinnetPersonalDataStore.customWordsFile),
-    (name: "linnet_text_expander", file: LinnetPersonalDataStore.expansionsFile)
-  ]
+  enum PersonalDictionary: String, CaseIterable, Hashable, Sendable {
+    case customWords = "linnet_custom_words"
+    case textExpander = "linnet_text_expander"
+
+    var file: String {
+      switch self {
+      case .customWords: LinnetPersonalDataStore.customWordsFile
+      case .textExpander: LinnetPersonalDataStore.expansionsFile
+      }
+    }
+
+    var database: String { "\(rawValue).userdb" }
+  }
+
+  func reusablePersonalDictionaryDirectories(in directory: URL) throws -> Set<String> {
+    try requireDirectory(directory)
+    var reusable: Set<String> = []
+    for dictionary in PersonalDictionary.allCases {
+      let source = directory.appending(path: dictionary.file)
+      var info = stat()
+      if lstat(source.path, &info) == 0 {
+        try requireRegularFile(source)
+        reusable.insert(dictionary.database)
+      } else if errno != ENOENT {
+        throw Failure.unsafeDirectory(source.path)
+      }
+    }
+    return reusable
+  }
 
   struct LearningFile: Equatable, Sendable {
     let schema: String
@@ -186,18 +211,19 @@ struct RimeUserDataBridge {
     }
   }
 
-  /// Rebuilds only the two exact personal tables in an isolated candidate.
+  /// Rebuilds only the selected personal tables in an isolated candidate.
   /// The live Host remains the sole publication/activation owner.
   func preparePersonalDictionaries(
     candidate: URL,
     shared: URL,
-    product: String
+    product: String,
+    dictionaries: Set<PersonalDictionary>
   ) throws {
     try requireDirectory(candidate)
-    for dictionary in Self.personalDictionaries {
+    for dictionary in dictionaries.sorted(by: { $0.rawValue < $1.rawValue }) {
       try requireRegularFile(candidate.appending(path: dictionary.file))
       let database = candidate.appending(
-        path: "\(dictionary.name).userdb", directoryHint: .isDirectory)
+        path: "\(dictionary.rawValue).userdb", directoryHint: .isDirectory)
       var info = stat()
       if lstat(database.path, &info) == 0 {
         try requireDirectory(database)
@@ -207,18 +233,39 @@ struct RimeUserDataBridge {
       }
     }
 
+    guard !dictionaries.isEmpty else { return }
     withTraits(user: candidate, shared: shared, product: product) { traits in
       rime.deployer_initialize(&traits)
     }
     defer { rime.finalize() }
     let levers = try leversAPI()
-    for dictionary in Self.personalDictionaries {
+    for dictionary in dictionaries.sorted(by: { $0.rawValue < $1.rawValue }) {
       let source = candidate.appending(path: dictionary.file)
-      let rows = dictionary.name.withCString { name in
+      let rows = dictionary.rawValue.withCString { name in
         source.path.withCString { levers.import_user_dict(name, $0) }
       }
-      guard rows >= 0 else { throw Failure.importFailed(dictionary.name) }
+      guard rows >= 0 else { throw Failure.importFailed(dictionary.rawValue) }
     }
+  }
+
+  static func changedPersonalDictionaries(
+    from current: LinnetPersonalData,
+    to desired: LinnetPersonalData
+  ) -> Set<PersonalDictionary> {
+    var changed: Set<PersonalDictionary> = []
+    if current.customWords.count != desired.customWords.count
+      || zip(current.customWords, desired.customWords).contains(where: {
+        $0.value != $1.value || $0.code != $1.code
+      }) {
+      changed.insert(.customWords)
+    }
+    if current.expansions.count != desired.expansions.count
+      || zip(current.expansions, desired.expansions).contains(where: {
+        $0.value != $1.value || $0.trigger != $1.trigger
+      }) {
+      changed.insert(.textExpander)
+    }
+    return changed
   }
 }
 

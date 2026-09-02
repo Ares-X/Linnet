@@ -212,13 +212,14 @@ struct LinnetSettingsProjectionRendererTests {
     document.input.pinyinReverseTrigger = .semicolon
     let projections = LinnetSettingsProjectionRenderer.renderProjections(
       document: document)
-    let reverseLookupFiles =
-      LinnetSettingsProjectionRenderer.chineseCustomFiles
-      + [LinnetSettingsProjectionRenderer.englishCustomFile]
+    let reverseLookupFiles = LinnetSettingsProjectionRenderer.chineseCustomFiles
     guard Set(projections.keys)
-      == Set(reverseLookupFiles + [LinnetSettingsProjectionRenderer.defaultCustomFile])
+      == Set(reverseLookupFiles + [
+        LinnetSettingsProjectionRenderer.englishCustomFile,
+        LinnetSettingsProjectionRenderer.defaultCustomFile,
+      ])
     else {
-      fail("the reverse-lookup trigger did not project to both language modes")
+      fail("the reverse-lookup trigger did not project to every Chinese mode")
     }
     for file in reverseLookupFiles {
       guard let contents = projections[file],
@@ -228,6 +229,13 @@ struct LinnetSettingsProjectionRendererTests {
       else {
         fail("the reverse-lookup recognizer and affix prefix diverged in \(file)")
       }
+    }
+    guard let english = projections[LinnetSettingsProjectionRenderer.englishCustomFile],
+      !english.contains("recognizer/patterns/linnet_pinyin"),
+      !english.contains("linnet_pinyin/prefix"),
+      english.contains("\"linnet_pinyin/prism\": \"linnet_zh_pinyin\"")
+    else {
+      fail("the Chinese reverse-lookup trigger leaked into Smart English")
     }
 
     do {
@@ -311,9 +319,9 @@ struct LinnetSettingsProjectionRendererTests {
         projection + "  \"schema_list/@\(entry.offset)/schema\": \"\(entry.element)\"\n"
       }
       require(
-        english?.contains("\"linnet_pinyin/prism\": \"\(prism)\"") == true &&
+        english?.contains("\"linnet_pinyin/prism\": \"linnet_zh_pinyin\"") == true &&
           english?.contains("\"linnet_mode_switch/chinese_schema\": \"\(prism)\"") == true,
-        "the selected Chinese profile did not explicitly own English lookup and Shift return"
+        "the selected Chinese profile changed Smart English lookup or lost Shift return"
       )
       require(
         defaultCustom == expectedDefault,

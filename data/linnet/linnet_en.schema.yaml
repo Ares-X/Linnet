@@ -9,7 +9,7 @@ schema:
     - Linnet contributors
   description: |
     Standalone English mode with prefix completion, correction, automatic
-    pinyin lookup, session prediction, and Rime user learning.
+    full-pinyin lookup, session prediction, and Rime user learning.
 
 # prediction and full_shape are reset-only invariants. Without states they do
 # not add another visible language or shape control to the product switcher.
@@ -39,7 +39,6 @@ engine:
     - express_editor
   segmentors:
     - matcher
-    - affix_segmentor@linnet_pinyin
     - ascii_segmentor
     - abc_segmentor
     - punct_segmentor
@@ -78,21 +77,20 @@ predictor:
   max_candidates: 10
 
 # The ordinary-word tag sorts after zz_code_token, keeping code routing
-# authoritative. The native translator appends pinyin-to-English results after
-# ordinary English candidates, matching Hallelujah's established interaction.
+# authoritative. The native translator appends automatic full-pinyin results
+# after ordinary English candidates; punctuation never enters a reverse-lookup
+# segment in Smart English.
 recognizer:
   patterns:
     text_expander:
       __include: default.yaml:/linnet/recognizer_patterns/text_expander
     zz_code_token:
       __include: default.yaml:/linnet/recognizer_patterns/zz_code_token
-    linnet_pinyin:
-      __include: default.yaml:/linnet/recognizer_patterns/pinyin_reverse_lookup
     zz_english: "^[a-zA-Z]+$"
 
-# One Settings-owned Chinese profile selects this Prism. The dictionary and
-# canonical pinyin formatter stay singular; no profile-specific English index
-# or full-pinyin fallback exists.
+# Smart English pinyin lookup is an unprefixed, letter-only default capability.
+# It deliberately uses full pinyin independently of the selected Chinese
+# profile so semicolon and other punctuation remain host-owned.
 linnet_pinyin:
   __include: default.yaml:/linnet/pinyin_reverse_lookup
   dictionary: linnet_zh

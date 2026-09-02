@@ -295,8 +295,10 @@ private extension LinnetSettingsProjectionRenderer {
       defaultLayout: .horizontal,
       to: &entries
     )
-    appendPinyinReverseTrigger(input.pinyinReverseTrigger, to: &entries)
-    entries.append(("linnet_pinyin/prism", quoted(input.chineseProfile.schemaID)))
+    entries.append((
+      "linnet_pinyin/prism",
+      quoted(LinnetSettingsContract.ChineseProfile.fullPinyin.schemaID)
+    ))
     entries.append((
       "linnet_mode_switch/chinese_schema", quoted(input.chineseProfile.schemaID)
     ))

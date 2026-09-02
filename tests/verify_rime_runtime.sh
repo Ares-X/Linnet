@@ -15,10 +15,11 @@ if [[ "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --warm-session-probe ||
       "${1:-}" == --cold-client-probe ||
       "${1:-}" == --profile-key-matrix-probe ||
+      "${1:-}" == --fast-config-reload-probe ||
       "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--live-sync-probe]" >&2
+  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -323,7 +324,7 @@ for profile_case in "${profile_cases[@]}"; do
   DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     bin/rime_deployer --build "${user}" "${shared}" \
       "${user}/build" >/dev/null
-  rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
+  rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
   rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
   test -s "${user}/build/${schema}.prism.bin"
   prefix=';'
@@ -346,7 +347,7 @@ done
 "${scratch}/projection-fixture" english-learning-off "${user}"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   bin/rime_deployer --build "${user}" "${shared}" "${user}/build" >/dev/null
-rg -Fq 'prism: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
+rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'enable_user_dict: false' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'learning_enabled: false' "${user}/build/linnet_en.schema.yaml"
@@ -357,7 +358,7 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
 "${scratch}/projection-fixture" english-suggestions-off "${user}"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   bin/rime_deployer --build "${user}" "${shared}" "${user}/build" >/dev/null
-rg -Fq 'prism: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
+rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'reset: 0' "${user}/build/linnet_en.schema.yaml"
 if rg -q 'spelling_correction:' "${user}/build/linnet_en.schema.yaml"; then
@@ -398,7 +399,6 @@ for chinese_schema in \
 done
 rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
-rg -Fq 'prefix: "|"' "${user}/build/linnet_en.schema.yaml"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   "${scratch}/rime-smoke" "${shared}" "${user}" \
     --input-options-probe >/dev/null

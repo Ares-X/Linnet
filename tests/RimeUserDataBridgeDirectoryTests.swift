@@ -61,6 +61,50 @@ struct RimeUserDataBridgeDirectoryTests {
     expectFailure {
       try RimeUserDataBridge.validatePreparedUserDirectory(preparedReplaced)
     }
+
+    let baseline = LinnetPersonalData(
+      customWords: [.init(value: "Linnet", code: "linnet")],
+      disabledWords: ["teh"],
+      expansions: [.init(value: "Address", trigger: "x;addr")]
+    )
+    var expansionOnly = baseline
+    expansionOnly.expansions[0].value = "New address"
+    guard RimeUserDataBridge.changedPersonalDictionaries(
+      from: baseline, to: expansionOnly) == [.textExpander]
+    else { fail("an expansion edit rebuilt an unrelated personal dictionary") }
+
+    var customOnly = baseline
+    customOnly.customWords[0].code = "lin net"
+    guard RimeUserDataBridge.changedPersonalDictionaries(
+      from: baseline, to: customOnly) == [.customWords]
+    else { fail("a custom-word edit rebuilt an unrelated personal dictionary") }
+
+    var settingsOnly = baseline
+    settingsOnly.disabledWords[0].value = "the"
+    guard RimeUserDataBridge.changedPersonalDictionaries(
+      from: baseline, to: settingsOnly).isEmpty
+    else { fail("a disabled-word edit rebuilt personal table dictionaries") }
+
+    let personal = root.appending(path: "personal", directoryHint: .isDirectory)
+    try makeDirectory(personal)
+    try LinnetPersonalDataStore.writePersonalFiles(baseline, to: personal)
+    try LinnetPersonalDataStore.writeRuntimeSettings(baseline, to: personal)
+    try bridge.preparePersonalDictionaries(
+      candidate: personal,
+      shared: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appending(path: "data/linnet", directoryHint: .isDirectory),
+      product: product,
+      dictionaries: Set(RimeUserDataBridge.PersonalDictionary.allCases)
+    )
+    for dictionary in RimeUserDataBridge.PersonalDictionary.allCases {
+      guard FileManager.default.fileExists(
+        atPath: personal.appending(
+          path: "\(dictionary.rawValue).userdb", directoryHint: .isDirectory
+        ).path
+      ) else {
+        fail("preparing both personal tables omitted \(dictionary.rawValue)")
+      }
+    }
     print("RimeUserDataBridgeDirectoryTests: PASS")
   }
 

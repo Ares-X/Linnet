@@ -80,11 +80,13 @@ struct LinnetBackupStoreTests {
     try makeDirectory(recovery)
     try Data("retired LevelDB recovery bytes".utf8).write(
       to: recovery.appending(path: "000006.log"))
-    try LinnetBackupStore.cloneLearningDictionaries(from: source, to: older)
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: LinnetBackupStore.learningDirectories, from: source, to: older)
     guard !FileManager.default.fileExists(
       atPath: older.appending(path: "linnet_en.userdb/lost").path
     ) else { fail("LevelDB recovery quarantine leaked into the active learning snapshot") }
-    try LinnetBackupStore.cloneLearningDictionaries(from: source, to: newer)
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: LinnetBackupStore.learningDirectories, from: source, to: newer)
     let retained = newer.appending(path: "linnet_en.userdb/000007.ldb")
     var originalInfo = stat()
     var cloneInfo = stat()
@@ -97,7 +99,8 @@ struct LinnetBackupStoreTests {
     try writer.write(contentsOf: Data([0x19]))
     try writer.close()
     try FileManager.default.removeItem(at: older)
-    try LinnetBackupStore.cloneLearningDictionaries(from: newer, to: restored)
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: LinnetBackupStore.learningDirectories, from: newer, to: restored)
     guard try Data(contentsOf: retained) == bytes,
       try Data(contentsOf: restored.appending(path: "linnet_en.userdb/000007.ldb")) == bytes,
       try Data(contentsOf: original) != bytes
@@ -105,13 +108,15 @@ struct LinnetBackupStoreTests {
     let symlink = database.appending(path: "unsafe.ldb")
     try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: original)
     expectFailure(.unsafeArtifact("unsafe.ldb")) {
-      try LinnetBackupStore.cloneLearningDictionaries(from: source, to: restored)
+      try LinnetBackupStore.cloneUserDictionaries(
+        named: LinnetBackupStore.learningDirectories, from: source, to: restored)
     }
     try FileManager.default.removeItem(at: symlink)
     let foreign = database.appending(path: "foreign", directoryHint: .isDirectory)
     try makeDirectory(foreign)
     expectFailure(.unsafeArtifact("foreign")) {
-      try LinnetBackupStore.cloneLearningDictionaries(from: source, to: restored)
+      try LinnetBackupStore.cloneUserDictionaries(
+        named: LinnetBackupStore.learningDirectories, from: source, to: restored)
     }
     try FileManager.default.removeItem(at: foreign)
     try FileManager.default.removeItem(at: recovery)
@@ -120,7 +125,8 @@ struct LinnetBackupStoreTests {
       withDestinationURL: original
     )
     expectFailure(.unsafeArtifact("lost")) {
-      try LinnetBackupStore.cloneLearningDictionaries(from: source, to: restored)
+      try LinnetBackupStore.cloneUserDictionaries(
+        named: LinnetBackupStore.learningDirectories, from: source, to: restored)
     }
   }
 

@@ -225,7 +225,7 @@ struct InputTabView: View {
         }
         .pickerStyle(.menu)
         Text(
-          "The selected scheme is used for Chinese input and pinyin-to-English lookup in Smart English."
+          "The selected scheme is used for Chinese input and prefixed pinyin-to-English lookup in Chinese mode."
         )
         .font(.callout)
         .foregroundStyle(.secondary)
@@ -248,17 +248,17 @@ struct InputTabView: View {
         }
         .pickerStyle(.menu)
         .accessibilityHint(
-          Text("Type the selected key before the chosen scheme's code in Chinese or Smart English.")
+          Text("Type the selected key before the chosen scheme's code in Chinese mode.")
         )
 
         Text(
-          "Type the selected key before the chosen scheme's code in Chinese or Smart English."
+          "Type the selected key before the chosen scheme's code in Chinese mode."
         )
         .font(.callout)
         .foregroundStyle(.secondary)
 
         Text(
-          "Smart English also recognizes the chosen scheme's letter-only codes automatically. Use the trigger for codes that contain punctuation."
+          "Smart English recognizes letter-only full pinyin automatically; semicolon and other punctuation go directly to the current app."
         )
           .font(.caption)
           .foregroundStyle(.secondary)
