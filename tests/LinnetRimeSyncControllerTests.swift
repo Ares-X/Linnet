@@ -73,9 +73,10 @@ struct LinnetRimeSyncControllerTests {
       fail("the hourly automatic window performed an early write")
     }
 
-    controller.synchronizeNow()
-    waitUntil { operations == 1 }
-    guard operations == 1, recordedAttempts == 1 else {
+    var manualResult: LinnetRimeSyncResult?
+    controller.synchronizeNow { manualResult = $0 }
+    waitUntil { manualResult != nil }
+    guard operations == 1, recordedAttempts == 1, manualResult == .completed else {
       fail("an explicit manual synchronization did not override the automatic window once")
     }
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
@@ -157,9 +158,11 @@ struct LinnetRimeSyncControllerTests {
       try Data(contentsOf: installation) == before
     else { fail("an unavailable sync location started a write or erased the configured directory") }
     locationIsAvailable = true
-    controller.synchronizeNow()
-    waitUntil { operations == 1 }
+    var manualResult: LinnetRimeSyncResult?
+    controller.synchronizeNow { manualResult = $0 }
+    waitUntil { manualResult != nil }
     guard configurationLoads == 2, operations == 1, recordedAttempts == 1,
+      manualResult == .completed,
       try Data(contentsOf: installation) == before
     else {
       fail("an enabled sync location stayed disconnected after becoming available")
@@ -183,9 +186,11 @@ struct LinnetRimeSyncControllerTests {
         return .completed
       }, cancelOperation: {})
     controller.start()
-    controller.synchronizeNow()
+    var manualResult: LinnetRimeSyncResult?
+    controller.synchronizeNow { manualResult = $0 }
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
     guard operations == 0, recordedAttempts == 0,
+      manualResult == .unavailable,
       try Data(contentsOf: installation) == before
     else { fail("disabled synchronization wrote a marker, installation, or learning data") }
     controller.stop()

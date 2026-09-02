@@ -20,12 +20,12 @@ extension SettingsDataCoordinator {
     let result = try await request(
       makeRequest(
         transactionID: UUID(), command: .synchronizeLearning, candidate: nil,
-        deadline: Date().addingTimeInterval(Self.interactiveRequestTimeout)
+        deadline: Date().addingTimeInterval(Self.learningSyncRequestTimeout)
       ),
-      replyTimeout: Self.interactiveRequestTimeout,
+      replyTimeout: Self.learningSyncRequestTimeout,
       progress: { _ in }
     )
-    guard result.code == .learningSyncRequested else {
+    guard result.code == .learningSyncCompleted else {
       throw Failure.requestFailed(result.code)
     }
   }

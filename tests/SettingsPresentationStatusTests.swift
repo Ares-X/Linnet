@@ -18,9 +18,9 @@ struct SettingsPresentationStatusTests {
       chinese
     )
     expect(
-      .cloudSyncRequested,
-      en: "Learning synchronization requested.",
-      zh: "已请求同步学习词。",
+      .cloudSyncCompleted,
+      en: "Learning synchronization completed.",
+      zh: "学习词同步已完成。",
       english,
       chinese
     )

@@ -584,8 +584,8 @@ struct SettingsDataCoordinatorTests {
           return .init(
             transactionID: request.transactionID,
             status: .running,
-            code: .learningSyncRequested,
-            detail: "fixture requested learning sync",
+            code: .learningSyncCompleted,
+            detail: "fixture completed learning sync",
             health: nil
           )
         case .pause:

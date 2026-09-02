@@ -2478,6 +2478,13 @@ rg -Fq 'case reloadLearningSync = "reload_learning_sync"' \
 rg -Fq 'case synchronizeLearning = "synchronize_learning"' \
   sources/LinnetSettings/SettingsContract.swift ||
   fail "manual learning synchronization has no typed IPC command"
+rg -Fq 'case learningSyncCompleted = "learning_sync_completed"' \
+  sources/LinnetSettings/SettingsContract.swift ||
+  fail "manual learning synchronization has no Host-owned terminal result"
+if rg -n 'learning_sync_requested|learningSyncRequested|cloudSyncRequested' \
+    sources tests -g '!verify_runtime_footprint.sh'; then
+  fail "manual learning synchronization regained request-dispatch success"
+fi
 if [[ -e package/installer-scripts/quit-applications-clean.jxa ]] ||
     rg -n '/usr/bin/osascript|quit-applications-clean\.jxa' \
       package/core-installer-scripts/preinstall package/make_package \

@@ -35,12 +35,22 @@ enum LinnetRimeSyncOutcome {
   case failed
 }
 
+/// The Host-owned terminal meaning of one explicit synchronization request.
+/// Settings must never infer completion from request dispatch alone.
+enum LinnetRimeSyncResult: Equatable {
+  case completed
+  case deferred
+  case failed
+  case unavailable
+}
+
 private struct LinnetRimeSyncCycle {
   let cycleID: UUID
   let deadline: Date
   var attempt: Int
   var recorded: Bool
   let syncDirectory: URL
+  let completion: ((LinnetRimeSyncResult) -> Void)?
 }
 
 final class LinnetRimeSyncController: @unchecked Sendable {
@@ -51,6 +61,7 @@ final class LinnetRimeSyncController: @unchecked Sendable {
   private let cancelOperation: () -> Void
   private let configurationQueue = DispatchQueue(label: "Linnet.learning-sync", qos: .utility)
   private var configurationOperation: BlockOperation?
+  private var configurationCompletion: ((LinnetRimeSyncResult) -> Void)?
   private var timer: Timer?
   private var cycle: LinnetRimeSyncCycle?
 
@@ -71,14 +82,23 @@ final class LinnetRimeSyncController: @unchecked Sendable {
   func stop() {
     configurationOperation?.cancel()
     configurationOperation = nil
+    let configurationCompletion = configurationCompletion
+    self.configurationCompletion = nil
+    let cycleCompletion = cycle?.completion
     cancelOperation()
     timer?.invalidate()
     timer = nil
     cycle = nil
+    configurationCompletion?(.deferred)
+    cycleCompletion?(.deferred)
   }
 
-  func reload(synchronizeImmediately: Bool = false) {
+  func reload(
+    synchronizeImmediately: Bool = false,
+    completion: ((LinnetRimeSyncResult) -> Void)? = nil
+  ) {
     stop()
+    configurationCompletion = completion
     let request = BlockOperation()
     configurationOperation = request
     request.addExecutionBlock { [weak self, weak request] in
@@ -87,45 +107,58 @@ final class LinnetRimeSyncController: @unchecked Sendable {
       DispatchQueue.main.async { [weak self] in
         guard let self, !request.isCancelled else { return }
         configurationOperation = nil
-        finishReload(result, synchronizeImmediately: synchronizeImmediately)
+        let completion = configurationCompletion
+        configurationCompletion = nil
+        finishReload(
+          result, synchronizeImmediately: synchronizeImmediately, completion: completion)
       }
     }
     configurationQueue.async { request.start() }
   }
 
   private func finishReload(
-    _ result: Result<LinnetRimeSyncConfiguration, Error>, synchronizeImmediately: Bool
+    _ result: Result<LinnetRimeSyncConfiguration, Error>,
+    synchronizeImmediately: Bool,
+    completion: ((LinnetRimeSyncResult) -> Void)?
   ) {
     do {
       let loaded = try result.get()
-      guard let syncDirectory = loaded.syncDirectory else { return }
+      guard let syncDirectory = loaded.syncDirectory else {
+        completion?(.unavailable)
+        return
+      }
       let now = Date()
       let next = synchronizeImmediately ? now : LinnetRimeSyncSchedule.nextAutomaticDate(
         now: now, lastAttempt: loaded.lastAttempt)
       if next <= now {
-        begin(at: now, syncDirectory: syncDirectory)
+        begin(at: now, syncDirectory: syncDirectory, completion: completion)
       } else {
         scheduleAutomatic(at: next)
       }
     } catch {
       print("Linnet learning sync configuration is unavailable: \(error.localizedDescription)")
+      completion?(.unavailable)
       scheduleAutomatic(at: Date().addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
     }
   }
 
-  func synchronizeNow() {
-    reload(synchronizeImmediately: true)
+  func synchronizeNow(completion: @escaping (LinnetRimeSyncResult) -> Void) {
+    reload(synchronizeImmediately: true, completion: completion)
   }
 
   private func scheduleAutomatic(at date: Date) {
     schedule(at: date) { [weak self] in self?.reload() }
   }
 
-  private func begin(at now: Date, syncDirectory: URL) {
+  private func begin(
+    at now: Date,
+    syncDirectory: URL,
+    completion: ((LinnetRimeSyncResult) -> Void)? = nil
+  ) {
     timer?.invalidate()
     let cycle = LinnetRimeSyncCycle(
       cycleID: UUID(), deadline: now.addingTimeInterval(60), attempt: 0, recorded: false,
-      syncDirectory: syncDirectory)
+      syncDirectory: syncDirectory, completion: completion)
     self.cycle = cycle
     attempt(cycle.cycleID)
   }
@@ -135,6 +168,7 @@ final class LinnetRimeSyncController: @unchecked Sendable {
     if !current.recorded {
       guard recordAttempt(Date()) else {
         cycle = nil
+        current.completion?(.failed)
         scheduleAutomatic(at: Date().addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
         return
       }
@@ -147,6 +181,7 @@ final class LinnetRimeSyncController: @unchecked Sendable {
       guard now < current.deadline else {
         cancelOperation()
         cycle = nil
+        current.completion?(.deferred)
         print("Linnet learning sync deferred; input and pending learning were preserved.")
         scheduleAutomatic(at: now.addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
         return
@@ -161,16 +196,26 @@ final class LinnetRimeSyncController: @unchecked Sendable {
       else {
         cancelOperation()
         cycle = nil
+        current.completion?(.deferred)
         scheduleAutomatic(at: now.addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
         return
       }
       schedule(at: now.addingTimeInterval(delay)) { [weak self] in self?.attempt(cycleID) }
-    case .completed, .deferred, .failed:
+    case .completed:
+      finish(current, result: .completed)
+    case .deferred:
+      finish(current, result: .deferred)
+    case .failed:
+      finish(current, result: .failed)
+    }
+  }
+
+  private func finish(_ current: LinnetRimeSyncCycle, result: LinnetRimeSyncResult) {
       let attemptedAt = Date()
       cycle = nil
+      current.completion?(result)
       scheduleAutomatic(
         at: attemptedAt.addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
-    }
   }
 
   private func schedule(at date: Date, action: @Sendable @escaping () -> Void) {

@@ -90,7 +90,8 @@ enum LinnetSettingsContract {
     /// Reloads the Host-owned learning synchronization schedule after the
     /// shared preference changes. No Rime database work runs in Settings.
     case reloadLearningSync = "reload_learning_sync"
-    /// Requests one immediate Host-owned incremental learning synchronization.
+    /// Runs one immediate Host-owned incremental learning synchronization and
+    /// returns only after the Host has a terminal attempt result.
     case synchronizeLearning = "synchronize_learning"
   }
 
@@ -152,7 +153,10 @@ enum LinnetSettingsContract {
     case coreActivationUnknownClient = "core_activation_unknown_client"
     case coreActivationRequesterUnavailable = "core_activation_requester_unavailable"
     case learningSyncConfigurationReloaded = "learning_sync_configuration_reloaded"
-    case learningSyncRequested = "learning_sync_requested"
+    case learningSyncCompleted = "learning_sync_completed"
+    case learningSyncDeferred = "learning_sync_deferred"
+    case learningSyncUnavailable = "learning_sync_unavailable"
+    case learningSyncFailed = "learning_sync_failed"
   }
 
   enum CoreActivationBlocker: String, Codable, Equatable, Sendable {

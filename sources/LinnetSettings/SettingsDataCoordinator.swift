@@ -254,6 +254,7 @@ actor SettingsDataCoordinator {
   /// Settings window when the input method is not running. Data mutations
   /// keep the full transaction timeout.
   static let interactiveRequestTimeout: TimeInterval = 3
+  static let learningSyncRequestTimeout: TimeInterval = 65
   static let transactionRequestTimeout: TimeInterval = 300
   static let configurationCandidateName = "configuration-candidate"
 

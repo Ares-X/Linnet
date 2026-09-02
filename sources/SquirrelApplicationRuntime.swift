@@ -367,15 +367,37 @@ extension SquirrelApplicationDelegate {
         health: health
       )
     case .synchronizeLearning:
-      rimeSyncController.synchronizeNow()
-      let health = runtimeHealth()
-      reply(
-        to: request.transactionID,
-        status: health.state,
-        code: .learningSyncRequested,
-        detail: "Immediate learning synchronization was requested.",
-        health: health
-      )
+      rimeSyncController.synchronizeNow { [weak self] result in
+        guard let self else { return }
+        let health = runtimeHealth()
+        let status: LinnetSettingsContract.RuntimeStatus
+        let code: LinnetSettingsContract.RuntimeReplyCode
+        let detail: String
+        switch result {
+        case .completed:
+          status = .running
+          code = .learningSyncCompleted
+          detail = "Immediate learning synchronization completed."
+        case .deferred:
+          status = .degraded
+          code = .learningSyncDeferred
+          detail = "Immediate learning synchronization was deferred without losing pending input."
+        case .unavailable:
+          status = .rejected
+          code = .learningSyncUnavailable
+          detail = "The learning synchronization location is unavailable."
+        case .failed:
+          status = .failed
+          code = .learningSyncFailed
+          detail = "Immediate learning synchronization failed."
+        }
+        transactionReply(.init(
+          transactionID: request.transactionID,
+          status: status,
+          code: code,
+          detail: detail,
+          health: health))
+      }
     }
   }
 

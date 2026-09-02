@@ -336,7 +336,7 @@ extension SettingsModel {
       defer { self.cloudSyncPreparing = false }
       do {
         try await self.coordinator.synchronizeLearningNow()
-        self.status = .cloudSyncRequested
+        self.status = .cloudSyncCompleted
       } catch {
         self.logDiagnostic(error, context: "Immediate learning sync request failed")
         self.status = .operationFailed(self.presentationFailure(error))

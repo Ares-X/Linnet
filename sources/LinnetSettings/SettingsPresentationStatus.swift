@@ -109,7 +109,7 @@ enum SettingsPresentationStatus: Equatable {
   case portableExported(productName: String)
   case portableImported
   case cloudSyncEnabled
-  case cloudSyncRequested
+  case cloudSyncCompleted
   case cloudBackupUploaded(Date)
   case cloudBackupUnchanged(Date)
   case cloudBackupRepairRequired
@@ -192,8 +192,8 @@ enum SettingsPresentationStatus: Equatable {
       pair = ("Selected portable categories were replaced; other data was preserved.", "已替换所选迁移数据类别，其他数据保持不变。")
     case .cloudSyncEnabled:
       pair = ("iCloud Drive learning synchronization enabled.", "已启用 iCloud Drive 学习词同步。")
-    case .cloudSyncRequested:
-      pair = ("Learning synchronization requested.", "已请求同步学习词。")
+    case .cloudSyncCompleted:
+      pair = ("Learning synchronization completed.", "学习词同步已完成。")
     case .cloudBackupUploaded(let verifiedAt):
       pair = (
         "Incremental recovery backup verified at \(verifiedAt.formatted()).",
@@ -295,7 +295,7 @@ enum SettingsPresentationStatus: Equatable {
       .portableExported,
       .portableImported,
       .cloudSyncEnabled,
-      .cloudSyncRequested,
+      .cloudSyncCompleted,
       .cloudBackupUploaded,
       .cloudBackupUnchanged,
       .cloudSyncDisabled,
