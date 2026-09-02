@@ -38,7 +38,7 @@
 | `data/chinese/overrides/` | 已复现、人工接受的中文读音与排序决定 |
 | `patches/` | 对精确上游源码应用且摘要锁定的必要补丁 |
 | `scripts/` | 上游同步、runtime build、数据 staging 和 metadata 工具 |
-| `package/` | 当前用户域 PKG、语言包、卸载器和 publication plan |
+| `package/` | 当前用户域 PKG、语言包、源码内卸载脚本和 publication plan |
 | `tests/` | focused、engine、package 和 product gates |
 | `upstreams.lock.json` | 所有上游版本、提交、输入摘要与直接上游集合 |
 | `config/linnet-data-releases.json` | Chinese/English/LTS/Extended release identity |
@@ -149,7 +149,7 @@ Settings UI 仅在显式隔离桌面和 Developer Mode 可用时运行，否则�
 checkout/cache/hydrate，保留历史相关的版本单调性检查及实际签名 App/package 门。
 不重跑已本地通过的源码测试；仅当收据的 Settings UI 未执行时补测这一项。
 它使用临时 Keychain 构建、签名、打包和最终验证一次。
-互不重叠的 Core 3 件、data 4 个完整词包及对应差分和 public 1 件直接写入三个 Draft GitHub
+互不重叠的 Core 2 件、data 4 个完整词包及对应差分和 public 1 件直接写入三个 Draft GitHub
 Releases。候选传输
 不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
 
@@ -168,12 +168,14 @@ identity。由于未来 `data-N` 尚不存在，只有显式
 - 只有同一个 `candidate_revision` 可以快进到 `main`；随后正常 candidate Action
   必须从已发布的固定 `data-N` pack 冷构建并得到相同 data bytes。
 
-进入安装验收时，本地只下载 candidate Action 的三个 Draft Release 原字节。验收人
-运行 `scripts/release-control authorize /absolute/release-directory` 后，本地 owner
-重新验证 manifest 中全部文件、远端 SHA-256/size 和精确 main，只创建非 force 的
-`linnet-publication/*` 标签。该标签启动 Ubuntu Action；publisher 不下载大型资产，
-只读取 GitHub metadata 和约 4 KB Catalog，按 Core → data → 非强制快进 Catalog →
-public / Latest 发布。稳定 Catalog 仍只有一个 owner 和一个 URL。
+进入安装验收时，本地只下载 candidate Action 的三个 Draft Release 原字节。离线安装、
+功能和 UI 验收通过后，`scripts/release-control preview /absolute/release-directory`
+重新验证完整候选并只创建 `linnet-preview/*` 标签；Ubuntu publisher 公开既有
+Core/data 预发布并推进 `preview-channel`，不触碰稳定 Catalog、Public 或 Latest。
+从旧版 Settings 选择 Preview 完成真实在线升级和跨 Mac iCloud 验收后，再运行
+`scripts/release-control authorize /absolute/release-directory`。正式标签复核同一批
+字节，推进 `data-channel`，最后公开 public / Latest。两个 Catalog 各有一个固定 URL，
+Settings 只消费用户明确选择的一个频道，不自动回退。
 
 GitHub Actions 会缓存锁定下载、runtime 构建依赖、经 fingerprint 和 inventory digest
 验证的原生 Rime 编译 transport、固定 Periphery binary，以及英文生成数据。手动
@@ -278,7 +280,8 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 ```
 
 `archive` 会沿同一链生成并验证固定 CMS leaf 的 App、未签名的 Complete/Core
-PKG、卸载器、确定性语言包和 sidecar；不要另写脚本重签或修补输出。由于 CMS
+两个 PKG、确定性语言包和 sidecar；卸载命令从对应版本源码标签读取，不是发布资产。
+不要另写脚本重签或修补输出。由于 CMS
 签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载
 `release-ci` 直接写入三个 Draft GitHub Releases 的同一 manifest 产物原字节。
 
@@ -330,7 +333,9 @@ Dock，并在最后一个窗口关闭后退出。
 
 PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机日志。PR 说明应列出
 精确 commit、manifest 集合摘要、逐文件 SHA-256、实际通过的验证和未执行项。
-安装验收不会自行创建公开版本 tag 或稳定 Release；只有验收人显式运行
+安装验收不会自行创建正式版本 tag 或稳定 Release；Preview 只允许验收人显式运行
+`scripts/release-control preview /absolute/release-directory` 后公开候选 Core/data 和
+候选 Catalog。只有完整验收后显式运行
 `scripts/release-control authorize /absolute/release-directory` 后，本地才会用
 Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
 复核同一批字节并完成发布；本地命令不能上传、编辑 Release 或推进 Catalog。

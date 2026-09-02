@@ -21,7 +21,7 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
   暂存和发布边界通过严格 codesign 结构校验；
 - PKG 明确为 `Status: no signature`，且不能含 Installer Signature 记录；
 - 候选目录精确匹配 `package/release_asset_manifest`；正式 Release 只有 1 个完整安装包，Core
-  更新频道包含 Core、卸载器和 Catalog，数据频道包含 4 个不可变词包及已绑定基线的差分；
+  更新频道包含 Core 和 Catalog，数据频道包含 4 个不可变词包及已绑定基线的差分；
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
 - Complete 只在首次创建 App 时注册输入源并向 macOS 提交一次启用请求；已有 App
   的 Complete 字节修复与 Core 更新都不注册、启用或选择输入源。允许与菜单选择
@@ -82,7 +82,7 @@ Settings UI 只在合法隔离桌面及 Developer Mode 下本地执行，否则�
 `package/verify_publication_artifacts` 再验证完整 manifest 集合。中间的 archive
 投影不重复验证同一 PKG。
 
-候选 Action 把 manifest 的原字节直接写入三个 Draft GitHub Releases：Core 3 件、data
+候选 Action 把 manifest 的原字节直接写入三个 Draft GitHub Releases：Core 2 件、data
 4 个完整词包及对应差分、public 1 件。GitHub Actions artifact 不是发布传输或存储 owner，因此不会再
 上传约 906 MB artifact、随后在另一个 job 下载并解压同一份数据。
 Core 与 public Draft 必须精确绑定当前候选 revision；data Draft 由固定 tag、标题、
@@ -138,15 +138,20 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
    `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
 3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
    candidate job summary 的 revision 与产物集合摘要，并在本地重新运行最终 verifier；
-4. 在真实账号用该目录完成“两轮同 leaf Core”：从前一公开版升级到候选，再重装
-   同一原字节。两轮都须无注销、无 Keychain 密码提示、Host PID 不变且
-   `AXHidden=false`，并保留 enabled/selected、UserData、输入菜单、Settings 和真实输入；
-5. 验收通过后运行
+4. 先完成候选原字节的首次安装、升级、重装、卸载、功能、性能和 UI 验收。随后运行
+   `scripts/release-control preview "$ARCHIVE_OUTPUT_DIR"`；它只创建字节绑定的
+   `linnet-preview/*` 标签。Ubuntu publisher 只公开 Core/data 预发布并非强制推进
+   `preview-channel`，不推进 `data-channel`、不公开 `v<VERSION>`、不改变 Latest；
+5. 在前一公开版的 Settings 选择 Preview，完成真实在线发现、Core 安装、运行中生效、
+   语言数据和双向 iCloud 同步验收；再用同一目录完成“两轮同 leaf Core”。两轮都须
+   无注销、无 Keychain 密码提示、Host PID 符合激活协议且 `AXHidden=false`，并保留
+   enabled/selected、UserData、输入菜单、Settings 和真实输入；
+6. 全量验收通过后运行
    `scripts/release-control authorize "$ARCHIVE_OUTPUT_DIR"`。本地命令只能重新验证
    全部 manifest 文件和三个远端 Release 的 SHA-256/size，并通过 SSH 创建
    `linnet-publication/v<VERSION>-<FULL_REVISION>-h<SET_SHA256>`；它不能构建、
    上传、编辑 Release 或推进 Catalog；
-6. 授权标签启动 Ubuntu publisher job。它从 GitHub Release metadata 验证完整 manifest
+7. 正式授权标签启动同一个 Ubuntu publisher job。它从 GitHub Release metadata 验证完整 manifest
    集合，只下载约 4 KB 的 `Linnet-Data-Channel.json`，然后按
    Core → data → 非强制快进 Catalog → Public / Latest 的顺序发布。大型资产不再下载。
 
@@ -160,8 +165,8 @@ candidate 流程。正常版本不运行 seed 模式。
 任一项失败都停止在当前幂等边界；不能覆盖、删除或 `--clobber` 已公开资产。候选
 字节本身有误时，修复必须形成新的 revision；只有已验收版本推进时才增加 build，
 数据内容变化时才增加必要的数据 sequence，再由
-macOS Action 生成新候选。`v<VERSION>` 只标识公开版本，两个控制标签分别只授权
-显式 data seed 或已验收的产物集合。
+macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、Preview 和正式
+发布三个控制标签分别只授权自己的边界。
 
 词包身份变化时序号必须严格递增，身份不变时序号必须保持不变。合并或 squash
 可能一次包含多次合法修订，因此基线比较不要求序号恰好加一；不得为了合并检查
@@ -177,8 +182,9 @@ matrix 独立验证。该记录只闭合 legacy identity edge，不能冒充当�
 Settings、输入交互或完整安装 UAT；当前候选仍以步骤 4 的“两轮同 leaf Core”为
 发布前证据。
 
-Settings 只读取 `data-channel` 的一个稳定指针，不读取可变 Release 别名，也不
-维护第二份 Core 版本清单。仓库没有候选 Catalog 地址或自动回退路径。
+Settings 只读取用户明确选择的 `data-channel` 或 `preview-channel` 指针，不读取
+可变 Release 别名，也不维护第二份 Core 版本清单；默认始终是正式频道，未知保存值
+回到正式频道，不存在自动回退路径。
 
 GitHub 令牌只用于把已经验证的字节写入当前仓库；固定 P12 与密码分别存放在
 `community-signing` Environment 的

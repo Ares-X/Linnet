@@ -111,6 +111,7 @@ extension DataTabView {
     GroupBox("Core update") {
       VStack(alignment: .leading, spacing: 10) {
         runtimeVersionRow
+        updateChannelPicker
         updateCheckRow
         Divider()
         HStack(alignment: .center, spacing: 10) {

@@ -572,6 +572,22 @@ struct SettingsDataCoordinatorTests {
         switch request.command {
         case .activateCore:
           fail("the data coordinator unexpectedly requested Core activation")
+        case .reloadLearningSync:
+          return .init(
+            transactionID: request.transactionID,
+            status: .running,
+            code: .learningSyncConfigurationReloaded,
+            detail: "fixture reloaded learning sync",
+            health: nil
+          )
+        case .synchronizeLearning:
+          return .init(
+            transactionID: request.transactionID,
+            status: .running,
+            code: .learningSyncRequested,
+            detail: "fixture requested learning sync",
+            health: nil
+          )
         case .pause:
           if let status = requestOrder.takePauseStatus() {
             return reply(status, "fixture forced pause terminal", request: request)
@@ -681,6 +697,12 @@ struct SettingsDataCoordinatorTests {
         dataRegistry: registry,
         transactionRequester: transactionRequester
       )
+      let requestsBeforeLearningSync = requestOrder.currentRequestCount()
+      try await coordinator.reloadLearningSyncConfiguration()
+      try await coordinator.synchronizeLearningNow()
+      guard requestOrder.currentRequestCount() == requestsBeforeLearningSync + 2 else {
+        fail("learning synchronization did not use the typed Host IPC boundary")
+      }
       let oversizedHallelujah = fixtureRoot.appending(path: "oversized-substitutions.sqlite3")
       try makeSubstitutionDatabase(at: oversizedHallelujah)
       let oversizedHallelujahHandle = try FileHandle(forWritingTo: oversizedHallelujah)

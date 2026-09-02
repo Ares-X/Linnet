@@ -135,7 +135,8 @@ extension SettingsModel {
     packDownloadProgress = 0
     setLanguageDataUpdateState(target, .downloading)
     let coordinator = coordinator
-    packDownloadTask = Task.detached { [weak self, registry, downloadSource, coordinator] in
+    let catalogURL = updateChecker.updateChannel.catalogURL
+    packDownloadTask = Task.detached { [weak self, registry, downloadSource, coordinator, catalogURL] in
       do {
         try registry.prepareMutableDirectories()
         let lease = try await LinnetSettingsMutationLease.acquire(
@@ -143,8 +144,7 @@ extension SettingsModel {
         defer { _ = lease }
         try Task.checkCancellation()
         let transport = LinnetSettingsDownloadTransport(source: downloadSource)
-        let catalogData = try await transport.downloadCatalog(
-          at: LinnetSettingsDownloadSource.canonicalCatalogURL)
+        let catalogData = try await transport.downloadCatalog(at: catalogURL)
         try Task.checkCancellation()
         await self?.setLanguageDataUpdateState(target, .verifying)
         let catalog = try registry.verifyDataChannel(catalogData)

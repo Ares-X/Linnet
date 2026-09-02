@@ -304,7 +304,7 @@ extension SettingsModel {
         }
         cloudSyncEnabled = true
         cloudSyncLocation = location
-        notifyCloudSyncConfigurationChanged()
+        try await coordinator.reloadLearningSyncConfiguration()
         status = .cloudSyncEnabled
       } catch {
         logDiagnostic(error, context: "Linnet iCloud Drive folder is unavailable")
@@ -317,11 +317,32 @@ extension SettingsModel {
       }
       cloudSyncEnabled = false
       cloudSyncLocation = nil
-      notifyCloudSyncConfigurationChanged()
+      do {
+        try await coordinator.reloadLearningSyncConfiguration()
+      } catch {
+        logDiagnostic(error, context: "Learning sync configuration reload failed")
+        status = .operationFailed(presentationFailure(error))
+        return
+      }
       status = .cloudSyncDisabled
     }
   }
 
+  func synchronizeLearningNow() {
+    guard cloudSyncLocation != nil, !operationActive, !cloudSyncPreparing else { return }
+    cloudSyncPreparing = true
+    Task { [weak self] in
+      guard let self else { return }
+      defer { self.cloudSyncPreparing = false }
+      do {
+        try await self.coordinator.synchronizeLearningNow()
+        self.status = .cloudSyncRequested
+      } catch {
+        self.logDiagnostic(error, context: "Immediate learning sync request failed")
+        self.status = .operationFailed(self.presentationFailure(error))
+      }
+    }
+  }
   func uploadCloudBackupArchive(repair: Bool = false) {
     guard let cloudFolder = cloudSyncLocation?.folder, !operationActive else { return }
     run(
@@ -364,14 +385,6 @@ extension SettingsModel {
       status = .operationFailed(presentationFailure(error))
       return nil
     }
-  }
-
-  private func notifyCloudSyncConfigurationChanged() {
-    DistributedNotificationCenter.default().postNotificationName(
-      LinnetSettingsContract.cloudSyncConfigurationDidChange,
-      object: nil,
-      userInfo: nil,
-      deliverImmediately: true)
   }
 
   func inspectPortableImport(

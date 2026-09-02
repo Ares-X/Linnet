@@ -10,8 +10,8 @@ This installer works only in the current user's account. It installs Linnet in
 or install a daemon, launch item, privileged helper, or background updater.
 
 This community package is not signed with an Apple Developer ID and is not
-notarized. Continue only after the package and uninstaller match their exact
-release SHA-256 files. Open it from Finder with Control-click or right-click >
+notarized. Continue only after the package matches its exact Release SHA-256.
+The uninstall command in README is bound to this version's source tag. Open the package from Finder with Control-click or right-click >
 Open; if macOS still blocks it, use System Settings > Privacy & Security > Open
 Anyway. Never disable Gatekeeper or clear quarantine attributes. Stop if the
 checksum differs or macOS reports damage or malware.
@@ -72,8 +72,9 @@ IP address, request time, and requested public file URLs, but Linnet does not
 send them personal dictionaries, learning data, or credentials.
 
 Keep the installer until installation and first input are complete. The exact
-SHA-256 is printed in the same stable Release notes. Core updates and the
-uninstaller live in the same repository's versioned Core update channel.
+SHA-256 is printed in the same stable Release notes. Core updates live in the
+same repository's versioned Core update channel; README fetches uninstall only
+from the matching immutable version tag.
 
 Before uninstalling, switch to another input source. The uninstaller never runs
 the installed Host; if the exact Host or Settings process remains active, sign
@@ -136,6 +137,8 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 内置字体，不会下载或依赖第三方字体。
 
 Settings 打开时会检查一次已发布 Catalog，并以内联方式显示 Core/数据更新状态。
+更新频道可选正式版（默认）或预览版；Core 检查和语言数据下载始终使用同一所选频道，
+不会自动切换或回退。
 Core 仍需用户确认安装；语言数据只在用户从 Settings 主动发起时下载。GitHub 是默认来源，也可明确选择第三方
 公开镜像或兼容的自定义 HTTPS 镜像。Linnet 不自动切换来源，并在激活前校验
 Catalog、容器和每个文件。第三方镜像可能看到 IP、请求时间和公开文件 URL，

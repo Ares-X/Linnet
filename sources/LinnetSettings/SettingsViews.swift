@@ -747,3 +747,25 @@ func categoryName(_ category: LinnetBackupStore.Category) -> LocalizedStringKey 
   case .englishLearning: "English learning"
   }
 }
+
+extension DataTabView {
+  var updateChannelPicker: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Picker("Update channel", selection: Binding(
+        get: { updateChecker.updateChannel },
+        set: { updateChecker.setUpdateChannel($0) }
+      )) {
+        Text("Stable").tag(LinnetSettingsUpdateChecker.UpdateChannel.stable)
+        Text("Preview").tag(LinnetSettingsUpdateChecker.UpdateChannel.preview)
+      }
+      .pickerStyle(.segmented)
+      .disabled(updateChecker.active || updateChecker.activationInProgress)
+      if updateChecker.updateChannel == .preview {
+        Text(
+          "Preview receives release candidates before they become the latest stable version.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+}

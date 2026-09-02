@@ -25,8 +25,9 @@ fail_publish() {
 }
 
 [[ "$#" -eq 5 &&
-   ( "${mode}" == verify || "${mode}" == publish || "${mode}" == data-seed ) ]] ||
-  fail_publish "usage: {verify|publish|data-seed} VERSION CATALOG_SEQUENCE CANDIDATE_REVISION AUTHORIZATION_TAG"
+   ( "${mode}" == verify || "${mode}" == preview ||
+     "${mode}" == publish || "${mode}" == data-seed ) ]] ||
+  fail_publish "usage: {verify|preview|publish|data-seed} VERSION CATALOG_SEQUENCE CANDIDATE_REVISION AUTHORIZATION_TAG"
 [[ "${mode}" == verify || "${GITHUB_ACTIONS:-}" == true ]] ||
   fail_publish "public release mutation is owned by GitHub Actions"
 [[ "${repository}" == Ares-X/Linnet ]] ||
@@ -52,7 +53,11 @@ if [[ "${mode}" == data-seed ]]; then
      "${BASH_REMATCH[3]}" == "${candidate_revision}" ]] ||
     fail_publish "data-seed authorization differs from candidate identity"
 else
-  authorization_pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h([0-9a-f]{64})$'
+  if [[ "${mode}" == preview ]]; then
+    authorization_pattern='^linnet-preview/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h([0-9a-f]{64})$'
+  else
+    authorization_pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h([0-9a-f]{64})$'
+  fi
   [[ "${publication_authorization}" =~ ${authorization_pattern} ]] ||
     fail_publish "publication authorization tag is invalid"
   [[ "${BASH_REMATCH[1]}" == "${version}" &&
@@ -279,16 +284,17 @@ if [[ "${mode}" == verify ]]; then
   exit 0
 fi
 promote_catalog() {
+  local branch="$1"
   local api="repos/${repository}/git"
   local current_commit="" current_tree current_blob current_sequence
-  if current_commit="$(gh api "repos/${repository}/git/ref/heads/data-channel" \
-      --jq '.object.sha' 2>"${work_root}/data-channel-error")"; then
+  if current_commit="$(gh api "repos/${repository}/git/ref/heads/${branch}" \
+      --jq '.object.sha' 2>"${work_root}/${branch}-error")"; then
     [[ "${current_commit}" =~ ^[0-9a-f]{40}$ ]] ||
-      fail_publish "data-channel branch identity is invalid"
+      fail_publish "${branch} branch identity is invalid"
     current_tree="$(gh api "${api}/commits/${current_commit}" --jq '.tree.sha')"
     current_blob="$(gh api "${api}/trees/${current_tree}" --jq \
       '.tree | select(length == 1 and .[0].path == "Linnet-Data-Channel.json" and .[0].mode == "100644" and .[0].type == "blob") | .[0].sha')"
-    [[ -n "${current_blob}" ]] || fail_publish "data-channel tree is not canonical"
+    [[ -n "${current_blob}" ]] || fail_publish "${branch} tree is not canonical"
     gh api "${api}/blobs/${current_blob}" --jq '.content' |
       ruby -rbase64 -e 'File.binwrite(ARGV.fetch(0), Base64.decode64(STDIN.read))' \
         "${work_root}/current-catalog"
@@ -300,7 +306,7 @@ promote_catalog() {
       abort unless value.is_a?(Integer) && value.positive?
       puts value
     ' "${work_root}/current-catalog")" ||
-      fail_publish "current data-channel Catalog is invalid"
+      fail_publish "current ${branch} Catalog is invalid"
     if (( current_sequence == catalog_sequence )); then
       ruby -rjson -e '
         current = JSON.parse(File.binread(ARGV.fetch(0)))
@@ -316,10 +322,10 @@ promote_catalog() {
     elif (( current_sequence > catalog_sequence )); then
       fail_publish "Catalog sequence cannot replace current sequence ${current_sequence}"
     fi
-  elif ! grep -Eq 'Not Found|HTTP 404' "${work_root}/data-channel-error"; then
-    [[ ! -s "${work_root}/data-channel-error" ]] ||
-      cat "${work_root}/data-channel-error" >&2
-    fail_publish "data-channel branch identity is unavailable"
+  elif ! grep -Eq 'Not Found|HTTP 404' "${work_root}/${branch}-error"; then
+    [[ ! -s "${work_root}/${branch}-error" ]] ||
+      cat "${work_root}/${branch}-error" >&2
+    fail_publish "${branch} branch identity is unavailable"
   fi
 
   ruby -rjson -rbase64 -e '
@@ -340,34 +346,39 @@ promote_catalog() {
     document = {"message" => ARGV.fetch(0), "tree" => ARGV.fetch(1)}
     document["parents"] = [ARGV.fetch(2)] unless ARGV.fetch(2).empty?
     File.binwrite(ARGV.fetch(3), JSON.generate(document))
-  ' "Publish Linnet data channel ${catalog_sequence}" "${tree}" "${current_commit}" \
+  ' "Publish Linnet ${branch} ${catalog_sequence}" "${tree}" "${current_commit}" \
     "${work_root}/commit.json"
   commit="$(gh api --method POST "${api}/commits" --input \
     "${work_root}/commit.json" --jq '.sha')"
   if [[ -n "${current_commit}" ]]; then
-    gh api --method PATCH "repos/${repository}/git/refs/heads/data-channel" \
+    gh api --method PATCH "repos/${repository}/git/refs/heads/${branch}" \
       -f sha="${commit}" -F force=false >/dev/null
   else
     gh api --method POST "repos/${repository}/git/refs" \
-      -f ref=refs/heads/data-channel -f sha="${commit}" >/dev/null
+      -f ref="refs/heads/${branch}" -f sha="${commit}" >/dev/null
   fi
   local final_commit final_tree final_blob
-  final_commit="$(gh api "repos/${repository}/git/ref/heads/data-channel" --jq '.object.sha')"
+  final_commit="$(gh api "repos/${repository}/git/ref/heads/${branch}" --jq '.object.sha')"
   [[ "${final_commit}" == "${commit}" ]] ||
-    fail_publish "data-channel ref did not advance to the exact Catalog"
+    fail_publish "${branch} ref did not advance to the exact Catalog"
   final_tree="$(gh api "${api}/commits/${final_commit}" --jq '.tree.sha')"
   final_blob="$(gh api "${api}/trees/${final_tree}" --jq \
     '.tree | select(length == 1 and .[0].path == "Linnet-Data-Channel.json" and .[0].mode == "100644" and .[0].type == "blob") | .[0].sha')"
-  [[ -n "${final_blob}" ]] || fail_publish "published data-channel tree is not canonical"
+  [[ -n "${final_blob}" ]] || fail_publish "published ${branch} tree is not canonical"
   gh api "${api}/blobs/${final_blob}" --jq '.content' |
     ruby -rbase64 -e 'File.binwrite(ARGV.fetch(0), Base64.decode64(STDIN.read))' \
       "${work_root}/final-catalog"
   cmp -s "${catalog}" "${work_root}/final-catalog" ||
-    fail_publish "data-channel bytes differ after publication"
+    fail_publish "${branch} bytes differ after publication"
 }
 
 publish_channel core
 publish_channel data
-promote_catalog
+if [[ "${mode}" == preview ]]; then
+  promote_catalog preview-channel
+  echo "Linnet ${version} GitHub Action Preview publication: PASS"
+  exit 0
+fi
+promote_catalog data-channel
 publish_channel public
 echo "Linnet ${version} GitHub Action publication: PASS"

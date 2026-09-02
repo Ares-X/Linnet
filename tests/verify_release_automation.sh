@@ -78,6 +78,7 @@ if rg -n 'scripts/release-control publish|signs exactly once locally|本地归�
 fi
 for required in \
     'macOS GitHub Action' \
+    'scripts/release-control preview' \
     'scripts/release-control authorize' \
     'GitHub Actions artifact 不是发布传输或存储 owner'; do
   rg -Fq -- "${required}" "${policy_docs[@]}" ||
@@ -88,6 +89,7 @@ for required in \
     'environment: community-signing' \
     'LINNET_COMMUNITY_CMS_P12_BASE64' \
     'linnet-data-seed/v*-*-*' \
+    'linnet-preview/v*-*-h*' \
     'Bootstrap an exact future LTS data seed' \
     'scripts/fetch-locked-release-asset upstreams.lock.json' \
     './action-install.sh' \
@@ -101,7 +103,7 @@ for required in \
     'package/stage_github_release stage' \
     'package/publish_github_release data-seed' \
     'runs-on: ubuntu-latest' \
-    'package/publish_github_release publish'; do
+    'package/publish_github_release "${publication_mode}"'; do
   rg -Fq -- "${required}" "${release_workflow}" ||
     fail "the Action-owned release chain is incomplete: ${required}"
 done
@@ -123,11 +125,13 @@ fi
 
 for required in \
     'usage: scripts/release-control authorize ABSOLUTE_RELEASE_DIRECTORY' \
+    'usage: scripts/release-control preview ABSOLUTE_RELEASE_DIRECTORY' \
     'remote get-url origin' \
     'ls-remote --exit-code origin refs/heads/main' \
     'package/verify_publication_artifacts' \
     'package/release_candidate_identity' \
     'linnet-publication/v${version}-${revision}-h${candidate_digest}' \
+    'linnet-preview/v${version}-${revision}-h${candidate_digest}' \
     'package/stage_github_release" verify'; do
   rg -Fq -- "${required}" "${control}" ||
     fail "local UAT authorization boundary is incomplete: ${required}"
@@ -357,6 +361,17 @@ export FAKE_RELEASE_DIR="${release_dir}"
 export FAKE_LOG="${fake_log}"
 fake_path="${fake_bin}:${PATH}"
 expected_tag="linnet-publication/v0.1.8-${FAKE_REVISION}-h$(printf '%064d' 0)"
+expected_preview_tag="linnet-preview/v0.1.8-${FAKE_REVISION}-h$(printf '%064d' 0)"
+
+: >"${fake_log}"
+TMPDIR="${fixture}/tmp" PATH="${fake_path}" \
+  "${fixture_repo}/scripts/release-control" preview "${release_dir}" >/dev/null
+[[ "$(grep -E '^verify ' "${fake_log}")" == \
+  $'verify core\nverify data\nverify public' ]] ||
+  fail "local Preview authorization did not reverify the complete candidate"
+[[ "$(grep -c "^push ${FAKE_REVISION}:refs/tags/${expected_preview_tag}$" \
+    "${fake_log}")" -eq 1 ]] ||
+  fail "local Preview authorization did not create one exact byte-bound tag"
 
 : >"${fake_log}"
 TMPDIR="${fixture}/tmp" PATH="${fake_path}" \

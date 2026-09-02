@@ -113,11 +113,9 @@ output_dir="$(cd "${output_dir}" && pwd -P)"
 release_prefix="Linnet-${version}-arm64"
 core_package_name="${release_prefix}-Core-community-beta.pkg"
 package_name="Linnet.pkg"
-uninstaller_name="Linnet-${version}-Uninstall.command"
 outputs=(
   "${core_package_name}"
   "${package_name}"
-  "${uninstaller_name}"
 )
 for output in "${outputs[@]}"; do
   [[ ! -e "${output_dir}/${output}" ]] ||
@@ -456,9 +454,5 @@ for candidate in "${core_candidate}" "${package_candidate}"; do
   name="${candidate##*/}"
   mv "${candidate}" "${output_dir}/${name}"
 done
-cp "${project_root}/package/uninstall-linnet" "${work_root}/${uninstaller_name}"
-chmod 755 "${work_root}/${uninstaller_name}"
-mv "${work_root}/${uninstaller_name}" "${output_dir}/${uninstaller_name}"
-
 echo "Linnet current-user Core and complete PKGs: PASS"
 printf '%s\n' "${core_package_name}" "${package_name}"

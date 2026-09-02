@@ -5,6 +5,38 @@ import Foundation
 /// orchestration. The running Host remains the sole exit-safety authority.
 @MainActor
 final class LinnetSettingsUpdateChecker: ObservableObject {
+  enum UpdateChannel: String, CaseIterable, Identifiable, Sendable {
+    case stable
+    case preview
+
+    static let defaultsKey = "Linnet.Settings.UpdateChannel.v1"
+
+    var id: String { rawValue }
+
+    var catalogURL: URL {
+      switch self {
+      case .stable:
+        LinnetSettingsDownloadSource.canonicalCatalogURL
+      case .preview:
+        URL(
+          string:
+            "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/Linnet-Data-Channel.json"
+        )!
+      }
+    }
+
+    static func load(from defaults: UserDefaults = .standard) -> Self {
+      guard let rawValue = defaults.string(forKey: defaultsKey),
+        let channel = Self(rawValue: rawValue)
+      else { return .stable }
+      return channel
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+      defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+  }
+
   enum RuntimeVersionState: Equatable {
     /// One public compatibility bridge: an identity-free 0.1.9 Host can only
     /// defer to the installed 0.1.10 Core. Remove this constant, the
@@ -76,6 +108,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   @Published private(set) var installedIdentity: LinnetSettingsContract.ProductIdentity?
   @Published private(set) var runtimeVersionState: RuntimeVersionState =
     .checking(installed: nil)
+  @Published private(set) var updateChannel: UpdateChannel
 
   var activationInProgress: Bool {
     if case .applying = runtimeVersionState { return true }
@@ -86,6 +119,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   private let hostBundleURL: URL?
   private let hostBundleIdentifier: String?
   private let transactionRequester: LinnetSettingsTransactionRequesting
+  private let updateDefaults: UserDefaults
   private var edition: LinnetDataRegistry.Edition?
   private var installedPacks: [LinnetDataRegistry.ActivePack]
   private var task: Task<Void, Never>?
@@ -97,7 +131,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     edition: LinnetDataRegistry.Edition?,
     installedPacks: [LinnetDataRegistry.ActivePack],
     bundle: Bundle = .main,
-    transactionRequester: LinnetSettingsTransactionRequesting? = nil
+    transactionRequester: LinnetSettingsTransactionRequesting? = nil,
+    updateDefaults: UserDefaults = .standard
   ) {
     identityBundle = bundle
     installedIdentity = nil
@@ -106,6 +141,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
     hostBundleURL = host?.bundleURL
     hostBundleIdentifier = host?.bundleIdentifier
+    self.updateDefaults = updateDefaults
+    updateChannel = UpdateChannel.load(from: updateDefaults)
     self.transactionRequester = transactionRequester
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
     refreshInstalledIdentity()
@@ -115,6 +152,18 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   func check() {
     startCheck(replacingCurrent: false)
     refreshRuntime()
+  }
+
+  func setUpdateChannel(_ channel: UpdateChannel) {
+    guard channel != updateChannel else { return }
+    task?.cancel()
+    cycle &+= 1
+    active = false
+    failed = false
+    availability = nil
+    updateChannel = channel
+    channel.save(to: updateDefaults)
+    startCheck(replacingCurrent: true)
   }
 
   func refreshRuntime() {
@@ -221,11 +270,11 @@ extension LinnetSettingsUpdateChecker {
     let currentBuild = installedIdentity.build
     let edition = edition
     let installedPacks = installedPacks
+    let catalogURL = updateChannel.catalogURL
     task = Task.detached { [weak self] in
       do {
         let transport = LinnetSettingsDownloadTransport(source: .direct)
-        let data = try await transport.downloadCatalog(
-          at: LinnetSettingsDownloadSource.canonicalCatalogURL)
+        let data = try await transport.downloadCatalog(at: catalogURL)
         try Task.checkCancellation()
         let catalog = try LinnetDataChannel.verifyPublished(data).catalog
         let result = try catalog.updateAvailability(

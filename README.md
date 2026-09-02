@@ -154,7 +154,7 @@ Linnet 不会自动点击系统授权或选择输入源；首次安装后的允�
 |suanfa  → algorithm
 ```
 
-选择自然码后，同一示例可以写成 `|srfa`。Smart English 中直接输入全拼字母即可查看英文候选，不使用反查触发键；普通英文候选仍排在前面，拼音结果不会取代原始输入，`;` 等标点始终直接交给当前应用。
+选择自然码后，同一示例可以写成 `|srfa`。Smart English 中直接输入当前全拼或双拼编码即可查看英文候选，不使用反查触发键；普通英文候选仍排在前面，拼音结果不会取代原始输入，`;` 等标点始终直接交给当前应用。
 
 ### 自定义词与 Text Expander
 
@@ -179,7 +179,7 @@ Linnet 不会自动点击系统授权或选择输入源；首次安装后的允�
 
 外观预览会使用所选主题、字号与布局；需要改变输入行为的选项在点击 **Apply Changes** 后生效。请不要手工编辑 Linnet 生成的 `linnet_user.custom.yaml`、`squirrel.custom.yaml`、`default.custom.yaml` 或 schema custom 文件。
 
-Settings 每次打开时会从同一 GitHub 仓库读取一个经过校验的小型 Catalog，并在“Data & Updates / 数据与更新”中安静显示“已是最新”、Core 更新或具体语言数据更新；同一区域还会比较磁盘上已安装的 Core 与当前 Host 的版本和 build，避免把“安装成功”误报成“新代码已经运行”。源码 revision 仅在高级详情中显示。输入进程始终离线；检查不会下载大型词库，也不会弹出系统通知。只有用户明确点击语言数据更新后，Settings 才会下载并校验语言包，再通过现有事务原子激活。
+Settings 每次打开时会从同一 GitHub 仓库读取一个经过校验的小型 Catalog，并在“Data & Updates / 数据与更新”中安静显示“已是最新”、Core 更新或具体语言数据更新。更新频道可选择 **正式版**（默认）或 **预览版**；两者的 Core 检查和语言数据下载始终使用同一个所选 Catalog，不会自动切换或回退。同一区域还会比较磁盘上已安装的 Core 与当前 Host 的版本和 build，避免把“安装成功”误报成“新代码已经运行”。源码 revision 仅在高级详情中显示。输入进程始终离线；检查不会下载大型词库，也不会弹出系统通知。只有用户明确点击语言数据更新后，Settings 才会下载并校验语言包，再通过现有事务原子激活。
 
 本地语言数据比频道版本更新时，会明确显示“已安装的语言数据领先于此更新频道”，不会提示降级或下载旧包。语言包以各自的 Data release 序号比较新旧；整组更新必须兼容且不让任何已有包倒退，同一序号对应不同内容会报告校验失败。已有词包优先下载与当前内容匹配的差分，不变词包直接复用。缺少可用差分或差分校验失败时，保留当前数据，只有再次确认完整修复后才下载有变化的完整词包；首次安装尚不存在的词包需要完整基线。
 
@@ -228,14 +228,18 @@ shasum -a 256 "Linnet-${LINNET_VERSION}-arm64-Core-community-beta.pkg"
 
 ### 卸载
 
-卸载工具也在对应的 `core-v<version>` 更新页。下载并核对页面中的 SHA-256 后，先查看计划：
+卸载脚本只从已发布版本的精确源码标签读取，不使用可变的 `main`，也不再作为独立 Release 资产。先查看计划：
 
 运行卸载器前，必须先从 macOS 输入菜单切换到其他输入法。卸载器不会执行安装目录内的 Host，也不会替用户终止 Host 或 Settings；如果检测到其精确进程仍在运行，会停止且不删除任何内容，请注销并重新登录后再运行卸载器。
 
 ```bash
 LINNET_VERSION='X.Y.Z'
-"./Linnet-${LINNET_VERSION}-Uninstall.command" --print-plan
-"./Linnet-${LINNET_VERSION}-Uninstall.command"
+/usr/bin/curl --fail --location --proto '=https' \
+  "https://raw.githubusercontent.com/Ares-X/Linnet/v${LINNET_VERSION}/package/uninstall-linnet" \
+  | /bin/bash -s -- --print-plan
+/usr/bin/curl --fail --location --proto '=https' \
+  "https://raw.githubusercontent.com/Ares-X/Linnet/v${LINNET_VERSION}/package/uninstall-linnet" \
+  | /bin/bash
 ```
 
 默认卸载会删除 App、语言包和生成数据，但保留个人词、学习数据、Text Expander、备份、事务记录与偏好。完成后注销并重新登录，以刷新 macOS 输入源列表。
@@ -243,7 +247,9 @@ LINNET_VERSION='X.Y.Z'
 只有确定不再需要任何 Linnet 用户数据时，才使用不可恢复的完整清理：
 
 ```bash
-"./Linnet-${LINNET_VERSION}-Uninstall.command" --purge-user-data
+/usr/bin/curl --fail --location --proto '=https' \
+  "https://raw.githubusercontent.com/Ares-X/Linnet/v${LINNET_VERSION}/package/uninstall-linnet" \
+  | /bin/bash -s -- --purge-user-data
 ```
 
 运行日志位于产品固定目录 `Application Support/Linnet/Runtime/Logs`，会随默认卸载的 Runtime 一起删除。`--purge-user-data` 还会删除偏好和剩余个人数据；卸载器不会猜测或遍历系统临时目录。

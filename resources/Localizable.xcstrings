@@ -1,6 +1,10 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Update channel" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"更新频道"}}}},
+    "Stable" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"正式版"}}}},
+    "Preview" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"预览版"}}}},
+    "Preview receives release candidates before they become the latest stable version." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"预览版会在候选版本成为最新正式版前收到更新。"}}}},
     "Installed language data is newer than this update channel. No downgrade will be downloaded." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"已安装的语言数据领先于此更新频道，不会下载旧版本。"}}}},
     "iCloud Drive sync" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"iCloud Drive 同步"}}}},
     "Sync learned words with iCloud Drive" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"通过 iCloud Drive 同步学习词"}}}},

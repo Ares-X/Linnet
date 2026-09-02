@@ -304,7 +304,10 @@ if rg -n 'core-update-selection|prior_enablement|TISDisable|--activate-input-sou
 fi
 test "$(rg -F -c 'TISRegisterInputSource' sources/InputSource.swift)" = 1
 test "$(rg -F -c 'TISEnableInputSource' sources/InputSource.swift)" = 1
-test "$(rg -F -c 'TISSelectInputSource' sources/InputSource.swift)" = 1
+if rg -Fq 'TISSelectInputSource' sources/InputSource.swift; then
+  echo "Complete first install still selects the user-owned input source." >&2
+  exit 1
+fi
 legacy_revisions=(
   755f69612ddd529ae5178a940498a2f2f9ac7cbf
   3a48e4853674b27cfd49b6bddcf9f6c9d6ee0999

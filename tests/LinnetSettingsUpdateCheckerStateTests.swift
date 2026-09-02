@@ -4,6 +4,33 @@ import Foundation
 @main
 struct LinnetSettingsUpdateCheckerStateTests {
   @MainActor static func main() async {
+    let defaultsSuite = "LinnetSettingsUpdateChannelTests-\(UUID().uuidString)"
+    guard let updateDefaults = UserDefaults(suiteName: defaultsSuite) else {
+      fail("could not create isolated update-channel defaults")
+    }
+    defer { updateDefaults.removePersistentDomain(forName: defaultsSuite) }
+    require(
+      LinnetSettingsUpdateChecker.UpdateChannel.load(from: updateDefaults) == .stable,
+      "a fresh installation did not default to the stable update channel"
+    )
+    LinnetSettingsUpdateChecker.UpdateChannel.preview.save(to: updateDefaults)
+    require(
+      LinnetSettingsUpdateChecker.UpdateChannel.load(from: updateDefaults) == .preview,
+      "the Preview channel selection was not persisted"
+    )
+    require(
+      LinnetSettingsUpdateChecker.UpdateChannel.stable.catalogURL.absoluteString
+        == "https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/Linnet-Data-Channel.json"
+        && LinnetSettingsUpdateChecker.UpdateChannel.preview.catalogURL.absoluteString
+          == "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/Linnet-Data-Channel.json",
+      "Stable and Preview do not own their exact Catalog endpoints"
+    )
+    updateDefaults.set("nightly", forKey: LinnetSettingsUpdateChecker.UpdateChannel.defaultsKey)
+    require(
+      LinnetSettingsUpdateChecker.UpdateChannel.load(from: updateDefaults) == .stable,
+      "an unknown update channel did not fail closed to Stable"
+    )
+
     let installed = identity(version: "0.1.10", build: 69, revision: "a")
     let older = identity(version: "0.1.9", build: 68, revision: "b")
     let later = identity(version: "0.1.11", build: 70, revision: "c")

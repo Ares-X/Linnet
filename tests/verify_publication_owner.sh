@@ -474,7 +474,6 @@ catalog_sequence="$("${repo_root}/package/data_release_metadata" get-catalog-seq
 public_expected=Linnet.pkg
 core_expected="$(printf '%s\n' \
   "Linnet-${version}-arm64-Core-community-beta.pkg" \
-  "Linnet-${version}-Uninstall.command" \
   Linnet-Data-Channel.json | LC_ALL=C sort)"
 delta_expected="$(ruby -rjson -e '
   baseline = JSON.parse(File.read(ARGV.fetch(0))).fetch("pack_baselines")

@@ -21,6 +21,7 @@ fail() {
 
 usage() {
   echo "usage: scripts/release-control authorize ABSOLUTE_RELEASE_DIRECTORY" >&2
+  echo "usage: scripts/release-control preview ABSOLUTE_RELEASE_DIRECTORY" >&2
   echo "       scripts/release-control {verify-local|candidate}" >&2
   echo "       scripts/release-control verify-source CANDIDATE_REF COMMIT" >&2
   exit 64
@@ -28,7 +29,7 @@ usage() {
 case "${command_name}" in
   verify-local|candidate) [[ "$#" -eq 1 ]] || usage ;;
   verify-source) [[ "$#" -eq 3 ]] || usage ;;
-  authorize) [[ "$#" -eq 2 ]] || usage ;;
+  authorize|preview) [[ "$#" -eq 2 ]] || usage ;;
   *) usage ;;
 esac
 
@@ -133,7 +134,7 @@ if [[ "${command_name}" == verify-local ]]; then
   exit
 fi
 
-if [[ "${command_name}" == authorize ]]; then
+if [[ "${command_name}" == authorize || "${command_name}" == preview ]]; then
 [[ "${release_dir}" == /* && -d "${release_dir}" && ! -L "${release_dir}" ]] ||
   fail "release directory is unsafe"
 release_dir="$(cd "${release_dir}" && pwd -P)"
@@ -204,13 +205,18 @@ candidate_identity="$("${repo_root}/package/release_candidate_identity" \
 [[ "${candidate_identity}" =~ ^sha256:([0-9a-f]{64})$ ]] ||
   fail "candidate archive identity is invalid"
 candidate_digest="${BASH_REMATCH[1]}"
-authorization_tag="linnet-publication/v${version}-${revision}-h${candidate_digest}"
+if [[ "${command_name}" == preview ]]; then
+  authorization_tag="linnet-preview/v${version}-${revision}-h${candidate_digest}"
+else
+  authorization_tag="linnet-publication/v${version}-${revision}-h${candidate_digest}"
+fi
 authorization_ref="refs/tags/${authorization_tag}"
 
 gh auth status --hostname github.com >/dev/null
-# Authorization never uploads or repairs bytes after installed acceptance. It
+# Authorization never uploads or repairs bytes after acceptance. It
 # proves that all three Action-staged drafts still contain the accepted
-# manifest-owned set, then creates the immutable tag consumed by release-ci.yml.
+# manifest-owned set, then creates an immutable Preview or stable publication
+# tag consumed by release-ci.yml.
 for channel in core data public; do
   GITHUB_REPOSITORY="${repository}" \
     "${repo_root}/package/stage_github_release" verify \
@@ -226,4 +232,4 @@ elif [[ "${existing}" != "${revision}"$'\t'"${authorization_ref}" ]]; then
   fail "publication authorization already names another revision"
 fi
 
-echo "Linnet ${version} GitHub Action publication authorized from ${candidate_identity}"
+echo "Linnet ${version} GitHub Action ${command_name} authorized from ${candidate_identity}"

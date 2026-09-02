@@ -87,6 +87,11 @@ enum LinnetSettingsContract {
     /// Atomically publishes a candidate settings document, reconciles all
     /// derived config files, and reloads the fixed schema configuration set.
     case reloadConfiguration = "reload_configuration"
+    /// Reloads the Host-owned learning synchronization schedule after the
+    /// shared preference changes. No Rime database work runs in Settings.
+    case reloadLearningSync = "reload_learning_sync"
+    /// Requests one immediate Host-owned incremental learning synchronization.
+    case synchronizeLearning = "synchronize_learning"
   }
 
   enum RuntimeStatus: String, Codable, Equatable, Sendable {
@@ -146,6 +151,8 @@ enum LinnetSettingsContract {
     case coreActivationApplicationsRunning = "core_activation_applications_running"
     case coreActivationUnknownClient = "core_activation_unknown_client"
     case coreActivationRequesterUnavailable = "core_activation_requester_unavailable"
+    case learningSyncConfigurationReloaded = "learning_sync_configuration_reloaded"
+    case learningSyncRequested = "learning_sync_requested"
   }
 
   enum CoreActivationBlocker: String, Codable, Equatable, Sendable {
@@ -231,11 +238,6 @@ enum LinnetSettingsContract {
   private static let legacyCloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
   private static let cloudSyncLastAttemptKey = "cloud_sync.last_attempt_v1"
   private static let inputMethodConnectionKey = "InputMethodConnectionName"
-  static let cloudSyncConfigurationDidChange = Notification.Name(
-    "io.github.ares-x.inputmethod.Linnet.cloud-sync-configuration-v1")
-  static let cloudSyncNowRequested = Notification.Name(
-    "io.github.ares-x.inputmethod.Linnet.cloud-sync-now-v1")
-
   static func hostBundle(startingAt bundle: Bundle = .main) -> Bundle? {
     if isInputMethod(bundle) {
       return bundle

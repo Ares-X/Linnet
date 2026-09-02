@@ -468,6 +468,8 @@ extension LinnetSettingsTransactionIPC {
       return [.activated, .rejected, .failed].contains(status)
     case .diagnose: return [.running, .paused, .degraded, .failed].contains(status)
     case .activateCore: return [.terminating, .rejected, .failed].contains(status)
+    case .reloadLearningSync, .synchronizeLearning:
+      return [.running, .degraded, .rejected, .failed].contains(status)
     }
   }
 }

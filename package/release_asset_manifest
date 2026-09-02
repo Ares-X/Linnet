@@ -32,7 +32,6 @@ public_assets() {
 core_assets() {
   printf '%s\n' \
     "Linnet-${version}-arm64-Core-community-beta.pkg" \
-    "Linnet-${version}-Uninstall.command" \
     Linnet-Data-Channel.json
 }
 

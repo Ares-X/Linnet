@@ -2,6 +2,34 @@ import Darwin
 import Foundation
 
 extension SettingsDataCoordinator {
+  func reloadLearningSyncConfiguration() async throws {
+    let result = try await request(
+      makeRequest(
+        transactionID: UUID(), command: .reloadLearningSync, candidate: nil,
+        deadline: Date().addingTimeInterval(Self.interactiveRequestTimeout)
+      ),
+      replyTimeout: Self.interactiveRequestTimeout,
+      progress: { _ in }
+    )
+    guard result.code == .learningSyncConfigurationReloaded else {
+      throw Failure.requestFailed(result.code)
+    }
+  }
+
+  func synchronizeLearningNow() async throws {
+    let result = try await request(
+      makeRequest(
+        transactionID: UUID(), command: .synchronizeLearning, candidate: nil,
+        deadline: Date().addingTimeInterval(Self.interactiveRequestTimeout)
+      ),
+      replyTimeout: Self.interactiveRequestTimeout,
+      progress: { _ in }
+    )
+    guard result.code == .learningSyncRequested else {
+      throw Failure.requestFailed(result.code)
+    }
+  }
+
   /// The document currently in the live user directory, or the default
   /// document when none exists.
   func liveDocument() throws -> LinnetSettingsDocument {

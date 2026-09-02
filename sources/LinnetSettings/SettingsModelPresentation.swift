@@ -411,11 +411,4 @@ extension SettingsModel {
     )
   }
 
-  func synchronizeLearningNow() {
-    guard cloudSyncLocation != nil, !operationActive else { return }
-    DistributedNotificationCenter.default().postNotificationName(
-      LinnetSettingsContract.cloudSyncNowRequested, object: nil, userInfo: nil,
-      deliverImmediately: true)
-    status = .cloudSyncRequested
-  }
 }

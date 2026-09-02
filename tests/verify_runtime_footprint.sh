@@ -1524,6 +1524,14 @@ done
 rg -Fq 'https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/Linnet-Data-Channel.json' \
   sources/LinnetSettings/LinnetSettingsDownloadSource.swift ||
   fail "the Settings network boundary lost its stable data-channel endpoint"
+rg -Fq 'https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/Linnet-Data-Channel.json' \
+  sources/LinnetSettings/LinnetSettingsUpdateChecker.swift ||
+  fail "the Settings update-channel owner lost its Preview endpoint"
+for required in 'case stable' 'case preview' 'func setUpdateChannel' \
+    'Linnet.Settings.UpdateChannel.v1' 'updateChecker.updateChannel.catalogURL'; do
+  rg -Fq "${required}" sources/LinnetSettings ||
+    fail "the selectable update-channel path is incomplete: ${required}"
+done
 if rg -Fq 'https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/Linnet-Data-Channel.json' \
     sources/LinnetSettings/SettingsMain.swift \
     sources/LinnetSettings/SettingsModelLanguageData.swift; then
@@ -2418,7 +2426,7 @@ ruby -e '
   abort "the sole first-install input-source authorization owner is missing" unless
     request && request.scan("TISRegisterInputSource").length == 1 &&
       request.scan("TISEnableInputSource").length == 1 &&
-      request.scan("TISSelectInputSource").length == 1 &&
+      !request.include?("TISSelectInputSource") &&
       request.include?("LinnetInputSourceRegistration.inspect(identifier:") &&
       !request.include?("finalState") &&
       !request.include?("if inspection.state == .enablementRequired")
@@ -2449,11 +2457,27 @@ ruby -e '
   abort "TIS mutation escaped the single Complete owner" unless
     source.scan("TISRegisterInputSource").length == 1 &&
       source.scan("TISEnableInputSource").length == 1 &&
-      source.scan("TISSelectInputSource").length == 1 &&
+      source.scan("TISSelectInputSource").empty? &&
       !registration.include?("TISRegisterInputSource") &&
       !registration.include?("TISEnableInputSource") &&
       !registration.include?("TISSelectInputSource")
 ' || fail "install-boundary input-source availability regressed"
+if rg -n 'cloudSyncConfigurationDidChange|cloudSyncNowRequested' \
+    sources/LinnetSettings/SettingsContract.swift \
+    sources/LinnetSettings/SettingsMain.swift \
+    sources/LinnetSettings/SettingsModelPresentation.swift \
+    sources/SquirrelApplicationRuntime.swift || \
+    rg -n 'DistributedNotificationCenter' \
+      sources/LinnetSettings/SettingsMain.swift \
+      sources/LinnetSettings/SettingsModelPresentation.swift; then
+  fail "learning synchronization retained its unreliable distributed-notification path"
+fi
+rg -Fq 'case reloadLearningSync = "reload_learning_sync"' \
+  sources/LinnetSettings/SettingsContract.swift ||
+  fail "learning synchronization configuration has no typed IPC command"
+rg -Fq 'case synchronizeLearning = "synchronize_learning"' \
+  sources/LinnetSettings/SettingsContract.swift ||
+  fail "manual learning synchronization has no typed IPC command"
 if [[ -e package/installer-scripts/quit-applications-clean.jxa ]] ||
     rg -n '/usr/bin/osascript|quit-applications-clean\.jxa' \
       package/core-installer-scripts/preinstall package/make_package \

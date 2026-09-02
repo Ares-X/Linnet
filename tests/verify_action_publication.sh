@@ -42,11 +42,13 @@ for required in \
     'public release mutation is owned by GitHub Actions' \
     'publication authorization differs from candidate bytes' \
     'data-seed authorization differs from candidate identity' \
+    'linnet-preview/' \
     'Catalog not promoted' \
     'staged candidate inventory differs from the canonical asset set' \
     'publish_channel core' \
     'publish_channel data' \
-    'promote_catalog' \
+    'promote_catalog preview-channel' \
+    'promote_catalog data-channel' \
     'publish_channel public' \
     '-F force=false'; do
   rg -Fq -- "${required}" "${publisher}" ||
@@ -89,8 +91,6 @@ candidate_revision=0123456789abcdef0123456789abcdef01234567
 core_name="Linnet-${version}-arm64-Core-community-beta.pkg"
 printf 'complete installer\n' >"${fixture_assets}/Linnet.pkg"
 printf 'core installer\n' >"${fixture_assets}/${core_name}"
-printf '#!/bin/sh\nexit 0\n' \
-  >"${fixture_assets}/Linnet-${version}-Uninstall.command"
 for kind in Chinese English Extended LTS; do
   printf 'pack:%s\n' "${kind}" >"${fixture_assets}/Linnet-${kind}.linnetpack"
 done
@@ -167,6 +167,7 @@ candidate_identity="$("${fixture_repo}/package/release_candidate_identity" \
   fail "fixture candidate identity is invalid"
 candidate_digest="${BASH_REMATCH[1]}"
 authorization_tag="linnet-publication/v${version}-${candidate_revision}-h${candidate_digest}"
+preview_tag="linnet-preview/v${version}-${candidate_revision}-h${candidate_digest}"
 
 cat >"${fake_bin}/git" <<'FAKE_GIT'
 #!/usr/bin/env bash
@@ -337,40 +338,50 @@ when %r{\AGET:repos/Ares-X/Linnet/git/ref/tags/(.+)\z}
   else
     puts sha
   end
-when "GET:repos/Ares-X/Linnet/git/ref/heads/data-channel"
-  path = File.join(state, "data-channel", "ref")
+when %r{\AGET:repos/Ares-X/Linnet/git/ref/heads/(data-channel|preview-channel)\z}
+  branch = Regexp.last_match(1)
+  path = File.join(state, branch, "ref")
   fail_fake("HTTP 404 Not Found", 1) unless File.file?(path)
   puts File.read(path).strip
 when %r{\AGET:repos/Ares-X/Linnet/git/commits/(.+)\z}
   commit = Regexp.last_match(1)
-  path = File.join(state, "data-channel", "commits", commit)
-  fail_fake("commit not found", 1) unless File.file?(path)
+  path = %w[data-channel preview-channel].map do |branch|
+    File.join(state, branch, "commits", commit)
+  end.find { |candidate| File.file?(candidate) }
+  fail_fake("commit not found", 1) unless path
   puts File.readlines(path, chomp: true).fetch(0)
 when %r{\AGET:repos/Ares-X/Linnet/git/trees/(.+)\z}
-  path = File.join(state, "data-channel", "blob")
-  fail_fake("tree not found", 1) unless File.file?(path)
+  path = %w[data-channel preview-channel].map do |branch|
+    File.join(state, branch, "blob")
+  end.find { |candidate| File.file?(candidate) }
+  fail_fake("tree not found", 1) unless path
   puts File.read(path).strip
 when %r{\AGET:repos/Ares-X/Linnet/git/blobs/(.+)\z}
-  path = File.join(state, "data-channel", "catalog")
-  fail_fake("blob not found", 1) unless File.file?(path)
+  path = %w[data-channel preview-channel].map do |branch|
+    File.join(state, branch, "catalog")
+  end.find { |candidate| File.file?(candidate) }
+  fail_fake("blob not found", 1) unless path
   puts Base64.strict_encode64(File.binread(path))
 when "POST:repos/Ares-X/Linnet/git/blobs"
   document = JSON.parse(File.binread(input))
   bytes = Base64.strict_decode64(document.fetch("content"))
-  root = File.join(state, "data-channel")
-  FileUtils.mkdir_p(root)
-  File.binwrite(File.join(root, "pending-catalog"), bytes)
+  File.binwrite(File.join(state, "pending-catalog"), bytes)
   blob = "b" * 40
-  File.binwrite(File.join(root, "pending-blob"), "#{blob}\n")
+  File.binwrite(File.join(state, "pending-blob"), "#{blob}\n")
   puts blob
 when "POST:repos/Ares-X/Linnet/git/trees"
-  root = File.join(state, "data-channel")
   tree = "a" * 40
-  File.binwrite(File.join(root, "pending-tree"), "#{tree}\n")
+  File.binwrite(File.join(state, "pending-tree"), "#{tree}\n")
   puts tree
 when "POST:repos/Ares-X/Linnet/git/commits"
   document = JSON.parse(File.binread(input))
-  root = File.join(state, "data-channel")
+  branch = document.fetch("message")[/Publish Linnet (data-channel|preview-channel)/, 1]
+  fail_fake("unknown Catalog branch") unless branch
+  root = File.join(state, branch)
+  FileUtils.mkdir_p(root)
+  FileUtils.cp(File.join(state, "pending-catalog"), File.join(root, "pending-catalog"))
+  FileUtils.cp(File.join(state, "pending-tree"), File.join(root, "pending-tree"))
+  FileUtils.cp(File.join(state, "pending-blob"), File.join(root, "pending-blob"))
   ref_path = File.join(root, "ref")
   parent = document.fetch("parents", []).first
   if parent
@@ -388,8 +399,9 @@ when "POST:repos/Ares-X/Linnet/git/commits"
   File.binwrite(File.join(root, "pending-commit"), "#{commit}\n")
   puts commit
 when "POST:repos/Ares-X/Linnet/git/refs"
-  fail_fake("wrong ref create") unless fields.fetch("ref") == "refs/heads/data-channel"
-  root = File.join(state, "data-channel")
+  branch = fields.fetch("ref")[%r{\Arefs/heads/(data-channel|preview-channel)\z}, 1]
+  fail_fake("wrong ref create") unless branch
+  root = File.join(state, branch)
   fail_fake("ref already exists", 1) if File.file?(File.join(root, "ref"))
   commit = fields.fetch("sha")
   fail_fake("wrong commit") unless
@@ -399,9 +411,10 @@ when "POST:repos/Ares-X/Linnet/git/refs"
   FileUtils.cp(File.join(root, "pending-blob"), File.join(root, "blob"))
   File.binwrite(File.join(root, "ref"), "#{commit}\n")
   append_line(mutations, "catalog-create")
-when "PATCH:repos/Ares-X/Linnet/git/refs/heads/data-channel"
+when %r{\APATCH:repos/Ares-X/Linnet/git/refs/heads/(data-channel|preview-channel)\z}
+  branch = Regexp.last_match(1)
   fail_fake("forced update") unless fields.fetch("force") == "false"
-  root = File.join(state, "data-channel")
+  root = File.join(state, branch)
   if File.file?(File.join(root, "inject-race"))
     race = "e" * 40
     File.binwrite(File.join(root, "ref"), "#{race}\n")
@@ -652,6 +665,9 @@ write_release "${publisher_state}" public "v${version}" false true
 mkdir -p "$(dirname "${publisher_state}/tags/${authorization_tag}")"
 printf '%s\n' "${candidate_revision}" \
   >"${publisher_state}/tags/${authorization_tag}"
+mkdir -p "$(dirname "${publisher_state}/tags/${preview_tag}")"
+printf '%s\n' "${candidate_revision}" \
+  >"${publisher_state}/tags/${preview_tag}"
 
 run_publisher() {
   local mode="$1"
@@ -742,18 +758,39 @@ fi
 [[ ! -s "${publisher_state}/mutations.log" ]] ||
   fail "rejected non-Action publisher changed GitHub state"
 
+: >"${publisher_state}/mutations.log"
+GITHUB_ACTIONS=true run_publisher preview "${preview_tag}" >/dev/null ||
+  fail "Action publisher rejected the exact Preview authorization"
+expected_preview_mutations="$(
+  printf '%s\n' \
+    "release-publish core-v${version}" \
+    "release-publish data-${catalog_sequence}" \
+    "catalog-create"
+)"
+[[ "$(cat "${publisher_state}/mutations.log")" == \
+    "${expected_preview_mutations}" ]] ||
+  fail "Preview publication order is not Core -> data -> Preview Catalog"
+cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
+  "${publisher_state}/preview-channel/catalog" ||
+  fail "preview-channel did not receive the exact staged Catalog"
+[[ ! -e "${publisher_state}/data-channel/ref" ]] ||
+  fail "Preview publication advanced the stable Catalog"
+ruby -rjson -e '
+  abort unless JSON.parse(File.binread(ARGV.fetch(0))).fetch("isDraft")
+' "${publisher_state}/releases/v${version}.json" ||
+  fail "Preview publication exposed the public release"
+
+: >"${publisher_state}/mutations.log"
 GITHUB_ACTIONS=true run_publisher publish >/dev/null ||
   fail "Action publisher rejected exact staged releases"
 expected_publish_mutations="$(
   printf '%s\n' \
-    "release-publish core-v${version}" \
-    "release-publish data-${catalog_sequence}" \
     "catalog-create" \
     "release-publish v${version}"
 )"
 [[ "$(cat "${publisher_state}/mutations.log")" == \
     "${expected_publish_mutations}" ]] ||
-  fail "publication order is not Core -> data -> Catalog -> public"
+  fail "stable publication did not promote Catalog before the public release"
 cmp -s "${fixture_assets}/Linnet-Data-Channel.json" \
   "${publisher_state}/data-channel/catalog" ||
   fail "stable data-channel did not receive the exact staged Catalog"

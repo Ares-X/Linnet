@@ -12,7 +12,6 @@ final class SquirrelInstaller {
   enum Failure: Error, Equatable, CustomStringConvertible {
     case registrationFailed(OSStatus)
     case enableFailed(OSStatus)
-    case selectFailed(OSStatus)
     case registrationStateRejected(String)
 
     var description: String {
@@ -21,8 +20,6 @@ final class SquirrelInstaller {
         "Input source registration failed (OSStatus \(status))."
       case .enableFailed(let status):
         "Input source enablement failed (OSStatus \(status))."
-      case .selectFailed(let status):
-        "Input source selection failed (OSStatus \(status))."
       case .registrationStateRejected(let state):
         "Input source registration state cannot request authorization: \(state)."
       }
@@ -30,8 +27,8 @@ final class SquirrelInstaller {
   }
 
   /// Only publication of the first installed App may register Linnet and ask
-  /// macOS for user authorization and perform the one initial selection that
-  /// publishes the source into the system switch cycle. Existing-App Complete
+  /// macOS for user authorization. Selection remains exclusively owned by the
+  /// user and macOS after authorization. Existing-App Complete
   /// repairs and Core updates preserve the App inode and never call this path.
   /// An immediate HIToolbox property remains only an observation; it is never
   /// promoted to durable authorization evidence.
@@ -56,13 +53,12 @@ final class SquirrelInstaller {
     // still submits the standard enablement request after validating the one
     // exact source. No update path may infer authorization from this
     // process-local observation or resubmit the request. The explicit first-
-    // install/identity-repair action also selects once because enablement alone
-    // does not publish a newly authorized source into macOS's switch cycle.
+    // install/identity-repair action does not select the source: macOS may keep
+    // authorization pending after enablement returns, and selection is a user
+    // action in System Settings or the input menu.
     let enableStatus = TISEnableInputSource(inputSource)
     guard enableStatus == noErr else { throw Failure.enableFailed(enableStatus) }
-    let selectStatus = TISSelectInputSource(inputSource)
-    guard selectStatus == noErr else { throw Failure.selectFailed(selectStatus) }
-    print("Input source authorization and initial selection are ready: \(identifier)")
+    print("Input source authorization was requested: \(identifier)")
   }
 
   /// An InputMethodKit Host is valid only from the per-user installation

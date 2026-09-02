@@ -263,25 +263,10 @@ extension SquirrelApplicationDelegate {
       settingsTransactionHost = nil
       print("Settings transaction IPC is unavailable: \(error)")
     }
-    let notifCenter = DistributedNotificationCenter.default()
-    notifCenter.addObserver(
+    DistributedNotificationCenter.default().addObserver(
       self,
       selector: #selector(inputSourceChanged(_:)),
       name: .init(kTISNotifySelectedKeyboardInputSourceChanged as String),
-      object: nil,
-      suspensionBehavior: .deliverImmediately
-    )
-    notifCenter.addObserver(
-      self,
-      selector: #selector(cloudSyncConfigurationChanged(_:)),
-      name: LinnetSettingsContract.cloudSyncConfigurationDidChange,
-      object: nil,
-      suspensionBehavior: .deliverImmediately
-    )
-    notifCenter.addObserver(
-      self,
-      selector: #selector(cloudSyncNowRequested(_:)),
-      name: LinnetSettingsContract.cloudSyncNowRequested,
       object: nil,
       suspensionBehavior: .deliverImmediately
     )
@@ -299,22 +284,6 @@ extension SquirrelApplicationDelegate {
       name: .init(kTISNotifySelectedKeyboardInputSourceChanged as String),
       object: nil
     )
-    distributed.removeObserver(
-      self,
-      name: LinnetSettingsContract.cloudSyncConfigurationDidChange,
-      object: nil
-    )
-    distributed.removeObserver(
-      self,
-      name: LinnetSettingsContract.cloudSyncNowRequested,
-      object: nil
-    )
-  }
-  @objc private func cloudSyncConfigurationChanged(_: Notification) {
-    DispatchQueue.main.async { [weak self] in self?.rimeSyncController.reload() }
-  }
-  @objc private func cloudSyncNowRequested(_: Notification) {
-    DispatchQueue.main.async { [weak self] in self?.rimeSyncController.synchronizeNow() }
   }
 }
 
@@ -387,6 +356,26 @@ extension SquirrelApplicationDelegate {
       publishSettingsCandidate(request, scope: .appearance)
     case .reloadConfiguration:
       publishSettingsCandidate(request, scope: .configuration)
+    case .reloadLearningSync:
+      rimeSyncController.reload()
+      let health = runtimeHealth()
+      reply(
+        to: request.transactionID,
+        status: health.state,
+        code: .learningSyncConfigurationReloaded,
+        detail: "The learning synchronization configuration was reloaded.",
+        health: health
+      )
+    case .synchronizeLearning:
+      rimeSyncController.synchronizeNow()
+      let health = runtimeHealth()
+      reply(
+        to: request.transactionID,
+        status: health.state,
+        code: .learningSyncRequested,
+        detail: "Immediate learning synchronization was requested.",
+        health: health
+      )
     }
   }
 
