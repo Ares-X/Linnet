@@ -81,8 +81,13 @@ enum LinnetCloudRecoveryArchive {
     try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: work) }
     let target = work.appending(path: "target", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
-    try payload.write(to: target.appending(path: payloadName), options: .atomic)
+    try FileManager.default.createDirectory(
+      at: target, withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700])
+    let targetPayload = target.appending(path: payloadName)
+    try payload.write(to: targetPayload, options: .atomic)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: targetPayload.path)
 
     let archiveRoot = root(in: cloudFolder)
     let latest = try latestVerified(in: archiveRoot, workspace: work)

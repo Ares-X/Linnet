@@ -144,6 +144,26 @@ struct LinnetBackupStoreTests {
     guard baseline.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
       fail("first cloud recovery did not create its base")
     }
+    let publishedRoot = LinnetCloudRecoveryArchive.root(in: root)
+    let publishedBases = try fileManager.contentsOfDirectory(
+      at: publishedRoot.appending(path: "bases"), includingPropertiesForKeys: nil)
+    guard let publishedBase = publishedBases.first else {
+      fail("first cloud recovery did not publish a base directory")
+    }
+    let publishedPayload = publishedBase.appending(path: "payload.linnet-data")
+    try fileManager.setAttributes(
+      [.posixPermissions: 0o700], ofItemAtPath: publishedBase.path)
+    try fileManager.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: publishedPayload.path)
+    let fileProviderWorkspace = root.appending(
+      path: "file-provider-inspect", directoryHint: .isDirectory)
+    try makeDirectory(fileProviderWorkspace)
+    guard let fileProviderMaterialized = try LinnetCloudRecoveryArchive.materializeLatest(
+      in: root, workspace: fileProviderWorkspace),
+      try Data(contentsOf: fileProviderMaterialized) == first
+    else {
+      fail("FileProvider permission normalization invalidated cloud recovery")
+    }
     let sameContentLater = try LinnetBackupStore.encodePortable(
       personalData: .init(
         customWords: [.init(value: "one", code: "one")], disabledWords: [], expansions: []),
