@@ -1062,6 +1062,14 @@ struct SettingsDataCoordinatorTests {
           "\"linnet_english_interaction/tab_behavior\": \"navigate\""),
         requestOrder.currentReloadCount() == 0,
         try exportContains(
+          "linnet_custom_words", row: "Cloud Team\tcloud team",
+          directory: live, fixtureRoot: fixtureRoot
+        ),
+        try exportContains(
+          "linnet_text_expander", row: "be right back\tx;brb",
+          directory: live, fixtureRoot: fixtureRoot
+        ),
+        try exportContains(
           "linnet_zh", row: "你好\tni hao", directory: live, fixtureRoot: fixtureRoot
         ),
         try exportContains(

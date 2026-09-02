@@ -2593,6 +2593,17 @@ ruby -e '
     coordinator.include?("struct OwnedFileSnapshot") ||
       coordinator.include?("restoreOwnedFiles(")
 
+  mutation = File.read("sources/LinnetSettings/SettingsDataCoordinatorMutation.swift")
+  bridge = File.read("sources/LinnetSettings/RimeUserDataBridge.swift")
+  personal_prepare = bridge[/func preparePersonalDictionaries\(.*?\n  \}\n\}/m]
+  abort "personal Apply lost its focused table preparation" unless
+    mutation.scan("try bridge.preparePersonalDictionaries(").length == 1 &&
+      personal_prepare &&
+      personal_prepare.include?("levers.import_user_dict") &&
+      !personal_prepare.include?("rime.deploy()")
+  abort "personal table preparation no longer owns the exact two dictionaries" unless
+    bridge.scan(/\(name: "linnet_(?:custom_words|text_expander)"/).length == 2
+
   personal = File.read("sources/LinnetSettings/PersonalDataStore.swift")
   abort "runtime settings are not a standard custom patch" unless
     personal.include?(%q{static let userSettingsFile = "linnet_user.custom.yaml"}) &&

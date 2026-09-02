@@ -2,11 +2,16 @@ import Darwin
 import Foundation
 
 /// Owns the Settings-process boundary to librime's deployer and Levers APIs.
-/// It only snapshots and imports the two canonical learning dictionaries.
+/// It snapshots learning and prepares isolated personal-table databases; the
+/// Host remains the only owner that publishes those bytes to the live runtime.
 struct RimeUserDataBridge {
   static let chineseSchema = "linnet_zh"
   static let englishSchema = "linnet_en"
   static let learningSchemas = Set([chineseSchema, englishSchema])
+  private static let personalDictionaries = [
+    (name: "linnet_custom_words", file: LinnetPersonalDataStore.customWordsFile),
+    (name: "linnet_text_expander", file: LinnetPersonalDataStore.expansionsFile)
+  ]
 
   struct LearningFile: Equatable, Sendable {
     let schema: String
@@ -178,6 +183,41 @@ struct RimeUserDataBridge {
       + [Self.englishSchema]
     for schema in schemas {
       try smoke(schema: schema, substitutionProbe: substitutionProbe)
+    }
+  }
+
+  /// Rebuilds only the two exact personal tables in an isolated candidate.
+  /// The live Host remains the sole publication/activation owner.
+  func preparePersonalDictionaries(
+    candidate: URL,
+    shared: URL,
+    product: String
+  ) throws {
+    try requireDirectory(candidate)
+    for dictionary in Self.personalDictionaries {
+      try requireRegularFile(candidate.appending(path: dictionary.file))
+      let database = candidate.appending(
+        path: "\(dictionary.name).userdb", directoryHint: .isDirectory)
+      var info = stat()
+      if lstat(database.path, &info) == 0 {
+        try requireDirectory(database)
+        try FileManager.default.removeItem(at: database)
+      } else if errno != ENOENT {
+        throw Failure.unsafeDirectory(database.path)
+      }
+    }
+
+    withTraits(user: candidate, shared: shared, product: product) { traits in
+      rime.deployer_initialize(&traits)
+    }
+    defer { rime.finalize() }
+    let levers = try leversAPI()
+    for dictionary in Self.personalDictionaries {
+      let source = candidate.appending(path: dictionary.file)
+      let rows = dictionary.name.withCString { name in
+        source.path.withCString { levers.import_user_dict(name, $0) }
+      }
+      guard rows >= 0 else { throw Failure.importFailed(dictionary.name) }
     }
   }
 }

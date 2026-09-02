@@ -528,12 +528,16 @@ extension SettingsDataCoordinator {
       )
       try Task.checkCancellation()
       // Personal edits are already format-validated local source files. Host is
-      // the only live Rime activation owner and compiles those files after the
-      // atomic swap. Running a second ten-schema deploy in Settings made a
-      // local edit slower and introduced an unrelated failure boundary.
+      // the only live Rime activation owner. Prepare only their two exact
+      // table databases in the isolated candidate; a ten-schema deployment is
+      // unrelated to this local edit and would block input unnecessarily.
       switch operation {
       case .apply:
-        break
+        try bridge.preparePersonalDictionaries(
+          candidate: materialized.candidate,
+          shared: environment.shared,
+          product: environment.product
+        )
       default:
         progress(.deploying)
         try bridge.deploy(
