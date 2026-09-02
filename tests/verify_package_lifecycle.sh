@@ -1497,6 +1497,15 @@ if rg -Fq '"${host_cli}" --disable-input-source' package/uninstall-linnet; then
   echo "Default uninstall mutates Text Input state before preserving user data." >&2
   exit 1
 fi
+rg -Fq 'Usage: uninstall-linnet [--purge-user-data] [--print-plan]' \
+  package/uninstall-linnet || {
+    echo "Uninstall help still names a retired release asset." >&2
+    exit 1
+  }
+if rg -Fq 'Uninstall-Linnet.command' package/uninstall-linnet; then
+  echo "Uninstall help regained the retired .command asset name." >&2
+  exit 1
+fi
 
 # Input-source mutation is a Complete boundary. Core consumes the package
 # helper's typed, read-only TIS classification and never mutates TIS.

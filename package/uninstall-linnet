@@ -34,7 +34,7 @@ current_uid="$(/usr/bin/id -u)"
 
 usage() {
   cat <<'EOF'
-Usage: Uninstall-Linnet.command [--purge-user-data] [--print-plan]
+Usage: uninstall-linnet [--purge-user-data] [--print-plan]
 
 By default Linnet removes the user-level App, immutable language packs,
 generated runtime/build data and Installer receipts. Personal dictionaries,
