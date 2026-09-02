@@ -365,9 +365,9 @@ Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Rele
 
 ### 拼音反查
 
-`data/chinese/reports/enriched_pinyin_english.json` 的候选顺序是 rank owner，`pinyin_embargo_remove.tsv` 是精确删除 owner。Smart English 直接查询 full-pinyin key；中文的标准 affix segmentor 去掉触发前缀，当前 profile Prism 只解码完整非纠错路径，再查询同一 key。生成器只把这份审核快照投影到 `p/<pinyin>`，不得自动重写快照或另设运行时排序表。
+`data/chinese/reports/enriched_pinyin_english.json` 的候选顺序是 rank owner，`pinyin_embargo_remove.tsv` 是精确删除 owner。Smart English 通过当前 profile Prism 将完整、非纠错的全拼或双拼编码还原为 full-pinyin key，再查询同一 key；中文的标准 affix segmentor 先去掉触发前缀。生成器只把这份审核快照投影到 `p/<pinyin>`，不得自动重写快照或另设运行时排序表。
 
-所有中文 profile 必须覆盖默认 `|` 和用户可选的 `;`、标准音节分隔符、profile 内部可能使用的分号，以及 64/65 个可达 Prism key 的 fail-closed 边界。Smart English 固定使用无前缀、纯字母全拼反查，不继承中文 profile 或触发键。默认 idle `/ , . ; ' [ ] - =` 必须到达 host；英文模式的 `;` 始终透传，中文模式只有用户显式选择 `;` 作为反查触发键或当前方案把它当作拼写键时才进入组合。
+所有中文 profile 必须覆盖默认 `|` 和用户可选的 `;`、标准音节分隔符、profile 内部可能使用的分号，以及 64/65 个可达 Prism key 的 fail-closed 边界。Smart English 使用无前缀的当前 profile Prism 自动反查，但不继承中文触发键。默认 idle `/ , . ; ' [ ] - =` 必须到达 host；英文模式的 `;` 始终透传，中文模式只有用户显式选择 `;` 作为反查触发键或当前方案把它当作拼写键时才进入组合。
 
 ### Rime Core
 

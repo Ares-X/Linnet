@@ -297,7 +297,7 @@ private extension LinnetSettingsProjectionRenderer {
     )
     entries.append((
       "linnet_pinyin/prism",
-      quoted(LinnetSettingsContract.ChineseProfile.fullPinyin.schemaID)
+      quoted(input.chineseProfile.schemaID)
     ))
     entries.append((
       "linnet_mode_switch/chinese_schema", quoted(input.chineseProfile.schemaID)

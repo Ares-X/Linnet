@@ -258,7 +258,7 @@ struct InputTabView: View {
         .foregroundStyle(.secondary)
 
         Text(
-          "Smart English recognizes letter-only full pinyin automatically; semicolon and other punctuation go directly to the current app."
+          "Smart English recognizes the selected full- or double-pinyin scheme automatically; semicolon and other punctuation go directly to the current app."
         )
           .font(.caption)
           .foregroundStyle(.secondary)

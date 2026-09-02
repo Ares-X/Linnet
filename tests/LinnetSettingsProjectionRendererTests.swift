@@ -319,9 +319,9 @@ struct LinnetSettingsProjectionRendererTests {
         projection + "  \"schema_list/@\(entry.offset)/schema\": \"\(entry.element)\"\n"
       }
       require(
-        english?.contains("\"linnet_pinyin/prism\": \"linnet_zh_pinyin\"") == true &&
+        english?.contains("\"linnet_pinyin/prism\": \"\(prism)\"") == true &&
           english?.contains("\"linnet_mode_switch/chinese_schema\": \"\(prism)\"") == true,
-        "the selected Chinese profile changed Smart English lookup or lost Shift return"
+        "the selected Chinese profile did not own Smart English lookup and Shift return"
       )
       require(
         defaultCustom == expectedDefault,

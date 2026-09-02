@@ -877,16 +877,16 @@ if ! ruby -ryaml -e '
   function = renderer[/private static func renderEnglishSchemaCustom\(.*?(?=\n  private static func appendEnglishMetadataOptions)/m]
   abort "English renderer missing" unless function
   abort "trigger projection" if function.include?("appendPinyinReverseTrigger")
-  fixed_prism = %q{quoted(LinnetSettingsContract.ChineseProfile.fullPinyin.schemaID)}
-  abort "fixed full-pinyin projection missing" unless
-    function.include?(%Q{"linnet_pinyin/prism"}) && function.include?(fixed_prism)
+  selected_prism = %q{quoted(input.chineseProfile.schemaID)}
+  abort "selected-profile projection missing" unless
+    function.include?(%Q{"linnet_pinyin/prism"}) && function.include?(selected_prism)
 ' data/linnet/linnet_en.schema.yaml \
     sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift; then
   fail "Smart English regained an explicit pinyin trigger that captures punctuation"
 fi
 test "$(rg -F -c '__include: default.yaml:/linnet/pinyin_reverse_lookup' \
   data/linnet/linnet_en.schema.yaml)" -eq 1 ||
-  fail "Smart English must reuse exactly one automatic full-pinyin namespace"
+  fail "Smart English must reuse exactly one automatic selected-profile namespace"
 for decoder_contract in 'dictionary: linnet_zh' 'prism: linnet_zh' 'delimiter: " '\''"'; do
   rg -Fq "  ${decoder_contract}" data/linnet/linnet_en.schema.yaml ||
     fail "Smart English lost its bundled natural-code decoder: ${decoder_contract}"

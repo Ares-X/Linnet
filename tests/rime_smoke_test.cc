@@ -5092,15 +5092,29 @@ void ExpectEnglishPinyinProfile(RimeApi_stdbool* api,
                                 const std::string& code,
                                 const std::string& prefix) {
   const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
-  Enter(api, session, "suanfa");
+  Enter(api, session, code);
   const auto automatic = CandidateOrigins(session, 256);
   if (std::none_of(automatic.begin(), automatic.end(), [](const auto& item) {
         return BaseText(item.text) == "algorithm" &&
                item.genuine_type == "linnet_pinyin";
       })) {
-    Fail("Smart English lost its automatic full-pinyin lookup for " + profile);
+    Fail("Smart English lost its automatic selected-profile lookup for " +
+         profile);
   }
   api->destroy_session(session);
+
+  if (profile == "jiajia") {
+    const RimeSessionId full_pinyin = CreateSchemaSession(api, "linnet_en");
+    Enter(api, full_pinyin, "suanfa");
+    const auto candidates = CandidateOrigins(full_pinyin, 256);
+    if (std::any_of(candidates.begin(), candidates.end(), [](const auto& item) {
+          return BaseText(item.text) == "algorithm" &&
+                 item.genuine_type == "linnet_pinyin";
+        })) {
+      Fail("Smart English ignored the selected Jiajia Prism");
+    }
+    api->destroy_session(full_pinyin);
+  }
 
   const RimeSessionId idle_semicolon = CreateSchemaSession(api, "linnet_en");
   if (api->process_key(idle_semicolon, ';', 0)) {
@@ -5600,7 +5614,7 @@ void WriteFastReloadProjection(const std::filesystem::path& user_directory,
   std::ostringstream english;
   english
       << "patch:\n"
-      << "  \"linnet_pinyin/prism\": \"linnet_zh_pinyin\"\n"
+      << "  \"linnet_pinyin/prism\": \"" << schema_id << "\"\n"
       << "  \"linnet_mode_switch/chinese_schema\": \"" << schema_id
       << "\"\n"
       << "  \"linnet_english_interaction/sentence_capitalization\": false\n"
@@ -6830,8 +6844,8 @@ int main(int argc, char** argv) {
     api->destroy_session(chinese);
 
     const RimeSessionId english = CreateSchemaSession(api, "linnet_en");
-    // Smart English provides the same lookup automatically for letter-only
-    // full pinyin; its punctuation remains host-owned.
+    // The selected full-pinyin profile drives automatic Smart English lookup;
+    // its punctuation remains host-owned.
     ExpectCandidate(api, english, "suanfa", "algorithm");
     const auto live_english = rime::Service::instance().GetSession(english);
     bool capitalization = true;

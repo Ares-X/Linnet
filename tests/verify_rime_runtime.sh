@@ -324,7 +324,7 @@ for profile_case in "${profile_cases[@]}"; do
   DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     bin/rime_deployer --build "${user}" "${shared}" \
       "${user}/build" >/dev/null
-  rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
+  rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
   rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
   test -s "${user}/build/${schema}.prism.bin"
   prefix=';'
@@ -347,7 +347,7 @@ done
 "${scratch}/projection-fixture" english-learning-off "${user}"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   bin/rime_deployer --build "${user}" "${shared}" "${user}/build" >/dev/null
-rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
+rg -Fq 'prism: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'enable_user_dict: false' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'learning_enabled: false' "${user}/build/linnet_en.schema.yaml"
@@ -358,7 +358,7 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
 "${scratch}/projection-fixture" english-suggestions-off "${user}"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   bin/rime_deployer --build "${user}" "${shared}" "${user}/build" >/dev/null
-rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
+rg -Fq 'prism: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'reset: 0' "${user}/build/linnet_en.schema.yaml"
 if rg -q 'spelling_correction:' "${user}/build/linnet_en.schema.yaml"; then
