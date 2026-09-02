@@ -31,6 +31,7 @@ enum SettingsPresentationFailure: Equatable {
   case timedOut
   case hostBusy
   case deploymentFailed
+  case incrementalBackupFailed
   case appearanceRecoveryFailed
   case configurationRecoveryFailed
   case staleHostState
@@ -407,6 +408,11 @@ private func failureText(_ failure: SettingsPresentationFailure) -> SettingsLoca
   case .timedOut: ("The input method did not reply in time.", "输入法未在规定时间内响应。")
   case .hostBusy: ("The input method is busy with another settings operation.", "输入法正在处理另一项设置操作。")
   case .deploymentFailed: ("The input method could not deploy the new configuration.", "输入法无法部署新配置。")
+  case .incrementalBackupFailed:
+    (
+      "The incremental backup could not be created. Existing settings and learning data were left unchanged.",
+      "无法创建增量备份；现有设置和学习数据均未更改。"
+    )
   case .appearanceRecoveryFailed:
     (
       "The previous candidate appearance could not be restored. Reopen Settings after the input method is available.",

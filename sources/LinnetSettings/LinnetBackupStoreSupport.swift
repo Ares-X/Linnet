@@ -16,6 +16,10 @@ extension LinnetBackupStore {
   static let stableFiles = Set(["installation.yaml", "user.yaml"])
   static let learningFiles = Set(["linnet_zh.txt", "linnet_en.txt"])
   static let learningDirectories = Set(Category.allCases.compactMap(\.learningSchema).map { "\($0).userdb" })
+  // LevelDB moves superseded recovery fragments here. They are not part of
+  // the live database state and must never be traversed or copied into a
+  // current incremental snapshot.
+  static let learningRecoveryQuarantineName = "lost"
 
   enum StableLayout {
     case current
@@ -426,9 +430,17 @@ extension LinnetBackupStore {
   }
 
   static func databaseFiles(in directory: URL) throws -> [URL] {
-    let files = try immediateChildren(
+    let entries = try immediateChildren(
       of: directory, maximumCount: maximumLiveDirectoryEntries,
       overflow: .artifactTooLarge("user database file count"))
+    var files: [URL] = []
+    for entry in entries {
+      if entry.lastPathComponent == learningRecoveryQuarantineName {
+        try requireDirectory(entry)
+      } else {
+        files.append(entry)
+      }
+    }
     guard !files.isEmpty else { throw Failure.incompleteBackup }
     for file in files {
       guard safeName(file.lastPathComponent) else { throw Failure.unsafeArtifact(file.lastPathComponent) }

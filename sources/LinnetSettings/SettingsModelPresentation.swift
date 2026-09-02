@@ -61,6 +61,7 @@ extension SettingsModel {
   }
 
   func presentationFailure(_ error: Error) -> SettingsPresentationFailure {
+    if error is LinnetBackupStore.Failure { return .incrementalBackupFailed }
     guard let failure = error as? SettingsDataCoordinator.Failure else { return .unknown }
     return switch failure {
     case .unavailable: .unavailable

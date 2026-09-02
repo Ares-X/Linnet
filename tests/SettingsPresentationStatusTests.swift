@@ -130,6 +130,13 @@ struct SettingsPresentationStatusTests {
       chinese
     )
     expect(
+      .operationFailed(.incrementalBackupFailed),
+      en: "The incremental backup could not be created. Existing settings and learning data were left unchanged.",
+      zh: "无法创建增量备份；现有设置和学习数据均未更改。",
+      english,
+      chinese
+    )
+    expect(
       .operationFailed(.configurationRecoveryFailed),
       en: "The previous input configuration could not be restored. Reopen Settings after the input method is available.",
       zh: "无法恢复先前的输入配置。请在输入法可用后重新打开设置。",

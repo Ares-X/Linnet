@@ -76,7 +76,14 @@ struct LinnetBackupStoreTests {
     let bytes = Data(repeating: 0xa7, count: 4 * 1024 * 1024)
     let original = database.appending(path: "000007.ldb")
     try bytes.write(to: original)
+    let recovery = database.appending(path: "lost", directoryHint: .isDirectory)
+    try makeDirectory(recovery)
+    try Data("retired LevelDB recovery bytes".utf8).write(
+      to: recovery.appending(path: "000006.log"))
     try LinnetBackupStore.cloneLearningDictionaries(from: source, to: older)
+    guard !FileManager.default.fileExists(
+      atPath: older.appending(path: "linnet_en.userdb/lost").path
+    ) else { fail("LevelDB recovery quarantine leaked into the active learning snapshot") }
     try LinnetBackupStore.cloneLearningDictionaries(from: source, to: newer)
     let retained = newer.appending(path: "linnet_en.userdb/000007.ldb")
     var originalInfo = stat()
@@ -98,6 +105,21 @@ struct LinnetBackupStoreTests {
     let symlink = database.appending(path: "unsafe.ldb")
     try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: original)
     expectFailure(.unsafeArtifact("unsafe.ldb")) {
+      try LinnetBackupStore.cloneLearningDictionaries(from: source, to: restored)
+    }
+    try FileManager.default.removeItem(at: symlink)
+    let foreign = database.appending(path: "foreign", directoryHint: .isDirectory)
+    try makeDirectory(foreign)
+    expectFailure(.unsafeArtifact("foreign")) {
+      try LinnetBackupStore.cloneLearningDictionaries(from: source, to: restored)
+    }
+    try FileManager.default.removeItem(at: foreign)
+    try FileManager.default.removeItem(at: recovery)
+    try FileManager.default.createSymbolicLink(
+      at: recovery,
+      withDestinationURL: original
+    )
+    expectFailure(.unsafeArtifact("lost")) {
       try LinnetBackupStore.cloneLearningDictionaries(from: source, to: restored)
     }
   }
