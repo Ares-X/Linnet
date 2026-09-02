@@ -1026,13 +1026,15 @@ struct SettingsDataCoordinatorTests {
         }
       }
 
+      let applyPhases = PhaseHarness()
       let applyResult = try await coordinator.run(
         .applyConfiguration(
           personal: replacementPersonal,
           document: replacementDocument,
           basePersonalRevision: legacyResult.personalSnapshot.revision,
           baseDocumentRevision: replacementDocumentRevision
-        )
+        ),
+        progress: { update in applyPhases.record(update.phase) }
       )
       for (schema, expected) in originalLearning {
         try verifyRawDictionary(schema, expected: expected, directory: live, operation: "personal apply")
@@ -1064,18 +1066,12 @@ struct SettingsDataCoordinatorTests {
         ),
         try exportContains(
           "linnet_en", row: "hello\thello", directory: live, fixtureRoot: fixtureRoot
-        )
+        ),
+        applyPhases.snapshot()
+          == [.preflight, .pausing, .snapshotting, .staging, .activating, .completed]
       else {
-        fail("personal apply did not preserve substitutions and zh/en learning")
+        fail("personal apply redeployed schemas or did not preserve substitutions and learning")
       }
-      let appliedRuntime = try registry.runtimeSnapshot()
-      try verifySelectedChineseProfile(
-        .jiajia,
-        user: live,
-        shared: appliedRuntime.sharedDataDirectory,
-        product: productName
-      )
-
       let backupsBeforeConfiguration = try LinnetBackupStore.listBackups(
         in: registry.backupsDirectory).count
       let requestsBeforeConfiguration = requestOrder.currentRequestCount()
@@ -2439,69 +2435,6 @@ struct SettingsDataCoordinatorTests {
       }
     }
     print("Core theme deployment: PASS (legacy pack, theme-free pack, same-version Core update, preserved choices)")
-  }
-
-  private static func verifySelectedChineseProfile(
-    _ expected: LinnetSettingsContract.ChineseProfile,
-    user: URL,
-    shared: URL,
-    product: String
-  ) throws {
-    let api = rime_get_api_stdbool().pointee
-    let prebuilt = shared.appending(path: "build").path
-    let staging = user.appending(path: "build").path
-    shared.path.withCString { sharedPath in
-      prebuilt.withCString { prebuiltPath in
-        user.path.withCString { userPath in
-          staging.withCString { stagingPath in
-            product.withCString { productPath in
-              "".withCString { logPath in
-                var traits = RimeTraits()
-                traits.data_size = Int32(
-                  MemoryLayout<RimeTraits>.size - MemoryLayout<Int32>.size)
-                traits.shared_data_dir = sharedPath
-                traits.prebuilt_data_dir = prebuiltPath
-                traits.user_data_dir = userPath
-                traits.staging_dir = stagingPath
-                traits.distribution_name = productPath
-                traits.app_name = productPath
-                traits.min_log_level = 2
-                traits.log_dir = logPath
-                api.setup(&traits)
-              }
-            }
-          }
-        }
-      }
-    }
-    api.initialize(nil)
-    defer { api.finalize() }
-
-    var config = RimeConfig()
-    guard api.user_config_open("user", &config) else {
-      fail("the applied Rime user configuration could not be opened")
-    }
-    let staleSchemaID = LinnetSettingsContract.ChineseProfile.natural.schemaID
-    let wroteStale = staleSchemaID.withCString {
-      api.config_set_string(&config, "var/previously_selected_schema", $0)
-    }
-    let closed = api.config_close(&config)
-    guard wroteStale, closed, staleSchemaID != expected.schemaID else {
-      fail("could not establish a stale user.yaml schema selection")
-    }
-
-    let session = api.create_session()
-    guard session != 0 else {
-      fail("a fresh session could not be created after full Apply")
-    }
-    defer { _ = api.destroy_session(session) }
-    var active = [CChar](repeating: 0, count: Int(PATH_MAX))
-    let readActive = active.withUnsafeMutableBufferPointer { buffer in
-      api.get_current_schema(session, buffer.baseAddress, buffer.count)
-    }
-    guard readActive, String(cString: active) == expected.schemaID else {
-      fail("a stale user.yaml value overrode the document-selected Chinese profile")
-    }
   }
 
   private static func makeBundleFixture(at root: URL, productName: String) throws -> Bundle {

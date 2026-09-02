@@ -3,6 +3,7 @@ import Foundation
 @main
 struct LinnetRimeSessionLeaseTests {
   nonisolated(unsafe) private static var destroyedSessions: [RimeSessionId] = []
+  nonisolated(unsafe) private static var selectedSchemas: [String] = []
 
   static func main() {
     guard let first = LinnetRimeSessionLease.acquire(identifier: 41),
@@ -35,12 +36,18 @@ struct LinnetRimeSessionLeaseTests {
   }
 
   private static func testWarmSessionReusesRetiredIdentifier() {
+    selectedSchemas = []
     guard let oldController = LinnetRimeSessionLease.acquire(identifier: 91) else {
       fail("the old controller did not acquire its session")
     }
     let api = warmSessionAPI()
     let warm = LinnetRimeWarmSession()
-    require(warm.prepare(using: api) == 91, "the warm session did not initialize")
+    require(
+      warm.prepare(using: api, schemaID: "linnet_zh_jiajia") == 91,
+      "the warm session did not initialize")
+    require(
+      selectedSchemas == ["linnet_zh_jiajia"],
+      "the warm session did not select the document-owned schema")
     require(!oldController.isCurrent(sessionExists: { $0 == 91 }),
             "the old controller still owned the identifier recycled by the warm session")
     warm.discard(using: api)
@@ -51,7 +58,7 @@ struct LinnetRimeSessionLeaseTests {
     let active = LinnetRimeSessionLease.acquire(identifier: 102)!
     let warm = LinnetRimeWarmSession()
     let api = warmSessionAPI()
-    require(warm.prepare(using: api) == 91, "warm preparation failed")
+    require(warm.prepare(using: api, schemaID: "linnet_zh") == 91, "warm preparation failed")
     LinnetRimeSessionLease.retireAll()
     for retired in [inactive, active] {
       require(!retired.isCurrent(sessionExists: { _ in
@@ -70,7 +77,7 @@ struct LinnetRimeSessionLeaseTests {
     destroyedSessions = []
     let warm = LinnetRimeWarmSession()
     let api = warmSessionAPI()
-    require(warm.prepare(using: api) == 91, "warm preparation failed")
+    require(warm.prepare(using: api, schemaID: "linnet_zh") == 91, "warm preparation failed")
     let controller = LinnetRimeSessionLease.acquire(identifier: 91)!
     warm.discard(using: api)
     require(destroyedSessions.isEmpty, "stale warm cleanup destroyed a controller's session")
@@ -84,7 +91,9 @@ struct LinnetRimeSessionLeaseTests {
     var api = warmSessionAPI()
     api.simulate_key_sequence = { _, _ in false }
     let warm = LinnetRimeWarmSession()
-    require(warm.prepare(using: api) == nil, "failed priming reported a ready resource owner")
+    require(
+      warm.prepare(using: api, schemaID: "linnet_zh") == nil,
+      "failed priming reported a ready resource owner")
     require(warm.identifier == 0 && destroyedSessions == [91],
             "failed priming did not destroy and retire exactly its own session")
     warm.discard(using: api)
@@ -95,6 +104,11 @@ struct LinnetRimeSessionLeaseTests {
     var api = RimeApi_stdbool()
     api.create_session = { 91 }
     api.find_session = { $0 == 91 }
+    api.select_schema = { _, schema in
+      guard let schema else { return false }
+      LinnetRimeSessionLeaseTests.selectedSchemas.append(String(cString: schema))
+      return true
+    }
     api.simulate_key_sequence = { _, _ in true }
     api.clear_composition = { _ in }
     api.destroy_session = { identifier in

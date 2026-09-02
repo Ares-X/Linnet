@@ -527,14 +527,23 @@ extension SettingsDataCoordinator {
         snapshot: snapshot
       )
       try Task.checkCancellation()
-      progress(.deploying)
-      try bridge.deploy(
-        candidate: materialized.candidate,
-        shared: environment.shared,
-        product: environment.product,
-        imports: materialized.imports,
-        substitutionProbe: materialized.report?.smokeProbe
-      )
+      // Personal edits are already format-validated local source files. Host is
+      // the only live Rime activation owner and compiles those files after the
+      // atomic swap. Running a second ten-schema deploy in Settings made a
+      // local edit slower and introduced an unrelated failure boundary.
+      switch operation {
+      case .apply:
+        break
+      default:
+        progress(.deploying)
+        try bridge.deploy(
+          candidate: materialized.candidate,
+          shared: environment.shared,
+          product: environment.product,
+          imports: materialized.imports,
+          substitutionProbe: materialized.report?.smokeProbe
+        )
+      }
       try Task.checkCancellation()
       progress(.activating)
       let activation = try await request(

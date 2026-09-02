@@ -1713,6 +1713,9 @@ ruby -e '
       owner.include?("var identifier: RimeSessionId { lease?.identifier ?? 0 }") &&
       owner.scan("api.create_session()").length == 1
   abort "the warm-session owner does not prime the real candidate path" unless
+    owner.scan("api.select_schema(created, $0)").length == 1 &&
+      owner.index("api.select_schema(created, $0)") <
+        owner.index(%q{"ceshi".withCString}) &&
     owner.scan(%q{"ceshi".withCString}).length == 1 &&
       owner.scan(%q{api.simulate_key_sequence(created, $0)}).length == 1 &&
       owner.scan("api.clear_composition(created)").length == 1
@@ -1733,7 +1736,7 @@ ruby -e '
   maintenance = method.index("rimeAPI.start_maintenance(fullCheck)")
   join = method.index("rimeAPI.join_maintenance_thread()")
   deploy = method.index(%q{rimeAPI.deploy_config_file("squirrel.yaml", "config_version")})
-  prepare = method.index("warmRimeSession.prepare(using: rimeAPI)")
+  prepare = method.index("warmRimeSession.prepare(")
   publish = method.index("isRimeRunning = true")
   project = method.index("LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(")
   initialize = method.index("rimeAPI.initialize(nil)")
@@ -1745,10 +1748,10 @@ ruby -e '
       prepare < publish
   abort "runtime readiness no longer fails closed" unless
     method.include?(%q{guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else}) &&
-      method.include?("guard warmRimeSession.prepare(using: rimeAPI) != nil else")
+      method.include?("schemaID: settingsSnapshot.document.input.chineseProfile.schemaID")
   abort "runtime readiness gained retry or duplicate probes" unless
     method.scan("rimeAPI.join_maintenance_thread()").length == 1 &&
-      method.scan("warmRimeSession.prepare(using: rimeAPI)").length == 1 &&
+      method.scan("warmRimeSession.prepare(").length == 1 &&
       !method.include?("rimeAPI.create_session") &&
       !method.include?("rimeAPI.destroy_session") &&
       !method.include?("runtimeHealth()")
@@ -1786,8 +1789,9 @@ ruby -e '
   abort "runtime cleanup can retain an online sync iterator" unless
     cancel_sync && cancel_sync < retire_all
   abort "configuration reload regained a second readiness-session path" unless
-    reload.scan("warmRimeSession.prepare(using: rimeAPI)").length == 1 &&
+    reload.scan("warmRimeSession.prepare(").length == 1 &&
       reload.scan("warmRimeSession.discard(using: rimeAPI)").length == 1 &&
+      reload.scan("schemaID: selectedProfile.schemaID").length == 1 &&
       !reload.include?("rimeAPI.create_session") &&
       !reload.include?("rimeAPI.destroy_session")
 ' sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift ||

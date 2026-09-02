@@ -108,7 +108,10 @@ extension SquirrelApplicationDelegate {
     guard rimeAPI.deploy_config_file("squirrel.yaml", "config_version") else {
       return failStart("Linnet runtime configuration deployment failed.")
     }
-    guard warmRimeSession.prepare(using: rimeAPI) != nil else {
+    guard warmRimeSession.prepare(
+      using: rimeAPI,
+      schemaID: settingsSnapshot.document.input.chineseProfile.schemaID
+    ) != nil else {
       return failStart("Linnet runtime session readiness check failed.")
     }
     reopenRimeInput()
@@ -665,7 +668,10 @@ extension SquirrelApplicationDelegate {
       // The compiled schema is deployment output and must never select intent.
       // Readiness below only compares that intent with the fresh session,
       // so a stale or mismatched deployment fails before acknowledgement.
-      guard let readinessSession = warmRimeSession.prepare(using: rimeAPI) else {
+      guard let readinessSession = warmRimeSession.prepare(
+        using: rimeAPI,
+        schemaID: selectedProfile.schemaID
+      ) else {
         return false
       }
       var activeSchemaBuffer = [CChar](repeating: 0, count: Int(PATH_MAX))
