@@ -123,7 +123,7 @@ ruby -e '
   verification_bundle = signer[/^require_verification_bundle\(\) \{\n(?<body>.*?)(?=^\}\n)/m, :body]
   abort "frozen candidate verification has no exact bundle-name owner" unless
     verification_bundle &&
-      verification_bundle.include?("Linnet.app|Linnet.candidate") &&
+      verification_bundle.include?("Linnet.app|Linnet.candidate|Linnet.payload") &&
       verification_bundle.include?("Settings.app|Settings.candidate")
   abort "product verification does not consume the frozen candidate boundary" unless
     verifier.include?(%q{require_verification_bundle "${host_app}" host}) &&

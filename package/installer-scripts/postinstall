@@ -130,7 +130,8 @@ require_live_runtime() {
 }
 
 complete_stage_root="${support_root}/.linnet-complete"
-complete_staged_app="${complete_stage_root}/App/Linnet.app"
+complete_transport_name="Linnet.payload"
+complete_staged_app="${complete_stage_root}/App/${complete_transport_name}"
 complete_staged_data="${complete_stage_root}/Data"
 complete_staged_runtime="${complete_stage_root}/Runtime"
 complete_app_action=none

@@ -735,7 +735,7 @@ prepare_signed_postinstall_home() {
 stage_complete_candidate() {
   local home="$1"
   local root="${home}/Library/Application Support/Linnet/.linnet-complete"
-  local stage="${root}/App/Linnet.app"
+  local stage="${root}/App/Linnet.payload"
   mkdir -p "${stage%/*}" "${root}/Data/Packs" "${root}/Runtime/Active"
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${candidate_fixture}" "${stage}"
   printf 'staged language data\n' >"${root}/Data/Packs/staged"

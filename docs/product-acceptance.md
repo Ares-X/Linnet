@@ -1,5 +1,39 @@
 # Linnet product acceptance
 
+## 2026-09-02 Complete transport input-source identity (candidate)
+
+Exact rejected installed candidate: version `0.1.11`, build `77`, source
+`644530f938bcc64c5af3bf1501e7c3f36b04aa78`. At 01:43:59 +08, native
+PackageKit classified the temporary Complete payload at
+`~/Library/Application Support/Linnet/.linnet-complete/App/Linnet.app` as the
+production parent bundle and reported that it would be atomically shoved. At
+01:44:02 it touched that App and its Settings bundle after postinstall had
+already published the bytes and removed the temporary path; Installer then
+failed to resolve both deleted bundle URLs. The permanent App itself remained
+valid, but macOS no longer offered Linnet in the input menu until the next real
+login. The first wrong owner was the Complete payload and PackageInfo bundle
+mapping, not Rime, the Host connection name, TIS observation, or Core update.
+
+Build `78` makes Complete transport the signed App bytes as an opaque
+`Linnet.payload` directory with zero PackageKit bundle, upgrade, strict or
+Distribution mappings. Postinstall remains the only publication owner and
+exchanges only the permanent App's `Contents`, preserving the registered App
+directory and system authorization. The old component plist is deleted. Input
+source identities remain 1→1; temporary discoverable App identities and bundle
+mapping owners go 1→0; registration and enablement mutation paths remain one
+first-install-only path and zero update paths. No fallback registration,
+LaunchServices cleanup, application restart or logout-based repair is added.
+
+Focused PackageInfo, lifecycle, DirectoryDelta and publication-owner tests,
+the complete Swift/App/Rime gates, strict lint and Periphery pass on the source
+candidate. The eight schema matrix passes 1,776 candidate cases. The native
+incremental-sync probe passes 8,819 input samples with sync-step p99 0.344 ms
+and input p99 1.604 ms, without entering input maintenance. Exact clean package
+construction, native Complete upgrade, absence of PackageKit bundle discovery,
+menu continuity, multi-application typing, data update and public-byte
+publication remain `NOT_EXERCISED` until the clean candidate is built and
+installed below.
+
 ## 2026-09-01 community installer identity recovery (in progress)
 
 Exact rejected local candidate: source `77687efc8c186681a089661bc87da4f79b2a640d`.

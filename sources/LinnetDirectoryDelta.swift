@@ -127,8 +127,12 @@ enum LinnetDirectoryDelta {
     // LaunchServices/InputMethodKit can retain references to the registered
     // App directory. Exchange its complete Contents, never the App inode: the
     // old registered object must not move to staging and then get deleted.
+    guard installed.pathExtension == "app",
+      staged.pathExtension == "app" || staged.lastPathComponent == "Linnet.payload" else {
+      throw Failure.invalid("App publication path")
+    }
     for app in [installed, staged] {
-      guard app.pathExtension == "app",
+      guard
         try FileManager.default.contentsOfDirectory(atPath: app.path) == ["Contents"] else {
         throw Failure.invalid("App publication layout")
       }

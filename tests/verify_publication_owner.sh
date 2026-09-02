@@ -185,7 +185,7 @@ staged_identity_dispatch = <<~'BASH'
     staged)
       [[ "$#" -eq 2 && ( "$2" == \
         "${user_home}/Library/Input Methods/.linnet-core."??????"/Linnet.app" || \
-        "$2" == "${user_home}/Library/Application Support/Linnet/.linnet-complete/App/Linnet.app" ) ]] ||
+        "$2" == "${user_home}/Library/Application Support/Linnet/.linnet-complete/App/Linnet.payload" ) ]] ||
         fail_identity "staged App is outside the package transaction"
       readonly app_path="$2"
       secure_owned_path "${app_path%/*}" directory &&

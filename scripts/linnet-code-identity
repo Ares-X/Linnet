@@ -228,14 +228,14 @@ require_verification_bundle() {
   local product="$2"
   local accepted_names
   case "${product}" in
-    host) accepted_names='Linnet.app|Linnet.candidate' ;;
+    host) accepted_names='Linnet.app|Linnet.candidate|Linnet.payload' ;;
     settings) accepted_names='Settings.app|Settings.candidate' ;;
     *) fail_identity "unknown product verification boundary" ;;
   esac
   [[ "${bundle}" == /* && -d "${bundle}" && ! -L "${bundle}" ]] ||
     fail_identity "unsafe product verification bundle"
   case "${product}:${bundle##*/}" in
-    host:Linnet.app|host:Linnet.candidate|settings:Settings.app|settings:Settings.candidate) ;;
+    host:Linnet.app|host:Linnet.candidate|host:Linnet.payload|settings:Settings.app|settings:Settings.candidate) ;;
     *) fail_identity "unexpected product verification bundle: ${accepted_names}" ;;
   esac
 }

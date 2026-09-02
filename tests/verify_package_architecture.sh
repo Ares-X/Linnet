@@ -43,6 +43,18 @@ ruby -e '
   abort "Core update is not a scripts-only differential component" unless
     core_builder.include?("--nopayload")
 ' || fail "Core differential payload boundary is missing"
+ruby -e '
+  source = File.read("package/make_package")
+  verifier = File.read("package/verify_package")
+  lifecycle = File.read("package/installer-scripts/postinstall")
+  abort "Complete still stages a discoverable App bundle" unless
+    source.include?(%q{complete_transport_name="Linnet.payload"}) &&
+      lifecycle.include?(%q{complete_transport_name="Linnet.payload"})
+  abort "Complete still gives PackageKit a production bundle mapping" if
+    source.include?(%q{--component-plist "${project_root}/package/Linnet-component.plist"})
+  abort "Complete verification still accepts PackageKit bundle mappings" unless
+    verifier.include?(%q{Complete Core payload contains a bundle mapping})
+' || fail "Complete opaque transport boundary is missing"
 if rg -n 'expected_core_scripts=|def manifest\(root\)' package/verify_package; then
   fail "package verification regained a duplicate inventory or tree-digest owner"
 fi

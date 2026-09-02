@@ -22,6 +22,7 @@ complete_staging_name=".linnet-complete"
 support_install_location="/Library/Application Support/Linnet"
 complete_staging_location="${support_install_location}/${complete_staging_name}"
 complete_app_staging_location="${complete_staging_location}/App"
+complete_transport_name="Linnet.payload"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
 release_tool="${LINNET_RELEASE_TOOL:-}"
 registration_inspector="${project_root}/build/input-source-registration-inspector"
@@ -427,12 +428,18 @@ package_candidate="${work_root}/${package_name}"
 productbuild --distribution "${core_distribution}" --resources "${metadata_root}" \
   --package-path "${work_root}" "${core_candidate}" >/dev/null
 # Complete transports the App and every language payload to one hidden
-# transaction root. Its Profile postinstall is the sole publication owner.
+# transaction root. The App transport deliberately has no .app suffix and no
+# Installer bundle mapping: PackageKit and LaunchServices must never observe a
+# second production input-source identity. Profile postinstall is the sole
+# publication owner.
 # Core reconstructs its exact target from the explicit published baseline.
 unlink "${core_component}"
+complete_transport_app="${core_payload}/${complete_transport_name}"
+mv "${core_app}" "${complete_transport_app}"
+core_app="${complete_transport_app}"
 pkgbuild --info "${project_root}/package/PackageInfo" --compression latest \
   --min-os-version 13.0 --root "${core_payload}" \
-  --component-plist "${project_root}/package/Linnet-component.plist" \
+  --component-plist "${project_root}/package/Opaque-component.plist" \
   --identifier "${complete_core_receipt}" --version "${version}" \
   --install-location "${complete_app_staging_location}" --scripts "${complete_core_scripts}" \
   "${core_component}" >/dev/null

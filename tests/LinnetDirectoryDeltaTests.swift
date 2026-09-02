@@ -115,6 +115,15 @@ extension LinnetPackTests {
         LinnetTestFailure.fail("Core publication moved the existing App bookmark into staging")
       }
     }
+    let completePayload = root.appending(path: "Linnet.payload", directoryHint: .isDirectory)
+    try manager.copyItem(at: candidate, to: completePayload)
+    try LinnetDirectoryDelta.exchangeApp(installed: installed, staged: completePayload,
+      baseSHA256: baseDigest, targetSHA256: targetDigest)
+    let completeContents = try Data(contentsOf: installed.appending(path: "Contents/payload"))
+    precondition(completeContents == Data("new".utf8),
+      "opaque Complete payload did not publish its exact contents")
+    try LinnetDirectoryDelta.exchangeApp(installed: installed, staged: completePayload,
+      baseSHA256: baseDigest, targetSHA256: targetDigest)
     let unexpected = installed.appending(path: "outside-Contents")
     try Data("invalid App layout".utf8).write(to: unexpected)
     let invalidDigest = try LinnetDirectoryDelta.digest(installed)
