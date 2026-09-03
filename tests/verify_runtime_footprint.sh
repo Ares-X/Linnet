@@ -2461,6 +2461,7 @@ ruby -rjson -e '
     "Apply the installed Core now?",
     "First use the macOS input menu to select another input source.",
     "Your apps stay open. Settings closes after the new Core is verified.",
+    "You can keep using the current Core, or apply the installed Core after switching away from Linnet. Other apps stay open and no logout is required.",
     "Apply Now",
     "Download Core Update", "Downloading Core update…",
     "Core package downloaded and verified", "Core download failed",
@@ -2469,6 +2470,13 @@ ruby -rjson -e '
   ]
   absent_core_keys = required_core_keys - catalog.fetch("strings", {}).keys
   abort "Core update localization keys are missing: #{absent_core_keys.join(", ")}" unless absent_core_keys.empty?
+  required_input_keys = [
+    "The selected scheme is used for Chinese input and prefixed pinyin-to-English lookup in Chinese mode.",
+    "Type the selected key before the chosen scheme\u0027s code in Chinese mode.",
+    "Smart English recognizes the selected full- or double-pinyin scheme automatically; semicolon and other punctuation go directly to the current app."
+  ]
+  absent_input_keys = required_input_keys - catalog.fetch("strings", {}).keys
+  abort "Input help localization keys are missing: #{absent_input_keys.join(", ")}" unless absent_input_keys.empty?
   missing = catalog.fetch("strings", {}).each_with_object([]) do |(key, entry), result|
     unit = entry.dig("localizations", "zh-Hans", "stringUnit")
     result << key unless unit.is_a?(Hash) && unit["state"] == "translated" &&
