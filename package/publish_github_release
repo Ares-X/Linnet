@@ -326,6 +326,8 @@ promote_catalog() {
     [[ ! -s "${work_root}/${branch}-error" ]] ||
       cat "${work_root}/${branch}-error" >&2
     fail_publish "${branch} branch identity is unavailable"
+  else
+    current_commit=""
   fi
 
   ruby -rjson -rbase64 -e '

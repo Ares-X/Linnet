@@ -341,7 +341,10 @@ when %r{\AGET:repos/Ares-X/Linnet/git/ref/tags/(.+)\z}
 when %r{\AGET:repos/Ares-X/Linnet/git/ref/heads/(data-channel|preview-channel)\z}
   branch = Regexp.last_match(1)
   path = File.join(state, branch, "ref")
-  fail_fake("HTTP 404 Not Found", 1) unless File.file?(path)
+  unless File.file?(path)
+    puts JSON.generate({"message" => "Not Found", "status" => 404})
+    fail_fake("HTTP 404 Not Found", 1)
+  end
   puts File.read(path).strip
 when %r{\AGET:repos/Ares-X/Linnet/git/commits/(.+)\z}
   commit = Regexp.last_match(1)
