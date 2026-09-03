@@ -189,20 +189,11 @@ Settings 每次打开时会从同一 GitHub 仓库读取一个经过校验的小
 
 ## 升级与卸载
 
-Linnet 0.1 系列不会在后台静默安装未签名、未公证的 Core/App。Settings 会检查并提醒新版本；点击 **View Core Update / 查看核心更新** 会打开对应的 Core 页面，由用户核对 SHA-256 并按 macOS 提示确认安装。更新不应要求 Keychain 密码；若出现密码提示，请取消并向项目报告。
+Linnet 0.1 系列不会在后台静默安装未签名、未公证的 Core/App。Settings 检查到 Core 更新后，点击 **下载核心更新 / Download Core Update** 即可在设置内下载安装包；进度会直接显示在更新卡片中，文件大小和 SHA-256 校验通过后会自动在 Finder 中定位安装包。更新不应要求 Keychain 密码；若出现密码提示，请取消并向项目报告。
 
 正式版本页只提供完整安装包；`core-v<version>` 预发布页供已有用户免注销更新，`data-<sequence>` 预发布页供 Settings 更新语言数据。它们不会成为 Latest Release。
 
-已经完成首次安装和一次注销的用户，打开同版本 `core-v<version>` 页面，只下载：
-
-- `Linnet-<version>-arm64-Core-community-beta.pkg`。
-
-```bash
-LINNET_VERSION='X.Y.Z'
-shasum -a 256 "Linnet-${LINNET_VERSION}-arm64-Core-community-beta.pkg"
-```
-
-输出必须与 Core 更新页说明中的 SHA-256 完全一致。随后在 Finder 中按住 Control 点击 Core 安装包并选择 **打开**。Core 会验证既有 App 的发布身份、代码完整性、版本、输入源登记和语言数据，再原子替换为包内封装的完整候选；正式版与较低 build 的预览版使用同一条升级路径。它保持已安装语言包、个人数据和输入源状态，不重新注册输入源，也不关闭 Settings、TextEdit、Teams、浏览器等窗口。Settings 正在修改数据时，安装会暂缓，请完成该操作后重试。既有 App 缺失、损坏或身份不符时，Core 不会继续写入；按明确提示使用 Complete 安装包修复或先执行官方卸载。
+已经完成首次安装和一次注销的用户，只需在 **数据与更新 → 核心更新** 中下载提示的 Core 包。Settings 始终使用当前所选频道的 Catalog 和其中绑定的精确下载地址，不会要求用户寻找 Release 资产或手工比对哈希。校验完成后，在 Finder 中按住 Control 点击该安装包并选择 **打开**。Core 会验证既有 App 的发布身份、代码完整性、版本、输入源登记和语言数据，再原子替换为包内封装的完整候选；正式版与较低 build 的预览版使用同一条升级路径。它保持已安装语言包、个人数据和输入源状态，不重新注册输入源，也不关闭 Settings、TextEdit、Teams、浏览器等窗口。Settings 正在修改数据时，安装会暂缓，请完成该操作后重试。既有 App 缺失、损坏或身份不符时，Core 不会继续写入；按明确提示使用 Complete 安装包修复或先执行官方卸载。
 
 ### 安装后应用更新
 
@@ -304,7 +295,7 @@ no_download=1 ./action-build.sh release
 
 ## 版本、来源与许可证
 
-当前公开版本见 [Latest Release](https://github.com/Ares-X/Linnet/releases/latest)；本分支版本为 **0.1.11**（2026-09-03）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前公开版本见 [Latest Release](https://github.com/Ares-X/Linnet/releases/latest)；本分支版本为 **0.1.12**（2026-09-04）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 

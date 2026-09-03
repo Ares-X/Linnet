@@ -2457,15 +2457,18 @@ ruby -rjson -e '
   ]
   absent_cloud_keys = required_cloud_keys - catalog.fetch("strings", {}).keys
   abort "fixed iCloud localization keys are missing: #{absent_cloud_keys.join(", ")}" unless absent_cloud_keys.empty?
-  required_core_activation_keys = [
+  required_core_keys = [
     "Apply the installed Core now?",
     "First use the macOS input menu to select another input source.",
     "Your apps stay open. Settings closes after the new Core is verified.",
-    "Apply Now"
+    "Apply Now",
+    "Download Core Update", "Downloading Core update…",
+    "Core package downloaded and verified", "Core download failed",
+    "Show in Finder", "Try Download Again",
+    "Installed Core revision differs from the running Core"
   ]
-  absent_core_activation_keys =
-    required_core_activation_keys - catalog.fetch("strings", {}).keys
-  abort "Core activation localization keys are missing: #{absent_core_activation_keys.join(", ")}" unless absent_core_activation_keys.empty?
+  absent_core_keys = required_core_keys - catalog.fetch("strings", {}).keys
+  abort "Core update localization keys are missing: #{absent_core_keys.join(", ")}" unless absent_core_keys.empty?
   missing = catalog.fetch("strings", {}).each_with_object([]) do |(key, entry), result|
     unit = entry.dig("localizations", "zh-Hans", "stringUnit")
     result << key unless unit.is_a?(Hash) && unit["state"] == "translated" &&
@@ -2811,6 +2814,17 @@ settings_urlsession="$(rg -l 'URLSession' sources/LinnetSettings || true)"
 [[ "${settings_urlsession}" == \
   "sources/LinnetSettings/LinnetSettingsDownloadTransport.swift" ]] ||
   fail "URLSession escaped the single Settings external-transport owner"
+if rg -n 'openCoreUpdate|View Core Update|查看核心更新' \
+    sources/LinnetSettings resources/Localizable.xcstrings README.md; then
+  fail "the retired browser-only Core update action returned"
+fi
+rg -Fq 'LinnetSettingsDownloadTransport(source: .direct)' \
+  sources/LinnetSettings/LinnetSettingsUpdateChecker.swift &&
+  rg -Fq 'LinnetDataChannel.verifyDownloadedArtifact(' \
+    sources/LinnetSettings/LinnetSettingsUpdateChecker.swift &&
+  rg -Fq 'NSWorkspace.shared.activateFileViewerSelecting([$0])' \
+    sources/LinnetSettings/LinnetSettingsUpdateChecker.swift ||
+  fail "Core updates lost the one download, verification, and Finder handoff path"
 
 if rg -n 'inputRuntimePreferences|chineseProfileKey|setChineseProfile|applyPreferredChineseProfileIfIdle|rimeAPI\.select_schema' \
     sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift sources/SquirrelInputController.swift \

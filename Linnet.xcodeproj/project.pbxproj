@@ -85,6 +85,7 @@
 		D3000000000000000000000C /* LinnetSettingsProjectionRenderer.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001C /* LinnetSettingsProjectionRenderer.swift */; };
 		D3000000000000000000000D /* SettingsViews.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001D /* SettingsViews.swift */; };
 		FD1000000000000000000001 /* SettingsDataViews.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FD1000000000000000000002 /* SettingsDataViews.swift */; };
+		FD3000000000000000000001 /* SettingsCoreUpdatePresentation.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FD3000000000000000000002 /* SettingsCoreUpdatePresentation.swift */; };
 		E90400000000000000000001 /* LinnetSettingsAppearancePreview.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E90400000000000000000002 /* LinnetSettingsAppearancePreview.swift */; };
 		E90600000000000000000001 /* LinnetSettingsThemeFamilyPicker.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E90600000000000000000002 /* LinnetSettingsThemeFamilyPicker.swift */; };
 		E90500000000000000000001 /* squirrel.yaml in Settings Resources */ = {isa = PBXBuildFile; fileRef = E90500000000000000000002 /* squirrel.yaml */; };
@@ -248,6 +249,7 @@
 		D3000000000000000000001C /* LinnetSettingsProjectionRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsProjectionRenderer.swift; path = sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift; sourceTree = "<group>"; };
 		D3000000000000000000001D /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsViews.swift; path = sources/LinnetSettings/SettingsViews.swift; sourceTree = "<group>"; };
 		FD1000000000000000000002 /* SettingsDataViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsDataViews.swift; path = sources/LinnetSettings/SettingsDataViews.swift; sourceTree = "<group>"; };
+		FD3000000000000000000002 /* SettingsCoreUpdatePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsCoreUpdatePresentation.swift; path = sources/LinnetSettings/SettingsCoreUpdatePresentation.swift; sourceTree = "<group>"; };
 		E90400000000000000000002 /* LinnetSettingsAppearancePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsAppearancePreview.swift; path = sources/LinnetSettings/LinnetSettingsAppearancePreview.swift; sourceTree = "<group>"; };
 		E90600000000000000000002 /* LinnetSettingsThemeFamilyPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsThemeFamilyPicker.swift; path = sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift; sourceTree = "<group>"; };
 		E90500000000000000000002 /* squirrel.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; name = squirrel.yaml; path = data/squirrel.yaml; sourceTree = "<group>"; };
@@ -387,6 +389,7 @@
 				E90600000000000000000002 /* LinnetSettingsThemeFamilyPicker.swift */,
 				D3000000000000000000001D /* SettingsViews.swift */,
 				FD1000000000000000000002 /* SettingsDataViews.swift */,
+				FD3000000000000000000002 /* SettingsCoreUpdatePresentation.swift */,
 				D30000000000000000000017 /* Settings-Bridging-Header.h */,
 			);
 			name = LinnetSettings;
@@ -695,6 +698,7 @@
 				E90600000000000000000001 /* LinnetSettingsThemeFamilyPicker.swift in Settings Sources */,
 				D3000000000000000000000D /* SettingsViews.swift in Settings Sources */,
 				FD1000000000000000000001 /* SettingsDataViews.swift in Settings Sources */,
+				FD3000000000000000000001 /* SettingsCoreUpdatePresentation.swift in Settings Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -159,12 +159,11 @@ extension DataTabView {
       }
     case .pending(let installed, let running):
       VStack(alignment: .leading, spacing: 4) {
-        Label("Installed Core update is ready", systemImage: "checkmark.circle")
+        Label(pendingCoreTitle(installed: installed, running: running),
+          systemImage: "checkmark.circle")
           .foregroundStyle(.orange)
         coreIdentityRows(installed: installed, running: running)
-        Text(
-          "You can keep using the current Core, or apply the installed Core after switching away from Linnet. Other apps stay open and no logout is required."
-        )
+        Text(pendingCoreDetail(installed: installed, running: running))
           .font(.caption2)
           .foregroundStyle(.secondary)
         Button("Check Runtime Again") { updateChecker.refreshRuntime() }
@@ -367,11 +366,13 @@ extension DataTabView {
     HStack(alignment: .center, spacing: 10) {
       updateCheckLabel
       Spacer()
-      if case .core = updateChecker.availability {
-        Button("View Core Update") { updateChecker.openCoreUpdate() }
+      if case .core(let core) = updateChecker.availability {
+        coreDownloadControls(core)
       }
       Button("Check Again") { updateChecker.check() }
-        .disabled(updateChecker.active || updateChecker.activationInProgress)
+        .disabled(
+          updateChecker.active || updateChecker.activationInProgress
+            || updateChecker.coreDownloadInProgress)
     }
   }
 
@@ -393,8 +394,8 @@ extension DataTabView {
           .foregroundStyle(.secondary)
       case .some(.core(let core)):
         VStack(alignment: .leading, spacing: 2) {
-          Label("Core update available", systemImage: "arrow.down.circle.fill")
-            .foregroundStyle(.orange)
+          Label(coreDownloadStatusTitle(core), systemImage: coreDownloadStatusImage(core))
+            .foregroundStyle(coreDownloadStatusColor(core))
           LabeledContent("Current") {
             if let installed = updateChecker.installedIdentity {
               Text(verbatim: productIdentityDescription(installed))
@@ -407,7 +408,7 @@ extension DataTabView {
             Text(verbatim: "\(core.version) (\(core.build))")
           }
           .font(.caption.monospacedDigit())
-          Text("The Core update does not require another logout. macOS may ask you to approve the unsigned package.")
+          Text(coreDownloadStatusDetail(core))
             .font(.caption2)
             .foregroundStyle(.secondary)
         }

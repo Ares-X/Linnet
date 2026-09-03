@@ -759,7 +759,9 @@ extension DataTabView {
         Text("Preview").tag(LinnetSettingsUpdateChecker.UpdateChannel.preview)
       }
       .pickerStyle(.segmented)
-      .disabled(updateChecker.active || updateChecker.activationInProgress)
+      .disabled(
+        updateChecker.active || updateChecker.activationInProgress
+          || updateChecker.coreDownloadInProgress)
       if updateChecker.updateChannel == .preview {
         Text(
           "Preview receives release candidates before they become the latest stable version.")

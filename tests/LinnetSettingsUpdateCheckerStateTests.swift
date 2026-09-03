@@ -200,6 +200,64 @@ struct LinnetSettingsUpdateCheckerStateTests {
           "0.1.9 blocker \(legacy.code.rawValue) entered Host lifecycle or success"
         )
       }
+
+      let core = LinnetDataChannel.Core(
+        version: "0.1.11", build: 87,
+        revision: String(repeating: "d", count: 40),
+        bytes: 6_479_740,
+        sha256: String(repeating: "e", count: 64),
+        packageURL: URL(
+          string:
+            "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.11/Linnet-0.1.11-arm64-Core-community-beta.pkg"
+        )!,
+        releaseURL: URL(
+          string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.11")!
+      )
+      let downloaded = fixture.root.appending(
+        path: "Linnet-0.1.11-arm64-Core-community-beta.pkg",
+        directoryHint: .notDirectory)
+      var revealed: [URL] = []
+      let downloadChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: requester,
+        coreDownloader: StubCoreDownloader(destination: downloaded),
+        revealCorePackage: { revealed.append($0) })
+      downloadChecker.downloadCoreUpdate(core)
+      await waitUntil("verified Core download did not become ready") {
+        downloadChecker.coreDownloadState == .ready(core: core, file: downloaded)
+      }
+      require(
+        revealed == [downloaded],
+        "verified Core download was not revealed through the one Finder boundary"
+      )
+
+      let failedDownloadChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: requester,
+        coreDownloader: StubCoreDownloader(destination: nil),
+        revealCorePackage: { _ in fail("a failed Core download was revealed") })
+      failedDownloadChecker.downloadCoreUpdate(core)
+      await waitUntil("failed Core download did not publish its terminal state") {
+        failedDownloadChecker.coreDownloadState == .failed(core: core)
+      }
+
+      if ProcessInfo.processInfo.environment["LINNET_CORE_DOWNLOAD_LIVE"] == "1" {
+        let catalogData = try await LinnetSettingsDownloadTransport(
+          source: .direct
+        ).downloadCatalog(
+          at: LinnetSettingsUpdateChecker.UpdateChannel.stable.catalogURL)
+        let publishedCore = try LinnetDataChannel.verifyPublished(catalogData).catalog.core
+        let liveRoot = fixture.root.appending(
+          path: "Live Core Download", directoryHint: .isDirectory)
+        let liveFile = try await LinnetCorePackageDownloader(
+          downloadsDirectory: liveRoot
+        ).download(publishedCore, progress: { _ in })
+        try LinnetDataChannel.verifyDownloadedArtifact(
+          bytes: publishedCore.bytes,
+          sha256: publishedCore.sha256,
+          at: liveFile)
+      }
+
     } catch {
       fail("unexpected fixture error: \(error)")
     }
@@ -265,6 +323,22 @@ struct LinnetSettingsUpdateCheckerStateTests {
     }
 
     private enum Failure: Error { case unavailable }
+  }
+
+  private struct StubCoreDownloader: LinnetCorePackageDownloading {
+    let destination: URL?
+
+    func download(
+      _ core: LinnetDataChannel.Core,
+      progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+      progress(0.5)
+      guard let destination else { throw Failure.rejected }
+      progress(1)
+      return destination
+    }
+
+    private enum Failure: Error { case rejected }
   }
 
   private struct BundleFixture {

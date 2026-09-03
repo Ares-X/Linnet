@@ -1,6 +1,66 @@
 import AppKit
 import Foundation
 
+protocol LinnetCorePackageDownloading: Sendable {
+  func download(
+    _ core: LinnetDataChannel.Core,
+    progress: @escaping @Sendable (Double) -> Void
+  ) async throws -> URL
+}
+
+/// Downloads the Catalog-owned Core package through Settings' existing byte
+/// transfer boundary, then verifies the exact Catalog size and SHA-256 before
+/// exposing the file to the user.
+struct LinnetCorePackageDownloader: LinnetCorePackageDownloading {
+  private let downloadsDirectory: URL?
+
+  init(downloadsDirectory: URL? = nil) {
+    self.downloadsDirectory = downloadsDirectory
+  }
+
+  func download(
+    _ core: LinnetDataChannel.Core,
+    progress: @escaping @Sendable (Double) -> Void
+  ) async throws -> URL {
+    let root = try resolvedDownloadsDirectory()
+    let directory = root.appending(
+      path: "\(core.sha256)-\(UUID().uuidString)",
+      directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+    let destination = directory.appending(
+      path: core.packageURL.lastPathComponent,
+      directoryHint: .notDirectory
+    )
+    let transport = LinnetSettingsDownloadTransport(source: .direct)
+    try await transport.downloadArtifact(
+      from: core.packageURL,
+      expectedBytes: core.bytes,
+      to: destination,
+      progress: progress
+    )
+    try LinnetDataChannel.verifyDownloadedArtifact(
+      bytes: core.bytes, sha256: core.sha256, at: destination)
+    return destination
+  }
+
+  private func resolvedDownloadsDirectory() throws -> URL {
+    if let downloadsDirectory { return downloadsDirectory }
+    guard let downloads = FileManager.default.urls(
+      for: .downloadsDirectory,
+      in: .userDomainMask
+    ).first else { throw Failure.missingDownloadsDirectory }
+    return downloads.appending(path: "Linnet Core Updates", directoryHint: .isDirectory)
+  }
+
+  private enum Failure: Error {
+    case missingDownloadsDirectory
+  }
+}
+
 /// Settings owns update visibility and the user-requested Core activation
 /// orchestration. The running Host remains the sole exit-safety authority.
 @MainActor
@@ -102,6 +162,13 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     }
   }
 
+  enum CoreDownloadState: Equatable {
+    case idle
+    case downloading(core: LinnetDataChannel.Core, progress: Double)
+    case ready(core: LinnetDataChannel.Core, file: URL)
+    case failed(core: LinnetDataChannel.Core)
+  }
+
   @Published private(set) var availability: LinnetDataChannel.UpdateAvailability?
   @Published private(set) var active = false
   @Published private(set) var failed = false
@@ -109,9 +176,15 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   @Published private(set) var runtimeVersionState: RuntimeVersionState =
     .checking(installed: nil)
   @Published private(set) var updateChannel: UpdateChannel
+  @Published private(set) var coreDownloadState: CoreDownloadState = .idle
 
   var activationInProgress: Bool {
     if case .applying = runtimeVersionState { return true }
+    return false
+  }
+
+  var coreDownloadInProgress: Bool {
+    if case .downloading = coreDownloadState { return true }
     return false
   }
 
@@ -120,19 +193,27 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   private let hostBundleIdentifier: String?
   private let transactionRequester: LinnetSettingsTransactionRequesting
   private let updateDefaults: UserDefaults
+  private let coreDownloader: any LinnetCorePackageDownloading
+  private let revealCorePackage: (URL) -> Void
   private var edition: LinnetDataRegistry.Edition?
   private var installedPacks: [LinnetDataRegistry.ActivePack]
   private var task: Task<Void, Never>?
   private var runtimeTask: Task<Void, Never>?
+  private var coreDownloadTask: Task<Void, Never>?
   private var cycle: UInt64 = 0
   private var runtimeCycle: UInt64 = 0
+  private var coreDownloadCycle: UInt64 = 0
 
   init(
     edition: LinnetDataRegistry.Edition?,
     installedPacks: [LinnetDataRegistry.ActivePack],
     bundle: Bundle = .main,
     transactionRequester: LinnetSettingsTransactionRequesting? = nil,
-    updateDefaults: UserDefaults = .standard
+    updateDefaults: UserDefaults = .standard,
+    coreDownloader: any LinnetCorePackageDownloading = LinnetCorePackageDownloader(),
+    revealCorePackage: @escaping (URL) -> Void = {
+      NSWorkspace.shared.activateFileViewerSelecting([$0])
+    }
   ) {
     identityBundle = bundle
     installedIdentity = nil
@@ -142,6 +223,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     hostBundleURL = host?.bundleURL
     hostBundleIdentifier = host?.bundleIdentifier
     self.updateDefaults = updateDefaults
+    self.coreDownloader = coreDownloader
+    self.revealCorePackage = revealCorePackage
     updateChannel = UpdateChannel.load(from: updateDefaults)
     self.transactionRequester = transactionRequester
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
@@ -161,6 +244,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     active = false
     failed = false
     availability = nil
+    resetCoreDownload()
     updateChannel = channel
     channel.save(to: updateDefaults)
     startCheck(replacingCurrent: true)
@@ -307,9 +391,74 @@ extension LinnetSettingsUpdateChecker {
     startCheck(replacingCurrent: true)
   }
 
-  func openCoreUpdate() {
-    guard case .core(let core) = availability else { return }
-    NSWorkspace.shared.open(core.releaseURL)
+  func downloadCoreUpdate(_ core: LinnetDataChannel.Core) {
+    if case .ready(let readyCore, let file) = coreDownloadState,
+      readyCore == core {
+      revealCorePackage(file)
+      return
+    }
+    if case .downloading(let downloadingCore, _) = coreDownloadState,
+      downloadingCore == core {
+      return
+    }
+    coreDownloadTask?.cancel()
+    coreDownloadCycle &+= 1
+    let activeCycle = coreDownloadCycle
+    coreDownloadState = .downloading(core: core, progress: 0)
+    coreDownloadTask = Task { [weak self] in
+      guard let self else { return }
+      do {
+        let file = try await coreDownloader.download(core) { [weak self] progress in
+          Task { @MainActor [weak self] in
+            self?.recordCoreDownloadProgress(
+              progress, core: core, cycle: activeCycle)
+          }
+        }
+        guard !Task.isCancelled, activeCycle == coreDownloadCycle else { return }
+        coreDownloadState = .ready(core: core, file: file)
+        coreDownloadTask = nil
+        revealCorePackage(file)
+      } catch is CancellationError {
+        guard activeCycle == coreDownloadCycle else { return }
+        coreDownloadState = .idle
+        coreDownloadTask = nil
+      } catch {
+        guard activeCycle == coreDownloadCycle else { return }
+        coreDownloadState = .failed(core: core)
+        coreDownloadTask = nil
+      }
+    }
+  }
+
+  func cancelCoreDownload() {
+    resetCoreDownload()
+  }
+
+  func showDownloadedCoreUpdate() {
+    guard case .ready(_, let file) = coreDownloadState else { return }
+    revealCorePackage(file)
+  }
+
+  private func recordCoreDownloadProgress(
+    _ progress: Double,
+    core: LinnetDataChannel.Core,
+    cycle activeCycle: UInt64
+  ) {
+    guard activeCycle == coreDownloadCycle,
+      case .downloading(let downloadingCore, _) = coreDownloadState,
+      downloadingCore == core
+    else { return }
+    coreDownloadState = .downloading(
+      core: core,
+      progress: min(1, max(0, progress))
+    )
+  }
+
+  private func resetCoreDownload() {
+    coreDownloadTask?.cancel()
+    coreDownloadTask = nil
+    coreDownloadCycle &+= 1
+    coreDownloadState = .idle
   }
 
   private func request(
@@ -384,6 +533,17 @@ extension LinnetSettingsUpdateChecker {
     cycle activeCycle: UInt64
   ) {
     guard activeCycle == cycle else { return }
+    if case .core(let core) = result {
+      switch coreDownloadState {
+      case .downloading(let downloadingCore, _), .ready(let downloadingCore, _),
+        .failed(let downloadingCore):
+        if downloadingCore != core { resetCoreDownload() }
+      case .idle:
+        break
+      }
+    } else {
+      resetCoreDownload()
+    }
     availability = result
     active = false
     failed = false
