@@ -219,7 +219,14 @@ private extension LinnetSettingsProjectionRenderer {
     // owner for policies that must override an older Active pack immediately.
     var entries = [
       ("ascii_composer/switch_key/Caps_Lock", "commit_code"), ("ascii_composer/switch_key/Shift_L", "commit_code"), ("ascii_composer/switch_key/Shift_R", "commit_code"),
-      ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern))
+      ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern)),
+      ("punctuator/half_shape/,", "{ commit: \"，\" }"),
+      ("punctuator/half_shape/.", "{ commit: \"。\" }"),
+      ("punctuator/half_shape/:", "{ commit: \"：\" }"),
+      ("punctuator/half_shape/;", "{ commit: \"；\" }"),
+      ("punctuator/half_shape/'", "{ pair: [\"‘\", \"’\"] }"),
+      ("punctuator/half_shape/[", "{ commit: \"【\" }"),
+      ("punctuator/half_shape/]", "{ commit: \"】\" }")
     ]
     if pageSize != LinnetSettingsDocument.Appearance.defaultPageSize {
       entries.append(("menu/page_size", String(pageSize)))

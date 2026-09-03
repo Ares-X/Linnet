@@ -191,6 +191,16 @@ struct LinnetSettingsProjectionRendererTests {
         == coreInteractionProjection + defaultSchemaOrderProjection,
       "the default Core projection did not own the complete installed interaction policy"
     )
+    guard let coreProjection = projections[
+      LinnetSettingsProjectionRenderer.defaultCustomFile
+    ],
+      coreProjection.contains("\"punctuator/half_shape/,\": { commit: \"，\" }"),
+      coreProjection.contains("\"punctuator/half_shape/.\": { commit: \"。\" }"),
+      coreProjection.contains("\"punctuator/half_shape/:\": { commit: \"：\" }"),
+      coreProjection.contains("\"punctuator/half_shape/;\": { commit: \"；\" }")
+    else {
+      fail("the Core projection did not repair Chinese punctuation in an older language pack")
+    }
     for name in schemaFiles {
       guard let contents = projections[name] else {
         fail("the default interaction projection was absent from \(name)")
@@ -1053,6 +1063,13 @@ struct LinnetSettingsProjectionRendererTests {
       "ascii_composer/switch_key/Shift_L": commit_code
       "ascii_composer/switch_key/Shift_R": commit_code
       "linnet/recognizer_patterns/zz_code_token": "^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$"
+      "punctuator/half_shape/,": { commit: "，" }
+      "punctuator/half_shape/.": { commit: "。" }
+      "punctuator/half_shape/:": { commit: "：" }
+      "punctuator/half_shape/;": { commit: "；" }
+      "punctuator/half_shape/'": { pair: ["‘", "’"] }
+      "punctuator/half_shape/[": { commit: "【" }
+      "punctuator/half_shape/]": { commit: "】" }
 
     """
 
