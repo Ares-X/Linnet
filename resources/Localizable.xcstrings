@@ -340,6 +340,8 @@
     "An unidentified app used this Host, so Linnet cannot prove that an immediate restart is safe. The update will remain installed for the next login or restart." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"有无法识别的应用使用过此 Host，因此 Linnet 无法证明立即重启是安全的。更新将保持已安装状态，并在下次登录或重启时生效。"}}}},
     "Settings could not establish the one safe activation requester. Reopen Settings and try again." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"设置无法建立唯一的安全激活请求方。请重新打开设置后再试。"}}}},
     "Apply the installed Core now?" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"现在应用已安装的核心？"}}}},
+    "First use the macOS input menu to select another input source." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"请先使用 macOS 输入菜单切换到其他输入法。"}}}},
+    "Your apps stay open. Settings closes after the new Core is verified." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"其他应用会保持打开；新核心验证成功后，设置将关闭。"}}}},
     "Apply Now" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"立即应用"}}}},
     "Check Runtime Again" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"重新检查运行状态"}}}},
     "Running Core identity is unavailable." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"无法获取正在运行核心的身份。"}}}},

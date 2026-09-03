@@ -2405,6 +2405,15 @@ ruby -rjson -e '
   ]
   absent_cloud_keys = required_cloud_keys - catalog.fetch("strings", {}).keys
   abort "fixed iCloud localization keys are missing: #{absent_cloud_keys.join(", ")}" unless absent_cloud_keys.empty?
+  required_core_activation_keys = [
+    "Apply the installed Core now?",
+    "First use the macOS input menu to select another input source.",
+    "Your apps stay open. Settings closes after the new Core is verified.",
+    "Apply Now"
+  ]
+  absent_core_activation_keys =
+    required_core_activation_keys - catalog.fetch("strings", {}).keys
+  abort "Core activation localization keys are missing: #{absent_core_activation_keys.join(", ")}" unless absent_core_activation_keys.empty?
   missing = catalog.fetch("strings", {}).each_with_object([]) do |(key, entry), result|
     unit = entry.dig("localizations", "zh-Hans", "stringUnit")
     result << key unless unit.is_a?(Hash) && unit["state"] == "translated" &&

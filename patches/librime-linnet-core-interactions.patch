@@ -1380,7 +1380,7 @@ diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_mana
 index e0331e4..d2ea2cf 100644
 --- a/src/rime/lever/user_dict_manager.cc
 +++ b/src/rime/lever/user_dict_manager.cc
-@@ -224,3 +224,310 @@ bool UserDictManager::SynchronizeAll() {
+@@ -224,3 +224,320 @@ bool UserDictManager::SynchronizeAll() {
  }
  
  }  // namespace rime
@@ -1571,7 +1571,12 @@ index e0331e4..d2ea2cf 100644
 +        return 1;
 +      }
 +      auto* level = dynamic_cast<LevelDb*>(database.get());
-+      if (!level) return -1;
++      if (!level) {
++        // A same-name Settings mirror may use the .userdb suffix while the
++        // live Host database is a read-only StableDb. It is not learning data.
++        source.reset(); ++imported;
++        return 1;
++      }
 +      if (level->in_transaction()) return 1;  // Preserve local undo.
 +      if (!source && level->merge_phase() != UserDbMergePhase::none)
 +        return level->DrainUserDbMerge(deadline) ? 1 : -1;
@@ -1602,7 +1607,12 @@ index e0331e4..d2ea2cf 100644
 +      const auto& name = io->names[exported];
 +      auto database = component->FindDb(name);
 +      auto* level = database ? dynamic_cast<LevelDb*>(database.get()) : nullptr;
-+      if (database && !level) return -1;
++      if (database && !level) {
++        // Only live LevelDb dictionaries own Rime learning. Custom words and
++        // Text Expander can have writable Settings mirrors with this suffix.
++        cursor.clear(); ++exported;
++        return 1;
++      }
 +      if (level && level->merge_phase() != UserDbMergePhase::none) {
 +        if (level->in_transaction()) return 1;
 +        return level->DrainUserDbMerge(deadline) ? 1 : -1;

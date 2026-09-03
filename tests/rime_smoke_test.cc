@@ -6133,6 +6133,37 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   SyncRows expected_visible;
   auto* db_factory = rime::Db::Require("userdb");
   if (!db_factory) Fail("upstream user database factory unavailable");
+  // Settings owns writable LevelDB mirrors for custom words and Text Expander,
+  // while the Host loads the same names through Rime's read-only stabledb.
+  // The learning synchronizer must classify by the loaded database type, not
+  // by the unrelated mirror directory's .userdb suffix.
+  const std::string stable_collision_name = "linnet_sync_stable_collision";
+  std::unique_ptr<rime::Db> stable_collision_shadow(
+      db_factory->Create(stable_collision_name));
+  if (!stable_collision_shadow || stable_collision_shadow->Exists() ||
+      !stable_collision_shadow->Open() ||
+      !stable_collision_shadow->Update("auxiliary \tshadow", "c=1 d=1 t=1") ||
+      !stable_collision_shadow->Close())
+    Fail("cannot seed the non-learning .userdb collision");
+  {
+    std::ofstream stable_file(
+        rime::Service::instance().deployer().user_data_dir /
+        (stable_collision_name + ".txt"));
+    stable_file << "# Rime table\n# coding: utf-8\n"
+                   "#@/db_name\t" << stable_collision_name << ".txt\n"
+                   "#@/db_type\ttabledb\n#\n"
+                   "Auxiliary\tauxiliary\n";
+    if (!stable_file) Fail("cannot seed the stabledb side of the collision");
+  }
+  std::unique_ptr<rime::UserDictionary> stable_collision(
+      component->Create(stable_collision_name, "stabledb"));
+  if (!stable_collision) Fail("cannot create the non-learning stabledb collision");
+  // StableDb is read-only and has no learning tick, so UserDictionary::Load()
+  // returns false after successfully opening it. The loaded database is the
+  // exact Host state that must be classified as non-learning.
+  stable_collision->Load();
+  if (!stable_collision->loaded())
+    Fail("cannot load the non-learning stabledb collision");
   {
     std::unique_ptr<rime::Db> reference(db_factory->Create("linnet-sync-merge-oracle"));
     if (!reference || reference->Exists() || !reference->Open())
@@ -6273,6 +6304,16 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   if (database->Fetch("yun tong bu \t未提交", &value))
     Fail("aborted local learning became durable during sync");
   finish();
+  if (std::filesystem::exists(
+          directory / rime::Service::instance().deployer().user_id /
+          (stable_collision_name + ".userdb.txt")))
+    Fail("learning sync published a non-learning stabledb mirror");
+  stable_collision.reset();
+  if (!stable_collision_shadow->Remove())
+    Fail("cannot remove the non-learning .userdb collision");
+  std::filesystem::remove(
+      rime::Service::instance().deployer().user_data_dir /
+      (stable_collision_name + ".txt"));
   if (!activation_checked) record_failure("the initial merge never published tick 1000");
   size_t differing_rows = 0;
   std::string first_difference;
