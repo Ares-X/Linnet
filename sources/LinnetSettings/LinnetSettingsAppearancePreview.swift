@@ -424,11 +424,10 @@ struct LinnetSettingsAppearancePreviewView: View {
       }
     }
     .accessibilityElement(children: .contain)
-    .accessibilityLabel(Text("Local candidate appearance preview"))
-    .accessibilityValue(accessibilityValue)
+    .accessibilityLabel(accessibilityLabel)
   }
 
-  private var accessibilityValue: Text {
+  private var accessibilityLabel: Text {
     switch preview {
     case .success:
       Text(

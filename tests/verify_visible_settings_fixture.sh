@@ -62,6 +62,7 @@ uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
 uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
 xcode_user_name="$(id -un)"
 settings_ui_source="tests/SettingsUITests/SettingsUITests.swift"
+appearance_preview_source="sources/LinnetSettings/LinnetSettingsAppearancePreview.swift"
 focused_ui_tests=()
 if [[ -n "${ui_test_name}" ]]; then
   [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+(,test[A-Za-z0-9]+)*$ ]] ||
@@ -95,6 +96,11 @@ if /usr/bin/grep -Eq \
 fi
 rg -Fq 'continueAfterFailure = false' "${settings_ui_source}" ||
   fail "Settings UI tests must stop interactions inside a failed test"
+rg -Fq '.accessibilityLabel(accessibilityLabel)' "${appearance_preview_source}" ||
+  fail "appearance preview no longer publishes browsing state in its accessible name"
+if rg -Fq '.accessibilityValue(accessibilityValue)' "${appearance_preview_source}"; then
+  fail "appearance preview restored the unreliable parallel AXValue state path"
+fi
 if rg -n 'suiteHasFailed|XCTSkipIf' "${settings_ui_source}"; then
   fail "one failed Settings test must not skip independent UI workflows"
 fi

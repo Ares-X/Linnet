@@ -225,13 +225,13 @@ final class SettingsUITests: XCTestCase {
       identifier: "settings.appearance.browsing",
       in: app)
 
-    let preview = app.groups["Local candidate appearance preview"]
+    let preview = app.groups["Expanded candidate preview"]
     try reveal(
       preview,
       named: "Expanded candidate preview",
       in: app,
       acceptingVisiblePortion: true)
-    XCTAssertEqual(preview.value as? String, "Expanded candidate preview")
+    XCTAssertTrue(preview.exists)
     XCTAssertFalse(
       app.descendants(matching: .any)[
         "settings.appearance.preview.chinese.disclosure"].exists)

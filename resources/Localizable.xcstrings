@@ -231,7 +231,6 @@
     "Replace categories from this portable archive?" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"用此便携归档替换所选数据类别？"}}}},
     "Restore Backup" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复备份"}}}},
     "Restore this verified backup?" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复此已验证备份？"}}}},
-    "Local candidate appearance preview" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"本地候选外观预览"}}}},
     "Expanded candidate preview" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"展开候选预览"}}}},
     "Scrolling-only candidate preview" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"仅滚动候选预览"}}}},
     "Local candidate appearance preview unavailable" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"本地候选外观预览不可用"}}}},
