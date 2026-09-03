@@ -121,13 +121,13 @@
     }
   ],
   "core" : {
-    "build" : 87,
-    "bytes" : 6479740,
-    "package_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.11/Linnet-0.1.11-arm64-Core-community-beta.pkg",
-    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.11",
-    "revision" : "4466a5744ca78918c03fca5499bd79863a4f84ec",
-    "sha256" : "c413061f6f930e109ddf3438f6017b418ade9d95589b4ccbbcbd0786b6d42f58",
-    "version" : "0.1.11"
+    "build" : 89,
+    "bytes" : 6498474,
+    "package_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.13/Linnet-0.1.13-arm64-Core-community-beta.pkg",
+    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.13",
+    "revision" : "c6834466ba4527c3d51b8470166128ef74bd4291",
+    "sha256" : "8594df83201bf5cdc21146759a090bff4d8936a8ef29fad38a6548f167251170",
+    "version" : "0.1.13"
   },
   "format" : 1,
   "sequence" : 47
