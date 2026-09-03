@@ -162,9 +162,10 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
 Core/Public，也不得推进 Catalog。随后只有同一 revision 可快进到 `main`，再走正常
 candidate 流程。正常版本不运行 seed 模式。
 
-任一项失败都停止在当前幂等边界；不能覆盖、删除或 `--clobber` 已公开资产。候选
-字节本身有误时，修复必须形成新的 revision；只有已验收版本推进时才增加 build，
-数据内容变化时才增加必要的数据 sequence，再由
+任一项失败都停止在当前幂等边界；不能覆盖或 `--clobber` 已公开资产。候选
+字节本身有误时，修复必须形成新的 revision；候选一旦公开到 Preview，就成为在线
+升级基线，同版本的后续 Preview 必须严格增加 Core build。尚未公开、只停留在 Draft
+的候选修订可保持 build 不变。数据内容变化时才增加必要的数据 sequence，再由
 macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、Preview 和正式
 发布三个控制标签分别只授权自己的边界。
 
