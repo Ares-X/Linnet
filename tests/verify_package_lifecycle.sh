@@ -130,7 +130,11 @@ fixture="${target}/Contents/Resources/LinnetLifecycleFixture"
 kind="$(cat "${fixture}/signature-kind")"
 case " $* " in
   *' --verify '*)
-    [[ "${kind}" == legacy-community-adhoc ]]
+    [[ ! -e "${target}/Contents/unexpected" ]] || exit 1
+    case "${kind}" in
+      legacy-community-adhoc|community-cms) ;;
+      *) exit 1 ;;
+    esac
     ;;
   *' -dvvv '*)
     case "${kind}" in
@@ -290,11 +294,11 @@ ruby -e '
   legacy = profiles&.match(/^community-adhoc\).*?^  ;;$/m)&.[](0)
   verify = %q{/usr/bin/codesign --verify --deep --strict}
   abort unless prefix && cms && legacy &&
-    !prefix.include?(verify) && !cms.include?(verify) &&
+    !prefix.include?(verify) && cms.scan(verify).size == 1 &&
     legacy.scan(verify).size == 1 &&
     !source.include?(%q{--extract-certificates})
 ' package/installer-scripts/candidate-app-identity.sh || {
-  echo "Current community installation regained a user trust-store dependency." >&2
+  echo "Candidate identity integrity checks are not scoped to both admitted signing profiles." >&2
   exit 1
 }
 if rg -n 'core-update-selection|prior_enablement|TISDisable|--activate-input-source|--disable-input-source|--select-input-source|--refresh-core-input-source' \
@@ -933,27 +937,26 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   [[ -x "${delta_tool}" ]] || { echo "Canonical pack CLI must be built before lifecycle tests." >&2; exit 1; }
   cp -X "${delta_tool}" "${scripts_root}/linnet-pack"
   chmod 0755 "${scripts_root}/linnet-pack"
-  delta_base_home="${test_root}/delta-base/home"
-  prepare_signed_postinstall_home "${delta_base_home}"
-  configure_installed_identity "${delta_base_home}" same-community-cms-leaf
-  delta_base_app="${delta_base_home}/Library/Input Methods/Linnet.app"
-  "${delta_tool}" build-delta --base "${delta_base_app}" --target "${candidate_fixture}" \
-    --output "${scripts_root}/core.linnetdelta"
-  chmod 0644 "${scripts_root}/core.linnetdelta"
-  cp -X "${scripts_root}/core.linnetdelta" "${test_root}/accepted.linnetdelta"
+  COPYFILE_DISABLE=1 ditto --norsrc --noextattr \
+    "${candidate_fixture}" "${scripts_root}/core.payload"
   target_tree="$("${delta_tool}" tree-digest --root "${candidate_fixture}")"
 
-  # Core must classify the immutable delta boundary before PackageKit can
-  # mutate any payload path. A valid CMS/registered/runtime App is still not a
-  # Core baseline unless its complete tree matches the published delta base.
-  for preflight_case in base target wrong-base; do
+  # Core admits any intact, same-leaf public release no newer than the sealed
+  # candidate. This includes a stable build and a lower Preview with distinct
+  # bytes; a tampered App still fails before PackageKit can mutate state.
+  for preflight_case in stable preview target tampered; do
     preflight_home="${test_root}/delta-preflight-${preflight_case}/home"
     preflight_app="${preflight_home}/Library/Input Methods/Linnet.app"
     prepare_signed_postinstall_home "${preflight_home}"
     case "${preflight_case}" in
-      base) configure_installed_identity "${preflight_home}" same-community-cms-leaf ;;
+      stable) configure_installed_identity "${preflight_home}" same-community-cms-leaf ;;
+      preview)
+        configure_installed_identity "${preflight_home}" same-community-cms-leaf \
+          0.1.13 30
+        printf 'published preview bytes\n' >"${preflight_app}/Contents/preview-build"
+        ;;
       target) ;;
-      wrong-base)
+      tampered)
         configure_installed_identity "${preflight_home}" same-community-cms-leaf
         printf 'unexpected bytes\n' >"${preflight_app}/Contents/unexpected"
         ;;
@@ -961,20 +964,20 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     before_tree="$("${delta_tool}" tree-digest --root "${preflight_app}")"
     if HOME="${preflight_home}" "${scripts_root}/preinstall" \
         >"${test_root}/delta-preflight-${preflight_case}/result.log" 2>&1; then
-      [[ "${preflight_case}" != wrong-base ]] || {
-        echo "Core preinstall accepted a non-baseline App tree." >&2; exit 1;
+      [[ "${preflight_case}" != tampered ]] || {
+        echo "Core preinstall accepted a tampered App tree." >&2; exit 1;
       }
     else
-      [[ "${preflight_case}" == wrong-base ]] || {
+      [[ "${preflight_case}" == tampered ]] || {
         cat "${test_root}/delta-preflight-${preflight_case}/result.log" >&2; exit 1;
       }
-      grep -Fq 'exact published baseline' \
+      grep -Fq 'code signature is invalid' \
         "${test_root}/delta-preflight-${preflight_case}/result.log" || {
-        echo "Core wrong-base exit did not explain the exact baseline contract." >&2; exit 1;
+        echo "Core tampered-App exit did not explain the integrity failure." >&2; exit 1;
       }
     fi
     [[ "$("${delta_tool}" tree-digest --root "${preflight_app}")" == "${before_tree}" ]] || {
-      echo "Core preinstall changed App bytes before its delta decision." >&2; exit 1;
+      echo "Core preinstall changed App bytes before its admission decision." >&2; exit 1;
     }
   done
 
@@ -1059,15 +1062,14 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   }
   release_download_lease "${lease_complete_release}"
 
-  # Core uses the same dispatcher, even though its exact delta writes only the
-  # App. The shared lease keeps that App replacement outside a data download.
+  # Core uses the same dispatcher. The shared lease keeps its atomic App
+  # replacement outside a concurrent data download.
   printf 'core-update\n' >"${scripts_root}/install-mode"
   lease_core_home="${test_root}/lease-core/home"
   prepare_signed_postinstall_home "${lease_core_home}"
   configure_installed_identity "${lease_core_home}" same-community-cms-leaf
   mkdir -p "${lease_core_home}/Library/Application Support/Linnet/Data"
   printf 'live data\n' >"${lease_core_home}/Library/Application Support/Linnet/Data/sentinel"
-  cp -X "${test_root}/accepted.linnetdelta" "${scripts_root}/core.linnetdelta"
   lease_core_app_before="$(snapshot_app "${lease_core_home}/Library/Input Methods/Linnet.app")"
   lease_core_data_before="$("${delta_tool}" tree-digest --root \
     "${lease_core_home}/Library/Application Support/Linnet/Data")"
@@ -1091,18 +1093,19 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   }
   release_download_lease "${lease_core_release}"
   printf 'core-update\n' >"${scripts_root}/install-mode"
-  for delta_case in success wrong-base corrupt staged-identity rollback; do
+  for delta_case in success corrupt staged-identity rollback; do
     delta_home="${test_root}/delta-${delta_case}/home"
     delta_app="${delta_home}/Library/Input Methods/Linnet.app"
     delta_runtime_log="${test_root}/delta-${delta_case}/runtime-build"
     prepare_signed_postinstall_home "${delta_home}"
     configure_installed_identity "${delta_home}" same-community-cms-leaf
-    cp -X "${test_root}/accepted.linnetdelta" "${scripts_root}/core.linnetdelta"
+    /bin/chmod -R -P u+w "${scripts_root}/core.payload"
+    /bin/rm -rf -- "${scripts_root}/core.payload"
+    COPYFILE_DISABLE=1 ditto --norsrc --noextattr \
+      "${candidate_fixture}" "${scripts_root}/core.payload"
     case "${delta_case}" in
-      wrong-base) printf 'unexpected bytes\n' >"${delta_app}/Contents/unexpected" ;;
       corrupt)
-        ruby -e 'File.open(ARGV.fetch(0), "r+b") { |file| file.seek(-1, IO::SEEK_END); byte = file.read(1).ord; file.seek(-1, IO::SEEK_END); file.write((byte ^ 1).chr) }' \
-          "${scripts_root}/core.linnetdelta"
+        printf 'unexpected bytes\n' >"${scripts_root}/core.payload/Contents/unexpected"
         ;;
       staged-identity)
         write_candidate_identity "${candidate_version}" "${candidate_build}" \
@@ -1119,7 +1122,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
         LINNET_FAKE_RUNTIME_TARGET_BUILD="${candidate_build}" \
         LINNET_FAKE_RUNTIME_BUILD_LOG="${delta_runtime_log}" \
         "${scripts_root}/postinstall" >"${test_root}/delta-${delta_case}/result.log" 2>&1; then
-      [[ "${delta_case}" == success ]] || { echo "Core delta accepted ${delta_case}" >&2; exit 1; }
+      [[ "${delta_case}" == success ]] || { echo "Core payload accepted ${delta_case}" >&2; exit 1; }
       [[ "$("${delta_tool}" tree-digest --root "${delta_app}")" == "${target_tree}" ]]
     else
       [[ "${delta_case}" != success ]] || { cat "${test_root}/delta-${delta_case}/result.log" >&2; exit 1; }
@@ -1139,9 +1142,10 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     write_candidate_identity "${candidate_version}" "${candidate_build}" \
       "${candidate_revision}" "${candidate_leaf}"
   done
-  cp -X "${test_root}/accepted.linnetdelta" "${scripts_root}/core.linnetdelta"
-  [[ "$("${delta_tool}" delta-state --base "${delta_base_app}" \
-    --delta "${scripts_root}/core.linnetdelta")" == base ]]
+  /bin/chmod -R -P u+w "${scripts_root}/core.payload"
+  /bin/rm -rf -- "${scripts_root}/core.payload"
+  COPYFILE_DISABLE=1 ditto --norsrc --noextattr \
+    "${candidate_fixture}" "${scripts_root}/core.payload"
 
   core_postinstall_home="${test_root}/postinstall-core/home"
   core_postinstall_log="${test_root}/postinstall-core/host-invocations"
@@ -1386,6 +1390,7 @@ if HOME="${user_home}" "${scripts_root}/preinstall" \
   exit 1
 fi
 grep -Fq 'Linnet Complete' "${core_missing_app_error}" || {
+  cat "${core_missing_app_error}" >&2
   echo "Core missing-App failure did not direct the user to Complete repair." >&2
   exit 1
 }
@@ -1428,19 +1433,11 @@ done
   exit 1
 }
 
-# A legacy signing transition is valid only for the explicitly selected
-# Complete repair: Core still requires its one published delta baseline.
+# The explicit legacy public-signing edge remains a supported Core source now
+# that Core carries one sealed candidate rather than one baseline-specific delta.
 if [[ "${candidate_fixture_available}" == true ]]; then
   configure_installed_identity "${user_home}" legacy-community-adhoc
-  legacy_core_error="${test_root}/core-legacy-baseline-error"
-  if HOME="${user_home}" "${scripts_root}/preinstall" >"${legacy_core_error}" 2>&1; then
-    echo "Core update accepted a legacy App outside its published delta baseline." >&2
-    exit 1
-  fi
-  grep -Fq 'exact published baseline' "${legacy_core_error}" || {
-    echo "Core legacy-baseline rejection did not explain the Complete repair boundary." >&2
-    exit 1
-  }
+  HOME="${user_home}" "${scripts_root}/preinstall"
   configure_installed_identity "${user_home}" same-community-cms-leaf
   HOME="${user_home}" "${scripts_root}/preinstall"
 fi

@@ -19,12 +19,11 @@ identity_metadata="${script_root}/candidate-app-identity.json"
 registration_inspector="${script_root}/input-source-registration-inspector"
 runtime_inspector="${script_root}/linnet-runtime-inspector"
 delta_tool="${script_root}/linnet-pack"
-delta_file="${script_root}/core.linnetdelta"
+candidate_app="${script_root}/core.payload"
 current_uid="$(/usr/bin/id -u)"
 identity_transition=""
 registration_state=""
 runtime_state=""
-delta_state=""
 candidate_bundle_identifier=""
 
 secure_owned_path() {
@@ -83,8 +82,8 @@ case "${install_mode}" in
 esac
 if [[ "${install_mode}" == core-update ]]; then
   [[ -f "${delta_tool}" && ! -L "${delta_tool}" && -x "${delta_tool}" && \
-    -f "${delta_file}" && ! -L "${delta_file}" ]] || {
-    echo "Linnet Core preinstall: differential payload is unavailable" >&2
+    -d "${candidate_app}" && ! -L "${candidate_app}" ]] || {
+    echo "Linnet Core preinstall: candidate App payload is unavailable" >&2
     exit 1
   }
 fi
@@ -202,6 +201,8 @@ case "${identity_transition}" in
     ;;
 esac
 
+"${identity_helper}" packaged || exit 1
+
 # Core can replace bytes only when TIS resolves exactly one source with Linnet's
 # source and bundle IDs. Enablement is user-owned and may be pending; Core does
 # not reinterpret or mutate it.
@@ -235,20 +236,9 @@ inspect_runtime || {
   exit 1
 }
 
-# CMS identity, registration and Runtime health admit a supported installed
-# product, but only the sealed directory delta can decide whether it is this
-# Core package's exact published baseline. Reject before PackageKit writes any
-# payload; Complete remains a separate user-confirmed repair action.
-if ! delta_state="$("${delta_tool}" delta-state --base "${app_path}" --delta "${delta_file}")"; then
-  echo "Linnet Core update requires the exact published baseline. Run the explicitly selected Linnet Complete install/repair package." >&2
-  exit 1
-fi
-case "${delta_state}" in
-  base|target) ;;
-  *)
-    echo "Linnet Core update requires the exact published baseline. Run the explicitly selected Linnet Complete install/repair package." >&2
-    exit 1
-    ;;
-esac
+# Candidate identity, installed CMS integrity, registration and Runtime health
+# are the complete Core admission boundary. The version/build policy accepts a
+# stable release and every lower Preview through this one update path; the
+# packaged candidate is verified byte-exact before PackageKit can mutate state.
 
 exit 0

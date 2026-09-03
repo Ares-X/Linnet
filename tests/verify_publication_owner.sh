@@ -175,7 +175,7 @@ BASH
 clean_complete_transition = "    printf '%s\\n' clean-complete-install\n"
 historical_missing_transition = "    printf '%s\\n' missing-app-install\n"
 staged_identity_dispatch = <<~'BASH'
-  [[ "$#" -ge 1 ]] || fail_identity "usage: existing | installed | staged APP"
+  [[ "$#" -ge 1 ]] || fail_identity "usage: existing | installed | packaged | staged APP"
   readonly verification_mode="$1"
   case "${verification_mode}" in
     existing|installed)
@@ -191,6 +191,12 @@ staged_identity_dispatch = <<~'BASH'
       secure_owned_path "${app_path%/*}" directory &&
         [[ "$(cd "${app_path%/*}" && pwd -P)" == "${app_path%/*}" ]] ||
         fail_identity "staged App parent is unsafe"
+      ;;
+    packaged)
+      [[ "$#" -eq 1 ]] || fail_identity "unexpected packaged App path"
+      readonly app_path="${script_root}/core.payload"
+      secure_owned_path "${script_root}" directory ||
+        fail_identity "packaged App parent is unsafe"
       ;;
     *) fail_identity "verification mode is invalid" ;;
   esac
@@ -232,7 +238,8 @@ current_cms_validation = <<~'BASH'
     # Publication verifies the complete CMS chain before packaging. Installation
     # must not require the maintainer certificate in the user's trust store; it
     # binds the packaged bytes to the same fixed leaf through the designated
-    # requirement, then verifies the exact target tree below.
+    # requirement, verifies the installed code integrity, then verifies the exact
+    # target tree for packaged, staged and post-install candidate modes below.
     expected_requirement="designated => identifier \"${host_bundle_id}\" and certificate leaf = H\"$(
       /usr/bin/tr '[:upper:]' '[:lower:]' <<<"${expected_leaf_sha1}")\""
     actual_requirement="$(/usr/bin/codesign -d -r- "${app_path}" 2>&1 |
@@ -240,6 +247,8 @@ current_cms_validation = <<~'BASH'
       fail_identity "installed App signing requirement is unavailable"
     [[ "${actual_requirement}" == "${expected_requirement}" ]] ||
       fail_identity "installed App signing requirement does not match"
+    /usr/bin/codesign --verify --deep --strict "${app_path}" >/dev/null 2>&1 ||
+      fail_identity "installed App code signature is invalid"
     embedded_leaf="$(read_value "${version_path}" \
       distribution.application_code_signature.leaf_certificate_sha256)" ||
       fail_identity "installed release signing leaf is unavailable"

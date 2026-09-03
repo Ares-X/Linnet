@@ -7,10 +7,9 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 lock="${project_root}/config/linnet-update-baselines.json"
 kind="${1:-}"
 fail() { echo "prepare_update_baseline: $*" >&2; exit 1; }
-[[ $# == 1 ]] || fail "usage: core|chinese|english|lts|extended|delta-KIND"
+[[ $# == 1 ]] || fail "usage: chinese|english|lts|extended|delta-KIND"
 delta_only=false
 case "${kind}" in
-  core) source_key="$(plutil -extract core_source raw -o - "${lock}")" ;;
   chinese|english|lts|extended)
     source_key="$(plutil -extract "pack_baselines.${kind}.source" raw -o - "${lock}")" ;;
   delta-chinese|delta-english|delta-lts|delta-extended)
@@ -63,10 +62,6 @@ app="${expanded}/Linnet-Core.component.pkg/Payload/Linnet.app"
 identity="$("${project_root}/scripts/linnet-code-identity" verify-published "${app}" "${revision}")"
 [[ "$(printf '%s' "${identity}" | plutil -extract candidate_revision raw -o - -)" == "${revision}" ]] ||
   fail "extracted App differs from the pinned revision"
-if [[ "${kind}" == core ]]; then
-  printf '%s\n' "${app}"
-  exit 0
-fi
 asset="$("${project_root}/build/linnet-pack" asset-name --kind "${kind}")"
 component="${asset%.linnetpack}.component.pkg"
 parent="${expanded}/${component}/Payload/Data/Packs/${kind}"

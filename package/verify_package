@@ -126,7 +126,7 @@ ruby -rjson -rrexml/document -e '
   versions = {}
   install_kbytes = {}
   components.each do |kind|
-    delta_component = kind == "core" && edition == "core"
+    scripts_component = kind == "core" && edition == "core"
     component = File.join(expanded, "Linnet-#{names.fetch(kind)}.component.pkg")
     info_path = File.join(component, "PackageInfo")
     stat = File.lstat(info_path) rescue abort("PackageInfo is missing")
@@ -148,8 +148,8 @@ ruby -rjson -rrexml/document -e '
     end
     versions[kind] = root.attributes["version"]
     nodes = children.call(root)
-    if delta_component
-      abort "Core update retained a full payload" if nodes.first&.name == "payload"
+    if scripts_component
+      abort "Core update gained a PackageKit payload" if nodes.first&.name == "payload"
       install_kbytes[kind] = "0"
     else
       payload = nodes.shift
@@ -158,7 +158,7 @@ ruby -rjson -rrexml/document -e '
         attrs.call(payload).values.all? { |value| value.match?(/\A[0-9]+\z/) } && children.call(payload).empty?
       install_kbytes[kind] = payload.attributes["installKBytes"]
     end
-    if kind == "core" && !delta_component && nodes.first&.name == "bundle"
+    if kind == "core" && !scripts_component && nodes.first&.name == "bundle"
       abort "Complete Core payload contains a bundle mapping"
     end
     empty.call(nodes.shift, "bundle-version")
@@ -299,7 +299,7 @@ ruby -rjson -rrexml/document -e '
   if edition == "core"
     core_scripts["postinstall"] = [0o755,
       File.binread(File.join(project, "package/installer-scripts/postinstall"))]
-    core_scripts["core.linnetdelta"] = [0o644, nil]
+    core_scripts["core.payload"] = [:directory, nil]
   end
   script_contracts = {
     "core" => core_scripts,
@@ -324,6 +324,11 @@ ruby -rjson -rrexml/document -e '
       abort "Scripts tree inventory mismatch" unless Dir.children(scripts).sort == expected.keys.sort
       expected.each do |name, (mode, bytes)|
         path = File.join(scripts, name); entry = File.lstat(path)
+        if mode == :directory
+          abort "unsafe packaged candidate App" unless entry.directory? && !entry.symlink? &&
+            (entry.mode & 0o7777) == 0o755
+          next
+        end
         abort "unsafe Installer script" unless entry.file? && !entry.symlink? &&
           (entry.mode & 0o7777) == mode && (bytes.nil? ? entry.size.positive? : File.binread(path) == bytes)
       end
@@ -343,15 +348,8 @@ ruby -rjson -rrexml/document -e '
 core_component="${expanded}/Linnet-Core.component.pkg"
 if [[ "${edition}" == core ]]; then
   [[ ! -e "${core_component}/Payload" && ! -L "${core_component}/Payload" ]] ||
-    fail_verification "Core differential package contains a full payload"
-  core_base_app="$("${project_root}/package/prepare_update_baseline" core)" ||
-    fail_verification "published Core baseline is unavailable"
-  [[ "${core_base_app}" == /* && -d "${core_base_app}" && ! -L "${core_base_app}" ]] ||
-    fail_verification "published Core baseline is unsafe"
-  payload_core_app="${work_root}/Linnet.app"
-  "${release_tool}" apply-delta --base "${core_base_app}" \
-    --delta "${core_component}/Scripts/core.linnetdelta" --output "${payload_core_app}" ||
-    fail_verification "Core differential reconstruction failed"
+    fail_verification "Core package contains a PackageKit payload"
+  payload_core_app="${core_component}/Scripts/core.payload"
 else
   [[ "$(find "${core_component}/Payload" -mindepth 1 -maxdepth 1 -exec basename {} \;)" == \
     "Linnet.payload" ]] || fail_verification "Complete Core payload is not exactly Linnet.payload"
@@ -426,9 +424,9 @@ grep -Fq 'inspect_runtime || {' "${core_component}/Scripts/preinstall" ||
 grep -Fq '"${identity_helper}" existing' "${core_component}/Scripts/preinstall" ||
   fail_verification "Core candidate identity preflight is incomplete"
 if [[ "${edition}" == core ]]; then
-  grep -Fq 'delta-state --base "${app_path}" --delta "${delta_file}"' \
+  grep -Fq '"${identity_helper}" packaged' \
     "${core_component}/Scripts/preinstall" ||
-    fail_verification "Core exact-baseline preflight is incomplete"
+    fail_verification "Core packaged candidate preflight is incomplete"
   grep -Fq '"${identity_helper}" installed' "${core_component}/Scripts/postinstall" ||
     fail_verification "Core installed identity gate is incomplete"
   grep -Fq 'with-settings-mutation-lease' "${core_component}/Scripts/postinstall" ||

@@ -1,6 +1,5 @@
 {
   "format": 1,
-  "core_source": "release_0_1_10",
   "sources": {
     "release_0_1_10": {
       "repository": "https://github.com/Ares-X/Linnet.git",

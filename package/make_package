@@ -77,10 +77,6 @@ actual_revision="$(git -C "${project_root}" rev-parse --verify HEAD^{commit})"
   fail_package "candidate revision differs from the candidate checkout"
 [[ -z "$(git -C "${project_root}" status --porcelain)" ]] ||
   fail_package "package assembly requires a clean candidate revision"
-core_base_app="$("${project_root}/package/prepare_update_baseline" core)" ||
-  fail_package "published Core baseline is unavailable"
-[[ "${core_base_app}" == /* && -d "${core_base_app}" && ! -L "${core_base_app}" ]] ||
-  fail_package "published Core baseline is unsafe"
 
 data_release_file="${project_root}/config/linnet-data-releases.json"
 data_release_tool="${project_root}/package/data_release_metadata"
@@ -159,6 +155,8 @@ prepare_core_scripts() {
   cp -X "${pack_tool}" "${destination}/linnet-pack"
   if [[ "${install_mode}" == core-update ]]; then
     cp -X "${project_root}/package/installer-scripts/postinstall" "${destination}/postinstall"
+    COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${core_app}" \
+      "${destination}/core.payload"
     chmod 755 "${destination}/postinstall"
   fi
   printf '%s\n' "${version}" >"${destination}/candidate-core-version"
@@ -337,10 +335,6 @@ for payload in "${core_payload}" "${chinese_payload}" "${english_payload}" \
     TZ=UTC touch -h -t "${timestamp}" "${entry}"
   done < <(find "${payload}" -print0)
 done
-
-"${pack_tool}" build-delta --base "${core_base_app}" --target "${core_app}" \
-  --output "${core_update_scripts}/core.linnetdelta"
-chmod 0644 "${core_update_scripts}/core.linnetdelta"
 
 core_component="${work_root}/Linnet-Core.component.pkg"
 chinese_component="${work_root}/Linnet-Chinese.component.pkg"

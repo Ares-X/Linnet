@@ -185,34 +185,41 @@ if [[ "${install_mode}" == core-update ]]; then
     echo "Linnet postinstall: installed Core App is missing or unsafe" >&2
     exit 1
   }
-  delta_file="${script_root}/core.linnetdelta"
-  secure_owned_path "${delta_file}" file || {
-    echo "Linnet postinstall: differential payload is missing or unsafe" >&2
+  candidate_app="${script_root}/core.payload"
+  secure_owned_path "${candidate_app}" directory || {
+    echo "Linnet postinstall: candidate App payload is missing or unsafe" >&2
     exit 1
   }
-  delta_state="$("${delta_tool}" delta-state --base "${app_path}" --delta "${delta_file}")"
-  case "${delta_state}" in
-    target) ;;
-    base)
+  "${identity_helper}" packaged
+  if "${identity_helper}" installed >/dev/null 2>&1; then
+    :
+  else
+      "${identity_helper}" existing >/dev/null
       update_root="$(/usr/bin/mktemp -d "${input_methods_root}/.linnet-core.XXXXXX")"
       staged_app="${update_root}/Linnet.app"
+      update_base="$("${delta_tool}" tree-digest --root "${app_path}")"
+      update_target="$("${delta_tool}" tree-digest --root "${candidate_app}")"
       cleanup_update() {
-        local result=$? current_state
+        local result=$? current_tree
         trap - EXIT INT TERM HUP
         if [[ "${update_root%/*}" != "${input_methods_root}" ||
           "${update_root##*/}" != .linnet-core.?????? ]] ||
           ! secure_owned_path "${update_root}" directory; then exit 1; fi
         if [[ "${update_accepted}" != true ]]; then
-          current_state="$("${delta_tool}" delta-state --base "${app_path}" --delta "${delta_file}")" || {
+          current_tree="$("${delta_tool}" tree-digest --root "${app_path}")" || {
             echo "Linnet postinstall: installed identity changed; retained recovery at ${update_root}" >&2
             exit 1
           }
-          if [[ "${current_state}" == target ]]; then
-            "${delta_tool}" exchange-app-delta --installed "${app_path}" \
-              --staged "${staged_app}" --delta "${delta_file}" || {
+          if [[ "${current_tree}" == "${update_target}" ]]; then
+            "${delta_tool}" exchange-app --installed "${app_path}" \
+              --staged "${staged_app}" --base-sha256 "${update_base}" \
+              --target-sha256 "${update_target}" || {
               echo "Linnet postinstall: rollback failed; retained recovery at ${update_root}" >&2
               exit 1
             }
+          elif [[ "${current_tree}" != "${update_base}" ]]; then
+            echo "Linnet postinstall: installed identity changed; retained recovery at ${update_root}" >&2
+            exit 1
           fi
         fi
         /bin/chmod -R -P u+w "${update_root}"
@@ -223,14 +230,13 @@ if [[ "${install_mode}" == core-update ]]; then
       trap 'exit 130' INT
       trap 'exit 143' TERM
       trap 'exit 129' HUP
-      "${delta_tool}" apply-delta --base "${app_path}" --delta "${delta_file}" \
-        --output "${staged_app}"
+      COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr \
+        "${candidate_app}" "${staged_app}"
       "${identity_helper}" staged "${staged_app}"
-      "${delta_tool}" exchange-app-delta --installed "${app_path}" \
-        --staged "${staged_app}" --delta "${delta_file}"
-      ;;
-    *) echo "Linnet postinstall: invalid differential state" >&2; exit 1 ;;
-  esac
+      "${delta_tool}" exchange-app --installed "${app_path}" \
+        --staged "${staged_app}" --base-sha256 "${update_base}" \
+        --target-sha256 "${update_target}"
+  fi
 else
   secure_owned_path "${complete_stage_root}" directory && \
     secure_owned_path "${complete_staged_app}" directory && \

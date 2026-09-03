@@ -38,11 +38,18 @@ ruby -rrexml/document -e '
 ruby -e '
   source = File.read("package/make_package")
   core_builder = source.split(/^pkgbuild /, 2).fetch(1).split(/^pkgbuild /, 2).first
-  abort "normal Core update still carries the complete App payload" if
+  abort "Core update gained a PackageKit App payload" if
     core_builder.include?(%q{--root "${core_payload}"})
-  abort "Core update is not a scripts-only differential component" unless
-    core_builder.include?("--nopayload")
-' || fail "Core differential payload boundary is missing"
+  abort "Core update is not a scripts-only atomic replacement component" unless
+    core_builder.include?("--nopayload") &&
+      source.include?(%q{"${destination}/core.payload"}) &&
+      !source.include?("core.linnetdelta")
+' || fail "Core atomic replacement boundary is missing"
+if rg -n 'core_source|core\.linnetdelta|prepare_update_baseline" core|delta-state --base "\$\{app_path\}"' \
+    config/linnet-update-baselines.json package/make_package package/verify_package \
+    package/core-installer-scripts/preinstall package/installer-scripts/postinstall; then
+  fail "the retired single-baseline Core update path returned"
+fi
 ruby -e '
   source = File.read("package/make_package")
   verifier = File.read("package/verify_package")
@@ -214,8 +221,8 @@ ruby -rrexml/document -e '
     ref.attributes["installKBytes"] == "0" && ref.attributes["updateKBytes"] == "0" &&
     ref.get_elements("bundle-version/bundle").empty?
 ' "${fixture}/expanded" || fail "Apple scripts-only Core metadata changed"
-if [[ "${1:-}" == --core-delta-structure ]]; then
-  echo "Core differential Installer structure: PASS"
+if [[ "${1:-}" == --core-update-structure ]]; then
+  echo "Core atomic-update Installer structure: PASS"
   exit 0
 fi
 
