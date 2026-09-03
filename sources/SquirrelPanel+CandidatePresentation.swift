@@ -257,6 +257,35 @@ extension SquirrelPanel {
     return view.detailContentRect
   }
 
+  /// Expanded browsing keeps one selected-candidate definition surface stable
+  /// while the Rime-owned highlight moves through the grid. Compact browsing
+  /// remains content-sized.
+  func selectedDetailSurfaceSize(
+    geometry: LinnetCandidatePresentation.CandidateDetailGeometry,
+    candidateSize: NSSize,
+    measuredDetailSize: NSSize,
+    theme: SquirrelTheme,
+    reservesExpandedDetail: Bool
+  ) -> NSSize {
+    guard reservesExpandedDetail else { return measuredDetailSize }
+    let detailFont = (theme.detailAttrs[.font] as? NSFont) ?? theme.font
+    let lineHeight = max(
+      1, ceil(detailFont.ascender - detailFont.descender + detailFont.leading))
+    switch geometry.placement {
+    case .footer:
+      return NSSize(
+        width: geometry.fittedDetailWidth(
+          candidateWidth: candidateSize.width,
+          detailWidth: geometry.detailColumnMaximumWidth ?? candidateSize.width),
+        height: lineHeight * CGFloat(
+          LinnetCandidatePresentation.maximumFooterDetailLineCount))
+    case .sidecar:
+      return NSSize(
+        width: geometry.detailColumnMaximumWidth ?? measuredDetailSize.width,
+        height: candidateSize.height)
+    }
+  }
+
   // Get the window size, the windows will be the dirtyRect in
   // SquirrelView.drawRect
   // swiftlint:disable:next cyclomatic_complexity
@@ -309,11 +338,17 @@ extension SquirrelPanel {
         theme: theme,
         textContainer: detailTextContainer,
         textLayoutManager: detailTextLayoutManager)
-      detailFrames = detailGeometry.frames(
+      let detailSize = selectedDetailSurfaceSize(
+        geometry: detailGeometry,
         candidateSize: contentRect.size,
-        detailSize: NSSize(
+        measuredDetailSize: NSSize(
           width: ceil(detailRect.width),
           height: ceil(detailRect.height)),
+        theme: theme,
+        reservesExpandedDetail: candidateSnapshot?.isExpanded == true)
+      detailFrames = detailGeometry.frames(
+        candidateSize: contentRect.size,
+        detailSize: detailSize,
         dividerSize: NSSize(width: 1, height: contentRect.height))
       if let detailFrames {
         contentRect = NSRect(origin: .zero, size: detailFrames.size)
@@ -467,11 +502,20 @@ extension SquirrelPanel {
   func selectedDetail(
     theme: SquirrelTheme,
     candidates: [SquirrelInputController.CandidateItem],
-    highlighted index: Int
+    highlighted index: Int,
+    reservesExpandedDetail: Bool
   ) -> NSAttributedString? {
     guard candidates.indices.contains(index) else { return nil }
-    let comment = LinnetCandidatePresentation.selectedDetailText(
+    var comment = LinnetCandidatePresentation.selectedDetailText(
       candidates[index].comment.precomposedStringWithCanonicalMapping)
+    if comment.isEmpty,
+      reservesExpandedDetail,
+      candidates.contains(where: {
+        !LinnetCandidatePresentation.selectedDetailText($0.comment).isEmpty
+      }) {
+      comment = NSLocalizedString(
+        "No definition", comment: "Expanded English candidate without a definition")
+    }
     guard !comment.isEmpty else { return nil }
     return LinnetCandidatePresentation.candidateLine(
       candidateFormat: "[comment]",

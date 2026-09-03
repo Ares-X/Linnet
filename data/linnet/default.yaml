@@ -48,8 +48,8 @@ key_binder:
 
 # ── Punctuator ──────────────────────────────────────────────────────────────
 punctuator:
-  # librime defaults this field to ".:" when absent; an explicit empty value
-  # keeps numeric separators and ordinary punctuation host-owned.
+  # Punctuation follows the explicit Chinese/English punctuation setting in
+  # every context; no hidden numeric exception changes the selected mode.
   digit_separators: ""
   full_shape:
     ' ' : { commit: '　' }
@@ -86,6 +86,11 @@ punctuator:
     '}' : { commit: '】' }
     '~' : { commit: '〜' }
   half_shape:
+    ',' : { commit: '，' }
+    '.' : { commit: '。' }
+    ':' : { commit: '：' }
+    ';' : { commit: '；' }
+    '''' : { pair: ['‘', '’'] }
     '!' : { commit: '！' }
     '"' : { pair: ['“', '”'] }
     '$' : { commit: '¥' }
@@ -98,6 +103,8 @@ punctuator:
     '^' : { commit: '……' }
     '_' : { commit: '——' }
     '`' : { commit: '·' }
+    '[' : { commit: '【' }
+    ']' : { commit: '】' }
     '{' : { commit: '「' }
     '}' : { commit: '」' }
 

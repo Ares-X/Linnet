@@ -131,7 +131,7 @@ struct AppearanceTabView: View {
         Text(
           // Keep the complete localization key intact for String Catalog lookup.
           // swiftlint:disable:next line_length
-          "Chinese and English keep independent horizontal or vertical layouts. Expandable browsing adds a candidate-window arrow that temporarily shows up to three pages; every new composition starts collapsed. These changes take effect after Apply Changes."
+          "Chinese and English keep independent horizontal or vertical layouts. Expandable browsing starts compact, then pressing [ or ] (or - or =) to switch candidate pages expands up to three pages automatically. Every new composition starts collapsed. These changes take effect after Apply Changes."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

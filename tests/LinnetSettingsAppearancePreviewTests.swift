@@ -8,7 +8,6 @@ import Vision
 struct LinnetSettingsAppearancePreviewTests {
   @MainActor static func main() {
     testCloudThemeRecognition()
-    testPreviewDisclosureStateIsPerLanguage()
     testBundledThemeSourceIsComplete()
     testCatalogOwnsThemePairs()
     testThemeProjectionReadsTheCanonicalSource()
@@ -135,26 +134,6 @@ struct LinnetSettingsAppearancePreviewTests {
     require(themeCandidateText(in: clipped, widthInPoints: 680).components(separatedBy: "输入").count - 1 < 14,
       "OCR accepted a clipped theme grid")
     print("Cloud theme OCR regression: PASS (14 visible; each of 14 missing, blank and clipped rejected)")
-  }
-
-  private static func testPreviewDisclosureStateIsPerLanguage() {
-    var state = LinnetSettingsAppearancePreview.DisclosureState()
-    require(!state.isExpanded(.chinese) && !state.isExpanded(.english),
-            "candidate previews did not begin independently collapsed")
-    state.toggle(.chinese)
-    require(state.isExpanded(.chinese),
-            "the Chinese candidate preview did not expand")
-    require(!state.isExpanded(.english),
-            "expanding Chinese also expanded the independent English preview")
-    state.toggle(.english)
-    require(state.isExpanded(.chinese) && state.isExpanded(.english),
-            "the English candidate preview could not expand independently")
-    state.toggle(.chinese)
-    require(!state.isExpanded(.chinese) && state.isExpanded(.english),
-            "collapsing Chinese also collapsed the independent English preview")
-    state.reset()
-    require(!state.isExpanded(.chinese) && !state.isExpanded(.english),
-            "changing browsing capability did not reset both transient previews")
   }
 
   private static func testBundledThemeSourceIsComplete() {

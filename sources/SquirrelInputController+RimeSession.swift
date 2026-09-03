@@ -8,6 +8,9 @@
 import InputMethodKit
 
 extension SquirrelInputController {
+  private static let candidateExpansionRequestProperty =
+    "linnet/candidate_expansion_request_v1"
+
   struct CandidateItem: Equatable {
     let absoluteIndex: Int
     let page: Int
@@ -221,12 +224,32 @@ extension SquirrelInputController {
       session,
       Int32(effectiveKeycode),
       Int32(rimeModifiers))
+    consumeCandidateExpansionRequest()
     if handled {
       updateChordState(
         keycode: effectiveKeycode,
         modifiers: rimeModifiers)
     }
     return handled
+  }
+
+  /// Consumes the one-shot intent published by the canonical Rime key owner.
+  /// This boundary does not infer which physical key caused the page switch.
+  private func consumeCandidateExpansionRequest() {
+    var value = [CChar](repeating: 0, count: 2)
+    let present = Self.candidateExpansionRequestProperty.withCString { property in
+      value.withUnsafeMutableBufferPointer { buffer in
+        rimeAPI.get_property(session, property, buffer.baseAddress, buffer.count)
+      }
+    }
+    guard present else { return }
+    Self.candidateExpansionRequestProperty.withCString { property in
+      "".withCString { empty in
+        rimeAPI.set_property(session, property, empty)
+      }
+    }
+    guard value.first == 49 else { return }
+    NSApp.squirrelAppDelegate.panel?.requestCandidateExpansionForKeyboardPaging()
   }
 
   private func synchronizeCandidateLayoutOptions() {

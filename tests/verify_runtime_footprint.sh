@@ -363,11 +363,23 @@ ruby -ryaml -e '
   abort "numeric separators retained a delayed punctuation state" unless
     punctuator["digit_separators"] == "" && !punctuator.key?("digit_separator_action")
   half = punctuator.fetch("half_shape")
-  forbidden = [" ", "/", ",", ".", ":", ";", "\x27", "[", "]", "-", "="]
-  owned = forbidden.select { |key| half.key?(key) }
-  abort "half-shape punctuator still owns host keys: #{owned.join}" unless owned.empty?
+  expected = {
+    "," => "，", "." => "。", ":" => "：", ";" => "；",
+    "[" => "【", "]" => "】",
+  }
+  expected.each do |key, value|
+    entry = half.fetch(key)
+    actual = entry.is_a?(Hash) ? entry.fetch("commit") : entry
+    abort "half-shape #{key} maps to #{actual.inspect}, expected #{value.inspect}" unless
+      actual == value
+  end
+  host_owned = ["/", "-", "+", "="]
+  captured = host_owned.select { |key| half.key?(key) }
+  abort "half-shape punctuation captured host-owned keys: #{captured.join}" unless
+    captured.empty?
+  abort "half-shape punctuation unexpectedly owns Space" if half.key?(" ")
 ' data/linnet/default.yaml ||
-  fail "the Chinese half-shape punctuator still consumes host-owned keys"
+  fail "the Chinese half-shape punctuation contract diverged"
 if rg -n 'candidate_list_layout|text_orientation' \
     data/linnet/linnet_en.schema.yaml; then
   fail "the English schema regained a private candidate-layout default"
@@ -410,6 +422,10 @@ ruby -e '
       views.include?("Expandable")
   abort "candidate preview lost the disclosure capability" unless
     preview.include?("candidateBrowsingMode")
+  abort "Settings preview still requires a manual disclosure click" unless
+    preview.include?("let expanded = preview.candidateBrowsingMode == .expandable") &&
+      !preview.include?("DisclosureState") &&
+      !preview.include?("settings.appearance.preview.chinese.disclosure")
   abort "Settings preview retained static expanded layout ownership" if
     preview.include?("case .expanded") ||
       preview.include?("LinnetCandidatePresentation.rowRanges(")
@@ -485,6 +501,9 @@ ruby -e '
     controls&.include?("case .expand") && controls.include?("#{state} = true") &&
       controls.include?("case .collapse") && controls.include?("#{state} = false") &&
       controls.scan("refreshCandidatePresentation(").length == 2
+  abort "keyboard paging does not enter the same Panel expansion state" unless
+    panel.include?("func requestCandidateExpansionForKeyboardPaging()") &&
+      panel.include?("candidateExpansionAllowed")
 ' sources/SquirrelPanel.swift ||
   fail "candidate disclosure is not Panel-transient"
 rg -Fq 'candidateRanges[itemIndex] =' sources/SquirrelPanel.swift ||
@@ -524,6 +543,12 @@ ruby -e '
     owner.scan("ProcessPrintablePagingKey(").length == 2 &&
       owner.include?("candidate_count <= static_cast<int>(next_page_start)") &&
       owner.include?("selected < static_cast<size_t>(page_size)")
+  paging = owner[/ProcessResult ProcessPrintablePagingKey.*?(?=\n  void HardStop)/m]
+  abort "unavailable paging can still capture normal input" unless
+    paging && !paging.include?("return kRejected")
+  abort "printable paging no longer publishes one expansion intent" unless
+    owner.include?("kCandidateExpansionRequestProperty") &&
+      owner.include?(%q{set_property(kCandidateExpansionRequestProperty, "1")})
   abort "digit selection regained a mixed-entity interception path" if
     owner.include?("ProcessMixedEntityKey") ||
       owner.include?("CanExtendEntity") ||

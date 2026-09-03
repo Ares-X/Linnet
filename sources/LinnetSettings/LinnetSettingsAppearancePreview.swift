@@ -9,26 +9,6 @@ enum LinnetSettingsAppearancePreview {
     case chinese, english
   }
 
-  struct DisclosureState: Equatable {
-    private var expandedLanguages: Set<PreviewLanguage> = []
-
-    func isExpanded(_ language: PreviewLanguage) -> Bool {
-      expandedLanguages.contains(language)
-    }
-
-    mutating func toggle(_ language: PreviewLanguage) {
-      if expandedLanguages.contains(language) {
-        expandedLanguages.remove(language)
-      } else {
-        expandedLanguages.insert(language)
-      }
-    }
-
-    mutating func reset() {
-      expandedLanguages.removeAll()
-    }
-  }
-
   typealias SelectionStyle = LinnetCandidatePresentation.CandidateSelectionStyle
 
   enum Failure: LocalizedError, Equatable {
@@ -409,8 +389,6 @@ struct LinnetSettingsAppearancePreviewView: View {
   let appearance: LinnetSettingsDocument.Appearance
 
   @Environment(\.colorScheme) private var systemColorScheme
-  @State private var disclosureState = LinnetSettingsAppearancePreview.DisclosureState()
-
   private var preview: Result<LinnetSettingsAppearancePreview.Presentation, LinnetSettingsAppearancePreview.Failure> {
     switch LinnetSettingsAppearancePreview.Catalog.bundled {
     case .success(let catalog):
@@ -448,15 +426,14 @@ struct LinnetSettingsAppearancePreviewView: View {
     .accessibilityElement(children: .contain)
     .accessibilityLabel(Text("Local candidate appearance preview"))
     .accessibilityValue(accessibilityValue)
-    .id(appearance.candidateBrowsingMode)
-    .task(id: appearance.candidateBrowsingMode) {
-      disclosureState.reset()
-    }
   }
 
   private var accessibilityValue: Text {
     switch preview {
-    case .success: Text("Current candidate preview")
+    case .success:
+      Text(
+        appearance.candidateBrowsingMode == .expandable
+          ? "Expanded candidate preview" : "Scrolling-only candidate preview")
     case .failure: Text("Preview unavailable")
     }
   }
@@ -465,31 +442,12 @@ struct LinnetSettingsAppearancePreviewView: View {
     _ preview: LinnetSettingsAppearancePreview.Presentation,
     language: LinnetSettingsAppearancePreview.PreviewLanguage
   ) -> some View {
-    let expanded = preview.candidateBrowsingMode == .expandable &&
-      disclosureState.isExpanded(language)
+    let expanded = preview.candidateBrowsingMode == .expandable
     let detailGeometry = preview.detailGeometry(for: language)
     return VStack(alignment: .leading, spacing: LinnetCandidatePresentation.candidateRowSpacing) {
-      HStack {
-        previewLanguageLabel(language)
-          .font(.caption.weight(.medium))
-          .foregroundStyle(preview.palette.secondary.color)
-        Spacer()
-        if preview.candidateBrowsingMode == .expandable {
-          Button {
-            disclosureState.toggle(language)
-          } label: {
-            Image(systemName: expanded ? "chevron.up" : "chevron.down")
-          }
-          .buttonStyle(.plain)
-          .help(expanded ? "Show fewer candidates" : "Show more candidates")
-          .accessibilityLabel(
-            Text(expanded ? "Show fewer candidates" : "Show more candidates"))
-          .accessibilityIdentifier(
-            language == .chinese
-              ? "settings.appearance.preview.chinese.disclosure"
-              : "settings.appearance.preview.english.disclosure")
-        }
-      }
+      previewLanguageLabel(language)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(preview.palette.secondary.color)
       ScrollView(.horizontal, showsIndicators: false) {
         LinnetCandidateDetailSurfaceLayout(geometry: detailGeometry) {
           candidateList(preview, language: language, expanded: expanded)

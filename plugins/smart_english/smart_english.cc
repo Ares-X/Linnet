@@ -49,7 +49,9 @@ using namespace smart_english_domain;
 
 constexpr char kSuppressFollowingSpaceProperty[] = "linnet/suppress_following_space_v1",
                kPredictionNavigationProperty[] = "linnet/prediction_navigation_v1",
-               kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1";
+               kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1",
+               kCandidateExpansionRequestProperty[] =
+                   "linnet/candidate_expansion_request_v1";
 constexpr std::size_t kPinyinKeyLimit = 64,
                       kPinyinInputByteLimit = 96,
                       kPinyinTraversalLimit = 4096;
@@ -96,6 +98,7 @@ void ResetContinuationState(Context* context,
   context->set_property(kSpacingProperty, "");
   SetSentenceBoundary(context, false);
   context->set_property(kSuppressFollowingSpaceProperty, "");
+  context->set_property(kCandidateExpansionRequestProperty, "");
 }
 
 char ShiftedAscii(char key) {
@@ -367,18 +370,20 @@ class LinnetInteractionProcessor : public Processor {
     const bool next =
         key.keycode() == XK_bracketright || key.keycode() == XK_equal;
     if (!previous && !next) return kNoop;
-    if (!context || context->composition().empty()) return kRejected;
+    // A paging symbol owns the key only when it can move to a real adjacent
+    // page. Every boundary case stays on the normal punctuation/input path.
+    if (!context || context->composition().empty()) return kNoop;
 
     Segment& segment = context->composition().back();
     if (!segment.menu || IsRawLikeSegment(segment) || !engine_->schema()) {
-      return kRejected;
+      return kNoop;
     }
     const int page_size = engine_->schema()->page_size();
-    if (page_size <= 0) return kRejected;
+    if (page_size <= 0) return kNoop;
     const size_t selected = segment.selected_index;
     size_t target = 0;
     if (previous) {
-      if (selected < static_cast<size_t>(page_size)) return kRejected;
+      if (selected < static_cast<size_t>(page_size)) return kNoop;
       target = selected - static_cast<size_t>(page_size);
     } else {
       const size_t page_start =
@@ -388,13 +393,14 @@ class LinnetInteractionProcessor : public Processor {
       const int candidate_count =
           segment.menu->Prepare(next_page_start + page_size);
       if (candidate_count <= static_cast<int>(next_page_start)) {
-        return kRejected;
+        return kNoop;
       }
       target = (std::min)(selected + static_cast<size_t>(page_size),
                           static_cast<size_t>(candidate_count - 1));
     }
     context->Highlight(target);
     segment.tags.insert("paging");
+    context->set_property(kCandidateExpansionRequestProperty, "1");
     return kAccepted;
   }
 

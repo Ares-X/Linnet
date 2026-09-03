@@ -15,7 +15,7 @@
   "pack_baselines": {
     "chinese": {
       "source": "release_0_1_10",
-      "target_sequence": 35,
+      "target_sequence": 36,
       "content_sha256": "2a826ca1f59563ba3d00a8e90bca6b006e84fb73ca02b0cbbd422144643e09d3"
     },
     "english": {

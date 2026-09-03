@@ -225,17 +225,15 @@ final class SettingsUITests: XCTestCase {
       identifier: "settings.appearance.browsing",
       in: app)
 
-    for (identifier, language) in [
-      ("settings.appearance.preview.chinese.disclosure", "Chinese"),
-      ("settings.appearance.preview.english.disclosure", "English"),
-    ] {
-      let disclosure = app.descendants(matching: .any)[identifier]
-      try reveal(disclosure, named: "Show more \(language) candidates", in: app)
-      disclosure.click()
-      XCTAssertEqual(disclosure.label, "Show fewer candidates")
-      disclosure.click()
-      XCTAssertEqual(disclosure.label, "Show more candidates")
-    }
+    let preview = app.groups["Local candidate appearance preview"]
+    try reveal(preview, named: "Expanded candidate preview", in: app)
+    XCTAssertEqual(preview.value as? String, "Expanded candidate preview")
+    XCTAssertFalse(
+      app.descendants(matching: .any)[
+        "settings.appearance.preview.chinese.disclosure"].exists)
+    XCTAssertFalse(
+      app.descendants(matching: .any)[
+        "settings.appearance.preview.english.disclosure"].exists)
   }
 
   @MainActor

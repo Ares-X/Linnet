@@ -63,6 +63,8 @@ constexpr char kSentenceBoundaryProperty[] =
     "linnet/sentence_boundary_v1";
 constexpr char kModeReturnSchemaProperty[] =
     "linnet/mode_return_schema_v1";
+constexpr char kCandidateExpansionRequestProperty[] =
+    "linnet/candidate_expansion_request_v1";
 constexpr char kForcedRawCandidateType[] = "linnet_forced_raw";
 constexpr char kDefaultPinyinReversePrefix[] = "|";
 constexpr std::array<const char*, 9> kProductSchemaIDs = {
@@ -1832,22 +1834,19 @@ int CurrentCandidatePage(RimeApi_stdbool* api,
 void ExpectCandidatePagingShortcuts(RimeApi_stdbool* api,
                                     const char* schema_id,
                                     const std::string& input) {
-  const auto read_state = [&](RimeSessionId session,
-                              const std::string& reason) {
-    RimeContext_stdbool context = {};
-    RIME_STRUCT_INIT(RimeContext_stdbool, context);
-    if (!api->get_context(session, &context)) {
-      Fail("could not inspect rejected paging state for " + reason);
+  const auto expect_expansion_request = [&](RimeSessionId session,
+                                             bool expected,
+                                             const std::string& reason) {
+    std::array<char, 8> value = {};
+    const bool present = api->get_property(
+        session, kCandidateExpansionRequestProperty,
+        value.data(), value.size());
+    if (present != expected || (expected && std::string(value.data()) != "1")) {
+      Fail(std::string(schema_id) + " candidate expansion request " + reason);
     }
-    const char* active_input = api->get_input(session);
-    const auto state = std::make_tuple(
-        std::string(active_input ? active_input : ""),
-        std::string(context.composition.preedit
-                        ? context.composition.preedit
-                        : ""),
-        context.menu.page_no, context.menu.highlighted_candidate_index);
-    api->free_context(&context);
-    return state;
+    if (present) {
+      api->set_property(session, kCandidateExpansionRequestProperty, "");
+    }
   };
   for (const auto& key_case :
        std::array<std::tuple<int, const char*, int, const char*>, 2>{{
@@ -1859,14 +1858,6 @@ void ExpectCandidatePagingShortcuts(RimeApi_stdbool* api,
     if (CurrentCandidatePage(api, session, "initial page") != 0) {
       Fail(std::string(schema_id) + " paging fixture did not start on page zero");
     }
-    const auto first_page_state =
-        read_state(session, "unavailable previous page");
-    if (api->process_key(session, std::get<2>(key_case), 0) ||
-        read_state(session, "rejected previous page") != first_page_state) {
-      Fail(std::string(schema_id) + " " + std::get<3>(key_case) +
-           " was consumed or mutated composition without a previous page");
-    }
-    ExpectNoCommit(api, session, "rejected previous candidate page");
 
     int final_page = 0;
     while (true) {
@@ -1883,24 +1874,116 @@ void ExpectCandidatePagingShortcuts(RimeApi_stdbool* api,
         Fail(std::string(schema_id) + " " + std::get<1>(key_case) +
              " did not move to the next candidate page");
       }
+      expect_expansion_request(session, true, "missing after accepted next paging");
     }
     if (final_page == 0) {
       Fail(std::string(schema_id) + " paging fixture has no next candidate page");
     }
-    const auto last_page_state = read_state(session, "unavailable next page");
-    if (api->process_key(session, std::get<0>(key_case), 0) ||
-        read_state(session, "rejected next page") != last_page_state) {
-      Fail(std::string(schema_id) + " " + std::get<1>(key_case) +
-           " was consumed or mutated composition without a next page");
-    }
-    ExpectNoCommit(api, session, "rejected next candidate page");
     if (!api->process_key(session, std::get<2>(key_case), 0) ||
         CurrentCandidatePage(api, session, std::get<3>(key_case)) !=
             final_page - 1) {
       Fail(std::string(schema_id) + " " + std::get<3>(key_case) +
            " did not return from the final candidate page");
     }
+    expect_expansion_request(session, true, "missing after accepted previous paging");
     api->destroy_session(session);
+  }
+}
+
+void ExpectCandidatePagingBoundaryNormalInput(RimeApi_stdbool* api,
+                                              const char* schema_id,
+                                              const std::string& input) {
+  struct BoundaryCase {
+    int keycode;
+    const char* expected_symbol;
+    bool final_page;
+  };
+  for (const auto& boundary : std::array<BoundaryCase, 4>{{
+           {XK_bracketleft, "【", false},
+           {XK_minus, "-", false},
+           {XK_bracketright, "】", true},
+           {XK_equal, "=", true},
+       }}) {
+    const RimeSessionId session = CreateSchemaSession(api, schema_id);
+    Enter(api, session, input);
+    if (boundary.final_page) {
+      while (true) {
+        RimeContext_stdbool page_context = {};
+        RIME_STRUCT_INIT(RimeContext_stdbool, page_context);
+        if (!api->get_context(session, &page_context)) {
+          api->destroy_session(session);
+          Fail(std::string(schema_id) + " could not inspect final paging boundary");
+        }
+        const bool is_last_page = page_context.menu.is_last_page;
+        api->free_context(&page_context);
+        if (is_last_page) break;
+        if (!api->process_key(session, XK_bracketright, 0)) {
+          api->destroy_session(session);
+          Fail(std::string(schema_id) + " could not reach final paging boundary");
+        }
+        api->set_property(session, kCandidateExpansionRequestProperty, "");
+      }
+    }
+
+    const auto live = rime::Service::instance().GetSession(session);
+    if (!live || !live->context() || live->context()->composition().empty()) {
+      api->destroy_session(session);
+      Fail(std::string(schema_id) + " could not inspect normal paging fallback");
+    }
+    const auto selected_candidate =
+        live->context()->composition().back().GetSelectedCandidate();
+    if (!selected_candidate) {
+      api->destroy_session(session);
+      Fail(std::string(schema_id) + " normal paging fallback has no selection");
+    }
+    const std::string selected_text = selected_candidate->text();
+    const bool handled = api->process_key(session, boundary.keycode, 0);
+    std::string actual = TakeCommit(api, session, "normal paging boundary");
+    if (!handled) actual.push_back(static_cast<char>(boundary.keycode));
+    const std::string expected = selected_text + boundary.expected_symbol;
+    const char* remaining_input = api->get_input(session);
+    const bool retained_input = remaining_input && *remaining_input != '\0';
+    const bool retained_candidates = !Candidates(api, session).empty();
+    api->destroy_session(session);
+    if (actual != expected || retained_input || retained_candidates) {
+      Fail(std::string(schema_id) + " paging boundary produced '" + actual +
+           "' instead of normal input '" + expected + "'");
+    }
+  }
+}
+
+void ExpectSmartEnglishHyphenBoundary(RimeApi_stdbool* api) {
+  const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+  Enter(api, session, "built");
+  const auto candidates = Candidates(api, session);
+  RimeContext_stdbool context = {};
+  RIME_STRUCT_INIT(RimeContext_stdbool, context);
+  if (!api->get_context(session, &context)) {
+    api->destroy_session(session);
+    Fail("could not inspect the Smart English built- fixture");
+  }
+  const int selected = context.menu.highlighted_candidate_index;
+  api->free_context(&context);
+  if (selected < 0 || static_cast<size_t>(selected) >= candidates.size()) {
+    api->destroy_session(session);
+    Fail("Smart English built- fixture has no selected candidate");
+  }
+  const std::string expected = candidates[selected].text;
+
+  if (api->process_key(session, XK_minus, 0)) {
+    api->destroy_session(session);
+    Fail("Smart English built- captured the hyphen as candidate paging");
+  }
+  if (TakeCommit(api, session, "Smart English built- boundary") != expected) {
+    api->destroy_session(session);
+    Fail("Smart English built- did not confirm the selected word before the host hyphen");
+  }
+  const char* remaining_input = api->get_input(session);
+  const bool retained_input = remaining_input && *remaining_input != '\0';
+  const bool retained_candidates = !Candidates(api, session).empty();
+  api->destroy_session(session);
+  if (retained_input || retained_candidates) {
+    Fail("Smart English built- left marked text for the host hyphen to replace");
   }
 }
 
@@ -5913,8 +5996,12 @@ void ExpectFormalProfileSymbolKeys(RimeApi_stdbool* api,
                                    const std::string& schema_id,
                                    const std::string& input,
                                    bool semicolon_is_spelling) {
-  for (const char symbol : std::string("/,.:") +
-                               (semicolon_is_spelling ? "" : ";")) {
+  const std::array<std::pair<char, const char*>, 5> symbols = {{
+      {'/', "/"}, {',', "，"}, {'.', "。"}, {':', "："}, {';', "；"},
+  }};
+  for (const auto& mapping : symbols) {
+    const char symbol = mapping.first;
+    if (symbol == ';' && semicolon_is_spelling) continue;
     const std::string reason =
         schema_id + " active host symbol " + std::string(1, symbol);
     const RimeSessionId session = CreateSchemaSession(api, schema_id.c_str());
@@ -5924,13 +6011,14 @@ void ExpectFormalProfileSymbolKeys(RimeApi_stdbool* api,
     if (selected < 0 || static_cast<size_t>(selected) >= candidates.size()) {
       Fail(reason + " has no selected Chinese candidate");
     }
-    if (api->process_key(
-            session, symbol,
-            PrintableModifier(static_cast<unsigned char>(symbol)))) {
-      Fail(reason + " was captured instead of reaching the host");
-    }
-    if (TakeCommit(api, session, reason) != candidates[selected].text) {
-      Fail(reason + " did not commit the selected candidate exactly once");
+    const bool handled = api->process_key(
+        session, symbol,
+        PrintableModifier(static_cast<unsigned char>(symbol)));
+    std::string actual = TakeCommit(api, session, reason);
+    if (!handled) actual.push_back(symbol);
+    const std::string expected = candidates[selected].text + mapping.second;
+    if (actual != expected) {
+      Fail(reason + " produced '" + actual + "' instead of '" + expected + "'");
     }
     ExpectNoCommit(api, session, "duplicate " + reason);
     const auto after = ReadKeyInteractionSnapshot(api, session);
@@ -6015,24 +6103,33 @@ void ExpectFormalProfileKeyMatrix(RimeApi_stdbool* api) {
     const std::string paging_input =
         PagingInputForProfile(api, schema_id, reviewed->second);
     ExpectCandidatePagingShortcuts(api, schema_id.c_str(), paging_input);
+    ExpectCandidatePagingBoundaryNormalInput(
+        api, schema_id.c_str(), paging_input);
     ExpectNineCandidateSelectKeys(api, schema_id.c_str(), paging_input);
     ExpectFormalProfileCommitKeys(api, schema_id, paging_input);
     ExpectFormalProfileSymbolKeys(
         api, schema_id, paging_input, semicolon_is_spelling);
 
-    // The unshifted identity symbols below are host text while idle, but '-'
-    // and '=' become page commands only when a menu exists. Shifted partners
-    // of scheme spelling keys belong to the macOS key-normalization matrix,
-    // not this Rime-level physical-key oracle.
-    for (const char symbol : std::string("/,.:;'[]-=")) {
+    // With no adjacent candidate page, these keys use ordinary Chinese
+    // punctuation or the host-owned ASCII path. Slash, '-' and '=' remain
+    // ASCII by design.
+    const std::array<std::pair<char, const char*>, 10> idle_symbols = {{
+        {'/', "/"}, {',', "，"}, {'.', "。"}, {':', "："}, {';', "；"},
+        {'\'', "‘"}, {'[', "【"}, {']', "】"}, {'-', "-"}, {'=', "="},
+    }};
+    for (const auto& mapping : idle_symbols) {
+      const char symbol = mapping.first;
       const std::string reason = schema_id + " idle identity symbol " + symbol;
       const RimeSessionId idle = CreateSchemaSession(api, schema_id.c_str());
-      if (api->process_key(idle, symbol,
-                           PrintableModifier(
-                               static_cast<unsigned char>(symbol)))) {
-        Fail(reason + " was captured instead of reaching the host");
+      const bool handled = api->process_key(
+          idle, symbol, PrintableModifier(static_cast<unsigned char>(symbol)));
+      std::string actual = TakeOptionalCommit(api, idle);
+      if (!handled) actual.push_back(symbol);
+      if (actual != mapping.second) {
+        api->destroy_session(idle);
+        Fail(reason + " produced '" + actual + "' instead of '" +
+             mapping.second + "'");
       }
-      ExpectNoCommit(api, idle, reason);
       const auto after = ReadKeyInteractionSnapshot(api, idle);
       api->destroy_session(idle);
       if (!after.input.empty() || after.composition_size != 0 ||
@@ -6044,12 +6141,13 @@ void ExpectFormalProfileKeyMatrix(RimeApi_stdbool* api) {
     for (const std::string& numeric : {"1,000", "3.14", "12:30"}) {
       const RimeSessionId numeric_session =
           CreateSchemaSession(api, schema_id.c_str());
+      api->set_option(numeric_session, "ascii_punct", true);
       const std::string actual =
           SimulateHostText(api, numeric_session, numeric);
       api->destroy_session(numeric_session);
       if (actual != numeric) {
-        Fail(schema_id + " changed numeric input '" + numeric + "' to '" +
-             actual + "'");
+        Fail(schema_id + " English-punctuation mode changed numeric input '" +
+             numeric + "' to '" + actual + "'");
       }
     }
   }
@@ -6801,6 +6899,7 @@ int main(int argc, char** argv) {
 
   if (profile_key_matrix_probe) {
     ExpectFormalProfileKeyMatrix(api);
+    ExpectSmartEnglishHyphenBoundary(api);
     ExpectNineCandidateSelectKeys(api, "linnet_en", "a");
     ExpectFormalSingleLetterMatrix(api);
     ExpectNaturalSingleKeyDefaultRanking(api);
@@ -7041,6 +7140,7 @@ int main(int argc, char** argv) {
   ExpectFullShapeOff(api, english, "linnet_en");
   ExpectFullShapeOff(api, chinese, "linnet_zh");
   ExpectFormalProfileKeyMatrix(api);
+  ExpectSmartEnglishHyphenBoundary(api);
   ExpectDateShortcutProfileIsolation(api);
   ExpectPinyinReverseUsesActiveProfiles(api);
   ExpectPinyinReverseTraversalBounded(api);

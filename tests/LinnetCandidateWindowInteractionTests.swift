@@ -162,8 +162,10 @@ struct LinnetCandidateWindowInteractionTests {
     testPreeditPressDoesNotInferEngineCaret()
     testInputModeStatusNotice()
     testScreenLocalPanelPlacement()
+    testKeyboardPagingRequestsExpansion()
     testDefaultNineCandidateNaturalSize()
     testEnglishMetadataFooterNaturalSize()
+    testExpandedEnglishDetailKeepsStableExtent()
     testSharedCandidateDetailSidecarGeometry()
     testThemeLayoutMatrix()
     testVerticalPanelDoesNotMemorizeWhenDisabled()
@@ -367,6 +369,26 @@ struct LinnetCandidateWindowInteractionTests {
     ] {
       require(options.contains(option), "candidate tracking area lost option \(option.rawValue)")
     }
+  }
+
+  private static func testKeyboardPagingRequestsExpansion() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    let candidateView = panel.view
+    candidateView.lightTheme.candidateExpansionAllowed = true
+    candidateView.darkTheme.candidateExpansionAllowed = true
+    require(!panel.candidateExpansionRequested,
+            "expandable browsing did not begin with a compact candidate page")
+    panel.requestCandidateExpansionForKeyboardPaging()
+    require(panel.candidateExpansionRequested,
+            "an accepted keyboard page switch did not request candidate expansion")
+    panel.hide()
+    require(!panel.candidateExpansionRequested,
+            "a new composition retained the prior keyboard expansion")
+    candidateView.lightTheme.candidateExpansionAllowed = false
+    candidateView.darkTheme.candidateExpansionAllowed = false
+    panel.requestCandidateExpansionForKeyboardPaging()
+    require(!panel.candidateExpansionRequested,
+            "scrolling-only browsing accepted a keyboard expansion request")
   }
 
   private static func testExactCandidatePathHitTesting() {
@@ -1881,6 +1903,90 @@ struct LinnetCandidateWindowInteractionTests {
           isExpanded: false, canExpand: false),
         highlighted: 0, update: true, controller: controller)
       render(panel.view)
+    }
+  }
+
+  private static func testExpandedEnglishDetailKeepsStableExtent() {
+    for linear in [true, false] {
+      let panel = SquirrelPanel(position: NSRect(x: 260, y: 420, width: 2, height: 20))
+      let controller = SquirrelInputController()
+      panel.bind(controller: controller)
+      let candidateView = panel.view
+      let theme = candidateView.lightTheme
+      let candidateFont = NSFont.systemFont(ofSize: 16)
+      let detailFont = NSFont.systemFont(ofSize: 12)
+      let candidateAttributes: [NSAttributedString.Key: Any] = [
+        .font: candidateFont, .foregroundColor: NSColor.labelColor,
+      ]
+      theme.font = candidateFont
+      theme.linear = linear
+      theme.candidateExpansionAllowed = true
+      theme.showPaging = true
+      theme.candidateFormat = "[label] [candidate]"
+      theme.attrs = candidateAttributes
+      theme.highlightedAttrs = candidateAttributes
+      theme.labelAttrs = candidateAttributes
+      theme.labelHighlightedAttrs = candidateAttributes
+      theme.commentAttrs = candidateAttributes
+      theme.commentHighlightedAttrs = candidateAttributes
+      theme.detailAttrs = [
+        .font: detailFont, .foregroundColor: NSColor.secondaryLabelColor,
+      ]
+      theme.firstParagraphStyle = NSMutableParagraphStyle()
+      theme.paragraphStyle = NSMutableParagraphStyle()
+
+      let values = [
+        "working", "works", "worker", "waking", "wording", "workable",
+        "worked", "workplace", "workout",
+      ]
+      let details = [
+        "/wɜːkɪŋ/ · adj. 工作的；劳动的；工作上的；初步的；暂定的；"
+          + "n. 工作；作业区；运转方式；复数形式",
+        "n. 工作",
+        "",
+      ]
+      var sizes = [NSSize]()
+      for highlighted in details.indices {
+        let snapshot = SquirrelInputController.CandidateSnapshot(
+          items: values.enumerated().map { index, value in
+            .init(
+              text: value,
+              comment: index < details.count ? details[index] : "n. 英文候选",
+              page: index / 3,
+              indexOnPage: index % 3,
+              absoluteIndex: index,
+              selectionLabel: index < 3 ? String(index + 1) : nil)
+          },
+          pageSize: 3,
+          currentPage: 0,
+          isLastPage: false,
+          isExpanded: true,
+          canExpand: true)
+        _ = panel.update(
+          preedit: "", selRange: .empty, caretPos: 0,
+          candidates: snapshot, highlighted: highlighted, update: true,
+          controller: controller)
+        panel.displayIfNeeded()
+        candidateView.displayIfNeeded()
+        require(
+          !candidateView.detailTextView.isHidden,
+          "expanded \(linear ? "horizontal" : "vertical") English detail disappeared")
+        if highlighted == 2 {
+          require(
+            candidateView.detailTextView.textContentStorage?.attributedString?.string
+              == "No definition",
+            "expanded English candidate without a definition lost its quiet placeholder")
+        }
+        sizes.append(panel.frame.size)
+      }
+      let tolerance = 1 / max(panel.backingScaleFactor, 1) + 0.01
+      require(
+        sizes.dropFirst().allSatisfy {
+          abs($0.width - sizes[0].width) <= tolerance &&
+            abs($0.height - sizes[0].height) <= tolerance
+        },
+        "expanded \(linear ? "horizontal" : "vertical") English detail changed panel extent: \(sizes)")
+      panel.hide()
     }
   }
 

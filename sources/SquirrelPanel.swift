@@ -206,6 +206,13 @@ final class SquirrelPanel: NSPanel {
       return true
     }
   }
+
+  /// The Rime interaction processor has already accepted a printable paging
+  /// key. Reuse the disclosure state without reclassifying the physical key.
+  func requestCandidateExpansionForKeyboardPaging() {
+    guard view.currentTheme.candidateExpansionAllowed else { return }
+    candidateExpansionRequested = true
+  }
 }
 
 extension SquirrelPanel {
@@ -289,7 +296,11 @@ extension SquirrelPanel {
       forLinearLayout: linear || vertical,
       candidateFontPoint: theme.font.pointSize)
     let selectedDetail = usesInlineComments
-      ? nil : selectedDetail(theme: theme, candidates: candidates.items, highlighted: index)
+      ? nil : selectedDetail(
+        theme: theme,
+        candidates: candidates.items,
+        highlighted: index,
+        reservesExpandedDetail: candidates.isExpanded)
     let detailRange = NSRange.empty
 
     // candidates

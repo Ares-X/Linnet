@@ -21,7 +21,9 @@ enum LinnetCandidatePresentation {
     let replacement: FormatReplacement
   }
 
-  static let maximumDetailCharacterCount = 72
+  // TextKit owns visible line truncation. This higher bound is only a safety
+  // limit for malformed dictionary metadata, not a display budget.
+  static let maximumDetailCharacterCount = 256
   static let maximumFooterDetailLineCount = 3
   static let maximumExpandedPageCount = 3
   static let maximumExpandedCandidateCount = 27

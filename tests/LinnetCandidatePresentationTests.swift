@@ -81,13 +81,14 @@ struct LinnetCandidatePresentationTests {
       ) == "n. 光\nlit. 字面义\nfig. 比喻义",
       "literal and figurative definition groups did not receive separate lines"
     )
-    let long = String(repeating: "释", count: 90)
+    let long = String(repeating: "释", count: 300)
     let bounded = LinnetCandidatePresentation.selectedDetailText(long)
     require(
-      bounded.count == LinnetCandidatePresentation.maximumDetailCharacterCount,
-      "detail budget changed"
+      LinnetCandidatePresentation.maximumDetailCharacterCount == 256 &&
+        bounded.count == LinnetCandidatePresentation.maximumDetailCharacterCount,
+      "detail was still truncated at the former 72-character display budget"
     )
-    require(bounded.last == "…", "truncated detail has no ellipsis")
+    require(bounded.last == "…", "safety-bounded detail has no ellipsis")
 
     require(
       LinnetCandidatePresentation.accessibilityAnnouncement(
