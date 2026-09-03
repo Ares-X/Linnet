@@ -12,6 +12,7 @@ struct SettingsContractTests {
     do {
       testPinyinReverseLookupExamples()
       testCoreActivationGate()
+      testHostPreferenceDomainSelection()
       try testLegacyRuntimeHealthWithoutIdentity()
       try testLegacyCoreActivationBlockerWireCodes()
       try testNativeLearningDataVersionWireCompatibility()
@@ -126,6 +127,23 @@ struct SettingsContractTests {
     ) == .blocked(.coreActivationRequesterUnavailable) else {
       fail("a missing Settings requester did not block Core activation")
     }
+  }
+
+  private static func testHostPreferenceDomainSelection() {
+    let identifier = "io.github.linnet.tests.preferences.\(UUID().uuidString)"
+    guard LinnetSettingsContract.preferenceDefaults(
+      hostIdentifier: identifier,
+      runningIdentifier: identifier
+    ) === UserDefaults.standard else {
+      fail("the running Host did not use its standard preference domain")
+    }
+    guard let embedded = LinnetSettingsContract.preferenceDefaults(
+      hostIdentifier: identifier,
+      runningIdentifier: "\(identifier).settings"
+    ), embedded !== UserDefaults.standard else {
+      fail("embedded Settings did not use the Host-named preference suite")
+    }
+    embedded.removePersistentDomain(forName: identifier)
   }
 
   private static func testLegacyRuntimeHealthWithoutIdentity() throws {

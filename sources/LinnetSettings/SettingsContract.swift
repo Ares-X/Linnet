@@ -465,7 +465,21 @@ extension LinnetSettingsContract {
     else {
       return nil
     }
-    return UserDefaults(suiteName: identifier)
+    return preferenceDefaults(
+      hostIdentifier: identifier,
+      runningIdentifier: Bundle.main.bundleIdentifier)
+  }
+
+  /// The Host's own preferences are its standard domain. Embedded Settings
+  /// crosses the bundle boundary and therefore opens the Host-named suite.
+  static func preferenceDefaults(
+    hostIdentifier: String,
+    runningIdentifier: String?
+  ) -> UserDefaults? {
+    if hostIdentifier == runningIdentifier {
+      return .standard
+    }
+    return UserDefaults(suiteName: hostIdentifier)
   }
 
 }
