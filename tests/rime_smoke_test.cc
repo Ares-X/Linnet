@@ -7620,6 +7620,37 @@ int main(int argc, char** argv) {
   NormalizedCandidateIndex(api, isolated_session, "CLOUD");
   ExpectStandardTableOrigin(isolated_session, "CLOUD");
 
+  Enter(api, isolated_session, "WAF");
+  const auto acronym_prefix_candidates = Candidates(api, isolated_session);
+  if (acronym_prefix_candidates.empty() ||
+      acronym_prefix_candidates.front().text != "WAF") {
+    Fail("uppercase acronym prefix did not preserve the user's exact input first");
+  }
+  NormalizedCandidateIndex(api, isolated_session, "WAFA");
+  ExpectStandardTableOrigin(isolated_session, "WAFA");
+  for (const auto& schema_id : RuntimeChineseSchemaIDs(api)) {
+    const RimeSessionId acronym_prefix =
+        CreateSchemaSession(api, schema_id.c_str());
+    Enter(api, acronym_prefix, "WAF");
+    const auto candidates = Candidates(api, acronym_prefix);
+    if (candidates.empty() || candidates.front().text != "WAF") {
+      std::cerr << "Origins for uppercase acronym prefix WAF in " << schema_id
+                << ":";
+      for (const auto& candidate : CandidateOrigins(acronym_prefix)) {
+        std::cerr << " [" << candidate.text << ":" << candidate.type << ":"
+                  << candidate.genuine_type << ":q=" << candidate.quality
+                  << ":exact=" << candidate.phrase_exact << "]";
+      }
+      std::cerr << '\n';
+      api->destroy_session(acronym_prefix);
+      Fail(schema_id +
+           " uppercase acronym prefix did not preserve the user's exact input first");
+    }
+    NormalizedCandidateIndex(api, acronym_prefix, "WAFA");
+    ExpectStandardTableOrigin(acronym_prefix, "WAFA");
+    api->destroy_session(acronym_prefix);
+  }
+
   Enter(api, chinese, "nihk");
   const size_t nihao_index = CandidateIndex(api, chinese, "你好");
   if (!api->select_candidate(chinese, nihao_index)) {

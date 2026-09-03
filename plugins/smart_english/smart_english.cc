@@ -742,7 +742,16 @@ class SmartEnglishTranslator : public Translator {
   an<Translation> Query(const string& input, const Segment& segment) override {
     auto result = New<FifoTranslation>();
     if (!predict_engine_) return result;
-    if (segment.HasTag("zz_code_token") || segment.HasTag("zz_english")) {
+    const string normalized = LowerAsciiWord(input);
+    // Uppercase letters are explicit English intent even while a Chinese
+    // schema owns the session. Give that literal input the same typed identity
+    // as Smart English's raw spelling so a completion cannot replace it. The
+    // filter still retires this echo when an exact dictionary row exists.
+    const bool explicit_chinese_mode_english =
+        schema_id_ != kSmartEnglishSchema && segment.HasTag("abc") &&
+        !normalized.empty() && input != normalized;
+    if (segment.HasTag("zz_code_token") || segment.HasTag("zz_english") ||
+        explicit_chinese_mode_english) {
       const char* candidate_type = segment.HasTag("zz_code_token")
                                        ? "raw"
                                        : kForcedRawCandidateType;
@@ -781,7 +790,6 @@ class SmartEnglishTranslator : public Translator {
       return result;
     }
     if (!segment.HasTag("zz_english")) return result;
-    const string normalized = LowerAsciiWord(input);
     for (const auto& word : index_.LookupCorrections(normalized)) {
       if (word.text == normalized) continue;
       auto candidate = New<SimpleCandidate>(kCorrectionCandidateType, segment.start, segment.end, word.text);
