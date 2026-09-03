@@ -938,7 +938,7 @@ if [[ "${candidate_fixture_available}" == true ]]; then
   cp -X "${delta_tool}" "${scripts_root}/linnet-pack"
   chmod 0755 "${scripts_root}/linnet-pack"
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr \
-    "${candidate_fixture}" "${scripts_root}/core.payload"
+    "${candidate_fixture}" "${scripts_root}/Linnet.payload"
   target_tree="$("${delta_tool}" tree-digest --root "${candidate_fixture}")"
 
   # Core admits any intact, same-leaf public release no newer than the sealed
@@ -1099,13 +1099,13 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     delta_runtime_log="${test_root}/delta-${delta_case}/runtime-build"
     prepare_signed_postinstall_home "${delta_home}"
     configure_installed_identity "${delta_home}" same-community-cms-leaf
-    /bin/chmod -R -P u+w "${scripts_root}/core.payload"
-    /bin/rm -rf -- "${scripts_root}/core.payload"
+    /bin/chmod -R -P u+w "${scripts_root}/Linnet.payload"
+    /bin/rm -rf -- "${scripts_root}/Linnet.payload"
     COPYFILE_DISABLE=1 ditto --norsrc --noextattr \
-      "${candidate_fixture}" "${scripts_root}/core.payload"
+      "${candidate_fixture}" "${scripts_root}/Linnet.payload"
     case "${delta_case}" in
       corrupt)
-        printf 'unexpected bytes\n' >"${scripts_root}/core.payload/Contents/unexpected"
+        printf 'unexpected bytes\n' >"${scripts_root}/Linnet.payload/Contents/unexpected"
         ;;
       staged-identity)
         write_candidate_identity "${candidate_version}" "${candidate_build}" \
@@ -1142,10 +1142,10 @@ if [[ "${candidate_fixture_available}" == true ]]; then
     write_candidate_identity "${candidate_version}" "${candidate_build}" \
       "${candidate_revision}" "${candidate_leaf}"
   done
-  /bin/chmod -R -P u+w "${scripts_root}/core.payload"
-  /bin/rm -rf -- "${scripts_root}/core.payload"
+  /bin/chmod -R -P u+w "${scripts_root}/Linnet.payload"
+  /bin/rm -rf -- "${scripts_root}/Linnet.payload"
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr \
-    "${candidate_fixture}" "${scripts_root}/core.payload"
+    "${candidate_fixture}" "${scripts_root}/Linnet.payload"
 
   core_postinstall_home="${test_root}/postinstall-core/home"
   core_postinstall_log="${test_root}/postinstall-core/host-invocations"

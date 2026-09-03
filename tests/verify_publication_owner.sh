@@ -194,7 +194,7 @@ staged_identity_dispatch = <<~'BASH'
       ;;
     packaged)
       [[ "$#" -eq 1 ]] || fail_identity "unexpected packaged App path"
-      readonly app_path="${script_root}/core.payload"
+      readonly app_path="${script_root}/Linnet.payload"
       secure_owned_path "${script_root}" directory ||
         fail_identity "packaged App parent is unsafe"
       ;;

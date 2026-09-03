@@ -299,7 +299,7 @@ ruby -rjson -rrexml/document -e '
   if edition == "core"
     core_scripts["postinstall"] = [0o755,
       File.binread(File.join(project, "package/installer-scripts/postinstall"))]
-    core_scripts["core.payload"] = [:directory, nil]
+    core_scripts["Linnet.payload"] = [:directory, nil]
   end
   script_contracts = {
     "core" => core_scripts,
@@ -349,7 +349,7 @@ core_component="${expanded}/Linnet-Core.component.pkg"
 if [[ "${edition}" == core ]]; then
   [[ ! -e "${core_component}/Payload" && ! -L "${core_component}/Payload" ]] ||
     fail_verification "Core package contains a PackageKit payload"
-  payload_core_app="${core_component}/Scripts/core.payload"
+  payload_core_app="${core_component}/Scripts/Linnet.payload"
 else
   [[ "$(find "${core_component}/Payload" -mindepth 1 -maxdepth 1 -exec basename {} \;)" == \
     "Linnet.payload" ]] || fail_verification "Complete Core payload is not exactly Linnet.payload"

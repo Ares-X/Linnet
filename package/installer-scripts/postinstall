@@ -185,7 +185,7 @@ if [[ "${install_mode}" == core-update ]]; then
     echo "Linnet postinstall: installed Core App is missing or unsafe" >&2
     exit 1
   }
-  candidate_app="${script_root}/core.payload"
+  candidate_app="${script_root}/Linnet.payload"
   secure_owned_path "${candidate_app}" directory || {
     echo "Linnet postinstall: candidate App payload is missing or unsafe" >&2
     exit 1

@@ -156,7 +156,7 @@ prepare_core_scripts() {
   if [[ "${install_mode}" == core-update ]]; then
     cp -X "${project_root}/package/installer-scripts/postinstall" "${destination}/postinstall"
     COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${core_app}" \
-      "${destination}/core.payload"
+      "${destination}/Linnet.payload"
     chmod 755 "${destination}/postinstall"
   fi
   printf '%s\n' "${version}" >"${destination}/candidate-core-version"

@@ -42,7 +42,7 @@ ruby -e '
     core_builder.include?(%q{--root "${core_payload}"})
   abort "Core update is not a scripts-only atomic replacement component" unless
     core_builder.include?("--nopayload") &&
-      source.include?(%q{"${destination}/core.payload"}) &&
+      source.include?(%q{"${destination}/Linnet.payload"}) &&
       !source.include?("core.linnetdelta")
 ' || fail "Core atomic replacement boundary is missing"
 if rg -n 'core_source|core\.linnetdelta|prepare_update_baseline" core|delta-state --base "\$\{app_path\}"' \
