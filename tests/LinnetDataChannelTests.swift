@@ -37,21 +37,39 @@ struct LinnetDataChannelTests {
     require(try LinnetDataChannel.packSnapshotDigest(coreOnly.catalog)
       == LinnetDataChannel.packSnapshotDigest(catalog), "Core-only change altered immutable pack identity")
     require(
-      verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 7)
+      verified.catalog.core.availability(
+        currentVersion: "1.0.0", currentBuild: 7,
+        currentRevision: String(repeating: "a", count: 40))
         == .available,
       "newer Core build was not reported")
     require(
-      verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 8)
+      verified.catalog.core.availability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40))
         == .current,
       "current Core build was reported as outdated")
     require(
+      verified.catalog.core.availability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "b", count: 40))
+        == .available,
+      "same-build Core source revision replacement was not reported")
+    require(
       try verified.catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 7, edition: .standard,
+        currentVersion: "1.0.0", currentBuild: 7,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: []) == .core(verified.catalog.core),
       "Core update did not take priority over data")
     require(
       try verified.catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "b", count: 40), edition: .standard,
+        installedPacks: []) == .core(verified.catalog.core),
+      "same-build Core source revision replacement did not take priority over data")
+    require(
+      try verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: []) == .languageData([
           .init(
             kind: .chinese, installedVersion: nil, installedSequence: nil,
@@ -76,7 +94,9 @@ struct LinnetDataChannelTests {
             relativePath: pack.relativePath, manifestSHA256: pack.manifestSHA256)
         }
         require(try catalog.updateAvailability(
-          currentVersion: "1.0.0", currentBuild: 8, edition: edition, installedPacks: newerLocal) == .localDataAhead,
+          currentVersion: "1.0.0", currentBuild: 8,
+          currentRevision: String(repeating: "a", count: 40),
+          edition: edition, installedPacks: newerLocal) == .localDataAhead,
           "local-ahead or mixed new/old activation set must be explicitly identified")
       }
     }
@@ -94,13 +114,15 @@ struct LinnetDataChannelTests {
       relativePath: staleEnglish.relativePath, manifestSHA256: staleEnglish.manifestSHA256)
     do {
       _ = try catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: [installedStandard[0], conflictingEnglish, installedStandard[2]])
       LinnetTestFailure.fail("same-sequence different content was accepted as current or an update")
     } catch LinnetDataChannel.Failure.invalidCatalog { }
     require(
       try verified.catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: [installedStandard[0], staleEnglish, installedStandard[2]])
         == .languageData([
           .init(
@@ -111,7 +133,8 @@ struct LinnetDataChannelTests {
       "an outdated language-data release did not report both versions")
     require(
       try verified.catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: installedPacks(from: catalog.activationSets[0].packs)) == .current,
       "an exact installation was reported as outdated")
 

@@ -169,9 +169,14 @@ enum LinnetDataChannel {
       case releaseURL = "release_url"
     }
 
-    func availability(currentVersion: String, currentBuild: UInt64) -> CoreAvailability {
+    func availability(
+      currentVersion: String,
+      currentBuild: UInt64,
+      currentRevision: String
+    ) -> CoreAvailability {
       if version == currentVersion {
-        return build > currentBuild ? .available : .current
+        return build > currentBuild || (build == currentBuild && revision != currentRevision)
+          ? .available : .current
       }
       return LinnetPackContract.supportsCore(required: currentVersion, actual: version)
         && !LinnetPackContract.supportsCore(required: version, actual: currentVersion)
@@ -197,10 +202,14 @@ enum LinnetDataChannel {
     func updateAvailability(
       currentVersion: String,
       currentBuild: UInt64,
+      currentRevision: String,
       edition: LinnetDataRegistry.Edition?,
       installedPacks: [LinnetDataRegistry.ActivePack]
     ) throws -> UpdateAvailability {
-      if core.availability(currentVersion: currentVersion, currentBuild: currentBuild)
+      if core.availability(
+        currentVersion: currentVersion,
+        currentBuild: currentBuild,
+        currentRevision: currentRevision)
         == .available {
         return .core(core)
       }

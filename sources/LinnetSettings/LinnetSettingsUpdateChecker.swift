@@ -352,6 +352,7 @@ extension LinnetSettingsUpdateChecker {
     }
     let currentVersion = installedIdentity.version
     let currentBuild = installedIdentity.build
+    let currentRevision = installedIdentity.revision
     let edition = edition
     let installedPacks = installedPacks
     let catalogURL = updateChannel.catalogURL
@@ -363,6 +364,7 @@ extension LinnetSettingsUpdateChecker {
         let catalog = try LinnetDataChannel.verifyPublished(data).catalog
         let result = try catalog.updateAvailability(
           currentVersion: currentVersion, currentBuild: currentBuild,
+          currentRevision: currentRevision,
           edition: edition, installedPacks: installedPacks)
         await self?.finish(result, cycle: activeCycle)
       } catch is CancellationError {
