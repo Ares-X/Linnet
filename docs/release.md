@@ -164,8 +164,8 @@ candidate 流程。正常版本不运行 seed 模式。
 
 任一项失败都停止在当前幂等边界；不能覆盖或 `--clobber` 已公开资产。候选
 字节本身有误时，修复必须形成新的 revision；候选一旦公开到 Preview，就成为在线
-升级基线，同版本的后续 Preview 必须严格增加 Core build。尚未公开、只停留在 Draft
-的候选修订可保持 build 不变。数据内容变化时才增加必要的数据 sequence，再由
+升级基线，后续 Preview 必须使用新的产品版本并严格增加 Core build，不能改写已公开的
+`core-v<VERSION>`。尚未公开、只停留在 Draft 的候选修订可保持版本与 build 不变。数据内容变化时才增加必要的数据 sequence，再由
 macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、Preview 和正式
 发布三个控制标签分别只授权自己的边界。
 
