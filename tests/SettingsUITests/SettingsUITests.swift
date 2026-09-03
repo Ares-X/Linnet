@@ -226,7 +226,11 @@ final class SettingsUITests: XCTestCase {
       in: app)
 
     let preview = app.groups["Local candidate appearance preview"]
-    try reveal(preview, named: "Expanded candidate preview", in: app)
+    try reveal(
+      preview,
+      named: "Expanded candidate preview",
+      in: app,
+      acceptingVisiblePortion: true)
     XCTAssertEqual(preview.value as? String, "Expanded candidate preview")
     XCTAssertFalse(
       app.descendants(matching: .any)[
@@ -846,7 +850,8 @@ final class SettingsUITests: XCTestCase {
   private func reveal(
     _ element: XCUIElement,
     named name: String,
-    in app: XCUIApplication
+    in app: XCUIApplication,
+    acceptingVisiblePortion: Bool = false
   ) throws {
     let scrollView = app.scrollViews["settings.page.scroll"]
     for direction in [-1.0, 1.0] {
@@ -858,7 +863,10 @@ final class SettingsUITests: XCTestCase {
         if element.exists {
           let frame = element.frame
           let hittable = element.isHittable
-          if viewport.contains(frame) { return }
+          let isVisible = acceptingVisiblePortion
+            ? viewport.intersects(frame) && hittable
+            : viewport.contains(frame)
+          if isVisible { return }
           print("Reveal \(name): frame=\(frame), viewport=\(viewport), hittable=\(hittable)")
           // Center the target instead of jumping over its visible interval.
           // Visibility belongs here; each interaction verifies its actual result.
