@@ -169,19 +169,6 @@ enum LinnetDataChannel {
       case releaseURL = "release_url"
     }
 
-    func availability(
-      currentVersion: String,
-      currentBuild: UInt64,
-      currentRevision: String
-    ) -> CoreAvailability {
-      if version == currentVersion {
-        return build > currentBuild || (build == currentBuild && revision != currentRevision)
-          ? .available : .current
-      }
-      return LinnetPackContract.supportsCore(required: currentVersion, actual: version)
-        && !LinnetPackContract.supportsCore(required: version, actual: currentVersion)
-        ? .available : .current
-    }
   }
 
   struct Catalog: Codable, Equatable, Sendable {
@@ -422,6 +409,22 @@ enum LinnetDataChannel {
 
   private static func sha256(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+extension LinnetDataChannel.Core {
+  func availability(
+    currentVersion: String,
+    currentBuild: UInt64,
+    currentRevision: String
+  ) -> LinnetDataChannel.CoreAvailability {
+    if version == currentVersion {
+      return build > currentBuild || (build == currentBuild && revision != currentRevision)
+        ? .available : .current
+    }
+    return LinnetPackContract.supportsCore(required: currentVersion, actual: version)
+      && !LinnetPackContract.supportsCore(required: version, actual: currentVersion)
+      ? .available : .current
   }
 }
 
