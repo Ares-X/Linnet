@@ -741,9 +741,9 @@ ruby -e '
       added.include?("set<const DictEntry*>* preserved") &&
       added.include?("map<int, size_t> system_starts") &&
       added.include?("system_starts[group.first] = same_start_pos[group.first].size()") &&
-      added.include?("const size_t system_start = system_starts[group.first]") &&
+      added.include?("const size_t system_start = system_starts[end_constraints.first]") &&
       added.include?("homophones.begin() + system_start, homophones.end()") &&
-      added.include?("const auto entry = enrolled != homophones.end()") &&
+      added.include?("an<DictEntry> entry = enrolled != homophones.end()") &&
       added.include?("preserved->insert(entry.get())") &&
       added.include?("set<const DictEntry*> preserved_entries") &&
       added.include?("preserved_entries.count(&entry) != 0") &&
@@ -751,6 +751,19 @@ ruby -e '
       added.include?("target_state.ordinary") &&
       added.include?("target_state.preserved") &&
       added.include?("preserved_entry_count == 1")
+  abort "explicit Shift entities lost their one ScriptTranslator graph path" unless
+    added.include?("kExplicitEntitySyllable") &&
+      added.include?("explicit_entity_constraints() const") &&
+      added.include?("entity_start == 0 || entity_end == input_.size()") &&
+      added.include?("prefix_consumed = build_part(prefix_input, &prefix)") &&
+      added.include?("suffix_consumed = build_part(suffix_input, &suffix)") &&
+      added.include?("engine_->context()->input().substr(segment.start, input.size())") &&
+      added.include?("syllable_graph_.edges[entity_start][entity_end]") &&
+      added.include?("properties.end_pos += entity_end") &&
+      added.include?("ambiguous_sources.insert(entity_end + source)") &&
+      added.include?("entry->code.push_back(kExplicitEntitySyllable)")
+  abort "the core mixed graph special-cased one reported acronym" if
+    added.include?(%q{"WAF"}) || added.include?(%q{"QZX"})
   abort "the Poet preserve predicate again widened exact graph entries by text" if
     added.include?("return is_uppercase_entity(entry.text);")
   abort "an iterator can survive a preserved-entry vector growth again" if
@@ -983,6 +996,13 @@ test "$(rg -F -c 'bool IsMixedChineseCandidate(' "${smart_english_filter}")" -eq
 test "$(rg -F -c 'New<ShadowCandidate>(genuine, kMixedCandidateType' \
   "${smart_english_filter}")" -eq 1 ||
   fail "mixed presentation no longer has one non-authoritative candidate projection"
+rg -Fq 'if (!segment || segment->HasTag("text_expander"))' \
+  "${smart_english_filter}" ||
+  fail "native mixed candidates can no longer cross the code-shaped presentation gate"
+if rg -Fq 'if (!segment || segment->HasTag("zz_code_token") ||' \
+  "${smart_english_filter}"; then
+  fail "the retired unconditional code-shaped filter exclusion returned"
+fi
 if rg -n 'sentence->components\(\)|word_lengths\(\)' \
     "${smart_english_filter}"; then
   fail "the filter regained a second native sentence/entity inference owner"
@@ -991,6 +1011,13 @@ rg -Fq 'struct PendingSegment {' "${smart_english_filter_header}" ||
   fail "the exact segment flow lost its typed transport"
 rg -Fq 'bool pinyin_flow = false;' "${smart_english_filter_header}" ||
   fail "the exact segment flow lost its pinyin-flow fact"
+rg -Fq 'bool code_token = false;' "${smart_english_filter_header}" ||
+  fail "the code-shaped segment flow lost its typed routing fact"
+rg -Fq 'const bool is_code_token =' "${smart_english_filter}" ||
+  fail "the filter no longer consumes the typed code-shaped routing fact"
+rg -Fq 'if (has_non_raw && (!is_code_token || has_mixed)) {' \
+  "${smart_english_filter}" ||
+  fail "code-shaped raw input can retire without a native mixed sentence"
 if rg -n 'xuexicsjiting|liaojieaijishu|shiyongcpuxingneng|学习CS急停|了解AI技术|使用CPU性能' \
     plugins/smart_english; then
   fail "a mixed-input acceptance fixture leaked into production code"

@@ -604,19 +604,37 @@ index 0c20b92..71d992a 100644
  
  inline static bool ends_with_digit(const string& text) {
 diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translator.cc
-index aef6217..0214027 100644
+index aef6217..ebce6e7 100644
 --- a/src/rime/gear/script_translator.cc
 +++ b/src/rime/gear/script_translator.cc
-@@ -75,6 +75,8 @@ static bool syllabify_dfs(SyllabifyTask* task,
+@@ -7,6 +7,7 @@
+ // 2011-07-10 GONG Chen <chen.sst@gmail.com>
+ //
+ #include <algorithm>
++#include <limits>
+ #include <stack>
+ #include <cmath>
+ #include <boost/algorithm/string/join.hpp>
+@@ -75,6 +76,10 @@ static bool syllabify_dfs(SyllabifyTask* task,
  
  }  // anonymous namespace
  
 +using EntityConstraints = map<size_t, map<size_t, set<string>>>;
++constexpr SyllableId kExplicitEntitySyllable =
++    std::numeric_limits<SyllableId>::max();
 +
  class ScriptSyllabifier : public PhraseSyllabifier {
   public:
    ScriptSyllabifier(ScriptTranslator* translator,
-@@ -97,6 +99,12 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+@@ -84,6 +89,7 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+       : translator_(translator),
+         input_(input),
+         start_(start),
++        corrector_(corrector),
+         syllabifier_(translator->delimiters(),
+                      translator->enable_completion(),
+                      translator->strict_spelling()) {
+@@ -97,15 +103,26 @@ class ScriptSyllabifier : public PhraseSyllabifier {
    string GetPreeditString(const Phrase& cand) const;
    string GetOriginalSpelling(const Phrase& cand) const;
    bool IsCorrection(const Code& code, size_t code_length) const;
@@ -628,8 +646,22 @@ index aef6217..0214027 100644
 +  }
  
    const SyllableGraph& syllable_graph() const { return syllable_graph_; }
++  const EntityConstraints& explicit_entity_constraints() const {
++    return explicit_entity_constraints_;
++  }
  
-@@ -137,14 +145,18 @@ class ScriptTranslation : public Translation {
+  protected:
+   ScriptTranslator* translator_;
+   string input_;
+   size_t start_;
++  Corrector* corrector_;
+   Syllabifier syllabifier_;
+   SyllableGraph syllable_graph_;
++  EntityConstraints explicit_entity_constraints_;
+ };
+ 
+ class ScriptTranslation : public Translation {
+@@ -137,14 +154,18 @@ class ScriptTranslation : public Translation {
    bool CheckEmpty();
    bool IsNormalSpelling() const;
    bool PrepareCandidate();
@@ -650,15 +682,16 @@ index aef6217..0214027 100644
  
    ScriptTranslator* translator_;
    Poet* poet_;
-@@ -155,6 +167,7 @@ class ScriptTranslation : public Translation {
+@@ -155,6 +176,8 @@ class ScriptTranslation : public Translation {
    an<DictEntryCollector> phrase_;
    an<UserDictEntryCollector> user_phrase_;
    deque<an<Sentence>> sentences_;
 +  EntityConstraints entity_constraints_;
++  EntityConstraints explicit_entity_constraints_;
  
    an<Phrase> candidate_ = nullptr;
    size_t candidate_index_ = 0;
-@@ -190,6 +203,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
+@@ -190,6 +213,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
      config->GetBool(name_space_ + "/always_show_comments",
                      &always_show_comments_);
      config->GetBool(name_space_ + "/enable_correction", &enable_correction_);
@@ -667,7 +700,123 @@ index aef6217..0214027 100644
      if (!config->GetBool(name_space_ + "/enable_word_completion",
                           &enable_word_completion_)) {
        enable_word_completion_ = enable_completion_;
-@@ -448,11 +463,42 @@ static bool has_exact_match_phrase(Ptr ptr, Iter iter, size_t consumed) {
+@@ -219,10 +244,16 @@ an<Translation> ScriptTranslator::Query(const string& input,
+       user_dict_ && user_dict_->loaded() && !IsUserDictDisabledFor(input);
+ 
+   size_t end_of_input = engine_->context()->input().length();
++  string sentence_input = input;
++  if (sentence_with_uppercase_syllable_ &&
++      segment.start + input.size() <= end_of_input) {
++    sentence_input =
++        engine_->context()->input().substr(segment.start, input.size());
++  }
+   // the translator should survive translations it creates
+   auto result = New<ScriptTranslation>(
+-      this, corrector_.get(), poet_.get(), input, segment.start, end_of_input,
+-      max_sentences_, sentence_cutoff_threshold_);
++      this, corrector_.get(), poet_.get(), sentence_input, segment.start,
++      end_of_input, max_sentences_, sentence_cutoff_threshold_);
+   if (!result || !result->Evaluate(
+                      dict_.get(), enable_user_dict ? user_dict_.get() : NULL)) {
+     return nullptr;
+@@ -365,8 +396,94 @@ Spans ScriptSyllabifier::Syllabify(const Phrase* phrase) {
+ }
+ 
+ size_t ScriptSyllabifier::BuildSyllableGraph(Prism& prism) {
+-  return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
+-                                                 &syllable_graph_);
++  const auto uppercase_start =
++      std::find_if(input_.begin(), input_.end(), [](unsigned char byte) {
++        return byte >= 'A' && byte <= 'Z';
++      });
++  if (uppercase_start == input_.end()) {
++    return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
++                                                   &syllable_graph_);
++  }
++  const auto uppercase_end =
++      std::find_if(uppercase_start, input_.end(), [](unsigned char byte) {
++        return byte < 'A' || byte > 'Z';
++      });
++  const size_t entity_start =
++      static_cast<size_t>(uppercase_start - input_.begin());
++  const size_t entity_end =
++      static_cast<size_t>(uppercase_end - input_.begin());
++  if (entity_start == 0 || entity_end == input_.size() ||
++      entity_end - entity_start < 2 || entity_end - entity_start > 6 ||
++      std::any_of(uppercase_end, input_.end(), [](unsigned char byte) {
++        return byte >= 'A' && byte <= 'Z';
++      })) {
++    return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
++                                                   &syllable_graph_);
++  }
++
++  const auto build_part = [&](const string& part, SyllableGraph* graph) {
++    Syllabifier syllabifier(translator_->delimiters(),
++                            translator_->enable_completion(),
++                            translator_->strict_spelling());
++    if (corrector_) syllabifier.EnableCorrection(corrector_);
++    return static_cast<size_t>(
++        syllabifier.BuildSyllableGraph(part, prism, graph));
++  };
++  SyllableGraph prefix;
++  SyllableGraph suffix;
++  const string prefix_input = input_.substr(0, entity_start);
++  const string suffix_input = input_.substr(entity_end);
++  const size_t prefix_consumed = build_part(prefix_input, &prefix);
++  const size_t suffix_consumed = build_part(suffix_input, &suffix);
++  if (prefix_consumed != prefix_input.size() ||
++      suffix_consumed != suffix_input.size()) {
++    return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
++                                                   &syllable_graph_);
++  }
++
++  syllable_graph_ = std::move(prefix);
++  EdgeProperties entity_properties;
++  entity_properties.type = kNormalSpelling;
++  entity_properties.end_pos = entity_end;
++  syllable_graph_.edges[entity_start][entity_end].insert(
++      {kExplicitEntitySyllable, entity_properties});
++  syllable_graph_.vertices[entity_start] = kNormalSpelling;
++  syllable_graph_.vertices[entity_end] = kNormalSpelling;
++  for (const auto& vertex : suffix.vertices) {
++    syllable_graph_.vertices[entity_end + vertex.first] = vertex.second;
++  }
++  for (const auto& start : suffix.edges) {
++    for (const auto& end : start.second) {
++      auto& rebased = syllable_graph_.edges[entity_end + start.first]
++                                           [entity_end + end.first];
++      for (const auto& spelling : end.second) {
++        EdgeProperties properties = spelling.second;
++        properties.end_pos += entity_end;
++        set<size_t> ambiguous_sources;
++        for (const size_t source : properties.ambiguous_source_positions) {
++          ambiguous_sources.insert(entity_end + source);
++        }
++        properties.ambiguous_source_positions = std::move(ambiguous_sources);
++        rebased.insert({spelling.first, std::move(properties)});
++      }
++    }
++  }
++  syllable_graph_.indices.clear();
++  for (const auto& start : syllable_graph_.edges) {
++    auto& index = syllable_graph_.indices[start.first];
++    for (const auto& end : boost::adaptors::reverse(start.second)) {
++      for (const auto& spelling : end.second) {
++        if (spelling.first != kExplicitEntitySyllable) {
++          index[spelling.first].push_back(&spelling.second);
++        }
++      }
++    }
++  }
++  syllable_graph_.input_length = input_.size();
++  syllable_graph_.interpreted_length = input_.size();
++  explicit_entity_constraints_[entity_start][entity_end].insert(
++      input_.substr(entity_start, entity_end - entity_start));
++  return input_.size();
+ }
+ 
+ bool ScriptSyllabifier::IsCorrection(const Code& code,
+@@ -448,11 +565,52 @@ static bool has_exact_match_phrase(Ptr ptr, Iter iter, size_t consumed) {
           iter->second.Peek()->IsExactMatch();
  }
  
@@ -686,6 +835,8 @@ index aef6217..0214027 100644
 +  for (const auto& start : graph.edges) {
 +    for (const auto& end : start.second) {
 +      for (const auto& spelling : end.second) {
++        if (spelling.first == kExplicitEntitySyllable)
++          continue;
 +        if (spelling.second.type != kNormalSpelling)
 +          continue;
 +        const string text =
@@ -706,11 +857,28 @@ index aef6217..0214027 100644
    const auto& syllable_graph = syllabifier_->syllable_graph();
 +  if (translator_->sentence_with_uppercase_syllable()) {
 +    entity_constraints_ = find_entity_constraints(syllable_graph, dict);
++    explicit_entity_constraints_ =
++        syllabifier_->explicit_entity_constraints();
++    for (const auto& start : explicit_entity_constraints_) {
++      for (const auto& end : start.second) {
++        entity_constraints_[start.first][end.first].insert(end.second.begin(),
++                                                           end.second.end());
++      }
++    }
 +  }
    bool predict_word = translator_->enable_word_completion() &&
                        start_ + consumed == end_of_input_;
  
-@@ -492,12 +538,19 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+@@ -465,7 +623,7 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+         user_dict->Lookup(syllable_graph, 0, kUnlimitedDepth,
+                           predict_word ? kNumSyllablesToPredictWord : 0);
+   }
+-  if (!phrase_ && !user_phrase_)
++  if (!phrase_ && !user_phrase_ && entity_constraints_.empty())
+     return false;
+ 
+   if (phrase_)
+@@ -492,12 +650,19 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
               << ", has_reliable_phrase: " << has_reliable_phrase
               << ", has_reliable_user_phrase: " << has_reliable_user_phrase
               << ", has_at_least_two_syllables: " << has_at_least_two_syllables;
@@ -736,7 +904,7 @@ index aef6217..0214027 100644
        auto sentence = MakeSentence(dict, user_dict);
        if (sentence)
          sentences_ = {sentence};
-@@ -588,6 +641,15 @@ inline static bool prefer_user_phrase(
+@@ -588,6 +753,15 @@ inline static bool prefer_user_phrase(
           (user_phrase_weight == sys_phrase_weight && compare_on_tie());
  }
  
@@ -752,7 +920,7 @@ index aef6217..0214027 100644
  bool ScriptTranslation::PrepareCandidate() {
  iter_incremented:
    if (exhausted()) {
-@@ -642,7 +704,10 @@ iter_incremented:
+@@ -642,7 +816,10 @@ iter_incremented:
      candidate_ =
          New<Phrase>(translator_->language(),
                      entry->IsPredictiveMatch() ? "completion" : "user_phrase",
@@ -764,7 +932,7 @@ index aef6217..0214027 100644
      candidate_->set_quality(std::exp(entry->weight) +
                              translator_->initial_quality() +
                              (entry->quality_len / full_code_length));
-@@ -660,7 +725,9 @@ iter_incremented:
+@@ -660,7 +837,9 @@ iter_incremented:
      candidate_ =
          New<Phrase>(translator_->language(),
                      entry->IsPredictiveMatch() ? "completion" : "phrase",
@@ -775,7 +943,7 @@ index aef6217..0214027 100644
      candidate_->set_quality(std::exp(entry->weight) +
                              translator_->initial_quality() +
                              (entry->quality_len / full_code_length));
-@@ -697,7 +764,8 @@ void ScriptTranslation::EnrollEntries(
+@@ -697,7 +876,8 @@ void ScriptTranslation::EnrollEntries(
  
  WordGraph ScriptTranslation::PrepareForMakingSentence(
      Dictionary* dict,
@@ -785,7 +953,7 @@ index aef6217..0214027 100644
    const int kMaxSyllablesForUserPhraseQuery = 5;
    const auto& syllable_graph = syllabifier_->syllable_graph();
    WordGraph graph;
-@@ -709,21 +777,59 @@ WordGraph ScriptTranslation::PrepareForMakingSentence(
+@@ -709,21 +889,70 @@ WordGraph ScriptTranslation::PrepareForMakingSentence(
                                        kMaxSyllablesForUserPhraseQuery));
      }
      // merge lookup results
@@ -799,22 +967,33 @@ index aef6217..0214027 100644
 +        system_starts[group.first] = same_start_pos[group.first].size();
 +    EnrollEntries(same_start_pos, system_entries);
 +    const auto start_constraints = entity_constraints_.find(x.first);
-+    if (!system_entries || start_constraints == entity_constraints_.end())
++    if (start_constraints == entity_constraints_.end())
 +      continue;
-+    for (auto& group : *system_entries) {
-+      const auto end_constraints = start_constraints->second.find(group.first);
-+      if (end_constraints == start_constraints->second.end()) continue;
-+      auto& homophones = same_start_pos[group.first];
-+      const size_t system_start = system_starts[group.first];
-+      for (const auto& text : end_constraints->second) {
++    const auto explicit_start = explicit_entity_constraints_.find(x.first);
++    for (const auto& end_constraints : start_constraints->second) {
++      auto& homophones = same_start_pos[end_constraints.first];
++      const size_t system_start = system_starts[end_constraints.first];
++      for (const auto& text : end_constraints.second) {
 +        const auto enrolled = std::find_if(
 +            homophones.begin() + system_start, homophones.end(),
 +                         [&](const an<DictEntry>& entry) {
 +                           return entry && entry->text == text;
 +                         });
-+        const auto entry = enrolled != homophones.end()
-+                               ? *enrolled
-+                               : group.second.FindRemainingEntry(text);
++        const bool explicit_entity =
++            explicit_start != explicit_entity_constraints_.end() &&
++            explicit_start->second.count(end_constraints.first) != 0 &&
++            explicit_start->second.at(end_constraints.first).count(text) != 0;
++        an<DictEntry> entry = enrolled != homophones.end() ? *enrolled : nullptr;
++        if (!entry && system_entries) {
++          const auto system_group = system_entries->find(end_constraints.first);
++          if (system_group != system_entries->end())
++            entry = system_group->second.FindRemainingEntry(text);
++        }
++        if (!entry && explicit_entity) {
++          entry = New<DictEntry>();
++          entry->text = text;
++          entry->code.push_back(kExplicitEntitySyllable);
++        }
 +        if (!entry) continue;
 +        if (enrolled == homophones.end())
 +          homophones.push_back(entry);

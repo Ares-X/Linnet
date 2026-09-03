@@ -418,6 +418,19 @@ void Enter(RimeApi_stdbool* api,
   }
 }
 
+void AppendShiftedUppercase(RimeApi_stdbool* api,
+                            RimeSessionId session,
+                            const std::string& uppercase) {
+  api->process_key(session, XK_Shift_L, kShiftMask);
+  for (const unsigned char byte : uppercase) {
+    if (byte < 'A' || byte > 'Z' ||
+        !api->process_key(session, byte, kShiftMask)) {
+      Fail("could not append physical Shift uppercase input: " + uppercase);
+    }
+  }
+  api->process_key(session, XK_Shift_L, kReleaseMask);
+}
+
 void ExpectCandidate(RimeApi_stdbool* api,
                      RimeSessionId session,
                      const std::string& input,
@@ -1127,6 +1140,71 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
     ExpectNineCandidateSelectKeys(
         api, profile.first.c_str(),
         PagingInputForProfile(api, profile.first, profile.second));
+
+    for (const char* entity : {"WAF", "QZX"}) {
+      const RimeSessionId explicit_mixed =
+          CreateSchemaSession(api, profile.first.c_str());
+      Enter(api, explicit_mixed, profile.second);
+      AppendShiftedUppercase(api, explicit_mixed, entity);
+      if (!api->simulate_key_sequence(explicit_mixed,
+                                      profile.second.c_str())) {
+        api->destroy_session(explicit_mixed);
+        Fail(profile.first +
+             " could not append Chinese input after an uppercase entity");
+      }
+      const std::string input =
+          profile.second + std::string(entity) + profile.second;
+      const std::string expected =
+          "你好" + std::string(entity) + "你好";
+      const auto candidates = CandidateOrigins(explicit_mixed);
+      const auto exact = std::find_if(
+          candidates.begin(), candidates.end(), [&](const auto& candidate) {
+            return candidate.type == "linnet_mixed" &&
+                   candidate.genuine_type == "sentence" &&
+                   candidate.genuine_language == "linnet_zh" &&
+                   candidate.start == 0 && candidate.end == input.size() &&
+                   BaseText(candidate.text) == expected &&
+                   candidate.sentence_uppercase_entity_count == 1 &&
+                   candidate.sentence_components_follow_mixed_contract;
+          });
+      if (exact == candidates.end()) {
+        const char* retained = api->get_input(explicit_mixed);
+        std::cerr << "Explicit mixed origins for " << profile.first << " '"
+                  << input << "' retained='" << (retained ? retained : "")
+                  << "':";
+        for (const auto& candidate : candidates) {
+          std::cerr << " [" << BaseText(candidate.text) << ":"
+                    << candidate.type << ":" << candidate.genuine_type << ":"
+                    << candidate.genuine_language << ":" << candidate.start
+                    << "-" << candidate.end << ":components="
+                    << candidate.sentence_components << "]";
+        }
+        const auto live = rime::Service::instance().GetSession(explicit_mixed);
+        if (live && live->context()) {
+          std::cerr << " segments=";
+          for (const auto& segment : live->context()->composition()) {
+            std::cerr << "[" << segment.start << "-" << segment.end
+                      << ":status=" << segment.status << ":tags=";
+            for (const auto& tag : segment.tags) std::cerr << tag << ",";
+            std::cerr << "]";
+          }
+        }
+        std::cerr << '\n';
+        api->destroy_session(explicit_mixed);
+        Fail(profile.first + " did not preserve novel explicit uppercase " +
+             entity + " while composing Chinese on both sides");
+      }
+      const size_t exact_index =
+          static_cast<size_t>(std::distance(candidates.begin(), exact));
+      if (exact_index >= 9 ||
+          !api->select_candidate(explicit_mixed, exact_index) ||
+          BaseText(TakeCommit(api, explicit_mixed)) != expected) {
+        api->destroy_session(explicit_mixed);
+        Fail(profile.first + " could not select and commit novel explicit " +
+             entity + " with Chinese on both sides");
+      }
+      api->destroy_session(explicit_mixed);
+    }
   }
 
   for (const auto& ordinary_case :

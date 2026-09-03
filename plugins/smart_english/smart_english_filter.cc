@@ -201,8 +201,8 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
       std::exchange(pending_segment_, std::nullopt);
   const string ranking_input =
       pending_segment ? pending_segment->input : string();
-  const bool is_pinyin_flow =
-      pending_segment && pending_segment->pinyin_flow;
+  const bool is_pinyin_flow = pending_segment && pending_segment->pinyin_flow;
+  const bool is_code_token = pending_segment && pending_segment->code_token;
   string input_word = LowerAsciiWord(ranking_input);
   struct RankedCandidate {
     an<Candidate> candidate, genuine;
@@ -344,7 +344,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   // explicit zz_english typo candidate one typed origin; transport priority is
   // not candidate identity. An exact English dictionary row retires even that
   // typed fallback because the input is no longer a typo.
-  if (has_non_raw) {
+  if (has_non_raw && (!is_code_token || has_mixed)) {
     candidates.erase(
         std::remove_if(candidates.begin(), candidates.end(),
                        [promote_exact](const auto& item) {
@@ -465,10 +465,14 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
 
 bool SmartEnglishFilter::AppliesToSegment(Segment* segment) {
   pending_segment_.reset();
-  if (!segment || segment->HasTag("zz_code_token") ||
-      segment->HasTag("text_expander")) {
+  if (!segment || segment->HasTag("text_expander")) {
     return false;
   }
+  // A code-shaped segment can still contain the one native mixed sentence
+  // produced from an explicit Shift entity with parseable Chinese on both
+  // sides. Let the existing candidate classifier see that sentence; ordinary
+  // URLs and identifiers have no such native candidate and retain their raw
+  // route unchanged.
   const bool applies =
       segment->HasTag("linnet_pinyin") || segment->HasTag("abc") ||
       (schema_id_ == "linnet_en" &&
@@ -487,7 +491,8 @@ bool SmartEnglishFilter::AppliesToSegment(Segment* segment) {
   pending_segment_ = PendingSegment{
       composition_input.substr(segment->start,
                                segment->end - segment->start),
-      segment->HasTag("linnet_pinyin")};
+      segment->HasTag("linnet_pinyin"),
+      segment->HasTag("zz_code_token")};
   return true;
 }
 

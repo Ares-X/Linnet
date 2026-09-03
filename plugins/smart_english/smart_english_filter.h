@@ -29,6 +29,7 @@ class SmartEnglishFilter : public rime::Filter {
   struct PendingSegment {
     std::string input;
     bool pinyin_flow = false;
+    bool code_token = false;
   };
 
   const std::string schema_id_;
