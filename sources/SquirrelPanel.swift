@@ -328,33 +328,39 @@ extension SquirrelPanel {
       attributes: theme.attrs)
     view.separatorWidth = usesInlineLayout
       ? inlineSeparator.boundingRect(with: .zero).width : 0
+    let candidateLines = candidates.items.enumerated().map { itemIndex, item in
+      let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
+      let labelAttrs = itemIndex == index ? theme.labelHighlightedAttrs : theme.labelAttrs
+      let commentAttrs = itemIndex == index ? theme.commentHighlightedAttrs : theme.commentAttrs
+      let label = theme.candidateFormat.contains(/\[label\]/)
+        ? item.selectionLabel ?? "" : ""
+      let displayedComment = usesInlineComments
+        ? LinnetCandidatePresentation.candidateComment(item.comment).displayText : ""
+      return LinnetCandidatePresentation.candidateLine(
+        candidateFormat: theme.candidateFormat,
+        label: label,
+        candidate: item.text,
+        comment: displayedComment,
+        candidateAttributes: attrs,
+        labelAttributes: labelAttrs,
+        commentAttributes: commentAttrs)
+    }
+    let gridColumns = usesGridLayout
+      ? LinnetCandidatePresentation.candidateGridColumns(
+        rows: visualRows,
+        itemWidths: candidateLines.map {
+          $0.attributedString.boundingRect(
+            with: .zero, options: [.usesLineFragmentOrigin]).width
+        },
+        spacing: view.separatorWidth)
+      : nil
     var isFirstCandidate = true
     for row in visualRows {
       for (column, itemIndex) in row.enumerated() {
-        let item = candidates.items[itemIndex]
         let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
-        let labelAttrs = itemIndex == index ? theme.labelHighlightedAttrs : theme.labelAttrs
-        let commentAttrs = itemIndex == index ? theme.commentHighlightedAttrs : theme.commentAttrs
-        let label = theme.candidateFormat.contains(/\[label\]/)
-          ? item.selectionLabel ?? "" : ""
-        let displayedComment = usesInlineComments
-          ? LinnetCandidatePresentation.candidateComment(item.comment).displayText : ""
-        let candidateLine = LinnetCandidatePresentation.candidateLine(
-          candidateFormat: theme.candidateFormat,
-          label: label,
-          candidate: item.text,
-          comment: displayedComment,
-          candidateAttributes: attrs,
-          labelAttributes: labelAttrs,
-          commentAttributes: commentAttrs)
+        let candidateLine = candidateLines[itemIndex]
         let line = NSMutableAttributedString(
           attributedString: candidateLine.attributedString)
-
-        if !isFirstCandidate {
-          let separator = column == 0
-            ? "\n" : LinnetCandidatePresentation.inlineCandidateSeparator
-          text.append(NSAttributedString(string: separator, attributes: attrs))
-        }
 
         let paragraphStyleCandidate = NSMutableParagraphStyle()
         paragraphStyleCandidate.setParagraphStyle(
@@ -362,6 +368,19 @@ extension SquirrelPanel {
         if usesInlineLayout {
           paragraphStyleCandidate.paragraphSpacingBefore -= detailGeometry.spacing
           paragraphStyleCandidate.lineSpacing = detailGeometry.spacing
+        }
+        if let gridColumns {
+          paragraphStyleCandidate.tabStops = gridColumns.leadingOffsets.dropFirst().map {
+            NSTextTab(textAlignment: .left, location: $0, options: [:])
+          }
+        }
+        if !isFirstCandidate {
+          let separator = column == 0
+            ? "\n" : usesGridLayout ? "\t" : LinnetCandidatePresentation.inlineCandidateSeparator
+          var separatorAttributes = attrs
+          separatorAttributes[.paragraphStyle] = paragraphStyleCandidate
+          text.append(NSAttributedString(
+            string: separator, attributes: separatorAttributes))
         }
         if !usesInlineLayout, candidateLine.labelPrefix.length > 0 {
           paragraphStyleCandidate.headIndent = candidateLine.labelPrefix.boundingRect(

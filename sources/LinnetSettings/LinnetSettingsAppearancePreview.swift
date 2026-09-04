@@ -520,19 +520,34 @@ private extension LinnetSettingsAppearancePreviewView {
     let fonts = (label: labelFont, candidate: candidateFont)
     let inlineSpacing = LinnetCandidatePresentation.inlineCandidateSeparatorWidth(
       font: candidateFont)
+    let gridColumns = expanded
+      ? LinnetCandidatePresentation.candidateGridColumns(
+        rows: rows,
+        itemWidths: values.enumerated().map { index, value in
+          LinnetSettingsAppearancePreview.candidateLine(
+            index < preview.pageSize ? String(index + 1) : "",
+            value,
+            selected: index == 0,
+            preview,
+            fonts: fonts
+          ).boundingRect(with: .zero, options: [.usesLineFragmentOrigin]).width
+        },
+        spacing: inlineSpacing)
+      : nil
     VStack(
       alignment: .leading,
       spacing: LinnetCandidatePresentation.candidateRowSpacing
     ) {
       ForEach(Array(rows.enumerated()), id: \.offset) { row in
         HStack(spacing: inlineSpacing) {
-          ForEach(row.element, id: \.self) { index in
+          ForEach(Array(row.element.enumerated()), id: \.element) { column, index in
             LinnetSettingsAppearancePreview.candidate(
               index < preview.pageSize ? String(index + 1) : "",
               values[index],
               selected: index == 0,
               preview,
-              fonts: fonts)
+              fonts: fonts,
+              width: gridColumns?.widths[column])
           }
         }
       }
@@ -567,8 +582,37 @@ extension LinnetSettingsAppearancePreview {
     _ value: String,
     selected: Bool,
     _ preview: LinnetSettingsAppearancePreview.Presentation,
-    fonts: (label: NSFont, candidate: NSFont)
+    fonts: (label: NSFont, candidate: NSFont),
+    width: CGFloat? = nil
   ) -> some View {
+    let line = candidateLine(
+      label, value, selected: selected, preview, fonts: fonts)
+    let selectionInsets = LinnetCandidatePresentation.candidateSelectionInsets(
+      style: preview.selectionStyle,
+      candidateFont: fonts.candidate)
+    return candidateCell(
+      selected: selected,
+      preview: preview,
+      selectionInsets: selectionInsets
+    ) {
+      Text(AttributedString(line))
+    }
+    .fixedSize(horizontal: true, vertical: false)
+    .frame(width: width, alignment: .leading)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text("Candidate"))
+    .accessibilityValue(Text(verbatim: value))
+    .accessibilityHint(Text(label))
+    .accessibilityAddTraits(selected ? .isSelected : .isStaticText)
+  }
+
+  static func candidateLine(
+    _ label: String,
+    _ value: String,
+    selected: Bool,
+    _ preview: LinnetSettingsAppearancePreview.Presentation,
+    fonts: (label: NSFont, candidate: NSFont)
+  ) -> NSAttributedString {
     let candidateColor = selected
       ? preview.palette.selectedPrimary.nsColor : preview.palette.primary.nsColor
     let labelColor = selected && preview.selectionStyle == .tile
@@ -596,22 +640,7 @@ extension LinnetSettingsAppearancePreview {
       candidateAttributes: candidateAttributes,
       labelAttributes: labelAttributes,
       commentAttributes: labelAttributes)
-    let selectionInsets = LinnetCandidatePresentation.candidateSelectionInsets(
-      style: preview.selectionStyle,
-      candidateFont: fonts.candidate)
-    return candidateCell(
-      selected: selected,
-      preview: preview,
-      selectionInsets: selectionInsets
-    ) {
-      Text(AttributedString(line.attributedString))
-    }
-    .fixedSize(horizontal: true, vertical: false)
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(Text("Candidate"))
-    .accessibilityValue(Text(verbatim: value))
-    .accessibilityHint(Text(label))
-    .accessibilityAddTraits(selected ? .isSelected : .isStaticText)
+    return line.attributedString
   }
 }
 
