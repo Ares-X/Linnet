@@ -1988,6 +1988,21 @@ struct LinnetCandidateWindowInteractionTests {
           controller: controller)
         panel.displayIfNeeded()
         candidateView.displayIfNeeded()
+        let cellOrigins = candidateView.candidateRanges.map { range -> CGFloat? in
+          guard let textRange = candidateView.convert(range: range) else { return nil }
+          return candidateView.contentRect(range: textRange).minX
+        }
+        for column in 0..<snapshot.pageSize {
+          let alignedOrigins = stride(
+            from: column, to: snapshot.items.count, by: snapshot.pageSize
+          ).compactMap { cellOrigins[$0] }
+          guard let firstOrigin = alignedOrigins.first else { continue }
+          require(
+            alignedOrigins.dropFirst().allSatisfy {
+              abs($0 - firstOrigin) <= 0.5
+            },
+            "expanded \(linear ? "horizontal" : "vertical") grid column \(column + 1) did not share one leading guide: \(alignedOrigins)")
+        }
         require(
           !candidateView.detailTextView.isHidden,
           "expanded \(linear ? "horizontal" : "vertical") English detail disappeared")

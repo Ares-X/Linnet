@@ -425,6 +425,45 @@ extension LinnetCandidatePresentation {
     }
   }
 
+  struct CandidateGridColumns: Equatable {
+    let widths: [CGFloat]
+    let leadingOffsets: [CGFloat]
+  }
+
+  /// Expanded rows share one set of column guides. Each column is only as wide
+  /// as its widest visible cell, which keeps long English candidates readable
+  /// without turning a nine-column page into nine globally equal wide cells.
+  static func candidateGridColumns(
+    rows: [[Int]],
+    itemWidths: [CGFloat],
+    spacing: CGFloat
+  ) -> CandidateGridColumns? {
+    guard spacing.isFinite, spacing >= 0,
+      itemWidths.allSatisfy({ $0.isFinite && $0 >= 0 })
+    else { return nil }
+    let columnCount = rows.map(\.count).max() ?? 0
+    guard columnCount > 0 else {
+      return CandidateGridColumns(widths: [], leadingOffsets: [])
+    }
+    var widths = [CGFloat](repeating: 0, count: columnCount)
+    var seen = Set<Int>()
+    for row in rows {
+      for (column, itemIndex) in row.enumerated() {
+        guard itemWidths.indices.contains(itemIndex), seen.insert(itemIndex).inserted
+        else { return nil }
+        widths[column] = max(widths[column], itemWidths[itemIndex])
+      }
+    }
+    guard seen.count == itemWidths.count else { return nil }
+
+    var nextOffset: CGFloat = 0
+    let leadingOffsets = widths.map { width -> CGFloat in
+      defer { nextOffset += width + spacing }
+      return nextOffset
+    }
+    return CandidateGridColumns(widths: widths, leadingOffsets: leadingOffsets)
+  }
+
   enum AccessibilitySurface: Equatable {
     case candidates, inputModeStatus
 
