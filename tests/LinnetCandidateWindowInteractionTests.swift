@@ -1238,6 +1238,23 @@ struct LinnetCandidateWindowInteractionTests {
   }
 
   private static func testScreenLocalPanelPlacement() {
+    let widthPanel = SquirrelPanel(
+      position: NSRect(x: 100, y: 100, width: 2, height: 20))
+    widthPanel.screenRect = NSRect(x: 0, y: 0, width: 1_129, height: 754)
+    let widthMetrics = LinnetPanelGeometry.presentationMetrics(
+      role: .candidate,
+      candidateFontPoint: 16,
+      candidateEdgeInset: LinnetCandidatePresentation.candidateWindowInset,
+      candidatePaging: .none,
+      candidateVertical: false,
+      candidateCornerRadius: 10)
+    require(
+      widthPanel.maxTextWidth(metrics: widthMetrics, expanded: true) >= 832,
+      "expanded grid did not reserve readable width on a 1129pt display")
+    require(
+      widthPanel.maxTextWidth(metrics: widthMetrics, expanded: false) < 500,
+      "compact candidates lost their narrow screen-width cap")
+
     let screens = [
       NSRect(x: 0, y: 0, width: 1_440, height: 900),
       NSRect(x: -1_280, y: 0, width: 1_280, height: 800),
@@ -1496,7 +1513,7 @@ struct LinnetCandidateWindowInteractionTests {
         .init(
           text: value, comment: "", page: index / values.count,
           indexOnPage: index % values.count, absoluteIndex: index,
-          selectionLabel: String(index % values.count + 1))
+          selectionLabel: index < values.count ? String(index + 1) : nil)
       },
       pageSize: values.count,
       currentPage: 0,
@@ -1516,6 +1533,68 @@ struct LinnetCandidateWindowInteractionTests {
     require(
       candidateView.candidateInteractionFrames.count == 21,
       "expanded candidates lost or invented interaction geometry")
+    let expandedCells = candidateView.candidateGridView.geometries(in: candidateView)
+    for cell in expandedCells where cell.itemIndex < values.count {
+      let line = LinnetCandidatePresentation.candidateLine(
+        candidateFormat: theme.candidateFormat,
+        label: String(cell.itemIndex + 1),
+        candidate: expandedValues[cell.itemIndex],
+        comment: "",
+        candidateAttributes: theme.attrs,
+        labelAttributes: theme.labelAttrs,
+        commentAttributes: theme.commentAttrs).attributedString
+      let requiredWidth = ceil(line.boundingRect(
+        with: NSSize(
+          width: CGFloat.greatestFiniteMagnitude,
+          height: CGFloat.greatestFiniteMagnitude),
+        options: [.usesLineFragmentOrigin, .usesFontLeading]).width)
+      require(
+        cell.textFrame.width + 0.5 >= requiredWidth,
+        "default expanded candidate \(cell.itemIndex + 1) wrapped its label: "
+          + "text=\(cell.textFrame.width), required=\(requiredWidth)")
+    }
+
+    let shiftedLabels = SquirrelInputController.CandidateSnapshot(
+      items: expandedValues.enumerated().map { index, value in
+        .init(
+          text: value, comment: "", page: index / values.count,
+          indexOnPage: index % values.count, absoluteIndex: index,
+          selectionLabel: index / values.count == 1
+            ? String(index % values.count + 1) : nil)
+      },
+      pageSize: values.count,
+      currentPage: 1,
+      isLastPage: false,
+      isExpanded: true,
+      canExpand: true)
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: shiftedLabels, highlighted: values.count,
+      update: true,
+      controller: controller)
+    panel.displayIfNeeded()
+    render(candidateView)
+    let republishedCells = candidateView.candidateGridView.geometries(in: candidateView)
+    for cell in republishedCells where cell.itemIndex / values.count == 1 {
+      let indexOnPage = cell.itemIndex % values.count
+      let line = LinnetCandidatePresentation.candidateLine(
+        candidateFormat: theme.candidateFormat,
+        label: String(indexOnPage + 1),
+        candidate: expandedValues[cell.itemIndex],
+        comment: "",
+        candidateAttributes: theme.attrs,
+        labelAttributes: theme.labelAttrs,
+        commentAttributes: theme.commentAttrs).attributedString
+      let requiredWidth = ceil(line.boundingRect(
+        with: NSSize(
+          width: CGFloat.greatestFiniteMagnitude,
+          height: CGFloat.greatestFiniteMagnitude),
+        options: [.usesLineFragmentOrigin, .usesFontLeading]).width)
+      require(
+        cell.textFrame.width + 0.5 >= requiredWidth,
+        "same-shape expanded republish truncated candidate \(indexOnPage + 1): "
+          + "text=\(cell.textFrame.width), required=\(requiredWidth)")
+    }
 
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,

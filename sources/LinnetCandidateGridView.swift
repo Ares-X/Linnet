@@ -63,6 +63,7 @@ final class LinnetCandidateGridView: NSGridView {
       textView.setLayoutOrientation(verticalText ? .vertical : .horizontal)
       isHidden = false
       invalidateIntrinsicContentSize()
+      needsLayout = true
     }
 
     func clear() {
@@ -71,6 +72,7 @@ final class LinnetCandidateGridView: NSGridView {
       textView.textContentStorage?.attributedString = NSAttributedString()
       isHidden = true
       invalidateIntrinsicContentSize()
+      needsLayout = true
     }
 
     override var intrinsicContentSize: NSSize { measuredSize }
@@ -99,6 +101,8 @@ final class LinnetCandidateGridView: NSGridView {
 
   private var cellPool: [CandidateCellView] = []
   private var gridShape: GridShape?
+  private var naturalColumnWidths: [CGFloat] = []
+  private var naturalRowHeights: [CGFloat] = []
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -147,6 +151,17 @@ final class LinnetCandidateGridView: NSGridView {
           itemIndex: row[column], line: lines[row[column]], verticalText: verticalText)
       }
     }
+    naturalColumnWidths = (0..<columnCount).map { column in
+      (0..<rows.count).map {
+        cellPool[$0 * columnCount + column].intrinsicContentSize.width
+      }.max() ?? 1
+    }
+    naturalRowHeights = (0..<rows.count).map { row in
+      (0..<columnCount).map {
+        cellPool[row * columnCount + $0].intrinsicContentSize.height
+      }.max() ?? 1
+    }
+    fitColumns(to: nil)
     isHidden = false
     invalidateIntrinsicContentSize()
     needsLayout = true
@@ -155,8 +170,40 @@ final class LinnetCandidateGridView: NSGridView {
 
   func clear() {
     cellPool.forEach { $0.clear() }
+    naturalColumnWidths = []
+    naturalRowHeights = []
     isHidden = true
     frame = .zero
+    invalidateIntrinsicContentSize()
+  }
+
+  /// NSGridView does not reliably promote a changed child intrinsic width
+  /// after pooled cells are republished. Own the column guides explicitly so
+  /// labels and candidates stay on one line; only an actual screen-width cap
+  /// is allowed to truncate a cell.
+  func fitColumns(to maximumWidth: CGFloat?) {
+    guard !naturalColumnWidths.isEmpty else { return }
+    let spacing = columnSpacing * CGFloat(max(0, naturalColumnWidths.count - 1))
+    let available = maximumWidth.map { max(1, $0 - spacing) }
+    var widths = naturalColumnWidths
+    if let available, widths.reduce(0, +) > available {
+      var remaining = available
+      var unresolved = Set(widths.indices)
+      for index in widths.indices.sorted(by: { widths[$0] < widths[$1] }) {
+        let share = remaining / CGFloat(unresolved.count)
+        guard widths[index] <= share else { break }
+        remaining -= widths[index]
+        unresolved.remove(index)
+      }
+      let share = remaining / CGFloat(max(1, unresolved.count))
+      for index in unresolved { widths[index] = share }
+    }
+    for (index, width) in widths.enumerated() {
+      column(at: index).width = width
+    }
+    for (index, height) in naturalRowHeights.enumerated() {
+      row(at: index).height = height
+    }
     invalidateIntrinsicContentSize()
   }
 

@@ -394,6 +394,7 @@ extension SquirrelView {
     candidateGridWidthLimit = width.flatMap {
       $0.isFinite && $0 > 0 ? $0 : nil
     }
+    candidateGridView.fitColumns(to: candidateGridWidthLimit)
   }
 
   func layoutCandidateGrid(

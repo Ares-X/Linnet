@@ -211,10 +211,12 @@ extension SquirrelPanel {
   }
 
   func maxTextWidth(
-    metrics: LinnetPanelGeometry.PresentationMetrics
+    metrics: LinnetPanelGeometry.PresentationMetrics,
+    expanded: Bool
   ) -> CGFloat {
     let fontScale = metrics.fontPoint / 12
-    let textWidthRatio = min(1, 1 / (metrics.vertical ? 4 : 3) + fontScale / 12)
+    let compactRatio = min(1, 1 / (metrics.vertical ? 4 : 3) + fontScale / 12)
+    let textWidthRatio = expanded ? max(0.75, compactRatio) : compactRatio
     let maxWidth = if metrics.vertical {
       screenRect.height * textWidthRatio - metrics.edgeInset.height * 2
     } else {
@@ -310,7 +312,9 @@ extension SquirrelPanel {
     }
 
     // Break line if the text is too long, based on screen size.
-    let maximumTextWidth = maxTextWidth(metrics: metrics)
+    let maximumTextWidth = maxTextWidth(
+      metrics: metrics,
+      expanded: candidateSnapshot?.isExpanded == true)
     view.applyCandidateGridWidthLimit(maximumTextWidth)
     let maxTextHeight = metrics.vertical
       ? screenRect.width - metrics.edgeInset.width * 2
