@@ -439,11 +439,11 @@ ruby -e '
 if rg -n 'style/linnet_expand_candidate_rows' sources data/squirrel.yaml; then
   fail "the retired static expanded-row setting returned"
 fi
-if rg -n 'isExpanded[[:space:]]*\?[[:space:]]*\.footer|expanded[[:space:]]*\?[[:space:]]*LinnetCandidatePresentation\.DetailPlacement\.footer' \
-    sources/SquirrelPanel.swift \
-    sources/LinnetSettings/LinnetSettingsAppearancePreview.swift; then
-  fail "candidate disclosure regained authority over horizontal/vertical detail placement"
-fi
+rg -Fq 'linear || candidates.isExpanded || vertical' sources/SquirrelPanel.swift ||
+  fail "expanded candidate details stopped using the native footer geometry"
+rg -Fq 'forLinearLayout: linear || expanded' \
+  sources/LinnetSettings/LinnetSettingsAppearancePreview.swift ||
+  fail "Settings preview diverged from the expanded candidate footer"
 rg -Fq 'let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(' \
   sources/SquirrelPanel.swift ||
   fail "the live panel bypassed the shared candidate-detail geometry owner"
@@ -486,26 +486,31 @@ test "$(rg -F -o 'selectCandidate(' \
   fail "expanded candidate clicks do not retain an absolute selection path"
 ruby -e '
   panel = File.read(ARGV.fetch(0))
-  state = "candidateExpansionRequested"
-  abort "Panel transient expansion state is missing" unless
-    panel.include?("private(set) var #{state} = false")
+  anchor = "candidateExpansionAnchorPage"
+  abort "Panel transient expansion anchor is missing" unless
+    panel.include?("private(set) var #{anchor}: Int?")
   hide = panel[/  func hide\(\) \{.*?\n  \}/m]
   update = panel[/  func update\(\n.*?\n  \}/m]
   binding = panel[/  func bind\(.*?\n  \}/m]
   controls = panel[/  func performControl\(.*?\n  \}/m]
-  abort "Panel hide does not reset disclosure" unless hide&.include?("#{state} = false")
+  abort "Panel hide does not reset disclosure" unless hide&.include?("#{anchor} = nil")
   abort "new composition does not start collapsed" unless
-    update&.include?("#{state} = candidates.isExpanded") &&
+    update&.include?("#{anchor} = candidates.isExpanded") &&
       binding&.include?("hide()")
   abort "candidate disclosure actions do not own both transient transitions" unless
-    controls&.include?("case .expand") && controls.include?("#{state} = true") &&
-      controls.include?("case .collapse") && controls.include?("#{state} = false") &&
+    controls&.include?("case .expand") && controls.include?("#{anchor} = currentPage") &&
+      controls.include?("case .collapse") && controls.include?("#{anchor} = nil") &&
       controls.scan("refreshCandidatePresentation(").length == 2
   abort "keyboard paging does not enter the same Panel expansion state" unless
     panel.include?("func requestCandidateExpansionForKeyboardPaging()") &&
-      panel.include?("candidateExpansionAllowed")
+      panel.include?("candidateExpansionAllowed") &&
+      panel.scan("#{anchor} = currentPage").length >= 2
 ' sources/SquirrelPanel.swift ||
   fail "candidate disclosure is not Panel-transient"
+if rg -n 'expansionRequested:|expandedCandidateRange\([[:space:]]*page:' \
+    sources tests --glob '*.swift'; then
+  fail "the retired re-anchoring candidate disclosure path returned"
+fi
 rg -Fq 'candidateRanges[itemIndex] =' sources/SquirrelPanel.swift ||
   fail "visual candidate reordering stopped writing geometry back by item offset"
 rg -Fq 'candidate.absoluteIndex' sources/LinnetCandidateAccessibility.swift ||

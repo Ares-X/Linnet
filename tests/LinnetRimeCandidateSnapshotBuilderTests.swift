@@ -59,7 +59,7 @@ struct LinnetRimeCandidateSnapshotBuilderTests {
     let snapshot = LinnetRimeCandidateSnapshotBuilder.build(
       context: context,
       labels: ["123456789"],
-      expansionRequested: false,
+      expansionAnchorPage: nil,
       session: 0,
       rimeAPI: RimeApi_stdbool())
     require(
@@ -81,12 +81,25 @@ struct LinnetRimeCandidateSnapshotBuilderTests {
       "zero-input predictions lost labels or the validated highlight in the builder"
     )
 
+    context.menu.page_no = 2
+    let finalPageSnapshot = LinnetRimeCandidateSnapshotBuilder.build(
+      context: context,
+      labels: ["123456789"],
+      expansionAnchorPage: nil,
+      session: 0,
+      rimeAPI: RimeApi_stdbool())
+    require(
+      finalPageSnapshot?.items.map(\.absoluteIndex) == [18, 19] &&
+        finalPageSnapshot?.canExpand == true,
+      "a compact final page lost its absolute indices or earlier expandable pages"
+    )
+
     context.menu.highlighted_candidate_index = 2
     require(
       LinnetRimeCandidateSnapshotBuilder.build(
         context: context,
         labels: ["123456789"],
-        expansionRequested: false,
+        expansionAnchorPage: nil,
         session: 0,
         rimeAPI: RimeApi_stdbool()) == nil,
       "the builder accepted an out-of-range Rime highlight"

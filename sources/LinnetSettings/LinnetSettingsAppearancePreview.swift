@@ -243,7 +243,8 @@ enum LinnetSettingsAppearancePreview {
     let isDark: Bool
 
     func detailGeometry(
-      for language: PreviewLanguage
+      for language: PreviewLanguage,
+      expanded: Bool
     ) -> LinnetCandidatePresentation.CandidateDetailGeometry {
       let layout = language == .chinese
         ? chineseCandidateLayout : englishCandidateLayout
@@ -252,7 +253,7 @@ enum LinnetSettingsAppearancePreview {
       case .vertical: false
       }
       return LinnetCandidatePresentation.candidateDetailGeometry(
-        forLinearLayout: linear,
+        forLinearLayout: linear || expanded,
         candidateFontPoint: CGFloat(candidateFontPoint))
     }
   }
@@ -442,7 +443,9 @@ struct LinnetSettingsAppearancePreviewView: View {
     language: LinnetSettingsAppearancePreview.PreviewLanguage
   ) -> some View {
     let expanded = preview.candidateBrowsingMode == .expandable
-    let detailGeometry = preview.detailGeometry(for: language)
+    let detailGeometry = preview.detailGeometry(
+      for: language,
+      expanded: expanded)
     return VStack(alignment: .leading, spacing: LinnetCandidatePresentation.candidateRowSpacing) {
       previewLanguageLabel(language)
         .font(.caption.weight(.medium))
@@ -496,7 +499,9 @@ private extension LinnetSettingsAppearancePreviewView {
       ? min(
         availableValues.count,
         LinnetCandidatePresentation.expandedCandidateRange(
-          page: 0, pageSize: preview.pageSize)?.upperBound ?? preview.pageSize)
+          anchorPage: 0,
+          currentPage: 0,
+          pageSize: preview.pageSize)?.upperBound ?? preview.pageSize)
       : min(availableValues.count, preview.pageSize)
     let values = Array(availableValues.prefix(requestedCount))
     let flow: LinnetCandidatePresentation.CandidateFlow =

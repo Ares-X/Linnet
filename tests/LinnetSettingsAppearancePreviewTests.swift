@@ -198,7 +198,7 @@ struct LinnetSettingsAppearancePreviewTests {
         }
         require(preview.palette == source.palette, "preview colors must come from the canonical scheme")
         for language in LinnetSettingsAppearancePreview.PreviewLanguage.allCases {
-          require(preview.detailGeometry(for: language).placement == .footer,
+          require(preview.detailGeometry(for: language, expanded: false).placement == .footer,
                   "a horizontal bilingual layout must keep selected detail below")
         }
         require(preview.selectionStyle == source.selectionStyle,
@@ -217,13 +217,18 @@ struct LinnetSettingsAppearancePreviewTests {
         appearance.englishCandidateLayout = englishLayout
         let preview = projected(appearance, systemIsDark: false, catalog: catalog)
         require(
-          preview.detailGeometry(for: .chinese).placement
+          preview.detailGeometry(for: .chinese, expanded: false).placement
             == (chineseLayout == .vertical ? .sidecar : .footer),
           "Chinese preview detail placement diverged from its layout")
         require(
-          preview.detailGeometry(for: .english).placement
+          preview.detailGeometry(for: .english, expanded: false).placement
             == (englishLayout == .vertical ? .sidecar : .footer),
           "English preview detail placement diverged from its layout")
+        for language in LinnetSettingsAppearancePreview.PreviewLanguage.allCases {
+          require(
+            preview.detailGeometry(for: language, expanded: true).placement == .footer,
+            "expanded preview detail did not follow the native row grid")
+        }
       }
     }
 

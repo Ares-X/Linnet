@@ -319,6 +319,26 @@ extension LinnetCandidatePresentation {
     case horizontal, vertical
   }
 
+  struct RimeNavigationLayout: Equatable {
+    let linear: Bool
+    let vertical: Bool
+  }
+
+  /// Projects the visible candidate geometry into librime Selector's two
+  /// layout options. Compact candidates retain the configured list behavior.
+  /// Expanded candidates use the macOS row grid regardless of compact flow:
+  /// Left/Right moves one cell and Up/Down keeps the column across pages.
+  static func rimeNavigationLayout(
+    flow: CandidateFlow,
+    verticalText: Bool,
+    expanded: Bool
+  ) -> RimeNavigationLayout {
+    guard expanded else {
+      return .init(linear: flow == .horizontal, vertical: verticalText)
+    }
+    return .init(linear: true, vertical: false)
+  }
+
   enum CandidateControlMode: Equatable {
     case paging(canPageUp: Bool, canPageDown: Bool)
     case disclosure(expanded: Bool)
@@ -329,22 +349,43 @@ extension LinnetCandidatePresentation {
   }
 
   /// Absolute candidate bounds requested from librime when the disclosure is
-  /// open. The iterator remains bounded even when a translation is lazy or
+  /// open. The anchor keeps the rendered grid stable while the highlighted
+  /// page remains visible; crossing an edge shifts only enough to reveal it.
+  /// The iterator remains bounded even when a translation is lazy or
   /// effectively unbounded.
-  static func expandedCandidateRange(page: Int, pageSize: Int) -> Range<Int>? {
-    guard page >= 0, pageSize > 0 else { return nil }
-    let (start, startOverflow) = page.multipliedReportingOverflow(by: pageSize)
+  static func expandedCandidateRange(
+    anchorPage: Int,
+    currentPage: Int,
+    pageSize: Int
+  ) -> Range<Int>? {
+    guard anchorPage >= 0, currentPage >= 0, pageSize > 0 else { return nil }
+    let visiblePageCount = max(
+      1,
+      min(maximumExpandedPageCount, maximumExpandedCandidateCount / pageSize))
+    var firstPage = anchorPage
+    if currentPage < firstPage {
+      firstPage = currentPage
+    } else {
+      let (pageEnd, pageEndOverflow) = firstPage.addingReportingOverflow(
+        visiblePageCount)
+      if pageEndOverflow || currentPage >= pageEnd {
+        firstPage = currentPage - (visiblePageCount - 1)
+      }
+    }
+    let (start, startOverflow) = firstPage.multipliedReportingOverflow(by: pageSize)
     guard !startOverflow else { return nil }
-    let pageBound = pageSize > maximumExpandedCandidateCount / maximumExpandedPageCount
-      ? maximumExpandedCandidateCount
-      : pageSize * maximumExpandedPageCount
+    let (candidateBound, candidateBoundOverflow) =
+      pageSize.multipliedReportingOverflow(by: visiblePageCount)
+    guard !candidateBoundOverflow else { return nil }
+    let pageBound = min(maximumExpandedCandidateCount, candidateBound)
     let (end, endOverflow) = start.addingReportingOverflow(pageBound)
     guard !endOverflow else { return nil }
     return start..<end
   }
 
-  /// Maps absolute-order snapshot offsets to visual rows. Horizontal expansion
-  /// adds one row per Rime page; vertical expansion adds one column per page.
+  /// Maps absolute-order snapshot offsets to visual rows. Expansion always adds
+  /// one row per Rime page, matching the native macOS candidate grid and the
+  /// Selector's Left/Right cell plus Up/Down page navigation contract.
   /// Every item offset appears exactly once, so click and accessibility indices
   /// remain independent from the visual order.
   static func visualRows(
@@ -362,20 +403,8 @@ extension LinnetCandidatePresentation {
       }
     }
 
-    switch flow {
-    case .horizontal:
-      return stride(from: 0, to: candidateCount, by: pageSize).map { start in
-        Array(start..<min(candidateCount, start + pageSize))
-      }
-    case .vertical:
-      let pageCount = (candidateCount + pageSize - 1) / pageSize
-      return (0..<min(pageSize, candidateCount)).compactMap { row in
-        let values = (0..<pageCount).compactMap { page -> Int? in
-          let index = page * pageSize + row
-          return index < candidateCount ? index : nil
-        }
-        return values.isEmpty ? nil : values
-      }
+    return stride(from: 0, to: candidateCount, by: pageSize).map { start in
+      Array(start..<min(candidateCount, start + pageSize))
     }
   }
 

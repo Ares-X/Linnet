@@ -485,7 +485,7 @@ extension SquirrelInputController {
       }
 
       // Update candidates. Rime owns the active page and candidate order;
-      // disclosure may only read a bounded absolute slice from that page.
+      // disclosure may only project a bounded anchored slice that contains it.
       var labels = [String]()
       // swiftlint:disable identifier_name
       if let select_keys = ctx.menu.select_keys {
@@ -497,12 +497,12 @@ extension SquirrelInputController {
         }
       }
       // swiftlint:enable identifier_name
-      let expansionRequested =
-        NSApp.squirrelAppDelegate.panel?.candidateExpansionRequested ?? false
+      let expansionAnchorPage =
+        NSApp.squirrelAppDelegate.panel?.candidateExpansionAnchorPage
       guard let candidateSnapshot = LinnetRimeCandidateSnapshotBuilder.build(
         context: ctx,
         labels: labels,
-        expansionRequested: expansionRequested,
+        expansionAnchorPage: expansionAnchorPage,
         session: session,
         rimeAPI: rimeAPI)
       else {

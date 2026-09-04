@@ -254,11 +254,15 @@ extension SquirrelInputController {
 
   private func synchronizeCandidateLayoutOptions() {
     guard let panel = NSApp.squirrelAppDelegate.panel else { return }
-    if panel.linear != rimeAPI.get_option(session, "_linear") {
-      rimeAPI.set_option(session, "_linear", panel.linear)
+    let navigationLayout = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: panel.linear ? .horizontal : .vertical,
+      verticalText: panel.vertical,
+      expanded: panel.candidateExpansionRequested)
+    if navigationLayout.linear != rimeAPI.get_option(session, "_linear") {
+      rimeAPI.set_option(session, "_linear", navigationLayout.linear)
     }
-    if panel.vertical != rimeAPI.get_option(session, "_vertical") {
-      rimeAPI.set_option(session, "_vertical", panel.vertical)
+    if navigationLayout.vertical != rimeAPI.get_option(session, "_vertical") {
+      rimeAPI.set_option(session, "_vertical", navigationLayout.vertical)
     }
   }
 

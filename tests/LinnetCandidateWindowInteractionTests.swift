@@ -376,11 +376,30 @@ struct LinnetCandidateWindowInteractionTests {
     let candidateView = panel.view
     candidateView.lightTheme.candidateExpansionAllowed = true
     candidateView.darkTheme.candidateExpansionAllowed = true
+    panel.candidateSnapshot = .init(
+      items: [
+        .init(
+          text: "候选", comment: "", page: 2, indexOnPage: 0,
+          absoluteIndex: 18, selectionLabel: "1"),
+      ],
+      pageSize: 9,
+      currentPage: 2,
+      isLastPage: false,
+      isExpanded: false,
+      canExpand: true)
     require(!panel.candidateExpansionRequested,
             "expandable browsing did not begin with a compact candidate page")
     panel.requestCandidateExpansionForKeyboardPaging()
-    require(panel.candidateExpansionRequested,
-            "an accepted keyboard page switch did not request candidate expansion")
+    require(
+      panel.candidateExpansionAnchorPage == 2,
+      "an accepted keyboard page switch did not anchor expansion to the visible page")
+    panel.candidateSnapshot = .init(
+      items: [], pageSize: 9, currentPage: 3, isLastPage: false,
+      isExpanded: true, canExpand: true)
+    panel.requestCandidateExpansionForKeyboardPaging()
+    require(
+      panel.candidateExpansionAnchorPage == 2,
+      "continued grid navigation re-anchored the visible candidate rows")
     panel.hide()
     require(!panel.candidateExpansionRequested,
             "a new composition retained the prior keyboard expansion")
@@ -1971,6 +1990,9 @@ struct LinnetCandidateWindowInteractionTests {
         require(
           !candidateView.detailTextView.isHidden,
           "expanded \(linear ? "horizontal" : "vertical") English detail disappeared")
+        require(
+          candidateView.detailDividerView.isHidden,
+          "expanded \(linear ? "horizontal" : "vertical") English detail was not a stable footer below the grid")
         if highlighted == 2 {
           require(
             candidateView.detailTextView.textContentStorage?.attributedString?.string

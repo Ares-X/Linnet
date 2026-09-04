@@ -5,7 +5,7 @@ enum LinnetRimeCandidateSnapshotBuilder {
   static func build(
     context: RimeContext_stdbool,
     labels: [String],
-    expansionRequested: Bool,
+    expansionAnchorPage: Int?,
     session: RimeSessionId,
     rimeAPI: RimeApi_stdbool
   ) -> SquirrelInputController.CandidateSnapshot? {
@@ -24,17 +24,19 @@ enum LinnetRimeCandidateSnapshotBuilder {
     let pageSize = menuPage.pageSize
     let currentCount = menuPage.candidateCount
     let highlightedOnPage = menuPage.highlighted
-    guard let expandedBounds = LinnetCandidatePresentation.expandedCandidateRange(
-      page: currentPage, pageSize: pageSize)
+    guard let compactBounds = LinnetCandidatePresentation.expandedCandidateRange(
+      anchorPage: currentPage,
+      currentPage: currentPage,
+      pageSize: pageSize)
     else { return nil }
 
-    let pageStart = expandedBounds.lowerBound
+    let currentPageStart = compactBounds.lowerBound
     var compactItems = [SquirrelInputController.CandidateItem]()
     compactItems.reserveCapacity(currentCount)
     for indexOnPage in 0..<currentCount {
       let candidate = context.menu.candidates[indexOnPage]
       compactItems.append(.init(
-        absoluteIndex: pageStart + indexOnPage,
+        absoluteIndex: currentPageStart + indexOnPage,
         page: currentPage,
         indexOnPage: indexOnPage,
         text: candidate.text.map { String(cString: $0) } ?? "",
@@ -49,9 +51,13 @@ enum LinnetRimeCandidateSnapshotBuilder {
       pageSize: pageSize,
       highlightedItemIndex: highlightedOnPage,
       isLastPage: context.menu.is_last_page,
-      canExpand: !context.menu.is_last_page,
+      canExpand: currentPage > 0 || !context.menu.is_last_page,
       isExpanded: false)
-    guard expansionRequested,
+    guard let expansionAnchorPage,
+      let expandedBounds = LinnetCandidatePresentation.expandedCandidateRange(
+        anchorPage: expansionAnchorPage,
+        currentPage: currentPage,
+        pageSize: pageSize),
       let iteratorStart = Int32(exactly: expandedBounds.lowerBound)
     else { return compact }
 
@@ -80,7 +86,7 @@ enum LinnetRimeCandidateSnapshotBuilder {
             at: indexOnPage, labels: labels) : nil
       ))
     }
-    let highlightedAbsolute = pageStart + highlightedOnPage
+    let highlightedAbsolute = currentPageStart + highlightedOnPage
     guard !expandedItems.isEmpty,
       let expandedHighlighted = expandedItems.firstIndex(where: {
         $0.absoluteIndex == highlightedAbsolute
@@ -92,7 +98,7 @@ enum LinnetRimeCandidateSnapshotBuilder {
       pageSize: pageSize,
       highlightedItemIndex: expandedHighlighted,
       isLastPage: context.menu.is_last_page,
-      canExpand: !context.menu.is_last_page,
+      canExpand: currentPage > 0 || !context.menu.is_last_page,
       isExpanded: true)
   }
 }

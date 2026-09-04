@@ -44,7 +44,10 @@ final class SquirrelPanel: NSPanel {
   var candidateSnapshot: SquirrelInputController.CandidateSnapshot?
   var index: Int = 0
   var candidateInteraction = LinnetCandidateInteractionState<SquirrelView.CandidateHit>()
-  private(set) var candidateExpansionRequested = false
+  private(set) var candidateExpansionAnchorPage: Int?
+  var candidateExpansionRequested: Bool {
+    candidateExpansionAnchorPage != nil
+  }
 
   init(position: NSRect) {
     self.position = position
@@ -146,7 +149,7 @@ final class SquirrelPanel: NSPanel {
     statusTimer?.invalidate()
     statusTimer = nil
     statusMessage = ""
-    candidateExpansionRequested = false
+    candidateExpansionAnchorPage = nil
     candidateSnapshot = nil
     candidateInteraction.advancePublication()
     publishCandidatePointerFeedback()
@@ -194,14 +197,15 @@ final class SquirrelPanel: NSPanel {
     case .expand:
       guard view.currentTheme.candidateExpansionAllowed,
         candidateSnapshot?.canExpand == true,
-        !candidateExpansionRequested
+        candidateExpansionAnchorPage == nil,
+        let currentPage = candidateSnapshot?.currentPage
       else { return false }
-      candidateExpansionRequested = true
+      candidateExpansionAnchorPage = currentPage
       inputController.refreshCandidatePresentation()
       return true
     case .collapse:
-      guard candidateExpansionRequested else { return false }
-      candidateExpansionRequested = false
+      guard candidateExpansionAnchorPage != nil else { return false }
+      candidateExpansionAnchorPage = nil
       inputController.refreshCandidatePresentation()
       return true
     }
@@ -210,8 +214,11 @@ final class SquirrelPanel: NSPanel {
   /// The Rime interaction processor has already accepted a printable paging
   /// key. Reuse the disclosure state without reclassifying the physical key.
   func requestCandidateExpansionForKeyboardPaging() {
-    guard view.currentTheme.candidateExpansionAllowed else { return }
-    candidateExpansionRequested = true
+    guard view.currentTheme.candidateExpansionAllowed,
+      candidateExpansionAnchorPage == nil,
+      let currentPage = candidateSnapshot?.currentPage
+    else { return }
+    candidateExpansionAnchorPage = currentPage
   }
 }
 
@@ -240,7 +247,8 @@ extension SquirrelPanel {
       (self.preedit, self.selRange) = (preedit, selRange)
       self.caretPos = caretPos
       candidateSnapshot = candidates
-      candidateExpansionRequested = candidates.isExpanded
+      candidateExpansionAnchorPage = candidates.isExpanded
+        ? candidates.items.first?.page : nil
       self.index = index
     } else {
       guard let publication,
@@ -293,7 +301,7 @@ extension SquirrelPanel {
     let usesInlineComments = LinnetCandidatePresentation.usesInlineComments(
       candidateFormat: theme.candidateFormat)
     let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
-      forLinearLayout: linear || vertical,
+      forLinearLayout: linear || candidates.isExpanded || vertical,
       candidateFontPoint: theme.font.pointSize)
     let selectedDetail = usesInlineComments
       ? nil : selectedDetail(

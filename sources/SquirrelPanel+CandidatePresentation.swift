@@ -315,7 +315,8 @@ extension SquirrelPanel {
       ? screenRect.width - metrics.edgeInset.width * 2
       : screenRect.height - metrics.edgeInset.height * 2
     let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
-      forLinearLayout: linear || metrics.vertical,
+      forLinearLayout:
+        linear || candidateSnapshot?.isExpanded == true || metrics.vertical,
       candidateFontPoint: theme.font.pointSize)
     let hasDetail = !view.detailTextView.isHidden
     let hasSidecar = hasDetail && detailGeometry.placement == .sidecar

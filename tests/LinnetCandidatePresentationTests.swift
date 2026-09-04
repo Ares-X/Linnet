@@ -6,6 +6,7 @@ struct LinnetCandidatePresentationTests {
   static func main() {
     testExpandedCandidateBounds()
     testCandidateRows()
+    testExpandedNavigationLayout()
 
     require(
       LinnetCandidatePresentation.candidateWindowInset == CGSize(width: 7, height: 6) &&
@@ -517,8 +518,8 @@ struct LinnetCandidatePresentationTests {
     }
   }
 
-  /// Expansion starts at the current Rime page and may inspect at most three
-  /// pages or 27 candidates. The iterator may stop earlier at end-of-list.
+  /// Expansion keeps its visible page window stable while the highlight moves
+  /// inside it, then advances only far enough to reveal an out-of-window page.
   private static func testExpandedCandidateBounds() {
     require(
       LinnetCandidatePresentation.maximumExpandedPageCount == 3,
@@ -528,18 +529,49 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.maximumExpandedCandidateCount == 27,
       "candidate disclosure exceeded the 27-candidate product bound"
     )
-    for (page, pageSize, expected) in [
-      (0, 9, 0..<27),
-      (2, 9, 18..<45),
-      (4, 5, 20..<35),
-      (3, 3, 9..<18),
+    for (anchorPage, currentPage, pageSize, expected) in [
+      (0, 0, 9, 0..<27),
+      (0, 1, 9, 0..<27),
+      (0, 2, 9, 0..<27),
+      (0, 3, 9, 9..<36),
+      (1, 0, 9, 0..<27),
+      (4, 3, 5, 15..<30),
+      (3, 5, 3, 9..<18),
     ] {
       require(
         LinnetCandidatePresentation.expandedCandidateRange(
-          page: page, pageSize: pageSize) == expected,
-        "expanded candidate iterator lost its current-page bound for page \(page), size \(pageSize)"
+          anchorPage: anchorPage,
+          currentPage: currentPage,
+          pageSize: pageSize) == expected,
+        "expanded candidate window did not keep page \(currentPage) visible from anchor \(anchorPage), size \(pageSize)"
       )
     }
+  }
+
+  private static func testExpandedNavigationLayout() {
+    let compactHorizontal = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .horizontal, verticalText: false, expanded: false)
+    require(
+      compactHorizontal.linear && !compactHorizontal.vertical,
+      "compact horizontal candidates lost their stock Left/Right navigation")
+
+    let compactVertical = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .vertical, verticalText: false, expanded: false)
+    require(
+      !compactVertical.linear && !compactVertical.vertical,
+      "compact vertical candidates lost their stock Up/Down navigation")
+
+    let expandedHorizontal = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .horizontal, verticalText: true, expanded: true)
+    require(
+      expandedHorizontal.linear && !expandedHorizontal.vertical,
+      "expanded horizontal grid did not map Left/Right within rows and Up/Down across rows")
+
+    let expandedVertical = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .vertical, verticalText: false, expanded: true)
+    require(
+      expandedVertical.linear && !expandedVertical.vertical,
+      "expanded vertical preference did not switch to the native row grid")
   }
 
   private static func testCandidateRows() {
@@ -570,18 +602,16 @@ struct LinnetCandidatePresentationTests {
         "expanded horizontal candidates are not one row per Rime page"
       )
 
-      let vertical = LinnetCandidatePresentation.visualRows(
+      let verticalPreference = LinnetCandidatePresentation.visualRows(
         candidateCount: count, pageSize: pageSize,
         flow: .vertical, expanded: true)
       require(
-        vertical == (0..<pageSize).map { row in
-          [row, pageSize + row, pageSize * 2 + row]
-        },
-        "expanded vertical candidates are not one column per Rime page"
+        verticalPreference == horizontal,
+        "expanded vertical preference did not use the native row grid"
       )
       require(
         horizontal.flatMap { $0 }.sorted() == Array(0..<count) &&
-          vertical.flatMap { $0 }.sorted() == Array(0..<count),
+          verticalPreference.flatMap { $0 }.sorted() == Array(0..<count),
         "expanded presentation lost or duplicated an absolute candidate offset"
       )
     }
@@ -595,9 +625,9 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.visualRows(
         candidateCount: 14, pageSize: 5, flow: .vertical, expanded: true
       ) == [
-        [0, 5, 10], [1, 6, 11], [2, 7, 12], [3, 8, 13], [4, 9],
+        [0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13],
       ],
-      "a partial final candidate page lost its vertical column mapping"
+      "a partial final candidate page lost its native row mapping"
     )
   }
 
