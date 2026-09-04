@@ -20,13 +20,20 @@ def fail_metadata(message)
   exit 1
 end
 
-def load_metadata(path)
+def load_metadata(path, allow_legacy_core_artifact_format: false)
   fail_metadata("metadata must be a regular file") unless
     File.file?(path) && !File.symlink?(path)
   document = JSON.parse(File.read(path))
+  expected_keys = %w[catalog_sequence core_artifact_format format packs]
+  legacy_keys = %w[catalog_sequence format packs]
   fail_metadata("unexpected top-level shape") unless
     document.is_a?(Hash) &&
-      document.keys.sort == %w[catalog_sequence core_artifact_format format packs]
+      (document.keys.sort == expected_keys ||
+        (allow_legacy_core_artifact_format && document.keys.sort == legacy_keys))
+  # Historical v1 metadata predates the explicit field and only ever shipped
+  # installer packages. Accept that exact old shape at the comparison boundary.
+  document["core_artifact_format"] = "installer-package" unless
+    document.key?("core_artifact_format")
   fail_metadata("format mismatch") unless document.fetch("format") == FORMAT
   fail_metadata("catalog sequence is invalid") unless
     document.fetch("catalog_sequence").is_a?(Integer) &&
@@ -182,7 +189,8 @@ when "check-baseline"
   puts "Linnet data release historical floor: PASS"
 when "check-monotonic"
   fail_metadata("usage: check-monotonic PREVIOUS CURRENT") unless ARGV.length == 2
-  previous_document = load_metadata(ARGV.fetch(0))
+  previous_document = load_metadata(
+    ARGV.fetch(0), allow_legacy_core_artifact_format: true)
   current_document = load_metadata(ARGV.fetch(1))
   previous = previous_document.fetch("packs")
   current = current_document.fetch("packs")

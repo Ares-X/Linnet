@@ -48,6 +48,9 @@ check = lambda do |name, expected, &mutation|
 end
 
 check.call("unchanged-core-only", :pass) { |_document| }
+legacy_before = Marshal.load(Marshal.dump(base))
+legacy_before.delete("core_artifact_format")
+check_documents.call("legacy-installer-format-to-explicit", :pass, legacy_before, base)
 check.call("sequence-only", :fail) do |document|
   document.fetch("packs").fetch("chinese")["sequence"] += 1
 end
