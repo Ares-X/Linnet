@@ -140,15 +140,15 @@ release identity。定时 GitHub workflow 只报告候选更新，不得自动�
 临时 Git index 将待提交文件、删除、权限和 gitlink 绑定到一个 Git tree，不改真实
 暂存区；首尾 tree 必须相同。唯一收据位于 ignored
 `build/linnet-source-verification.json`，是维护者的本地验收声明，不是云端独立测试证明。
-Settings UI 仅在显式隔离桌面和 Developer Mode 可用时运行，否则记录 `NOT_EXERCISED`。
+Settings UI 是收据的必需本机验收项；没有隔离桌面或 Developer Mode 时不签发收据。
 
 提交相同 tree 后，在 clean、精确远端 `main` 上执行
 `scripts/release-control candidate`，创建携带收据的 annotated
 `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签；不再手动推送裸标签。
 唯一 macOS release Action 验证标签、commit、tree 和必需测试结果，一次
 checkout/cache/hydrate，保留历史相关的版本单调性检查及实际签名 App/package 门。
-不重跑已本地通过的源码测试；仅当收据的 Settings UI 未执行时补测这一项。
-它使用临时 Keychain 构建、签名、打包和最终验证一次。
+不重跑已由收据绑定为 PASS 的源码、Rime 或 Settings UI 测试。它使用临时 Keychain
+构建、签名、打包和最终验证一次。
 互不重叠的 Core 2 件、data 4 个完整词包及对应差分和 public 1 件直接写入三个 Draft GitHub
 Releases。候选传输
 不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
@@ -187,12 +187,10 @@ owner。缓存不是版本或发布权威：
 每次运行仍由 `action-install.sh` 校验 commit、tree、摘要、内部 fingerprint 与产物
 形状，不匹配时只重建受影响部分。
 
-PR CI 在一个 macOS job 内完成一次 checkout、cache restore、hydrate 和 unsigned App
-build，再串行执行 lint、release/data owner、App（含 Settings UI）、Swift owner、
-native Rime 与 Periphery。commit CI 采用同一条串行链，但只允许手动 dispatch；
-`main` push 不自动重复完整验证。这样避免四个 runner 重复下载、hydrate 和构建，
-也不会把并行墙钟误当成额度用量。首个真实 Actions 样本仍须记录墙钟、runner minutes
-和 cache 命中，未执行前不宣称云端加速百分比。连续 PR 更新只保留最新一次。
+PR CI 和手动 commit CI 都只验证干净 checkout/SDK 边界：恢复锁定 cache、检查 lint、
+publication/data identity，hydrate 一次、完成一次 unsigned App build，再运行 Periphery。
+Swift owner、native Rime、Settings UI 和真实产品流程只由绑定精确 tree 的本机收据负责，
+不在 Action 重复。`main` push 不自动执行完整验证；连续 PR 更新只保留最新一次。
 
 ## 构建
 
@@ -301,20 +299,17 @@ revision、Draft Release SHA-256 和候选 metadata 后，才可以使用 macOS 
 唯一一次真正的注销/登录、系统输入源添加与允许、从 macOS 输入菜单选择 Linnet
 和真实输入。
 
-旧 ad-hoc → 固定 CMS 是一次性的历史 Core lifecycle 验收，唯一记录在
-`config/linnet-community-signing.json`。其固定 leaf、bundle ID、macOS major 和
-identity classifier 的“旧迁移投影指纹”是完整失效键：任一项与当前候选失配，才在
-隔离的 legacy-seeded 账号或虚拟机中重做；四项全部匹配时不得为每个候选重复迁移。
-Host 连续性和 TIS 不变性不从这份历史指纹推断，统一由当前 package lifecycle matrix
-验证。该历史记录只闭合 legacy identity edge，不是当前候选菜单、Settings、真实输入
-或完整安装 UAT。
+Core 直升只接受固定 CMS App，公开 0.1.8 是最低直接升级版本。0.1.7 或更早的旧
+ad-hoc App 由 Complete 修复；Core 必须在 payload 前拒绝并给出该操作提示。package
+lifecycle 直接验证 Core 拒绝时不修改 App/Runtime，并验证 Complete 接受旧身份时保留
+个人数据和输入源状态。
 
 每个精确候选仍须在同一真实账号使用 Action 生成的 Draft Release 原字节完成
 “两轮同 leaf Core”：先从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级
 到候选，再把同一候选的原字节重装一次。两轮都要
 证明 Installer 无注销、无 Keychain 密码提示、登录会话不变，并保留
-enabled/selected、UserData、输入菜单、Settings 和真实输入。旧身份的历史迁移不
-授权同 leaf Core 重新 register、enable 或 select。Core preinstall 只验证候选、已安装
+enabled/selected、UserData、输入菜单、Settings 和真实输入。Complete 修复旧身份和
+同 leaf Core 更新都不重新 register、enable 或 select。Core preinstall 只验证候选、已安装
 App、Active data 与 package-owned read-only typed TIS 状态；脚本不关闭 Host 或任何
 用户应用，也不调用 `osascript`。Core 与 Complete 均不声明 `must-close`；安装过程
 持有 Settings 数据事务共用的 mutation lease，不关闭 Settings。运行中的 Host 必须保持同一
@@ -396,29 +391,44 @@ tests/verify_swift_units.sh
 ```
 
 只运行受影响的最小集合，先证明缺陷用例，再证明它转绿。
+Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称，再用
+`tests/verify_swift_units.sh --only OWNER[,OWNER...]` 精确选择；例如候选窗改动运行
+`--only candidate-presentation,candidate-snapshot-builder,panel-geometry,candidate-window`，
+不会连带执行备份、下载、IPC 或数据 Registry。`--appearance-preview` 仍是
+`--only appearance-preview` 的兼容简写。不要建立按源码字符串或文件名自动猜测测试的
+第二套门禁；由改动所属 owner 明确选择测试。
+精确选择 `candidate-window` 时只运行候选行为和布局矩阵；README 三张产品图的生成与
+像素对比只在不带选择器的完整 Swift 冻结门中运行一次。
+
+| 改动 owner | 日常 focused 命令 |
+| --- | --- |
+| 候选投影、Grid、面板几何 | `tests/verify_swift_units.sh --only candidate-presentation,candidate-snapshot-builder,panel-geometry,candidate-window` |
+| Settings ↔ Host 事务 | `tests/verify_swift_units.sh --only settings-ipc,settings-update-checker,settings-data-coordinator` |
+| 个人数据或备份 | `tests/verify_swift_units.sh --only personal-data,settings-session,backup-store` |
+| Rime 路径或 session | `tests/verify_swift_units.sh --only rime-path,rime-session-lease` |
+| Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
+| 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
+| Installer 脚本 | 生成精确候选后，只在专用虚拟机执行真实首次安装、升级、Core、Complete、卸载和重装 |
+| 发布事务脚本 | `tests/verify_action_publication.sh`；仅发布链变更或候选 Action 执行 |
 
 Swift 夹具通过 `LinnetTestScratch.directory` 使用本轮测试专属目录；不要直接使用
 Foundation 的 `temporaryDirectory`（macOS 上不会随 `TMPDIR` 重定向）。
 `verify_swift_units.sh` 负责在成功、失败退出或 INT/TERM 中断后回收目录，包括只读
 词包；删除失败会使测试门失败，不会静默忽略。编译缓存不在回收范围内。
-清理回归已纳入该门，也可单独运行 `bash tests/verify_swift_scratch.sh`。
 强制杀死父进程（SIGKILL）或断电无法执行退出清理，不在此保证内。
 
 主题卡片渲染或 OCR 失败时，可单独运行
 `tests/verify_swift_units.sh --appearance-preview`。它复用同一测试与编译缓存，
-不需要下载词库或构建 Rime。手动 CI 的 `theme-preview` profile 只运行此项，
-失败截图随日志保留；其结果不能替代完整 CI 或安装验收。
+不需要下载词库或构建 Rime；其结果不能替代完整本机收据或安装验收。
 
-Settings 的实际点击、滚动或窗口行为失败时，使用手动 CI 的 `settings-ui`
-profile；`ui_test` 留空运行完整 Settings UI 套件，也可填写逗号分隔的现有测试方法名
-一次复现所选用例。此入口复用锁定依赖准备、无签名构建和
-`tests/verify_visible_settings_fixture.sh --ui-test [test-name,...]`，不运行 Rime/Swift
-全套门、签名或发布打包。真实界面测试只在 CI 或明确隔离的 macOS 桌面执行，
+Settings 的实际点击、滚动或窗口行为失败时，在隔离桌面运行
+`tests/verify_visible_settings_fixture.sh --ui-test [test-name,...]`；不传测试名运行完整
+Settings UI 套件，也可传逗号分隔的现有方法名复现所选用例。此入口不运行 Rime/Swift
+全套门、签名或发布打包。真实界面测试只在明确隔离的 macOS 桌面执行，
 不得为了测试而关闭使用者的应用；通过也不等于正式安装包验收。
 每个用例失败后立即停止该用例内的后续点击，但继续其余独立用例；任意失败仍使
 整个门失败。不要恢复全局“首错跳过其他用例”标志，以免每次构建只能发现一个问题。
-原生 xcresult（含失败截图）保留在 `build/settings-ui-results/`；手动 CI 上传此
-隔离报告并保留三天，不上传 App、词库、安装包，也不参与正式发布传输。
+原生 xcresult（含失败截图）保留在 `build/settings-ui-results/`，不参与正式发布传输。
 
 ### Development composite
 
@@ -426,15 +436,9 @@ profile；`ui_test` 留空运行完整 Settings UI 套件，也可填写逗号�
 tests/verify_development.sh
 ```
 
-这是普通开发的综合门，不需要签名或安装。它覆盖 owner/source guards、package lifecycle、IPC、中文/英文 projection 和真实 Rime 行为，但不是 package architecture、签名产物或安装 UAT；package architecture 使用下一节的独立门。
-
-### Package architecture
-
-```bash
-tests/verify_package_architecture.sh
-```
-
-它可使用临时 fixture 验证 package 结构；通过不代表已生成发布 PKG。
+这是准备冻结候选时运行一次的本机综合门，不是每次小改动的默认命令。它不需要签名
+或安装，覆盖 App、Swift owner、IPC、中文/英文 projection 和真实 Rime 行为；安装
+生命周期只在专用虚拟机验收，package architecture 使用下一节的独立门。
 
 ### Finalized local candidate
 

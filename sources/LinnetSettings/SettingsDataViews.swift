@@ -145,18 +145,6 @@ extension DataTabView {
       VStack(alignment: .leading, spacing: 4) {
         coreIdentityRows(installed: identity, running: identity)
       }
-    case .restartRequired(let installed):
-      VStack(alignment: .leading, spacing: 4) {
-        Label("Installed Core will start after one normal login", systemImage: "info.circle")
-          .foregroundStyle(.orange)
-        coreIdentityRows(installed: installed, running: nil)
-        Text(
-          "This Core cannot verify every app released its old input connection, so this update cannot be applied now. After one normal macOS login or restart, later updates need no logout."
-        )
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
-      }
     case .pending(let installed, let running):
       VStack(alignment: .leading, spacing: 4) {
         Label(pendingCoreTitle(installed: installed, running: running),
@@ -306,7 +294,7 @@ extension DataTabView {
     switch updateChecker.runtimeVersionState {
     case .pending, .blocked, .failed:
       "Switch away from Linnet before applying the installed Core update."
-    case .restartRequired, .unsupported:
+    case .unsupported:
       "Installed Core will run after the next normal login or restart."
     case .applying:
       "The installed Core update is being applied."

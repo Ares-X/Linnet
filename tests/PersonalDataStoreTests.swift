@@ -86,17 +86,6 @@ struct PersonalDataStoreTests {
       guard try LinnetPersonalDataStore.load(from: legacyDirectory).disabledWords.map(\.value)
         == ["legacy-disabled"]
       else { fail("legacy user settings were not explicitly adopted") }
-      expectFailure(.invalidFile("backup-v2 personal files")) {
-        _ = try LinnetPersonalDataStore.legacyV2Snapshot(from: legacyDirectory)
-      }
-      try LinnetPersonalDataStore.writePersonalFiles(.empty, to: legacyDirectory)
-      let legacyV2 = try LinnetPersonalDataStore.legacyV2Snapshot(from: legacyDirectory)
-      guard legacyV2.data.disabledWords.map(\.value) == ["legacy-disabled"],
-        legacyV2.sentenceCapitalization,
-        legacyV2.tabBehavior == "pass",
-        legacyV2.revision
-          == "ea751fce69bf049f1b2deffda1a2b9fc00d0660eba510674d4d16d581a6e6563"
-      else { fail("the frozen v2 decoder diverged from the bda21963 revision codec") }
       try LinnetPersonalDataStore.writeRuntimeSettings(.empty, to: legacyDirectory)
       guard !FileManager.default.fileExists(
         atPath: legacyDirectory.appending(path: LinnetPersonalDataStore.legacyUserSettingsFile).path

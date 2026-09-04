@@ -5,15 +5,44 @@
 
 set -euo pipefail
 
-if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --appearance-preview ) ]]; then
-  echo "Usage: $0 [--appearance-preview]" >&2
-  exit 2
+owners='hallelujah-importer personal-data projection-renderer appearance-preview settings-page-layout presentation-status cloud-sync-location rime-sync-controller settings-session settings-window-close settings-update-checker backup-store candidate-presentation candidate-snapshot-builder macos-keycodes rime-session-lease input-activation-policy input-source-lifecycle host-entrypoints preedit-geometry panel-geometry candidate-window client-appearance settings-contract data-registry data-channel download-transport download-source pack rime-path rime-user-data-bridge settings-data-coordinator settings-ipc'
+selection=all
+case "$#:${1:-}" in
+  0:) ;;
+  1:--appearance-preview) selection=appearance-preview ;;
+  1:--list)
+    printf '%s\n' ${owners}
+    exit 0
+    ;;
+  2:--only) selection="$2" ;;
+  *)
+    echo "Usage: $0 [--list|--appearance-preview|--only OWNER[,OWNER...]]" >&2
+    exit 2
+    ;;
+esac
+
+selected() {
+  local owner="$1"
+  [[ "${selection}" == all ]] && return 0
+  case ",${selection}," in
+    *,"${owner}",*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [[ "${selection}" != all ]]; then
+  IFS=',' read -r -a requested_owners <<<"${selection}"
+  for requested in "${requested_owners[@]}"; do
+    [[ -n "${requested}" && " ${owners} " == *" ${requested} "* ]] || {
+      echo "Unknown Swift test owner: ${requested:-<empty>}" >&2
+      exit 2
+    }
+  done
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
-bash tests/verify_swift_scratch.sh
 source tests/swift_test_scratch.sh
 linnet_swift_scratch_init
 
@@ -44,6 +73,13 @@ compile_run() {
   end_phase "compile and run ${name}"
 }
 
+compile_run_selected() {
+  local name="$1"
+  shift
+  selected "${name}" || return 0
+  compile_run "${name}" "$@"
+}
+
 appearance_preview() {
   begin_phase "compile and run appearance-preview"
   linnet_swift_compile appearance-preview -warnings-as-errors -sdk "${sdk}" -framework SwiftUI \
@@ -68,24 +104,14 @@ appearance_preview() {
   end_phase "compile and run appearance-preview"
 }
 
-if [[ "${1:-}" == --appearance-preview ]]; then
-  appearance_preview
-  exit 0
-fi
-
-compile_run hallelujah-importer \
+compile_run_selected hallelujah-importer \
   sources/LinnetSettings/HallelujahSubstitutionImporter.swift \
   tests/HallelujahSubstitutionImporterTests.swift
-compile_run personal-data \
+compile_run_selected personal-data \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
   tests/PersonalDataStoreTests.swift
-compile_run stable-row-binding -framework SwiftUI \
-  sources/LinnetSettings/PersonalDataStore.swift \
-  sources/LinnetSettings/PersonalDataValidation.swift \
-  sources/LinnetSettings/LinnetStableRowTextBinding.swift \
-  tests/LinnetStableRowTextBindingTests.swift
-compile_run projection-renderer \
+compile_run_selected projection-renderer \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
@@ -95,21 +121,23 @@ compile_run projection-renderer \
   sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionRendererTests.swift
-appearance_preview
-compile_run settings-page-layout -framework SwiftUI \
+if selected appearance-preview; then
+  appearance_preview
+fi
+compile_run_selected settings-page-layout -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsPage.swift \
   tests/LinnetSettingsPageLayoutTests.swift
-compile_run presentation-status \
+compile_run_selected presentation-status \
   sources/LinnetSettings/SettingsRuntimeReachability.swift \
   sources/LinnetSettings/SettingsPresentationStatus.swift \
   tests/SettingsPresentationStatusTests.swift
-compile_run cloud-sync-location \
+compile_run_selected cloud-sync-location \
   sources/LinnetSettings/LinnetCloudSyncLocation.swift \
   tests/LinnetCloudSyncLocationTests.swift
-compile_run rime-sync-controller \
+compile_run_selected rime-sync-controller \
   sources/LinnetSettings/LinnetRimeSyncController.swift \
   tests/LinnetRimeSyncControllerTests.swift
-compile_run settings-session \
+compile_run_selected settings-session \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
@@ -117,14 +145,13 @@ compile_run settings-session \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
   sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
-  sources/LinnetSettings/LinnetPortableJSONBudget.swift \
   sources/LinnetSettings/LinnetBackupStore.swift sources/LinnetSettings/LinnetBackupStoreSupport.swift \
   sources/LinnetSettings/SettingsSessionState.swift \
   tests/SettingsSessionStateTests.swift
-compile_run settings-window-close -framework AppKit -framework SwiftUI \
+compile_run_selected settings-window-close -framework AppKit -framework SwiftUI \
   sources/LinnetSettings/SettingsWindowCloseGuard.swift \
   tests/SettingsWindowCloseCoordinatorTests.swift
-compile_run settings-update-checker -framework AppKit \
+compile_run_selected settings-update-checker -framework AppKit \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
@@ -135,7 +162,7 @@ compile_run settings-update-checker -framework AppKit \
   sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
   sources/LinnetSettings/LinnetSettingsUpdateChecker.swift \
   tests/LinnetSettingsUpdateCheckerStateTests.swift
-compile_run backup-store \
+compile_run_selected backup-store \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
@@ -143,17 +170,16 @@ compile_run backup-store \
   sources/LinnetSettings/PersonalDataStore.swift \
   sources/LinnetSettings/PersonalDataValidation.swift \
   sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
-  sources/LinnetSettings/LinnetPortableJSONBudget.swift \
   sources/LinnetSettings/LinnetBackupStore.swift sources/LinnetSettings/LinnetBackupStoreSupport.swift \
   sources/LinnetSettings/LinnetCloudRecoveryArchive.swift \
   tests/LinnetBackupStoreTests.swift
-compile_run candidate-presentation \
+compile_run_selected candidate-presentation \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetCandidatePresentation.swift tests/LinnetCandidatePresentationTests.swift
-compile_run candidate-snapshot-builder -target "${target}" -framework AppKit \
+compile_run_selected candidate-snapshot-builder -target "${target}" -framework AppKit \
   -import-objc-header sources/Squirrel-Bridging-Header.h \
   -I librime/dist/include \
   sources/LinnetPackContract.swift \
@@ -163,69 +189,91 @@ compile_run candidate-snapshot-builder -target "${target}" -framework AppKit \
   sources/LinnetCandidatePresentation.swift \
   sources/LinnetRimeCandidateSnapshotBuilder.swift \
   tests/LinnetRimeCandidateSnapshotBuilderTests.swift
-compile_run macos-keycodes -target "${target}" -framework AppKit \
+compile_run_selected macos-keycodes -target "${target}" -framework AppKit \
   -import-objc-header sources/Squirrel-Bridging-Header.h \
   -I librime/dist/include \
   sources/MacOSKeyCodes.swift tests/MacOSKeyCodesTests.swift
-compile_run rime-session-lease -target "${target}" \
+compile_run_selected rime-session-lease -target "${target}" \
   -import-objc-header sources/Squirrel-Bridging-Header.h \
   -I librime/dist/include \
   sources/LinnetRimeSessionLease.swift sources/LinnetRimeWarmSession.swift \
   tests/LinnetRimeSessionLeaseTests.swift
-compile_run input-activation-policy \
+compile_run_selected input-activation-policy \
   sources/LinnetInputActivationPolicy.swift tests/LinnetInputActivationPolicyTests.swift
-compile_run input-source-lifecycle -parse-as-library -framework InputMethodKit -framework Carbon \
+compile_run_selected input-source-lifecycle -parse-as-library -framework InputMethodKit -framework Carbon \
   sources/LinnetInputSourceRegistration.swift sources/InputSource.swift \
   tests/LinnetInputSourceLifecycleTests.swift
-begin_phase "parse Host entrypoints"
-"${swiftc}" -swift-version 5 -parse sources/Main.swift \
-  sources/LinnetInputSourceRegistration.swift sources/InputSource.swift
-end_phase "parse Host entrypoints"
-compile_run preedit-geometry -parse-as-library \
+if selected host-entrypoints; then
+  begin_phase "parse Host entrypoints"
+  "${swiftc}" -swift-version 5 -parse sources/Main.swift \
+    sources/LinnetInputSourceRegistration.swift sources/InputSource.swift
+  end_phase "parse Host entrypoints"
+fi
+compile_run_selected preedit-geometry -parse-as-library \
   sources/LinnetPreeditGeometry.swift tests/LinnetPreeditGeometryTests.swift
-compile_run panel-geometry -parse-as-library \
+compile_run_selected panel-geometry -parse-as-library \
   sources/LinnetPanelGeometry.swift tests/LinnetPanelGeometryTests.swift
-begin_phase "candidate window interaction"
-tests/verify_candidate_window_interaction.sh
-end_phase "candidate window interaction"
-compile_run client-appearance -framework AppKit \
+if selected candidate-window; then
+  begin_phase "candidate window interaction"
+  if [[ "${selection}" == all ]]; then
+    tests/verify_candidate_window_interaction.sh
+  else
+    tests/verify_candidate_window_interaction.sh --behavior
+  fi
+  end_phase "candidate window interaction"
+fi
+compile_run_selected client-appearance -framework AppKit \
   sources/LinnetClientAppearance.swift tests/LinnetClientAppearanceTests.swift
-compile_run settings-contract \
+compile_run_selected settings-contract \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift sources/LinnetSettings/SettingsContract.swift \
   tests/SettingsContractTests.swift
-compile_run data-registry \
+compile_run_selected data-registry \
   tests/LinnetTestFailure.swift sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   tests/LinnetDataRegistryTests.swift
-compile_run data-channel \
+compile_run_selected data-channel \
   tests/LinnetTestFailure.swift sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   tools/LinnetDataCatalogBuilder.swift tests/LinnetDataChannelTests.swift
-compile_run download-transport \
+compile_run_selected download-transport \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/LinnetSettingsDownloadSource.swift \
   sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift \
   sources/LinnetSettings/LinnetSettingsDownloadTransport.swift \
   tests/LinnetSettingsDownloadTransportTests.swift
-compile_run download-source \
+compile_run_selected download-source \
   sources/LinnetSettings/LinnetSettingsDownloadSource.swift \
   tests/LinnetSettingsDownloadSourceTests.swift
-compile_run pack \
+compile_run_selected pack \
   tests/LinnetTestFailure.swift sources/LinnetPackContract.swift \
   tests/LinnetDirectoryDeltaTests.swift \
   sources/LinnetDataChannel.swift sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   tools/LinnetPackEncoder.swift \
   tests/LinnetPackTests.swift
 
-begin_phase "Rime filesystem projection"
-linnet_swift_compile rime-path -parse-as-library -warnings-as-errors -sdk "${sdk}" \
-  tests/RimeFilesystemPathProjectionTests.swift
-"${LINNET_SWIFT_COMPILED_BINARY}" \
-  sources/SquirrelApplicationDelegate.swift sources/SquirrelApplicationRuntime.swift sources/SquirrelApplicationTransactions.swift \
-  sources/SquirrelApplicationPresentation.swift
-end_phase "Rime filesystem projection"
+if selected rime-path; then
+  begin_phase "Rime filesystem projection"
+  linnet_swift_compile rime-path -parse-as-library -warnings-as-errors -sdk "${sdk}" \
+    -target "${target}" \
+    -import-objc-header sources/Squirrel-Bridging-Header.h \
+    -I librime/dist/include sources/BridgingFunctions.swift \
+    tests/RimeFilesystemPathProjectionTests.swift \
+    lib/librime.1.dylib \
+    lib/rime-plugins/librime-lua.dylib \
+    lib/rime-plugins/librime-octagram.dylib \
+    lib/rime-plugins/librime-predict.dylib \
+    lib/rime-plugins/librime-smart-english.dylib
+  external_rime_cwd="${scratch}/Rime external cwd"
+  mkdir -p "${external_rime_cwd}"
+  (
+    cd "${external_rime_cwd}"
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${LINNET_SWIFT_COMPILED_BINARY}" "${repo_root}"
+  )
+  end_phase "Rime filesystem projection"
+fi
 
 common_settings_sources=(
   tests/LinnetTestScratch.swift
@@ -236,49 +284,54 @@ common_settings_sources=(
   sources/LinnetSettings/PersonalDataStore.swift
   sources/LinnetSettings/PersonalDataValidation.swift
   sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift
-  sources/LinnetSettings/LinnetPortableJSONBudget.swift
   sources/LinnetSettings/LinnetBackupStore.swift sources/LinnetSettings/LinnetBackupStoreSupport.swift
   sources/LinnetSettings/LinnetCloudRecoveryArchive.swift
   sources/LinnetSettings/HallelujahSubstitutionImporter.swift
   sources/LinnetSettings/RimeUserDataBridge.swift
 )
 
-begin_phase "Rime user-data bridge"
-linnet_swift_compile rime-user-data-bridge \
-  -warnings-as-errors -sdk "${sdk}" -target "${target}" \
-  -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
-  -I librime/dist/include \
-  "${common_settings_sources[@]}" \
-  tests/RimeUserDataBridgeDirectoryTests.swift -L lib -lrime.1
-DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-  "${LINNET_SWIFT_COMPILED_BINARY}"
-end_phase "Rime user-data bridge"
-
-begin_phase "Settings data coordinator"
-linnet_swift_compile settings-data-coordinator \
-  -warnings-as-errors -sdk "${sdk}" -target "${target}" \
-  -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
-  -I librime/dist/include \
-  "${common_settings_sources[@]}" \
-  sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
-  sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
-  sources/LinnetSettings/LinnetSettingsMutationLease.swift \
-  sources/LinnetSettings/SettingsRuntimeReachability.swift \
-  sources/LinnetSettings/LinnetCloudSyncLocation.swift \
-  sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift \
-  tests/SettingsDataCoordinatorTests.swift -L lib -lrime.1
-mkdir -p "${scratch}/rime-logs"
-if ! RIME_LOG_DIR="${scratch}/rime-logs" \
-    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-    "${LINNET_SWIFT_COMPILED_BINARY}" \
-    >"${scratch}/settings-data.out" 2>&1; then
-  tail -n 160 "${scratch}/settings-data.out" >&2 || true
-  exit 1
+if selected rime-user-data-bridge; then
+  begin_phase "Rime user-data bridge"
+  linnet_swift_compile rime-user-data-bridge \
+    -warnings-as-errors -sdk "${sdk}" -target "${target}" \
+    -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
+    -I librime/dist/include \
+    "${common_settings_sources[@]}" \
+    tests/RimeUserDataBridgeDirectoryTests.swift -L lib -lrime.1
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${LINNET_SWIFT_COMPILED_BINARY}"
+  end_phase "Rime user-data bridge"
 fi
-rg -Fq 'SettingsDataCoordinatorTests: PASS' "${scratch}/settings-data.out"
-end_phase "Settings data coordinator"
 
-begin_phase "Settings transaction IPC"
-tests/verify_settings_transaction_ipc.sh
-end_phase "Settings transaction IPC"
-echo "Linnet Swift owner tests: PASS"
+if selected settings-data-coordinator; then
+  begin_phase "Settings data coordinator"
+  linnet_swift_compile settings-data-coordinator \
+    -warnings-as-errors -sdk "${sdk}" -target "${target}" \
+    -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
+    -I librime/dist/include \
+    "${common_settings_sources[@]}" \
+    sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
+    sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
+    sources/LinnetSettings/LinnetSettingsMutationLease.swift \
+    sources/LinnetSettings/SettingsRuntimeReachability.swift \
+    sources/LinnetSettings/LinnetCloudSyncLocation.swift \
+    sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift \
+    tests/SettingsDataCoordinatorTests.swift -L lib -lrime.1
+  mkdir -p "${scratch}/rime-logs"
+  if ! RIME_LOG_DIR="${scratch}/rime-logs" \
+      DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${LINNET_SWIFT_COMPILED_BINARY}" \
+      >"${scratch}/settings-data.out" 2>&1; then
+    tail -n 160 "${scratch}/settings-data.out" >&2 || true
+    exit 1
+  fi
+  rg -Fq 'SettingsDataCoordinatorTests: PASS' "${scratch}/settings-data.out"
+  end_phase "Settings data coordinator"
+fi
+
+if selected settings-ipc; then
+  begin_phase "Settings transaction IPC"
+  tests/verify_settings_transaction_ipc.sh
+  end_phase "Settings transaction IPC"
+fi
+echo "Linnet Swift owner tests (${selection}): PASS"

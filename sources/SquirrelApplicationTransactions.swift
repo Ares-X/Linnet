@@ -263,26 +263,11 @@ extension SquirrelApplicationDelegate {
 
   func recoverAbandonedDataTransaction() {
     guard let active = activeDataTransaction, active.phase == .paused else { return }
-    let reason: String
-    let code: LinnetSettingsContract.RuntimeReplyCode
-    if Date() >= active.deadline {
-      reason = "The data operation deadline expired; original data resumed."
-      code = .deadlineExpired
-    } else if !LinnetSettingsContract.requesterIsAlive(active.requesterPID) {
-      reason = "The Settings process exited; original data resumed."
-      code = .requesterExited
-    } else {
-      return
-    }
+    guard Date() >= active.deadline
+      || !LinnetSettingsContract.requesterIsAlive(active.requesterPID)
+    else { return }
     finishDataTransaction()
-    let health = resumeCurrentRuntime()
-    reply(
-      to: active.transactionID,
-      status: .failed,
-      code: code,
-      detail: reason,
-      health: health
-    )
+    _ = resumeCurrentRuntime()
   }
 
   func finishDataTransaction() {

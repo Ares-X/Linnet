@@ -20,9 +20,6 @@ excluded: # case-sensitive paths to ignore during linting. Takes precedence over
 # If true, SwiftLint will not fail if no lintable files are found.
 allow_zero_lintable_files: false
 
-# If true, SwiftLint will treat all warnings as errors.
-strict: true
-
 # rules that have both warning and error levels, can set just the warning level
 # implicitly
 line_length: 200

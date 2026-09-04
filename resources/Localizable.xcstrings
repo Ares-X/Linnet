@@ -325,8 +325,6 @@
     "You can keep using the current Core, or apply the installed Core after switching away from Linnet. Other apps stay open and no logout is required." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"你可以继续使用当前核心，也可以先切换到其他输入法，再应用已安装的核心。其他应用会保持打开，无需注销。"}}}},
     "Running" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"正在运行"}}}},
     "Installed" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"已安装"}}}},
-    "Installed Core will start after one normal login" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"已安装的核心将在一次正常登录后启动"}}}},
-    "This Core cannot verify every app released its old input connection, so this update cannot be applied now. After one normal macOS login or restart, later updates need no logout." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"当前核心无法确认所有应用都已释放旧输入连接，因此现在不能应用这次更新。正常登录 macOS 或重启一次后，后续更新无需注销。"}}}},
     "Apply Installed Update…" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"应用已安装的更新…"}}}},
     "Applying installed Core…" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"正在应用已安装的核心…"}}}},
     "Keep another input source selected until Settings closes." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"在设置窗口关闭前，请保持选中其他输入法。"}}}},

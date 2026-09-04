@@ -58,7 +58,6 @@ final class SquirrelInstaller {
     // action in System Settings or the input menu.
     let enableStatus = TISEnableInputSource(inputSource)
     guard enableStatus == noErr else { throw Failure.enableFailed(enableStatus) }
-    print("Input source authorization was requested: \(identifier)")
   }
 
   /// An InputMethodKit Host is valid only from the per-user installation

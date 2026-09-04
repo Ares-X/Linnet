@@ -30,26 +30,6 @@ struct LinnetCandidatePresentationTests {
     testHighlightedCandidateBounds()
     testCandidateSelectionLabels()
 
-    var accessibilitySurface =
-      LinnetCandidatePresentation.AccessibilitySurface.candidates
-    require(
-      accessibilitySurface.exposesCandidateList &&
-        accessibilitySurface.localizedLabelKey == "Candidate window",
-      "candidate publication lost its list accessibility container"
-    )
-    accessibilitySurface = .inputModeStatus
-    require(
-      !accessibilitySurface.exposesCandidateList &&
-        accessibilitySurface.localizedLabelKey == "Input mode",
-      "status publication retained the candidate-list accessibility container"
-    )
-    accessibilitySurface = .candidates
-    require(
-      accessibilitySurface.exposesCandidateList &&
-        accessibilitySurface.localizedLabelKey == "Candidate window",
-      "candidate publication did not restore its accessibility container"
-    )
-
     require(
       LinnetCandidatePresentation.usesInlineComments(
         candidateFormat: "[label]. [candidate] [comment]"),
@@ -100,31 +80,6 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.candidateComment("\u{001D}n. 工作")
         == .init(displayText: "n. 工作", belongsToSmartEnglish: true),
       "the Smart English detail marker was not removed at the presentation boundary"
-    )
-
-    require(
-      LinnetCandidatePresentation.accessibilityAnnouncement(
-        candidate: "interface", comment: "  n. 接口  ", page: 2, indexOnPage: 1
-      ) == "Page 3, candidate 2, interface, n. 接口",
-      "candidate accessibility announcement lost position or definition"
-    )
-    require(
-      LinnetCandidatePresentation.accessibilityAnnouncement(
-        candidate: "work", comment: "n. 工作；v. 运行", page: 0, indexOnPage: 0
-      ) == "Page 1, candidate 1, work, n. 工作, v. 运行",
-      "visual part-of-speech line breaks leaked into accessibility speech"
-    )
-    require(
-      LinnetCandidatePresentation.accessibilityAnnouncement(
-        candidate: "候选", comment: "", page: 0, indexOnPage: 0
-      ) == "Page 1, candidate 1, 候选",
-      "empty candidate comment produced accessibility noise"
-    )
-    require(
-      LinnetCandidatePresentation.accessibilityAnnouncement(
-        candidate: "candidate", comment: "definition", page: -1, indexOnPage: 0
-      ) == nil,
-      "invalid highlighted candidate was announced"
     )
 
     print("LinnetCandidatePresentationTests: PASS")

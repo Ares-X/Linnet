@@ -4,7 +4,8 @@ import Foundation
 
 /// One on-disk delta boundary shared by Core packages and immutable language
 /// packs. rsync owns the difference algorithm; reconstruction only touches an
-/// APFS clone. Neither a failed delta nor clone failure permits a full copy.
+/// private reconstruction tree. APFS clones avoid duplicate storage when
+/// available; other filesystems use a normal copy.
 enum LinnetDirectoryDelta {
   enum Failure: LocalizedError {
     case invalid(String)
@@ -216,8 +217,16 @@ enum LinnetDirectoryDelta {
       default:
         let handle = try openRead(source)
         defer { try? handle.close() }
-        guard fclonefileat(handle.fileDescriptor, AT_FDCWD, destination.path, 0) == 0 else {
-          throw Failure.filesystem("APFS clone", errno)
+        if fclonefileat(handle.fileDescriptor, AT_FDCWD, destination.path, 0) != 0 {
+          let code = errno
+          guard code == ENOTSUP || code == EXDEV else {
+            throw Failure.filesystem("APFS clone", code)
+          }
+          do {
+            try fileManager.copyItem(at: source, to: destination)
+          } catch {
+            throw Failure.filesystem("file copy", Int32(clamping: (error as NSError).code))
+          }
         }
         // Keep immutable file modes. rsync replaces changed files through its
         // temporary-file path; unchanged clones retain their original blocks.
@@ -310,7 +319,9 @@ enum LinnetDirectoryDelta {
     while completion.wait(timeout: .now() + .milliseconds(50)) == .timedOut {
       if Task.isCancelled || DispatchTime.now().uptimeNanoseconds >= deadline {
         process.terminate()
-        process.waitUntilExit()
+        if completion.wait(timeout: .now() + .seconds(2)) == .timedOut {
+          _ = kill(process.processIdentifier, SIGKILL)
+        }
         try Task.checkCancellation()
         throw Failure.invalid("rsync deadline")
       }

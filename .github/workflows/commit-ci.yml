@@ -1,19 +1,5 @@
-name: Linnet manual full CI
-on:
-  workflow_dispatch:
-    inputs:
-      profile:
-        description: Full product validation or focused Settings diagnosis
-        type: choice
-        default: full
-        options:
-          - full
-          - theme-preview
-          - settings-ui
-      ui_test:
-        description: Settings UI test methods, comma-separated (empty runs the suite)
-        type: string
-        default: ''
+name: Linnet clean build CI
+on: workflow_dispatch
 permissions:
   contents: read
 
@@ -22,49 +8,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  product:
+  build:
     runs-on: macos-latest
-    timeout-minutes: ${{ inputs.profile == 'theme-preview' && 10 || inputs.profile == 'settings-ui' && 30 || 120 }}
+    timeout-minutes: 60
     steps:
       - name: Checkout last commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-          # action-install verifies and initializes the five locked source
-          # submodules itself. Recursive checkout can chase unreachable
-          # historical gitlinks from upstream tags.
           submodules: false
 
-      - name: Diagnose only Settings theme previews
-        if: inputs.profile == 'theme-preview'
-        run: tests/verify_swift_units.sh --appearance-preview
-
-      - name: Restore locked build cache once
-        if: inputs.profile != 'theme-preview'
+      - name: Restore locked build cache
         uses: ./.github/actions/restore-locked-build-cache
         with:
           save: true
 
-      - name: Restore and save incremental Swift owner tests
-        if: inputs.profile == 'full'
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
-        with:
-          path: build/swift-unit-cache
-          key: linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: |
-            linnet-swift-units-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install declared build tools
+        run: scripts/install_ci_build_tools.sh quality
 
-      - name: Install declared build tools once
-        if: inputs.profile != 'theme-preview'
-        run: scripts/install_ci_build_tools.sh ${{ inputs.profile == 'full' && 'quality' || 'release' }}
-
-      - name: Strict Swift lint
-        if: inputs.profile == 'full'
-        run: scripts/run_swiftlint.sh
+      - name: Check source and publication contracts
+        run: |
+          scripts/run_swiftlint.sh
+          tests/verify_publication_owner.sh
 
       - name: Check language-data release identity changes
-        if: inputs.profile == 'full'
         run: |
           set -euo pipefail
           changed="$(mktemp)"
@@ -83,49 +51,11 @@ jobs:
           fi
           package/data_release_metadata check-source-change <"${changed}"
 
-      - name: Check release and publication owners
-        if: inputs.profile == 'full'
-        run: tests/verify_release_automation.sh && tests/verify_publication_owner.sh
-
-      - name: Hydrate and verify locked inputs once
-        if: inputs.profile != 'theme-preview'
+      - name: Hydrate locked inputs
         run: ./action-install.sh
 
-      - name: Build the unsigned local product once
-        if: inputs.profile != 'theme-preview'
+      - name: Build the unsigned product
         run: make --no-print-directory release
 
-      - name: Verify App and package owners
-        if: inputs.profile == 'full'
-        run: tests/verify_development.sh app
-
-      - name: Verify visible Settings workflow
-        if: inputs.profile == 'full'
-        run: tests/verify_visible_settings_fixture.sh --ui-test
-
-      - name: Diagnose Settings UI without release packaging
-        if: inputs.profile == 'settings-ui'
-        env:
-          LINNET_UI_TEST: ${{ inputs.ui_test }}
-        run: tests/verify_visible_settings_fixture.sh --ui-test "${LINNET_UI_TEST}"
-
-      - name: Preserve isolated Settings UI evidence
-        if: always() && inputs.profile != 'theme-preview'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: settings-ui-results
-          path: build/settings-ui-results/
-          if-no-files-found: ignore
-          retention-days: 3
-
-      - name: Verify Swift owner contracts
-        if: inputs.profile == 'full'
-        run: tests/verify_development.sh swift
-
-      - name: Verify Rime and all input profiles
-        if: inputs.profile == 'full'
-        run: tests/verify_development.sh rime
-
       - name: Check unused production code
-        if: inputs.profile == 'full'
         run: scripts/run_periphery.sh

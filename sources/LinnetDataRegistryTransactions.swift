@@ -251,7 +251,7 @@ extension LinnetDataRegistry {
       try FileManager.default.moveItem(at: partial, to: final)
       return active
     } catch {
-      try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: partial.path)
+      try? prepareOwnedTreeForRemoval(partial)
       try? FileManager.default.removeItem(at: partial)
       throw error
     }
@@ -447,7 +447,8 @@ extension LinnetDataRegistry {
       entries, activeState: activeState, now: now)
     let packCleanups = try supersededPackCleanups(
       active: activeState.packs, rollback: activeState.rollbackPacks,
-      pending: transactionPlan.pendingPackPaths, remaining: &traversalBudget)
+      pending: transactionPlan.pendingPackPaths, now: now,
+      remaining: &traversalBudget)
     let downloadCleanups = transactionPlan.language.map {
       downloadsDirectory.appending(path: $0.transactionID.uuidString, directoryHint: .isDirectory)
     }
@@ -467,16 +468,7 @@ extension LinnetDataRegistry {
     for cleanup in packCleanups where !protected.contains(cleanup.relativePath) {
       guard let tree = preflightedTrees[cleanup.directory.standardizedFileURL.path] else { continue }
       do {
-        // Only retired, preflighted pack directories lose their read-only bit.
-        // Files remain immutable; lchmod never follows a directory symlink.
-        for entry in [cleanup.directory] + tree {
-          var info = stat()
-          guard lstat(entry.path, &info) == 0 else { throw Failure.invalidActiveState }
-          if (info.st_mode & S_IFMT) == S_IFDIR {
-            guard info.st_uid == getuid(), (info.st_mode & (S_IWGRP | S_IWOTH)) == 0,
-              lchmod(entry.path, info.st_mode | S_IWUSR) == 0 else { throw Failure.invalidActiveState }
-          }
-        }
+        try prepareOwnedTreeForRemoval(cleanup.directory, entries: tree)
         try FileManager.default.removeItem(at: cleanup.directory)
       } catch { continue }
     }
@@ -636,6 +628,7 @@ extension LinnetDataRegistry {
     active: [ActivePack],
     rollback: [ActivePack],
     pending: Set<String>,
+    now: Date,
     remaining: inout Int
   ) throws -> [PackCleanup] {
     let retained = Set((active + rollback).map(\.relativePath)).union(pending)
@@ -647,7 +640,10 @@ extension LinnetDataRegistry {
       else { continue }
       for entry in entries {
         let relative = "Data/Packs/\(kind.rawValue)/\(entry.lastPathComponent)"
-        guard !retained.contains(relative), validatedPackDeletion(at: entry, kind: kind) else {
+        guard !retained.contains(relative),
+          validatedPackDeletion(at: entry, kind: kind)
+            || validatedPartialPackDeletion(at: entry, kind: kind, now: now)
+        else {
           continue
         }
         cleanups.append(.init(directory: entry, relativePath: relative))
@@ -671,6 +667,32 @@ extension LinnetDataRegistry {
         sequence: identity.sequence, version: identity.version)
     else { return false }
     return true
+  }
+
+  func validatedPartialPackDeletion(
+    at directory: URL,
+    kind: LinnetPackContract.Kind,
+    now: Date
+  ) -> Bool {
+    let kindRoot = packsDirectory.appending(path: kind.rawValue, directoryHint: .isDirectory)
+      .standardizedFileURL
+    let name = directory.lastPathComponent
+    guard directory.deletingLastPathComponent().standardizedFileURL == kindRoot,
+      Self.isSecureOwnedDirectory(kindRoot), Self.isSecureOwnedDirectory(directory),
+      contains(directory.resolvingSymlinksInPath()), name.first == ".",
+      let marker = name.range(of: ".partial-", options: .backwards),
+      marker.lowerBound > name.index(after: name.startIndex),
+      UUID(uuidString: String(name[marker.upperBound...])) != nil,
+      let identitySeparator = name[..<marker.lowerBound].firstIndex(of: "-")
+    else { return false }
+    let sequenceStart = name.index(after: name.startIndex)
+    let sequence = name[sequenceStart..<identitySeparator]
+    let version = name[name.index(after: identitySeparator)..<marker.lowerBound]
+    guard UInt64(sequence) != nil, Self.isSafeIdentifier(String(version)),
+      let modified = try? directory.resourceValues(
+        forKeys: [.contentModificationDateKey]).contentModificationDate
+    else { return false }
+    return now.timeIntervalSince(modified) >= Self.orphanSafetyAge
   }
 
   /// Streams a Registry-owned directory under one reconciliation-wide budget.

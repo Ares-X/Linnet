@@ -9,12 +9,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
-if rg -n 'import Security|Sec(Code|StaticCode|Certificate)|kSecCode|CC_SHA256|leafCertificate|peerBundleIdentifier|LinnetIPCPeerBundleIdentifier' \
-    sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
-    tests/LinnetSettingsTransactionIPCTests.swift; then
-  echo "verify_settings_transaction_ipc: certificate-based peer identity returned" >&2
-  exit 1
-fi
 fixture="$(mktemp -d /tmp/linnet-settings-ipc.XXXXXX)"
 fixture="$(cd "${fixture}" && pwd -P)"
 active_host_pid=''

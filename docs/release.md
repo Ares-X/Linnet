@@ -72,8 +72,8 @@ Git index 绑定完整源 tree，不改变暂存区。收据只保存在 ignored
 `build/linnet-source-verification.json`；合并提交不同但 tree 完全相同时可复用。
 这是可信维护者的验收声明，不宣称 Action 独立重跑了本地测试。
 
-Settings UI 只在合法隔离桌面及 Developer Mode 下本地执行，否则明确记录
-`NOT_EXERCISED`，由 candidate Action 补测；本地 PASS 时不重跑。
+Settings UI 必须在合法隔离桌面及 Developer Mode 下本地通过；未执行时不签发候选收据，
+candidate Action 不补跑本机产品验收。
 同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
 标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
 `community-signing` Environment 中的 P12 和密码创建临时 Keychain，并只运行一次
@@ -114,10 +114,8 @@ Settings 的已安装版本读取同一磁盘安装的 Info.plist 与 VERSION.js
 使用 `complete.*.pkg` receipts，只指向隐藏暂存目录。不能复用旧版全量安装的
 live-payload receipt，否则 PackageKit 会在 preinstall 与 postinstall 之间删除本版
 未携带的旧文件。旧 receipts 仅由 README 的离线卸载命令清理，升级不修改或遗忘它们。
-变更安装组件布局时，先在本地运行
-`tests/verify_package_architecture.sh --native-receipt-upgrade`；它用独立安装路径和
-测试 receipts 验证真实 PackageKit 的旧版迁移、重复安装与 Core/Complete 交替，
-不替代后续精确候选的产品安装和输入验收。
+变更安装组件布局时，必须在专用虚拟机用精确候选验证真实 PackageKit 的旧版迁移、
+重复安装与 Core/Complete 交替；源码夹具不能替代产品安装和输入验收。
 
 rsync batch 是系统维护的非确定性传输格式；可验证的是精确目标内容，不是重复构建得到
 同一 batch。首次生成后冻结其原字节并验收。在后续 Core-only 候选中，将已发布 delta
@@ -133,8 +131,8 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
 
 1. 运行 `scripts/release-control verify-local`，提交其绑定的相同 source tree，
    在 clean、精确远端 `main` 运行 `scripts/release-control candidate`；
-2. 等待唯一 macOS candidate job 成功。它复用源码收据，补齐未执行的 Settings UI，
-   只构建、签名一次，并把 manifest 中的全部产物直接放入
+2. 等待唯一 macOS candidate job 成功。它复用完整源码收据，只构建、签名一次，并把
+   manifest 中的全部产物直接放入
    `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
 3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
    candidate job summary 的 revision 与产物集合摘要，并在本地重新运行最终 verifier；
@@ -174,14 +172,10 @@ macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、
 把已有序号重新编号，或允许同一序号对应不同内容。Catalog 的词包快照序号遵循
 相同的顺序规则，Core-only 变化不推进词包序号。
 
-旧 ad-hoc → 固定 CMS 只是一条一次性的历史 Core lifecycle 验收边；唯一记录在
-`config/linnet-community-signing.json`。其中固定 leaf、bundle ID、macOS major 和
-identity classifier 的“旧迁移投影指纹”共同决定该历史证据能否继续复用：任一项与
-当前候选失配，才必须在隔离的 legacy-seeded 账号或虚拟机中重做迁移；全部匹配时
-不得要求每个候选重复该迁移。Host 连续性和 TIS 不变性由当前 package lifecycle
-matrix 独立验证。该记录只闭合 legacy identity edge，不能冒充当前候选的菜单、
-Settings、输入交互或完整安装 UAT；当前候选仍以步骤 4 的“两轮同 leaf Core”为
-发布前证据。
+Core 更新只接受已安装的固定 CMS 身份；此前公开的旧 ad-hoc App 必须使用
+Complete 修复，不能进入 Core 的就地更新路径。
+Complete 仍须验证旧 App 的代码完整性和明确身份，在不修改既有 TIS 状态与个人数据的
+前提下替换 App。当前候选仍以步骤 4 的“两轮同 leaf Core”为发布前证据。
 
 Settings 只读取用户明确选择的 `data-channel` 或 `preview-channel` 指针，不读取
 可变 Release 别名，也不维护第二份 Core 版本清单；默认始终是正式频道，未知保存值
@@ -209,13 +203,11 @@ Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 c
 同一组 Draft Release 原字节：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
 升级，第二轮重装候选原字节；两轮均
 不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、
-输入菜单、Settings 和真实输入。旧 ad-hoc 身份迁移的复用与失效条件只由
-`config/linnet-community-signing.json` 中的固定 leaf、bundle ID、macOS major 和
-“旧迁移投影指纹”决定，不是逐候选步骤。Core 只接受唯一、精确匹配的 TIS source/bundle
-身份；App 缺失或注册缺失时在 payload 前失败。受支持签名 App 的缺失注册由 Complete
-修复；重复、冲突、未知 bundle 或任何残留身份必须先执行 README 的离线完整卸载命令，不能猜测或覆盖用户
-状态。发布 Keychain 密码永远不属于用户安装流程；历史首次身份迁移若由
-macOS 显示输入源安全确认，它是一次系统授权，不是 Keychain 密码。
+输入菜单、Settings 和真实输入。Core 只接受固定 CMS App 以及唯一、精确匹配的 TIS
+source/bundle 身份；旧 ad-hoc App、App 缺失或注册缺失都在 payload 前失败并指向
+Complete。受支持签名 App 的缺失注册由 Complete 修复；重复、冲突、未知 bundle 或
+任何残留身份必须先执行 README 的离线完整卸载命令，不能猜测或覆盖用户状态。发布
+Keychain 密码永远不属于用户安装流程。
 安装脚本也不得调用依赖用户系统信任根的深度验签来判断 App 是否损坏；用户侧只核对
 冻结的 designated requirement、发布 metadata、差分基线和精确目标整树。
 

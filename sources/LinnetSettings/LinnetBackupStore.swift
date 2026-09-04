@@ -7,7 +7,6 @@ enum LinnetBackupStore {
   static let portableFormatVersion = 1
   static let backupFormatVersion = 4
   static let tableBackupFormatVersion = 3
-  static let legacyBackupFormatVersion = 2
   static let portableExtension = "linnet-data"
 
   static let maximumPortableBytes = 64 * 1024 * 1024
@@ -223,22 +222,6 @@ enum LinnetBackupStore {
 
   static func decodePortable(_ data: Data) throws -> PortableArchive {
     guard data.count <= maximumPortableBytes else { throw Failure.documentTooLarge }
-    let personalCategoryCount = Category.allCases.filter { $0.learningSchema == nil }.count
-    do {
-      try LinnetPortableJSONBudget.validate(
-        data,
-        maximumArrayLength: LinnetPersonalDataStore.maximumRows,
-        maximumTotalArrayElements:
-          LinnetPersonalDataStore.maximumRows * personalCategoryCount + 32,
-        maximumObjectMembers:
-          LinnetPersonalDataStore.maximumRows * personalCategoryCount * 2 + 64,
-        maximumStringBytes: maximumLearningBytes * 2 + 1024
-      )
-    } catch LinnetPortableJSONBudget.Failure.resourceLimit {
-      throw Failure.documentTooLarge
-    } catch {
-      throw Failure.invalidDocument("JSON")
-    }
     let archive: PortableArchive
     do {
       archive = try decoder().decode(PortableArchive.self, from: data)
@@ -467,8 +450,7 @@ extension LinnetBackupStore {
     let manifest = try readBackupManifest(at: backupDirectory)
     try validateBackupArtifacts(manifest, at: backupDirectory)
     let stable = backupDirectory.appending(path: "stable", directoryHint: .isDirectory)
-    let personalRevision = try backupPersonalRevision(
-      at: stable, formatVersion: manifest.formatVersion)
+    let personalRevision = try backupPersonalRevision(at: stable)
     guard personalRevision == manifest.personalRevision else {
       throw Failure.invalidHash("personal revision")
     }
@@ -494,7 +476,6 @@ extension LinnetBackupStore {
     }
     guard manifest.formatVersion == backupFormatVersion
       || manifest.formatVersion == tableBackupFormatVersion
-      || manifest.formatVersion == legacyBackupFormatVersion
     else {
       throw Failure.unsupportedVersion(manifest.formatVersion)
     }
@@ -535,10 +516,7 @@ extension LinnetBackupStore {
     }
   }
 
-  static func backupPersonalRevision(at stable: URL, formatVersion: Int) throws -> String {
-    if formatVersion == legacyBackupFormatVersion {
-      return try LinnetPersonalDataStore.legacyV2Snapshot(from: stable).revision
-    }
+  static func backupPersonalRevision(at stable: URL) throws -> String {
     return try LinnetPersonalDataStore.snapshot(from: stable).revision
   }
 
@@ -683,20 +661,15 @@ extension LinnetBackupStore {
       throw Failure.unsafeArtifact("candidate")
     }
     let stable = try stableArtifactURLs(source, formatVersion: nil)
-    switch stable.layout {
-    case .current:
-      var copiedBytes = 0
-      for file in stable.files {
-        let remaining = maximumBackupBytes - copiedBytes
-        let copied = try cloneBoundedRegularFile(
-          file,
-          to: destination.appending(path: file.lastPathComponent),
-          limit: min(stableArtifactLimit(file.lastPathComponent), remaining)
-        )
-        copiedBytes += copied
-      }
-    case .legacyV2:
-      try normalizeLegacyV2Stable(stable.files, from: source, to: destination)
+    var copiedBytes = 0
+    for file in stable {
+      let remaining = maximumBackupBytes - copiedBytes
+      let copied = try cloneBoundedRegularFile(
+        file,
+        to: destination.appending(path: file.lastPathComponent),
+        limit: min(stableArtifactLimit(file.lastPathComponent), remaining)
+      )
+      copiedBytes += copied
     }
   }
 

@@ -9,7 +9,6 @@ import Carbon
 import InputMethodKit
 
 final class SquirrelInputController: IMKInputController {
-  static let keyRollOver = 50
   static var unknownAppCount: UInt = 0
 
   weak var activeClient: IMKTextInput?
@@ -23,12 +22,6 @@ final class SquirrelInputController: IMKInputController {
   private var inputModeIdentity: LinnetCandidatePresentation.InputModeIdentity?
   private var inlinePreedit = false
   private var inlineCandidate = false
-  // for chord-typing
-  var chordKeyCodes: [UInt32] = .init(repeating: 0, count: SquirrelInputController.keyRollOver)
-  var chordModifiers: [UInt32] = .init(repeating: 0, count: SquirrelInputController.keyRollOver)
-  var chordKeyCount: Int = 0
-  var chordTimer: Timer?
-  var chordDuration: TimeInterval = 0
   var currentApp: String = ""
 
   // InputMethodKit ingress; stateful decisions remain in their typed owners.
@@ -52,10 +45,6 @@ final class SquirrelInputController: IMKInputController {
 
     guard ensureReadySession(for: senderClient) else { return false }
 
-    if let app = senderClient.bundleIdentifier(), currentApp != app {
-      currentApp = app
-      updateAppOptions()
-    }
     return dispatchReadyEvent(
       event,
       modifiers: modifiers)
@@ -150,6 +139,10 @@ final class SquirrelInputController: IMKInputController {
       return
     }
     guard ensureReadySession(for: activatingClient) else { return }
+    if let app = activatingClient.bundleIdentifier(), currentApp != app {
+      currentApp = app
+      updateAppOptions()
+    }
     let configuredLayout = NSApp.squirrelAppDelegate.config?.getString("keyboard_layout")
     if let keyboardLayout = LinnetInputActivationPolicy.keyboardLayoutName(
       configured: configuredLayout) {
@@ -171,7 +164,6 @@ final class SquirrelInputController: IMKInputController {
   override func deactivateServer(_ sender: Any!) {
     guard let deactivatingClient = sender as? IMKTextInput else { return }
     inputModeIdentity = nil
-    clearChord()
     // Retire the old client before calling back into it. A synchronous native
     // activation triggered by the commit then becomes the sole new owner.
     activeClient = nil
@@ -363,7 +355,6 @@ extension SquirrelInputController {
   private func commitRawComposition(to targetClient: IMKTextInput?) {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
       retireSessionLease()
-      clearChord()
       return
     }
     guard sessionIsCurrent() else { return }
@@ -374,7 +365,6 @@ extension SquirrelInputController {
   /// The single active-session exit. Rime owns raw-input semantics; the panel
   /// independently rejects a hide from a controller it no longer presents.
   private func commitActiveComposition(to targetClient: IMKTextInput) {
-    clearChord()
     commitRawComposition(to: targetClient)
     NSApp.squirrelAppDelegate.panel?.hide(controller: self)
   }
@@ -384,7 +374,6 @@ extension SquirrelInputController {
     guard let updateClient = activeClient else { return }
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else {
       retireSessionLease()
-      clearChord()
       hidePalettes()
       return
     }

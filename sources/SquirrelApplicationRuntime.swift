@@ -1,6 +1,11 @@
 import AppKit
-import Darwin
 import InputMethodKit
+import os
+
+private let linnetRuntimeLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet",
+  category: "Runtime"
+)
 
 extension SquirrelApplicationDelegate {
   enum RimeStartup {
@@ -36,13 +41,9 @@ extension SquirrelApplicationDelegate {
     }
     guard let logDirectory = try? SquirrelApp.dataRegistry.prepareRuntimeLogDirectory() else {
       runtimeDataSnapshot = nil
-      print("Linnet runtime log directory is unavailable.")
+      linnetRuntimeLogger.error("The runtime log directory is unavailable.")
       return false
     }
-    runtimeDataSnapshot = snapshot
-    // OpenCC resolves dictionary paths relative to the one activated data
-    // view. A runtime restart repeats this after Settings repairs or updates.
-    FileManager.default.changeCurrentDirectoryPath(snapshot.sharedDataDirectory.path)
     // swiftlint:disable identifier_name
     let notification_handler:
       @convention(c) (
@@ -52,17 +53,21 @@ extension SquirrelApplicationDelegate {
     // swiftlint:enable identifier_name
     rimeAPI.set_notification_handler(notification_handler, context_object)
 
-    var rimeDuoTraits = RimeTraits.rimeStructInit()
-    rimeDuoTraits.setCString(snapshot.sharedDataDirectory.path, to: \.shared_data_dir)
-    rimeDuoTraits.setCString(snapshot.userDataDirectory.path, to: \.user_data_dir)
-    rimeDuoTraits.setCString(snapshot.prebuiltDataDirectory.path, to: \.prebuilt_data_dir)
-    rimeDuoTraits.setCString(snapshot.stagingDirectory.path, to: \.staging_dir)
-    rimeDuoTraits.setCString(logDirectory.path, to: \.log_dir)
-    rimeDuoTraits.setCString(SquirrelApp.productName, to: \.distribution_code_name)
-    rimeDuoTraits.setCString(SquirrelApp.productName, to: \.distribution_name)
-    rimeDuoTraits.setCString(SquirrelApp.productVersion, to: \.distribution_version)
-    rimeDuoTraits.setCString(SquirrelApp.rimeAppName, to: \.app_name)
-    rimeAPI.setup(&rimeDuoTraits)
+    let traits = LinnetRimeTraitValues(
+      sharedDataDirectory: snapshot.sharedDataDirectory.path,
+      userDataDirectory: snapshot.userDataDirectory.path,
+      prebuiltDataDirectory: snapshot.prebuiltDataDirectory.path,
+      stagingDirectory: snapshot.stagingDirectory.path,
+      logDirectory: logDirectory.path,
+      distributionCodeName: SquirrelApp.productName,
+      distributionName: SquirrelApp.productName,
+      distributionVersion: SquirrelApp.productVersion,
+      applicationName: SquirrelApp.rimeAppName)
+    guard traits.apply(to: rimeAPI) else {
+      runtimeDataSnapshot = nil
+      return false
+    }
+    runtimeDataSnapshot = snapshot
     return true
   }
   @discardableResult
@@ -72,12 +77,11 @@ extension SquirrelApplicationDelegate {
 
   @discardableResult
   private func startRime(_ startup: RimeStartup) -> Bool {
-    print("Initializing la rime...")
     // Reconciliation is a pre-start boundary. Mutating projection caches while
     // an existing runtime owns them would publish bytes it has not activated.
     guard !isRimeRunning else { return activeSettingsRevision != nil }
     func failStart(_ message: String) -> Bool {
-      print(message)
+      linnetRuntimeLogger.error("\(message, privacy: .public)")
       isRimeInputSuspended = true
       rimeAPI.finalize()
       isRimeRunning = false
@@ -101,7 +105,7 @@ extension SquirrelApplicationDelegate {
         settingsSnapshot = try LinnetSettingsDocumentStore.snapshot(from: directory)
       }
     } catch {
-      print("Linnet settings reconciliation failed.")
+      linnetRuntimeLogger.error("Settings reconciliation failed.")
       isRimeInputSuspended = true
       return false
     }
@@ -130,7 +134,9 @@ extension SquirrelApplicationDelegate {
     }
     guard warmRimeSession.prepare(
       using: rimeAPI,
-      schemaID: settingsSnapshot.document.input.chineseProfile.schemaID
+      schemaID: settingsSnapshot.document.input.chineseProfile.schemaID,
+      representativeInputCode:
+        settingsSnapshot.document.input.chineseProfile.representativeInputCode
     ) != nil else {
       return failStart("Linnet runtime session readiness check failed.")
     }
@@ -261,7 +267,9 @@ extension SquirrelApplicationDelegate {
       settingsTransactionHost = host
     } catch {
       settingsTransactionHost = nil
-      print("Settings transaction IPC is unavailable: \(error)")
+      linnetRuntimeLogger.error(
+        "Settings transaction IPC is unavailable: \(error.localizedDescription, privacy: .private)"
+      )
     }
     DistributedNotificationCenter.default().addObserver(
       self,
@@ -294,6 +302,7 @@ extension SquirrelApplicationDelegate {
     case 0: return .completed
     case 1: return .inProgress
     case 2: return .deferred
+    case 3: return .waiting
     default: return .failed
     }
   }
@@ -714,7 +723,8 @@ extension SquirrelApplicationDelegate {
       // so a stale or mismatched deployment fails before acknowledgement.
       guard let readinessSession = warmRimeSession.prepare(
         using: rimeAPI,
-        schemaID: selectedProfile.schemaID
+        schemaID: selectedProfile.schemaID,
+        representativeInputCode: selectedProfile.representativeInputCode
       ) else {
         return false
       }

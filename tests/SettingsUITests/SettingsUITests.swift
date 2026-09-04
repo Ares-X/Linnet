@@ -133,35 +133,26 @@ final class SettingsUITests: XCTestCase {
     defer { app.terminate() }
 
     clickTab("Dictionary", in: app)
-    try exerciseFocusedDeletion(
+    try exerciseFocusedRowDeletion(
       addLabel: "Add Custom words",
       fieldLabel: "Value",
       removeLabel: "Remove custom word",
-      value: "Linnet UI test",
+      focusedValue: "10101",
+      untouchedValue: "11111",
       in: app)
-    try exerciseSingleFocusedDeletion(
-      addLabel: "Add Custom words",
-      fieldLabel: "code",
-      removeLabel: "Remove custom word",
-      value: "linnetui",
-      in: app)
-    try exerciseFocusedDeletion(
+    try exerciseFocusedRowDeletion(
       addLabel: "Add Disabled English words",
       fieldLabel: "word",
       removeLabel: "Remove disabled word",
-      value: "linnetuitest",
+      focusedValue: "20202",
+      untouchedValue: "21212",
       in: app)
-    try exerciseFocusedDeletion(
+    try exerciseFocusedRowDeletion(
       addLabel: "Add Text Expander",
       fieldLabel: "Expansion",
       removeLabel: "Remove text expansion",
-      value: "Linnet expansion test",
-      in: app)
-    try exerciseSingleFocusedDeletion(
-      addLabel: "Add Text Expander",
-      fieldLabel: "x;trigger",
-      removeLabel: "Remove text expansion",
-      value: "x;linnetui",
+      focusedValue: "30303",
+      untouchedValue: "31313",
       in: app)
   }
 
@@ -372,7 +363,8 @@ final class SettingsUITests: XCTestCase {
       in: mirror,
       named: "Custom mirror base URL",
       with: "https://mirror.example.com/",
-      in: app)
+      in: app,
+      focus: false)
     XCTAssertEqual(mirror.value as? String, "https://mirror.example.com/")
     try waitUntilEnabled(useCustomMirror, timeout: 3)
     useCustomMirror.click()
@@ -653,13 +645,20 @@ final class SettingsUITests: XCTestCase {
     in field: XCUIElement,
     named name: String,
     with value: String,
-    in app: XCUIApplication
+    in app: XCUIApplication,
+    focus: Bool = true
   ) throws {
     try reveal(field, named: name, in: app)
-    field.click()
-    field.typeKey("a", modifierFlags: [.command])
-    field.typeKey(.delete, modifierFlags: [])
-    field.typeText(value)
+    if focus {
+      field.click()
+      field.typeKey("a", modifierFlags: [.command])
+      field.typeKey(.delete, modifierFlags: [])
+      field.typeText(value)
+    } else {
+      app.typeKey("a", modifierFlags: [.command])
+      app.typeKey(.delete, modifierFlags: [])
+      app.typeText(value)
+    }
   }
 
   @MainActor
@@ -699,61 +698,12 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
-  private func exerciseFocusedDeletion(
+  private func exerciseFocusedRowDeletion(
     addLabel: String,
     fieldLabel: String,
     removeLabel: String,
-    value: String,
-    in app: XCUIApplication
-  ) throws {
-    let add = app.buttons[addLabel]
-    try reveal(add, named: addLabel, in: app)
-    let fields = app.textFields.matching(NSPredicate(
-      format: "placeholderValue == %@ OR label == %@ OR identifier == %@",
-      fieldLabel,
-      fieldLabel,
-      fieldLabel))
-    let removes = app.buttons.matching(NSPredicate(
-      format: "label == %@ OR identifier == %@", removeLabel, removeLabel))
-    let originalCount = fields.count
-    let originalRemoveCount = removes.count
-
-    for _ in 0..<3 { add.click() }
-    XCTAssertEqual(fields.count, originalCount + 3)
-
-    for offset in [1, 1, 0] {
-      let focusedField = fields.element(boundBy: originalCount + offset)
-      XCTAssertTrue(focusedField.waitForExistence(timeout: 3))
-      focusedField.click()
-      focusedField.typeText(value)
-
-      let focusedRowRemove = removes.element(boundBy: originalRemoveCount + offset)
-      XCTAssertTrue(focusedRowRemove.waitForExistence(timeout: 3))
-      focusedRowRemove.click()
-      app.typeKey(.tab, modifierFlags: [])
-      app.typeKey(.tab, modifierFlags: [.shift])
-      XCTAssertNotEqual(
-        app.state,
-        .notRunning,
-        "Settings exited after removing a focused row")
-    }
-    XCTAssertEqual(fields.count, originalCount)
-
-    for _ in 0..<6 { add.click() }
-    while removes.count > originalRemoveCount {
-      let addedRow = removes.element(boundBy: originalRemoveCount)
-      XCTAssertTrue(addedRow.waitForExistence(timeout: 3))
-      addedRow.click()
-    }
-    XCTAssertEqual(fields.count, originalCount)
-  }
-
-  @MainActor
-  private func exerciseSingleFocusedDeletion(
-    addLabel: String,
-    fieldLabel: String,
-    removeLabel: String,
-    value: String,
+    focusedValue: String,
+    untouchedValue: String,
     in app: XCUIApplication
   ) throws {
     let add = app.buttons[addLabel]
@@ -768,16 +718,39 @@ final class SettingsUITests: XCTestCase {
     let originalFieldCount = fields.count
     let originalRemoveCount = removes.count
 
-    add.click()
-    let field = fields.element(boundBy: originalFieldCount)
-    XCTAssertTrue(field.waitForExistence(timeout: 3))
-    field.click()
-    field.typeText(value)
-    let remove = removes.element(boundBy: originalRemoveCount)
-    XCTAssertTrue(remove.waitForExistence(timeout: 3))
-    remove.click()
-    app.typeKey(.tab, modifierFlags: [])
-    XCTAssertNotEqual(app.state, .notRunning)
+    for _ in 0..<3 { add.click() }
+    let focusedField = fields.element(boundBy: originalFieldCount + 1)
+    let untouchedField = fields.element(boundBy: originalFieldCount + 2)
+    XCTAssertTrue(focusedField.waitForExistence(timeout: 3))
+    XCTAssertTrue(untouchedField.waitForExistence(timeout: 3))
+    focusedField.click()
+    focusedField.typeText(focusedValue)
+    untouchedField.click()
+    untouchedField.typeText(untouchedValue)
+
+    focusedField.click()
+    let precedingRowRemove = removes.element(boundBy: originalRemoveCount)
+    XCTAssertTrue(precedingRowRemove.waitForExistence(timeout: 3))
+    precedingRowRemove.click()
+
+    XCTAssertEqual(
+      fields.element(boundBy: originalFieldCount).value as? String,
+      focusedValue,
+      "removing a preceding row lost the focused row value")
+    XCTAssertEqual(
+      fields.element(boundBy: originalFieldCount + 1).value as? String,
+      untouchedValue,
+      "a stale focused-row callback overwrote the next row")
+
+    fields.element(boundBy: originalFieldCount).click()
+    removes.element(boundBy: originalRemoveCount).click()
+    XCTAssertNotEqual(app.state, .notRunning, "Settings exited after removing the focused row")
+    XCTAssertEqual(
+      fields.element(boundBy: originalFieldCount).value as? String,
+      untouchedValue,
+      "removing the focused row changed the untouched row")
+
+    removes.element(boundBy: originalRemoveCount).click()
     XCTAssertEqual(fields.count, originalFieldCount)
   }
 
@@ -854,7 +827,7 @@ final class SettingsUITests: XCTestCase {
     acceptingVisiblePortion: Bool = false
   ) throws {
     let scrollView = app.scrollViews["settings.page.scroll"]
-    for direction in [-1.0, 1.0] {
+    for direction in [1.0, -1.0] {
       for _ in 0..<12 {
         guard scrollView.exists else { break }
         let viewport = scrollView.frame.insetBy(dx: 0, dy: 12)
@@ -870,7 +843,7 @@ final class SettingsUITests: XCTestCase {
           print("Reveal \(name): frame=\(frame), viewport=\(viewport), hittable=\(hittable)")
           // Center the target instead of jumping over its visible interval.
           // Visibility belongs here; each interaction verifies its actual result.
-          deltaY = min(max(viewport.midY - frame.midY, -maximumStep), maximumStep)
+          deltaY = min(max(frame.midY - viewport.midY, -maximumStep), maximumStep)
           if abs(deltaY) < 1 { break }
         }
         scrollView.scroll(byDeltaX: 0, deltaY: deltaY)

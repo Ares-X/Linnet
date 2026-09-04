@@ -16,11 +16,161 @@ extension SquirrelView {
     let usesSelectionStyle: Bool
   }
 
+  struct CandidateDrawing {
+    let backgroundPaths: CGMutablePath?
+    let highlightedPath: CGMutablePath?
+    let interactionFrames: [NSRect]
+    let interactionPaths: [CGPath?]
+
+    static let empty = CandidateDrawing(
+      backgroundPaths: nil,
+      highlightedPath: nil,
+      interactionFrames: [],
+      interactionPaths: [])
+  }
+
   struct PagingDrawing {
     let layer: CAShapeLayer
     let layout: LinnetPanelGeometry.PagingLayout
     let downPath: CGPath?
     let upPath: CGPath?
+  }
+
+  func makeCandidateDrawing(
+    contentFrame: NSRect,
+    backgroundRect: NSRect,
+    preeditRect: NSRect,
+    containingRect: NSRect,
+    theme: SquirrelTheme
+  ) -> CandidateDrawing {
+    if !candidateGridView.isHidden {
+      return makeExpandedCandidateDrawing(contentFrame: contentFrame, theme: theme)
+    }
+    return makeCompactCandidateDrawing(
+      contentFrame: contentFrame,
+      backgroundRect: backgroundRect,
+      preeditRect: preeditRect,
+      containingRect: containingRect,
+      theme: theme)
+  }
+
+  private func makeExpandedCandidateDrawing(
+    contentFrame: NSRect,
+    theme: SquirrelTheme
+  ) -> CandidateDrawing {
+    var backgroundPaths: CGMutablePath?
+    var highlightedPath: CGMutablePath?
+    var interactionFrames = [NSRect](repeating: .zero, count: candidateRanges.count)
+    var interactionPaths = [CGPath?](repeating: nil, count: candidateRanges.count)
+    for geometry in candidateGridView.geometries(in: self)
+    where candidateRanges.indices.contains(geometry.itemIndex) {
+      var cellFrame = geometry.cellFrame
+      var textFrame = geometry.textFrame
+      cellFrame.origin.x -= contentFrame.minX
+      textFrame.origin.x -= contentFrame.minX
+      let cellPath = expandedCandidatePath(
+        cellFrame: cellFrame,
+        textFrame: textFrame,
+        usesSelectionStyle: false,
+        extraExpansion: 0)
+      let interactionFrame = geometry.cellFrame.intersection(bounds)
+      interactionFrames[geometry.itemIndex] = interactionFrame
+      interactionPaths[geometry.itemIndex] = CGPath(rect: interactionFrame, transform: nil)
+      _ = shape.capture(
+        cellPath,
+        candidateIndex: geometry.itemIndex,
+        horizontalOffset: contentFrame.minX,
+        bounds: bounds)
+
+      if geometry.itemIndex == hilightedIndex, theme.highlightedBackColor != nil {
+        highlightedPath = (theme.selectionStyle == .tile
+          ? cellPath
+          : expandedCandidatePath(
+            cellFrame: cellFrame,
+            textFrame: textFrame,
+            usesSelectionStyle: true,
+            extraExpansion: 0))?.mutableCopy()
+      } else if geometry.itemIndex != hilightedIndex, theme.candidateBackColor != nil {
+        let candidatePath = expandedCandidatePath(
+          cellFrame: cellFrame,
+          textFrame: textFrame,
+          usesSelectionStyle: false,
+          extraExpansion: theme.surroundingExtraExpansion)
+        if backgroundPaths == nil { backgroundPaths = CGMutablePath() }
+        if let candidatePath { backgroundPaths?.addPath(candidatePath) }
+      }
+    }
+    return CandidateDrawing(
+      backgroundPaths: backgroundPaths,
+      highlightedPath: highlightedPath,
+      interactionFrames: interactionFrames,
+      interactionPaths: interactionPaths)
+  }
+
+  private func makeCompactCandidateDrawing(
+    contentFrame: NSRect,
+    backgroundRect: NSRect,
+    preeditRect: NSRect,
+    containingRect: NSRect,
+    theme: SquirrelTheme
+  ) -> CandidateDrawing {
+    var backgroundPaths: CGMutablePath?
+    var highlightedPath: CGMutablePath?
+    var interactionFrames: [NSRect] = []
+    var interactionPaths: [CGPath?] = []
+    for (index, candidate) in candidateRanges.enumerated() {
+      let cellPath = candidate.length > 0
+        ? drawPath(
+          highlightedRange: candidate,
+          context: CandidatePathContext(
+            backgroundRect: backgroundRect,
+            preeditRect: preeditRect,
+            containingRect: containingRect,
+            extraExpansion: 0,
+            usesSelectionStyle: false))
+        : nil
+      var interactionTransform = CGAffineTransform(translationX: contentFrame.minX, y: 0)
+      interactionPaths.append(cellPath?.copy(using: &interactionTransform))
+      interactionFrames.append(
+        shape.capture(
+          cellPath,
+          candidateIndex: index,
+          horizontalOffset: contentFrame.minX,
+          bounds: bounds) ?? .zero)
+
+      if index == hilightedIndex,
+        candidate.length > 0,
+        theme.highlightedBackColor != nil {
+        highlightedPath = (theme.selectionStyle == .tile
+          ? cellPath
+          : drawPath(
+            highlightedRange: candidate,
+            context: CandidatePathContext(
+              backgroundRect: backgroundRect,
+              preeditRect: preeditRect,
+              containingRect: containingRect,
+              extraExpansion: 0,
+              usesSelectionStyle: true)))?.mutableCopy()
+      } else if index != hilightedIndex,
+        candidate.length > 0,
+        theme.candidateBackColor != nil {
+        let candidatePath = drawPath(
+          highlightedRange: candidate,
+          context: CandidatePathContext(
+            backgroundRect: backgroundRect,
+            preeditRect: preeditRect,
+            containingRect: containingRect,
+            extraExpansion: theme.surroundingExtraExpansion,
+            usesSelectionStyle: false))
+        if backgroundPaths == nil { backgroundPaths = CGMutablePath() }
+        if let candidatePath { backgroundPaths?.addPath(candidatePath) }
+      }
+    }
+    return CandidateDrawing(
+      backgroundPaths: backgroundPaths,
+      highlightedPath: highlightedPath,
+      interactionFrames: interactionFrames,
+      interactionPaths: interactionPaths)
   }
 
   // A tweaked sign function, to winddown corner radius when the size is small
@@ -315,6 +465,54 @@ extension SquirrelView {
     }
   }
 
+  /// Expanded selection and background paths are derived only from the real
+  /// NSGridView cell frames. Text frames are used solely for the underline and
+  /// bar treatments that intentionally follow the glyph line.
+  func expandedCandidatePath(
+    cellFrame: NSRect,
+    textFrame: NSRect,
+    usesSelectionStyle: Bool,
+    extraExpansion: CGFloat
+  ) -> CGPath? {
+    let theme = currentTheme
+    if usesSelectionStyle {
+      let insets = LinnetCandidatePresentation.candidateSelectionInsets(
+        style: theme.selectionStyle, candidateFont: theme.font)
+      switch theme.selectionStyle {
+      case .underline:
+        return CGPath(
+          rect: NSRect(
+            x: textFrame.minX,
+            y: textFrame.maxY + 1,
+            width: textFrame.width,
+            height: 2),
+          transform: nil)
+      case .bar:
+        return CGPath(
+          rect: NSRect(
+            x: max(1, textFrame.minX - insets.left),
+            y: cellFrame.minY - insets.top,
+            width: 3,
+            height: cellFrame.height + insets.top + insets.bottom),
+          transform: nil)
+      case .tile:
+        break
+      }
+    }
+
+    var rect = cellFrame.insetBy(
+      dx: -separatorWidth / 2,
+      dy: -theme.linespace / 2)
+    rect = rect.insetBy(dx: -extraExpansion, dy: -extraExpansion)
+    guard rect.width > 0, rect.height > 0 else { return nil }
+    let radius = max(0, theme.hilitedCornerRadius + extraExpansion)
+    return drawSmoothLines(
+      rectVertex(of: rect),
+      straightCorner: [],
+      alpha: 0.3 * radius,
+      beta: 1.4 * radius)
+  }
+
   func drawPath(highlightedRange: NSRange, context: CandidatePathContext) -> CGPath? {
     let theme = currentTheme
     if let selectionPath = selectionIndicatorPath(for: highlightedRange, theme: theme, enabled: context.usesSelectionStyle) { return selectionPath }
@@ -354,7 +552,7 @@ extension SquirrelView {
 
     let effectiveRadius = max(0, theme.hilitedCornerRadius + 2 * extraExpansion / theme.hilitedCornerRadius * max(0, theme.cornerRadius - theme.hilitedCornerRadius))
 
-    if theme.linear || usesGridLayout, let highlightedTextRange = convert(range: highlightedRange) {
+    if theme.linear, let highlightedTextRange = convert(range: highlightedRange) {
       let (leadingRect, bodyRect, trailingRect) = multilineRects(forRange: highlightedTextRange, extraSurounding: separatorWidth, bounds: outerBox)
       var (highlightedPoints, highlightedPoints2, rightCorners, rightCorners2) = linearMultilineFor(body: bodyRect, leading: leadingRect, trailing: trailingRect)
 
@@ -418,7 +616,7 @@ extension SquirrelView {
   }
 
   /// Keep the rendered path centered inside the same cell consumed by mouse
-  /// and accessibility actions. Centering the path bounds, rather than the
+  /// actions. Centering the path bounds, rather than the
   /// triangle's construction origin, also handles the rotated arrow exactly.
   func centeredPagingPath(_ path: CGPath, rotationAngle: CGFloat, in control: LinnetPanelGeometry.PagingControl) -> CGPath? {
     var rotation = CGAffineTransform(rotationAngle: rotationAngle)
@@ -431,12 +629,20 @@ extension SquirrelView {
 
   func pagingLayer(theme: SquirrelTheme, metrics: LinnetPanelGeometry.PresentationMetrics, preeditRect: CGRect) -> PagingDrawing {
     let layer = CAShapeLayer()
-    guard metrics.paging.isVisible, let firstCandidate = candidateRanges.first, let range = convert(range: firstCandidate) else {
+    guard metrics.paging.isVisible, !candidateRanges.isEmpty else {
       return PagingDrawing(layer: layer, layout: .none, downPath: nil, upPath: nil)
     }
-    var height = contentRect(range: range).height
+    let height: CGFloat
+    if !candidateGridView.isHidden,
+      let first = candidateGridView.geometries(in: self).first {
+      height = first.cellFrame.height + theme.linespace
+    } else if let firstCandidate = candidateRanges.first,
+      let range = convert(range: firstCandidate) {
+      height = contentRect(range: range).height + theme.linespace
+    } else {
+      return PagingDrawing(layer: layer, layout: .none, downPath: nil, upPath: nil)
+    }
     let preeditHeight = max(0, preeditRect.height + theme.preeditLinespace / 2 + theme.linespace / 2 - theme.edgeInset.height) + theme.edgeInset.height - theme.linespace / 2
-    height += theme.linespace
     let layout = LinnetPanelGeometry.pagingLayout(configuration: metrics.paging, in: bounds, preferredAxisCenter: preeditHeight + height / 2, vertical: metrics.vertical)
     guard layout.previousPage != nil || layout.nextPage != nil else { return PagingDrawing(layer: layer, layout: .none, downPath: nil, upPath: nil) }
     let radius = min(0.5 * metrics.paging.themeOffset, 2 * height / 9)

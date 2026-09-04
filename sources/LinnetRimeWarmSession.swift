@@ -8,14 +8,20 @@ final class LinnetRimeWarmSession {
   private var lease: LinnetRimeSessionLease?
   var identifier: RimeSessionId { lease?.identifier ?? 0 }
 
-  func prepare(using api: RimeApi_stdbool, schemaID: String) -> RimeSessionId? {
-    guard identifier == 0, !schemaID.isEmpty else { return nil }
+  func prepare(
+    using api: RimeApi_stdbool,
+    schemaID: String,
+    representativeInputCode: String
+  ) -> RimeSessionId? {
+    guard identifier == 0, !schemaID.isEmpty, !representativeInputCode.isEmpty else {
+      return nil
+    }
     let created = api.create_session()
     guard let acquired = LinnetRimeSessionLease.acquire(identifier: created) else { return nil }
     lease = acquired
 
     let selected = schemaID.withCString { api.select_schema(created, $0) }
-    let primed = selected && "ceshi".withCString {
+    let primed = selected && representativeInputCode.withCString {
       api.simulate_key_sequence(created, $0)
     }
     guard primed else {

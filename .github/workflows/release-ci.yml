@@ -18,7 +18,6 @@ jobs:
       github.event.created == true &&
       github.event.deleted == false &&
       github.repository == 'Ares-X/Linnet' &&
-      github.actor == 'Ares-X' &&
       (startsWith(github.ref, 'refs/tags/linnet-candidate/') ||
        startsWith(github.ref, 'refs/tags/linnet-data-seed/'))
     concurrency:
@@ -47,7 +46,6 @@ jobs:
           set -euo pipefail
           test "${GITHUB_EVENT_NAME}" = push
           test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
-          test "${GITHUB_ACTOR}" = Ares-X
           [[ "${CANDIDATE_REVISION}" =~ ^[0-9a-f]{40}$ ]]
           CANDIDATE_REVISION="$(git rev-parse --verify "${CANDIDATE_REVISION}^{commit}")"
           candidate_pattern='^refs/tags/linnet-candidate/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})$'
@@ -73,11 +71,10 @@ jobs:
           tag_record="$(gh api \
             "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
             --jq '[.object.type, .object.sha] | @tsv')"
-          settings_ui=NOT_EXERCISED
           if [[ "${request_mode}" == candidate ]]; then
             test "${tag_record}" = $'tag\t'"$(git rev-parse --verify "${CANDIDATE_REF}")"
-            settings_ui="$(scripts/release-control verify-source \
-              "${CANDIDATE_REF}" "${CANDIDATE_REVISION}")"
+            scripts/release-control verify-source \
+              "${CANDIDATE_REF}" "${CANDIDATE_REVISION}" >/dev/null
             remote_main="$(gh api \
               "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
             test "${remote_main}" = "${CANDIDATE_REVISION}"
@@ -103,7 +100,6 @@ jobs:
             echo "version=${version}"
             echo "revision=${CANDIDATE_REVISION}"
             echo "catalog_sequence=${catalog_sequence}"
-            echo "settings_ui=${settings_ui}"
           } >>"${GITHUB_OUTPUT}"
 
       - name: Restore locked build cache once
@@ -150,6 +146,7 @@ jobs:
       - name: Verify history-sensitive publication metadata
         run: |
           set -euo pipefail
+          tests/verify_action_publication.sh
           if git cat-file -e 'HEAD^' 2>/dev/null; then
             changed="$(mktemp)"
             previous="$(mktemp)"
@@ -167,7 +164,6 @@ jobs:
         if: steps.request.outputs.mode == 'data-seed'
         run: |
           scripts/run_swiftlint.sh
-          tests/verify_release_automation.sh
           tests/verify_publication_owner.sh
           tests/verify_development.sh rime
 
@@ -226,10 +222,6 @@ jobs:
             package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
               "${{ steps.request.outputs.version }}" \
               "${LINNET_CANDIDATE_REVISION}"
-
-      - name: Complete Settings UI acceptance when not exercised locally
-        if: steps.request.outputs.mode == 'candidate' && steps.request.outputs.settings_ui == 'NOT_EXERCISED'
-        run: tests/verify_visible_settings_fixture.sh --ui-test
 
       - name: Stage exact GitHub Release bytes
         env:
@@ -305,7 +297,6 @@ jobs:
       github.event.created == true &&
       github.event.deleted == false &&
       github.repository == 'Ares-X/Linnet' &&
-      github.actor == 'Ares-X' &&
       (startsWith(github.ref, 'refs/tags/linnet-preview/') ||
        startsWith(github.ref, 'refs/tags/linnet-publication/'))
     concurrency:
@@ -332,7 +323,6 @@ jobs:
           set -euo pipefail
           test "${GITHUB_EVENT_NAME}" = push
           test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
-          test "${GITHUB_ACTOR}" = Ares-X
           test -z "$(git status --porcelain)"
           test "$(git rev-parse --verify HEAD^{commit})" = \
             "${CANDIDATE_REVISION}"

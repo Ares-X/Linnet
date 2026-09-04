@@ -5,15 +5,6 @@ extension LinnetPersonalDataStore {
     let data: LinnetPersonalData
     let revision: String
   }
-
-  /// Decoded identity of the immutable backup-v2 personal-data boundary.
-  /// Only restore/import code may consume this retired physical format.
-  struct LegacyV2Snapshot: Equatable, Sendable {
-    let data: LinnetPersonalData
-    let sentenceCapitalization: Bool
-    let tabBehavior: String
-    let revision: String
-  }
 }
 
 enum LinnetPersonalDataValidation: Equatable, Sendable {
@@ -120,6 +111,13 @@ extension LinnetPersonalDataStore {
 }
 
 private extension LinnetPersonalDataStore {
+  static let customWordCodeExpression = try! NSRegularExpression(
+    pattern: #"^[a-z0-9;']+(?: [a-z0-9;']+)*$"#
+  )
+  static let expansionTriggerExpression = try! NSRegularExpression(
+    pattern: #"^x;[-0-9A-Za-z_]+$"#
+  )
+
   enum ValidationResult<Value> {
     case valid(Value)
     case invalid(LinnetPersonalDataValidation.Issue)
@@ -198,9 +196,9 @@ private extension LinnetPersonalDataStore {
     guard validValue(value) else {
       return invalid(.customWord(row.id, .value), .invalid)
     }
-    guard code.range(
-      of: #"^[a-z0-9;']+(?: [a-z0-9;']+)*$"#,
-      options: .regularExpression
+    guard customWordCodeExpression.firstMatch(
+      in: code,
+      range: NSRange(code.startIndex..<code.endIndex, in: code)
     ) != nil else {
       return invalid(.customWord(row.id, .code), .invalid)
     }
@@ -255,9 +253,9 @@ private extension LinnetPersonalDataStore {
     guard validValue(value) else {
       return invalid(.expansion(row.id, .value), .invalid)
     }
-    guard trigger.range(
-      of: #"^x;[-0-9A-Za-z_]+$"#,
-      options: .regularExpression
+    guard expansionTriggerExpression.firstMatch(
+      in: trigger,
+      range: NSRange(trigger.startIndex..<trigger.endIndex, in: trigger)
     ) != nil else {
       return invalid(.expansion(row.id, .trigger), .invalid)
     }

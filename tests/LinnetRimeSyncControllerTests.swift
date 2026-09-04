@@ -12,6 +12,7 @@ struct LinnetRimeSyncControllerTests {
         try testDisabledSyncDoesNotRun(root: root)
         try testSlowConfigurationDoesNotBlockInput(root: root)
         try testIncrementalWorkYieldsAndCancellationStopsIt(root: root)
+        try testWaitingWorkUsesLowFrequencyPolling(root: root)
         try testDeferredCycleRetainsHourlyWindow(root: root)
       }
       testHourlyAutomaticLimit()
@@ -265,6 +266,30 @@ struct LinnetRimeSyncControllerTests {
     else {
       fail("incremental work bypassed throttling or continued after cancellation")
     }
+  }
+
+  private static func testWaitingWorkUsesLowFrequencyPolling(root: URL) throws {
+    var callTimes: [Date] = []
+    var result: LinnetRimeSyncResult?
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: { .init(syncDirectory: root, lastAttempt: nil) },
+      recordAttempt: { _ in true },
+      operation: { _ in
+        callTimes.append(Date())
+        return callTimes.count < 3 ? .waiting : .completed
+      }, cancelOperation: {})
+    controller.synchronizeNow { result = $0 }
+    waitUntil { result != nil }
+    guard result == .completed, callTimes.count == 3 else {
+      fail("waiting synchronization did not reach its terminal result")
+    }
+    let intervals = zip(callTimes, callTimes.dropFirst()).map {
+      $1.timeIntervalSince($0)
+    }
+    guard intervals.allSatisfy({ $0 >= 0.075 }) else {
+      fail("background I/O waiting retained high-frequency main-run-loop polling")
+    }
+    controller.stop()
   }
 
   private static func testDeferredCycleRetainsHourlyWindow(root: URL) throws {

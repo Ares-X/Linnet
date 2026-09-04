@@ -11,15 +11,19 @@ enum LinnetCloudRecoveryArchive {
   private static let payloadName = "payload.\(LinnetBackupStore.portableExtension)"
   private static let maximumHeadsToProbe = 32
   private static let maximumHeadBytes = 128 * 1024
+  private static let cloudDownloadTimeout: TimeInterval = 30
 
   enum Failure: LocalizedError {
     case needsConfirmedRepair
+    case cloudItemUnavailable(String)
     case invalid(String)
 
     var errorDescription: String? {
       switch self {
       case .needsConfirmedRepair:
         "No verified cloud recovery baseline is available; explicit repair confirmation is required."
+      case .cloudItemUnavailable(let name):
+        "The iCloud recovery item is not available locally: \(name)."
       case .invalid(let detail): "Invalid cloud recovery archive: \(detail)."
       }
     }
@@ -171,10 +175,12 @@ private extension LinnetCloudRecoveryArchive {
   }
 
   private static func latestVerified(in archiveRoot: URL, workspace: URL) throws -> Latest {
+    let downloadDeadline = Date().addingTimeInterval(cloudDownloadTimeout)
     let heads = archiveRoot.appending(path: "heads", directoryHint: .isDirectory)
     guard FileManager.default.fileExists(atPath: heads.path) else {
       return try hasRecoveryObjects(in: archiveRoot) ? .unusable : .absent
     }
+    try makeUbiquitousItemReadable(heads, deadline: downloadDeadline)
     try requireDirectory(heads)
     let candidates = try FileManager.default.contentsOfDirectory(
       at: heads, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
@@ -188,10 +194,15 @@ private extension LinnetCloudRecoveryArchive {
         path: "head-\(UUID().uuidString)", directoryHint: .isDirectory)
       try FileManager.default.createDirectory(at: candidateWorkspace, withIntermediateDirectories: false)
       do {
+        try makeUbiquitousItemReadable(candidate, deadline: downloadDeadline)
         let head = try readHead(candidate)
         let reconstructed = try reconstruct(
-          head, archiveRoot: archiveRoot, workspace: candidateWorkspace)
+          head, archiveRoot: archiveRoot, workspace: candidateWorkspace,
+          downloadDeadline: downloadDeadline)
         return .verified(head, reconstructed)
+      } catch Failure.cloudItemUnavailable(let name) {
+        try? FileManager.default.removeItem(at: candidateWorkspace)
+        throw Failure.cloudItemUnavailable(name)
       } catch {
         try? FileManager.default.removeItem(at: candidateWorkspace)
       }
@@ -212,11 +223,17 @@ private extension LinnetCloudRecoveryArchive {
     return false
   }
 
-  private static func reconstruct(_ head: Head, archiveRoot: URL, workspace: URL) throws -> URL {
+  private static func reconstruct(
+    _ head: Head,
+    archiveRoot: URL,
+    workspace: URL,
+    downloadDeadline: Date
+  ) throws -> URL {
     guard head.formatVersion == 1, head.deltas.count <= 1024 else {
       throw Failure.invalid("head version or length")
     }
     let base = archiveRoot.appending(path: "bases/\(head.baseDigest)", directoryHint: .isDirectory)
+    try makeUbiquitousTreeReadable(base, deadline: downloadDeadline)
     try requireDirectory(base)
     guard try LinnetDirectoryDelta.digest(base) == head.baseDigest else {
       throw Failure.invalid("base digest")
@@ -225,6 +242,7 @@ private extension LinnetCloudRecoveryArchive {
     for (index, delta) in head.deltas.enumerated() {
       guard safeName(delta.name) else { throw Failure.invalid("delta name") }
       let source = archiveRoot.appending(path: "deltas/\(delta.name)", directoryHint: .notDirectory)
+      try makeUbiquitousItemReadable(source, deadline: downloadDeadline)
       try requireRegular(source)
       guard try sha256(source) == delta.sha256 else { throw Failure.invalid("delta hash") }
       let output = workspace.appending(path: "reconstructed-\(index)", directoryHint: .isDirectory)
@@ -241,12 +259,59 @@ private extension LinnetCloudRecoveryArchive {
       throw Failure.invalid("head target")
     }
     let archive = current.appending(path: payloadName, directoryHint: .notDirectory)
+    try makeUbiquitousItemReadable(archive, deadline: downloadDeadline)
     try requireRegular(archive)
     let payload = try Data(contentsOf: archive)
     guard try payloadIdentity(LinnetBackupStore.decodePortable(payload)) == head.payloadIdentity else {
       throw Failure.invalid("payload identity")
     }
     return current
+  }
+
+  private static func makeUbiquitousTreeReadable(_ root: URL, deadline: Date) throws {
+    guard FileManager.default.fileExists(atPath: root.path) else { return }
+    try makeUbiquitousItemReadable(root, deadline: deadline)
+    guard let entries = FileManager.default.enumerator(
+      at: root,
+      includingPropertiesForKeys: [.isUbiquitousItemKey],
+      options: [.skipsHiddenFiles])
+    else { return }
+    for case let entry as URL in entries {
+      try makeUbiquitousItemReadable(entry, deadline: deadline)
+    }
+  }
+
+  private static func makeUbiquitousItemReadable(_ url: URL, deadline: Date) throws {
+    let fileManager = FileManager.default
+    guard fileManager.isUbiquitousItem(at: url) else { return }
+    do {
+      try fileManager.startDownloadingUbiquitousItem(at: url)
+    } catch {
+      throw Failure.cloudItemUnavailable(url.lastPathComponent)
+    }
+    while true {
+      try Task.checkCancellation()
+      let values: URLResourceValues
+      do {
+        values = try url.resourceValues(forKeys: [
+          .ubiquitousItemDownloadingStatusKey,
+          .ubiquitousItemDownloadingErrorKey
+        ])
+      } catch {
+        throw Failure.cloudItemUnavailable(url.lastPathComponent)
+      }
+      if values.ubiquitousItemDownloadingError != nil {
+        throw Failure.cloudItemUnavailable(url.lastPathComponent)
+      }
+      guard let status = values.ubiquitousItemDownloadingStatus else { return }
+      if status == .current || status == .downloaded {
+        return
+      }
+      guard Date() < deadline else {
+        throw Failure.cloudItemUnavailable(url.lastPathComponent)
+      }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
   }
 
   private static func payloadIdentity(_ archive: LinnetBackupStore.PortableArchive) throws -> String {

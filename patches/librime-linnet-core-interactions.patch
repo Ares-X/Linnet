@@ -1199,7 +1199,7 @@ diff --git a/src/rime_api.h b/src/rime_api.h
 index 2fccde0..2fce13b 100644
 --- a/src/rime_api.h
 +++ b/src/rime_api.h
-@@ -505,6 +505,12 @@ typedef struct RIME_FLAVORED(rime_api_t) {
+@@ -505,6 +505,13 @@ typedef struct RIME_FLAVORED(rime_api_t) {
                                                size_t index);
  
    Bool (*change_page)(RimeSessionId session_id, Bool backward);
@@ -1207,7 +1207,8 @@ index 2fccde0..2fce13b 100644
 +  // Return True if this call committed raw input.
 +  Bool (*commit_raw_input)(RimeSessionId session_id);
 +  // Linnet: append-only ABI; nullptr cancels. 1=pending, 0=done,
-+  // 2=deferred (inactive/changing dictionary), -1=failed.
++  // 2=deferred (inactive/changing dictionary), 3=background I/O waiting,
++  // -1=failed.
 +  int (*sync_user_data_step)(const char* sync_directory);
  } RIME_FLAVORED(RimeApi);
  
@@ -1228,7 +1229,7 @@ index 30f4514..9368c75 100644
  }
  
  RIME_DEPRECATED void RimeFinalize() {
-+  UserDictManager::SynchronizeIncrementally(nullptr);
++  UserDictManager::CancelAndWaitForIncrementalSynchronization();
    Service::instance().deployer().JoinMaintenanceThread();
    Service::instance().StopService();
    Registry::instance().Clear();
@@ -1236,7 +1237,7 @@ index 30f4514..9368c75 100644
  }
  
  RIME_DEPRECATED Bool RimeStartMaintenance(Bool full_check) {
-+  UserDictManager::SynchronizeIncrementally(nullptr);
++  UserDictManager::CancelAndWaitForIncrementalSynchronization();
    LoadModules(kDeployerModules);
    Deployer& deployer(Service::instance().deployer());
    deployer.RunTask("clean_old_log_files");
@@ -1244,7 +1245,7 @@ index 30f4514..9368c75 100644
  }
  
  RIME_DEPRECATED Bool RimeSyncUserData() {
-+  UserDictManager::SynchronizeIncrementally(nullptr);
++  UserDictManager::CancelAndWaitForIncrementalSynchronization();
    Service::instance().CleanupAllSessions();
    Deployer& deployer(Service::instance().deployer());
    deployer.ScheduleTask("installation_update");
@@ -1543,7 +1544,7 @@ diff --git a/src/rime/lever/user_dict_manager.h b/src/rime/lever/user_dict_manag
 index 3cefa8f..843f943 100644
 --- a/src/rime/lever/user_dict_manager.h
 +++ b/src/rime/lever/user_dict_manager.h
-@@ -36,6 +36,11 @@ class RIME_DLL UserDictManager {
+@@ -36,6 +36,13 @@ class RIME_DLL UserDictManager {
    bool Synchronize(const string& dict_name);
    bool SynchronizeAll();
  
@@ -1551,6 +1552,8 @@ index 3cefa8f..843f943 100644
 +  // 2=deferred (inactive/changing dictionary), -1=failed.
 +  // nullptr cancels uncommitted work without waiting for cloud I/O.
 +  static int SynchronizeIncrementally(const char* sync_directory);
++  // Runtime mutation and shutdown boundaries cancel and join the worker.
++  static void CancelAndWaitForIncrementalSynchronization();
 +
   protected:
    Deployer* deployer_;
@@ -1559,7 +1562,7 @@ diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_mana
 index e0331e4..d2ea2cf 100644
 --- a/src/rime/lever/user_dict_manager.cc
 +++ b/src/rime/lever/user_dict_manager.cc
-@@ -224,3 +224,320 @@ bool UserDictManager::SynchronizeAll() {
+@@ -224,3 +224,324 @@ bool UserDictManager::SynchronizeAll() {
  }
  
  }  // namespace rime
@@ -1608,9 +1611,9 @@ index e0331e4..d2ea2cf 100644
 +  vector<string> names;
 +  vector<an<SyncSnapshot>> incoming;
 +  vector<an<SyncSnapshot>> outgoing;
-+  vector<an<SyncSnapshot>> discarded;
 +  std::mutex mutex;
 +  std::condition_variable ready;
++  std::thread worker;
 +  Work work = Work::waiting;
 +  // 0=snapshots ready, 1=I/O pending, 2=worker finished, -1=failed.
 +  std::atomic<int> result{1};
@@ -1621,7 +1624,11 @@ index e0331e4..d2ea2cf 100644
 +    { std::lock_guard<std::mutex> lock(mutex); work = next; }
 +    ready.notify_one();
 +  }
-+  void ReleaseSnapshots() { incoming.clear(); outgoing.clear(); discarded.clear(); names.clear(); }
++  void Join() {
++    if (worker.joinable()) worker.join();
++  }
++  ~SyncIO() { Join(); }
++  void ReleaseSnapshots() { incoming.clear(); outgoing.clear(); names.clear(); }
 +};
 +
 +an<SyncSnapshot> ReadSnapshot(const path& file, const string& name) {
@@ -1694,25 +1701,23 @@ index e0331e4..d2ea2cf 100644
 +
 +void StartIO(const an<SyncIO>& io) {
 +  try {
-+    std::thread([io] {
++    io->worker = std::thread([state = io.get()] {
 +    int result = 2;
 +    try {
-+      ReadCloud(*io);
-+      io->result.store(0, std::memory_order_release);
-+      std::unique_lock<std::mutex> lock(io->mutex);
-+      io->ready.wait(lock, [&] { return io->work != SyncIO::Work::waiting; });
-+      const bool publish = io->work == SyncIO::Work::publish;
++      ReadCloud(*state);
++      state->result.store(0, std::memory_order_release);
++      std::unique_lock<std::mutex> lock(state->mutex);
++      state->ready.wait(lock, [&] { return state->work != SyncIO::Work::waiting; });
++      const bool publish = state->work == SyncIO::Work::publish;
 +      lock.unlock();
-+      if (publish) WriteCloud(*io);
++      if (publish) WriteCloud(*state);
 +    } catch (const std::exception& error) {
 +      LOG(ERROR) << "learning sync: " << error.what();
 +      result = -1;
 +    }
-+    // The worker retains the final heavy-data reference until it has observed
-+    // publication/cancellation. No ready/cancel interleaving frees maps on main.
-+    io->ReleaseSnapshots();
-+    io->result.store(result, std::memory_order_release);
-+    }).detach();
++    state->ReleaseSnapshots();
++    state->result.store(result, std::memory_order_release);
++    });
 +  } catch (...) {
 +    io->result.store(-1, std::memory_order_release);
 +    throw;
@@ -1728,15 +1733,16 @@ index e0331e4..d2ea2cf 100644
 +  an<SyncSnapshot> snapshot;
 +  weak<Db> snapshot_owner;
 +  uint64_t snapshot_revision = 0;
-+  string cursor;
++  an<DbAccessor> records;
 +  bool writing = false;
 +  bool deferred = false;
 +  size_t exported_bytes = 0;
 +
 +  int Step() {
 +    const int result = io->result.load(std::memory_order_acquire);
-+    if (result == -1 || result == 1) return result;
-+    if (writing) return result == 2 ? (deferred ? 2 : 0) : 1;
++    if (result == -1) return result;
++    if (result == 1) return 3;
++    if (writing) return result == 2 ? (deferred ? 2 : 0) : 3;
 +    const auto deadline = Clock::now() + std::chrono::milliseconds(1);
 +    auto* component = dynamic_cast<UserDictionaryComponent*>(
 +        UserDictionary::Require("user_dictionary"));
@@ -1789,7 +1795,7 @@ index e0331e4..d2ea2cf 100644
 +      if (database && !level) {
 +        // Only live LevelDb dictionaries own Rime learning. Custom words and
 +        // Text Expander can have writable Settings mirrors with this suffix.
-+        cursor.clear(); ++exported;
++        records.reset(); ++exported;
 +        return 1;
 +      }
 +      if (level && level->merge_phase() != UserDbMergePhase::none) {
@@ -1799,8 +1805,8 @@ index e0331e4..d2ea2cf 100644
 +      if (!database || (snapshot && (snapshot_owner.lock() != database ||
 +                                    snapshot_revision != level->write_revision()))) {
 +        deferred = true;
-+        if (snapshot) io->discarded.push_back(std::move(snapshot));
-+        cursor.clear(); ++exported;
++        snapshot.reset();
++        records.reset(); ++exported;
 +        return 1;
 +      }
 +      if (!snapshot) {
@@ -1811,18 +1817,16 @@ index e0331e4..d2ea2cf 100644
 +        DbSource metadata(database.get());
 +        while (metadata.MetaGet(&key, &value)) snapshot->MetaUpdate(key, value);
 +        snapshot->MetaUpdate("/user_id", io->user_id);
++        records = database->QueryAll();
 +      }
-+      auto records = database->QueryAll();
-+      if (!records || (!cursor.empty() && !records->Jump(cursor))) return -1;
++      if (!records) return -1;
 +      for (size_t count = 0; count < 64; ++count) {
 +        if (!records->GetNextRecord(&key, &value)) {
 +          io->outgoing.push_back(std::move(snapshot));
-+          cursor.clear(); ++exported;
++          records.reset(); ++exported;
 +          break;
 +        }
-+        if (key == cursor) continue;
 +        if (!snapshot->Update(key, value)) return -1;
-+        cursor = key;
 +        exported_bytes += key.size() + value.size();
 +        if (exported_bytes > 32 * 1024 * 1024) return -1;
 +        if (Clock::now() >= deadline) break;
@@ -1844,10 +1848,6 @@ index e0331e4..d2ea2cf 100644
 +int UserDictManager::SynchronizeIncrementally(const char* sync_directory) {
 +  if (!sync_directory) {
 +    if (outstanding_io) outstanding_io->publication.exchange(2);
-+    if (live_sync) {
-+      if (live_sync->snapshot)
-+        outstanding_io->discarded.push_back(std::move(live_sync->snapshot));
-+    }
 +    live_sync.reset();
 +    if (outstanding_io) outstanding_io->Request(SyncIO::Work::cancel);
 +    return 0;
@@ -1856,7 +1856,7 @@ index e0331e4..d2ea2cf 100644
 +    if (!live_sync) {
 +      if (outstanding_io) {
 +        const int pending = outstanding_io->result.load(std::memory_order_acquire);
-+        if (pending == 0 || pending == 1) return 1;
++        if (pending == 0 || pending == 1) return 3;
 +      }
 +      auto io = New<SyncIO>();
 +      const auto& deployer = Service::instance().deployer();
@@ -1868,16 +1868,23 @@ index e0331e4..d2ea2cf 100644
 +      live_sync = std::make_unique<LiveSync>();
 +      live_sync->io = outstanding_io = io;
 +      StartIO(io);
-+      return 1;
++      return 3;
 +    }
 +    const int result = live_sync->Step();
-+    if (result != 1) SynchronizeIncrementally(nullptr);
++    if (result != 1 && result != 3) SynchronizeIncrementally(nullptr);
 +    return result;
 +  } catch (const std::exception& error) {
 +    LOG(ERROR) << "learning sync: " << error.what();
 +    SynchronizeIncrementally(nullptr);
 +    return -1;
 +  }
++}
++
++void UserDictManager::CancelAndWaitForIncrementalSynchronization() {
++  SynchronizeIncrementally(nullptr);
++  if (!outstanding_io) return;
++  outstanding_io->Join();
++  outstanding_io.reset();
 +}
 +}  // namespace rime
 diff --git a/src/rime/dict/level_db.h b/src/rime/dict/level_db.h

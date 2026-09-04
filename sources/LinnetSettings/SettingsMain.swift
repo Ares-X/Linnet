@@ -10,8 +10,14 @@
 
 import AppKit
 import Combine
+import os
 import SwiftUI
 import UniformTypeIdentifiers
+
+private let settingsModelLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet.Settings",
+  category: "Model"
+)
 
 @MainActor
 final class SettingsModel: ObservableObject {
@@ -101,7 +107,9 @@ final class SettingsModel: ObservableObject {
         )
     } catch {
       personalSnapshot = nil
-      print("Personal settings could not be loaded: \(error.localizedDescription)")
+      settingsModelLogger.error(
+        "Personal settings could not be loaded: \(error.localizedDescription, privacy: .private)"
+      )
     }
     hallelujahDatabase = FileManager.default.urls(
       for: .applicationSupportDirectory,
@@ -119,7 +127,9 @@ final class SettingsModel: ObservableObject {
         ?? LinnetSettingsDocumentStore.defaultSnapshot()
     } catch {
       loadedDocument = nil
-      print("Settings document could not be loaded: \(error.localizedDescription)")
+      settingsModelLogger.error(
+        "Settings document could not be loaded: \(error.localizedDescription, privacy: .private)"
+      )
     }
     let initialConfiguration = SettingsConfigurationSession(
       document: loadedDocument,
@@ -159,7 +169,9 @@ extension SettingsModel {
       do {
         cloudSyncLocation = try await coordinator.prepareCloudSyncLocation()
       } catch {
-        logDiagnostic(error, context: "The Linnet iCloud Drive folder is unavailable")
+        settingsModelLogger.error(
+          "The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription, privacy: .private)"
+        )
       }
     }
   }
@@ -252,7 +264,9 @@ extension SettingsModel {
       } catch {
         guard !Task.isCancelled else { return }
         legacyImportState = .failed
-        logDiagnostic(error, context: "Legacy import inspection failed")
+        settingsModelLogger.error(
+          "Legacy import inspection failed: \(error.localizedDescription, privacy: .private)"
+        )
       }
       legacyInspectionTask = nil
     }
@@ -307,7 +321,9 @@ extension SettingsModel {
         try await coordinator.reloadLearningSyncConfiguration()
         status = .cloudSyncEnabled
       } catch {
-        logDiagnostic(error, context: "Linnet iCloud Drive folder is unavailable")
+        settingsModelLogger.error(
+          "Linnet iCloud Drive folder is unavailable: \(error.localizedDescription, privacy: .private)"
+        )
         status = .operationFailed(.unavailable)
       }
     } else {
@@ -320,7 +336,9 @@ extension SettingsModel {
       do {
         try await coordinator.reloadLearningSyncConfiguration()
       } catch {
-        logDiagnostic(error, context: "Learning sync configuration reload failed")
+        settingsModelLogger.error(
+          "Learning sync configuration reload failed: \(error.localizedDescription, privacy: .private)"
+        )
         status = .operationFailed(presentationFailure(error))
         return
       }
@@ -338,7 +356,9 @@ extension SettingsModel {
         try await self.coordinator.synchronizeLearningNow()
         self.status = .cloudSyncCompleted
       } catch {
-        self.logDiagnostic(error, context: "Immediate learning sync request failed")
+        settingsModelLogger.error(
+          "Immediate learning sync request failed: \(error.localizedDescription, privacy: .private)"
+        )
         self.status = .operationFailed(self.presentationFailure(error))
       }
     }
@@ -381,7 +401,9 @@ extension SettingsModel {
     } catch SettingsDataCoordinator.Failure.cancelled {
       status = .operationCancelled; return nil
     } catch {
-      logDiagnostic(error, context: "Cloud recovery inspection failed")
+      settingsModelLogger.error(
+        "Cloud recovery inspection failed: \(error.localizedDescription, privacy: .private)"
+      )
       status = .operationFailed(presentationFailure(error))
       return nil
     }
@@ -401,7 +423,9 @@ extension SettingsModel {
     } catch SettingsDataCoordinator.Failure.cancelled {
       status = .operationCancelled; return nil
     } catch {
-      logDiagnostic(error, context: "Portable import inspection failed")
+      settingsModelLogger.error(
+        "Portable import inspection failed: \(error.localizedDescription, privacy: .private)"
+      )
       status = .operationFailed(presentationFailure(error))
       return nil
     }
@@ -530,7 +554,9 @@ extension SettingsModel {
       cloudRecoveryRepairConfirmationRequired = true
       status = .cloudBackupRepairRequired
     } catch {
-      logDiagnostic(error, context: "Settings operation failed")
+      settingsModelLogger.error(
+        "Settings operation failed: \(error.localizedDescription, privacy: .private)"
+      )
       status = kind == .removeBackup
         ? .backupRecordRemovalFailed
         : .operationFailed(presentationFailure(error))
@@ -606,7 +632,9 @@ extension SettingsModel {
             over: baseline.appearance)
         }
       } catch {
-        logDiagnostic(error, context: "Candidate appearance publish failed")
+        settingsModelLogger.error(
+          "Candidate appearance publish failed: \(error.localizedDescription, privacy: .private)"
+        )
         status = .appearanceFailed(presentationFailure(error))
       }
       appearancePublishActive = false
@@ -691,64 +719,6 @@ extension SettingsModel {
       ? .conflict : .accepted
   }
 
-  private func acceptPersonalEffect(
-    _ outcome: SettingsDataCoordinator.Outcome,
-    ticket: SettingsConfigurationSession.PersonalTicket?
-  ) -> SettingsOutcomeAcceptance {
-    switch outcome.personalEffect {
-    case .observed:
-      return configuration.observePersonal(outcome.personalSnapshot) == .conflict
-        ? .conflict : .accepted
-    case .submittedDraft:
-      guard let ticket else { return .rejected }
-      return personalCommitAcceptance(
-        outcome.personalSnapshot, kind: .submittedDraft, ticket: ticket)
-    case .externalReplacement:
-      guard let ticket else { return .rejected }
-      return personalCommitAcceptance(
-        outcome.personalSnapshot, kind: .externalReplacement, ticket: ticket)
-    }
-  }
-
-  private func personalCommitAcceptance(
-    _ snapshot: LinnetPersonalDataStore.Snapshot,
-    kind: SettingsConfigurationSession.PersonalCommitKind,
-    ticket: SettingsConfigurationSession.PersonalTicket
-  ) -> SettingsOutcomeAcceptance {
-    switch configuration.acceptPersonalCommit(snapshot, kind: kind, ticket: ticket) {
-    case .conflict: .conflict
-    case .rejectedStaleTicket: .rejected
-    case .accepted, .pendingEditsPreserved: .accepted
-    }
-  }
-
-  private func acceptDocumentEffect(
-    _ outcome: SettingsDataCoordinator.Outcome,
-    ticket: SettingsConfigurationSession.DocumentTicket?
-  ) -> SettingsOutcomeAcceptance {
-    switch outcome.documentEffect {
-    case .observed:
-      return .accepted
-    case .submittedDraft(let snapshot), .externalReplacement(let snapshot):
-      guard let ticket else { return .rejected }
-      let kind: SettingsConfigurationSession.DocumentCommitKind
-      if case .externalReplacement = outcome.documentEffect {
-        kind = .externalReplacement
-      } else {
-        kind = .submittedDraft
-      }
-      switch configuration.acceptDocumentCommit(
-        snapshot, kind: kind, ticket: ticket
-      ) {
-      case .conflict: return .conflict
-      case .rejectedStaleTicket: return .rejected
-      case .accepted, .pendingEditsPreserved: return .accepted
-      }
-    case .submittedAppearance:
-      return .rejected
-    }
-  }
-
   private func recoverConfiguration(
     using personal: LinnetPersonalDataStore.Snapshot
   ) -> Bool {
@@ -767,7 +737,9 @@ extension SettingsModel {
       return configuration.readiness == .ready
     } catch {
       configuration.markSourceUnreadable()
-      logDiagnostic(error, context: "Restored settings could not be loaded")
+      settingsModelLogger.error(
+        "Restored settings could not be loaded: \(error.localizedDescription, privacy: .private)"
+      )
       return false
     }
   }
@@ -791,7 +763,7 @@ extension SettingsModel {
         // Preserve the last verified view. An unreadable or over-limit history
         // is unavailable, never authoritative evidence that no backups exist.
         backupHistory.failLoading()
-        print("Backups could not be read within the bounded history contract.")
+        settingsModelLogger.error("Backups could not be read within the bounded history contract.")
       }
       backupRefreshTask = nil
     }

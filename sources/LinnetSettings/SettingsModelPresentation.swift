@@ -1,6 +1,12 @@
 import AppKit
+import os
 import SwiftUI
 import UniformTypeIdentifiers
+
+private let settingsPresentationLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet.Settings",
+  category: "Presentation"
+)
 
 enum SettingsOutcomeAcceptance {
   case accepted, conflict, rejected
@@ -27,7 +33,9 @@ extension SettingsModel {
       return .ignored
     } catch {
       configuration.markSourceUnreadable()
-      logDiagnostic(error, context: "Personal data could not be reloaded")
+      settingsPresentationLogger.error(
+        "Personal data could not be reloaded: \(error.localizedDescription, privacy: .private)"
+      )
       return nil
     }
   }
@@ -77,6 +85,64 @@ extension SettingsModel {
     }
   }
 
+  func acceptPersonalEffect(
+    _ outcome: SettingsDataCoordinator.Outcome,
+    ticket: SettingsConfigurationSession.PersonalTicket?
+  ) -> SettingsOutcomeAcceptance {
+    switch outcome.personalEffect {
+    case .observed:
+      return configuration.observePersonal(outcome.personalSnapshot) == .conflict
+        ? .conflict : .accepted
+    case .submittedDraft:
+      guard let ticket else { return .rejected }
+      return personalCommitAcceptance(
+        outcome.personalSnapshot, kind: .submittedDraft, ticket: ticket)
+    case .externalReplacement:
+      guard let ticket else { return .rejected }
+      return personalCommitAcceptance(
+        outcome.personalSnapshot, kind: .externalReplacement, ticket: ticket)
+    }
+  }
+
+  func personalCommitAcceptance(
+    _ snapshot: LinnetPersonalDataStore.Snapshot,
+    kind: SettingsConfigurationSession.PersonalCommitKind,
+    ticket: SettingsConfigurationSession.PersonalTicket
+  ) -> SettingsOutcomeAcceptance {
+    switch configuration.acceptPersonalCommit(snapshot, kind: kind, ticket: ticket) {
+    case .conflict: .conflict
+    case .rejectedStaleTicket: .rejected
+    case .accepted, .pendingEditsPreserved: .accepted
+    }
+  }
+
+  func acceptDocumentEffect(
+    _ outcome: SettingsDataCoordinator.Outcome,
+    ticket: SettingsConfigurationSession.DocumentTicket?
+  ) -> SettingsOutcomeAcceptance {
+    switch outcome.documentEffect {
+    case .observed:
+      return .accepted
+    case .submittedDraft(let snapshot), .externalReplacement(let snapshot):
+      guard let ticket else { return .rejected }
+      let kind: SettingsConfigurationSession.DocumentCommitKind
+      if case .externalReplacement = outcome.documentEffect {
+        kind = .externalReplacement
+      } else {
+        kind = .submittedDraft
+      }
+      switch configuration.acceptDocumentCommit(
+        snapshot, kind: kind, ticket: ticket
+      ) {
+      case .conflict: return .conflict
+      case .rejectedStaleTicket: return .rejected
+      case .accepted, .pendingEditsPreserved: return .accepted
+      }
+    case .submittedAppearance:
+      return .rejected
+    }
+  }
+
   private func presentationFailure(
     _ code: LinnetSettingsContract.RuntimeReplyCode
   ) -> SettingsPresentationFailure {
@@ -86,10 +152,6 @@ extension SettingsModel {
     case .staleCandidate: .staleHostState
     default: .hostRejected
     }
-  }
-
-  func logDiagnostic(_ error: Error, context: String) {
-    print("\(context): \(error.localizedDescription)")
   }
 
   var operationActive: Bool {
@@ -145,21 +207,22 @@ extension SettingsModel {
     configuration.personalDraft.customWords.append(.init(value: "", code: ""))
   }
 
-  func customWordValueBinding(_ row: LinnetPersonalData.CustomWord) -> Binding<String> {
-    LinnetStableRowTextBinding.make(
-      draft: personalDraftBinding,
-      rowIdentifier: row.id,
-      fallback: row.value,
-      field: .init(rows: \.customWords, identifier: \.id, value: \.value)
-    )
-  }
-
-  func customWordCodeBinding(_ row: LinnetPersonalData.CustomWord) -> Binding<String> {
-    LinnetStableRowTextBinding.make(
-      draft: personalDraftBinding,
-      rowIdentifier: row.id,
-      fallback: row.code,
-      field: .init(rows: \.customWords, identifier: \.id, value: \.code)
+  func customWordBinding(
+    _ row: LinnetPersonalData.CustomWord,
+    at index: Int
+  ) -> Binding<LinnetPersonalData.CustomWord> {
+    Binding(
+      get: {
+        let rows = self.configuration.personalDraft.customWords
+        guard rows.indices.contains(index), rows[index].id == row.id else { return row }
+        return rows[index]
+      },
+      set: { updatedRow in
+        guard self.configuration.personalDraft.customWords.indices.contains(index),
+          self.configuration.personalDraft.customWords[index].id == row.id
+        else { return }
+        self.configuration.personalDraft.customWords[index] = updatedRow
+      }
     )
   }
 
@@ -171,12 +234,24 @@ extension SettingsModel {
     configuration.personalDraft.disabledWords.append(.init(value: ""))
   }
 
-  func disabledWordBinding(_ row: LinnetPersonalData.DisabledWord) -> Binding<String> {
-    LinnetStableRowTextBinding.make(
-      draft: personalDraftBinding,
-      rowIdentifier: row.identifier,
-      fallback: row.value,
-      field: .init(rows: \.disabledWords, identifier: \.identifier, value: \.value)
+  func disabledWordBinding(
+    _ row: LinnetPersonalData.DisabledWord,
+    at index: Int
+  ) -> Binding<LinnetPersonalData.DisabledWord> {
+    Binding(
+      get: {
+        let rows = self.configuration.personalDraft.disabledWords
+        guard rows.indices.contains(index), rows[index].identifier == row.identifier else {
+          return row
+        }
+        return rows[index]
+      },
+      set: { updatedRow in
+        guard self.configuration.personalDraft.disabledWords.indices.contains(index),
+          self.configuration.personalDraft.disabledWords[index].identifier == row.identifier
+        else { return }
+        self.configuration.personalDraft.disabledWords[index] = updatedRow
+      }
     )
   }
 
@@ -188,33 +263,27 @@ extension SettingsModel {
     configuration.personalDraft.expansions.append(.init(value: "", trigger: "x;"))
   }
 
-  func expansionValueBinding(_ row: LinnetPersonalData.Expansion) -> Binding<String> {
-    LinnetStableRowTextBinding.make(
-      draft: personalDraftBinding,
-      rowIdentifier: row.id,
-      fallback: row.value,
-      field: .init(rows: \.expansions, identifier: \.id, value: \.value)
-    )
-  }
-
-  func expansionTriggerBinding(_ row: LinnetPersonalData.Expansion) -> Binding<String> {
-    LinnetStableRowTextBinding.make(
-      draft: personalDraftBinding,
-      rowIdentifier: row.id,
-      fallback: row.trigger,
-      field: .init(rows: \.expansions, identifier: \.id, value: \.trigger)
+  func expansionBinding(
+    _ row: LinnetPersonalData.Expansion,
+    at index: Int
+  ) -> Binding<LinnetPersonalData.Expansion> {
+    Binding(
+      get: {
+        let rows = self.configuration.personalDraft.expansions
+        guard rows.indices.contains(index), rows[index].id == row.id else { return row }
+        return rows[index]
+      },
+      set: { updatedRow in
+        guard self.configuration.personalDraft.expansions.indices.contains(index),
+          self.configuration.personalDraft.expansions[index].id == row.id
+        else { return }
+        self.configuration.personalDraft.expansions[index] = updatedRow
+      }
     )
   }
 
   func removeExpansion(id expansionID: UUID) {
     configuration.personalDraft.expansions.removeAll { $0.id == expansionID }
-  }
-
-  private var personalDraftBinding: Binding<LinnetPersonalData> {
-    Binding(
-      get: { self.configuration.personalDraft },
-      set: { self.configuration.personalDraft = $0 }
-    )
   }
 
   func reloadExternalChanges() {

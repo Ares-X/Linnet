@@ -28,7 +28,7 @@ extension NSPoint {
 
 // This harness compiles the real candidate view without linking librime. The
 // theme and candidate data are narrow boundary fixtures; layout, tracking,
-// mouse hit testing, and accessibility geometry remain production code.
+// mouse hit testing, and candidate geometry remain production code.
 final class SquirrelTheme {
   static let offsetHeight: CGFloat = 5
   static let showStatusDuration: Double = 1.2
@@ -152,9 +152,6 @@ struct LinnetCandidateWindowInteractionTests {
     testSyntheticHoverLifecycle()
     testCandidateControlPointerFeedback()
     testCandidatePressPublicationIdentity()
-    testAccessibilitySelectionKeepsElementIdentity()
-    testStaleAccessibilityDoesNotRetainController()
-    testAccessibilityRejectsInvalidGeometry()
     testSameControllerReactivationInvalidatesOldPublication()
     testInputControllerOwnerSwapInvalidatesCandidateInteraction()
     testPreciseWheelPagingSemantics()
@@ -165,6 +162,7 @@ struct LinnetCandidateWindowInteractionTests {
     testKeyboardPagingRequestsExpansion()
     testDefaultNineCandidateNaturalSize()
     testEnglishMetadataFooterNaturalSize()
+    testExpandedGridLayoutMatrix()
     testExpandedEnglishDetailKeepsStableExtent()
     testExpandedChineseCommentsDoNotCreateEnglishPlaceholder()
     testSharedCandidateDetailSidecarGeometry()
@@ -263,11 +261,52 @@ struct LinnetCandidateWindowInteractionTests {
     require(
       steadyMaximum < 100,
       "steady candidate presentation maximum took \(steadyMaximum)ms")
+
+    let expandedValues = Array(repeating: ["测试", "candidate", "布局", "preview", "同步"], count: 3)
+      .flatMap { $0 }
+    let expanded = SquirrelInputController.CandidateSnapshot(
+      items: expandedValues.enumerated().map { index, value in
+        .init(
+          text: value, comment: "", page: index / 5, indexOnPage: index % 5,
+          absoluteIndex: index, selectionLabel: index < 5 ? String(index + 1) : nil)
+      },
+      pageSize: 5, currentPage: 0, isLastPage: false,
+      isExpanded: true, canExpand: true)
+    var expandedSamples: [Double] = []
+    var expandedRowIdentities: [ObjectIdentifier]?
+    for highlighted in 0..<20 {
+      let started = ProcessInfo.processInfo.systemUptime
+      let republished = panel.update(
+        preedit: "ceshi", selRange: .empty, caretPos: 5,
+        candidates: expanded, highlighted: highlighted % expanded.items.count,
+        update: true, controller: controller)
+      expandedSamples.append(
+        (ProcessInfo.processInfo.systemUptime - started) * 1_000)
+      require(republished, "expanded candidate presentation did not publish")
+      let rowIdentities = (0..<panel.view.candidateGridView.numberOfRows).map {
+        ObjectIdentifier(panel.view.candidateGridView.row(at: $0))
+      }
+      if let expandedRowIdentities {
+        require(
+          rowIdentities == expandedRowIdentities,
+          "same-shape expanded updates rebuilt the NSGridView constraint graph")
+      } else {
+        expandedRowIdentities = rowIdentities
+      }
+    }
+    let sortedExpandedSamples = expandedSamples.sorted()
+    let expandedP95 = sortedExpandedSamples[p95Index]
+    let expandedMaximum = sortedExpandedSamples.last ?? .infinity
+    require(
+      expandedP95 < 50 && expandedMaximum < 100,
+      "expanded grid presentation took p95 \(expandedP95)ms, max \(expandedMaximum)ms")
     print(
       "candidate_interaction: cold_presentation_ms="
         + String(format: "%.2f", coldMilliseconds)
         + " steady_p95_ms=" + String(format: "%.2f", steadyP95)
-        + " steady_max_ms=" + String(format: "%.2f", steadyMaximum))
+        + " steady_max_ms=" + String(format: "%.2f", steadyMaximum)
+        + " expanded_p95_ms=" + String(format: "%.2f", expandedP95)
+        + " expanded_max_ms=" + String(format: "%.2f", expandedMaximum))
     panel.hide()
   }
 
@@ -295,24 +334,6 @@ struct LinnetCandidateWindowInteractionTests {
     require(
       panel.isVisible && panel.statusTimer != nil,
       "a passive empty Rime update dismissed the timed input-mode status")
-    guard let candidateView = panel.contentView?.subviews.compactMap({
-      $0 as? SquirrelView
-    }).first else {
-      failures.append("input-mode status lost its production presentation surface")
-      panel.hide()
-      return
-    }
-    require(
-      candidateView.accessibilityRole() == .group &&
-        candidateView.accessibilityLabel() == "Input mode",
-      "input-mode status was exposed as a candidate list"
-    )
-    let children = candidateView.accessibilityChildren() ?? []
-    require(
-      children.count == 1 &&
-        (children[0] as? NSAccessibilityElement)?.accessibilityLabel() == "En",
-      "input-mode status lost its accessible language announcement"
-    )
     panel.hide()
   }
 
@@ -356,6 +377,25 @@ struct LinnetCandidateWindowInteractionTests {
       panel.frame.width <= screen.width * 0.95 + 0.5 &&
         panel.frame.height <= screen.height * 0.95 + 0.5,
       "candidate frame plus paging strip exceeded the 95% screen cap")
+    let expanded = SquirrelInputController.CandidateSnapshot(
+      items: ["输入", "候选", "布局", "竖排", "文本", "方案"].enumerated().map {
+        index, value in
+        .init(
+          text: value, comment: "", page: index / 3, indexOnPage: index % 3,
+          absoluteIndex: index, selectionLabel: index < 3 ? String(index + 1) : nil)
+      },
+      pageSize: 3, currentPage: 0, isLastPage: false,
+      isExpanded: true, canExpand: true)
+    let expandedPublished = panel.update(
+      preedit: "shuru", selRange: .empty, caretPos: 5,
+      candidates: expanded, highlighted: 0, update: true,
+      controller: controller)
+    render(candidateView)
+    require(
+      expandedPublished && !candidateView.candidateGridView.isHidden &&
+        candidateView.candidateGridView.numberOfRows == 2 &&
+        candidateView.candidateInteractionFrames.count == expanded.items.count,
+      "manual vertical text orientation lost the expanded real-cell grid")
     panel.hide()
   }
 
@@ -458,7 +498,7 @@ struct LinnetCandidateWindowInteractionTests {
       failures.append("candidate panel did not retain its production SquirrelView")
       return
     }
-    let frames = candidateView.candidateAccessibilityGeometry().candidateFrames
+    let frames = candidateView.candidateInteractionFrames
     guard frames.count == 2 else {
       failures.append("synthetic hover fixture did not publish two candidate cells")
       panel.hide()
@@ -499,7 +539,7 @@ struct LinnetCandidateWindowInteractionTests {
     }
     requireEngineHighlight(
       0, in: candidateView,
-      "mouse move replaced the Rime-owned visual or accessibility selection")
+      "mouse move replaced the Rime-owned visual selection")
     require(
       candidateView.shape.candidateIndex == 1 &&
         !candidateView.shape.isPressed,
@@ -522,187 +562,13 @@ struct LinnetCandidateWindowInteractionTests {
     }
     requireEngineHighlight(
       0, in: candidateView,
-      "mouse exit replaced the Rime-owned visual or accessibility selection")
+      "mouse exit replaced the Rime-owned visual selection")
     require(
       candidateView.shape.candidateIndex == nil &&
         !candidateView.shape.isPressed,
       "mouse exit did not clear candidate pointer feedback")
     requireNoPointerFeedback(in: candidateView, context: "mouse exit")
     panel.hide()
-  }
-
-  private static func testAccessibilitySelectionKeepsElementIdentity() {
-    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
-    let controller = SquirrelInputController()
-    panel.bind(controller: controller)
-    guard let candidateView = panel.contentView?.subviews.compactMap({
-      $0 as? SquirrelView
-    }).first else {
-      failures.append("accessibility identity fixture lost its candidate view")
-      return
-    }
-    candidateView.lightTheme.highlightedAttrs = candidateView.lightTheme.attrs
-    candidateView.lightTheme.labelHighlightedAttrs = candidateView.lightTheme.labelAttrs
-    candidateView.lightTheme.commentHighlightedAttrs = candidateView.lightTheme.commentAttrs
-    let candidates = candidatePublication([
-      (text: "甲", absoluteIndex: 101),
-      (text: "乙", absoluteIndex: 102),
-    ])
-    _ = panel.update(
-      preedit: "", selRange: .empty, caretPos: 0,
-      candidates: candidates, highlighted: 0, update: true,
-      controller: controller)
-    guard let firstChildren = candidateView.accessibilityChildren(),
-      firstChildren.count >= 2
-    else {
-      failures.append("accessibility identity fixture did not publish candidates")
-      panel.hide()
-      return
-    }
-
-    _ = panel.update(
-      preedit: "", selRange: .empty, caretPos: 0,
-      candidates: candidates, highlighted: 1, update: true,
-      controller: controller)
-    let secondChildren = candidateView.accessibilityChildren() ?? []
-    let selected = candidateView.accessibilitySelectedChildren() ?? []
-    let firstElements = firstChildren.compactMap { $0 as? NSAccessibilityElement }
-    let secondElements = secondChildren.compactMap { $0 as? NSAccessibilityElement }
-    let selectedElements = selected.compactMap { $0 as? NSAccessibilityElement }
-    require(
-      firstElements.count >= 2 && secondElements.count >= 2 &&
-        firstElements[0] === secondElements[0] &&
-        firstElements[1] === secondElements[1],
-      "a selection-only update replaced VoiceOver candidate identities")
-    require(
-      selectedElements.count == 1 && selectedElements[0] === secondElements[1],
-      "a selection-only update did not publish the new VoiceOver selection")
-    panel.hide()
-  }
-
-  private static func testStaleAccessibilityDoesNotRetainController() {
-    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
-    weak var releasedController: SquirrelInputController?
-    var staleElement: LinnetCandidateAccessibilityElement?
-    do {
-      let controller = SquirrelInputController()
-      releasedController = controller
-      panel.bind(controller: controller)
-      _ = panel.update(
-        preedit: "", selRange: .empty, caretPos: 0,
-        candidates: candidatePublication([(text: "甲", absoluteIndex: 101)]),
-        highlighted: 0, update: true,
-        controller: controller)
-      let candidateView = panel.contentView?.subviews.compactMap({
-        $0 as? SquirrelView
-      }).first
-      staleElement = candidateView?.accessibilityChildren()?.first
-        as? LinnetCandidateAccessibilityElement
-      panel.unbind(controller: controller)
-    }
-    require(
-      releasedController == nil,
-      "a stale accessibility action retained its retired input controller")
-    require(
-      staleElement?.accessibilityPerformPress() == false,
-      "a stale accessibility action remained authoritative after unbind")
-  }
-
-  private static func testAccessibilityRejectsInvalidGeometry() {
-    let view = SquirrelView(frame: NSRect(x: 0, y: 0, width: 180, height: 40))
-    let accessibility = LinnetCandidateAccessibility()
-    accessibility.install(parent: view, rawTextView: view.textView)
-    accessibility.publish(
-      parent: view,
-      publication: .init(
-        geometry: .init(
-          candidateFrames: [],
-          previousPageFrame: nil,
-          nextPageFrame: nil),
-        candidates: [
-          .init(
-            text: "甲", comment: "", page: 0, indexOnPage: 0,
-            absoluteIndex: 101, selectionLabel: "1"),
-        ],
-        highlightedIndex: 0,
-        controlMode: .paging(canPageUp: false, canPageDown: false),
-        shouldAnnounce: false),
-      selectCandidate: { _ in true },
-      performControl: { _ in true })
-    require(
-      (view.accessibilityChildren() ?? []).isEmpty,
-      "invalid candidate geometry was exposed as a whole-window AX button")
-
-    let validCandidateFrame = NSRect(x: 4, y: 4, width: 40, height: 20)
-    let validControlFrame = NSRect(x: 52, y: 4, width: 20, height: 20)
-    let invalidControlCases: [(
-      label: String,
-      mode: LinnetCandidatePresentation.CandidateControlMode,
-      previous: NSRect?,
-      next: NSRect?,
-      expectedActions: [LinnetCandidatePresentation.CandidateControlAction]
-    )] = [
-      (
-        label: "empty previous-page frame",
-        mode: .paging(canPageUp: true, canPageDown: true),
-        previous: .zero,
-        next: validControlFrame,
-        expectedActions: [.pageDown]
-      ),
-      (
-        label: "zero-width next-page frame",
-        mode: .paging(canPageUp: true, canPageDown: true),
-        previous: validControlFrame,
-        next: NSRect(x: 76, y: 4, width: 0, height: 20),
-        expectedActions: [.pageUp]
-      ),
-      (
-        label: "non-finite expand frame",
-        mode: .disclosure(expanded: false),
-        previous: nil,
-        next: NSRect(x: CGFloat.nan, y: 4, width: 20, height: 20),
-        expectedActions: []
-      ),
-      (
-        label: "non-finite collapse frame",
-        mode: .disclosure(expanded: true),
-        previous: NSRect(x: 52, y: 4, width: 20, height: CGFloat.infinity),
-        next: nil,
-        expectedActions: []
-      ),
-    ]
-    for invalidCase in invalidControlCases {
-      var performedActions: [LinnetCandidatePresentation.CandidateControlAction] = []
-      accessibility.publish(
-        parent: view,
-        publication: .init(
-          geometry: .init(
-            candidateFrames: [validCandidateFrame],
-            previousPageFrame: invalidCase.previous,
-            nextPageFrame: invalidCase.next),
-          candidates: [
-            .init(
-              text: "甲", comment: "", page: 0, indexOnPage: 0,
-              absoluteIndex: 101, selectionLabel: "1"),
-          ],
-          highlightedIndex: 0,
-          controlMode: invalidCase.mode,
-          shouldAnnounce: false),
-        selectCandidate: { _ in true },
-        performControl: { action in
-          performedActions.append(action)
-          return true
-        })
-      let children = view.accessibilityChildren() ?? []
-      for control in children.dropFirst() {
-        _ = (control as? LinnetCandidateAccessibilityElement)?
-          .accessibilityPerformPress()
-      }
-      require(
-        children.count == invalidCase.expectedActions.count + 1 &&
-          performedActions == invalidCase.expectedActions,
-        "\(invalidCase.label) published an invalid AX control frame")
-    }
   }
 
   private static func testPreciseWheelPagingSemantics() {
@@ -807,13 +673,13 @@ struct LinnetCandidateWindowInteractionTests {
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
-      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+      candidateView.candidateInteractionFrames.count == 2
     else {
       failures.append("candidate press fixture did not publish two candidate cells")
       panel.hide()
       return
     }
-    let candidateFrames = candidateView.candidateAccessibilityGeometry().candidateFrames
+    let candidateFrames = candidateView.candidateInteractionFrames
     let secondCandidatePoint = candidateView.convert(candidateFrames[1].center, to: nil)
     let outsidePoint = candidateView.convert(
       NSPoint(x: candidateView.bounds.minX - 10, y: candidateView.bounds.minY - 10),
@@ -1022,7 +888,7 @@ struct LinnetCandidateWindowInteractionTests {
     preeditPoint.y += candidateView.textView.frame.minY
       + candidateView.textView.textContainerInset.height
     let windowPreeditPoint = candidateView.convert(preeditPoint, to: nil)
-    let candidateFrame = candidateView.candidateAccessibilityGeometry().candidateFrames.first
+    let candidateFrame = candidateView.candidateInteractionFrames.first
     guard let candidateFrame else {
       failures.append("preedit press fixture did not publish candidate geometry")
       panel.hide()
@@ -1061,16 +927,14 @@ struct LinnetCandidateWindowInteractionTests {
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
-      let staleAccessibilityAction = candidateView.accessibilityChildren()?.first
-        as? LinnetCandidateAccessibilityElement,
-      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+      candidateView.candidateInteractionFrames.count == 2
     else {
-      failures.append("same-controller reactivation fixture did not publish actions")
+      failures.append("same-controller reactivation fixture did not publish candidate cells")
       panel.hide()
       return
     }
     let secondPoint = candidateView.convert(
-      candidateView.candidateAccessibilityGeometry().candidateFrames[1].center,
+      candidateView.candidateInteractionFrames[1].center,
       to: nil)
     sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 34)
 
@@ -1079,9 +943,6 @@ struct LinnetCandidateWindowInteractionTests {
     require(
       panel.publication == nil && panel.inputController === controller,
       "same-controller reactivation retained the previous publication")
-    require(
-      !staleAccessibilityAction.accessibilityPerformPress(),
-      "an accessibility action crossed same-controller activation generations")
     sendCandidateMouse(.leftMouseUp, at: secondPoint, to: panel, eventNumber: 35)
     require(
       controller.selectedCandidateIndices.isEmpty,
@@ -1091,17 +952,11 @@ struct LinnetCandidateWindowInteractionTests {
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
       controller: controller)
-    guard let currentAccessibilityAction = candidateView.accessibilityChildren()?.first
-      as? LinnetCandidateAccessibilityElement
-    else {
-      failures.append("replacement activation did not publish accessibility actions")
-      panel.hide()
-      return
-    }
+    sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 36)
+    sendCandidateMouse(.leftMouseUp, at: secondPoint, to: panel, eventNumber: 37)
     require(
-      currentAccessibilityAction.accessibilityPerformPress() &&
-        controller.selectedCandidateIndices == [101],
-      "the replacement activation did not accept its own exact action")
+      controller.selectedCandidateIndices == [102],
+      "the replacement activation did not accept its own exact mouse target")
     panel.hide()
   }
 
@@ -1122,22 +977,15 @@ struct LinnetCandidateWindowInteractionTests {
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
-      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+      candidateView.candidateInteractionFrames.count == 2
     else {
       failures.append("controller-swap fixture did not publish candidate geometry")
       panel.hide()
       return
     }
     let secondPoint = candidateView.convert(
-      candidateView.candidateAccessibilityGeometry().candidateFrames[1].center,
+      candidateView.candidateInteractionFrames[1].center,
       to: nil)
-    guard let staleAccessibilityAction = candidateView.accessibilityChildren()?.first
-      as? LinnetCandidateAccessibilityElement
-    else {
-      failures.append("controller-swap fixture did not publish accessibility actions")
-      panel.hide()
-      return
-    }
     sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 35)
     panel.bind(controller: newController)
     require(!panel.isVisible, "controller swap retained the previous candidate panel")
@@ -1145,15 +993,11 @@ struct LinnetCandidateWindowInteractionTests {
       candidateView.shape.candidateIndex == nil &&
         !candidateView.shape.isPressed,
       "controller swap retained the previous pointer interaction")
-    require(
-      candidateView.accessibilityChildren()?.isEmpty == true,
-      "controller swap retained the previous accessibility candidates")
     sendCandidateMouse(.leftMouseUp, at: secondPoint, to: panel, eventNumber: 36)
     require(
-      !staleAccessibilityAction.accessibilityPerformPress() &&
-        oldController.selectedCandidateIndices.isEmpty &&
+      oldController.selectedCandidateIndices.isEmpty &&
         newController.selectedCandidateIndices.isEmpty,
-      "an old mouse or accessibility action crossed controller ownership")
+      "an old mouse action crossed controller ownership")
 
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
@@ -1187,14 +1031,14 @@ struct LinnetCandidateWindowInteractionTests {
     guard let candidateView = panel.contentView?.subviews.compactMap({
       $0 as? SquirrelView
     }).first,
-      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 2
+      candidateView.candidateInteractionFrames.count == 2
     else {
       failures.append("candidate scroll fixture did not publish two candidate cells")
       panel.hide()
       return
     }
     let secondPoint = candidateView.convert(
-      candidateView.candidateAccessibilityGeometry().candidateFrames[1].center,
+      candidateView.candidateInteractionFrames[1].center,
       to: nil)
 
     sendCandidateMouse(.leftMouseDown, at: secondPoint, to: panel, eventNumber: 40)
@@ -1329,20 +1173,9 @@ struct LinnetCandidateWindowInteractionTests {
     in candidateView: SquirrelView,
     _ context: String
   ) {
-    let candidateElements = (candidateView.accessibilityChildren() ?? []).compactMap {
-      $0 as? NSAccessibilityElement
-    }
-    let selectedElements = (candidateView.accessibilitySelectedChildren() ?? []).compactMap {
-      $0 as? NSAccessibilityElement
-    }
     require(
       candidateView.hilightedIndex == expectedIndex,
       "\(context): visual index was \(candidateView.hilightedIndex)")
-    require(
-      candidateElements.indices.contains(expectedIndex) &&
-        selectedElements.count == 1 &&
-        selectedElements[0] === candidateElements[expectedIndex],
-      "\(context): accessibility selection diverged from candidate \(expectedIndex)")
   }
 
   private static func requirePointerFeedback(
@@ -1589,7 +1422,7 @@ struct LinnetCandidateWindowInteractionTests {
       disclosureGlyph?.fillColor != theme.backgroundColor.cgColor,
       "default collapsed disclosure glyph disappeared into the panel background")
 
-    let frames = candidateView.candidateAccessibilityGeometry().candidateFrames
+    let frames = candidateView.candidateInteractionFrames
     require(frames.count == values.count, "default 16pt row did not expose all nine candidate cells")
     if let last = frames.last {
       require(
@@ -1654,7 +1487,7 @@ struct LinnetCandidateWindowInteractionTests {
       abs(panel.frame.height - lastNaturalHeight) <= 0.5,
       "a partial last page retained stale paging height")
     require(
-      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 3,
+      candidateView.candidateInteractionFrames.count == 3,
       "a partial last page retained stale candidate geometry")
 
     let expandedValues = values + values + values.prefix(3)
@@ -1681,7 +1514,7 @@ struct LinnetCandidateWindowInteractionTests {
       abs(panel.frame.height - expandedNaturalHeight) <= 0.5,
       "expanded candidates retained height beyond their three visible rows")
     require(
-      candidateView.candidateAccessibilityGeometry().candidateFrames.count == 21,
+      candidateView.candidateInteractionFrames.count == 21,
       "expanded candidates lost or invented interaction geometry")
 
     _ = panel.update(
@@ -1988,10 +1821,14 @@ struct LinnetCandidateWindowInteractionTests {
           controller: controller)
         panel.displayIfNeeded()
         candidateView.displayIfNeeded()
-        let cellOrigins = candidateView.candidateRanges.map { range -> CGFloat? in
-          guard let textRange = candidateView.convert(range: range) else { return nil }
-          return candidateView.contentRect(range: textRange).minX
-        }
+        let gridGeometry = candidateView.candidateGridView.geometries(
+          in: candidateView)
+        require(
+          candidateView.candidateGridView.numberOfRows == 3 &&
+            gridGeometry.count == snapshot.items.count &&
+            candidateView.textView.string.isEmpty,
+          "expanded candidates did not use only real grid cells")
+        let cellOrigins = gridGeometry.map { Optional($0.cellFrame.minX) }
         for column in 0..<snapshot.pageSize {
           let alignedOrigins = stride(
             from: column, to: snapshot.items.count, by: snapshot.pageSize
@@ -2006,6 +1843,17 @@ struct LinnetCandidateWindowInteractionTests {
         require(
           !candidateView.detailTextView.isHidden,
           "expanded \(linear ? "horizontal" : "vertical") English detail disappeared")
+        if let contentView = panel.contentView {
+          let gridFrame = contentView.convert(
+            candidateView.candidateGridView.bounds,
+            from: candidateView.candidateGridView)
+          require(
+            contentView.bounds.insetBy(dx: -0.5, dy: -0.5).contains(gridFrame) &&
+              !gridFrame.intersects(candidateView.detailTextView.frame),
+            "expanded grid escaped the panel or overlapped its definition footer: "
+              + "grid=\(gridFrame), detail=\(candidateView.detailTextView.frame), "
+              + "panel=\(contentView.bounds)")
+        }
         require(
           candidateView.detailDividerView.isHidden,
           "expanded \(linear ? "horizontal" : "vertical") English detail was not a stable footer below the grid")
@@ -2025,6 +1873,105 @@ struct LinnetCandidateWindowInteractionTests {
         },
         "expanded \(linear ? "horizontal" : "vertical") English detail changed panel extent: \(sizes)")
       panel.hide()
+    }
+  }
+
+  private static func testExpandedGridLayoutMatrix() {
+    for point in [CGFloat(12), 16, 32] {
+      for linear in [true, false] {
+        for pageSize in [3, 5, 7, 9] {
+          let panel = SquirrelPanel(
+            position: NSRect(x: 260, y: 420, width: 2, height: 20))
+          let controller = SquirrelInputController()
+          panel.bind(controller: controller)
+          let view = panel.view
+          let font = NSFont.systemFont(ofSize: point)
+          for theme in [view.lightTheme, view.darkTheme] {
+            theme.available = true
+            theme.font = font
+            theme.linear = linear
+            theme.vertical = false
+            theme.candidateExpansionAllowed = true
+            theme.showPaging = true
+            theme.linespace = LinnetCandidatePresentation.candidateRowSpacing
+            theme.edgeInset = LinnetCandidatePresentation.candidateWindowInset
+            theme.candidateFormat = "[label] [candidate]"
+            theme.attrs = [.font: font, .foregroundColor: NSColor.labelColor]
+            theme.highlightedAttrs = theme.attrs
+            theme.labelAttrs = theme.attrs
+            theme.labelHighlightedAttrs = theme.attrs
+            theme.commentAttrs = theme.attrs
+            theme.commentHighlightedAttrs = theme.attrs
+            theme.firstParagraphStyle = NSMutableParagraphStyle()
+            theme.paragraphStyle = NSMutableParagraphStyle()
+          }
+
+          let count = pageSize * 3 - 1
+          let values = (0..<count).map { index in
+            index.isMultiple(of: 4)
+              ? "candidate-\(index)-with-a-long-name" : "候选\(index)"
+          }
+          let snapshot = SquirrelInputController.CandidateSnapshot(
+            items: values.enumerated().map { index, value in
+              .init(
+                text: value, comment: "", page: index / pageSize,
+                indexOnPage: index % pageSize, absoluteIndex: index,
+                selectionLabel: index / pageSize == 1
+                  ? String(index % pageSize + 1) : nil)
+            },
+            pageSize: pageSize, currentPage: 1, isLastPage: false,
+            isExpanded: true, canExpand: true)
+          let published = panel.update(
+            preedit: "", selRange: .empty, caretPos: 0,
+            candidates: snapshot, highlighted: pageSize + 1,
+            update: true, controller: controller)
+          render(view)
+
+          let geometry = view.candidateGridView.geometries(in: view)
+          let context = "\(point)pt \(linear ? "horizontal" : "vertical") "
+            + "page-size-\(pageSize)"
+          require(published, "\(context) expanded grid did not publish")
+          require(
+            view.candidateGridView.numberOfRows == 3 &&
+              view.candidateGridView.numberOfColumns == pageSize &&
+              geometry.count == count,
+            "\(context) expanded grid lost its partial final row")
+
+          for row in 0..<3 {
+            let rowCells = geometry.filter { $0.itemIndex / pageSize == row }
+            guard let first = rowCells.first else {
+              failures.append("\(context) expanded grid lost row \(row + 1)")
+              continue
+            }
+            require(
+              rowCells.dropFirst().allSatisfy {
+                abs($0.cellFrame.midY - first.cellFrame.midY) <= 0.5
+              },
+              "\(context) row \(row + 1) did not share one baseline")
+          }
+          for column in 0..<pageSize {
+            let columnCells = geometry.filter { $0.itemIndex % pageSize == column }
+            guard let first = columnCells.first else {
+              failures.append("\(context) expanded grid lost column \(column + 1)")
+              continue
+            }
+            require(
+              columnCells.dropFirst().allSatisfy {
+                abs($0.cellFrame.minX - first.cellFrame.minX) <= 0.5 &&
+                  abs($0.cellFrame.width - first.cellFrame.width) <= 0.5
+              },
+              "\(context) column \(column + 1) did not share one guide")
+          }
+          let visibleBounds = view.bounds.insetBy(dx: -0.5, dy: -0.5)
+          for cell in geometry {
+            require(
+              !cell.cellFrame.isEmpty && visibleBounds.contains(cell.cellFrame) &&
+                view.click(at: cell.cellFrame.center) == .candidate(cell.itemIndex),
+              "\(context) cell \(cell.itemIndex) lost visible click geometry")
+          }
+          panel.hide()
+        }
+      }
     }
   }
 
@@ -2178,7 +2125,7 @@ struct LinnetCandidateWindowInteractionTests {
       } else {
         failures.append("\(point)pt long definition has no TextKit geometry")
       }
-      let candidateFrames = candidateView.candidateAccessibilityGeometry().candidateFrames
+      let candidateFrames = candidateView.candidateInteractionFrames
       require(
         candidateFrames.allSatisfy {
           $0.maxX <= candidateView.detailDividerView.frame.minX + 0.5
@@ -2385,7 +2332,7 @@ struct LinnetCandidateWindowInteractionTests {
           require(published, "\(context) did not publish")
           let tolerance: CGFloat = 1.01
           let candidateBounds = candidateView.bounds.insetBy(dx: -tolerance, dy: -tolerance)
-          let candidateFrames = candidateView.candidateAccessibilityGeometry().candidateFrames
+          let candidateFrames = candidateView.candidateInteractionFrames
           require(
             candidateFrames.count == values.count && candidateFrames.allSatisfy {
               !$0.isEmpty && candidateBounds.contains($0)
@@ -2550,8 +2497,7 @@ struct LinnetCandidateWindowInteractionTests {
       hilightedIndex: 0,
       preeditRange: .empty,
       highlightedPreeditRange: .empty,
-      controlMode: .paging(canPageUp: false, canPageDown: false),
-      usesGridLayout: false)
+      controlMode: .paging(canPageUp: false, canPageDown: false))
     render(view)
 
     guard let textRange = view.convert(range: ranges[0]) else {
@@ -2567,7 +2513,7 @@ struct LinnetCandidateWindowInteractionTests {
     }
     switch style {
     case .tile:
-      let cellBox = view.candidateAccessibilityGeometry().candidateFrames.first
+      let cellBox = view.candidateInteractionFrames.first
       require(
         cellBox.map { approximatelyEqual(selectionBox, $0) } == true,
         "\(fontPoint)pt tile selection diverged from the candidate cell path")
@@ -2594,8 +2540,8 @@ struct LinnetCandidateWindowInteractionTests {
         "\(fontPoint)pt bar selection bypassed shared insets: \(selectionBox) / \(expected)")
     }
 
-    let frames = view.candidateAccessibilityGeometry().candidateFrames
-    require(frames.count == ranges.count, "AX candidate frame count changed at \(fontPoint)pt")
+    let frames = view.candidateInteractionFrames
+    require(frames.count == ranges.count, "candidate frame count changed at \(fontPoint)pt")
     guard frames.count == ranges.count else { return }
     let font = NSFont.systemFont(ofSize: fontPoint)
     let minimumRowHeight = NSLayoutManager().defaultLineHeight(for: font)
@@ -2603,7 +2549,7 @@ struct LinnetCandidateWindowInteractionTests {
     for (index, frame) in frames.enumerated() {
       require(
         frame.height + 0.5 >= minimumRowHeight,
-        "\(fontPoint)pt \(linear ? "row" : "column") AX frame \(frame.height) is smaller than visible row \(minimumRowHeight)")
+        "\(fontPoint)pt \(linear ? "row" : "column") frame \(frame.height) is smaller than visible row \(minimumRowHeight)")
       for point in interiorSamples(frame) {
         require(
           view.click(at: point) == .candidate(index),
@@ -2627,7 +2573,16 @@ struct LinnetCandidateWindowInteractionTests {
     }
     surface.cacheDisplay(in: surface.bounds, to: representation)
     guard panel != nil else { return }
-    let cells = view.candidateAccessibilityGeometry().candidateFrames
+    let cells = view.candidateInteractionFrames
+    if !view.candidateGridView.isHidden {
+      let gridCells = view.candidateGridView.geometries(in: view)
+      require(
+        gridCells.count == cells.count && zip(gridCells, cells).allSatisfy {
+          approximatelyEqual($0.cellFrame, $1)
+        },
+        "expanded render did not use its real grid cell frames")
+      return
+    }
     let origin = view.textView.textContainerOrigin
     let detailFrame = view.convert(view.detailTextView.bounds, from: view.detailTextView)
     for (candidate, cell) in zip(view.candidateRanges, cells) {
@@ -3228,8 +3183,7 @@ struct LinnetCandidateWindowInteractionTests {
       hilightedIndex: 0,
       preeditRange: .empty,
       highlightedPreeditRange: .empty,
-      controlMode: .paging(canPageUp: false, canPageDown: false),
-      usesGridLayout: false)
+      controlMode: .paging(canPageUp: false, canPageDown: false))
     if sample.isTranslucent {
       material.layer?.mask = view.shape
     }

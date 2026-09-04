@@ -186,11 +186,15 @@ registered:selected-observation:selectable:path-unknown) exit 0 ;;
   esac
 fi
 
-# Core is only an in-place update of the registered App identity. Missing App
-# state is not reconstructible from filesystem evidence, so it fails before
-# payload mutation and remains owned by the Complete registration lifecycle.
+# Core is only an in-place update of the registered fixed-CMS App identity.
+# Legacy ad-hoc Apps and missing App state remain owned by Complete, which can
+# repair the App without changing existing input-source or personal-data state.
 case "${identity_transition}" in
-  legacy-community-adhoc-to-cms|same-community-cms-leaf) ;;
+  same-community-cms-leaf) ;;
+  legacy-community-adhoc-to-cms)
+    echo "Linnet Core cannot upgrade a legacy ad-hoc App. Run Linnet Complete to preserve and repair this installation." >&2
+    exit 1
+    ;;
   clean-complete-install)
     echo "Linnet Core update requires the installed App. Run Linnet Complete to repair it." >&2
     exit 1

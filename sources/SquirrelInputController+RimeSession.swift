@@ -61,86 +61,6 @@ extension SquirrelInputController {
     return handled
   }
 
-  private func onChordTimer(
-    _: Timer,
-    sessionLease: LinnetRimeSessionLease
-  ) {
-    guard activeClient != nil,
-      self.sessionLease == sessionLease
-    else { return }
-    guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
-      retireSessionLease()
-      clearChord()
-      return
-    }
-    var processedKeys = false
-    guard ownsCurrentSession(sessionLease)
-    else {
-      retireSessionLease()
-      clearChord()
-      return
-    }
-    if chordKeyCount > 0 {
-      for index in 0..<chordKeyCount {
-        let handled = rimeAPI.process_key(
-          sessionLease.identifier,
-          Int32(chordKeyCodes[index]),
-          Int32(chordModifiers[index] | kReleaseMask.rawValue))
-        if handled {
-          processedKeys = true
-        }
-      }
-    }
-    clearChord()
-    if processedKeys {
-      rimeUpdate()
-    }
-  }
-
-  private func updateChord(
-    keycode: UInt32,
-    modifiers: UInt32
-  ) {
-    for index in 0..<chordKeyCount where chordKeyCodes[index] == keycode {
-      return
-    }
-    if chordKeyCount >= Self.keyRollOver {
-      return
-    }
-    chordKeyCodes[chordKeyCount] = keycode
-    chordModifiers[chordKeyCount] = modifiers
-    chordKeyCount += 1
-    if let timer = chordTimer, timer.isValid {
-      timer.invalidate()
-    }
-    chordDuration = 0.1
-    if let duration = NSApp.squirrelAppDelegate.config?.getDouble(
-      "chord_duration"
-    ), duration > 0 {
-      chordDuration = duration
-    }
-    guard let sessionLease,
-      ownsCurrentSession(sessionLease)
-    else { return }
-    chordTimer = Timer.scheduledTimer(
-      withTimeInterval: chordDuration, repeats: false
-    ) { [weak self] timer in
-      self?.onChordTimer(
-        timer,
-        sessionLease: sessionLease)
-    }
-  }
-
-  func clearChord() {
-    chordKeyCount = 0
-    if let timer = chordTimer {
-      if timer.isValid {
-        timer.invalidate()
-      }
-      chordTimer = nil
-    }
-  }
-
   func createSession(client sessionClient: IMKTextInput?) {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
       retireSessionLease()
@@ -150,7 +70,6 @@ extension SquirrelInputController {
       Self.unknownAppCount &+= 1
       return "UnknownApp\(Self.unknownAppCount)"
     }()
-    print("createSession: \(app)")
     currentApp = app
     let identifier = rimeAPI.create_session()
     sessionLease = LinnetRimeSessionLease.acquire(identifier: identifier)
@@ -177,7 +96,6 @@ extension SquirrelInputController {
   func ensureReadySession(for expectedClient: IMKTextInput) -> Bool {
     let recoveredSession = !sessionIsCurrent()
     if recoveredSession {
-      clearChord()
       retireSessionLease()
       createSession(client: expectedClient)
     }
@@ -193,13 +111,11 @@ extension SquirrelInputController {
     guard sessionIsCurrent(), !currentApp.isEmpty else { return }
     let appOptions = NSApp.squirrelAppDelegate.config?.getAppOptions(currentApp)
     for (key, value) in appOptions ?? [:] {
-      print("set app option: \(key) = \(value)")
       rimeAPI.set_option(session, key, value)
     }
   }
 
   func destroySession() {
-    defer { clearChord() }
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput else {
       retireSessionLease()
       return
@@ -225,11 +141,6 @@ extension SquirrelInputController {
       Int32(effectiveKeycode),
       Int32(rimeModifiers))
     consumeCandidateExpansionRequest()
-    if handled {
-      updateChordState(
-        keycode: effectiveKeycode,
-        modifiers: rimeModifiers)
-    }
     return handled
   }
 
@@ -272,30 +183,5 @@ extension SquirrelInputController {
       hasPendingRimeInput
     else { return keycode }
     return keypadEquivalent
-  }
-
-  private func updateChordState(
-    keycode: UInt32,
-    modifiers: UInt32
-  ) {
-    if isChordingKey(keycode) && rimeAPI.get_option(session, "_chord_typing") {
-      updateChord(
-        keycode: keycode,
-        modifiers: modifiers)
-    } else if modifiers & kReleaseMask.rawValue == 0 {
-      clearChord()
-    }
-  }
-
-  private func isChordingKey(_ keycode: UInt32) -> Bool {
-    switch Int32(keycode) {
-    case XK_space...XK_asciitilde,
-         XK_Control_L, XK_Control_R,
-         XK_Alt_L, XK_Alt_R,
-         XK_Shift_L, XK_Shift_R:
-      return true
-    default:
-      return false
-    }
   }
 }

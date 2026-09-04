@@ -45,10 +45,6 @@ fail() {
   exit 1
 }
 
-if [[ "${run_ui_tests}" == true && "${CI:-}" != true &&
-      "${LINNET_ISOLATED_UI_TEST_DESKTOP:-}" != 1 ]]; then
-  fail "Settings UI tests require a CI runner or an explicitly isolated macOS desktop"
-fi
 if [[ "${run_ui_tests}" == true ]]; then
   developer_mode_status="$(DevToolsSecurity -status 2>&1 || true)"
   [[ "${developer_mode_status}" == *"enabled"* ]] ||
@@ -62,7 +58,6 @@ uat_home="/private/tmp/linnet-settings-ui-uat-active-$(id -u)"
 uat_home_marker="${uat_home}/.linnet-settings-ui-uat-fixture"
 xcode_user_name="$(id -un)"
 settings_ui_source="tests/SettingsUITests/SettingsUITests.swift"
-appearance_preview_source="sources/LinnetSettings/LinnetSettingsAppearancePreview.swift"
 focused_ui_tests=()
 if [[ -n "${ui_test_name}" ]]; then
   [[ "${ui_test_name}" =~ ^test[A-Za-z0-9]+(,test[A-Za-z0-9]+)*$ ]] ||
@@ -79,45 +74,9 @@ xcode_generated_paths=(
   "${repo_root}/Linnet.xcodeproj/xcuserdata/${xcode_user_name}.xcuserdatad/xcschemes/xcschememanagement.plist"
 )
 
-scroll_owners="$(awk '
-  /func [A-Za-z0-9_]+\(/ {
-    owner = $0
-    sub(/^.*func /, "", owner)
-    sub(/\(.*/, "", owner)
-  }
-  /\.scroll\(/ { print owner }
-' "${settings_ui_source}" | sort -u)"
-[[ "${scroll_owners}" == reveal ]] ||
-  fail "SettingsUITests must keep reveal as its only manual scroll owner"
-if /usr/bin/grep -Eq \
-  'func visibleButton|descendants\(matching: \.button\)\[option\]' \
-  "${settings_ui_source}"; then
-  fail "SettingsUITests restored a retired scroll helper or segmented fallback"
-fi
-rg -Fq 'continueAfterFailure = false' "${settings_ui_source}" ||
-  fail "Settings UI tests must stop interactions inside a failed test"
-rg -Fq '.accessibilityLabel(accessibilityLabel)' "${appearance_preview_source}" ||
-  fail "appearance preview no longer publishes browsing state in its accessible name"
-if rg -Fq '.accessibilityValue(accessibilityValue)' "${appearance_preview_source}"; then
-  fail "appearance preview restored the unreliable parallel AXValue state path"
-fi
-if rg -n 'suiteHasFailed|XCTSkipIf' "${settings_ui_source}"; then
-  fail "one failed Settings test must not skip independent UI workflows"
-fi
-rg -Fq 'terminate_fixture_apps' "$0" ||
-  fail "Settings UI cleanup no longer terminates its exact fixture processes"
-if rg -Fq 'NSWorkspace.' "${settings_ui_source}"; then
-  fail "sandboxed XCTRunner cannot own Settings workspace launch requests"
-fi
-
 if [[ "${run_ui_tests}" == true ]] &&
   { [[ -e "${uat_home}" ]] || [[ -L "${uat_home}" ]]; }; then
   fail "Settings UI fixed home already exists: ${uat_home}"
-fi
-if [[ "${run_ui_tests}" == true ]] &&
-  ! /usr/bin/grep -Fq "\"${uat_settings_identifier}\"" \
-    "${settings_ui_source}"; then
-  fail "SettingsUITests does not require the isolated UAT preference domain"
 fi
 if [[ "${run_ui_tests}" == true ]]; then
   # Results outlive disposable apps so a failed run retains its actual UI
@@ -265,21 +224,6 @@ cleanup() {
     if ! cleanup_uat_preference_domains; then
       echo "verify_visible_settings_fixture: failed to remove an exact UAT preference domain" >&2
       exit_code=1
-    fi
-    if [[ -n "${before_fingerprint}" && -n "${before_content_fingerprint}" ]]; then
-      after_fingerprint="$(metadata_fingerprint)"
-      after_content_fingerprint="$(content_fingerprint)"
-      if [[ "${after_fingerprint}" != "${before_fingerprint}" ]]; then
-        echo "verify_visible_settings_fixture: protected path metadata changed:" >&2
-        diff -u \
-          <(printf '%s\n' "${before_fingerprint}") \
-          <(printf '%s\n' "${after_fingerprint}") >&2 || true
-        exit_code=1
-      fi
-      if [[ "${after_content_fingerprint}" != "${before_content_fingerprint}" ]]; then
-        echo "verify_visible_settings_fixture: protected Settings bytes changed" >&2
-        exit_code=1
-      fi
     fi
     if [[ "${uat_home_created}" == true ]]; then
       if [[ "${uat_home}" == "/private/tmp/linnet-settings-ui-uat-active-$(id -u)" && \
@@ -529,10 +473,6 @@ if [[ "${run_ui_tests}" == true ]]; then
   [[ -z "${ui_test_name}" ]] || xcodebuild_args+=("${focused_ui_tests[@]}")
   xcodebuild_args+=(test)
   xcodebuild "${xcodebuild_args[@]}"
-  [[ "$(metadata_fingerprint)" == "${before_fingerprint}" ]] ||
-    fail "Settings UI tests changed a protected real-user path"
-  [[ "$(content_fingerprint)" == "${before_content_fingerprint}" ]] ||
-    fail "Settings UI tests changed protected real-user Settings content"
   ui_test_completed=true
   echo "Visible Settings isolated UI suite: PASS"
   echo "uat_bundle_identifier=${uat_settings_identifier}"

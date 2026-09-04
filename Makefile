@@ -1,9 +1,8 @@
 SHELL := /bin/bash
 
-.PHONY: all install deps release debug community community-verified
+.PHONY: all release debug community community-verified
 
 all: release
-install: install-release
 
 RIME_BIN_DIR = librime/dist/bin
 RIME_LIB_DIR = librime/dist/lib
@@ -55,49 +54,6 @@ INPUT_SOURCE_REGISTRATION_INSPECTOR = build/input-source-registration-inspector
 INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES = \
 	sources/LinnetInputSourceRegistration.swift \
 	tools/LinnetInputSourceRegistrationInspector.swift
-PLUM_DATA = data/plum/default.yaml \
-	data/plum/linnet_algebra.yaml \
-	data/plum/linnet_zh.schema.yaml \
-	data/plum/linnet_zh_pinyin.schema.yaml \
-	data/plum/linnet_zh_flypy.schema.yaml \
-	data/plum/linnet_zh_mspy.schema.yaml \
-	data/plum/linnet_zh_sogou.schema.yaml \
-	data/plum/linnet_zh_abc.schema.yaml \
-	data/plum/linnet_zh_ziguang.schema.yaml \
-	data/plum/linnet_zh_jiajia.schema.yaml \
-	data/plum/symbols_v.yaml \
-	data/plum/symbols_caps_v.yaml \
-	data/plum/radical_pinyin.dict.yaml \
-	data/plum/radical_pinyin.schema.yaml \
-	data/plum/linnet_en.schema.yaml \
-	data/plum/linnet_user.yaml \
-	data/plum/linnet_en.dict.yaml \
-	data/plum/linnet_english_entities.dict.yaml \
-	data/plum/linnet_zh.dict.yaml \
-	data/plum/linnet_reviewed.dict.yaml \
-	data/plum/dicts/zi.dict.yaml \
-	data/plum/dicts/jichu.dict.yaml \
-	data/plum/dicts/lianxiang.dict.yaml \
-	data/plum/dicts/cuoyin.dict.yaml \
-	data/plum/dicts/duoyin.dict.yaml \
-	data/plum/dicts/shici.dict.yaml \
-	data/plum/dicts/diming.dict.yaml \
-	data/plum/dicts/yixue.dict.yaml \
-	data/plum/dicts/huaxue.dict.yaml \
-	data/plum/dicts/yaopin.dict.yaml \
-	data/plum/dicts/mingren.dict.yaml \
-	data/plum/dicts/yiren.dict.yaml \
-	data/plum/dicts/wuzhong.dict.yaml \
-	data/plum/dicts/renming.dict.yaml \
-	data/plum/dicts/taifeng.dict.yaml \
-	data/plum/dicts/fangyan.dict.yaml \
-	data/plum/linnet.smart.db \
-	data/plum/linnet.english-data-manifest.json \
-	data/plum/wanxiang-lts-zh-hans.gram \
-	data/plum/zh-hans-t-essay-bgw.gram
-OPENCC_DATA = data/opencc/TSCharacters.ocd2 \
-	data/opencc/TSPhrases.ocd2 \
-	data/opencc/t2s.json
 DEPS_CHECK = $(RIME_LIBRARY) $(SMART_ENGLISH_PLUGIN)
 
 CXX ?= $(shell xcrun --find clang++)
@@ -209,26 +165,6 @@ $(SMART_ENGLISH_PLUGIN): $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
 		$(RIME_LIB_DIR)/rime-plugins/librime-predict.dylib \
 		-o $(SMART_ENGLISH_PLUGIN) \
 		2>&1 | scripts/build-privacy redact
-
-.PHONY: data plum-data opencc-data
-
-data: plum-data opencc-data
-
-$(PLUM_DATA):
-	$(MAKE) plum-data
-
-$(OPENCC_DATA):
-	$(MAKE) opencc-data
-
-plum-data:
-	@echo "Linnet data is pinned and assembled by ./action-install.sh"
-	@false
-
-opencc-data:
-	@echo "Linnet OpenCC data is pinned and assembled by ./action-install.sh"
-	@false
-
-deps: verify-rime-binaries data
 
 BUILD_SETTINGS += COMPILER_INDEX_STORE_ENABLE=YES
 
@@ -356,7 +292,7 @@ community: release
 community-verified: community
 	./tests/verify_product.sh release
 
-.PHONY: package archive install install-debug install-release
+.PHONY: package archive
 
 # The stable community PKG follows Squirrel's pkgbuild/component route, then
 # wraps the component with visible license, upstream notice and privacy pages.
@@ -377,12 +313,6 @@ archive: package
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_archive \
 		"$(CANDIDATE_RELEASE_APP)" \
 		"$(ARCHIVE_OUTPUT_DIR)"
-
-# No build target may mutate the developer machine. Users install the produced
-# PKG explicitly with macOS Installer after checksum verification.
-install install-debug install-release:
-	@echo "Linnet build automation never installs, launches or registers the input method." >&2
-	@false
 
 .PHONY: clean clean-deps
 

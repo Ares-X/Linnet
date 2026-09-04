@@ -17,9 +17,6 @@ struct LinnetBackupStoreTests {
       try testCloudRecoveryArchive(root: root.appending(path: "cloud-recovery", directoryHint: .isDirectory))
       try testBackupHistory(root: root)
       try testLegacyV3Compatibility(root: root.appending(path: "legacy-v3", directoryHint: .isDirectory))
-      try testLegacyV2Compatibility(
-        root: root.appending(path: "legacy-v2", directoryHint: .isDirectory)
-      )
       try testSymlinkAndVersionGuards(root: root)
       try testRetention(root: root.appending(path: "retention", directoryHint: .isDirectory))
       try testHistoryLimit(root: root.appending(path: "history-limit", directoryHint: .isDirectory))
@@ -421,7 +418,7 @@ struct LinnetBackupStoreTests {
       {"formatVersion":1,"createdAt":"2023-11-14T22:13:20Z","appVersion":"1.0.0","dataVersion":"fixture","categories":["customWords"],"personal":[{"category":"customWords","rowCount":\(rowCount),"sha256":"\(String(repeating: "0", count: 64))","rows":[\(rows)]}],"learning":[]}
       """.utf8
     )
-    expectFailure(.documentTooLarge) {
+    expectFailure(.artifactTooLarge("customWords")) {
       _ = try LinnetBackupStore.decodePortable(structuralFlood)
     }
   }
@@ -512,110 +509,6 @@ struct LinnetBackupStoreTests {
     }
   }
 
-  private static func testLegacyV2Compatibility(root: URL) throws {
-    try makeDirectory(root)
-    let fixture = try makeLegacyV2Backup(root: root)
-
-    let history = try LinnetBackupStore.listBackups(in: root)
-    guard history.count == 1,
-      history[0].state == .verified(fixture.manifest),
-      try LinnetBackupStore.verifyBackup(at: fixture.backup) == fixture.manifest
-    else {
-      fail("a frozen legal v2 backup did not survive list and verification")
-    }
-
-    let restored = root.appending(path: "restored", directoryHint: .isDirectory)
-    try makeDirectory(restored)
-    try LinnetBackupStore.copyStable(
-      from: fixture.backup.appending(path: "stable", directoryHint: .isDirectory),
-      to: restored
-    )
-    let restoredPersonal = try LinnetPersonalDataStore.load(from: restored)
-    let restoredDocument = try LinnetSettingsDocumentStore.load(from: restored)
-    let restoredRuntime = try String(
-      contentsOf: restored.appending(path: LinnetPersonalDataStore.userSettingsFile),
-      encoding: .utf8
-    )
-    guard restoredPersonal.customWords.map(\.value) == ["Legacy Cloud"],
-      restoredPersonal.disabledWords.map(\.value) == ["legacy-disabled"],
-      restoredPersonal.expansions.map(\.trigger) == ["x;legacy"],
-      restoredDocument.english.sentenceCapitalization,
-      restoredDocument.english.tabBehavior == .pass,
-      restoredRuntime.hasPrefix("patch:\n"),
-      !FileManager.default.fileExists(
-        atPath: restored.appending(path: LinnetPersonalDataStore.legacyUserSettingsFile).path
-      )
-    else {
-      fail("v2 restore did not normalize exactly once into the current canonical files")
-    }
-
-    let rewrittenID = UUID()
-    let rewrittenTransaction = root.appending(
-      path: rewrittenID.uuidString, directoryHint: .isDirectory)
-    let rewrittenBackup = rewrittenTransaction.appending(
-      path: "backup", directoryHint: .isDirectory)
-    let rewrittenStable = rewrittenBackup.appending(
-      path: "stable", directoryHint: .isDirectory)
-    let rewrittenLearning = rewrittenBackup.appending(
-      path: "user-dictionaries", directoryHint: .isDirectory)
-    for directory in [rewrittenTransaction, rewrittenBackup, rewrittenStable, rewrittenLearning] {
-      try makeDirectory(directory)
-    }
-    _ = try LinnetBackupStore.snapshotStable(from: restored, to: rewrittenStable)
-    let rewritten = try commit(
-      rewrittenBackup,
-      transactionID: rewrittenID,
-      operation: .restore,
-      createdAt: Date(timeIntervalSince1970: 301)
-    )
-    guard rewritten.formatVersion == 4,
-      rewritten.artifacts.contains(where: {
-        $0.path == "stable/\(LinnetPersonalDataStore.userSettingsFile)"
-      }),
-      !rewritten.artifacts.contains(where: {
-        $0.path == "stable/\(LinnetPersonalDataStore.legacyUserSettingsFile)"
-      })
-    else {
-      fail("a restored v2 backup was not rewritten solely as v4")
-    }
-
-    let mislabeled = LinnetBackupStore.BackupManifest(
-      formatVersion: 2,
-      complete: rewritten.complete,
-      backupID: rewritten.backupID,
-      transactionID: rewritten.transactionID,
-      operation: rewritten.operation,
-      createdAt: rewritten.createdAt,
-      appVersion: rewritten.appVersion,
-      dataVersion: rewritten.dataVersion,
-      personalRevision: rewritten.personalRevision,
-      artifacts: rewritten.artifacts
-    )
-    try encode(mislabeled).write(
-      to: rewrittenBackup.appending(path: "manifest.json"), options: .atomic)
-    expectFailure(.incompleteBackup) {
-      _ = try LinnetBackupStore.verifyBackup(at: rewrittenBackup)
-    }
-
-    let damaged = LinnetBackupStore.BackupManifest(
-      formatVersion: fixture.manifest.formatVersion,
-      complete: fixture.manifest.complete,
-      backupID: fixture.manifest.backupID,
-      transactionID: fixture.manifest.transactionID,
-      operation: fixture.manifest.operation,
-      createdAt: fixture.manifest.createdAt,
-      appVersion: fixture.manifest.appVersion,
-      dataVersion: fixture.manifest.dataVersion,
-      personalRevision: String(repeating: "0", count: 64),
-      artifacts: fixture.manifest.artifacts
-    )
-    try encode(damaged).write(
-      to: fixture.backup.appending(path: "manifest.json"), options: .atomic)
-    expectFailure(.invalidHash("personal revision")) {
-      _ = try LinnetBackupStore.verifyBackup(at: fixture.backup)
-    }
-  }
-
   private static func testSymlinkAndVersionGuards(root: URL) throws {
     let symlinkTransaction = UUID()
     let symlinkBackup = try makeBackup(
@@ -656,24 +549,26 @@ struct LinnetBackupStoreTests {
       operation: .importPortable,
       createdAt: .now
     )
-    let unsupported = LinnetBackupStore.BackupManifest(
-      formatVersion: 99,
-      complete: manifest.complete,
-      backupID: manifest.backupID,
-      transactionID: manifest.transactionID,
-      operation: manifest.operation,
-      createdAt: manifest.createdAt,
-      appVersion: manifest.appVersion,
-      dataVersion: manifest.dataVersion,
-      personalRevision: manifest.personalRevision,
-      artifacts: manifest.artifacts
-    )
-    try encode(unsupported).write(
-      to: versionBackup.appending(path: "manifest.json"),
-      options: .atomic
-    )
-    expectFailure(.unsupportedVersion(99)) {
-      _ = try LinnetBackupStore.verifyBackup(at: versionBackup)
+    for unsupportedVersion in [2, 99] {
+      let unsupported = LinnetBackupStore.BackupManifest(
+        formatVersion: unsupportedVersion,
+        complete: manifest.complete,
+        backupID: manifest.backupID,
+        transactionID: manifest.transactionID,
+        operation: manifest.operation,
+        createdAt: manifest.createdAt,
+        appVersion: manifest.appVersion,
+        dataVersion: manifest.dataVersion,
+        personalRevision: manifest.personalRevision,
+        artifacts: manifest.artifacts
+      )
+      try encode(unsupported).write(
+        to: versionBackup.appending(path: "manifest.json"),
+        options: .atomic
+      )
+      expectFailure(.unsupportedVersion(unsupportedVersion)) {
+        _ = try LinnetBackupStore.verifyBackup(at: versionBackup)
+      }
     }
   }
 
@@ -1176,11 +1071,13 @@ struct LinnetBackupStoreTests {
     let backup = try makeBackup(root: root, transactionID: transactionID, customValue: "Legacy V3", legacyTable: true)
     let stable = backup.appending(path: "stable", directoryHint: .isDirectory)
     let manifest = LinnetBackupStore.BackupManifest(
-      formatVersion: 3, complete: true, backupID: UUID(), transactionID: transactionID,
+      formatVersion: LinnetBackupStore.tableBackupFormatVersion,
+      complete: true, backupID: UUID(), transactionID: transactionID,
       operation: .applyPersonalData, createdAt: Date(timeIntervalSince1970: 301),
       appVersion: "0.1.10", dataVersion: "fixture-v3",
       personalRevision: try LinnetPersonalDataStore.snapshot(from: stable).revision,
-      artifacts: try LinnetBackupStore.collectBackupArtifacts(backup, formatVersion: 3))
+      artifacts: try LinnetBackupStore.collectBackupArtifacts(
+        backup, formatVersion: LinnetBackupStore.tableBackupFormatVersion))
     try encode(manifest).write(to: backup.appending(path: "manifest.json"))
     guard try LinnetBackupStore.verifyBackup(at: backup) == manifest,
       manifest.artifacts.contains(where: { $0.path == "user-dictionaries/linnet_en.txt" && $0.rowCount == 1 })
@@ -1191,64 +1088,6 @@ struct LinnetBackupStoreTests {
     guard try LinnetPersonalDataStore.snapshot(from: candidate).revision == manifest.personalRevision else {
       fail("v3 stable restore changed the personal data")
     }
-  }
-
-  /// Frozen bytes and digest values produced by the v2 codec at bda21963.
-  /// This fixture never executes an old binary or touches live user data.
-  private static func makeLegacyV2Backup(root: URL) throws -> (
-    backup: URL, manifest: LinnetBackupStore.BackupManifest
-  ) {
-    let transactionID = UUID()
-    let transaction = root.appending(
-      path: transactionID.uuidString, directoryHint: .isDirectory)
-    let backup = transaction.appending(path: "backup", directoryHint: .isDirectory)
-    let stable = backup.appending(path: "stable", directoryHint: .isDirectory)
-    let learning = backup.appending(
-      path: "user-dictionaries", directoryHint: .isDirectory)
-    for directory in [transaction, backup, stable, learning] { try makeDirectory(directory) }
-
-    let files: [(name: String, contents: String, sha256: String)] = [
-      (
-        "linnet_custom_words.txt",
-        "# Rime table\n# coding: utf-8\n#@/db_name\tlinnet_custom_words.txt\n#@/db_type\ttabledb\n#\nLegacy Cloud\tlegacy\n",
-        "f94e48b117b3739c706ebcc4c1d3322e6620d2c5f3ffb37445bd720ad5002f3d"
-      ),
-      (
-        "linnet_text_expander.txt",
-        "# Rime table\n# coding: utf-8\n#@/db_name\tlinnet_text_expander.txt\n#@/db_type\ttabledb\n#\nLegacy expansion\tx;legacy\n",
-        "3bec19871ee3dd10b8a25dc7c0236b77aae307dea00f83a0ac68bb848bdae2de"
-      ),
-      (
-        "linnet_user.yaml",
-        "# Linnet user-managed settings\n# encoding: utf-8\n\ndisabled_words:\n  - \"legacy-disabled\"\nsentence_capitalization: true\ntab_behavior: pass\n",
-        "2e1674b6563e3bc56f3e297b348aa095bac288de214efd2f10b9eba382d86b93"
-      ),
-    ]
-    for file in files {
-      try file.contents.write(
-        to: stable.appending(path: file.name), atomically: true, encoding: .utf8)
-    }
-    let manifest = LinnetBackupStore.BackupManifest(
-      formatVersion: 2,
-      complete: true,
-      backupID: UUID(),
-      transactionID: transactionID,
-      operation: .applyPersonalData,
-      createdAt: Date(timeIntervalSince1970: 300),
-      appVersion: "1.0.0",
-      dataVersion: "2026.08.06",
-      personalRevision: "0420c8a4302ec4150da23ba08f21ca6f735774dd87d060d8d1543d04591a3954",
-      artifacts: files.map {
-        .init(
-          path: "stable/\($0.name)",
-          byteCount: $0.contents.utf8.count,
-          rowCount: nil,
-          sha256: $0.sha256
-        )
-      }
-    )
-    try encode(manifest).write(to: backup.appending(path: "manifest.json"), options: .atomic)
-    return (backup, manifest)
   }
 
   @discardableResult

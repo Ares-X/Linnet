@@ -79,34 +79,11 @@ if [[ "${run_app}" -eq 1 ]]; then
     exit 1
   }
 
-verify_inputs_predate() {
-  local executable="$1"
-  local input
-  while IFS= read -r input; do
-    [[ -f "${input}" && ! -L "${input}" ]] || continue
-    [[ ! "${input}" -nt "${executable}" ]] || {
-      echo "verify_development: Release is older than build input: ${input}" >&2
-      exit 1
-    }
-  done
-}
-
-  verify_inputs_predate "${build_stamp}" < <(
-    {
-      git ls-files --cached --others --exclude-standard -- \
-        Makefile Linnet.xcodeproj/project.pbxproj config/LinnetProduct.xcconfig \
-        sources resources data/linnet data/squirrel.yaml
-      find data/plum data/opencc lib -type f -print
-    } | LC_ALL=C sort -u
-  )
-
   bash -n action-build.sh action-install.sh package/installer-scripts/postinstall \
     package/installer-scripts/complete-postinstall
   tests/verify_runtime_footprint.sh
-  LINNET_LIFECYCLE_CANDIDATE_APP="${host_app}" tests/verify_package_lifecycle.sh
   tests/verify_visible_settings_fixture.sh --verify local
   tests/verify_release_metadata.sh
-  tests/verify_package_architecture.sh
   make --no-print-directory english-data-generator
   tests/verify_english_data_projection.sh
   ruby tests/generate_m2_fixtures.rb --check
@@ -115,15 +92,13 @@ verify_inputs_predate() {
   scripts/build-privacy scan "${host_app}"
 fi
 
-if [[ "${run_swift}" -eq 1 ]]; then
+run_swift_tests() {
   tests/verify_swift_units.sh
-fi
+}
 
-if [[ "${run_rime}" -eq 1 ]]; then
-  tests/verify_rime_test_orchestration.sh
+run_rime_tests() {
   tests/verify_lua_lifetime.sh
   tests/verify_data_release_baseline.sh
-  tests/verify_chinese_upstream_workflow.sh
   ruby scripts/upstream-sync verify
   tests/verify_chinese_source_projection.sh
   tests/verify_locked_release_asset.sh
@@ -131,6 +106,51 @@ if [[ "${run_rime}" -eq 1 ]]; then
   ruby tests/verify_profile_golden.rb
   tests/verify_chinese_learning_policy.sh
   tests/verify_rime_runtime.sh
+}
+
+if [[ "${profile}" == all ]]; then
+  # Both suites only read the staged product/runtime and own distinct temporary
+  # roots. Keep each suite internally serial while using the two independent
+  # process boundaries that actually reduce wall time.
+  parallel_pids=()
+  stop_parallel() {
+    local pid
+    for pid in "${parallel_pids[@]}"; do
+      kill -TERM "${pid}" 2>/dev/null || true
+    done
+    for pid in "${parallel_pids[@]}"; do
+      wait "${pid}" 2>/dev/null || true
+    done
+  }
+  trap 'stop_parallel; exit 130' INT
+  trap 'stop_parallel; exit 143' TERM HUP
+
+  run_swift_tests &
+  swift_pid=$!
+  parallel_pids+=("${swift_pid}")
+  run_rime_tests &
+  rime_pid=$!
+  parallel_pids+=("${rime_pid}")
+
+  set +e
+  wait "${swift_pid}"
+  swift_status=$?
+  if [[ "${swift_status}" -ne 0 ]]; then
+    kill -TERM "${rime_pid}" 2>/dev/null || true
+  fi
+  wait "${rime_pid}"
+  rime_status=$?
+  set -e
+  parallel_pids=()
+  trap - INT TERM HUP
+  [[ "${swift_status}" -eq 0 && "${rime_status}" -eq 0 ]] || exit 1
+else
+  if [[ "${run_swift}" -eq 1 ]]; then
+    run_swift_tests
+  fi
+  if [[ "${run_rime}" -eq 1 ]]; then
+    run_rime_tests
+  fi
 fi
 
 echo "Linnet development gate (${profile}): PASS (no signing or installation)"

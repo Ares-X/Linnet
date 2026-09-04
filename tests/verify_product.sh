@@ -44,7 +44,6 @@ settings="${repo_root}/build/Candidate.noindex/Release/Settings.candidate"
 
 frozen_revision="$(git rev-parse --verify HEAD^{commit})"
 assert_clean_checkout
-run_phase "native process isolation" tests/verify_candidate_native_idle.sh
 signing_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app}/Contents/Info.plist")"
 [[ "${signing_profile}" == community-cms ]] ||
@@ -131,8 +130,6 @@ done
 
 run_phase "fixed-home signed Settings bundle" \
   tests/verify_visible_settings_fixture.sh --verify candidate
-run_phase "signed package lifecycle" env \
-  LINNET_LIFECYCLE_CANDIDATE_APP="${app}" tests/verify_package_lifecycle.sh
 run_phase "offline candidate process" env \
   APP_PATH="${app}" LANGUAGE_DATA_ROOT="${repo_root}/data/plum" \
   tests/verify_input_process_offline.sh

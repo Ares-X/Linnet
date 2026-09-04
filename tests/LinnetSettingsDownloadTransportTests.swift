@@ -219,7 +219,7 @@ struct LinnetSettingsDownloadTransportTests {
       try await appearedTask.value
       throw TestFailure.message("mid-transfer destination accepted")
     } catch let failure as LinnetSettingsDownloadTransport.Failure {
-      guard case .storage = failure else { throw failure }
+      guard case .destinationExists = failure else { throw failure }
     }
     try require(try Data(contentsOf: sentinel) == Data("sentinel".utf8), "appeared target")
     try require(try partials(in: root).isEmpty, "appeared destination left partial")

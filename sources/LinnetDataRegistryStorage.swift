@@ -43,7 +43,11 @@ extension LinnetDataRegistry {
     for pack: ActivePack
   ) throws -> VerifiedInstalledManifest {
     let directory = rootDirectory.appending(path: pack.relativePath, directoryHint: .isDirectory)
-    let installed = try verifiedInstalledManifest(at: directory)
+    // Installed packs were content-hashed before their atomic publication.
+    // Startup only needs to prove that the immutable inventory still has the
+    // declared shape and byte sizes; re-reading every dictionary here makes
+    // each Host launch proportional to the full language-data footprint.
+    let installed = try verifiedInstalledManifest(at: directory, verifyContents: false)
     guard Self.sha256(installed.manifestData) == pack.manifestSHA256,
       Self.activePack(from: installed.manifest, manifestSHA256: pack.manifestSHA256) == pack
     else { throw Failure.invalidActiveState }
@@ -51,7 +55,8 @@ extension LinnetDataRegistry {
   }
 
   func verifiedInstalledManifest(
-    at directory: URL
+    at directory: URL,
+    verifyContents: Bool = true
   ) throws -> VerifiedInstalledManifest {
     let manifestData: Data
     do {
@@ -66,7 +71,7 @@ extension LinnetDataRegistry {
     } catch {
       throw Failure.invalidActiveState
     }
-    try verifyInstalledInventory(manifest, in: directory)
+    try verifyInstalledInventory(manifest, in: directory, verifyContents: verifyContents)
     return .init(manifest: manifest, manifestData: manifestData)
   }
 
@@ -224,8 +229,15 @@ extension LinnetDataRegistry {
 
   func verifyInstalledInventory(
     _ manifest: LinnetPackContract.Manifest,
-    in directory: URL
+    in directory: URL,
+    verifyContents: Bool
   ) throws {
+    let declaredBytes = Dictionary(
+      manifest.files.map { ($0.path, $0.bytes) },
+      uniquingKeysWith: { _, replacement in replacement })
+    guard declaredBytes.count == manifest.files.count else {
+      throw Failure.invalidActiveState
+    }
     var expectedFiles = Set(manifest.files.map(\.path))
     expectedFiles.insert("manifest.json")
     var expectedDirectories = Set<String>()
@@ -257,6 +269,10 @@ extension LinnetDataRegistry {
       else { throw Failure.invalidActiveState }
       switch info.st_mode & S_IFMT {
       case S_IFREG:
+        guard info.st_size >= 0,
+          relative == "manifest.json"
+            || declaredBytes[relative] == UInt64(info.st_size)
+        else { throw Failure.invalidActiveState }
         guard actualFiles.insert(relative).inserted else {
           throw Failure.invalidActiveState
         }
@@ -271,8 +287,10 @@ extension LinnetDataRegistry {
     guard actualFiles == expectedFiles, actualDirectories == expectedDirectories else {
       throw Failure.invalidActiveState
     }
-    for entry in manifest.files {
-      _ = try verifiedManifestFile(entry, in: directory)
+    if verifyContents {
+      for entry in manifest.files {
+        _ = try verifiedManifestFile(entry, in: directory)
+      }
     }
   }
 
@@ -435,6 +453,34 @@ extension LinnetDataRegistry {
       }
     }
     try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+  }
+
+  /// Restores owner write permission only on directories in a preflighted,
+  /// Registry-owned tree so Foundation can unlink immutable descendants.
+  func prepareOwnedTreeForRemoval(
+    _ directory: URL,
+    entries suppliedEntries: [URL]? = nil
+  ) throws {
+    let entries: [URL]
+    if let suppliedEntries {
+      entries = suppliedEntries
+    } else {
+      var remaining = Self.maximumInstalledPackEntries
+      guard let discovered = try boundedOwnedDirectoryEntries(
+        at: directory, recursively: true, remaining: &remaining)
+      else { return }
+      entries = discovered
+    }
+    for entry in [directory] + entries {
+      var info = stat()
+      guard lstat(entry.path, &info) == 0, info.st_uid == getuid(),
+        (info.st_mode & (S_IWGRP | S_IWOTH)) == 0
+      else { throw Failure.invalidActiveState }
+      guard (info.st_mode & S_IFMT) == S_IFDIR else { continue }
+      guard lchmod(entry.path, info.st_mode | S_IWUSR) == 0 else {
+        throw Failure.invalidActiveState
+      }
+    }
   }
 
   func contains(_ url: URL) -> Bool {

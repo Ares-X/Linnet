@@ -8,11 +8,6 @@ extension LinnetBackupStore {
     LinnetPersonalDataStore.userSettingsFile,
     LinnetPersonalDataStore.expansionsFile
   ])
-  static let legacyV2PersonalFiles = Set([
-    LinnetPersonalDataStore.customWordsFile,
-    LinnetPersonalDataStore.legacyUserSettingsFile,
-    LinnetPersonalDataStore.expansionsFile
-  ])
   static let stableFiles = Set(["installation.yaml", "user.yaml"])
   static let learningFiles = Set(["linnet_zh.txt", "linnet_en.txt"])
   static let learningDirectories = Set(Category.allCases.compactMap(\.learningSchema).map { "\($0).userdb" })
@@ -20,18 +15,6 @@ extension LinnetBackupStore {
   // the live database state and must never be traversed or copied into a
   // current incremental snapshot.
   static let learningRecoveryQuarantineName = "lost"
-
-  enum StableLayout {
-    case current
-    case legacyV2
-
-    var requiredFiles: Set<String> {
-      switch self {
-      case .current: canonicalPersonalFiles.union([LinnetSettingsDocumentStore.fileName])
-      case .legacyV2: legacyV2PersonalFiles
-      }
-    }
-  }
 
   static func backupRecord(_ transactionDirectory: URL) -> BackupRecord {
     let transactionID = UUID(uuidString: transactionDirectory.lastPathComponent)
@@ -357,8 +340,7 @@ extension LinnetBackupStore {
       directoryHint: .isDirectory
     )
     try requireDirectory(learning)
-    let stableURLs = try stableArtifactURLs(
-      stable, formatVersion: formatVersion).files
+    let stableURLs = try stableArtifactURLs(stable, formatVersion: formatVersion)
     let learningEntries = try immediateChildren(
       of: learning,
       maximumCount: learningFiles.count,
@@ -469,33 +451,27 @@ extension LinnetBackupStore {
   static func stableArtifactURLs(
     _ directory: URL,
     formatVersion: Int?
-  ) throws -> (layout: StableLayout, files: [URL]) {
+  ) throws -> [URL] {
+    if let formatVersion {
+      guard formatVersion == backupFormatVersion
+        || formatVersion == tableBackupFormatVersion
+      else {
+        throw Failure.unsupportedVersion(formatVersion)
+      }
+    }
     let files = try immediateChildren(
       of: directory,
       maximumCount: maximumStableFiles,
       overflow: .artifactTooLarge("stable file count")
     ).sorted { $0.lastPathComponent < $1.lastPathComponent }
     let names = Set(files.map(\.lastPathComponent))
-    let layout: StableLayout
-    switch formatVersion {
-    case backupFormatVersion, tableBackupFormatVersion: layout = .current
-    case legacyBackupFormatVersion: layout = .legacyV2
-    case .some(let version): throw Failure.unsupportedVersion(version)
-    case nil:
-      if legacyV2PersonalFiles.isSubset(of: names) {
-        layout = .legacyV2
-      } else if canonicalPersonalFiles.isSubset(of: names) {
-        layout = .current
-      } else {
-        throw Failure.incompleteBackup
-      }
-    }
-    guard layout.requiredFiles.isSubset(of: names) else {
+    let requiredFiles = canonicalPersonalFiles.union([LinnetSettingsDocumentStore.fileName])
+    guard requiredFiles.isSubset(of: names) else {
       throw Failure.incompleteBackup
     }
     for file in files {
       let name = file.lastPathComponent
-      guard layout.requiredFiles.contains(name) || stableSourceNameIsAllowed(name) else {
+      guard requiredFiles.contains(name) || stableSourceNameIsAllowed(name) else {
         throw Failure.unsafeArtifact(name)
       }
     }
@@ -510,50 +486,7 @@ extension LinnetBackupStore {
       partial += bytes
     }
     guard total <= maximumBackupBytes else { throw Failure.artifactTooLarge("backup total") }
-    return (layout, files)
-  }
-
-  /// The sole compatibility branch: verified v2 bytes are decoded with the
-  /// frozen v2 codec and materialized as current canonical files. No v2 writer
-  /// or steady-state fallback exists.
-  static func normalizeLegacyV2Stable(
-    _ files: [URL],
-    from source: URL,
-    to destination: URL
-  ) throws {
-    let legacy = try LinnetPersonalDataStore.legacyV2Snapshot(from: source)
-    let hadDocument = FileManager.default.fileExists(
-      atPath: source.appending(path: LinnetSettingsDocumentStore.fileName).path)
-    let document = try LinnetSettingsDocumentStore.load(from: source)
-    if !hadDocument {
-      guard document.english.sentenceCapitalization == legacy.sentenceCapitalization,
-        document.english.tabBehavior.rawValue == legacy.tabBehavior
-      else {
-        throw Failure.invalidDocument("backup-v2 interaction adoption")
-      }
-    }
-
-    let replacedFiles = legacyV2PersonalFiles
-      .union(canonicalPersonalFiles)
-      .union([LinnetSettingsDocumentStore.fileName])
-    let preserved = files.filter { !replacedFiles.contains($0.lastPathComponent) }
-    guard preserved.count + canonicalPersonalFiles.count + 1 <= maximumStableFiles else {
-      throw Failure.artifactTooLarge("stable file count")
-    }
-    var copiedBytes = 0
-    for file in preserved {
-      let remaining = maximumBackupBytes - copiedBytes
-      let copied = try cloneBoundedRegularFile(
-        file,
-        to: destination.appending(path: file.lastPathComponent),
-        limit: min(stableArtifactLimit(file.lastPathComponent), remaining)
-      )
-      copiedBytes += copied
-    }
-    try LinnetPersonalDataStore.writePersonalFiles(legacy.data, to: destination)
-    try LinnetPersonalDataStore.writeRuntimeSettings(legacy.data, to: destination)
-    try LinnetSettingsDocumentStore.write(document, to: destination)
-    _ = try regularBytes(in: destination, maximumCount: maximumStableFiles)
+    return files
   }
 
   static func regularBytes(in directory: URL, maximumCount: Int) throws -> Int {

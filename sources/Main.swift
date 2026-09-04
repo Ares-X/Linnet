@@ -121,11 +121,8 @@ struct SquirrelApp {
         delegate.shutdownRime()
         configurationFailure("The Rime settings could not load")
       }
-      print("\(productName) reporting!")
-
       // Only a fully initialized input method may publish a live IMK server.
       app.run()
-      print("\(productName) is quitting...")
       // RimeFinalize is owned by SquirrelApplicationDelegate.shutdownRime()
       // (called from applicationWillTerminate and workspaceWillPowerOff), so
       // the runtime is torn down exactly once, with sessions destroyed

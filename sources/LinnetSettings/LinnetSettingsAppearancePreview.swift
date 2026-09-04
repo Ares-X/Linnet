@@ -520,39 +520,46 @@ private extension LinnetSettingsAppearancePreviewView {
     let fonts = (label: labelFont, candidate: candidateFont)
     let inlineSpacing = LinnetCandidatePresentation.inlineCandidateSeparatorWidth(
       font: candidateFont)
-    let gridColumns = expanded
-      ? LinnetCandidatePresentation.candidateGridColumns(
-        rows: rows,
-        itemWidths: values.enumerated().map { index, value in
-          LinnetSettingsAppearancePreview.candidateLine(
-            index < preview.pageSize ? String(index + 1) : "",
-            value,
-            selected: index == 0,
-            preview,
-            fonts: fonts
-          ).boundingRect(with: .zero, options: [.usesLineFragmentOrigin]).width
-        },
-        spacing: inlineSpacing)
-      : nil
-    VStack(
-      alignment: .leading,
-      spacing: LinnetCandidatePresentation.candidateRowSpacing
-    ) {
-      ForEach(Array(rows.enumerated()), id: \.offset) { row in
-        HStack(spacing: inlineSpacing) {
-          ForEach(Array(row.element.enumerated()), id: \.element) { column, index in
-            LinnetSettingsAppearancePreview.candidate(
-              index < preview.pageSize ? String(index + 1) : "",
-              values[index],
-              selected: index == 0,
-              preview,
-              fonts: fonts,
-              width: gridColumns?.widths[column])
+    if expanded {
+      Grid(
+        alignment: .leading,
+        horizontalSpacing: inlineSpacing,
+        verticalSpacing: LinnetCandidatePresentation.candidateRowSpacing
+      ) {
+        ForEach(Array(rows.enumerated()), id: \.offset) { row in
+          GridRow {
+            ForEach(row.element, id: \.self) { index in
+              LinnetSettingsAppearancePreview.candidate(
+                index < preview.pageSize ? String(index + 1) : "",
+                values[index],
+                selected: index == 0,
+                preview,
+                fonts: fonts)
+            }
           }
         }
       }
+      .fixedSize(horizontal: true, vertical: false)
+    } else {
+      VStack(
+        alignment: .leading,
+        spacing: LinnetCandidatePresentation.candidateRowSpacing
+      ) {
+        ForEach(Array(rows.enumerated()), id: \.offset) { row in
+          HStack(spacing: inlineSpacing) {
+            ForEach(row.element, id: \.self) { index in
+              LinnetSettingsAppearancePreview.candidate(
+                index < preview.pageSize ? String(index + 1) : "",
+                values[index],
+                selected: index == 0,
+                preview,
+                fonts: fonts)
+            }
+          }
+        }
+      }
+      .fixedSize(horizontal: true, vertical: false)
     }
-    .fixedSize(horizontal: true, vertical: false)
   }
 
   func previewCandidateValues(
@@ -582,8 +589,7 @@ extension LinnetSettingsAppearancePreview {
     _ value: String,
     selected: Bool,
     _ preview: LinnetSettingsAppearancePreview.Presentation,
-    fonts: (label: NSFont, candidate: NSFont),
-    width: CGFloat? = nil
+    fonts: (label: NSFont, candidate: NSFont)
   ) -> some View {
     let line = candidateLine(
       label, value, selected: selected, preview, fonts: fonts)
@@ -598,7 +604,6 @@ extension LinnetSettingsAppearancePreview {
       Text(AttributedString(line))
     }
     .fixedSize(horizontal: true, vertical: false)
-    .frame(width: width, alignment: .leading)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text("Candidate"))
     .accessibilityValue(Text(verbatim: value))

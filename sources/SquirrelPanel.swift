@@ -15,7 +15,6 @@ final class SquirrelPanel: NSPanel {
 
   let view: SquirrelView
   let back: NSVisualEffectView
-  let candidateAccessibility: LinnetCandidateAccessibility
   private(set) weak var inputController: SquirrelInputController?
   var panelPublicationGeneration: UInt64 = 0
   var publication: Publication?
@@ -53,7 +52,6 @@ final class SquirrelPanel: NSPanel {
     self.position = position
     self.view = SquirrelView(frame: position)
     self.back = NSVisualEffectView()
-    self.candidateAccessibility = LinnetCandidateAccessibility()
     super.init(contentRect: position, styleMask: .nonactivatingPanel, backing: .buffered, defer: true)
     // CGShieldingWindowLevel is the level of the shielding window that sits
     // in front of a full-screen Space; at the *same* level the panel's
@@ -75,10 +73,10 @@ final class SquirrelPanel: NSPanel {
     contentView.addSubview(back)
     contentView.addSubview(view)
     contentView.addSubview(view.textView)
+    contentView.addSubview(view.candidateGridView)
     contentView.addSubview(view.detailDividerView)
     contentView.addSubview(view.detailTextView)
     self.contentView = contentView
-    candidateAccessibility.install(parent: view, rawTextView: view.textView)
   }
 
   var linear: Bool {
@@ -151,13 +149,12 @@ final class SquirrelPanel: NSPanel {
     statusMessage = ""
     candidateExpansionAnchorPage = nil
     candidateSnapshot = nil
+    view.candidateGridView.clear()
     candidateInteraction.advancePublication()
     publishCandidatePointerFeedback()
     maxHeight = 0
     guard panelPublicationGeneration == hiddenGeneration else { return }
     orderOut(nil)
-    guard panelPublicationGeneration == hiddenGeneration else { return }
-    candidateAccessibility.clear(parent: view)
   }
 
   /// Rebuilds the visible candidate window from the last accepted Rime
@@ -290,7 +287,7 @@ extension SquirrelPanel {
       text.append(line)
 
       text.addAttribute(.paragraphStyle, value: theme.preeditParagraphStyle, range: NSRange(location: 0, length: text.length))
-      if !candidates.items.isEmpty {
+      if !candidates.items.isEmpty, !candidates.isExpanded {
         text.append(NSAttributedString(string: "\n", attributes: theme.preeditAttrs))
       }
     } else {
@@ -321,12 +318,12 @@ extension SquirrelPanel {
       flow: flow,
       expanded: candidates.isExpanded
     )
-    let usesGridLayout = candidates.isExpanded
-    let usesInlineLayout = linear || usesGridLayout
+    let usesExpandedGrid = candidates.isExpanded
+    let usesInlineLayout = linear
     let inlineSeparator = NSAttributedString(
       string: LinnetCandidatePresentation.inlineCandidateSeparator,
       attributes: theme.attrs)
-    view.separatorWidth = usesInlineLayout
+    view.separatorWidth = usesInlineLayout || usesExpandedGrid
       ? inlineSeparator.boundingRect(with: .zero).width : 0
     let candidateLines = candidates.items.enumerated().map { itemIndex, item in
       let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
@@ -345,55 +342,51 @@ extension SquirrelPanel {
         labelAttributes: labelAttrs,
         commentAttributes: commentAttrs)
     }
-    let gridColumns = usesGridLayout
-      ? LinnetCandidatePresentation.candidateGridColumns(
+    if usesExpandedGrid {
+      view.candidateGridView.publish(
         rows: visualRows,
-        itemWidths: candidateLines.map {
-          $0.attributedString.boundingRect(
-            with: .zero, options: [.usesLineFragmentOrigin]).width
-        },
-        spacing: view.separatorWidth)
-      : nil
-    var isFirstCandidate = true
-    for row in visualRows {
-      for (column, itemIndex) in row.enumerated() {
-        let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
-        let candidateLine = candidateLines[itemIndex]
-        let line = NSMutableAttributedString(
-          attributedString: candidateLine.attributedString)
+        lines: candidateLines.map(\.attributedString),
+        verticalText: vertical,
+        columnSpacing: view.separatorWidth,
+        rowSpacing: theme.linespace)
+    } else {
+      view.candidateGridView.clear()
+      var isFirstCandidate = true
+      for row in visualRows {
+        for (column, itemIndex) in row.enumerated() {
+          let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
+          let candidateLine = candidateLines[itemIndex]
+          let line = NSMutableAttributedString(
+            attributedString: candidateLine.attributedString)
 
-        let paragraphStyleCandidate = NSMutableParagraphStyle()
-        paragraphStyleCandidate.setParagraphStyle(
-          isFirstCandidate ? theme.firstParagraphStyle : theme.paragraphStyle)
-        if usesInlineLayout {
-          paragraphStyleCandidate.paragraphSpacingBefore -= detailGeometry.spacing
-          paragraphStyleCandidate.lineSpacing = detailGeometry.spacing
-        }
-        if let gridColumns {
-          paragraphStyleCandidate.tabStops = gridColumns.leadingOffsets.dropFirst().map {
-            NSTextTab(textAlignment: .left, location: $0, options: [:])
+          let paragraphStyleCandidate = NSMutableParagraphStyle()
+          paragraphStyleCandidate.setParagraphStyle(
+            isFirstCandidate ? theme.firstParagraphStyle : theme.paragraphStyle)
+          if usesInlineLayout {
+            paragraphStyleCandidate.paragraphSpacingBefore -= detailGeometry.spacing
+            paragraphStyleCandidate.lineSpacing = detailGeometry.spacing
           }
-        }
-        if !isFirstCandidate {
-          let separator = column == 0
-            ? "\n" : usesGridLayout ? "\t" : LinnetCandidatePresentation.inlineCandidateSeparator
-          var separatorAttributes = attrs
-          separatorAttributes[.paragraphStyle] = paragraphStyleCandidate
-          text.append(NSAttributedString(
-            string: separator, attributes: separatorAttributes))
-        }
-        if !usesInlineLayout, candidateLine.labelPrefix.length > 0 {
-          paragraphStyleCandidate.headIndent = candidateLine.labelPrefix.boundingRect(
-            with: .zero, options: [.usesLineFragmentOrigin]).width
-        }
-        line.addAttribute(
-          .paragraphStyle,
-          value: paragraphStyleCandidate,
-          range: NSRange(location: 0, length: line.length))
+          if !isFirstCandidate {
+            let separator = column == 0
+              ? "\n" : LinnetCandidatePresentation.inlineCandidateSeparator
+            var separatorAttributes = attrs
+            separatorAttributes[.paragraphStyle] = paragraphStyleCandidate
+            text.append(NSAttributedString(
+              string: separator, attributes: separatorAttributes))
+          }
+          if !usesInlineLayout, candidateLine.labelPrefix.length > 0 {
+            paragraphStyleCandidate.headIndent = candidateLine.labelPrefix.boundingRect(
+              with: .zero, options: [.usesLineFragmentOrigin]).width
+          }
+          line.addAttribute(
+            .paragraphStyle,
+            value: paragraphStyleCandidate,
+            range: NSRange(location: 0, length: line.length))
 
-        candidateRanges[itemIndex] = NSRange(location: text.length, length: line.length)
-        text.append(line)
-        isFirstCandidate = false
+          candidateRanges[itemIndex] = NSRange(location: text.length, length: line.length)
+          text.append(line)
+          isFirstCandidate = false
+        }
       }
     }
 
@@ -415,35 +408,10 @@ extension SquirrelPanel {
       candidateRanges: candidateRanges, detailRange: detailRange,
       hilightedIndex: index, preeditRange: preeditRange,
       highlightedPreeditRange: highlightedPreeditRange,
-      controlMode: controlMode,
-      usesGridLayout: usesGridLayout)
+      controlMode: controlMode)
     guard publicationIsCurrent(currentPublication) else { return false }
     guard show(publication: currentPublication) else { return false }
     view.displayIfNeeded()
-    guard publicationIsCurrent(currentPublication), let inputController else {
-      return false
-    }
-    let publishedController = inputController
-    let publishedGeneration = currentPublication
-    candidateAccessibility.publish(
-      parent: view,
-      publication: .init(
-        geometry: view.candidateAccessibilityGeometry(),
-        candidates: candidates.items,
-        highlightedIndex: index,
-        controlMode: controlMode,
-        shouldAnnounce: update),
-      selectCandidate: { [weak self, weak publishedController] absoluteIndex in
-        guard let self, let publishedController else { return false }
-        guard publicationIsCurrent(publishedGeneration) else { return false }
-        return publishedController.selectCandidate(absoluteIndex: absoluteIndex)
-      },
-      performControl: { [weak self] action in
-        guard let self else { return false }
-        guard publicationIsCurrent(publishedGeneration) else { return false }
-        return performControl(action)
-      }
-    )
     return publicationIsCurrent(currentPublication)
   }
 

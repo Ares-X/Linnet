@@ -43,7 +43,8 @@ struct LinnetRimeSessionLeaseTests {
     let api = warmSessionAPI()
     let warm = LinnetRimeWarmSession()
     require(
-      warm.prepare(using: api, schemaID: "linnet_zh_jiajia") == 91,
+      warm.prepare(
+        using: api, schemaID: "linnet_zh_jiajia", representativeInputCode: "srfa") == 91,
       "the warm session did not initialize")
     require(
       selectedSchemas == ["linnet_zh_jiajia"],
@@ -58,7 +59,10 @@ struct LinnetRimeSessionLeaseTests {
     let active = LinnetRimeSessionLease.acquire(identifier: 102)!
     let warm = LinnetRimeWarmSession()
     let api = warmSessionAPI()
-    require(warm.prepare(using: api, schemaID: "linnet_zh") == 91, "warm preparation failed")
+    require(
+      warm.prepare(
+        using: api, schemaID: "linnet_zh", representativeInputCode: "srfa") == 91,
+      "warm preparation failed")
     LinnetRimeSessionLease.retireAll()
     for retired in [inactive, active] {
       require(!retired.isCurrent(sessionExists: { _ in
@@ -77,7 +81,10 @@ struct LinnetRimeSessionLeaseTests {
     destroyedSessions = []
     let warm = LinnetRimeWarmSession()
     let api = warmSessionAPI()
-    require(warm.prepare(using: api, schemaID: "linnet_zh") == 91, "warm preparation failed")
+    require(
+      warm.prepare(
+        using: api, schemaID: "linnet_zh", representativeInputCode: "srfa") == 91,
+      "warm preparation failed")
     let controller = LinnetRimeSessionLease.acquire(identifier: 91)!
     warm.discard(using: api)
     require(destroyedSessions.isEmpty, "stale warm cleanup destroyed a controller's session")
@@ -92,7 +99,8 @@ struct LinnetRimeSessionLeaseTests {
     api.simulate_key_sequence = { _, _ in false }
     let warm = LinnetRimeWarmSession()
     require(
-      warm.prepare(using: api, schemaID: "linnet_zh") == nil,
+      warm.prepare(
+        using: api, schemaID: "linnet_zh", representativeInputCode: "srfa") == nil,
       "failed priming reported a ready resource owner")
     require(warm.identifier == 0 && destroyedSessions == [91],
             "failed priming did not destroy and retire exactly its own session")

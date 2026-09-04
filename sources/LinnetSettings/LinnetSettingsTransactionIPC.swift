@@ -26,66 +26,58 @@ enum LinnetSettingsTransactionIPC {
   typealias Handler = (LinnetSettingsContract.DataRequest, @escaping Reply) -> Void
 
   final class Host: @unchecked Sendable {
-    private let identity: Identity
+    private let endpointURL: URL
     private let handler: Handler
     private let queue = DispatchQueue(label: "io.github.ares-x.linnet.settings-ipc")
-    private let lock = NSLock()
-    private var listener: Int32 = -1
+    private let transactionQueue = DispatchQueue(
+      label: "io.github.ares-x.linnet.settings-ipc.transaction",
+      qos: .userInitiated)
     private var listenerIdentity: (dev_t, ino_t)?
     private var source: DispatchSourceRead?
-    private var channels: [Int32: Channel] = [:]
 
     convenience init(startingAt bundle: Bundle = .main, handler: @escaping Handler) throws {
-      self.init(identity: try liveIdentity(startingAt: bundle), handler: handler)
+      self.init(endpointURL: try liveEndpoint(startingAt: bundle), handler: handler)
     }
 
-    private init(identity: Identity, handler: @escaping Handler) {
-      self.identity = identity
+    private init(endpointURL: URL, handler: @escaping Handler) {
+      self.endpointURL = endpointURL
       self.handler = handler
     }
 
     func start() throws {
-      lock.lock()
-      guard listener < 0 else {
-        lock.unlock()
-        return
-      }
-      lock.unlock()
+      guard source == nil else { return }
       try LinnetSettingsTransactionIPC.prepareEndpointParent(
-        identity.endpointURL.deletingLastPathComponent())
-      try LinnetSettingsTransactionIPC.removeStaleSocket(at: identity.endpointURL)
+        endpointURL.deletingLastPathComponent())
+      try LinnetSettingsTransactionIPC.removeStaleSocket(at: endpointURL)
       let fd = socket(AF_UNIX, SOCK_STREAM, 0)
       guard fd >= 0 else { throw Failure.unavailable }
       var boundIdentity: (dev_t, ino_t)?
       do {
-        try withSocketAddress(identity.endpointURL.path) { address, length in
+        try withSocketAddress(endpointURL.path) { address, length in
           guard Darwin.bind(fd, address, length) == 0 else { throw Failure.unavailable }
         }
         var info = stat()
-        guard lstat(identity.endpointURL.path, &info) == 0,
+        guard lstat(endpointURL.path, &info) == 0,
           (info.st_mode & S_IFMT) == S_IFSOCK,
           info.st_uid == geteuid()
         else { throw Failure.unavailable }
         boundIdentity = (info.st_dev, info.st_ino)
-        guard chmod(identity.endpointURL.path, S_IRUSR | S_IWUSR) == 0,
+        guard chmod(endpointURL.path, S_IRUSR | S_IWUSR) == 0,
           listen(fd, 8) == 0
         else { throw Failure.unavailable }
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
-        source.setEventHandler { [weak self] in self?.acceptPendingConnections() }
+        source.setEventHandler { [weak self] in self?.acceptConnection(from: fd) }
         source.setCancelHandler { Darwin.close(fd) }
-        lock.lock()
-        listener = fd
         listenerIdentity = (info.st_dev, info.st_ino)
         self.source = source
-        lock.unlock()
         source.resume()
       } catch {
         Darwin.close(fd)
         if let boundIdentity {
           var current = stat()
-          if lstat(identity.endpointURL.path, &current) == 0,
+          if lstat(endpointURL.path, &current) == 0,
             current.st_dev == boundIdentity.0, current.st_ino == boundIdentity.1 {
-            try? FileManager.default.removeItem(at: identity.endpointURL)
+            try? FileManager.default.removeItem(at: endpointURL)
           }
         }
         throw error
@@ -93,40 +85,37 @@ enum LinnetSettingsTransactionIPC {
     }
 
     func stop() {
-      lock.lock()
       let source = self.source
       self.source = nil
-      listener = -1
       let socketIdentity = listenerIdentity
       listenerIdentity = nil
-      let channels = Array(self.channels.values)
-      self.channels.removeAll()
-      lock.unlock()
       source?.cancel()
-      channels.forEach { $0.close() }
       guard let socketIdentity else { return }
       var info = stat()
-      if lstat(identity.endpointURL.path, &info) == 0,
+      if lstat(endpointURL.path, &info) == 0,
         info.st_dev == socketIdentity.0, info.st_ino == socketIdentity.1 {
-        try? FileManager.default.removeItem(at: identity.endpointURL)
+        try? FileManager.default.removeItem(at: endpointURL)
       }
     }
 
     deinit { stop() }
 
-    private func acceptPendingConnections() {
+    private func acceptConnection(from listener: Int32) {
       let fd = accept(listener, nil, nil)
       guard fd >= 0 else { return }
-      let channel = Channel(fd: fd) { [weak self] fd in self?.removeChannel(fd) }
-      lock.lock()
-      channels[fd] = channel
-      lock.unlock()
-      queue.async { [weak self, channel] in self?.receiveRequest(on: channel) }
+      let channel = Channel(fd: fd)
+      transactionQueue.async { [weak self] in
+        guard let self else {
+          channel.close()
+          return
+        }
+        self.receiveRequest(on: channel)
+      }
     }
 
     private func receiveRequest(on channel: Channel) {
       guard let pid = peerPID(channel.fd),
-        authenticate(fd: channel.fd, pid: pid),
+        peerIsSameUser(channel.fd), pid != getpid(),
         let payload = try? channel.readFrame(deadline: Date().addingTimeInterval(3)),
         let request = try? decode(LinnetSettingsContract.DataRequest.self, from: payload),
         LinnetSettingsContract.validDataRequest(request),
@@ -146,7 +135,7 @@ enum LinnetSettingsTransactionIPC {
             channel.close()
             return
           }
-          if terminal(reply.status, for: request.command) { channel.close() }
+          if reply.status != .verifying { channel.close() }
         }
       }
       guard request.command != .pause
@@ -161,12 +150,6 @@ enum LinnetSettingsTransactionIPC {
         return
       }
       handler(request, sendReply)
-    }
-
-    private func removeChannel(_ fd: Int32) {
-      lock.lock()
-      channels.removeValue(forKey: fd)
-      lock.unlock()
     }
   }
 
@@ -183,23 +166,17 @@ enum LinnetSettingsTransactionIPC {
       guard LinnetSettingsContract.validDataRequest(request), timeout > 0 else {
         throw Failure.invalidMessage
       }
-      let identity = try liveIdentity(startingAt: bundle)
-      return try await withCheckedThrowingContinuation { continuation in
-        DispatchQueue.global(qos: .userInitiated).async {
-          do {
-            continuation.resume(returning: try Self.perform(
-              request, timeout: timeout, identity: identity, progress: onProgress))
-          } catch {
-            continuation.resume(throwing: error)
-          }
-        }
-      }
+      let endpointURL = try liveEndpoint(startingAt: bundle)
+      return try await Task.detached(priority: .userInitiated) {
+        try Self.perform(
+          request, timeout: timeout, endpointURL: endpointURL, progress: onProgress)
+      }.value
     }
 
     private static func perform(
       _ request: LinnetSettingsContract.DataRequest,
       timeout: TimeInterval,
-      identity: Identity,
+      endpointURL: URL,
       progress: @Sendable (LinnetSettingsContract.RuntimeReply) -> Void
     ) throws -> LinnetSettingsContract.RuntimeReply {
       let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -207,22 +184,21 @@ enum LinnetSettingsTransactionIPC {
       let channel = Channel(fd: fd)
       defer { channel.close() }
       let deadline = Date().addingTimeInterval(timeout)
-      try withSocketAddress(identity.endpointURL.path) { address, length in
+      try withSocketAddress(endpointURL.path) { address, length in
         try connectUnixSocket(
           fd: fd, address: address, length: length, deadline: deadline)
       }
-      guard let pid = peerPID(fd), authenticate(fd: fd, pid: pid) else {
+      guard peerIsSameUser(fd) else {
         throw Failure.unavailable
       }
       try channel.writeFrame(try encode(request), deadline: deadline)
       while true {
         let payload = try channel.readFrame(deadline: deadline)
-        guard let reply = try? decode(
-          LinnetSettingsContract.RuntimeReply.self, from: payload),
+        guard let reply = try? decode(LinnetSettingsContract.RuntimeReply.self, from: payload),
           reply.transactionID == request.transactionID,
           LinnetSettingsContract.validRuntimeReply(reply)
-        else { continue }
-        guard terminal(reply.status, for: request.command) else {
+        else { throw Failure.invalidMessage }
+        guard reply.status != .verifying else {
           progress(reply)
           continue
         }
@@ -233,20 +209,13 @@ enum LinnetSettingsTransactionIPC {
 }
 
 extension LinnetSettingsTransactionIPC {
-  private struct Identity: @unchecked Sendable {
-    let endpointURL: URL
-  }
-
   private final class Channel: @unchecked Sendable {
     let fd: Int32
-    private let onClose: ((Int32) -> Void)?
-    private let lock = NSLock()
     private var closed = false
 
-    init(fd: Int32, onClose: ((Int32) -> Void)? = nil) {
-      self.fd = fd
-      self.onClose = onClose
-    }
+    init(fd: Int32) { self.fd = fd }
+
+    deinit { close() }
 
     func readFrame(deadline: Date) throws -> Data {
       let header = try read(count: 4, deadline: deadline)
@@ -260,39 +229,24 @@ extension LinnetSettingsTransactionIPC {
         throw Failure.invalidMessage
       }
       var length = UInt32(payload.count).bigEndian
-      let header = withUnsafeBytes(of: &length) { Data($0) }
-      lock.lock()
-      defer { lock.unlock() }
       guard !closed else { throw Failure.unavailable }
-      try write(header, deadline: deadline)
-      try write(payload, deadline: deadline)
+      var frame = withUnsafeBytes(of: &length) { Data($0) }
+      frame.append(payload)
+      try write(frame, deadline: deadline)
     }
 
     func close() {
-      lock.lock()
-      guard !closed else {
-        lock.unlock()
-        return
-      }
+      guard !closed else { return }
       closed = true
       Darwin.shutdown(fd, SHUT_RDWR)
       Darwin.close(fd)
-      lock.unlock()
-      onClose?(fd)
     }
 
     private func read(count: Int, deadline: Date) throws -> Data {
       var data = Data(count: count)
       var offset = 0
       while offset < count {
-        let remaining = deadline.timeIntervalSinceNow
-        guard remaining > 0 else { throw Failure.timedOut }
-        var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
-        if result == 0 { continue }
-        guard result > 0, descriptor.revents & Int16(POLLIN) != 0 else {
-          throw Failure.unavailable
-        }
+        try wait(for: Int16(POLLIN), until: deadline)
         let readCount = data.withUnsafeMutableBytes { buffer in
           Darwin.read(fd, buffer.baseAddress!.advanced(by: offset), count - offset)
         }
@@ -306,14 +260,7 @@ extension LinnetSettingsTransactionIPC {
     private func write(_ data: Data, deadline: Date) throws {
       var offset = 0
       while offset < data.count {
-        let remaining = deadline.timeIntervalSinceNow
-        guard remaining > 0 else { throw Failure.timedOut }
-        var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-        let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
-        if result == 0 { continue }
-        guard result > 0, descriptor.revents & Int16(POLLOUT) != 0 else {
-          throw Failure.unavailable
-        }
+        try wait(for: Int16(POLLOUT), until: deadline)
         let written = data.withUnsafeBytes { buffer in
           send(
             fd, buffer.baseAddress!.advanced(by: offset), data.count - offset,
@@ -324,28 +271,37 @@ extension LinnetSettingsTransactionIPC {
         offset += written
       }
     }
+
+    private func wait(for event: Int16, until deadline: Date) throws {
+      while true {
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 0 else { throw Failure.timedOut }
+        var descriptor = pollfd(fd: fd, events: event, revents: 0)
+        let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
+        if result == 0 || (result < 0 && errno == EINTR) { continue }
+        guard result > 0, descriptor.revents & event != 0 else {
+          throw Failure.unavailable
+        }
+        return
+      }
+    }
   }
 
-  private static func liveIdentity(startingAt bundle: Bundle) throws -> Identity {
+  private static func liveEndpoint(startingAt bundle: Bundle) throws -> URL {
     guard let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
     else { throw Failure.unavailable }
-    return try fixedIdentity(endpointURL: registry.rootDirectory.appending(
-      path: "State/settings-transaction.sock", directoryHint: .notDirectory))
-  }
-
-  private static func fixedIdentity(
-    endpointURL: URL
-  ) throws -> Identity {
+    let endpointURL = registry.rootDirectory.appending(
+      path: "State/settings-transaction.sock", directoryHint: .notDirectory)
     let endpoint = endpointURL.standardizedFileURL
     guard endpointURL.isFileURL, endpoint.path.hasPrefix("/")
     else { throw Failure.unavailable }
-    return .init(endpointURL: endpoint)
+    return endpoint
   }
 
-  private static func authenticate(fd descriptor: Int32, pid: pid_t) -> Bool {
+  private static func peerIsSameUser(_ descriptor: Int32) -> Bool {
     var uid: uid_t = 0
     var gid: gid_t = 0
-    return getpeereid(descriptor, &uid, &gid) == 0 && uid == geteuid() && pid != getpid()
+    return getpeereid(descriptor, &uid, &gid) == 0 && uid == geteuid()
   }
 
   private static func connectUnixSocket(
@@ -446,30 +402,11 @@ extension LinnetSettingsTransactionIPC {
   }
 
   private static func encode<T: Encodable>(_ value: T) throws -> Data {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    return try encoder.encode(value)
+    try JSONEncoder().encode(value)
   }
 
   private static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
     try JSONDecoder().decode(type, from: data)
   }
 
-  private static func terminal(
-    _ status: LinnetSettingsContract.RuntimeStatus,
-    for command: LinnetSettingsContract.DataCommand
-  ) -> Bool {
-    switch command {
-    case .pause: return [.paused, .cancelled, .rejected, .failed].contains(status)
-    case .cancel: return [.cancelled, .rejected, .failed].contains(status)
-    case .activate, .activateLanguage:
-      return [.activated, .rolledBack, .rejected, .failed].contains(status)
-    case .refresh, .reloadConfiguration:
-      return [.activated, .rejected, .failed].contains(status)
-    case .diagnose: return [.running, .paused, .degraded, .failed].contains(status)
-    case .activateCore: return [.terminating, .rejected, .failed].contains(status)
-    case .reloadLearningSync, .synchronizeLearning:
-      return [.running, .degraded, .rejected, .failed].contains(status)
-    }
-  }
 }

@@ -33,10 +33,6 @@ for required in \
   }
 done
 
-# Candidate probes share generated native artifacts with one another, but the
-# installed immutable App has no handle in this worktree and stays available.
-tests/verify_candidate_native_idle.sh
-
 reports_dir="${HOME}/Library/Logs/DiagnosticReports"
 reports_before="$(mktemp /tmp/linnet-learning-reports-before.XXXXXX)"
 reports_after="$(mktemp /tmp/linnet-learning-reports-after.XXXXXX)"

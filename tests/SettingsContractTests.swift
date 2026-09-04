@@ -51,7 +51,7 @@ struct SettingsContractTests {
     ]
     guard Dictionary(
       uniqueKeysWithValues: LinnetSettingsContract.ChineseProfile.allCases.map {
-        ($0, $0.reverseLookupExampleCode)
+        ($0, $0.representativeInputCode)
       }) == expected
     else {
       fail("a Settings reverse-lookup example diverged from its selected profile")

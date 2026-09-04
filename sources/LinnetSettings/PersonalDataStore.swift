@@ -125,39 +125,6 @@ enum LinnetPersonalDataStore {
     return Snapshot(data: data, revision: try revision(for: data))
   }
 
-  /// Strict decoder for legal backup-v2 bytes written by bda21963. It reads
-  /// only the retired three-file set and reproduces that writer's revision;
-  /// steady-state load/write paths remain exclusively on the current format.
-  static func legacyV2Snapshot(from directory: URL) throws -> LegacyV2Snapshot {
-    let required = [customWordsFile, expansionsFile, legacyUserSettingsFile]
-    guard required.allSatisfy({
-      FileManager.default.fileExists(atPath: directory.appending(path: $0).path)
-    }) else {
-      throw Failure.invalidFile("backup-v2 personal files")
-    }
-    let customRows = try readTable(directory.appending(path: customWordsFile))
-    let expansionRows = try readTable(directory.appending(path: expansionsFile))
-    let interaction = try readLegacyUserSettings(
-      directory.appending(path: legacyUserSettingsFile))
-    let data = try normalized(
-      .init(
-        customWords: customRows.map { .init(value: $0.value, code: $0.code) },
-        disabledWords: interaction.disabledWords,
-        expansions: expansionRows.map { .init(value: $0.value, trigger: $0.code) }
-      ))
-    let serialization = try legacyV2RevisionSerialization(
-      for: data,
-      sentenceCapitalization: interaction.sentenceCapitalization,
-      tabBehavior: interaction.tabBehavior
-    )
-    return .init(
-      data: data,
-      sentenceCapitalization: interaction.sentenceCapitalization,
-      tabBehavior: interaction.tabBehavior,
-      revision: revision(for: serialization)
-    )
-  }
-
   static func revision(for data: LinnetPersonalData) throws -> String {
     try revision(for: revisionSerialization(for: data))
   }
@@ -321,31 +288,6 @@ extension LinnetPersonalDataStore {
         rows: normalized.expansions.map { ($0.value, $0.trigger) }
       )
     ]
-  }
-
-  fileprivate static func legacyV2RevisionSerialization(
-    for data: LinnetPersonalData,
-    sentenceCapitalization: Bool,
-    tabBehavior: String
-  ) throws -> [String: String] {
-    let normalized = try normalized(data)
-    let files = [
-      customWordsFile: table(
-        name: customWordsFile,
-        rows: normalized.customWords.map { ($0.value, $0.code) }
-      ),
-      expansionsFile: table(
-        name: expansionsFile,
-        rows: normalized.expansions.map { ($0.value, $0.trigger) }
-      ),
-      legacyUserSettingsFile: try legacyV2UserSettingsYAML(
-        normalized.disabledWords.map(\.value),
-        sentenceCapitalization: sentenceCapitalization,
-        tabBehavior: tabBehavior
-      )
-    ]
-    try validateRenderedFiles(files)
-    return files
   }
 
   fileprivate static func readTable(_ file: URL) throws -> [TableRow] {
@@ -657,33 +599,6 @@ extension LinnetPersonalDataStore {
       ? ["  disabled_words: []"]
       : ["  disabled_words:"] + rows
     return (["patch:"] + disabledWords).joined(separator: "\n") + "\n"
-  }
-
-  fileprivate static func legacyV2UserSettingsYAML(
-    _ words: [String],
-    sentenceCapitalization: Bool,
-    tabBehavior: String
-  ) throws -> String {
-    guard ["pass", "navigate", "smart_complete"].contains(tabBehavior) else {
-      throw Failure.invalidFile(legacyUserSettingsFile)
-    }
-    let rows = try words.map { word -> String in
-      let data = try JSONEncoder().encode(word)
-      guard let json = String(data: data, encoding: .utf8) else {
-        throw Failure.invalidFile(legacyUserSettingsFile)
-      }
-      return "  - \(json)"
-    }
-    let disabledWords = words.isEmpty ? ["disabled_words: []"] : ["disabled_words:"] + rows
-    return
-      ([
-        "# Linnet user-managed settings",
-        "# encoding: utf-8",
-        ""
-      ] + disabledWords + [
-        "sentence_capitalization: \(sentenceCapitalization)",
-        "tab_behavior: \(tabBehavior)"
-      ]).joined(separator: "\n") + "\n"
   }
 
   fileprivate static func retireLegacySettings(in directory: URL) throws {

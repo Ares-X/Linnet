@@ -1,5 +1,11 @@
 import Foundation
+import os
 import SwiftUI
+
+private let linnetLanguageDataLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet.Settings",
+  category: "LanguageData"
+)
 
 @MainActor
 extension SettingsModel {
@@ -185,7 +191,9 @@ extension SettingsModel {
             try Task.checkCancellation()
             switch transfer {
             case .delta:
-              print("Language-data delta failed: \(error.localizedDescription)")
+              linnetLanguageDataLogger.error(
+                "Language-data delta failed: \(error.localizedDescription, privacy: .private)"
+              )
               throw LinnetDataChannel.Failure.completeRepairRequired
             default: throw error
             }
@@ -207,7 +215,9 @@ extension SettingsModel {
       } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
         await self?.finishPackDownloadCancellation(target)
       } catch {
-        print("Language-data catalog update failed: \(error.localizedDescription)")
+        linnetLanguageDataLogger.error(
+          "Language-data catalog update failed: \(error.localizedDescription, privacy: .private)"
+        )
         await self?.finishLanguageDataUpdate(
           target, failure: Self.packUpdateFailure(for: error))
       }

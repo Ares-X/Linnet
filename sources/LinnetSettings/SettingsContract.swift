@@ -35,9 +35,10 @@ enum LinnetSettingsContract {
       }
     }
 
-    /// A presentation-only, reviewed example for the same canonical word in
-    /// every profile. Runtime decoding remains owned by the active Rime Prism.
-    var reverseLookupExampleCode: String {
+    /// A reviewed ordinary spelling for the same canonical word in every
+    /// profile. Settings uses it as an example; runtime readiness uses it to
+    /// traverse the selected Prism and dictionaries without committing text.
+    var representativeInputCode: String {
       switch self {
       case .natural, .flypy, .microsoft, .sogou: "srfa"
       case .fullPinyin: "suanfa"

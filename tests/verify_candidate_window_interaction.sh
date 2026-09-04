@@ -29,16 +29,18 @@ linnet_swift_compile candidate-interaction \
   sources/LinnetCandidatePresentation.swift \
   sources/LinnetClientAppearance.swift \
   sources/LinnetPanelGeometry.swift \
+  sources/LinnetCandidateGridView.swift \
   sources/SquirrelView.swift \
   sources/SquirrelView+CandidateDrawing.swift \
   sources/LinnetCandidateInteractionState.swift \
-  sources/LinnetCandidateAccessibility.swift \
   sources/SquirrelPanel.swift \
   sources/SquirrelPanel+CandidatePresentation.swift \
   tests/LinnetCandidateWindowInteractionTests.swift
 candidate_interaction="${LINNET_SWIFT_COMPILED_BINARY}"
 
-if (( $# == 0 )); then
+if [[ "${1:-}" == --behavior && $# -eq 1 ]]; then
+  "${candidate_interaction}"
+elif (( $# == 0 )); then
   generated_modes="${scratch}/input-modes.png"
   generated_features="${scratch}/bilingual-features.png"
   generated_themes="${scratch}/theme-gallery.png"

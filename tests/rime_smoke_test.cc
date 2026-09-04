@@ -6392,9 +6392,11 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   std::vector<LatencySample> key_latency;
   std::vector<LatencySample> typing_latency;
   bool activation_checked = false;
+  size_t waiting_samples = 0;
   auto step = [&] {
     const auto before = std::chrono::steady_clock::now();
     const int result = api->sync_user_data_step(sync_directory.c_str());
+    if (result == 3) ++waiting_samples;
     step_latency.push_back(std::chrono::duration_cast<Nanoseconds>(
         std::chrono::steady_clock::now() - before).count());
     if (!api->find_session(chinese) || !api->find_session(english) ||
@@ -6437,7 +6439,7 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
     int result;
     do {
       result = tick();
-      if (result != 1) break;
+      if (result != 1 && result != 3) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     } while (std::chrono::steady_clock::now() < deadline);
     if (expected_result && result != *expected_result) {
@@ -6472,7 +6474,9 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   if (!transaction->BeginTransaction()) Fail("cannot create pending learning");
   database->Update("yun tong bu \t未提交", "c=1 d=1 t=2");
   for (int index = 0; index < 30; ++index) {
-    if (step() != 1) Fail("sync completed across a pending learning transaction");
+    const int result = step();
+    if (result != 1 && result != 3)
+      Fail("sync completed across a pending learning transaction");
     if (!transaction->in_transaction())
       Fail("pending learning ended inside the sync step");
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -6671,7 +6675,7 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
         if (pending && !pending->exhausted() && clock == "10") { activated = true; break; }
       } else if (clock == "1000") { activated = true; break; }
       expect_view(name + " staging", resumed_db.get(), before_activation, "10");
-      if (result != 1) break;
+      if (result != 1 && result != 3) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     if (!activated) Fail("recovery fixture never reached the atomic activation boundary");
@@ -6812,12 +6816,14 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   // Malformed remote rows must fail, without damaging input or our last file.
   { std::ofstream corrupt(remote, std::ios::app); corrupt << "broken-row\n"; }
   int failed = 1;
-  for (int index = 0; index < 100 && failed == 1; ++index) {
+  for (int index = 0; index < 100 && (failed == 1 || failed == 3); ++index) {
     failed = tick();
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
   if (failed != -1 || std::filesystem::last_write_time(published) != written_at)
     Fail("corrupt remote learning reported success or overwrote a valid snapshot");
+  if (waiting_samples == 0)
+    Fail("learning sync never distinguished background I/O waiting from runnable work");
   api->sync_user_data_step(sync_directory.c_str());
   api->sync_user_data_step(nullptr);
   Enter(api, chinese, "nihao");

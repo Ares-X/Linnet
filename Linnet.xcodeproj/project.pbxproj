@@ -32,7 +32,7 @@
 		E90100000000000000000001 /* LinnetPanelGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90100000000000000000002 /* LinnetPanelGeometry.swift */; };
 		E90200000000000000000001 /* LinnetCandidatePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90200000000000000000002 /* LinnetCandidatePresentation.swift */; };
 		E90200000000000000000003 /* LinnetCandidatePresentation.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E90200000000000000000002 /* LinnetCandidatePresentation.swift */; };
-		E90300000000000000000001 /* LinnetCandidateAccessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90300000000000000000002 /* LinnetCandidateAccessibility.swift */; };
+		E90700000000000000000001 /* LinnetCandidateGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90700000000000000000002 /* LinnetCandidateGridView.swift */; };
 		A70000000000000000000001 /* LinnetClientAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000000000000000000002 /* LinnetClientAppearance.swift */; };
 		B39771232BECEA150093A49B /* MacOSKeyCodes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39771222BECEA150093A49B /* MacOSKeyCodes.swift */; };
 		B39771252BED899F0093A49B /* SquirrelConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39771242BED899F0093A49B /* SquirrelConfig.swift */; };
@@ -76,7 +76,6 @@
 		D3000000000000000000000F /* librime.1.dylib in Copy Settings Runtime */ = {isa = PBXBuildFile; fileRef = 44CD640915E2633D0021234E /* librime.1.dylib */; };
 		D30000000000000000000008 /* PersonalDataStore.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000018 /* PersonalDataStore.swift */; };
 		A12E55000000000000000002 /* PersonalDataValidation.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = A12E55000000000000000001 /* PersonalDataValidation.swift */; };
-		A12E56000000000000000002 /* LinnetStableRowTextBinding.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = A12E56000000000000000001 /* LinnetStableRowTextBinding.swift */; };
 		D30000000000000000000009 /* LinnetBackupStore.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000019 /* LinnetBackupStore.swift */; };
 		E71000000000000000000004 /* LinnetBackupStoreSupport.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000005 /* LinnetBackupStoreSupport.swift */; };
 		D3000000000000000000000A /* RimeUserDataBridge.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001A /* RimeUserDataBridge.swift */; };
@@ -108,7 +107,6 @@
 		FC3000000000000000000001 /* SettingsModelLanguageData.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FC3000000000000000000002 /* SettingsModelLanguageData.swift */; };
 		F50000000000000000000001 /* LinnetSettingsTransactionIPC.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */; };
 		F50000000000000000000002 /* LinnetSettingsTransactionIPC.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */; };
-		F60000000000000000000001 /* LinnetPortableJSONBudget.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000002 /* LinnetPortableJSONBudget.swift */; };
 		F81000000000000000000001 /* SettingsWindowCloseGuard.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000002 /* SettingsWindowCloseGuard.swift */; };
 		F82000000000000000000001 /* PersonalDataStore.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000018 /* PersonalDataStore.swift */; };
 		A12E55000000000000000003 /* PersonalDataValidation.swift in Linnet Sources */ = {isa = PBXBuildFile; fileRef = A12E55000000000000000001 /* PersonalDataValidation.swift */; };
@@ -204,7 +202,7 @@
 		E90000000000000000000002 /* LinnetPreeditGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPreeditGeometry.swift; path = sources/LinnetPreeditGeometry.swift; sourceTree = "<group>"; };
 		E90100000000000000000002 /* LinnetPanelGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPanelGeometry.swift; path = sources/LinnetPanelGeometry.swift; sourceTree = "<group>"; };
 		E90200000000000000000002 /* LinnetCandidatePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCandidatePresentation.swift; path = sources/LinnetCandidatePresentation.swift; sourceTree = "<group>"; };
-		E90300000000000000000002 /* LinnetCandidateAccessibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCandidateAccessibility.swift; path = sources/LinnetCandidateAccessibility.swift; sourceTree = "<group>"; };
+		E90700000000000000000002 /* LinnetCandidateGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCandidateGridView.swift; path = sources/LinnetCandidateGridView.swift; sourceTree = "<group>"; };
 		A70000000000000000000002 /* LinnetClientAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetClientAppearance.swift; path = sources/LinnetClientAppearance.swift; sourceTree = "<group>"; };
 		48414C494345000000000016 /* LinnetPrivacy.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = LinnetPrivacy.xcconfig; path = config/LinnetPrivacy.xcconfig; sourceTree = "<group>"; };
 		48414C494345000000000017 /* LinnetProduct.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = LinnetProduct.xcconfig; path = config/LinnetProduct.xcconfig; sourceTree = "<group>"; };
@@ -240,7 +238,6 @@
 		D30000000000000000000017 /* Settings-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Settings-Bridging-Header.h"; path = "sources/LinnetSettings/Settings-Bridging-Header.h"; sourceTree = "<group>"; };
 		D30000000000000000000018 /* PersonalDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PersonalDataStore.swift; path = sources/LinnetSettings/PersonalDataStore.swift; sourceTree = "<group>"; };
 		A12E55000000000000000001 /* PersonalDataValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PersonalDataValidation.swift; path = sources/LinnetSettings/PersonalDataValidation.swift; sourceTree = "<group>"; };
-		A12E56000000000000000001 /* LinnetStableRowTextBinding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetStableRowTextBinding.swift; path = sources/LinnetSettings/LinnetStableRowTextBinding.swift; sourceTree = "<group>"; };
 		D30000000000000000000019 /* LinnetBackupStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetBackupStore.swift; path = sources/LinnetSettings/LinnetBackupStore.swift; sourceTree = "<group>"; };
 		E71000000000000000000005 /* LinnetBackupStoreSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetBackupStoreSupport.swift; path = sources/LinnetSettings/LinnetBackupStoreSupport.swift; sourceTree = "<group>"; };
 		D3000000000000000000001A /* RimeUserDataBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RimeUserDataBridge.swift; path = sources/LinnetSettings/RimeUserDataBridge.swift; sourceTree = "<group>"; };
@@ -269,7 +266,6 @@
 		FC2000000000000000000002 /* SettingsModelPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsModelPresentation.swift; path = sources/LinnetSettings/SettingsModelPresentation.swift; sourceTree = "<group>"; };
 		FC3000000000000000000002 /* SettingsModelLanguageData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsModelLanguageData.swift; path = sources/LinnetSettings/SettingsModelLanguageData.swift; sourceTree = "<group>"; };
 		F50000000000000000000003 /* LinnetSettingsTransactionIPC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsTransactionIPC.swift; path = sources/LinnetSettings/LinnetSettingsTransactionIPC.swift; sourceTree = "<group>"; };
-		F60000000000000000000002 /* LinnetPortableJSONBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetPortableJSONBudget.swift; path = sources/LinnetSettings/LinnetPortableJSONBudget.swift; sourceTree = "<group>"; };
 		F81000000000000000000002 /* SettingsWindowCloseGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsWindowCloseGuard.swift; path = sources/LinnetSettings/SettingsWindowCloseGuard.swift; sourceTree = "<group>"; };
 		F70000000000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = resources/en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		F70000000000000000000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "resources/zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
@@ -330,7 +326,7 @@
 				E90000000000000000000002 /* LinnetPreeditGeometry.swift */,
 				E90100000000000000000002 /* LinnetPanelGeometry.swift */,
 				E90200000000000000000002 /* LinnetCandidatePresentation.swift */,
-				E90300000000000000000002 /* LinnetCandidateAccessibility.swift */,
+				E90700000000000000000002 /* LinnetCandidateGridView.swift */,
 				A70000000000000000000002 /* LinnetClientAppearance.swift */,
 				B39771222BECEA150093A49B /* MacOSKeyCodes.swift */,
 				B397712C2BEEB39D0093A49B /* InputSource.swift */,
@@ -376,11 +372,9 @@
 				F30000000000000000000002 /* SettingsSessionState.swift */,
 				D30000000000000000000018 /* PersonalDataStore.swift */,
 				A12E55000000000000000001 /* PersonalDataValidation.swift */,
-				A12E56000000000000000001 /* LinnetStableRowTextBinding.swift */,
 				D30000000000000000000019 /* LinnetBackupStore.swift */,
 				E71000000000000000000005 /* LinnetBackupStoreSupport.swift */,
 				E71400000000000000000005 /* LinnetCloudRecoveryArchive.swift */,
-				F60000000000000000000002 /* LinnetPortableJSONBudget.swift */,
 				D3000000000000000000001A /* RimeUserDataBridge.swift */,
 				D3000000000000000000001B /* LinnetSettingsDocument.swift */,
 				E71100000000000000000007 /* LinnetSettingsDocumentStore.swift */,
@@ -684,11 +678,9 @@
 				F30000000000000000000001 /* SettingsSessionState.swift in Settings Sources */,
 				D30000000000000000000008 /* PersonalDataStore.swift in Settings Sources */,
 				A12E55000000000000000002 /* PersonalDataValidation.swift in Settings Sources */,
-				A12E56000000000000000002 /* LinnetStableRowTextBinding.swift in Settings Sources */,
 				D30000000000000000000009 /* LinnetBackupStore.swift in Settings Sources */,
 				E71000000000000000000004 /* LinnetBackupStoreSupport.swift in Settings Sources */,
 				E71400000000000000000004 /* LinnetCloudRecoveryArchive.swift in Settings Sources */,
-				F60000000000000000000001 /* LinnetPortableJSONBudget.swift in Settings Sources */,
 				D3000000000000000000000A /* RimeUserDataBridge.swift in Settings Sources */,
 				D3000000000000000000000B /* LinnetSettingsDocument.swift in Settings Sources */,
 				E71100000000000000000006 /* LinnetSettingsDocumentStore.swift in Settings Sources */,
@@ -733,7 +725,7 @@
 				E90000000000000000000001 /* LinnetPreeditGeometry.swift in Sources */,
 				E90100000000000000000001 /* LinnetPanelGeometry.swift in Sources */,
 				E90200000000000000000001 /* LinnetCandidatePresentation.swift in Sources */,
-				E90300000000000000000001 /* LinnetCandidateAccessibility.swift in Sources */,
+				E90700000000000000000001 /* LinnetCandidateGridView.swift in Sources */,
 				A70000000000000000000001 /* LinnetClientAppearance.swift in Sources */,
 				D30000000000000000000004 /* SettingsContract.swift in Linnet Sources */,
 				FB1000000000000000000003 /* LinnetCloudSyncLocation.swift in Linnet Sources */,

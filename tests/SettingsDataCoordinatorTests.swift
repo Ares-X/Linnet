@@ -1821,7 +1821,8 @@ struct SettingsDataCoordinatorTests {
         fail("clear both did not preserve personal data")
       }
 
-      try await verifyLegacyBackupRestore(coordinator: coordinator, live: live, fixtureRoot: fixtureRoot)
+      try await verifyShippedV3BackupRestore(
+        coordinator: coordinator, live: live, fixtureRoot: fixtureRoot)
 
       // Two independent Settings actors can prepare different pack kinds from
       // the same live revision. Only the first may publish; the second must be
@@ -2084,7 +2085,7 @@ struct SettingsDataCoordinatorTests {
         "linnet_en", row: "hello\thello", directory: live, fixtureRoot: fixtureRoot
       )
     else {
-      fail("legacy import, v2 backup, input separation, or exact learning allowlist failed")
+      fail("legacy import backup, input separation, or exact learning allowlist failed")
     }
   }
 
@@ -2578,45 +2579,42 @@ struct SettingsDataCoordinatorTests {
     try runDictionaryTool(["--import", name, source.path], directory: directory)
   }
 
-  private static func verifyLegacyBackupRestore(
+  private static func verifyShippedV3BackupRestore(
     coordinator: SettingsDataCoordinator, live: URL, fixtureRoot: URL
   ) async throws {
-    for version in [2, 3] {
-      let transactionID = UUID()
-      let backup = fixtureRoot.appending(path: "legacy-backups/\(transactionID.uuidString)/backup", directoryHint: .isDirectory)
-      let stable = backup.appending(path: "stable", directoryHint: .isDirectory)
-      let learning = backup.appending(path: "user-dictionaries", directoryHint: .isDirectory)
-      try makeDirectory(stable)
-      try makeDirectory(learning)
-      _ = try LinnetBackupStore.snapshotStable(from: live, to: stable)
-      if version == 2 {
-        try FileManager.default.removeItem(at: stable.appending(path: LinnetSettingsDocumentStore.fileName))
-        try FileManager.default.removeItem(at: stable.appending(path: LinnetPersonalDataStore.userSettingsFile))
-        try "disabled_words: []\nsentence_capitalization: false\ntab_behavior: smart_complete\n".write(
-          to: stable.appending(path: LinnetPersonalDataStore.legacyUserSettingsFile), atomically: true, encoding: .utf8)
-      }
-      for (schema, row) in ["linnet_zh": "你好\tni hao\t19", "linnet_en": "hello\thello\t11"] {
-        try "# Rime user dictionary export\n\(row)\n".write(
-          to: learning.appending(path: "\(schema).txt"), atomically: true, encoding: .utf8)
-      }
-      let manifest = LinnetBackupStore.BackupManifest(
-        formatVersion: version, complete: true, backupID: UUID(), transactionID: transactionID,
-        operation: .applyPersonalData, createdAt: Date(timeIntervalSince1970: 1_700_000_000),
-        appVersion: "0.1.10", dataVersion: "legacy-fixture",
-        personalRevision: try LinnetBackupStore.backupPersonalRevision(at: stable, formatVersion: version),
-        artifacts: try LinnetBackupStore.collectBackupArtifacts(backup, formatVersion: version))
-      let encoder = JSONEncoder()
-      encoder.dateEncodingStrategy = .iso8601
-      try encoder.encode(manifest).write(to: backup.appending(path: "manifest.json"))
-      let result = try await coordinator.run(.restoreBackup(backup))
-      guard try LinnetBackupStore.verifyBackup(at: backup) == manifest,
-        result.personalSnapshot.data.customWords.map(\.value)
-          == (try LinnetPersonalDataStore.load(from: stable)).customWords.map(\.value),
-        try exportContains("linnet_zh", row: "你好\tni hao", directory: live, fixtureRoot: fixtureRoot),
-        try exportContains("linnet_en", row: "hello\thello", directory: live, fixtureRoot: fixtureRoot)
-      else { fail("shipped v\(version) backup restore lost stable/learning data or rewrote its source") }
-      print("Legacy backup v\(version) native restore: PASS")
+    let transactionID = UUID()
+    let backup = fixtureRoot.appending(
+      path: "legacy-backups/\(transactionID.uuidString)/backup", directoryHint: .isDirectory)
+    let stable = backup.appending(path: "stable", directoryHint: .isDirectory)
+    let learning = backup.appending(path: "user-dictionaries", directoryHint: .isDirectory)
+    try makeDirectory(stable)
+    try makeDirectory(learning)
+    _ = try LinnetBackupStore.snapshotStable(from: live, to: stable)
+    for (schema, row) in ["linnet_zh": "你好\tni hao\t19", "linnet_en": "hello\thello\t11"] {
+      try "# Rime user dictionary export\n\(row)\n".write(
+        to: learning.appending(path: "\(schema).txt"), atomically: true, encoding: .utf8)
     }
+    let manifest = LinnetBackupStore.BackupManifest(
+      formatVersion: LinnetBackupStore.tableBackupFormatVersion,
+      complete: true, backupID: UUID(), transactionID: transactionID,
+      operation: .applyPersonalData, createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+      appVersion: "0.1.10", dataVersion: "legacy-fixture",
+      personalRevision: try LinnetBackupStore.backupPersonalRevision(at: stable),
+      artifacts: try LinnetBackupStore.collectBackupArtifacts(
+        backup, formatVersion: LinnetBackupStore.tableBackupFormatVersion))
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    try encoder.encode(manifest).write(to: backup.appending(path: "manifest.json"))
+    let result = try await coordinator.run(.restoreBackup(backup))
+    guard try LinnetBackupStore.verifyBackup(at: backup) == manifest,
+      result.personalSnapshot.data.customWords.map(\.value)
+        == (try LinnetPersonalDataStore.load(from: stable)).customWords.map(\.value),
+      try exportContains(
+        "linnet_zh", row: "你好\tni hao", directory: live, fixtureRoot: fixtureRoot),
+      try exportContains(
+        "linnet_en", row: "hello\thello", directory: live, fixtureRoot: fixtureRoot)
+    else { fail("shipped v3 backup restore lost stable/learning data or rewrote its source") }
+    print("Legacy backup v3 native restore: PASS")
   }
 
   // The native backup codec preserves the database clock and complete c/d/t

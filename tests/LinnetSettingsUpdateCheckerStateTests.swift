@@ -60,19 +60,19 @@ struct LinnetSettingsUpdateCheckerStateTests {
       health: health(productIdentity: nil)
     )
     require(
-      unidentified == .restartRequired(installed),
-      "an identity-free Host bypassed the one safe restart boundary"
+      unidentified == .unavailable(installed: installed),
+      "an identity-free Host did not fail closed"
     )
     require(
       unidentified.activationIdentities == nil,
-      "an identity-free Host became eligible for immediate activation"
+      "an identity-free Host became eligible for Core activation"
     )
     require(
       LinnetSettingsUpdateChecker.RuntimeVersionState.resolved(
         installed: later,
         health: health(productIdentity: nil)
       ) == .unavailable(installed: later),
-      "the one-release identity-free Host bridge leaked into 0.1.11"
+      "an identity-free Host inferred its runtime identity from 0.1.11 files"
     )
 
     require(
@@ -107,8 +107,8 @@ struct LinnetSettingsUpdateCheckerStateTests {
       )
 
       checker.refreshRuntime()
-      await waitUntil("identity-free Host did not require a normal restart") {
-        checker.runtimeVersionState == .restartRequired(installed)
+      await waitUntil("identity-free Host did not fail closed") {
+        checker.runtimeVersionState == .unavailable(installed: installed)
       }
       require(
         requester.commands == [.diagnose],
@@ -117,7 +117,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
 
       checker.activateInstalledCore()
       require(
-        checker.runtimeVersionState == .restartRequired(installed)
+        checker.runtimeVersionState == .unavailable(installed: installed)
           && requester.commands == [.diagnose],
         "identity-free Host received an unsafe Core activation request"
       )

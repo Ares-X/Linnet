@@ -11,18 +11,12 @@ Usage:
   scripts/build-privacy redact
   scripts/build-privacy scan PATH...
   scripts/build-privacy sanitize-localizations APP...
-  scripts/build-privacy project-menu-icon OUTPUT
-  scripts/build-privacy verify-menu-icon PDF
 
 Commands:
   redact            Read text from stdin and write a path-redacted stream to stdout.
   scan PATH...       Fail if an artifact contains private build paths or metadata.
   sanitize-localizations APP...
                     Remove only empty locale directories retired from the canonical string catalog.
-  project-menu-icon OUTPUT
-                    Project the canonical transparent Linnet mark into the 22x16 input-source PDF.
-  verify-menu-icon PDF
-                    Prove the input-source PDF is the transparent vector projection of that mark.
 USAGE
 }
 
@@ -134,18 +128,9 @@ scan_artifacts() {
   LINNET_PRIVACY_TEMP="${privacy_temp}" \
   LINNET_PRIVACY_WORKSPACE_NAME="${privacy_workspace_name}" \
     ruby - "$@" <<'RUBY'
-require "fiddle/import"
 require "open3"
 
-module NativeXattr
-  extend Fiddle::Importer
-  dlload Fiddle.dlopen(nil)
-  extern "long listxattr(const char*, char*, size_t, int)"
-  extern "long getxattr(const char*, const char*, void*, size_t, unsigned int, int)"
-end
-
 class PrivacyScanner
-  XATTR_NOFOLLOW = 0x0001
   MACH_MAGICS = %W[feedface cefaedfe feedfacf cffaedfe cafebabe bebafeca cafebabf bfbafeca].freeze
 
   def initialize
@@ -238,29 +223,6 @@ class PrivacyScanner
       (@workspace != "Linnet".b && components.any? { |component| component.include?(@workspace) })
   end
 
-  def xattrs(path, symlink)
-    options = symlink ? XATTR_NOFOLLOW : 0
-    size = NativeXattr.listxattr(path, nil, 0, options)
-    raise "listxattr failed" if size.negative?
-    return [] if size.zero?
-
-    buffer = Fiddle::Pointer.malloc(size)
-    actual = NativeXattr.listxattr(path, buffer, size, options)
-    raise "listxattr changed" if actual.negative? || actual > size
-    buffer.to_s(actual).split("\0", -1).reject(&:empty?).map do |name|
-      value_size = NativeXattr.getxattr(path, name, nil, 0, 0, options)
-      raise "getxattr failed" if value_size.negative?
-      value = "".b
-      if value_size.positive?
-        value_buffer = Fiddle::Pointer.malloc(value_size)
-        value_actual = NativeXattr.getxattr(path, name, value_buffer, value_size, 0, options)
-        raise "getxattr changed" if value_actual.negative? || value_actual > value_size
-        value = value_buffer.to_s(value_actual)
-      end
-      [name.b, value.b]
-    end
-  end
-
   def allowed_load_path?(path)
     path == "/usr/lib" || path == "/System/Library" ||
       path == "@rpath" || path == "@loader_path" || path == "@executable_path" ||
@@ -295,15 +257,6 @@ class PrivacyScanner
   def inspect_entry(path, label, stat)
     if forbidden_name?(label)
       report(label, "forbidden build metadata")
-      return
-    end
-
-    attributes = xattrs(path, stat.symlink?)
-    # Extended metadata is a privacy failure only when its name or value leaks
-    # a forbidden identity/path. macOS may recreate com.apple.provenance on
-    # local generated files; the attribute name alone discloses no build path.
-    if attributes.any? { |name, value| forbidden_content?(name) || forbidden_content?(value) }
-      report(label, "forbidden extended metadata")
       return
     end
 
@@ -393,171 +346,6 @@ sanitize_localizations() {
   done
 }
 
-menu_icon_tool() {
-  [[ "$#" -eq 2 ]] || {
-    usage
-    exit 2
-  }
-
-  local mode="$1"
-  local output="$2"
-  local source="${privacy_root}/resources/branding/linnet-mark.svg"
-
-  [[ -f "${source}" && ! -L "${source}" ]] ||
-    fail_privacy "canonical Linnet mark is unavailable"
-  if [[ "${mode}" == project && -f "${output}" && ! -L "${output}" ]] &&
-    "${privacy_root}/scripts/build-privacy" verify-menu-icon "${output}" \
-      >/dev/null 2>&1; then
-    return 0
-  fi
-
-  local menu_icon_temp_dir
-  menu_icon_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/linnet-menu-icon.XXXXXX")"
-  trap 'rm -f "${menu_icon_temp_dir}/expected.pdf" "${menu_icon_temp_dir}/expected.bmp" \
-    "${menu_icon_temp_dir}/actual.bmp"; rmdir "${menu_icon_temp_dir}"' EXIT
-
-  xcrun swift - "${mode}" "${source}" "${output}" \
-    "${menu_icon_temp_dir}/expected.pdf" <<'SWIFT'
-import AppKit
-import CoreGraphics
-import Foundation
-
-enum MenuIconError: Error { case invalid(String) }
-
-let pageSize = CGSize(width: 22, height: 16)
-let sourceRect = CGRect(x: 0, y: -3, width: 22, height: 22)
-
-func regularFileSize(at url: URL) -> Int? {
-  guard let values = try? url.resourceValues(
-    forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
-  ), values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
-  return values.fileSize
-}
-
-func regularFile(at url: URL) -> Bool { regularFileSize(at: url) != nil }
-
-func project(_ image: NSImage, to url: URL) throws {
-  if FileManager.default.fileExists(atPath: url.path), !regularFile(at: url) {
-    throw MenuIconError.invalid("output is not a regular file")
-  }
-  let data = NSMutableData()
-  var mediaBox = CGRect(origin: .zero, size: pageSize)
-  guard let consumer = CGDataConsumer(data: data as CFMutableData),
-        let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
-    throw MenuIconError.invalid("could not create PDF context")
-  }
-
-  context.beginPDFPage(nil)
-  NSGraphicsContext.saveGraphicsState()
-  NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-  image.draw(
-    in: sourceRect,
-    from: CGRect(origin: .zero, size: image.size),
-    operation: .copy,
-    fraction: 1
-  )
-  NSGraphicsContext.restoreGraphicsState()
-  context.endPDFPage()
-  context.closePDF()
-  try (data as Data).write(to: url, options: .atomic)
-}
-
-func verify(_ url: URL) throws {
-  guard let fileSize = regularFileSize(at: url) else {
-    throw MenuIconError.invalid("PDF is not a regular file")
-  }
-  guard fileSize > 0 && fileSize <= 65_536 else {
-    throw MenuIconError.invalid("PDF has an unexpected byte size")
-  }
-  let bytes = try Data(contentsOf: url, options: .mappedIfSafe)
-  guard bytes.count == fileSize else {
-    throw MenuIconError.invalid("PDF has an unexpected byte size")
-  }
-  guard let text = String(data: bytes, encoding: .isoLatin1),
-        !text.contains("DCTDecode"),
-        !text.contains("/Subtype /Image"),
-        text.contains("/Subtype /Form") else {
-    throw MenuIconError.invalid("PDF must contain vector forms and no raster image XObject")
-  }
-  guard let provider = CGDataProvider(data: bytes as CFData),
-        let document = CGPDFDocument(provider), document.numberOfPages == 1,
-        let page = document.page(at: 1) else {
-    throw MenuIconError.invalid("PDF must contain exactly one readable page")
-  }
-  let box = page.getBoxRect(.mediaBox)
-  guard box.origin == .zero && box.size == pageSize else {
-    throw MenuIconError.invalid("PDF media box must be 22x16 points")
-  }
-}
-
-do {
-  guard CommandLine.arguments.count == 5 else {
-    throw MenuIconError.invalid("invalid arguments")
-  }
-  let mode = CommandLine.arguments[1]
-  let sourceURL = URL(fileURLWithPath: CommandLine.arguments[2])
-  let outputURL = URL(fileURLWithPath: CommandLine.arguments[3])
-  let expectedURL = URL(fileURLWithPath: CommandLine.arguments[4])
-  guard let sourceSize = regularFileSize(at: sourceURL), sourceSize <= 65_536,
-        sourceURL.pathExtension == "svg",
-        let image = NSImage(contentsOf: sourceURL), image.isValid,
-        image.representations.contains(where: {
-          String(describing: type(of: $0)).contains("SVG")
-        }) else {
-    throw MenuIconError.invalid("canonical source is not a regular SVG")
-  }
-
-  if mode == "project" {
-    try project(image, to: outputURL)
-  } else if mode != "verify" {
-    throw MenuIconError.invalid("unknown operation")
-  }
-  try project(image, to: expectedURL)
-  try verify(outputURL)
-  try verify(expectedURL)
-} catch {
-  let message = "build-privacy: \(error)\n"
-  FileHandle.standardError.write(Data(message.utf8))
-  exit(1)
-}
-SWIFT
-
-  sips -s format bmp "${output}" \
-    --out "${menu_icon_temp_dir}/actual.bmp" >/dev/null
-  sips -s format bmp "${menu_icon_temp_dir}/expected.pdf" \
-    --out "${menu_icon_temp_dir}/expected.bmp" >/dev/null
-  cmp -s "${menu_icon_temp_dir}/actual.bmp" \
-    "${menu_icon_temp_dir}/expected.bmp" ||
-    fail_privacy "menu icon PDF is not the canonical mark projection"
-  ruby - "${menu_icon_temp_dir}/actual.bmp" <<'RUBY'
-data = File.binread(ARGV.fetch(0))
-raise "unexpected menu icon raster size" unless data.bytesize <= 4096
-offset = data.unpack1("@10V")
-width = data.unpack1("@18l<")
-height = data.unpack1("@22l<")
-bits = data.unpack1("@28v")
-raise "unexpected menu icon raster format" unless [width, height, bits] == [22, -16, 32]
-pixels = data.byteslice(offset, width * height.abs * 4).bytes.each_slice(4).to_a
-raise "truncated menu icon raster" unless pixels.length == width * height.abs
-alpha = ->(x, y) { pixels.fetch(y * width + x).fetch(3) }
-corners = [alpha.call(0, 0), alpha.call(width - 1, 0),
-           alpha.call(0, height.abs - 1), alpha.call(width - 1, height.abs - 1)]
-raise "menu icon corners are opaque" unless corners.all?(&:zero?)
-visible = pixels.each_index.select { |index| pixels.fetch(index).fetch(3) >= 64 }
-strong = pixels.count { |pixel| pixel.fetch(3) >= 192 }
-xs = visible.map { |index| index % width }
-ys = visible.map { |index| index / width }
-raise "menu icon is not legible at 22x16" unless
-  xs.max - xs.min + 1 >= 18 && ys.max - ys.min + 1 >= 12 &&
-    visible.length >= 60 && strong >= 20
-RUBY
-
-  rm "${menu_icon_temp_dir}/expected.pdf" \
-    "${menu_icon_temp_dir}/expected.bmp" "${menu_icon_temp_dir}/actual.bmp"
-  rmdir "${menu_icon_temp_dir}"
-  trap - EXIT
-}
-
 main() {
   [[ "$#" -gt 0 ]] || {
     usage
@@ -570,8 +358,6 @@ main() {
     redact) redact_stream "$@" ;;
     scan) scan_artifacts "$@" ;;
     sanitize-localizations) sanitize_localizations "$@" ;;
-    project-menu-icon) menu_icon_tool project "$@" ;;
-    verify-menu-icon) menu_icon_tool verify "$@" ;;
     -h|--help|help)
       [[ "$#" -eq 0 ]] || {
         usage

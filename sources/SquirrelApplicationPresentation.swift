@@ -1,15 +1,19 @@
 import AppKit
 import InputMethodKit
+import os
 import UserNotifications
+
+private let linnetPresentationLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet",
+  category: "Presentation"
+)
 
 extension SquirrelApplicationDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    print("\(SquirrelApp.productName) is quitting.")
     return .terminateNow
   }
 
   func workspaceWillPowerOff(_: Notification) {
-    print("Finalizing before logging out.")
     shutdownRime()
   }
 
@@ -196,7 +200,9 @@ extension SquirrelApplicationDelegate {
     let center = UNUserNotificationCenter.current()
     center.requestAuthorization(options: [.alert, .provisional]) { _, error in
       if let error = error {
-        print("User notification authorization error: \(error.localizedDescription)")
+        linnetPresentationLogger.error(
+          "Notification authorization failed: \(error.localizedDescription, privacy: .private)"
+        )
       }
     }
     center.getNotificationSettings { settings in
@@ -212,7 +218,9 @@ extension SquirrelApplicationDelegate {
           identifier: Self.notificationIdentifier, content: content, trigger: nil)
         center.add(request) { error in
           if let error = error {
-            print("User notification request error: \(error.localizedDescription)")
+            linnetPresentationLogger.error(
+              "Notification request failed: \(error.localizedDescription, privacy: .private)"
+            )
           }
         }
       }
@@ -239,6 +247,23 @@ func notificationHandler(
 
   let messageType = messageTypeC.map { String(cString: $0) }
   let messageValue = messageValueC.map { String(cString: $0) }
+  DispatchQueue.main.async { [weak delegate] in
+    guard let delegate else { return }
+    handleRimeNotification(
+      delegate: delegate,
+      sessionId: sessionId,
+      messageType: messageType,
+      messageValue: messageValue)
+  }
+}
+
+@MainActor
+private func handleRimeNotification(
+  delegate: SquirrelApplicationDelegate,
+  sessionId: RimeSessionId,
+  messageType: String?,
+  messageValue: String?
+) {
   if messageType == "deploy" {
     switch messageValue {
     case "start":

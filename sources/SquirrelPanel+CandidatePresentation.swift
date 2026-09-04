@@ -311,6 +311,7 @@ extension SquirrelPanel {
 
     // Break line if the text is too long, based on screen size.
     let maximumTextWidth = maxTextWidth(metrics: metrics)
+    view.applyCandidateGridWidthLimit(maximumTextWidth)
     let maxTextHeight = metrics.vertical
       ? screenRect.width - metrics.edgeInset.width * 2
       : screenRect.height - metrics.edgeInset.height * 2
@@ -415,6 +416,7 @@ extension SquirrelPanel {
       vertical: metrics.vertical).contentFrame
     view.textView.frame = contentFrame
     view.textView.textContainerInset = metrics.edgeInset
+    view.layoutCandidateGrid(in: contentFrame, edgeInset: metrics.edgeInset)
     if let detailFrames {
       let top = contentFrame.maxY - metrics.edgeInset.height
       view.detailTextView.frame = NSRect(
@@ -478,6 +480,7 @@ extension SquirrelPanel {
       orderOut(nil)
       return
     }
+    view.candidateGridView.clear()
     textContentStorage.attributedString = text
     view.publishSidecarDetail(nil)
     guard publicationIsCurrent(publication) else { return }
@@ -486,11 +489,9 @@ extension SquirrelPanel {
     view.drawView(
       candidateRanges: [NSRange(location: 0, length: text.length)], detailRange: .empty,
       hilightedIndex: -1, preeditRange: .empty, highlightedPreeditRange: .empty,
-      controlMode: .paging(canPageUp: false, canPageDown: false),
-      usesGridLayout: false)
+      controlMode: .paging(canPageUp: false, canPageDown: false))
     guard publicationIsCurrent(publication) else { return }
     guard show(publication: publication) else { return }
-    candidateAccessibility.publishStatus(parent: view, message: message)
     guard publicationIsCurrent(publication) else { return }
 
     statusTimer?.invalidate()

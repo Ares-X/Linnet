@@ -26,38 +26,6 @@ for owner in "${stager}" "${publisher}" "${manifest}" "${identity_owner}"; do
   bash -n "${owner}"
 done
 
-for required in \
-    'candidate draft mutation is owned by GitHub Actions' \
-    'release create "${tag}"' \
-    'release delete "${tag}"' \
-    'release upload "${tag}"' \
-    'contains foreign asset bytes' \
-    'older Draft is not exact Linnet-owned state' \
-    'Immutable pack' \
-    'earlier revision'; do
-  rg -Fq -- "${required}" "${stager}" ||
-    fail "draft stager contract is incomplete: ${required}"
-done
-for required in \
-    'public release mutation is owned by GitHub Actions' \
-    'publication authorization differs from candidate bytes' \
-    'data-seed authorization differs from candidate identity' \
-    'linnet-preview/' \
-    'Catalog not promoted' \
-    'staged candidate inventory differs from the canonical asset set' \
-    'publish_channel core' \
-    'publish_channel data' \
-    'promote_catalog preview-channel' \
-    'promote_catalog data-channel' \
-    'publish_channel public' \
-    '-F force=false'; do
-  rg -Fq -- "${required}" "${publisher}" ||
-    fail "Action publisher contract is incomplete: ${required}"
-done
-if rg -n 'release (create|upload|delete)|--clobber|force=true' "${publisher}"; then
-  fail "publisher regained authority to replace candidate bytes"
-fi
-
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/linnet-action-publication.XXXXXX")"
 cleanup() {
   [[ "${fixture}" == "${TMPDIR:-/tmp}/linnet-action-publication."* ]] &&

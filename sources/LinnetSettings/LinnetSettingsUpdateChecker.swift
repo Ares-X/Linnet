@@ -1,5 +1,11 @@
 import AppKit
 import Foundation
+import os
+
+private let linnetUpdateLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet.Settings",
+  category: "Update"
+)
 
 protocol LinnetCorePackageDownloading: Sendable {
   func download(
@@ -98,15 +104,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   }
 
   enum RuntimeVersionState: Equatable {
-    /// One public compatibility bridge: an identity-free 0.1.9 Host can only
-    /// defer to the installed 0.1.10 Core. Remove this constant, the
-    /// `restartRequired` resolution branch, and its tests when 0.1.11 becomes
-    /// the public update target.
-    private static let identityFreeBridgeTargetVersion = "0.1.10"
-
     case checking(installed: LinnetSettingsContract.ProductIdentity?)
     case current(LinnetSettingsContract.ProductIdentity)
-    case restartRequired(LinnetSettingsContract.ProductIdentity)
     case pending(
       installed: LinnetSettingsContract.ProductIdentity,
       running: LinnetSettingsContract.ProductIdentity
@@ -138,9 +137,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
       guard let installed else { return .unavailable(installed: nil) }
       guard let health else { return .unavailable(installed: installed) }
       guard let running = health.productIdentity else {
-        return installed.version == identityFreeBridgeTargetVersion
-          ? .restartRequired(installed)
-          : .unavailable(installed: installed)
+        return .unavailable(installed: installed)
       }
       return installed == running
         ? .current(running)
@@ -370,7 +367,9 @@ extension LinnetSettingsUpdateChecker {
       } catch is CancellationError {
         await self?.finishCancellation(cycle: activeCycle)
       } catch {
-        print("Update check failed: \(error.localizedDescription)")
+        linnetUpdateLogger.error(
+          "Update check failed: \(error.localizedDescription, privacy: .private)"
+        )
         await self?.finishFailure(cycle: activeCycle)
       }
     }

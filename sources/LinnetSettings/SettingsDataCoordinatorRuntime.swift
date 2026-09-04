@@ -395,14 +395,13 @@ extension SettingsDataCoordinator {
     }
   }
 
-  /// Only explicitly imported v2/v3 backups use the old portable table codec.
+  /// Shipped v3 backups use the old portable table codec.
   func legacyBackupLearningImports(
     from directory: URL,
     manifest: LinnetBackupStore.BackupManifest
   ) throws
     -> [RimeUserDataBridge.LearningImport] {
-    guard [LinnetBackupStore.legacyBackupFormatVersion, LinnetBackupStore.tableBackupFormatVersion]
-      .contains(manifest.formatVersion)
+    guard manifest.formatVersion == LinnetBackupStore.tableBackupFormatVersion
     else { throw Failure.invalidOperation("legacy backup learning version") }
     try requireDirectory(directory)
     let prefix = "user-dictionaries/"

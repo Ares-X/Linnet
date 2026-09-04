@@ -1,8 +1,15 @@
 import Foundation
+import os
+
+private let linnetSyncLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet",
+  category: "LearningSync"
+)
 
 enum LinnetRimeSyncSchedule {
   static let automaticInterval: TimeInterval = 60 * 60
   static let busyRetryInterval: TimeInterval = 5
+  static let waitingRetryInterval: TimeInterval = 0.1
   static let maximumBusyAttempts = 12
 
   static func nextAutomaticDate(now: Date, lastAttempt: Date?) -> Date {
@@ -30,6 +37,7 @@ struct LinnetRimeSyncConfiguration: Sendable {
 enum LinnetRimeSyncOutcome {
   case completed
   case inProgress
+  case waiting
   case deferred
   case busy
   case failed
@@ -136,7 +144,9 @@ final class LinnetRimeSyncController: @unchecked Sendable {
         scheduleAutomatic(at: next)
       }
     } catch {
-      print("Linnet learning sync configuration is unavailable: \(error.localizedDescription)")
+      linnetSyncLogger.error(
+        "Learning sync configuration is unavailable: \(error.localizedDescription, privacy: .private)"
+      )
       completion?(.unavailable)
       scheduleAutomatic(at: Date().addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
     }
@@ -177,16 +187,10 @@ final class LinnetRimeSyncController: @unchecked Sendable {
     cycle = current
     switch operation(current.syncDirectory) {
     case .inProgress:
-      let now = Date()
-      guard now < current.deadline else {
-        cancelOperation()
-        cycle = nil
-        current.completion?(.deferred)
-        print("Linnet learning sync deferred; input and pending learning were preserved.")
-        scheduleAutomatic(at: now.addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
-        return
-      }
-      schedule(at: now.addingTimeInterval(0.01)) { [weak self] in self?.attempt(cycleID) }
+      continueCycle(current, cycleID: cycleID, after: 0.01)
+    case .waiting:
+      continueCycle(
+        current, cycleID: cycleID, after: LinnetRimeSyncSchedule.waitingRetryInterval)
     case .busy:
       current.attempt += 1
       cycle = current
@@ -208,6 +212,23 @@ final class LinnetRimeSyncController: @unchecked Sendable {
     case .failed:
       finish(current, result: .failed)
     }
+  }
+
+  private func continueCycle(
+    _ current: LinnetRimeSyncCycle,
+    cycleID: UUID,
+    after interval: TimeInterval
+  ) {
+    let now = Date()
+    guard now < current.deadline else {
+      cancelOperation()
+      cycle = nil
+      current.completion?(.deferred)
+      linnetSyncLogger.notice("Learning sync was deferred; pending learning was preserved.")
+      scheduleAutomatic(at: now.addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
+      return
+    }
+    schedule(at: now.addingTimeInterval(interval)) { [weak self] in self?.attempt(cycleID) }
   }
 
   private func finish(_ current: LinnetRimeSyncCycle, result: LinnetRimeSyncResult) {

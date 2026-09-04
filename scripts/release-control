@@ -63,8 +63,7 @@ verify_receipt() {
     profiles = receipt.fetch("profiles")
     abort "incomplete source acceptance" unless profiles.keys.sort ==
       %w[app lint periphery rime settings_ui swift] &&
-      %w[app lint periphery rime swift].all? { |name| profiles[name] == "PASS" } &&
-      %w[PASS NOT_EXERCISED].include?(profiles["settings_ui"])
+      profiles.values.all? { |value| value == "PASS" }
     tools = receipt.fetch("toolchain")
     abort "missing toolchain evidence" unless tools.keys.sort == %w[macos swift xcode] &&
       tools.values.all? { |value| value.is_a?(String) && !value.empty? } &&
@@ -105,16 +104,11 @@ if [[ "${command_name}" == verify-local ]]; then
   macos_version="$(sw_vers -buildVersion)"
   ./action-build.sh release
   scripts/run_swiftlint.sh
-  tests/verify_release_automation.sh
   tests/verify_publication_owner.sh
   tests/verify_development.sh all
   scripts/run_periphery.sh
-  settings_ui=NOT_EXERCISED
-  if [[ "${LINNET_ISOLATED_UI_TEST_DESKTOP:-}" == 1 ]] &&
-    [[ "$(DevToolsSecurity -status 2>&1)" == *enabled* ]]; then
-    tests/verify_visible_settings_fixture.sh --ui-test
-    settings_ui=PASS
-  fi
+  tests/verify_visible_settings_fixture.sh --ui-test
+  settings_ui=PASS
   [[ "$(source_tree)" == "${before_tree}" ]] ||
     fail "source changed during local verification; no receipt was issued"
   receipt_stage="$(mktemp "${source_receipt}.XXXXXX")"

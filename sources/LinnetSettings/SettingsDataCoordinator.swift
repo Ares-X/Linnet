@@ -360,10 +360,14 @@ extension SettingsDataCoordinator {
       path: "CloudRecoveryInspect-\(UUID().uuidString)", directoryHint: .isDirectory)
     try fileManager.createDirectory(at: scratch, withIntermediateDirectories: false)
     defer { try? fileManager.removeItem(at: scratch) }
-    guard let materialized = try LinnetCloudRecoveryArchive.materializeLatest(
-      in: cloudFolder, workspace: scratch)
-    else { return nil }
-    return try inspectPortable(materialized)
+    do {
+      guard let materialized = try LinnetCloudRecoveryArchive.materializeLatest(
+        in: cloudFolder, workspace: scratch)
+      else { return nil }
+      return try inspectPortable(materialized)
+    } catch LinnetCloudRecoveryArchive.Failure.cloudItemUnavailable(_) {
+      throw Failure.unavailable
+    }
   }
 
   func run(
@@ -468,6 +472,9 @@ extension SettingsDataCoordinator {
     } catch LinnetCloudRecoveryArchive.Failure.needsConfirmedRepair {
       phaseProgress(.failed)
       throw Failure.cloudRecoveryRepairRequired
+    } catch LinnetCloudRecoveryArchive.Failure.cloudItemUnavailable(_) {
+      phaseProgress(.failed)
+      throw Failure.unavailable
     } catch {
       phaseProgress(.failed)
       throw error

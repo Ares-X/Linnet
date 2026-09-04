@@ -458,7 +458,7 @@ struct InputTabView: View {
 
   private var reverseLookupExample: String {
     let input = model.configuration.documentDraft.input
-    return "\(input.pinyinReverseTrigger.prefix)\(input.chineseProfile.reverseLookupExampleCode) → algorithm"
+    return "\(input.pinyinReverseTrigger.prefix)\(input.chineseProfile.representativeInputCode) → algorithm"
   }
 
 }
@@ -489,10 +489,15 @@ struct DictionaryTabView: View {
             sectionHeader(
               "Custom words", help: "Value and lowercase Rime code", add: model.addCustomWord)
             LazyVStack(alignment: .leading, spacing: 8) {
-              ForEach(model.configuration.personalDraft.customWords) { row in
+              let rows = model.configuration.personalDraft.customWords
+              ForEach(
+                rows.indices.lazy.map { ($0, rows[$0].id) }, id: \.1
+              ) { index, _ in
+                let row = rows[index]
+                let rowBinding = model.customWordBinding(row, at: index)
                 HStack {
-                  TextField("Value", text: model.customWordValueBinding(row))
-                  TextField("code", text: model.customWordCodeBinding(row)).frame(width: 170)
+                  TextField("Value", text: rowBinding.value)
+                  TextField("code", text: rowBinding.code).frame(width: 170)
                   removeButton("Remove custom word") { model.removeCustomWord(id: row.id) }
                 }
               }
@@ -503,9 +508,14 @@ struct DictionaryTabView: View {
               add: model.addDisabledWord
             )
             LazyVStack(alignment: .leading, spacing: 8) {
-              ForEach(model.configuration.personalDraft.disabledWords, id: \.identifier) { row in
+              let rows = model.configuration.personalDraft.disabledWords
+              ForEach(
+                rows.indices.lazy.map { ($0, rows[$0].identifier) }, id: \.1
+              ) { index, _ in
+                let row = rows[index]
+                let rowBinding = model.disabledWordBinding(row, at: index)
                 HStack {
-                  TextField("word", text: model.disabledWordBinding(row))
+                  TextField("word", text: rowBinding.value)
                   removeButton("Remove disabled word") {
                     model.removeDisabledWord(id: row.identifier)
                   }
@@ -516,10 +526,15 @@ struct DictionaryTabView: View {
             sectionHeader(
               "Text Expander", help: "Explicit triggers begin with x;", add: model.addExpansion)
             LazyVStack(alignment: .leading, spacing: 8) {
-              ForEach(model.configuration.personalDraft.expansions) { row in
+              let rows = model.configuration.personalDraft.expansions
+              ForEach(
+                rows.indices.lazy.map { ($0, rows[$0].id) }, id: \.1
+              ) { index, _ in
+                let row = rows[index]
+                let rowBinding = model.expansionBinding(row, at: index)
                 HStack {
-                  TextField("Expansion", text: model.expansionValueBinding(row))
-                  TextField("x;trigger", text: model.expansionTriggerBinding(row)).frame(width: 170)
+                  TextField("Expansion", text: rowBinding.value)
+                  TextField("x;trigger", text: rowBinding.trigger).frame(width: 170)
                   removeButton("Remove text expansion") { model.removeExpansion(id: row.id) }
                 }
               }
