@@ -11,7 +11,7 @@ or install a daemon, launch item, privileged helper, or background updater.
 
 This community package is not signed with an Apple Developer ID and is not
 notarized. Continue only after the package matches its exact Release SHA-256.
-The uninstall command in README is bound to this version's source tag. Open the package from Finder with Control-click or right-click >
+README provides direct offline uninstall commands. Open the package from Finder with Control-click or right-click >
 Open; if macOS still blocks it, use System Settings > Privacy & Security > Open
 Anyway. Never disable Gatekeeper or clear quarantine attributes. Stop if the
 checksum differs or macOS reports damage or malware.
@@ -43,7 +43,7 @@ After installation:
   add or enable it in System Settings > Keyboard > Text Input > Edit; an
   existing-App repair never resubmits authorization.
   If Core reports duplicate, conflicting, or unverifiable registration remnants,
-  run the official uninstaller first, then install Complete.
+  run the offline uninstall commands in README, then install Complete.
   Do not use Complete for a routine healthy upgrade or to bypass a rejected
   App identity or version.
 - If macOS asks for first-use approval, allow it, then select Linnet yourself
@@ -73,15 +73,14 @@ send them personal dictionaries, learning data, or credentials.
 
 Keep the installer until installation and first input are complete. The exact
 SHA-256 is printed in the same stable Release notes. Core updates live in the
-same repository's versioned Core update channel; README fetches uninstall only
-from the matching immutable version tag.
+same repository's versioned Core update channel. README provides direct offline
+commands for complete removal; Linnet does not download or publish an
+uninstaller.
 
-Before uninstalling, switch to another input source. The uninstaller never runs
-the installed Host; if the exact Host or Settings process remains active, sign
-out and back in, then retry. Runtime logs live in the fixed product path
-`Application Support/Linnet/Runtime/Logs` and leave with the default Runtime
-removal. Default uninstall keeps personal data; purge additionally removes
-preferences and remaining personal data without inferring a system temporary path.
+Before uninstalling, switch to another input source, sign out and back in, then
+open only Terminal. The README commands permanently remove the App, all Linnet
+data, backups, preferences and Installer receipts. Export anything you need
+before running them.
 
 ---
 
@@ -121,7 +120,7 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
   完整修复；它不会由 Core 静默回退触发。若输入菜单缺少或停用了 Linnet，请在
   系统设置 → 键盘 → 文本输入 → 编辑 中添加或启用；已有 App 的修复不会重复申请授权。
   若 Core 报告重复、冲突或无法验证的注册残留，
-  请先运行官方卸载器，再安装 Complete。
+  请先运行 README 中的离线卸载命令，再安装 Complete。
   不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。
 - 若 macOS 首次请求允许 Linnet，请选择“允许”，再从菜单栏输入菜单选择 Linnet。
   Complete 不会代替用户确认授权或切换输入源。
@@ -147,7 +146,6 @@ Catalog、容器和每个文件。第三方镜像可能看到 IP、请求时间�
 安装和首次输入完成前，请保留安装包，并核对同一 Release 说明中的 SHA-256。
 使用、隐私、升级与卸载说明见 Linnet Release 页面。
 
-卸载前先切换到其他输入法。卸载器不会执行已安装的 Host；若精确 Host 或
-Settings 进程仍在运行，请注销并重新登录后重试。运行日志固定存放在
-`Application Support/Linnet/Runtime/Logs`，会随默认卸载的 Runtime 一起删除。
-默认卸载保留个人数据；完整清理还会删除偏好与剩余个人数据，不推断系统临时路径。
+卸载前先切换到其他输入法，注销并重新登录，然后只打开 Terminal。README
+直接给出完全离线的本地命令；命令会永久删除 App、全部 Linnet 数据、备份、
+偏好和 Installer receipts，需要保留的数据请先导出。

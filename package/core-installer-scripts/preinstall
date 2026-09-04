@@ -113,7 +113,7 @@ done
 if [[ "${install_mode}" == complete ]]; then
   complete_stage_root="${support_root}/.linnet-complete"
   [[ ! -e "${complete_stage_root}" && ! -L "${complete_stage_root}" ]] || {
-    echo "Linnet Complete preinstall: a prior repair staging path remains. Run the official uninstaller first." >&2
+    echo "Linnet Complete preinstall: a prior repair staging path remains. Run the offline uninstall commands in README first." >&2
     exit 1
   }
 fi
@@ -172,7 +172,7 @@ if [[ "${install_mode}" == complete ]]; then
     exit 1
   }
   inspect_runtime || {
-    echo "Linnet Complete found invalid installed language data. Run the official uninstaller first." >&2
+    echo "Linnet Complete found invalid installed language data. Run the offline uninstall commands in README first." >&2
     exit 1
   }
   case "${registration_state}" in

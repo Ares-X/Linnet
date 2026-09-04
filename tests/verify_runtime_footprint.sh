@@ -1730,9 +1730,6 @@ test "$(rg -F -o 'func prepareRuntimeLogDirectory() throws -> URL' \
 rg -Fq 'try? SquirrelApp.dataRegistry.prepareRuntimeLogDirectory()' \
   sources/SquirrelApplicationRuntime.swift ||
   fail "Host stopped consuming the Registry-owned runtime-log path"
-if rg -n 'getconf DARWIN_USER_TEMP_DIR|temporary_log_path' package/uninstall-linnet; then
-  fail "uninstall regained an inferred temporary-log path"
-fi
 test "$(rg -o 'reconcileLanguageStorage\(' sources/LinnetDataRegistry.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift | wc -l | tr -d ' ')" -eq 4 ||
   fail "language storage reconciliation must have one owner and three lifecycle callers"
 rg -Fq 'static let languageTransactionMarkerName = ".linnet-language-transaction.json"' \

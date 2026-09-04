@@ -12,6 +12,23 @@ fail() {
   exit 1
 }
 
+[[ ! -e package/uninstall-linnet ]] ||
+  fail "the retired standalone uninstaller still exists"
+if rg -n 'raw\.githubusercontent\.com/.*/package/uninstall-linnet|curl.*uninstall' README.md; then
+  fail "README uninstall still depends on a network-fetched script"
+fi
+if rg -n 'LINNET_VERSION|--print-plan|--purge-user-data' README.md; then
+  fail "README uninstall regained a downloaded-script option or version selector"
+fi
+for offline_uninstall_fragment in \
+    'Library/Input Methods/Linnet.app' \
+    'Library/Application Support/Linnet' \
+    'Library/Preferences/io.github.ares-x.inputmethod.Linnet.plist' \
+    '/bin/rm -rf -x --'; do
+  rg -Fq -- "${offline_uninstall_fragment}" README.md ||
+    fail "README lost its direct offline uninstall command: ${offline_uninstall_fragment}"
+done
+
 for script in package/build_data_pack package/build_activation_profile \
     package/make_package package/make_archive \
     package/verify_package; do
@@ -247,7 +264,7 @@ rg -q '^archive:[[:space:]]+package$' Makefile ||
 tests/verify_lean_data_trust.sh
 
 if rg -n -i 'python|\.py([[:space:]"]|$)' \
-    sources resources package/installer-scripts package/uninstall-linnet; then
+    sources resources package/installer-scripts; then
   fail "the installed product or lifecycle scripts gained a Python runtime dependency"
 fi
 

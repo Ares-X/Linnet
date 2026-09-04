@@ -113,7 +113,7 @@ Settings 的已安装版本读取同一磁盘安装的 Info.plist 与 VERSION.js
 差分 Core 使用独立的 `update.core.pkg` receipt；Complete 的 App、词包和激活投影
 使用 `complete.*.pkg` receipts，只指向隐藏暂存目录。不能复用旧版全量安装的
 live-payload receipt，否则 PackageKit 会在 preinstall 与 postinstall 之间删除本版
-未携带的旧文件。旧 receipts 仅由卸载器清理，升级不修改或遗忘它们。
+未携带的旧文件。旧 receipts 仅由 README 的离线卸载命令清理，升级不修改或遗忘它们。
 变更安装组件布局时，先在本地运行
 `tests/verify_package_architecture.sh --native-receipt-upgrade`；它用独立安装路径和
 测试 receipts 验证真实 PackageKit 的旧版迁移、重复安装与 Core/Complete 交替，
@@ -213,7 +213,7 @@ Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 c
 `config/linnet-community-signing.json` 中的固定 leaf、bundle ID、macOS major 和
 “旧迁移投影指纹”决定，不是逐候选步骤。Core 只接受唯一、精确匹配的 TIS source/bundle
 身份；App 缺失或注册缺失时在 payload 前失败。受支持签名 App 的缺失注册由 Complete
-修复；重复、冲突、未知 bundle 或任何残留身份必须先走官方卸载，不能猜测或覆盖用户
+修复；重复、冲突、未知 bundle 或任何残留身份必须先执行 README 的离线完整卸载命令，不能猜测或覆盖用户
 状态。发布 Keychain 密码永远不属于用户安装流程；历史首次身份迁移若由
 macOS 显示输入源安全确认，它是一次系统授权，不是 Keychain 密码。
 安装脚本也不得调用依赖用户系统信任根的深度验签来判断 App 是否损坏；用户侧只核对

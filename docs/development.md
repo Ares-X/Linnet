@@ -38,7 +38,7 @@
 | `data/chinese/overrides/` | 已复现、人工接受的中文读音与排序决定 |
 | `patches/` | 对精确上游源码应用且摘要锁定的必要补丁 |
 | `scripts/` | 上游同步、runtime build、数据 staging 和 metadata 工具 |
-| `package/` | 当前用户域 PKG、语言包、源码内卸载脚本和 publication plan |
+| `package/` | 当前用户域 PKG、语言包和 publication plan；卸载命令由 README 直接提供 |
 | `tests/` | focused、engine、package 和 product gates |
 | `upstreams.lock.json` | 所有上游版本、提交、输入摘要与直接上游集合 |
 | `config/linnet-data-releases.json` | Chinese/English/LTS/Extended release identity |
@@ -241,7 +241,7 @@ App target 与独立的 `.local-build.settings` 身份。构建前后不会调�
 
 ### 一次性配置本机预检签名身份
 
-本地预检身份属于维护者工具，不属于 Linnet 产品数据，也不会被卸载器清理。先把固定
+本地预检身份属于维护者工具，不属于 Linnet 产品数据，README 的离线卸载命令也不会清理它。先把固定
 P12 和它的一行密码分别放到以下仓库外路径，两者都必须是当前用户拥有、权限为
 `0600` 的普通文件：
 
@@ -324,8 +324,8 @@ composition 或数据事务时，Host 的 typed activation owner 才能接受自
 随后只从 canonical 安装路径启动 Host，并在精确 revision 一致后报告生效；任一前提
 不满足都必须拒绝，不能强杀。Core 遇到 missing App 或 missing TIS registration 必须
 在 payload 前失败；缺失或停用的输入源由用户在系统设置中添加或启用，已有 App 的
-Complete 修复也不触碰 TIS。重复、冲突或未知 TIS 残留必须先官方卸载。默认卸载和显式 purge 仍需要独立
-验证数据保留/删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**
+Complete 修复也不触碰 TIS。重复、冲突或未知 TIS 残留必须先执行 README 的离线
+完整卸载命令，并验证全量删除与注销边界。选择 Linnet 后，可从其原生输入菜单的 **Settings**
 打开设置；它是 `Linnet.app` 内嵌的 accessory App，不作为独立产品安装、不常驻
 Dock，并在最后一个窗口关闭后退出。
 

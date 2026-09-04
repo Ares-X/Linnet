@@ -193,7 +193,7 @@ Linnet 0.1 系列不会在后台静默安装未签名、未公证的 Core/App。
 
 正式版本页只提供完整安装包；`core-v<version>` 预发布页供已有用户免注销更新，`data-<sequence>` 预发布页供 Settings 更新语言数据。它们不会成为 Latest Release。
 
-已经完成首次安装和一次注销的用户，只需在 **数据与更新 → 核心更新** 中下载提示的 Core 包。Settings 始终使用当前所选频道的 Catalog 和其中绑定的精确下载地址，不会要求用户寻找 Release 资产或手工比对哈希。校验完成后，在 Finder 中按住 Control 点击该安装包并选择 **打开**。Core 会验证既有 App 的发布身份、代码完整性、版本、输入源登记和语言数据，再原子替换为包内封装的完整候选；正式版与较低 build 的预览版使用同一条升级路径。它保持已安装语言包、个人数据和输入源状态，不重新注册输入源，也不关闭 Settings、TextEdit、Teams、浏览器等窗口。Settings 正在修改数据时，安装会暂缓，请完成该操作后重试。既有 App 缺失、损坏或身份不符时，Core 不会继续写入；按明确提示使用 Complete 安装包修复或先执行官方卸载。
+已经完成首次安装和一次注销的用户，只需在 **数据与更新 → 核心更新** 中下载提示的 Core 包。Settings 始终使用当前所选频道的 Catalog 和其中绑定的精确下载地址，不会要求用户寻找 Release 资产或手工比对哈希。校验完成后，在 Finder 中按住 Control 点击该安装包并选择 **打开**。Core 会验证既有 App 的发布身份、代码完整性、版本、输入源登记和语言数据，再原子替换为包内封装的完整候选；正式版与较低 build 的预览版使用同一条升级路径。它保持已安装语言包、个人数据和输入源状态，不重新注册输入源，也不关闭 Settings、TextEdit、Teams、浏览器等窗口。Settings 正在修改数据时，安装会暂缓，请完成该操作后重试。既有 App 缺失、损坏或身份不符时，Core 不会继续写入；按明确提示使用 Complete 安装包修复或先执行下文的离线卸载命令。
 
 ### 安装后应用更新
 
@@ -207,35 +207,22 @@ Linnet 0.1 系列不会在后台静默安装未签名、未公证的 Core/App。
 
 没有待应用更新时，按钮置灰是正常的。有未保存的设置或正在进行的数据操作时，请先完成页面提示的操作。应用被阻止时，根据卡片说明处理后重试；Linnet 不会替你切换输入源或强制关闭用户应用。若旧版 Host 不支持当前会话内应用更新，会明确提示等下次正常登录或重启后生效，不应反复重装或删除输入源。支持会话内更新的 Host 无需注销。
 
-正常升级只使用 Core；只有 App 缺失、损坏或发布身份不符时，才使用完整 `Linnet.pkg`。Complete 保留健康的已安装词包与个人数据；若 App 已存在，它也不会触碰输入源状态。注册缺失或停用由 **系统设置 → 键盘 → 文本输入 → 编辑** 处理，而不是让安装器重复申请授权。重复、冲突或无法验证的系统残留必须先使用官方卸载工具，再重新安装 Complete。不要手工复制 App 或绕过检查。
+正常升级只使用 Core；只有 App 缺失、损坏或发布身份不符时，才使用完整 `Linnet.pkg`。Complete 保留健康的已安装词包与个人数据；若 App 已存在，它也不会触碰输入源状态。注册缺失或停用由 **系统设置 → 键盘 → 文本输入 → 编辑** 处理，而不是让安装器重复申请授权。重复、冲突或无法验证的系统残留必须先执行下文的离线卸载命令，再重新安装 Complete。不要手工复制 App 或绕过检查。
 
 ### 卸载
 
-卸载脚本只从已发布版本的精确源码标签读取，不使用可变的 `main`，也不再作为独立 Release 资产。先查看计划：
-
-运行卸载器前，必须先从 macOS 输入菜单切换到其他输入法。卸载器不会执行安装目录内的 Host，也不会替用户终止 Host 或 Settings；如果检测到其精确进程仍在运行，会停止且不删除任何内容，请注销并重新登录后再运行卸载器。
+先从 macOS 输入菜单切换到其他输入法，注销并重新登录，然后只打开 Terminal。以下命令完全在本机运行，不下载或执行网络脚本。它会永久删除 Linnet App、全部个人数据、备份、偏好和安装记录；需要保留的数据请先导出。
 
 ```bash
-LINNET_VERSION='X.Y.Z'
-/usr/bin/curl --fail --location --proto '=https' \
-  "https://raw.githubusercontent.com/Ares-X/Linnet/v${LINNET_VERSION}/package/uninstall-linnet" \
-  | /bin/bash -s -- --print-plan
-/usr/bin/curl --fail --location --proto '=https' \
-  "https://raw.githubusercontent.com/Ares-X/Linnet/v${LINNET_VERSION}/package/uninstall-linnet" \
-  | /bin/bash
+/usr/bin/find -P "$HOME/Library/Application Support/Linnet" -x -type d -exec /bin/chmod u+rwx {} + 2>/dev/null || true
+/bin/rm -rf -x -- "$HOME/Library/Input Methods/Linnet.app" "$HOME/Library/Application Support/Linnet"
+/usr/bin/defaults delete io.github.ares-x.inputmethod.Linnet 2>/dev/null || true
+/usr/bin/defaults delete io.github.ares-x.inputmethod.Linnet.settings 2>/dev/null || true
+/bin/rm -f -- "$HOME/Library/Preferences/io.github.ares-x.inputmethod.Linnet.plist" "$HOME/Library/Preferences/io.github.ares-x.inputmethod.Linnet.settings.plist"
+/usr/sbin/pkgutil --volume "$HOME" --pkgs | /usr/bin/grep '^io\.github\.ares-x\.inputmethod\.Linnet\..*\.pkg$' | while IFS= read -r receipt; do /usr/sbin/pkgutil --volume "$HOME" --forget "$receipt" >/dev/null; done
 ```
 
-默认卸载会删除 App、语言包和生成数据，但保留个人词、学习数据、Text Expander、备份、事务记录与偏好。完成后注销并重新登录，以刷新 macOS 输入源列表。
-
-只有确定不再需要任何 Linnet 用户数据时，才使用不可恢复的完整清理：
-
-```bash
-/usr/bin/curl --fail --location --proto '=https' \
-  "https://raw.githubusercontent.com/Ares-X/Linnet/v${LINNET_VERSION}/package/uninstall-linnet" \
-  | /bin/bash -s -- --purge-user-data
-```
-
-运行日志位于产品固定目录 `Application Support/Linnet/Runtime/Logs`，会随默认卸载的 Runtime 一起删除。`--purge-user-data` 还会删除偏好和剩余个人数据；卸载器不会猜测或遍历系统临时目录。
+完成后再次注销并重新登录，以刷新 macOS 输入源列表。
 
 ## 故障排查
 
