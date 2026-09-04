@@ -525,10 +525,11 @@ extension SquirrelPanel {
         "No definition", comment: "Expanded English candidate without a definition")
     }
     guard !comment.isEmpty else { return nil }
+    let showsFullWord = reservesExpandedDetail && selectedComment.belongsToSmartEnglish
     return LinnetCandidatePresentation.candidateLine(
-      candidateFormat: "[comment]",
+      candidateFormat: showsFullWord ? "[candidate] · [comment]" : "[comment]",
       label: "",
-      candidate: "",
+      candidate: showsFullWord ? candidates[index].text : "",
       comment: comment,
       candidateAttributes: theme.detailAttrs,
       labelAttributes: theme.detailAttrs,

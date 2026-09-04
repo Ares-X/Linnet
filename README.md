@@ -193,7 +193,7 @@ Linnet 不会在后台自动修改 Core。Settings 检查到更新后，只有�
 
 正式版本页只提供完整安装包；`core-v<version>` 预发布页供已有用户免注销更新，`data-<sequence>` 预发布页供 Settings 更新语言数据。它们不会成为 Latest Release。
 
-0.1.15 是一次性桥接版：0.1.14 及更早的固定 CMS 版本仍会下载旧式 Core PKG，并显示 **打开旧版安装器… / Open Legacy Installer…**；只需按 macOS 提示完成这一次升级。安装 0.1.15 后，新的 `.linnetcore` 更新由 Settings 校验 Catalog SHA-256、目标版本/build/revision、完整代码签名及固定 CMS 叶，再原子交换 `Linnet.app/Contents`。Settings 始终使用当前所选频道的精确地址，不要求用户寻找 Release 资产或手工比对哈希。0.1.7 或更早的旧 ad-hoc 版本、App 缺失、损坏或身份不符仍须运行完整 `Linnet.pkg` 修复。
+0.1.15 是一次性桥接版：0.1.14 及更早的固定 CMS 版本仍会下载旧式 Core PKG，并显示 **打开旧版安装器… / Open Legacy Installer…**；只需按 macOS 提示完成这一次升级。之后在 Settings 中下载并应用核心更新即可，不需要寻找发布页中的文件或手工比对哈希。0.1.7 或更早的旧 ad-hoc 版本、App 缺失或损坏时仍须运行完整 `Linnet.pkg` 修复。
 
 ### 应用核心更新
 

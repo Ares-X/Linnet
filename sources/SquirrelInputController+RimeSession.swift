@@ -169,11 +169,29 @@ extension SquirrelInputController {
       flow: panel.linear ? .horizontal : .vertical,
       verticalText: panel.vertical,
       expanded: panel.candidateExpansionRequested)
-    if navigationLayout.linear != rimeAPI.get_option(session, "_linear") {
+    let changesLinear = navigationLayout.linear != rimeAPI.get_option(session, "_linear")
+    let changesVertical = navigationLayout.vertical != rimeAPI.get_option(session, "_vertical")
+    guard changesLinear || changesVertical else { return }
+
+    // Rime refreshes the composition when any option changes, including layout.
+    // Preserve its selection across that refresh, before processing the key.
+    var context = RimeContext_stdbool.rimeStructInit()
+    var selectedIndex: Int?
+    if rimeAPI.get_context(session, &context) {
+      if context.menu.num_candidates > 0 {
+        selectedIndex = Int(context.menu.page_no) * Int(context.menu.page_size)
+          + Int(context.menu.highlighted_candidate_index)
+      }
+      _ = rimeAPI.free_context(&context)
+    }
+    if changesLinear {
       rimeAPI.set_option(session, "_linear", navigationLayout.linear)
     }
-    if navigationLayout.vertical != rimeAPI.get_option(session, "_vertical") {
+    if changesVertical {
       rimeAPI.set_option(session, "_vertical", navigationLayout.vertical)
+    }
+    if let selectedIndex {
+      _ = rimeAPI.highlight_candidate(session, selectedIndex)
     }
   }
 

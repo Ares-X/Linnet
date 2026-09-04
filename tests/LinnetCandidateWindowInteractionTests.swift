@@ -1946,6 +1946,10 @@ struct LinnetCandidateWindowInteractionTests {
         require(
           !candidateView.detailTextView.isHidden,
           "expanded \(linear ? "horizontal" : "vertical") English detail disappeared")
+        require(
+          candidateView.detailTextView.textContentStorage?.attributedString?.string
+            .hasPrefix(values[highlighted] + " · ") == true,
+          "expanded English detail did not identify the complete selected word")
         if let contentView = panel.contentView {
           let gridFrame = contentView.convert(
             candidateView.candidateGridView.bounds,
@@ -1963,7 +1967,7 @@ struct LinnetCandidateWindowInteractionTests {
         if highlighted == 2 {
           require(
             candidateView.detailTextView.textContentStorage?.attributedString?.string
-              == "No definition",
+              == "worker · No definition",
             "expanded English candidate without a definition lost its quiet placeholder")
         }
         sizes.append(panel.frame.size)
