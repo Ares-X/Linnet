@@ -131,7 +131,7 @@ final class LinnetCandidateAccessibility {
       let candidate = candidates[index]
       guard let label = LinnetCandidatePresentation.accessibilityAnnouncement(
         candidate: candidate.text,
-        comment: candidate.comment,
+        comment: LinnetCandidatePresentation.candidateComment(candidate.comment).displayText,
         page: candidate.page,
         indexOnPage: candidate.indexOnPage
       ) else { continue }
@@ -192,7 +192,8 @@ final class LinnetCandidateAccessibility {
          candidate: candidates.indices.contains(highlightedIndex)
            ? candidates[highlightedIndex].text : "",
          comment: candidates.indices.contains(highlightedIndex)
-           ? candidates[highlightedIndex].comment : "",
+           ? LinnetCandidatePresentation.candidateComment(
+             candidates[highlightedIndex].comment).displayText : "",
          page: candidates.indices.contains(highlightedIndex)
            ? candidates[highlightedIndex].page : -1,
          indexOnPage: candidates.indices.contains(highlightedIndex)

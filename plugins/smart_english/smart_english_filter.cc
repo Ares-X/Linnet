@@ -123,6 +123,11 @@ an<Candidate> ProjectSmartEnglishCandidate(
                     : translation.empty() ? ipa : ipa + " · " + translation;
     }
   }
+  if (IsSmartEnglishCandidateOrigin(candidate) &&
+      (options.show_ipa || options.show_translation) &&
+      (comment.empty() || comment.front() != kDefinitionCommentPrefix)) {
+    comment.insert(comment.begin(), kDefinitionCommentPrefix);
+  }
   if (candidate == genuine && text == genuine->text() &&
       comment == genuine->comment()) {
     return genuine;
@@ -266,13 +271,9 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
       item.static_rank = static_rank->second;
     }
   }
-  // Exact dictionary identity is the default bilingual intent signal for a
-  // complete word. A lowercase single letter remains incomplete Chinese input
-  // whenever the active profile has a same-span Chinese candidate. Longer
-  // lowercase input preserves an established exact Chinese phrase reached
-  // through the active Prism without abbreviation; generated sentences and
-  // long-tail transliterations stay below an independently meaningful English
-  // word.
+  // Exact dictionary identity owns bilingual intent for complete words. Keep
+  // single-letter Chinese ambiguity and exact Chinese phrases ahead of weaker
+  // generated or transliterated alternatives.
   const bool explicit_english_case = !input_word.empty() && ranking_input != input_word;
   const bool lowercase_chinese_input =
       (has_exact || has_ambiguous_english || has_mixed) &&
@@ -339,11 +340,8 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
           std::rotate(english, chinese, std::next(chinese));
         }
       };
-  // Prefetching the bounded prefix must not turn Rime's lowest-priority echo
-  // fallback into an ordinary candidate. The native translator gives its
-  // explicit zz_english typo candidate one typed origin; transport priority is
-  // not candidate identity. An exact English dictionary row retires even that
-  // typed fallback because the input is no longer a typo.
+  // Prefetching must not promote Rime's echo fallback. A real exact English
+  // row also retires the typed typo fallback.
   if (has_non_raw && (!is_code_token || has_mixed)) {
     candidates.erase(
         std::remove_if(candidates.begin(), candidates.end(),

@@ -964,6 +964,14 @@ for extracted_header in smart_english_domain.h smart_english_filter.h; do
   rg -Fq "plugins/smart_english/${extracted_header}" Makefile ||
     fail "the extracted Smart English contract is absent from build dependencies: ${extracted_header}"
 done
+rg -Fq "kDefinitionCommentPrefix = '\\x1d'" "${smart_english_domain}" ||
+  fail "Smart English lost its canonical definition-comment boundary marker"
+rg -Fq 'comment.insert(comment.begin(), kDefinitionCommentPrefix);' \
+  "${smart_english_filter}" ||
+  fail "Smart English stopped owning definition eligibility at candidate projection"
+rg -Fq 'static let smartEnglishDetailPrefix = "\u{001D}"' \
+  sources/LinnetCandidatePresentation.swift ||
+  fail "the candidate presentation boundary no longer decodes Smart English detail ownership"
 for retired_mixed_owner in \
   plugins/smart_english/smart_english_mixed_decoder.h \
   plugins/smart_english/smart_english_mixed_decoder.cc \

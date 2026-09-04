@@ -9,6 +9,11 @@ import AppKit
 import Foundation
 
 enum LinnetCandidatePresentation {
+  struct CandidateComment: Equatable {
+    let displayText: String
+    let belongsToSmartEnglish: Bool
+  }
+
   private struct FormatReplacement {
     let token: String
     let value: String
@@ -27,6 +32,7 @@ enum LinnetCandidatePresentation {
   static let maximumFooterDetailLineCount = 3
   static let maximumExpandedPageCount = 3
   static let maximumExpandedCandidateCount = 27
+  static let smartEnglishDetailPrefix = "\u{001D}"
 
   // One compact typographic skeleton serves every bundled theme. Color,
   // material, corner treatment, and selection shape remain theme-owned.
@@ -38,6 +44,17 @@ enum LinnetCandidatePresentation {
 
   private static let detailPartOfSpeechBoundary =
     #/[；;]\s*(name|n|vt|vi|v|adj|adv|abbr|int|interj|prep|pref|conj|pron|suf|vbl|num|aux|art|det|fig|lit)[.]\s*/#
+
+  /// Smart English owns whether a Rime comment is an English detail surface.
+  /// The presentation boundary removes its one-byte marker before any text is
+  /// drawn or announced; ordinary Chinese spelling comments remain unmarked.
+  static func candidateComment(_ rawComment: String) -> CandidateComment {
+    guard rawComment.hasPrefix(smartEnglishDetailPrefix) else {
+      return CandidateComment(displayText: rawComment, belongsToSmartEnglish: false)
+    }
+    return CandidateComment(
+      displayText: String(rawComment.dropFirst()), belongsToSmartEnglish: true)
+  }
 
   struct InputModeIdentity: Equatable {
     let schemaID: String

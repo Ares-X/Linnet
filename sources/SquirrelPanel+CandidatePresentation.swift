@@ -507,12 +507,14 @@ extension SquirrelPanel {
     reservesExpandedDetail: Bool
   ) -> NSAttributedString? {
     guard candidates.indices.contains(index) else { return nil }
-    var comment = LinnetCandidatePresentation.selectedDetailText(
+    let selectedComment = LinnetCandidatePresentation.candidateComment(
       candidates[index].comment.precomposedStringWithCanonicalMapping)
+    var comment = LinnetCandidatePresentation.selectedDetailText(
+      selectedComment.displayText)
     if comment.isEmpty,
       reservesExpandedDetail,
       candidates.contains(where: {
-        !LinnetCandidatePresentation.selectedDetailText($0.comment).isEmpty
+        LinnetCandidatePresentation.candidateComment($0.comment).belongsToSmartEnglish
       }) {
       comment = NSLocalizedString(
         "No definition", comment: "Expanded English candidate without a definition")

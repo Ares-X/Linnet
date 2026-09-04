@@ -338,7 +338,7 @@ extension SquirrelPanel {
         let label = theme.candidateFormat.contains(/\[label\]/)
           ? item.selectionLabel ?? "" : ""
         let displayedComment = usesInlineComments
-          ? item.comment : ""
+          ? LinnetCandidatePresentation.candidateComment(item.comment).displayText : ""
         let candidateLine = LinnetCandidatePresentation.candidateLine(
           candidateFormat: theme.candidateFormat,
           label: label,

@@ -166,6 +166,7 @@ struct LinnetCandidateWindowInteractionTests {
     testDefaultNineCandidateNaturalSize()
     testEnglishMetadataFooterNaturalSize()
     testExpandedEnglishDetailKeepsStableExtent()
+    testExpandedChineseCommentsDoNotCreateEnglishPlaceholder()
     testSharedCandidateDetailSidecarGeometry()
     testThemeLayoutMatrix()
     testVerticalPanelDoesNotMemorizeWhenDisabled()
@@ -1970,7 +1971,7 @@ struct LinnetCandidateWindowInteractionTests {
           items: values.enumerated().map { index, value in
             .init(
               text: value,
-              comment: index < details.count ? details[index] : "n. 英文候选",
+              comment: "\u{001D}" + (index < details.count ? details[index] : "n. 英文候选"),
               page: index / 3,
               indexOnPage: index % 3,
               absoluteIndex: index,
@@ -2010,6 +2011,48 @@ struct LinnetCandidateWindowInteractionTests {
         "expanded \(linear ? "horizontal" : "vertical") English detail changed panel extent: \(sizes)")
       panel.hide()
     }
+  }
+
+  private static func testExpandedChineseCommentsDoNotCreateEnglishPlaceholder() {
+    let panel = SquirrelPanel(position: NSRect(x: 260, y: 420, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller)
+    let candidateView = panel.view
+    let theme = candidateView.lightTheme
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.labelColor,
+    ]
+    theme.font = NSFont.systemFont(ofSize: 16)
+    theme.linear = true
+    theme.candidateExpansionAllowed = true
+    theme.candidateFormat = "[label] [candidate]"
+    theme.attrs = attributes
+    theme.highlightedAttrs = attributes
+    theme.labelAttrs = attributes
+    theme.labelHighlightedAttrs = attributes
+    theme.detailAttrs = attributes
+    theme.firstParagraphStyle = NSMutableParagraphStyle()
+    theme.paragraphStyle = NSMutableParagraphStyle()
+
+    let snapshot = SquirrelInputController.CandidateSnapshot(
+      items: ["是", "时", "事", "市", "十", "使"].enumerated().map { index, value in
+        .init(
+          text: value, comment: index == 0 ? "［shì］" : "",
+          page: index / 3, indexOnPage: index % 3, absoluteIndex: index,
+          selectionLabel: index < 3 ? String(index + 1) : nil)
+      },
+      pageSize: 3, currentPage: 0, isLastPage: false,
+      isExpanded: true, canExpand: true)
+    _ = panel.update(
+      preedit: "ui", selRange: .empty, caretPos: 2,
+      candidates: snapshot, highlighted: 1, update: true,
+      controller: controller)
+    panel.displayIfNeeded()
+    candidateView.displayIfNeeded()
+    require(
+      candidateView.detailTextView.isHidden,
+      "expanded Chinese spelling comments gave another Chinese candidate the English placeholder")
+    panel.hide()
   }
 
   private static func testSharedCandidateDetailSidecarGeometry() {

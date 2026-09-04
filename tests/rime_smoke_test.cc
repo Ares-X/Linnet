@@ -1664,7 +1664,8 @@ void ExpectCommentEmpty(RimeApi_stdbool* api,
   for (const auto& candidate : candidates) {
     if (BaseText(candidate.text) != candidate_text) continue;
     found = true;
-    if (!candidate.comment.empty()) {
+    if (!candidate.comment.empty() &&
+        candidate.comment != std::string(1, '\x1d')) {
       std::array<char, 128> active_schema = {};
       api->get_current_schema(session, active_schema.data(),
                               active_schema.size());
@@ -5625,6 +5626,8 @@ void ExpectAutomaticPinyinTailProjection(RimeApi_stdbool* api) {
     if (candidate && genuine && genuine->type() == "linnet_pinyin" &&
         genuine->text() == "large") {
       if (candidate->text() != " LARGE" ||
+          candidate->comment().empty() ||
+          candidate->comment().front() != '\x1d' ||
           candidate->comment().find("lɑrʤ") == std::string::npos ||
           candidate->comment().find("大的") == std::string::npos) {
         Fail("automatic pinyin tail bypassed spacing, case or metadata: text=" +

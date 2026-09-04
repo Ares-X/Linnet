@@ -92,6 +92,17 @@ struct LinnetCandidatePresentationTests {
     require(bounded.last == "…", "safety-bounded detail has no ellipsis")
 
     require(
+      LinnetCandidatePresentation.candidateComment("［shì］")
+        == .init(displayText: "［shì］", belongsToSmartEnglish: false),
+      "ordinary Chinese spelling comments were classified as English details"
+    )
+    require(
+      LinnetCandidatePresentation.candidateComment("\u{001D}n. 工作")
+        == .init(displayText: "n. 工作", belongsToSmartEnglish: true),
+      "the Smart English detail marker was not removed at the presentation boundary"
+    )
+
+    require(
       LinnetCandidatePresentation.accessibilityAnnouncement(
         candidate: "interface", comment: "  n. 接口  ", page: 2, indexOnPage: 1
       ) == "Page 3, candidate 2, interface, n. 接口",

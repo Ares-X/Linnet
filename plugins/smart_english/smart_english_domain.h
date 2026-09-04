@@ -32,6 +32,7 @@ inline constexpr char kSpacingProperty[] = "linnet/spacing_v1";
 inline constexpr char kSentenceBoundaryProperty[] =
     "linnet/sentence_boundary_v1";
 inline constexpr char kSmartEnglishSchema[] = "linnet_en";
+inline constexpr char kDefinitionCommentPrefix = '\x1d';
 inline constexpr std::size_t kContextLimit = 4;
 inline constexpr std::size_t kBigramLimit = 128;
 inline constexpr std::size_t kCandidateLimit = 64;
