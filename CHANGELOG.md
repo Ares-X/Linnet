@@ -4,6 +4,13 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.16 — 2026-09-05
+
+### 设置内核心更新
+
+- 已安装 0.1.15 的用户可以直接在“数据与更新”中下载并应用新的 `.linnetcore` 核心更新；全过程不再打开访达或 Installer，也不需要密码、注销或重启。
+- 正式版与预览版频道使用各自的 Catalog 精确选择更新；下载完成后仍由用户明确点击“应用更新…”，Linnet 不会在后台自动替换核心。
+
 ## 0.1.15 — 2026-09-04
 
 ### 候选网格
