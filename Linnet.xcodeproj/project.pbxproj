@@ -85,6 +85,7 @@
 		D3000000000000000000000D /* SettingsViews.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = D3000000000000000000001D /* SettingsViews.swift */; };
 		FD1000000000000000000001 /* SettingsDataViews.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FD1000000000000000000002 /* SettingsDataViews.swift */; };
 		FD3000000000000000000001 /* SettingsCoreUpdatePresentation.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FD3000000000000000000002 /* SettingsCoreUpdatePresentation.swift */; };
+		FD4000000000000000000001 /* LinnetCoreUpdateInstaller.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FD4000000000000000000002 /* LinnetCoreUpdateInstaller.swift */; };
 		E90400000000000000000001 /* LinnetSettingsAppearancePreview.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E90400000000000000000002 /* LinnetSettingsAppearancePreview.swift */; };
 		E90600000000000000000001 /* LinnetSettingsThemeFamilyPicker.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E90600000000000000000002 /* LinnetSettingsThemeFamilyPicker.swift */; };
 		E90500000000000000000001 /* squirrel.yaml in Settings Resources */ = {isa = PBXBuildFile; fileRef = E90500000000000000000002 /* squirrel.yaml */; };
@@ -247,6 +248,7 @@
 		D3000000000000000000001D /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsViews.swift; path = sources/LinnetSettings/SettingsViews.swift; sourceTree = "<group>"; };
 		FD1000000000000000000002 /* SettingsDataViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsDataViews.swift; path = sources/LinnetSettings/SettingsDataViews.swift; sourceTree = "<group>"; };
 		FD3000000000000000000002 /* SettingsCoreUpdatePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsCoreUpdatePresentation.swift; path = sources/LinnetSettings/SettingsCoreUpdatePresentation.swift; sourceTree = "<group>"; };
+		FD4000000000000000000002 /* LinnetCoreUpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetCoreUpdateInstaller.swift; path = sources/LinnetSettings/LinnetCoreUpdateInstaller.swift; sourceTree = "<group>"; };
 		E90400000000000000000002 /* LinnetSettingsAppearancePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsAppearancePreview.swift; path = sources/LinnetSettings/LinnetSettingsAppearancePreview.swift; sourceTree = "<group>"; };
 		E90600000000000000000002 /* LinnetSettingsThemeFamilyPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsThemeFamilyPicker.swift; path = sources/LinnetSettings/LinnetSettingsThemeFamilyPicker.swift; sourceTree = "<group>"; };
 		E90500000000000000000002 /* squirrel.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; name = squirrel.yaml; path = data/squirrel.yaml; sourceTree = "<group>"; };
@@ -363,6 +365,7 @@
 				F10000000000000000000002 /* LinnetSettingsPage.swift */,
 				F81000000000000000000002 /* SettingsWindowCloseGuard.swift */,
 				F40000000000000000000002 /* LinnetSettingsDownloadSource.swift */,
+				FD4000000000000000000002 /* LinnetCoreUpdateInstaller.swift */,
 				FA0000000000000000000002 /* LinnetSettingsUpdateChecker.swift */,
 				FB1000000000000000000002 /* LinnetCloudSyncLocation.swift */,
 				FB2000000000000000000002 /* SettingsRootView.swift */,
@@ -670,6 +673,7 @@
 				F10000000000000000000001 /* LinnetSettingsPage.swift in Settings Sources */,
 				F81000000000000000000001 /* SettingsWindowCloseGuard.swift in Settings Sources */,
 				F40000000000000000000001 /* LinnetSettingsDownloadSource.swift in Settings Sources */,
+				FD4000000000000000000001 /* LinnetCoreUpdateInstaller.swift in Settings Sources */,
 				FA0000000000000000000001 /* LinnetSettingsUpdateChecker.swift in Settings Sources */,
 				FB1000000000000000000001 /* LinnetCloudSyncLocation.swift in Settings Sources */,
 				FB2000000000000000000001 /* SettingsRootView.swift in Settings Sources */,

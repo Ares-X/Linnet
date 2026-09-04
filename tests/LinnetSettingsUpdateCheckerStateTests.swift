@@ -206,35 +206,98 @@ struct LinnetSettingsUpdateCheckerStateTests {
         revision: String(repeating: "d", count: 40),
         bytes: 6_479_740,
         sha256: String(repeating: "e", count: 64),
-        packageURL: URL(
+        artifactFormat: .appArchive,
+        artifactURL: URL(
           string:
-            "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.11/Linnet-0.1.11-arm64-Core-community-beta.pkg"
+            "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.11/Linnet-0.1.11-arm64-Core.linnetcore"
         )!,
         releaseURL: URL(
           string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.11")!
       )
       let downloaded = fixture.root.appending(
-        path: "Linnet-0.1.11-arm64-Core-community-beta.pkg",
+        path: "Linnet-0.1.11-arm64-Core.linnetcore",
         directoryHint: .notDirectory)
+      let prepared = LinnetPreparedCoreUpdate(
+        core: core,
+        baseIdentity: installed,
+        installedApp: fixture.root.appending(path: "Linnet.app"),
+        stagingRoot: fixture.root.appending(path: ".linnet-core-update.fixture"),
+        candidateApp: fixture.root.appending(path: ".linnet-core-update.fixture/Linnet.payload"),
+        baseSHA256: String(repeating: "a", count: 64),
+        targetSHA256: String(repeating: "b", count: 64))
       var revealed: [URL] = []
       let downloadChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: requester,
         coreDownloader: StubCoreDownloader(destination: downloaded),
+        coreInstaller: StubCoreInstaller(prepared: prepared),
         revealCorePackage: { revealed.append($0) })
       downloadChecker.downloadCoreUpdate(core)
       await waitUntil("verified Core download did not become ready") {
-        downloadChecker.coreDownloadState == .ready(core: core, file: downloaded)
+        downloadChecker.coreDownloadState == .ready(core: core, update: prepared)
       }
       require(
-        revealed == [downloaded],
-        "verified Core download was not revealed through the one Finder boundary"
+        revealed.isEmpty,
+        "the verified App archive was exposed to Finder or Installer"
+      )
+
+      let applyingRequester = RuntimeRequester(health: health(productIdentity: installed))
+      let applyingChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: applyingRequester,
+        coreDownloader: StubCoreDownloader(destination: downloaded),
+        coreInstaller: StubCoreInstaller(prepared: prepared))
+      applyingChecker.refreshRuntime()
+      await waitUntil("current Host identity was not ready for an online Core update") {
+        applyingChecker.runtimeVersionState == .current(installed)
+      }
+      applyingChecker.downloadCoreUpdate(core)
+      await waitUntil("online Core candidate was not prepared") {
+        applyingChecker.coreDownloadState == .ready(core: core, update: prepared)
+      }
+      applyingChecker.applyDownloadedCoreUpdate()
+      await waitUntil("Host blocker was not preserved for the online Core update") {
+        applyingChecker.coreDownloadState == .blocked(
+          core: core, update: prepared, issue: .inputSourceActive)
+      }
+      require(
+        applyingRequester.commands == [.diagnose, .activateCore],
+        "online Core activation bypassed or duplicated the Host exit owner"
+      )
+
+      let legacyCore = LinnetDataChannel.Core(
+        version: core.version, build: core.build, revision: core.revision,
+        bytes: core.bytes, sha256: core.sha256,
+        artifactFormat: .installerPackage,
+        artifactURL: URL(
+          string:
+            "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.11/Linnet-0.1.11-arm64-Core-community-beta.pkg"
+        )!,
+        releaseURL: core.releaseURL)
+      let legacyPackage = fixture.root.appending(
+        path: "Linnet-0.1.11-arm64-Core-community-beta.pkg")
+      let legacyChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: requester,
+        coreDownloader: StubCoreDownloader(destination: legacyPackage),
+        coreInstaller: StubCoreInstaller(prepared: prepared),
+        revealCorePackage: { revealed.append($0) })
+      legacyChecker.downloadCoreUpdate(legacyCore)
+      await waitUntil("bridge PKG did not retain its explicit legacy state") {
+        legacyChecker.coreDownloadState == .installerPackage(
+          core: legacyCore, file: legacyPackage)
+      }
+      legacyChecker.showDownloadedCoreUpdate()
+      require(
+        revealed == [legacyPackage],
+        "the temporary bridge PKG did not require an explicit Installer action"
       )
 
       let failedDownloadChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: requester,
         coreDownloader: StubCoreDownloader(destination: nil),
+        coreInstaller: StubCoreInstaller(prepared: prepared),
         revealCorePackage: { _ in fail("a failed Core download was revealed") })
       failedDownloadChecker.downloadCoreUpdate(core)
       await waitUntil("failed Core download did not publish its terminal state") {
@@ -249,7 +312,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
         let publishedCore = try LinnetDataChannel.verifyPublished(catalogData).catalog.core
         let liveRoot = fixture.root.appending(
           path: "Live Core Download", directoryHint: .isDirectory)
-        let liveFile = try await LinnetCorePackageDownloader(
+        let liveFile = try await LinnetCoreDownloader(
           downloadsDirectory: liveRoot
         ).download(publishedCore, progress: { _ in })
         try LinnetDataChannel.verifyDownloadedArtifact(
@@ -325,7 +388,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
     private enum Failure: Error { case unavailable }
   }
 
-  private struct StubCoreDownloader: LinnetCorePackageDownloading {
+  private struct StubCoreDownloader: LinnetCoreDownloading {
     let destination: URL?
 
     func download(
@@ -339,6 +402,22 @@ struct LinnetSettingsUpdateCheckerStateTests {
     }
 
     private enum Failure: Error { case rejected }
+  }
+
+  private struct StubCoreInstaller: LinnetCoreUpdateInstalling {
+    let prepared: LinnetPreparedCoreUpdate
+
+    func prepare(
+      _: LinnetDataChannel.Core,
+      artifact _: URL,
+      installedApp _: URL
+    ) async throws -> LinnetPreparedCoreUpdate {
+      prepared
+    }
+
+    func exchange(_: LinnetPreparedCoreUpdate) async throws { }
+    func discard(_: LinnetPreparedCoreUpdate) async { }
+    func removeStaleUpdates(beside _: URL) async { }
   }
 
   private struct BundleFixture {

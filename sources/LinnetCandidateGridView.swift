@@ -24,6 +24,10 @@ final class LinnetCandidateGridView: NSGridView {
     private(set) var itemIndex: Int?
     let textView = NSTextView(frame: .zero)
     private var measuredSize: NSSize = .zero
+    private var textSize: NSSize = .zero
+    private var labelPrefixExtent: CGFloat = 0
+    private var leadingPadding: CGFloat = 0
+    private var verticalText = false
 
     init() {
       super.init(frame: .zero)
@@ -46,9 +50,14 @@ final class LinnetCandidateGridView: NSGridView {
 
     required init?(coder: NSCoder) { nil }
 
-    func publish(itemIndex: Int, line: NSAttributedString, verticalText: Bool) {
+    func publish(
+      itemIndex: Int,
+      line: LinnetCandidatePresentation.CandidateLine,
+      labelGutter: CGFloat,
+      verticalText: Bool
+    ) {
       self.itemIndex = itemIndex
-      let measured = line.boundingRect(
+      let measured = line.attributedString.boundingRect(
         with: NSSize(
           width: CGFloat.greatestFiniteMagnitude,
           height: CGFloat.greatestFiniteMagnitude),
@@ -56,10 +65,16 @@ final class LinnetCandidateGridView: NSGridView {
       let horizontalSize = NSSize(
         width: max(1, ceil(measured.width)),
         height: max(1, ceil(measured.height)))
-      self.measuredSize = verticalText
+      labelPrefixExtent = ceil(Self.width(of: line.labelPrefix))
+      leadingPadding = max(0, labelGutter - labelPrefixExtent)
+      self.verticalText = verticalText
+      textSize = verticalText
         ? NSSize(width: horizontalSize.height, height: horizontalSize.width)
         : horizontalSize
-      textView.textContentStorage?.attributedString = line
+      self.measuredSize = verticalText
+        ? NSSize(width: textSize.width, height: textSize.height + leadingPadding)
+        : NSSize(width: textSize.width + leadingPadding, height: textSize.height)
+      textView.textContentStorage?.attributedString = line.attributedString
       textView.setLayoutOrientation(verticalText ? .vertical : .horizontal)
       isHidden = false
       invalidateIntrinsicContentSize()
@@ -69,6 +84,10 @@ final class LinnetCandidateGridView: NSGridView {
     func clear() {
       itemIndex = nil
       measuredSize = .zero
+      textSize = .zero
+      labelPrefixExtent = 0
+      leadingPadding = 0
+      verticalText = false
       textView.textContentStorage?.attributedString = NSAttributedString()
       isHidden = true
       invalidateIntrinsicContentSize()
@@ -79,12 +98,19 @@ final class LinnetCandidateGridView: NSGridView {
 
     override func layout() {
       super.layout()
-      let size = NSSize(
-        width: min(bounds.width, measuredSize.width),
-        height: min(bounds.height, measuredSize.height))
+      let padding = min(
+        leadingPadding,
+        max(0, (verticalText ? bounds.height : bounds.width) - 1))
+      let size = verticalText
+        ? NSSize(
+          width: min(bounds.width, textSize.width),
+          height: min(max(1, bounds.height - padding), textSize.height))
+        : NSSize(
+          width: min(max(1, bounds.width - padding), textSize.width),
+          height: min(bounds.height, textSize.height))
       textView.frame = NSRect(
-        x: bounds.minX,
-        y: bounds.midY - size.height / 2,
+        x: bounds.minX + (verticalText ? 0 : padding),
+        y: verticalText ? bounds.minY + padding : bounds.midY - size.height / 2,
         width: size.width,
         height: size.height)
       textView.textContainer?.size = size
@@ -96,6 +122,15 @@ final class LinnetCandidateGridView: NSGridView {
         itemIndex: itemIndex,
         cellFrame: target.convert(bounds, from: self),
         textFrame: target.convert(textView.bounds, from: textView))
+    }
+
+    static func width(of text: NSAttributedString) -> CGFloat {
+      text.boundingRect(
+        with: NSSize(
+          width: CGFloat.greatestFiniteMagnitude,
+          height: CGFloat.greatestFiniteMagnitude),
+        options: [.usesLineFragmentOrigin, .usesFontLeading]
+      ).width
     }
   }
 
@@ -116,7 +151,7 @@ final class LinnetCandidateGridView: NSGridView {
 
   func publish(
     rows: [[Int]],
-    lines: [NSAttributedString],
+    lines: [LinnetCandidatePresentation.CandidateLine],
     verticalText: Bool,
     columnSpacing: CGFloat,
     rowSpacing: CGFloat
@@ -140,6 +175,11 @@ final class LinnetCandidateGridView: NSGridView {
 
     self.columnSpacing = max(0, columnSpacing)
     self.rowSpacing = max(0, rowSpacing)
+    // macOS keeps a stable label slot: rows without selection keys start
+    // their candidate text on the same column line as the numbered row.
+    let labelGutter = lines.map {
+      CandidateCellView.width(of: $0.labelPrefix)
+    }.max().map(ceil) ?? 0
     for (rowIndex, row) in rows.enumerated() {
       for column in 0..<columnCount {
         let cell = cellPool[rowIndex * columnCount + column]
@@ -148,19 +188,15 @@ final class LinnetCandidateGridView: NSGridView {
           continue
         }
         cell.publish(
-          itemIndex: row[column], line: lines[row[column]], verticalText: verticalText)
+          itemIndex: row[column], line: lines[row[column]],
+          labelGutter: labelGutter, verticalText: verticalText)
       }
     }
-    naturalColumnWidths = (0..<columnCount).map { column in
-      (0..<rows.count).map {
-        cellPool[$0 * columnCount + column].intrinsicContentSize.width
-      }.max() ?? 1
-    }
-    naturalRowHeights = (0..<rows.count).map { row in
-      (0..<columnCount).map {
-        cellPool[row * columnCount + $0].intrinsicContentSize.height
-      }.max() ?? 1
-    }
+    let visibleCells = cellPool.prefix(rows.count * columnCount).filter { !$0.isHidden }
+    let columnWidth = visibleCells.map(\.intrinsicContentSize.width).max() ?? 1
+    let rowHeight = visibleCells.map(\.intrinsicContentSize.height).max() ?? 1
+    naturalColumnWidths = Array(repeating: columnWidth, count: columnCount)
+    naturalRowHeights = Array(repeating: rowHeight, count: rows.count)
     fitColumns(to: nil)
     isHidden = false
     invalidateIntrinsicContentSize()
@@ -184,21 +220,11 @@ final class LinnetCandidateGridView: NSGridView {
   func fitColumns(to maximumWidth: CGFloat?) {
     guard !naturalColumnWidths.isEmpty else { return }
     let spacing = columnSpacing * CGFloat(max(0, naturalColumnWidths.count - 1))
-    let available = maximumWidth.map { max(1, $0 - spacing) }
-    var widths = naturalColumnWidths
-    if let available, widths.reduce(0, +) > available {
-      var remaining = available
-      var unresolved = Set(widths.indices)
-      for index in widths.indices.sorted(by: { widths[$0] < widths[$1] }) {
-        let share = remaining / CGFloat(unresolved.count)
-        guard widths[index] <= share else { break }
-        remaining -= widths[index]
-        unresolved.remove(index)
-      }
-      let share = remaining / CGFloat(max(1, unresolved.count))
-      for index in unresolved { widths[index] = share }
-    }
-    for (index, width) in widths.enumerated() {
+    let naturalWidth = naturalColumnWidths[0]
+    let width = maximumWidth.map {
+      min(naturalWidth, max(1, ($0 - spacing) / CGFloat(naturalColumnWidths.count)))
+    } ?? naturalWidth
+    for index in naturalColumnWidths.indices {
       column(at: index).width = width
     }
     for (index, height) in naturalRowHeights.enumerated() {

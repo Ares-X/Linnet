@@ -10,6 +10,23 @@ enum LinnetDataCatalogBuilder {
     let revision: String
     let bytes: UInt64
     let sha256: String
+    let artifactFormat: LinnetDataChannel.CoreArtifactFormat
+
+    init(
+      version: String,
+      build: UInt64,
+      revision: String,
+      bytes: UInt64,
+      sha256: String,
+      artifactFormat: LinnetDataChannel.CoreArtifactFormat = .installerPackage
+    ) {
+      self.version = version
+      self.build = build
+      self.revision = revision
+      self.bytes = bytes
+      self.sha256 = sha256
+      self.artifactFormat = artifactFormat
+    }
   }
 
   struct PublishedArtifact: Sendable {
@@ -66,8 +83,15 @@ enum LinnetDataCatalogBuilder {
     }
 
     let sharedKinds: [LinnetPackContract.Kind] = [.chinese, .english, .lts]
+    let coreAssetName = switch core.artifactFormat {
+    case .installerPackage:
+      "Linnet-\(core.version)-arm64-Core-community-beta.pkg"
+    case .appArchive:
+      "Linnet-\(core.version)-arm64-Core.linnetcore"
+    }
     let catalog = LinnetDataChannel.Catalog(
-      format: LinnetDataChannel.format,
+      format: core.artifactFormat == .installerPackage
+        ? LinnetDataChannel.legacyFormat : LinnetDataChannel.format,
       sequence: sequence,
       core: .init(
         version: core.version,
@@ -75,9 +99,10 @@ enum LinnetDataCatalogBuilder {
         revision: core.revision,
         bytes: core.bytes,
         sha256: core.sha256,
-        packageURL: URL(
+        artifactFormat: core.artifactFormat,
+        artifactURL: URL(
           string:
-            "https://github.com/Ares-X/Linnet/releases/download/core-v\(core.version)/Linnet-\(core.version)-arm64-Core-community-beta.pkg")!,
+            "https://github.com/Ares-X/Linnet/releases/download/core-v\(core.version)/\(coreAssetName)")!,
         releaseURL: URL(
           string: "https://github.com/Ares-X/Linnet/releases/tag/core-v\(core.version)")!),
       activationSets: [

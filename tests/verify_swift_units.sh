@@ -160,6 +160,7 @@ compile_run_selected settings-update-checker -framework AppKit \
   sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift \
   sources/LinnetSettings/LinnetSettingsDownloadTransport.swift \
   sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
+  sources/LinnetSettings/LinnetCoreUpdateInstaller.swift \
   sources/LinnetSettings/LinnetSettingsUpdateChecker.swift \
   tests/LinnetSettingsUpdateCheckerStateTests.swift
 compile_run_selected backup-store \

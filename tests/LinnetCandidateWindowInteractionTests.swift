@@ -300,6 +300,30 @@ struct LinnetCandidateWindowInteractionTests {
     require(
       expandedP95 < 50 && expandedMaximum < 100,
       "expanded grid presentation took p95 \(expandedP95)ms, max \(expandedMaximum)ms")
+    let expandedGeometry = panel.view.candidateGridView.geometries(
+      in: panel.view.candidateGridView)
+    let cellWidths = expandedGeometry.map(\.cellFrame.width)
+    if let firstWidth = cellWidths.first {
+      require(
+        cellWidths.allSatisfy { abs($0 - firstWidth) <= 0.5 },
+        "expanded grid columns do not share one visual width: \(cellWidths)")
+    }
+    for column in 0..<expanded.pageSize {
+      let columnGeometry = expandedGeometry.filter {
+        $0.itemIndex % expanded.pageSize == column
+      }
+      require(columnGeometry.count == 3, "expanded grid lost column \(column)")
+      let firstRowInset = columnGeometry[0].textFrame.minX - columnGeometry[0].cellFrame.minX
+      let continuationInsets = columnGeometry.dropFirst().map {
+        $0.textFrame.minX - $0.cellFrame.minX
+      }
+      require(
+        firstRowInset < 0.5 && continuationInsets.allSatisfy { $0 > firstRowInset },
+        "expanded grid did not reserve its continuation-row label slot")
+      require(
+        continuationInsets.allSatisfy { abs($0 - continuationInsets[0]) < 0.5 },
+        "expanded grid continuation rows do not share one label slot")
+    }
     print(
       "candidate_interaction: cold_presentation_ms="
         + String(format: "%.2f", coldMilliseconds)

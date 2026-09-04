@@ -345,7 +345,7 @@ extension SquirrelPanel {
     if usesExpandedGrid {
       view.candidateGridView.publish(
         rows: visualRows,
-        lines: candidateLines.map(\.attributedString),
+        lines: candidateLines,
         verticalText: vertical,
         columnSpacing: view.separatorWidth,
         rowSpacing: theme.linespace)

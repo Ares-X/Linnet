@@ -45,6 +45,7 @@ cp "${stager}" "${fixture_repo}/package/stage_github_release"
 cp "${publisher}" "${fixture_repo}/package/publish_github_release"
 cp "${manifest}" "${fixture_repo}/package/release_asset_manifest"
 cp "${identity_owner}" "${fixture_repo}/package/release_candidate_identity"
+cp "${repo_root}/package/data_release_metadata" "${fixture_repo}/package/data_release_metadata"
 cp "${repo_root}/config/linnet-data-releases.json" "${fixture_repo}/config/"
 cp "${repo_root}/config/linnet-update-baselines.json" "${fixture_repo}/config/"
 cp "${repo_root}/CHANGELOG.md" "${fixture_repo}/CHANGELOG.md"
@@ -56,16 +57,24 @@ version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
   fail "fixture product version is invalid"
 catalog_sequence=73
 candidate_revision=0123456789abcdef0123456789abcdef01234567
-core_name="Linnet-${version}-arm64-Core-community-beta.pkg"
+core_artifact_format="$(ruby -rjson -e \
+  'puts JSON.parse(File.binread(ARGV.fetch(0))).fetch("core_artifact_format")' \
+  "${fixture_repo}/config/linnet-data-releases.json")"
+case "${core_artifact_format}" in
+  installer-package) core_name="Linnet-${version}-arm64-Core-community-beta.pkg" ;;
+  app-tar-gzip) core_name="Linnet-${version}-arm64-Core.linnetcore" ;;
+  *) fail "fixture Core artifact format is invalid" ;;
+esac
 printf 'complete installer\n' >"${fixture_assets}/Linnet.pkg"
-printf 'core installer\n' >"${fixture_assets}/${core_name}"
+printf 'core artifact\n' >"${fixture_assets}/${core_name}"
 for kind in Chinese English Extended LTS; do
   printf 'pack:%s\n' "${kind}" >"${fixture_assets}/Linnet-${kind}.linnetpack"
 done
 
 ruby -rjson -rdigest - "${fixture_assets}" "${version}" \
-    "${catalog_sequence}" "${candidate_revision}" "${fixture_repo}/config" <<'RUBY'
-root, version, sequence, revision, config = ARGV
+    "${catalog_sequence}" "${candidate_revision}" "${fixture_repo}/config" \
+    "${core_artifact_format}" <<'RUBY'
+root, version, sequence, revision, config, core_format = ARGV
 sequence = Integer(sequence, 10)
 baselines = JSON.parse(File.binread(File.join(config, "linnet-update-baselines.json"))).fetch("pack_baselines")
 releases = JSON.parse(File.binread(File.join(config, "linnet-data-releases.json"))).fetch("packs")
@@ -76,7 +85,9 @@ asset = lambda do |name|
     "container_sha256" => Digest::SHA256.file(path).hexdigest,
   }
 end
-core_name = "Linnet-#{version}-arm64-Core-community-beta.pkg"
+core_name = core_format == "installer-package" ?
+  "Linnet-#{version}-arm64-Core-community-beta.pkg" :
+  "Linnet-#{version}-arm64-Core.linnetcore"
 core = asset.call(core_name)
 packs = {
   "chinese" => "Linnet-Chinese.linnetpack",
@@ -108,17 +119,23 @@ pack = lambda do |kind|
   end
   entry
 end
+core_entry = {
+  "version" => version,
+  "revision" => revision,
+  "bytes" => core.fetch("bytes"),
+  "sha256" => core.fetch("container_sha256"),
+  "release_url" => "https://github.com/Ares-X/Linnet/releases/tag/core-v#{version}",
+}
+if core_format == "installer-package"
+  core_entry["package_url"] = "https://github.com/Ares-X/Linnet/releases/download/core-v#{version}/#{core_name}"
+else
+  core_entry["artifact_format"] = "app-tar-gzip"
+  core_entry["artifact_url"] = "https://github.com/Ares-X/Linnet/releases/download/core-v#{version}/#{core_name}"
+end
 catalog = {
-  "format" => 1,
+  "format" => core_format == "installer-package" ? 1 : 2,
   "sequence" => sequence,
-  "core" => {
-    "version" => version,
-    "revision" => revision,
-    "bytes" => core.fetch("bytes"),
-    "sha256" => core.fetch("container_sha256"),
-    "release_url" => "https://github.com/Ares-X/Linnet/releases/tag/core-v#{version}",
-    "package_url" => "https://github.com/Ares-X/Linnet/releases/download/core-v#{version}/#{core_name}",
-  },
+  "core" => core_entry,
   "activation_sets" => [
     {"edition" => "standard", "packs" => [pack.call("chinese"), pack.call("english")]},
     {"edition" => "full", "packs" => [pack.call("extended"), pack.call("lts")]},
@@ -809,8 +826,14 @@ ruby -rjson -e '
   document.fetch("core")["revision"] = "f" * 40
   document.fetch("core")["release_url"] =
     "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.0"
-  document.fetch("core")["package_url"] =
-    "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg"
+  core = document.fetch("core")
+  if document.fetch("format") == 1
+    core["package_url"] =
+      "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg"
+  else
+    core["artifact_url"] =
+      "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core.linnetcore"
+  end
   File.binwrite(ARGV.fetch(1), JSON.generate(document) + "\n")
 ' "${fixture_assets}/Linnet-Data-Channel.json" "${previous_core_catalog}"
 seed_catalog "${previous_core_catalog}" "$(printf 'b%.0s' {1..40})"

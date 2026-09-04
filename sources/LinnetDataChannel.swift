@@ -3,6 +3,98 @@ import Foundation
 
 // The transport choice owns the verified pack to reuse or reconstruct.
 extension LinnetDataChannel {
+  enum CoreArtifactFormat: String, Codable, Equatable, Sendable {
+    case installerPackage = "installer-package"
+    case appArchive = "app-tar-gzip"
+  }
+
+  struct Core: Codable, Equatable, Sendable {
+    let version: String
+    let build: UInt64
+    let revision: String
+    let bytes: UInt64
+    let sha256: String
+    let artifactFormat: CoreArtifactFormat
+    let artifactURL: URL
+    let releaseURL: URL
+
+    enum CodingKeys: String, CodingKey {
+      case version, build, revision, bytes, sha256
+      case artifactFormat = "artifact_format"
+      case artifactURL = "artifact_url"
+      case packageURL = "package_url"
+      case releaseURL = "release_url"
+    }
+
+    init(
+      version: String,
+      build: UInt64,
+      revision: String,
+      bytes: UInt64,
+      sha256: String,
+      artifactFormat: CoreArtifactFormat,
+      artifactURL: URL,
+      releaseURL: URL
+    ) {
+      self.version = version
+      self.build = build
+      self.revision = revision
+      self.bytes = bytes
+      self.sha256 = sha256
+      self.artifactFormat = artifactFormat
+      self.artifactURL = artifactURL
+      self.releaseURL = releaseURL
+    }
+
+    init(from decoder: Decoder) throws {
+      let values = try decoder.container(keyedBy: CodingKeys.self)
+      version = try values.decode(String.self, forKey: .version)
+      build = try values.decode(UInt64.self, forKey: .build)
+      revision = try values.decode(String.self, forKey: .revision)
+      bytes = try values.decode(UInt64.self, forKey: .bytes)
+      sha256 = try values.decode(String.self, forKey: .sha256)
+      releaseURL = try values.decode(URL.self, forKey: .releaseURL)
+      if let format = try values.decodeIfPresent(
+        CoreArtifactFormat.self, forKey: .artifactFormat
+      ) {
+        guard format == .appArchive,
+          !values.contains(.packageURL)
+        else {
+          throw DecodingError.dataCorruptedError(
+            forKey: .artifactFormat, in: values,
+            debugDescription: "Invalid Core artifact contract")
+        }
+        artifactFormat = format
+        artifactURL = try values.decode(URL.self, forKey: .artifactURL)
+      } else {
+        guard !values.contains(.artifactURL) else {
+          throw DecodingError.dataCorruptedError(
+            forKey: .artifactURL, in: values,
+            debugDescription: "Missing Core artifact format")
+        }
+        artifactFormat = .installerPackage
+        artifactURL = try values.decode(URL.self, forKey: .packageURL)
+      }
+    }
+
+    func encode(to encoder: Encoder) throws {
+      var values = encoder.container(keyedBy: CodingKeys.self)
+      try values.encode(version, forKey: .version)
+      try values.encode(build, forKey: .build)
+      try values.encode(revision, forKey: .revision)
+      try values.encode(bytes, forKey: .bytes)
+      try values.encode(sha256, forKey: .sha256)
+      try values.encode(releaseURL, forKey: .releaseURL)
+      switch artifactFormat {
+      case .installerPackage:
+        try values.encode(artifactURL, forKey: .packageURL)
+      case .appArchive:
+        try values.encode(artifactFormat, forKey: .artifactFormat)
+        try values.encode(artifactURL, forKey: .artifactURL)
+      }
+    }
+  }
+
   struct Delta: Codable, Equatable, Sendable {
     let baseContentSHA256: String
     let bytes: UInt64
@@ -77,7 +169,10 @@ extension LinnetDataChannel {
 /// complete compatible Standard or Full Active set. Each entry binds the exact
 /// immutable release asset before the pack contract validates its contents.
 enum LinnetDataChannel {
-  static let format = 1
+  /// Read-only bridge for clients upgrading through 0.1.15; remove with the
+  /// Core PKG publication path in 0.1.17.
+  static let legacyFormat = 1
+  static let format = 2
   static let maximumCatalogBytes = 64 * 1024
   /// Core 0.1.1 ships the first public online catalog contract at data-4.
   /// A mirror is an untrusted transport, so a fresh install must reject older
@@ -152,23 +247,6 @@ enum LinnetDataChannel {
     let installedSequence: UInt64?
     let availableVersion: String
     let availableSequence: UInt64
-  }
-
-  struct Core: Codable, Equatable, Sendable {
-    let version: String
-    let build: UInt64
-    let revision: String
-    let bytes: UInt64
-    let sha256: String
-    let packageURL: URL
-    let releaseURL: URL
-
-    enum CodingKeys: String, CodingKey {
-      case version, build, revision, bytes, sha256
-      case packageURL = "package_url"
-      case releaseURL = "release_url"
-    }
-
   }
 
   struct Catalog: Codable, Equatable, Sendable {
@@ -304,9 +382,15 @@ enum LinnetDataChannel {
   private static func validate(
     _ catalog: Catalog, minimumSequence: UInt64
   ) throws {
-    guard catalog.format == format, catalog.sequence >= minimumSequence,
+    guard [legacyFormat, format].contains(catalog.format),
+      catalog.sequence >= minimumSequence,
       catalog.activationSets.count == 2, validate(catalog.core)
     else { throw Failure.invalidCatalog("identity") }
+    guard (catalog.format == legacyFormat
+      && catalog.core.artifactFormat == .installerPackage)
+      || (catalog.format == format
+        && catalog.core.artifactFormat == .appArchive)
+    else { throw Failure.invalidCatalog("Core artifact format") }
     let expectedEditions: Set<LinnetDataRegistry.Edition> = [.standard, .full]
     guard Set(catalog.activationSets.map(\.edition)) == expectedEditions else {
       throw Failure.invalidCatalog("edition set")
@@ -361,15 +445,21 @@ enum LinnetDataChannel {
     guard LinnetPackContract.supportsCore(required: core.version, actual: core.version),
       core.build > 0, isRevision(core.revision),
       core.bytes > 0, core.bytes <= LinnetPackContract.maximumContainerBytes,
-      isSHA256(core.sha256), core.packageURL.query == nil,
-      core.packageURL.fragment == nil, core.releaseURL.query == nil,
+      isSHA256(core.sha256), core.artifactURL.query == nil,
+      core.artifactURL.fragment == nil, core.releaseURL.query == nil,
       core.releaseURL.fragment == nil
     else { return false }
     let releaseTag = "core-v\(core.version)"
-    return core.packageURL.scheme == "https"
-      && core.packageURL.host?.lowercased() == "github.com"
-      && core.packageURL.path
-        == "/Ares-X/Linnet/releases/download/\(releaseTag)/Linnet-\(core.version)-arm64-Core-community-beta.pkg"
+    let artifactName = switch core.artifactFormat {
+    case .installerPackage:
+      "Linnet-\(core.version)-arm64-Core-community-beta.pkg"
+    case .appArchive:
+      "Linnet-\(core.version)-arm64-Core.linnetcore"
+    }
+    return core.artifactURL.scheme == "https"
+      && core.artifactURL.host?.lowercased() == "github.com"
+      && core.artifactURL.path
+        == "/Ares-X/Linnet/releases/download/\(releaseTag)/\(artifactName)"
       && core.releaseURL.scheme == "https"
       && core.releaseURL.host?.lowercased() == "github.com"
       && core.releaseURL.path == "/Ares-X/Linnet/releases/tag/\(releaseTag)"
@@ -416,11 +506,10 @@ extension LinnetDataChannel.Core {
   func availability(
     currentVersion: String,
     currentBuild: UInt64,
-    currentRevision: String
+    currentRevision _: String
   ) -> LinnetDataChannel.CoreAvailability {
     if version == currentVersion {
-      return build > currentBuild || (build == currentBuild && revision != currentRevision)
-        ? .available : .current
+      return build > currentBuild ? .available : .current
     }
     return LinnetPackContract.supportsCore(required: currentVersion, actual: version)
       && !LinnetPackContract.supportsCore(required: version, actual: currentVersion)

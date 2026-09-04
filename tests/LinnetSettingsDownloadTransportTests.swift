@@ -550,11 +550,12 @@ struct LinnetSettingsDownloadTransportTests {
         )!)
     }
     return .init(
-      format: LinnetDataChannel.format, sequence: sequence,
+      format: LinnetDataChannel.legacyFormat, sequence: sequence,
       core: .init(
         version: "0.1.0", build: 1, revision: String(repeating: "a", count: 40),
         bytes: 1, sha256: String(repeating: "b", count: 64),
-        packageURL: URL(
+        artifactFormat: .installerPackage,
+        artifactURL: URL(
           string:
             "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg")!,
         releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.0")!),

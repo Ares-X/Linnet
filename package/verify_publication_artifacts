@@ -34,12 +34,14 @@ fail_publication() {
   fail_publication "candidate revision is invalid"
 [[ "${release_tool}" == /* && -x "${release_tool}" && ! -L "${release_tool}" ]] ||
   fail_publication "LINNET_RELEASE_TOOL must name the verified pack CLI"
-for tool in find grep mktemp pkgutil rm ruby sort tr wc xar; do
+for tool in diff find grep mktemp pkgutil rm ruby sort tar tr wc xar; do
   command -v "${tool}" >/dev/null 2>&1 || fail_publication "required tool is unavailable: ${tool}"
 done
 
 catalog_sequence="$("${project_root}/package/data_release_metadata" \
   get-catalog-sequence "${project_root}/config/linnet-data-releases.json")"
+core_artifact_format="$("${project_root}/package/data_release_metadata" \
+  get-core-artifact-format "${project_root}/config/linnet-data-releases.json")"
 expected_files="$("${project_root}/package/release_asset_manifest" \
   candidate "${version}" "${catalog_sequence}")"
 actual_files="$(find "${release_dir}" -mindepth 1 -maxdepth 1 -type f ! -type l \
@@ -69,9 +71,7 @@ verify_unsigned_installer() {
   fi
 }
 
-core_pkg="${release_dir}/Linnet-${version}-arm64-Core-community-beta.pkg"
 complete_pkg="${release_dir}/Linnet.pkg"
-verify_unsigned_installer "${core_pkg}"
 verify_unsigned_installer "${complete_pkg}"
 
 archive_root="${work_root}/expanded-complete"
@@ -83,13 +83,68 @@ archive_identity="$("${project_root}/scripts/linnet-code-identity" verify-produc
   "${archive_core_payload}")" ||
   fail_publication "Complete target publication identity is invalid"
 
-for spec in "core:${core_pkg}" "complete:${complete_pkg}"; do
+for spec in "complete:${complete_pkg}"; do
   edition="${spec%%:*}"; package="${spec#*:}"
   LINNET_RELEASE_TOOL="${release_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
     "${project_root}/package/verify_package" "${package}" "${archive_core_payload}" \
       "${edition}" publication >/dev/null ||
     fail_publication "final ${edition} package contract is invalid"
 done
+
+case "${core_artifact_format}" in
+  installer-package)
+    core_artifact="${release_dir}/Linnet-${version}-arm64-Core-community-beta.pkg"
+    verify_unsigned_installer "${core_artifact}"
+    LINNET_RELEASE_TOOL="${release_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
+      "${project_root}/package/verify_package" "${core_artifact}" "${archive_core_payload}" \
+        core publication >/dev/null ||
+      fail_publication "final Core package contract is invalid"
+    ;;
+  app-tar-gzip)
+    core_artifact="${release_dir}/Linnet-${version}-arm64-Core.linnetcore"
+    archive_update="${work_root}/expanded-core-update"
+    mkdir "${archive_update}"
+    tar -xzf "${core_artifact}" --safe-writes --no-same-owner --no-same-permissions \
+      --no-acls --no-fflags --no-mac-metadata --no-xattrs -C "${archive_update}" ||
+      fail_publication "Core App archive could not be extracted safely"
+    [[ "$(find "${archive_update}" -mindepth 1 -maxdepth 1 -print)" == \
+      "${archive_update}/Linnet.payload" ]] ||
+      fail_publication "Core App archive layout is invalid"
+    update_identity="$("${project_root}/scripts/linnet-code-identity" verify-product \
+      "${archive_update}/Linnet.payload")" ||
+      fail_publication "Core App archive identity is invalid"
+    [[ "${update_identity}" == "${archive_identity}" ]] ||
+      fail_publication "Core App archive identity differs from Complete"
+    diff -qr "${archive_update}/Linnet.payload" "${archive_core_payload}" >/dev/null ||
+      fail_publication "Core App archive differs from the Complete App"
+    ;;
+  *) fail_publication "unknown Core artifact format" ;;
+esac
+
+catalog="${release_dir}/Linnet-Data-Channel.json"
+"${release_tool}" verify-catalog --catalog "${catalog}" --core-version "${version}" >/dev/null ||
+  fail_publication "Catalog contract is invalid"
+"${release_tool}" inspect-catalog --catalog "${catalog}" --core-version "${version}" \
+  >"${work_root}/catalog.json"
+ruby -rjson -rdigest -e '
+  catalog, artifact, format, version, revision = ARGV
+  document = JSON.parse(File.binread(catalog))
+  core = document.fetch("core")
+  expected_format = format == "installer-package" ? 1 : 2
+  expected_url_key = format == "installer-package" ? "package_url" : "artifact_url"
+  abort unless document.fetch("format") == expected_format &&
+    core.fetch("version") == version && core.fetch("revision") == revision &&
+    core.fetch("bytes") == File.size(artifact) &&
+    core.fetch("sha256") == Digest::SHA256.file(artifact).hexdigest &&
+    File.basename(core.fetch(expected_url_key)) == File.basename(artifact)
+  if expected_format == 1
+    abort if core.key?("artifact_format") || core.key?("artifact_url")
+  else
+    abort unless core.fetch("artifact_format") == "app-tar-gzip" && !core.key?("package_url")
+  end
+' "${work_root}/catalog.json" "${core_artifact}" "${core_artifact_format}" \
+  "${version}" "${candidate_revision}" ||
+  fail_publication "Catalog does not bind the selected Core artifact"
 
 ruby -rjson -e '
   identity = JSON.parse(ARGV.fetch(0))
@@ -102,4 +157,4 @@ ruby -rjson -e '
 ' "${archive_identity}" "${candidate_revision}" ||
   fail_publication "public artifact identity projection is invalid"
 
-echo "Linnet unsigned PKGs with community CMS App: PASS (manual-user-approval)"
+echo "Linnet community release artifacts: PASS (manual-user-approval)"

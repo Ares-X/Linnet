@@ -8,6 +8,7 @@ FORMAT = "io.github.ares-x.linnet.data-releases.v1"
 KINDS = %w[chinese english lts extended].freeze
 FIELDS = %w[version sequence data_abi min_core content_sha256].freeze
 IDENTITY_FIELDS = %w[content_sha256 data_abi min_core].freeze
+CORE_ARTIFACT_FORMATS = %w[installer-package app-tar-gzip].freeze
 SAFE_VERSION = /\A[0-9A-Za-z][0-9A-Za-z._-]*\z/
 SEMVER = /\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?\z/
 SHA256 = /\A[0-9a-f]{64}\z/
@@ -24,11 +25,14 @@ def load_metadata(path)
     File.file?(path) && !File.symlink?(path)
   document = JSON.parse(File.read(path))
   fail_metadata("unexpected top-level shape") unless
-    document.is_a?(Hash) && document.keys.sort == %w[catalog_sequence format packs]
+    document.is_a?(Hash) &&
+      document.keys.sort == %w[catalog_sequence core_artifact_format format packs]
   fail_metadata("format mismatch") unless document.fetch("format") == FORMAT
   fail_metadata("catalog sequence is invalid") unless
     document.fetch("catalog_sequence").is_a?(Integer) &&
       document.fetch("catalog_sequence").positive?
+  fail_metadata("Core artifact format is invalid") unless
+    CORE_ARTIFACT_FORMATS.include?(document.fetch("core_artifact_format"))
   packs = document.fetch("packs")
   fail_metadata("pack set mismatch") unless
     packs.is_a?(Hash) && packs.keys.sort == KINDS.sort
@@ -136,6 +140,9 @@ when "get"
 when "get-catalog-sequence"
   fail_metadata("usage: get-catalog-sequence FILE") unless ARGV.length == 1
   puts load_metadata(ARGV.fetch(0)).fetch("catalog_sequence")
+when "get-core-artifact-format"
+  fail_metadata("usage: get-core-artifact-format FILE") unless ARGV.length == 1
+  puts load_metadata(ARGV.fetch(0)).fetch("core_artifact_format")
 when "profile-receipt-version"
   fail_metadata("usage: profile-receipt-version FILE") unless ARGV.length == 1
   packs = load_metadata(ARGV.fetch(0)).fetch("packs")
@@ -215,5 +222,5 @@ when "check-source-change"
   check_source_change($stdin.each_line.to_a)
   puts "Linnet data release source-change coupling: PASS"
 else
-  fail_metadata("usage: validate FILE | get FILE KIND FIELD | get-catalog-sequence FILE | profile-receipt-version FILE | check-core FILE CORE_VERSION | check-active-core ACTIVE_STATE CORE_VERSION | check-baseline HISTORICAL CURRENT | check-monotonic PREVIOUS CURRENT | check-source-change < CHANGED_PATHS")
+  fail_metadata("usage: validate FILE | get FILE KIND FIELD | get-catalog-sequence FILE | get-core-artifact-format FILE | profile-receipt-version FILE | check-core FILE CORE_VERSION | check-active-core ACTIVE_STATE CORE_VERSION | check-baseline HISTORICAL CURRENT | check-monotonic PREVIOUS CURRENT | check-source-change < CHANGED_PATHS")
 end

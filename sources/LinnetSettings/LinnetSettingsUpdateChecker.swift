@@ -7,17 +7,17 @@ private let linnetUpdateLogger = Logger(
   category: "Update"
 )
 
-protocol LinnetCorePackageDownloading: Sendable {
+protocol LinnetCoreDownloading: Sendable {
   func download(
     _ core: LinnetDataChannel.Core,
     progress: @escaping @Sendable (Double) -> Void
   ) async throws -> URL
 }
 
-/// Downloads the Catalog-owned Core package through Settings' existing byte
+/// Downloads the Catalog-owned Core artifact through Settings' existing byte
 /// transfer boundary, then verifies the exact Catalog size and SHA-256 before
 /// exposing the file to the user.
-struct LinnetCorePackageDownloader: LinnetCorePackageDownloading {
+struct LinnetCoreDownloader: LinnetCoreDownloading {
   private let downloadsDirectory: URL?
 
   init(downloadsDirectory: URL? = nil) {
@@ -38,12 +38,12 @@ struct LinnetCorePackageDownloader: LinnetCorePackageDownloading {
       attributes: [.posixPermissions: 0o700]
     )
     let destination = directory.appending(
-      path: core.packageURL.lastPathComponent,
+      path: core.artifactURL.lastPathComponent,
       directoryHint: .notDirectory
     )
     let transport = LinnetSettingsDownloadTransport(source: .direct)
     try await transport.downloadArtifact(
-      from: core.packageURL,
+      from: core.artifactURL,
       expectedBytes: core.bytes,
       to: destination,
       progress: progress
@@ -162,8 +162,27 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   enum CoreDownloadState: Equatable {
     case idle
     case downloading(core: LinnetDataChannel.Core, progress: Double)
-    case ready(core: LinnetDataChannel.Core, file: URL)
+    case installerPackage(core: LinnetDataChannel.Core, file: URL)
+    case ready(core: LinnetDataChannel.Core, update: LinnetPreparedCoreUpdate)
+    case applying(core: LinnetDataChannel.Core, update: LinnetPreparedCoreUpdate)
+    case blocked(
+      core: LinnetDataChannel.Core,
+      update: LinnetPreparedCoreUpdate,
+      issue: LinnetSettingsContract.CoreActivationBlocker)
+    case applied(LinnetSettingsContract.ProductIdentity)
     case failed(core: LinnetDataChannel.Core)
+    case recoveryRequired(core: LinnetDataChannel.Core)
+
+    var core: LinnetDataChannel.Core? {
+      switch self {
+      case .idle, .applied:
+        nil
+      case .downloading(let core, _), .installerPackage(let core, _),
+        .ready(let core, _), .applying(let core, _),
+        .blocked(let core, _, _), .failed(let core), .recoveryRequired(let core):
+        core
+      }
+    }
   }
 
   @Published private(set) var availability: LinnetDataChannel.UpdateAvailability?
@@ -177,6 +196,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
 
   var activationInProgress: Bool {
     if case .applying = runtimeVersionState { return true }
+    if case .applying = coreDownloadState { return true }
     return false
   }
 
@@ -190,7 +210,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   private let hostBundleIdentifier: String?
   private let transactionRequester: LinnetSettingsTransactionRequesting
   private let updateDefaults: UserDefaults
-  private let coreDownloader: any LinnetCorePackageDownloading
+  private let coreDownloader: any LinnetCoreDownloading
+  private let coreInstaller: any LinnetCoreUpdateInstalling
   private let revealCorePackage: (URL) -> Void
   private var edition: LinnetDataRegistry.Edition?
   private var installedPacks: [LinnetDataRegistry.ActivePack]
@@ -207,7 +228,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     bundle: Bundle = .main,
     transactionRequester: LinnetSettingsTransactionRequesting? = nil,
     updateDefaults: UserDefaults = .standard,
-    coreDownloader: any LinnetCorePackageDownloading = LinnetCorePackageDownloader(),
+    coreDownloader: any LinnetCoreDownloading = LinnetCoreDownloader(),
+    coreInstaller: any LinnetCoreUpdateInstalling = LinnetCoreUpdateInstaller(),
     revealCorePackage: @escaping (URL) -> Void = {
       NSWorkspace.shared.activateFileViewerSelecting([$0])
     }
@@ -221,12 +243,17 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     hostBundleIdentifier = host?.bundleIdentifier
     self.updateDefaults = updateDefaults
     self.coreDownloader = coreDownloader
+    self.coreInstaller = coreInstaller
     self.revealCorePackage = revealCorePackage
     updateChannel = UpdateChannel.load(from: updateDefaults)
     self.transactionRequester = transactionRequester
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
     refreshInstalledIdentity()
     runtimeVersionState = .checking(installed: installedIdentity)
+    if let hostBundleURL {
+      let installer = self.coreInstaller
+      Task { await installer.removeStaleUpdates(beside: hostBundleURL) }
+    }
   }
 
   func check() {
@@ -235,7 +262,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   }
 
   func setUpdateChannel(_ channel: UpdateChannel) {
-    guard channel != updateChannel else { return }
+    guard channel != updateChannel, !activationInProgress else { return }
     task?.cancel()
     cycle &+= 1
     active = false
@@ -393,11 +420,6 @@ extension LinnetSettingsUpdateChecker {
   }
 
   func downloadCoreUpdate(_ core: LinnetDataChannel.Core) {
-    if case .ready(let readyCore, let file) = coreDownloadState,
-      readyCore == core {
-      revealCorePackage(file)
-      return
-    }
     if case .downloading(let downloadingCore, _) = coreDownloadState,
       downloadingCore == core {
       return
@@ -416,9 +438,19 @@ extension LinnetSettingsUpdateChecker {
           }
         }
         guard !Task.isCancelled, activeCycle == coreDownloadCycle else { return }
-        coreDownloadState = .ready(core: core, file: file)
+        if core.artifactFormat == .installerPackage {
+          coreDownloadState = .installerPackage(core: core, file: file)
+        } else {
+          guard let hostBundleURL else { throw ActivationFailure.missingInstalledHost }
+          let update = try await coreInstaller.prepare(
+            core, artifact: file, installedApp: hostBundleURL)
+          guard !Task.isCancelled, activeCycle == coreDownloadCycle else {
+            await coreInstaller.discard(update)
+            return
+          }
+          coreDownloadState = .ready(core: core, update: update)
+        }
         coreDownloadTask = nil
-        revealCorePackage(file)
       } catch is CancellationError {
         guard activeCycle == coreDownloadCycle else { return }
         coreDownloadState = .idle
@@ -436,8 +468,85 @@ extension LinnetSettingsUpdateChecker {
   }
 
   func showDownloadedCoreUpdate() {
-    guard case .ready(_, let file) = coreDownloadState else { return }
+    guard case .installerPackage(_, let file) = coreDownloadState else { return }
     revealCorePackage(file)
+  }
+
+  func applyDownloadedCoreUpdate() {
+    let core: LinnetDataChannel.Core
+    let update: LinnetPreparedCoreUpdate
+    switch coreDownloadState {
+    case .ready(let readyCore, let readyUpdate),
+      .blocked(let readyCore, let readyUpdate, _):
+      core = readyCore
+      update = readyUpdate
+    default:
+      return
+    }
+    guard refreshInstalledIdentity() == update.baseIdentity,
+      runtimeVersionState == .current(update.baseIdentity)
+    else {
+      coreDownloadState = .failed(core: core)
+      Task { await coreInstaller.discard(update) }
+      return
+    }
+    runtimeTask?.cancel()
+    runtimeCycle &+= 1
+    let activeRuntimeCycle = runtimeCycle
+    coreDownloadState = .applying(core: core, update: update)
+    runtimeTask = Task { [weak self] in
+      guard let self else { return }
+      var exchanged = false
+      do {
+        let reply = try await request(.activateCore, timeout: 4)
+        guard !Task.isCancelled else { return }
+        if let issue = coreActivationIssue(for: reply.code) {
+          coreDownloadState = .blocked(core: core, update: update, issue: issue)
+          runtimeTask = nil
+          return
+        }
+        guard reply.status == .terminating,
+          reply.code == .coreActivationAccepted
+        else { throw ActivationFailure.hostRejectedActivation }
+        try await awaitHostExit()
+        try await coreInstaller.exchange(update)
+        exchanged = true
+        try await launchCanonicalHost()
+        let target = LinnetSettingsContract.ProductIdentity(
+          version: core.version, build: core.build, revision: core.revision)
+        let health = try await awaitInstalledHost(identity: target)
+        guard activeRuntimeCycle == runtimeCycle,
+          health.productIdentity == target
+        else { throw CancellationError() }
+        await coreInstaller.discard(update)
+        coreDownloadState = .applied(target)
+        runtimeVersionState = .applied(target)
+        runtimeTask = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+          NSApp.terminate(nil)
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        if exchanged {
+          do {
+            try await stopCanonicalHostForRollback()
+            try await coreInstaller.exchange(update)
+            try await launchCanonicalHost()
+            _ = try await awaitInstalledHost(identity: update.baseIdentity)
+            await coreInstaller.discard(update)
+            coreDownloadState = .failed(core: core)
+          } catch {
+            coreDownloadState = .recoveryRequired(core: core)
+          }
+        } else {
+          coreDownloadState = .failed(core: core)
+          await coreInstaller.discard(update)
+        }
+        runtimeTask = nil
+        refreshRuntime()
+      }
+    }
   }
 
   private func recordCoreDownloadProgress(
@@ -456,10 +565,15 @@ extension LinnetSettingsUpdateChecker {
   }
 
   private func resetCoreDownload() {
+    let prepared: LinnetPreparedCoreUpdate? = switch coreDownloadState {
+    case .ready(_, let update), .blocked(_, let update, _): update
+    default: nil
+    }
     coreDownloadTask?.cancel()
     coreDownloadTask = nil
     coreDownloadCycle &+= 1
     coreDownloadState = .idle
+    if let prepared { Task { await coreInstaller.discard(prepared) } }
   }
 
   private func request(
@@ -489,6 +603,16 @@ extension LinnetSettingsUpdateChecker {
       try await Task.sleep(nanoseconds: 100_000_000)
     }
     throw ActivationFailure.hostDidNotExit
+  }
+
+  private func stopCanonicalHostForRollback() async throws {
+    guard let hostBundleIdentifier else { throw ActivationFailure.missingInstalledHost }
+    for application in NSRunningApplication.runningApplications(
+      withBundleIdentifier: hostBundleIdentifier)
+    where !application.terminate() {
+      throw ActivationFailure.hostDidNotExit
+    }
+    try await awaitHostExit()
   }
 
   private func launchCanonicalHost() async throws {
@@ -535,12 +659,8 @@ extension LinnetSettingsUpdateChecker {
   ) {
     guard activeCycle == cycle else { return }
     if case .core(let core) = result {
-      switch coreDownloadState {
-      case .downloading(let downloadingCore, _), .ready(let downloadingCore, _),
-        .failed(let downloadingCore):
-        if downloadingCore != core { resetCoreDownload() }
-      case .idle:
-        break
+      if let representedCore = coreDownloadState.core, representedCore != core {
+        resetCoreDownload()
       }
     } else {
       resetCoreDownload()
@@ -624,6 +744,7 @@ extension LinnetSettingsUpdateChecker {
 
   private enum ActivationFailure: Error {
     case missingInstalledHost
+    case hostRejectedActivation
     case hostDidNotExit
     case hostDidNotLaunch
   }

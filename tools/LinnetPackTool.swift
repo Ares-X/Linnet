@@ -66,7 +66,8 @@ struct LinnetPackTool {
         --chinese-pack DIR --english-pack DIR --lts-pack DIR \\
         --extended-pack DIR
       linnet-pack build-catalog --sequence N --core-version VERSION --output FILE
-        --core-build N --core-revision REVISION --core-package FILE
+        --core-build N --core-revision REVISION
+        (--core-package FILE | --core-archive FILE)
         --chinese-pack FILE --english-pack FILE --lts-pack FILE --extended-pack FILE
         [--KIND-delta FILE --KIND-base-content SHA256]
       linnet-pack verify-catalog --catalog FILE --core-version VERSION
@@ -362,6 +363,11 @@ struct LinnetPackTool {
       let coreBuildValue = options["core-build"], let coreBuild = UInt64(coreBuildValue),
       let coreRevision = options["core-revision"]
     else { throw ToolFailure.usage(help) }
+    let coreInputs = [
+      ("core-package", LinnetDataChannel.CoreArtifactFormat.installerPackage),
+      ("core-archive", LinnetDataChannel.CoreArtifactFormat.appArchive),
+    ].filter { options[$0.0] != nil }
+    guard coreInputs.count == 1 else { throw ToolFailure.usage(help) }
     let output = try requiredURL("output", options)
     guard !FileManager.default.fileExists(atPath: output.path) else {
       throw ToolFailure.unsafeOutput("refusing to overwrite catalog")
@@ -389,19 +395,28 @@ struct LinnetPackTool {
       }
       return artifact
     }
+    let coreInput = coreInputs[0]
     let core = try publishedCore(
-      at: requiredURL("core-package", options), version: coreVersion,
-      build: coreBuild, revision: coreRevision)
+      at: requiredURL(coreInput.0, options), version: coreVersion,
+      build: coreBuild, revision: coreRevision,
+      artifactFormat: coreInput.1)
     let data = try LinnetDataCatalogBuilder.build(
       sequence: sequence, coreVersion: coreVersion, core: core, artifacts: artifacts)
     try writeExclusive(data, to: output, mode: 0o444)
   }
 
   static func publishedCore(
-    at url: URL, version: String, build: UInt64, revision: String
+    at url: URL,
+    version: String,
+    build: UInt64,
+    revision: String,
+    artifactFormat: LinnetDataChannel.CoreArtifactFormat
   ) throws -> LinnetDataCatalogBuilder.PublishedCore {
     let identity = try releaseFileIdentity(url)
-    return .init(version: version, build: build, revision: revision, bytes: identity.bytes, sha256: identity.sha256)
+    return .init(
+      version: version, build: build, revision: revision,
+      bytes: identity.bytes, sha256: identity.sha256,
+      artifactFormat: artifactFormat)
   }
 
   static func releaseFileIdentity(_ url: URL) throws -> (bytes: UInt64, sha256: String) {

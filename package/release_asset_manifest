@@ -12,6 +12,8 @@ channel="${1:-}"
 version="${2:-}"
 catalog_sequence="${3:-}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+core_artifact_format="$("${project_root}/package/data_release_metadata" \
+  get-core-artifact-format "${project_root}/config/linnet-data-releases.json")"
 
 fail_manifest() {
   echo "release_asset_manifest: $*" >&2
@@ -30,9 +32,12 @@ public_assets() {
 }
 
 core_assets() {
-  printf '%s\n' \
-    "Linnet-${version}-arm64-Core-community-beta.pkg" \
-    Linnet-Data-Channel.json
+  case "${core_artifact_format}" in
+    installer-package) printf '%s\n' "Linnet-${version}-arm64-Core-community-beta.pkg" ;;
+    app-tar-gzip) printf '%s\n' "Linnet-${version}-arm64-Core.linnetcore" ;;
+    *) fail_manifest "unknown Core artifact format" ;;
+  esac
+  printf '%s\n' Linnet-Data-Channel.json
 }
 
 data_assets() {

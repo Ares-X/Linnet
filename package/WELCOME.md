@@ -63,8 +63,9 @@ output; and set a 12–32 pt candidate font size. Every font preset uses fonts
 built into macOS; Linnet does not download or require third-party fonts.
 
 Settings checks the published Catalog once when it opens and shows a quiet
-inline Core/data update status. Core remains a user-approved package update;
-language-data downloads run only when you start them in Settings. GitHub is the default source; a third-party
+inline Core/data update status. After the one-time 0.1.15 bridge, a Core update
+is downloaded, verified and explicitly applied in Settings without Installer,
+a password, logout or restart. Language-data downloads run only when you start them in Settings. GitHub is the default source; a third-party
 public mirror or a compatible custom HTTPS mirror can be selected explicitly.
 Linnet never switches sources automatically and verifies the catalog, container,
 and every packaged file before activation. Third-party mirrors may observe your
@@ -106,12 +107,10 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
   字节修复责任方。只有首次创建 App 时才注册并向 macOS 提交一次启用请求；已有
   App 的 Complete 修复与 Core 更新都不注册、启用或选择输入源。允许与菜单选择
   始终由用户完成。
-  健康安装的常规升级只使用 Core。
-  Core 不会重新注册、启用、选择或停止
-  正在服务的 InputMethodKit Host；Complete 修复会暂存并原子替换 App，不强制关闭
-  任何 Linnet 窗口；其他应用保持打开并保留输入连接。用户先切换到其他输入法，
-  且没有未完成组合或数据事务时，可在 Settings 中主动应用新 Core；其他应用保持打开；
-  否则新 Core 会在下次登录或重启后接管，也不会再次弹出启用授权。
+  0.1.15 是从旧式 Core PKG 进入设置内更新的一次性桥接版；此后的健康安装只使用
+  `.linnetcore`。用户先切换到其他输入法，且没有未完成组合或数据事务时，可在
+  Settings 中主动应用新 Core；其他应用保持打开，不需要 Installer、密码、注销或重启。
+  Core 不会重新注册、启用或选择输入源。
   从 0.1.10 升级后，备份、导入或修改数据前，请关闭并重新打开升级前已打开的
   Settings 窗口。旧窗口不认识新的增量学习格式，其数据操作会被拒绝；其他应用无需退出。
 - 全新首次安装时，保存工作，注销一次 macOS，再登录同一账户。Core 保持同一个

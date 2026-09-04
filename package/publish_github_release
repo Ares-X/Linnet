@@ -227,13 +227,21 @@ ruby -rjson -rdigest -e '
     end
   end
   catalog = JSON.parse(File.binread(catalog_path))
-  abort unless catalog.fetch("format") == 1 && catalog.fetch("sequence") == sequence
+  abort unless [1, 2].include?(catalog.fetch("format")) && catalog.fetch("sequence") == sequence
   core = catalog.fetch("core")
-  core_name = "Linnet-#{version}-arm64-Core-community-beta.pkg"
+  if catalog.fetch("format") == 1
+    core_name = "Linnet-#{version}-arm64-Core-community-beta.pkg"
+    core_url = core.fetch("package_url")
+    abort if core.key?("artifact_format") || core.key?("artifact_url")
+  else
+    core_name = "Linnet-#{version}-arm64-Core.linnetcore"
+    abort unless core.fetch("artifact_format") == "app-tar-gzip" && !core.key?("package_url")
+    core_url = core.fetch("artifact_url")
+  end
   abort unless core.fetch("version") == version &&
     core.fetch("revision") == revision &&
     core.fetch("release_url") == "https://github.com/#{repository}/releases/tag/core-v#{version}" &&
-    core.fetch("package_url") == "https://github.com/#{repository}/releases/download/core-v#{version}/#{core_name}"
+    core_url == "https://github.com/#{repository}/releases/download/core-v#{version}/#{core_name}"
   core_asset = assets.fetch(core_name)
   abort unless core.fetch("bytes") == core_asset.fetch(:bytes) &&
     core.fetch("sha256") == core_asset.fetch(:digest)

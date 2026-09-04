@@ -25,11 +25,34 @@ struct LinnetDataChannelTests {
     let data = try catalogData(catalog)
     let verified = try LinnetDataChannel.verify(data, coreVersion: "1.0.0")
     require(verified.catalog.sequence == 5, "valid canonical catalog")
+    let archiveCore = LinnetDataChannel.Core(
+      version: "1.0.1", build: 9,
+      revision: String(repeating: "f", count: 40), bytes: 17,
+      sha256: String(repeating: "e", count: 64), artifactFormat: .appArchive,
+      artifactURL: URL(string:
+        "https://github.com/Ares-X/Linnet/releases/download/core-v1.0.1/Linnet-1.0.1-arm64-Core.linnetcore")!,
+      releaseURL: URL(string:
+        "https://github.com/Ares-X/Linnet/releases/tag/core-v1.0.1")!)
+    let archiveData = try catalogData(.init(
+      format: LinnetDataChannel.format, sequence: catalog.sequence,
+      core: archiveCore, activationSets: catalog.activationSets))
+    let archiveCatalog = try LinnetDataChannel.verifyPublished(archiveData).catalog
+    require(
+      archiveCatalog.core.artifactFormat == .appArchive &&
+        archiveCatalog.core.artifactURL == archiveCore.artifactURL,
+      "Catalog v2 lost the canonical Core App archive")
+    let archiveJSON = try JSONSerialization.jsonObject(with: archiveData) as! [String: Any]
+    let archiveCoreJSON = archiveJSON["core"] as! [String: Any]
+    require(
+      archiveCoreJSON["artifact_format"] as? String == "app-tar-gzip" &&
+        archiveCoreJSON["artifact_url"] != nil && archiveCoreJSON["package_url"] == nil,
+      "Catalog v2 regained the legacy package contract")
     let nextCore = LinnetDataChannel.Core(
       version: catalog.core.version, build: catalog.core.build + 1,
       revision: String(repeating: "d", count: 40), bytes: catalog.core.bytes + 1,
       sha256: String(repeating: "e", count: 64),
-      packageURL: catalog.core.packageURL, releaseURL: catalog.core.releaseURL)
+      artifactFormat: catalog.core.artifactFormat,
+      artifactURL: catalog.core.artifactURL, releaseURL: catalog.core.releaseURL)
     let coreOnly = try LinnetDataChannel.verify(catalogData(.init(
       format: catalog.format, sequence: catalog.sequence, core: nextCore,
       activationSets: catalog.activationSets)), coreVersion: "1.0.0")
@@ -52,8 +75,8 @@ struct LinnetDataChannelTests {
       verified.catalog.core.availability(
         currentVersion: "1.0.0", currentBuild: 8,
         currentRevision: String(repeating: "b", count: 40))
-        == .available,
-      "same-build Core source revision replacement was not reported")
+        == .current,
+      "same-build Core source revision was treated as an upgrade")
     require(
       try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 7,
@@ -64,8 +87,18 @@ struct LinnetDataChannelTests {
       try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8,
         currentRevision: String(repeating: "b", count: 40), edition: .standard,
-        installedPacks: []) == .core(verified.catalog.core),
-      "same-build Core source revision replacement did not take priority over data")
+        installedPacks: []) == .languageData([
+          .init(
+            kind: .chinese, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .english, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .lts, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+        ]),
+      "same-build Core revision suppressed the real language-data update")
     require(
       try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8,
@@ -339,11 +372,12 @@ struct LinnetDataChannelTests {
             of: "data-5", with: "data-\(sequence)") + "/\(name)")!)
     }
     return .init(
-      format: LinnetDataChannel.format, sequence: sequence, core: .init(
+      format: LinnetDataChannel.legacyFormat, sequence: sequence, core: .init(
         version: "1.0.0", build: 8,
         revision: String(repeating: "a", count: 40),
         bytes: 16, sha256: String(repeating: "d", count: 64),
-        packageURL: URL(
+        artifactFormat: .installerPackage,
+        artifactURL: URL(
           string:
             "https://github.com/Ares-X/Linnet/releases/download/core-v1.0.0/Linnet-1.0.0-arm64-Core-community-beta.pkg")!,
         releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v1.0.0")!),

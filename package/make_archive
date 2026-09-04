@@ -18,7 +18,7 @@ fail_archive() {
   fail_archive "APP must be an absolute, non-symlink App bundle"
 [[ "${app_path##*/}" == Linnet.candidate ]] ||
   fail_archive "unexpected frozen candidate name"
-for tool in awk cmp cp find git mkdir mktemp mv pkgutil plutil ruby sort stat tr wc; do
+for tool in awk cmp cp ditto find git gzip mkdir mktemp mv pkgutil plutil ruby sort stat tar tr wc; do
   command -v "${tool}" >/dev/null 2>&1 || fail_archive "required tool is unavailable: ${tool}"
 done
 
@@ -34,6 +34,7 @@ data_release_tool="${project_root}/package/data_release_metadata"
 "${data_release_tool}" validate "${data_release_file}" >/dev/null
 "${data_release_tool}" check-core "${data_release_file}" "${version}" >/dev/null
 catalog_sequence="$("${data_release_tool}" get-catalog-sequence "${data_release_file}")"
+core_artifact_format="$("${data_release_tool}" get-core-artifact-format "${data_release_file}")"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
   fail_archive "LINNET_CANDIDATE_REVISION must name the exact candidate Git OID"
 [[ "$(git -C "${project_root}" rev-parse --verify HEAD^{commit})" == "${candidate_revision}" ]] ||
@@ -83,6 +84,29 @@ ruby -rjson -e '
     identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
 ' "${code_identity}" "${candidate_revision}" ||
   fail_archive "App identity differs from the candidate revision"
+
+core_artifact="${core_pkg}"
+core_catalog_option=--core-package
+if [[ "${core_artifact_format}" == app-tar-gzip ]]; then
+  core_artifact="${output_dir}/${release_prefix}-Core.linnetcore"
+  core_catalog_option=--core-archive
+  payload="${work_root}/Linnet.payload"
+  archive_tar="${work_root}/${release_prefix}-Core.tar"
+  archive_candidate="${work_root}/${release_prefix}-Core.linnetcore"
+  ditto --noqtn "${app_path}" "${payload}"
+  tar -cf "${archive_tar}" --no-acls --no-fflags --no-mac-metadata --no-xattrs \
+    -C "${work_root}" Linnet.payload
+  gzip -n -c "${archive_tar}" >"${archive_candidate}"
+  if [[ -e "${core_artifact}" ]]; then
+    [[ -f "${core_artifact}" && ! -L "${core_artifact}" ]] &&
+      cmp -s "${archive_candidate}" "${core_artifact}" ||
+      fail_archive "existing Core App archive bytes differ"
+  else
+    mv "${archive_candidate}" "${core_artifact}"
+  fi
+elif [[ "${core_artifact_format}" != installer-package ]]; then
+  fail_archive "unknown Core artifact format"
+fi
 expanded_complete="${work_root}/expanded-complete"
 pkgutil --expand-full "${complete_pkg}" "${expanded_complete}"
 delta_options=()
@@ -186,7 +210,7 @@ publish_catalog() {
   "${pack_tool}" build-catalog --sequence "${catalog_sequence}" \
     --core-version "${version}" --output "${candidate}" \
     --core-build "${build}" --core-revision "${candidate_revision}" \
-    --core-package "${core_pkg}" \
+    "${core_catalog_option}" "${core_artifact}" \
     --chinese-pack "${output_dir}/Linnet-Chinese.linnetpack" \
     --english-pack "${output_dir}/Linnet-English.linnetpack" \
     --lts-pack "${output_dir}/Linnet-LTS.linnetpack" \
@@ -200,6 +224,7 @@ publish_catalog() {
     catalog = JSON.parse(File.read(ARGV.shift))
     expected_sequence = Integer(ARGV.shift)
     root = ARGV.shift
+    core_artifact = ARGV.shift
     expected_version = ARGV.shift
     manifests = ARGV.to_h { |path|
       manifest = JSON.parse(File.read(path))
@@ -207,11 +232,10 @@ publish_catalog() {
     }
     abort "catalog sequence mismatch" unless catalog.fetch("sequence") == expected_sequence
     core = catalog.fetch("core")
-    core_package = File.join(root, "Linnet-#{core.fetch("version")}-arm64-Core-community-beta.pkg")
     abort "catalog Core version mismatch" unless core.fetch("version") == expected_version
-    abort "catalog Core byte count mismatch" unless core.fetch("bytes") == File.size(core_package)
+    abort "catalog Core byte count mismatch" unless core.fetch("bytes") == File.size(core_artifact)
     abort "catalog Core digest mismatch" unless
-      core.fetch("sha256") == Digest::SHA256.file(core_package).hexdigest
+      core.fetch("sha256") == Digest::SHA256.file(core_artifact).hexdigest
     catalog.fetch("activation_sets").each do |set|
       set.fetch("packs").each do |artifact|
         manifest = manifests.fetch(artifact.fetch("kind"))
@@ -237,7 +261,7 @@ publish_catalog() {
         end
       end
     end
-  ' "${work_root}/catalog-1.json" "${catalog_sequence}" "${output_dir}" "${version}" \
+  ' "${work_root}/catalog-1.json" "${catalog_sequence}" "${output_dir}" "${core_artifact}" "${version}" \
     "${work_root}/manifest-1-chinese.json" "${work_root}/manifest-1-english.json" \
     "${work_root}/manifest-1-lts.json" "${work_root}/manifest-1-extended.json" ||
     fail_archive "external catalog differs from the accepted pack set"
@@ -255,5 +279,9 @@ publish_catalog() {
 }
 
 publish_catalog
+
+if [[ "${core_artifact_format}" == app-tar-gzip ]]; then
+  /bin/rm -f -- "${core_pkg}"
+fi
 
 echo "Linnet deterministic language packs and Catalog: PASS"

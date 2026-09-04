@@ -63,10 +63,17 @@ version="$(sed -n 's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
   fail "the product version is unavailable"
 catalog_sequence="$("${repo_root}/package/data_release_metadata" get-catalog-sequence \
   "${repo_root}/config/linnet-data-releases.json")"
+core_artifact_format="$("${repo_root}/package/data_release_metadata" get-core-artifact-format \
+  "${repo_root}/config/linnet-data-releases.json")"
 
 public_expected=Linnet.pkg
+case "${core_artifact_format}" in
+  installer-package) core_artifact="Linnet-${version}-arm64-Core-community-beta.pkg" ;;
+  app-tar-gzip) core_artifact="Linnet-${version}-arm64-Core.linnetcore" ;;
+  *) fail "unknown Core artifact format" ;;
+esac
 core_expected="$(printf '%s\n' \
-  "Linnet-${version}-arm64-Core-community-beta.pkg" \
+  "${core_artifact}" \
   Linnet-Data-Channel.json | LC_ALL=C sort)"
 delta_expected="$(ruby -rjson -e '
   baseline = JSON.parse(File.read(ARGV.fetch(0))).fetch("pack_baselines")

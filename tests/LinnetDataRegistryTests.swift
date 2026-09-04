@@ -1167,11 +1167,12 @@ struct LinnetDataRegistryTests {
   ) throws -> LinnetDataChannel.Verified {
     let standard = full.filter { $0.kind != .extended }
     let catalog = LinnetDataChannel.Catalog(
-      format: LinnetDataChannel.format, sequence: 9,
+      format: LinnetDataChannel.legacyFormat, sequence: 9,
       core: .init(
         version: "1.0.0", build: build, revision: String(repeating: "a", count: 40),
         bytes: 1, sha256: String(repeating: "b", count: 64),
-        packageURL: URL(string:
+        artifactFormat: .installerPackage,
+        artifactURL: URL(string:
           "https://github.com/Ares-X/Linnet/releases/download/core-v1.0.0/Linnet-1.0.0-arm64-Core-community-beta.pkg")!,
         releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v1.0.0")!),
       activationSets: [
@@ -1792,11 +1793,12 @@ struct LinnetDataRegistryTests {
     let edition: LinnetDataRegistry.Edition = packs.contains { $0.kind == .extended }
       ? .full : .standard
     return .init(
-      format: LinnetDataChannel.format, sequence: sequence,
+      format: LinnetDataChannel.legacyFormat, sequence: sequence,
       core: .init(
         version: "0.1.0", build: 1, revision: String(repeating: "a", count: 40),
         bytes: 1, sha256: String(repeating: "b", count: 64),
-        packageURL: URL(
+        artifactFormat: .installerPackage,
+        artifactURL: URL(
           string:
             "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg")!,
         releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.0")!),

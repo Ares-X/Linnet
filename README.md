@@ -189,18 +189,18 @@ Settings 每次打开时会从同一 GitHub 仓库读取一个经过校验的小
 
 ## 升级与卸载
 
-Linnet 0.1 系列不会在后台静默安装未签名、未公证的 Core/App。Settings 检查到 Core 更新后，点击 **下载核心更新 / Download Core Update** 即可在设置内下载安装包；进度会直接显示在更新卡片中，文件大小和 SHA-256 校验通过后会自动在 Finder 中定位安装包。更新不应要求 Keychain 密码；若出现密码提示，请取消并向项目报告。
+Linnet 不会在后台自动修改 Core。Settings 检查到更新后，只有用户点击 **下载核心更新 / Download Core Update** 才会下载并校验 Catalog 绑定的精确文件。安装了 0.1.15 桥接版后，后续 Core 可在设置中点击 **应用更新… / Apply Update…** 完成：先切换到其他输入法，其他应用保持打开，不需要 Installer、密码、注销或重启。
 
 正式版本页只提供完整安装包；`core-v<version>` 预发布页供已有用户免注销更新，`data-<sequence>` 预发布页供 Settings 更新语言数据。它们不会成为 Latest Release。
 
-已经完成 0.1.8 或后续固定 CMS 版本安装和一次注销的用户，只需在 **数据与更新 → 核心更新** 中下载提示的 Core 包。Settings 始终使用当前所选频道的 Catalog 和其中绑定的精确下载地址，不会要求用户寻找 Release 资产或手工比对哈希。校验完成后，在 Finder 中按住 Control 点击该安装包并选择 **打开**。Core 会验证既有 App 的发布身份、代码完整性、版本、输入源登记和语言数据，再原子替换为包内封装的完整候选；正式版与较低 build 的预览版使用同一条升级路径。它保持已安装语言包、个人数据和输入源状态，不重新注册输入源，也不关闭 Settings、TextEdit、Teams、浏览器等窗口。Settings 正在修改数据时，安装会暂缓，请完成该操作后重试。0.1.7 或更早的旧 ad-hoc 版本、App 缺失、损坏或身份不符都不能直接使用 Core；请按提示运行完整 `Linnet.pkg` 修复。Complete 会保留已有语言包与个人数据，已有 App 的修复也不重新注册、启用或选择输入源。
+0.1.15 是一次性桥接版：0.1.14 及更早的固定 CMS 版本仍会下载旧式 Core PKG，并显示 **打开旧版安装器… / Open Legacy Installer…**；只需按 macOS 提示完成这一次升级。安装 0.1.15 后，新的 `.linnetcore` 更新由 Settings 校验 Catalog SHA-256、目标版本/build/revision、完整代码签名及固定 CMS 叶，再原子交换 `Linnet.app/Contents`。Settings 始终使用当前所选频道的精确地址，不要求用户寻找 Release 资产或手工比对哈希。0.1.7 或更早的旧 ad-hoc 版本、App 缺失、损坏或身份不符仍须运行完整 `Linnet.pkg` 修复。
 
-### 安装后应用更新
+### 应用核心更新
 
-1. 安装器显示“安装成功”后，从 Linnet 输入菜单打开 **Settings**。
+1. 从 Linnet 输入菜单打开 **Settings**。
 2. 进入 **数据与更新 → 核心更新**（**Data & Updates → Core update**）。查看“已安装”和“正在运行”：前者是磁盘上的版本，后者是当前输入法进程实际加载的版本。
 3. 完成或取消当前组词，再从 macOS 输入菜单切换到其他输入法，保留正在使用的应用窗口。
-4. 点击 **应用已安装的更新…**（**Apply Installed Update…**），按对话框提示确认。不要把它与用于修改设置的 **Apply Changes** 混淆。
+4. 新式在线更新点击 **应用更新…**（**Apply Update…**）；若刚通过旧式 PKG 完成桥接，则点击 **应用已安装的更新…**（**Apply Installed Update…**）。不要把它们与用于保存设置的 **Apply Changes** 混淆。
 5. 操作完成后切回 Linnet，输入几个字确认候选窗正常；回到核心更新卡片，确认“正在运行”与“已安装”一致。
 
 从 0.1.10 升级后，如果 Settings 窗口在升级前已经打开，请关闭并从 Linnet 输入菜单重新打开这个设置窗口，再进行备份、导入或修改数据。旧窗口不认识新的增量学习数据格式，其数据操作会被拒绝；无需退出正在使用的其他应用，也无需注销。
