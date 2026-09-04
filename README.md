@@ -295,7 +295,7 @@ no_download=1 ./action-build.sh release
 
 ## 版本、来源与许可证
 
-当前公开版本见 [Latest Release](https://github.com/Ares-X/Linnet/releases/latest)；本分支版本为 **0.1.13**（2026-09-04）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前公开版本见 [Latest Release](https://github.com/Ares-X/Linnet/releases/latest)；本分支版本为 **0.1.14**（2026-09-04）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 
