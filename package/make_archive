@@ -18,7 +18,7 @@ fail_archive() {
   fail_archive "APP must be an absolute, non-symlink App bundle"
 [[ "${app_path##*/}" == Linnet.candidate ]] ||
   fail_archive "unexpected frozen candidate name"
-for tool in awk cmp cp ditto find git gzip mkdir mktemp mv pkgutil plutil ruby sort stat tar tr wc; do
+for tool in awk cmp cp find git gzip mkdir mktemp mv pkgutil plutil ruby sort stat tar tr wc; do
   command -v "${tool}" >/dev/null 2>&1 || fail_archive "required tool is unavailable: ${tool}"
 done
 
@@ -85,17 +85,18 @@ ruby -rjson -e '
 ' "${code_identity}" "${candidate_revision}" ||
   fail_archive "App identity differs from the candidate revision"
 
+expanded_complete="${work_root}/expanded-complete"
+pkgutil --expand-full "${complete_pkg}" "${expanded_complete}"
 core_artifact="${core_pkg}"
 core_catalog_option=--core-package
 if [[ "${core_artifact_format}" == app-tar-gzip ]]; then
   core_artifact="${output_dir}/${release_prefix}-Core.linnetcore"
   core_catalog_option=--core-archive
-  payload="${work_root}/Linnet.payload"
   archive_tar="${work_root}/${release_prefix}-Core.tar"
   archive_candidate="${work_root}/${release_prefix}-Core.linnetcore"
-  ditto --noqtn "${app_path}" "${payload}"
+  # Both delivery formats carry the exact same finalized package payload.
   tar -cf "${archive_tar}" --no-acls --no-fflags --no-mac-metadata --no-xattrs \
-    -C "${work_root}" Linnet.payload
+    -C "${expanded_complete}/Linnet-Core.component.pkg/Payload" Linnet.payload
   gzip -n -c "${archive_tar}" >"${archive_candidate}"
   if [[ -e "${core_artifact}" ]]; then
     [[ -f "${core_artifact}" && ! -L "${core_artifact}" ]] &&
@@ -107,8 +108,6 @@ if [[ "${core_artifact_format}" == app-tar-gzip ]]; then
 elif [[ "${core_artifact_format}" != installer-package ]]; then
   fail_archive "unknown Core artifact format"
 fi
-expanded_complete="${work_root}/expanded-complete"
-pkgutil --expand-full "${complete_pkg}" "${expanded_complete}"
 delta_options=()
 
 publish_pack() {
