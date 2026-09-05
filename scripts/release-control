@@ -22,13 +22,15 @@ fail() {
 usage() {
   echo "usage: scripts/release-control authorize ABSOLUTE_RELEASE_DIRECTORY" >&2
   echo "usage: scripts/release-control preview ABSOLUTE_RELEASE_DIRECTORY" >&2
-  echo "       scripts/release-control {verify-local|candidate}" >&2
-  echo "       scripts/release-control verify-source CANDIDATE_REF COMMIT" >&2
+  echo "       scripts/release-control {verify-local|verify-settings-ui|candidate}" >&2
+  echo "       scripts/release-control candidate-preview REASON" >&2
+  echo "       scripts/release-control verify-source CANDIDATE_REF COMMIT [--release]" >&2
   exit 64
 }
 case "${command_name}" in
-  verify-local|candidate) [[ "$#" -eq 1 ]] || usage ;;
-  verify-source) [[ "$#" -eq 3 ]] || usage ;;
+  verify-local|verify-settings-ui|candidate) [[ "$#" -eq 1 ]] || usage ;;
+  candidate-preview) [[ "$#" -eq 2 && -n "$2" ]] || usage ;;
+  verify-source) [[ "$#" -eq 3 || ( "$#" -eq 4 && "$4" == --release ) ]] || usage ;;
   authorize|preview) [[ "$#" -eq 2 ]] || usage ;;
   *) usage ;;
 esac
@@ -56,6 +58,17 @@ source_tree() (
 verify_receipt() {
   ruby -rjson -e '
     receipt = JSON.parse(STDIN.read)
+    if receipt["format"] == 2
+      abort "preview-only acceptance cannot authorize a stable release" unless ARGV.fetch(1) == "candidate"
+      abort "invalid preview acceptance" unless receipt.keys.sort ==
+        %w[format preview_only profiles reason source_tree] && receipt["preview_only"] == true &&
+        receipt["source_tree"] == ARGV.fetch(0) && receipt["source_tree"].match?(/\A[0-9a-f]{40}\z/) &&
+        receipt["reason"].is_a?(String) && !receipt["reason"].strip.empty? &&
+        receipt["profiles"].keys.sort == %w[app lint periphery rime settings_ui swift] &&
+        receipt["profiles"].values.all? { |value| value == "NOT_EXERCISED" }
+      puts "NOT_EXERCISED (explicit preview-only request)"
+      exit
+    end
     abort "invalid source receipt" unless receipt.keys.sort ==
       %w[format profiles source_tree toolchain verified_at] && receipt.fetch("format") == 1 &&
       receipt.fetch("source_tree") == ARGV.fetch(0) &&
@@ -63,13 +76,17 @@ verify_receipt() {
     profiles = receipt.fetch("profiles")
     abort "incomplete source acceptance" unless profiles.keys.sort ==
       %w[app lint periphery rime settings_ui swift] &&
-      profiles.values.all? { |value| value == "PASS" }
+      profiles.reject { |key, _| key == "settings_ui" }.values.all? { |value| value == "PASS" }
+    abort "invalid Settings UI result" unless
+      %w[PASS NOT_EXERCISED].include?(profiles.fetch("settings_ui"))
+    abort "Settings UI acceptance is pending; run verify-settings-ui on a dedicated desktop" unless
+      ARGV.fetch(1) == "partial" || profiles.fetch("settings_ui") == "PASS"
     tools = receipt.fetch("toolchain")
     abort "missing toolchain evidence" unless tools.keys.sort == %w[macos swift xcode] &&
       tools.values.all? { |value| value.is_a?(String) && !value.empty? } &&
       receipt.fetch("verified_at").is_a?(String) && !receipt["verified_at"].empty?
     puts profiles.fetch("settings_ui")
-  ' "$1"
+  ' "$1" "${2:-complete}"
 }
 
 verify_source_tag() {
@@ -86,11 +103,43 @@ verify_source_tag() {
     "$(git -C "${repo_root}" rev-parse --verify "${reference}^{commit}")" == "${expected_revision}" ]] ||
     fail "candidate tag does not name the exact commit"
   tree="$(git -C "${repo_root}" rev-parse --verify "${expected_revision}^{tree}")"
-  printf '%s\n' "${tag_object#*$'\n\n'}" | verify_receipt "${tree}"
+  printf '%s\n' "${tag_object#*$'\n\n'}" | verify_receipt "${tree}" "${3:-candidate}"
 }
 
 if [[ "${command_name}" == verify-source ]]; then
-  verify_source_tag "$2" "$3"
+  if [[ "${4:-}" == --release ]]; then
+    verify_source_tag "$2" "$3" complete
+  else
+    verify_source_tag "$2" "$3"
+  fi
+  exit
+fi
+
+if [[ "${command_name}" == verify-settings-ui ]]; then
+  cd "${repo_root}"
+  before_tree="$(source_tree)"
+  [[ -f "${source_receipt}" && ! -L "${source_receipt}" ]] ||
+    fail "run verify-local for this source tree first"
+  verify_receipt "${before_tree}" partial <"${source_receipt}" >/dev/null
+  # Invalidate earlier UI acceptance before taking over the test desktop.
+  # An interrupted or failed run must never leave an old PASS behind.
+  ruby -rjson -e '
+    receipt = JSON.parse(File.read(ARGV.fetch(0)))
+    receipt.fetch("profiles")["settings_ui"] = "NOT_EXERCISED"
+    File.write(ARGV.fetch(0), JSON.pretty_generate(receipt) + "\n")
+  ' "${source_receipt}"
+  echo "Settings UI automation controls the current desktop. Use a dedicated test session."
+  tests/verify_visible_settings_fixture.sh --ui-test
+  [[ "$(source_tree)" == "${before_tree}" ]] ||
+    fail "source changed during Settings UI verification; no UI acceptance was issued"
+  ruby -rjson -rtime -e '
+    receipt = JSON.parse(File.read(ARGV.fetch(0)))
+    receipt.fetch("profiles")["settings_ui"] = "PASS"
+    receipt["verified_at"] = Time.now.utc.iso8601
+    File.write(ARGV.fetch(0), JSON.pretty_generate(receipt) + "\n")
+  ' "${source_receipt}"
+  verify_receipt "${before_tree}" <"${source_receipt}" >/dev/null
+  echo "Settings UI source acceptance: ${before_tree}"
   exit
 fi
 
@@ -107,8 +156,7 @@ if [[ "${command_name}" == verify-local ]]; then
   tests/verify_publication_owner.sh
   tests/verify_development.sh all
   scripts/run_periphery.sh
-  tests/verify_visible_settings_fixture.sh --ui-test
-  settings_ui=PASS
+  settings_ui=NOT_EXERCISED
   [[ "$(source_tree)" == "${before_tree}" ]] ||
     fail "source changed during local verification; no receipt was issued"
   receipt_stage="$(mktemp "${source_receipt}.XXXXXX")"
@@ -122,9 +170,10 @@ if [[ "${command_name}" == verify-local ]]; then
     })
   ' "${before_tree}" "${settings_ui}" "${xcode_version}" \
     "${swift_version}" "${macos_version}" >"${receipt_stage}"
-  verify_receipt "${before_tree}" <"${receipt_stage}" >/dev/null
+  verify_receipt "${before_tree}" partial <"${receipt_stage}" >/dev/null
   mv "${receipt_stage}" "${source_receipt}"
   echo "Local source acceptance: ${before_tree}; Settings UI: ${settings_ui}"
+  echo "Candidate acceptance remains pending until verify-settings-ui passes on a dedicated desktop."
   exit
 fi
 
@@ -156,11 +205,24 @@ version="$(sed -n \
 [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
   fail "product version is invalid"
 
-if [[ "${command_name}" == candidate ]]; then
+if [[ "${command_name}" == authorize ]]; then
+  verify_source_tag "refs/tags/linnet-candidate/v${version}-${revision}" "${revision}" complete >/dev/null
+fi
+
+if [[ "${command_name}" == candidate || "${command_name}" == candidate-preview ]]; then
+  tree="$(git -C "${repo_root}" rev-parse --verify HEAD^{tree})"
+  if [[ "${command_name}" == candidate-preview ]]; then
+    [[ ! -L "${source_receipt}" ]] || fail "source receipt is a symlink"
+    mkdir -p "${repo_root}/build"
+    ruby -rjson -e '
+      puts JSON.pretty_generate({format: 2, source_tree: ARGV.fetch(0), preview_only: true,
+        reason: ARGV.fetch(1), profiles: %w[app lint periphery rime settings_ui swift]
+          .to_h { |profile| [profile, "NOT_EXERCISED"] }})
+    ' "${tree}" "$2" >"${source_receipt}"
+  fi
   [[ -f "${source_receipt}" && ! -L "${source_receipt}" ]] ||
     fail "run verify-local before requesting a candidate"
-  tree="$(git -C "${repo_root}" rev-parse --verify HEAD^{tree})"
-  verify_receipt "${tree}" <"${source_receipt}" >/dev/null
+  verify_receipt "${tree}" candidate <"${source_receipt}" >/dev/null
   candidate_ref="refs/tags/linnet-candidate/v${version}-${revision}"
   if ! git -C "${repo_root}" show-ref --verify --quiet "${candidate_ref}"; then
     git -C "${repo_root}" -c tag.gpgSign=false tag --annotate \

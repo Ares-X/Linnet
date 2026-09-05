@@ -48,6 +48,12 @@ extension LinnetPackTests {
     precondition(deltaBytes < original.count / 10, "delta must not contain the full file")
     let baseState = try LinnetDirectoryDelta.state(base: base, delta: delta)
     precondition(baseState == .base)
+    precondition(chmod(base.appending(path: "nested").path, 0o755) == 0)
+    try expectDeltaFailure {
+      try LinnetDirectoryDelta.apply(base: base, delta: delta, output: restored)
+    }
+    precondition(!fileManager.fileExists(atPath: restored.path))
+    precondition(chmod(base.appending(path: "nested").path, 0o555) == 0)
     try LinnetDirectoryDelta.apply(base: base, delta: delta, output: restored)
     let restoredDigest = try LinnetDirectoryDelta.digest(restored)
     let baseAfter = try LinnetDirectoryDelta.digest(base)

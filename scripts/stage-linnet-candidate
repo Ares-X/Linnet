@@ -50,6 +50,8 @@ local_products = File.expand_path(local_products_argument)
 staging_products = File.expand_path(staging_products_argument)
 require_directory(local_products, "local products root")
 require_directory(staging_products, "candidate staging root")
+fail_stage("candidate staging must stay inside a .noindex directory") unless
+  File.realpath(staging_products).split(File::SEPARATOR).any? { |part| part.end_with?(".noindex") }
 fail_stage("local and candidate roots must differ") if local_products == staging_products
 fail_stage("candidate staging root must be empty") unless Dir.empty?(staging_products)
 
@@ -91,4 +93,4 @@ fail_stage("candidate staging changed the local Settings identity") unless
   bundle_identifier(local_settings) == local_settings_identifier &&
     bundle_identifier(local_embedded_settings) == local_settings_identifier
 
-puts "stage-linnet-candidate: PASS (local identity preserved; production identity isolated)"
+puts "stage-linnet-candidate: PASS (local identity preserved; candidate staged inside .noindex)"

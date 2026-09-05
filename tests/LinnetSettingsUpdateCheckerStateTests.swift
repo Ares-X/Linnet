@@ -226,13 +226,15 @@ struct LinnetSettingsUpdateCheckerStateTests {
         baseSHA256: String(repeating: "a", count: 64),
         targetSHA256: String(repeating: "b", count: 64))
       var revealed: [URL] = []
+      let mirrorSource = try LinnetSettingsDownloadSource.customMirror(
+        prefix: "https://mirror.example.com/")
       let downloadChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: requester,
-        coreDownloader: StubCoreDownloader(destination: downloaded),
+        coreDownloader: StubCoreDownloader(destination: downloaded, expectedSource: mirrorSource),
         coreInstaller: StubCoreInstaller(prepared: prepared),
         revealCorePackage: { revealed.append($0) })
-      downloadChecker.downloadCoreUpdate(core)
+      downloadChecker.downloadCoreUpdate(core, source: mirrorSource)
       await waitUntil("verified Core download did not become ready") {
         downloadChecker.coreDownloadState == .ready(core: core, update: prepared)
       }
@@ -251,7 +253,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
       await waitUntil("current Host identity was not ready for an online Core update") {
         applyingChecker.runtimeVersionState == .current(installed)
       }
-      applyingChecker.downloadCoreUpdate(core)
+      applyingChecker.downloadCoreUpdate(core, source: .direct)
       await waitUntil("online Core candidate was not prepared") {
         applyingChecker.coreDownloadState == .ready(core: core, update: prepared)
       }
@@ -282,7 +284,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
         coreDownloader: StubCoreDownloader(destination: legacyPackage),
         coreInstaller: StubCoreInstaller(prepared: prepared),
         revealCorePackage: { revealed.append($0) })
-      legacyChecker.downloadCoreUpdate(legacyCore)
+      legacyChecker.downloadCoreUpdate(legacyCore, source: .direct)
       await waitUntil("bridge PKG did not retain its explicit legacy state") {
         legacyChecker.coreDownloadState == .installerPackage(
           core: legacyCore, file: legacyPackage)
@@ -299,7 +301,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
         coreDownloader: StubCoreDownloader(destination: nil),
         coreInstaller: StubCoreInstaller(prepared: prepared),
         revealCorePackage: { _ in fail("a failed Core download was revealed") })
-      failedDownloadChecker.downloadCoreUpdate(core)
+      failedDownloadChecker.downloadCoreUpdate(core, source: .direct)
       await waitUntil("failed Core download did not publish its terminal state") {
         failedDownloadChecker.coreDownloadState == .failed(core: core)
       }
@@ -314,7 +316,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
           path: "Live Core Download", directoryHint: .isDirectory)
         let liveFile = try await LinnetCoreDownloader(
           downloadsDirectory: liveRoot
-        ).download(publishedCore, progress: { _ in })
+        ).download(publishedCore, source: .direct, progress: { _ in })
         try LinnetDataChannel.verifyDownloadedArtifact(
           bytes: publishedCore.bytes,
           sha256: publishedCore.sha256,
@@ -390,11 +392,14 @@ struct LinnetSettingsUpdateCheckerStateTests {
 
   private struct StubCoreDownloader: LinnetCoreDownloading {
     let destination: URL?
+    var expectedSource: LinnetSettingsDownloadSource = .direct
 
     func download(
       _ core: LinnetDataChannel.Core,
+      source: LinnetSettingsDownloadSource,
       progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
+      require(source == expectedSource, "Core ignored the selected download source")
       progress(0.5)
       guard let destination else { throw Failure.rejected }
       progress(1)

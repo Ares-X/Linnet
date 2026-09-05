@@ -140,7 +140,15 @@ release identity。定时 GitHub workflow 只报告候选更新，不得自动�
 临时 Git index 将待提交文件、删除、权限和 gitlink 绑定到一个 Git tree，不改真实
 暂存区；首尾 tree 必须相同。唯一收据位于 ignored
 `build/linnet-source-verification.json`，是维护者的本地验收声明，不是云端独立测试证明。
-Settings UI 是收据的必需本机验收项；没有隔离桌面或 Developer Mode 时不签发收据。
+`verify-local` 不启动桌面 UI 自动化，收据中的 Settings UI 记为 `NOT_EXERCISED`。
+在有 Developer Mode 的专用测试桌面单独运行
+`scripts/release-control verify-settings-ui`，只补跑 UI 验收，不重复已通过的非交互检查。
+它要求同一 source tree 的本地收据；失败或中断保持未通过，候选申请仍会拒绝。
+独立 bundle ID、数据目录和 `CFFIXED_USER_HOME` 不隔离鼠标、键盘、焦点或输入源会话；
+不得在维护者正在使用的桌面运行 XCUITest。
+
+仅在维护者明确要求先发布预览、稍后验收时，可用 `candidate-preview "原因"`
+代替完整收据申请；它记录未测试状态，不执行测试，且不能用于正式发布。详见发布文档。
 
 提交相同 tree 后，在 clean、精确远端 `main` 上执行
 `scripts/release-control candidate`，创建携带收据的 annotated
@@ -224,10 +232,14 @@ App target 与独立的 `.local-build.settings` 身份。构建前后不会调�
 `build/Local/Build/Products` 永远只保存 unsigned 的 `.local-build` 身份，不会再被原地改写成
 生产输入源，也不会被打包。`community` 只在 `build/Candidate.noindex/Intermediates.noindex` 中短暂
 建立 `.app` staging，复制本地产物后才投影正式 bundle ID、release metadata 与固定 CMS
-签名；全部校验通过后以不可发现的 `Linnet.candidate` / `Settings.candidate` 目录冻结。
+签名；全部校验通过后以 `Linnet.candidate` / `Settings.candidate` 目录冻结。
 `verify_product`、PKG 和 ZIP 只消费这份候选，打包时才在一次性工作目录中重建
-`Linnet.app`。因此构建树不会留下第二个可被 Launch Services 发现的生产 App，Xcode
-产物路径和可安装生产身份也不会在两种身份间切换。
+`Linnet.app`。`.candidate` 和 `.payload` 后缀不是 Launch Services 隔离机制；
+`.noindex` 仅限制索引发现，不阻止显式注册。暂存脚本要求真实路径位于 `.noindex` 内；
+不得将正式身份的展开副本复制到普通 UAT、报告或临时目录长期留存。
+留存与传输优先使用现有 PKG/Core 包；需要保留签名构建树时使用普通 tar/ZIP 归档，
+只在专用测试环境解压。不要靠注册后再注销副本来清理开发环境。
+Xcode 本地产物与可安装生产身份仍保持分离。
 
 普通贡献者运行到 `release` 即可，不需要证书或 Keychain。正式 `archive` lane
 由 macOS release Action 使用仓库钉住的固定 community CMS leaf；缺少精确身份时

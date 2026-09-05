@@ -189,6 +189,15 @@ development Mac with isolated data. Use the VM for actual keyboard input,
 installation/upgrades, potentially logout-requiring lifecycle cases, and the
 second iCloud endpoint. Batch guest observations and use SSH for shell work.
 Do not replace the development Mac's daily input method for these tests.
+Data directories and test bundle IDs do not isolate a macOS desktop session.
+Never run mouse/keyboard/focus-driving XCUITest on the maintainer's daily
+desktop. Keep source verification non-interactive; run Settings UI acceptance
+separately on a dedicated test desktop and keep unrun evidence NOT_EXERCISED.
+Production-identity staging belongs under .noindex, but neither .noindex nor
+.candidate/.payload suffixes prevent explicit LaunchServices registration.
+Retain or transfer production candidates as existing packages or tar/ZIP files,
+not expanded copies in ordinary UAT/report directories. Do not unregister
+same-identity copies as routine build cleanup.
 Record the exact tested source and bytes. Formal release acceptance still uses
 the Action-built artifact bytes; local exploration is not a substitute for it.
 

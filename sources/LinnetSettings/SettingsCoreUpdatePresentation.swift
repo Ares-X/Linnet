@@ -43,11 +43,21 @@ extension DataTabView {
       case .applying(let applyingCore, _) where applyingCore == core:
         ProgressView().controlSize(.small)
       case .failed(let failedCore) where failedCore == core:
-        Button("Try Download Again") { updateChecker.downloadCoreUpdate(core) }
+        Button("Try Download Again") {
+          if let source = model.configuredDownloadSource {
+            updateChecker.downloadCoreUpdate(core, source: source)
+          }
+        }
+        .disabled(!model.downloadSourceConfigured || model.operationActive)
       case .recoveryRequired:
         EmptyView()
       default:
-        Button("Download Core Update") { updateChecker.downloadCoreUpdate(core) }
+        Button("Download Core Update") {
+          if let source = model.configuredDownloadSource {
+            updateChecker.downloadCoreUpdate(core, source: source)
+          }
+        }
+        .disabled(!model.downloadSourceConfigured || model.operationActive)
       }
     }
     .accessibilityIdentifier("settings.data.core.downloadAction")

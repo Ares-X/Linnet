@@ -56,19 +56,26 @@ struct LinnetPackTests {
       try withFixture { builder in
         let firstPackage = registry.downloadsDirectory.appending(path: "base.linnetpack")
         let nextPackage = builder.downloadsDirectory.appending(path: "target.linnetpack")
-        _ = try makePack(firstPackage, payload: Data(repeating: 97, count: 131_072))
+        _ = try makePack(firstPackage, kind: .chinese, path: "dicts/jichu.dict.yaml",
+                         payload: Data(repeating: 97, count: 131_072))
         var changed = Data(repeating: 97, count: 131_072)
         changed[1024] = 98
-        _ = try makePack(nextPackage, payload: changed, sequence: 2)
+        _ = try makePack(nextPackage, kind: .chinese, path: "dicts/jichu.dict.yaml",
+                         payload: changed, sequence: 2)
         let base = try registry.verifyAndStagePack(
           package: firstPackage, artifact: catalogArtifact(firstPackage), transfer: .complete)
         var artifact = try catalogArtifact(nextPackage)
         let target = try builder.verifyAndStagePack(package: nextPackage, artifact: artifact, transfer: .complete)
         let baseRoot = registry.rootDirectory.appending(path: base.relativePath)
         let targetRoot = builder.rootDirectory.appending(path: target.relativePath)
-        let before = try LinnetDirectoryDelta.digest(baseRoot)
         let deltaFile = registry.downloadsDirectory.appending(path: "update.linnetdelta")
+        // PKG extraction produces writable directories; an installed pack is
+        // read-only. That difference must not change language-content identity.
+        let nested = baseRoot.appending(path: "dicts")
+        require(chmod(nested.path, 0o755) == 0, "fixture directory mode")
         try LinnetDirectoryDelta.build(base: baseRoot, target: targetRoot, output: deltaFile)
+        require(chmod(nested.path, 0o555) == 0, "installed directory mode")
+        let before = try LinnetDirectoryDelta.digest(baseRoot)
         let bytes = try Data(contentsOf: deltaFile)
         let delta = LinnetDataChannel.Delta(
           baseContentSHA256: base.contentSHA256, bytes: UInt64(bytes.count), sha256: LinnetPackContract.sha256(bytes),
@@ -87,6 +94,15 @@ struct LinnetPackTests {
         } catch LinnetDataChannel.Failure.invalidArtifact { }
         require(!FileManager.default.fileExists(atPath: registry.rootDirectory.appending(path: target.relativePath).path),
           "failed delta published a target pack")
+        let baseFile = baseRoot.appending(path: "dicts/jichu.dict.yaml")
+        require(chmod(baseFile.path, 0o644) == 0, "fixture file mode")
+        try changed.write(to: baseFile)
+        do {
+          _ = try registry.verifyAndStagePack(package: deltaFile, artifact: artifact, transfer: artifact.transfer(from: base))
+          LinnetTestFailure.fail("corrupt baseline content was accepted")
+        } catch LinnetDataRegistry.Failure.invalidActiveState { }
+        try Data(repeating: 97, count: 131_072).write(to: baseFile)
+        require(chmod(baseFile.path, 0o444) == 0, "restore fixture file mode")
         let staged = try registry.verifyAndStagePack(
           package: deltaFile, artifact: artifact, transfer: artifact.transfer(from: base))
         require(artifact.matches(staged), "reconstructed pack did not satisfy the canonical target")

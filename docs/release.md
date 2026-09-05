@@ -75,8 +75,17 @@ Git index 绑定完整源 tree，不改变暂存区。收据只保存在 ignored
 `build/linnet-source-verification.json`；合并提交不同但 tree 完全相同时可复用。
 这是可信维护者的验收声明，不宣称 Action 独立重跑了本地测试。
 
-Settings UI 必须在合法隔离桌面及 Developer Mode 下本地通过；未执行时不签发候选收据，
-candidate Action 不补跑本机产品验收。
+`verify-local` 不操作桌面，Settings UI 记录为 `NOT_EXERCISED`。随后在具备
+Developer Mode 的专用测试桌面运行 `scripts/release-control verify-settings-ui`，
+为同一 source tree 补充 UI 结果，不重跑非交互检查。UI 未通过时不能申请候选；
+candidate Action 不补跑产品验收。独立应用身份和数据目录不等于隔离桌面，
+不得在维护者日常输入会话中运行此命令或直接运行 XCUITest。
+
+维护者明确要求跳过测试、先发布 Preview 交由用户验收时，可在 clean、精确远端
+`main` 执行 `scripts/release-control candidate-preview "跳过原因"`。它不执行测试，
+为当前 tree 记录 `preview_only` 与 `NOT_EXERCISED`，不伪造通过项；随后仍由同一
+Action 构建、签名并检查发布文件，只允许推进预览频道。此记录不能授权正式发布；
+正式版仍须在已完成验收的源码上使用完整收据申请新候选。
 同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
 标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
 `community-signing` Environment 中的 P12 和密码创建临时 Keychain，并只运行一次

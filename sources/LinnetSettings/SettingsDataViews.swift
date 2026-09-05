@@ -587,7 +587,7 @@ extension DataTabView {
       .font(.caption)
       .foregroundStyle(.secondary)
       Text(
-        "The selected source is used only for future language-data downloads. Linnet never switches or falls back to another source automatically."
+        "The selected source applies to future Core and language-data downloads. Update checks still use GitHub directly. Linnet never switches sources automatically."
       )
       .font(.caption)
       .foregroundStyle(.secondary)

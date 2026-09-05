@@ -146,7 +146,7 @@ jobs:
       - name: Verify history-sensitive publication metadata
         run: |
           set -euo pipefail
-          tests/verify_action_publication.sh
+          # Behavioral suites run locally, not again in the packaging job.
           if git cat-file -e 'HEAD^' 2>/dev/null; then
             changed="$(mktemp)"
             previous="$(mktemp)"
@@ -348,6 +348,11 @@ jobs:
           catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
             config/linnet-data-releases.json)"
 
+          if [[ "${publication_mode}" == publish ]]; then
+            scripts/release-control verify-source \
+              "refs/tags/linnet-candidate/v${version}-${CANDIDATE_REVISION}" \
+              "${CANDIDATE_REVISION}" --release >/dev/null
+          fi
           package/publish_github_release "${publication_mode}" "${version}" \
             "${catalog_sequence}" "${CANDIDATE_REVISION}" \
             "${AUTHORIZATION_TAG}"
