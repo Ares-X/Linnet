@@ -297,7 +297,8 @@ community-verified: community
 # The stable community PKG follows Squirrel's pkgbuild/component route, then
 # wraps the component with visible license, upstream notice and privacy pages.
 # Creation and static expansion do not install, launch or register the App.
-package: community-verified linnet-pack-tool linnet-runtime-inspector \
+# Runtime acceptance is explicit (community-verified), not a packaging side effect.
+package: community linnet-pack-tool linnet-runtime-inspector \
 	input-source-registration-inspector
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
 	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
