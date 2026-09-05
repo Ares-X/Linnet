@@ -182,6 +182,16 @@ compatibility. Do not repeat locally proven deterministic suites in GitHub
 Actions unless Actions owns a distinct compiler, signing, packaging, or
 publication boundary.
 
+Development exploration may use a locally built, fixed-community-signed test
+package in the dedicated VM; it does not require an Action candidate or authorize
+publication. Keep component, layout, Settings and performance checks on the
+development Mac with isolated data. Use the VM for actual keyboard input,
+installation/upgrades, potentially logout-requiring lifecycle cases, and the
+second iCloud endpoint. Batch guest observations and use SSH for shell work.
+Do not replace the development Mac's daily input method for these tests.
+Record the exact tested source and bytes. Formal release acceptance still uses
+the Action-built artifact bytes; local exploration is not a substitute for it.
+
 ## 9. Review And Documentation
 
 Treat external audit findings as hypotheses. Verify the cited source, current

@@ -193,6 +193,15 @@ private extension LinnetSettingsProjectionRenderer {
     if appearance.candidateBrowsingMode == .scrollingOnly {
       entries.append(("style/linnet_candidate_expansion_allowed", "false"))
     }
+    if appearance.expandedHorizontalCount != LinnetSettingsContract.horizontalExpandedGridRange.upperBound {
+      entries.append(("style/linnet_expanded_horizontal_count", String(appearance.expandedHorizontalCount)))
+    }
+    if appearance.expandedHorizontalRows != LinnetSettingsContract.horizontalExpandedGridRange.lowerBound {
+      entries.append(("style/linnet_expanded_horizontal_rows", String(appearance.expandedHorizontalRows)))
+    }
+    if appearance.expandedVerticalCount != LinnetSettingsContract.expandedCandidateCountRange.lowerBound {
+      entries.append(("style/linnet_expanded_vertical_count", String(appearance.expandedVerticalCount)))
+    }
     guard !entries.isEmpty else { return nil }
     return renderPatch(entries)
   }

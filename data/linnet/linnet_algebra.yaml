@@ -41,6 +41,7 @@ full_pinyin:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -105,6 +106,7 @@ ziranma:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -199,6 +201,7 @@ flypy:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -293,6 +296,7 @@ sogou:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -388,6 +392,7 @@ mspy:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -484,6 +489,7 @@ abc:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -576,6 +582,7 @@ ziguang:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -670,6 +677,7 @@ jiajia:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890

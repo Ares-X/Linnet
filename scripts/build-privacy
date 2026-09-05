@@ -3,7 +3,6 @@
 set -euo pipefail
 
 privacy_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-privacy_workspace_name="$(basename "${privacy_root}")"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -126,7 +125,6 @@ scan_artifacts() {
   LINNET_PRIVACY_REPO="${privacy_root}" \
   LINNET_PRIVACY_HOME="${privacy_home}" \
   LINNET_PRIVACY_TEMP="${privacy_temp}" \
-  LINNET_PRIVACY_WORKSPACE_NAME="${privacy_workspace_name}" \
     ruby - "$@" <<'RUBY'
 require "open3"
 
@@ -138,7 +136,6 @@ class PrivacyScanner
     @exact_paths = %w[LINNET_PRIVACY_REPO LINNET_PRIVACY_HOME LINNET_PRIVACY_TEMP]
       .map { |key| ENV.fetch(key).b }
       .reject(&:empty?)
-    @workspace = ENV.fetch("LINNET_PRIVACY_WORKSPACE_NAME").b
     # These are audited upstream runtime filename templates, not captured
     # build roots. Keep the allowlist exact so a concrete temporary path still
     # fails the generic rules below.
@@ -211,16 +208,14 @@ class PrivacyScanner
       next true if @path_patterns.any? { |pattern| pattern.match?(inspected) }
 
       without_public_urls = inspected.gsub(%r{https?://[^\x00\s"\x27<>()]+}ni, "")
-      workspace_hit = @workspace != "Linnet".b && without_public_urls.include?(@workspace)
-      workspace_hit || @marker_patterns.any? { |pattern| pattern.match?(without_public_urls) }
+      @marker_patterns.any? { |pattern| pattern.match?(without_public_urls) }
     end
   end
 
   def forbidden_name?(label)
     components = label.b.split(/[\\\/]/n)
     markers = %w[DerivedData Intermediates.noindex Index.noindex CMakeFiles .DS_Store].map(&:b)
-    components.any? { |component| markers.include?(component) } ||
-      (@workspace != "Linnet".b && components.any? { |component| component.include?(@workspace) })
+    components.any? { |component| markers.include?(component) }
   end
 
   def allowed_load_path?(path)

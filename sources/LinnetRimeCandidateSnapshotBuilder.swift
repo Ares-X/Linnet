@@ -81,9 +81,7 @@ enum LinnetRimeCandidateSnapshotBuilder {
         indexOnPage: indexOnPage,
         text: iterator.candidate.text.map { String(cString: $0) } ?? "",
         comment: iterator.candidate.comment.map { String(cString: $0) } ?? "",
-        selectionLabel: page == currentPage
-          ? LinnetCandidatePresentation.candidateSelectionLabel(
-            at: indexOnPage, labels: labels) : nil
+        selectionLabel: nil
       ))
     }
     let highlightedAbsolute = currentPageStart + highlightedOnPage

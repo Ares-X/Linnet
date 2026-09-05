@@ -63,7 +63,11 @@ single_abbreviations = [
 profiles.each do |local_name, source_name|
   source_profile = source.fetch(source_name)
   raise "unexpected upstream profile shape" unless source_profile.keys == ["__append"]
-  source_rules = source_profile.fetch("__append")
+  # Upstream 17.9.7 repeats the identical m̄ normalization in full pinyin.
+  # Linnet projects it once; repeated identical transforms add no behavior.
+  source_rules = source_profile.fetch("__append").each_with_object([]) do |rule, rules|
+    rules << rule unless rule == %q{xform/m̄([a-z]*)$/m$1①/} && rules.last == rule
+  end
   local_rules = local.fetch(local_name)
   raise "#{local_name} entity projection must be its final algebra rule" unless
     local_rules.last == english_entity_projection &&
@@ -265,14 +269,20 @@ source_rows = list(projector.dictionary_rows(source_path))
 source_texts = {text for _, text, _, _ in source_rows}
 owned_texts = set()
 core_weights = defaultdict(int)
+abel_prize = None
 for table in projector.CORE_TABLES:
     for _, text, code, weight in projector.dictionary_rows(
         wanxiang_root / f"{table}.dict.yaml"
     ):
         if text in source_texts:
             owned_texts.add(text)
+        if text == "阿贝尔奖":
+            abel_prize = (code, weight)
         plain = " ".join(projector.tone_to_plain(code).split())
         core_weights[plain] = max(core_weights[plain], weight)
+
+if abel_prize != ("ā bèi ěr jiǎng", 52):
+    raise SystemExit(f"Wanxiang science sample drifted: 阿贝尔奖={abel_prize}")
 
 readings = projector.load_zi(wanxiang_root / "zi.dict.yaml")
 source_status = {}
@@ -319,7 +329,7 @@ if admitted_statuses != Counter({"verified": sum(lengths.values())}):
 # domains so a large but low-value projection cannot satisfy the gate by count.
 reviewed_samples = {
     "person": ("阿黛尔", "ā dài ěr", 13, 3),
-    "science": ("阿贝尔奖", "ā bèi ěr jiǎng", 6, 4),
+    "science": ("零点定理", "líng diǎn dìng lǐ", 6, 4),
     "medicine": ("阿尔茨海默", "ā ěr cí hǎi mò", 151, 5),
     "education": ("阿亨科技大学", "ā hēng kē jì dà xué", 163, 6),
     "technology": ("生成式人工智能", "shēng chéng shì rén gōng zhì néng", 163, 7),

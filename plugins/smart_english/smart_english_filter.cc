@@ -364,8 +364,10 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
       return has_exact ? !item.mixed : item.mixed;
     });
   }
-  if (!is_pinyin_flow && has_exact) {
-    if (promote_exact && schema_id_ == kSmartEnglishSchema) {
+  const bool ordinary_english =
+      schema_id_ == kSmartEnglishSchema && !input_word.empty() && !is_code_token;
+  if (!is_pinyin_flow && (has_exact || ordinary_english)) {
+    if (ordinary_english) {
       std::stable_sort(candidates.begin(), candidates.end(),
                        [](const auto& left, const auto& right) {
         const auto left_group = left.raw ? 0 : left.exact ? 1 : 2;

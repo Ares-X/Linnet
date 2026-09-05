@@ -148,12 +148,12 @@ $(INPUT_SOURCE_REGISTRATION_INSPECTOR): $(INPUT_SOURCE_REGISTRATION_INSPECTOR_SO
 		$(INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES) \
 		-o $(INPUT_SOURCE_REGISTRATION_INSPECTOR)
 
-$(SMART_ENGLISH_PLUGIN): $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
+$(SMART_ENGLISH_PLUGIN): Makefile $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
 		$(SMART_ENGLISH_SDK_HEADERS) \
 		$(RIME_LIB_DIR)/$(RIME_LIBRARY_FILE_NAME) \
 		$(RIME_LIB_DIR)/rime-plugins/librime-predict.dylib
 	@mkdir -p $(@D)
-	@set -o pipefail; $(CXX) -std=c++17 -arch arm64 -mmacosx-version-min=13.0 \
+	@set -o pipefail; $(CXX) -std=c++17 -O2 -arch arm64 -mmacosx-version-min=13.0 \
 		-isysroot "$(MACOS_SDK)" -Wall -Wextra -Werror \
 		-Wno-missing-field-initializers \
 		-DGLOG_USE_GLOG_EXPORT \

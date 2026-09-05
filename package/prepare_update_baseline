@@ -58,7 +58,7 @@ if [[ ! -e "${expanded}" && ! -L "${expanded}" ]]; then
   mv "${work}/expanded" "${expanded}"
 fi
 [[ -d "${expanded}" && ! -L "${expanded}" ]] || fail "unsafe extracted baseline"
-app="${expanded}/Linnet-Core.component.pkg/Payload/Linnet.app"
+app="${expanded}/Linnet-Core.component.pkg/Payload/Linnet.payload"
 identity="$("${project_root}/scripts/linnet-code-identity" verify-published "${app}" "${revision}")"
 [[ "$(printf '%s' "${identity}" | plutil -extract candidate_revision raw -o - -)" == "${revision}" ]] ||
   fail "extracted App differs from the pinned revision"

@@ -8,6 +8,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -4494,6 +4495,49 @@ void ExpectChineseTabPolicy(RimeApi_stdbool* api) {
   SetSchemaString(api, kSchema, kPolicyKey, "smart_complete");
 }
 
+void ExpectFrequentEnglishCompletions(RimeApi_stdbool* api) {
+  for (const auto& sample :
+       std::array<std::pair<const char*, const char*>, 6>{{
+           {"kn", "know"}, {"lib", "library"},
+           {"con", "contact"}, {"LIB", "LIBRARY"},
+           {"suppor", "support"}, {"mater", "matter"},
+       }}) {
+    const auto session = CreateSchemaSession(api, "linnet_en");
+    Enter(api, session, sample.first);
+    const auto candidates = Candidates(api, session);
+    const auto found = std::find_if(
+        candidates.begin(), candidates.end(), [&](const auto& candidate) {
+          return BaseText(candidate.text) == sample.second;
+        });
+    if (candidates.empty() || BaseText(candidates.front().text) != sample.first ||
+        found == candidates.end() || found - candidates.begin() >= 3) {
+      Fail(std::string("English suggestion did not preserve raw input and ") +
+           "reach the first three candidates: " + sample.first);
+    }
+    api->destroy_session(session);
+  }
+  // Compare the complete reachable menu, not just the newly ranked first page.
+  // Later expansion must not skip words that outrank an already emitted batch.
+  std::set<std::string> original_words;
+  for (bool weighted : {false, true}) {
+    SetSchemaBool(api, "linnet_en", "translator/completion_by_weight", weighted);
+    const auto session = CreateSchemaSession(api, "linnet_en");
+    Enter(api, session, "co");
+    std::set<std::string> words;
+    for (const auto& candidate : Candidates(api, session)) {
+      words.insert(BaseText(candidate.text));
+    }
+    api->destroy_session(session);
+    if (!weighted) {
+      original_words = std::move(words);
+    } else if (words != original_words) {
+      Fail("frequency completion changed the complete reachable candidate set");
+    }
+  }
+  std::cout << "rime_smoke_test: English completion tail preserved "
+            << original_words.size() << " distinct candidates\n";
+}
+
 void ExpectImmediateEnglishSpaceCommit(RimeApi_stdbool* api) {
   for (const char uppercase : {'F', 'I'}) {
     const RimeSessionId shifted = CreateSchemaSession(api, "linnet_en");
@@ -7279,6 +7323,7 @@ int main(int argc, char** argv) {
   ExpectCommentContains(api, english, "webhooks", "webhooks", "网络", "钩子");
   ExpectCommentContains(api, english, "API", "API", "应用", "接口");
   ExpectCommentContains(api, english, "April", "April", "四", "月");
+  ExpectFrequentEnglishCompletions(api);
   ExpectImmediateEnglishSpaceCommit(api);
   ExpectCommentContains(api, english, "Dejavu", "Déjà vu", "似曾", "相识");
   ExpectCommentContains(api, english, "jwt", "jwt", "JSON Web Token", "令牌");

@@ -136,6 +136,26 @@ extension SquirrelInputController {
 
     synchronizeCandidateLayoutOptions()
     let effectiveKeycode = effectiveRimeKeycode(for: rimeKeycode)
+    if rimeModifiers == 0,
+      (UInt32(XK_1)...UInt32(XK_9)).contains(effectiveKeycode),
+      let panel = NSApp.squirrelAppDelegate.panel,
+      panel.candidateSnapshot?.isExpanded == true {
+      if let target = panel.expandedCandidateSelectionTarget(
+        number: Int(effectiveKeycode - UInt32(XK_1)) + 1) {
+        _ = rimeAPI.select_candidate(session, target)
+      }
+      // A number without a label must not select a different Rime page item.
+      return true
+    }
+    if rimeModifiers == 0,
+      effectiveKeycode == UInt32(XK_Up) || effectiveKeycode == UInt32(XK_Down),
+      let target = NSApp.squirrelAppDelegate.panel?.expandedCandidateNavigationTarget(
+        up: effectiveKeycode == UInt32(XK_Up)) {
+      // At the end of the candidate list Rime declines the move; the arrow
+      // still belongs to candidate browsing, not to the application's caret.
+      _ = rimeAPI.highlight_candidate(session, target)
+      return true
+    }
     let handled = rimeAPI.process_key(
       session,
       Int32(effectiveKeycode),

@@ -7,7 +7,7 @@ patches/rime-wanxiang-linnet-reviewed.patch. The source project
 
   https://creativecommons.org/licenses/by/4.0/legalcode
 
-Upstream commit: 296f90d17e6b587b6fabcd661686e66372f2afaa (v17.3.0)
+Upstream commit: 45fa1a6f3be81978323ec51f9b74e106522f8918 (v17.9.7)
 
 Attribution: "万象拼音 (Wanxiang Pinyin) by amzxyz, CC BY 4.0"
 

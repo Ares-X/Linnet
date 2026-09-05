@@ -4,7 +4,7 @@
 schema:
   schema_id: linnet_en
   name: 双韵 Smart English
-  version: "0.2.1"
+  version: "0.2.2"
   author:
     - Linnet contributors
   description: |
@@ -70,6 +70,7 @@ translator:
   dictionary: linnet_en
   user_dict: linnet_en
   enable_completion: true
+  completion_by_weight: true
   enable_sentence: false
   enable_user_dict: true
 

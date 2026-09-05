@@ -19,6 +19,7 @@ struct LinnetSettingsProjectionRendererTests {
       testLightweightAppearanceProjection()
       testFontPointProjection()
       testPageSizeProjection()
+      try testExpandedCounts()
       testSwitchProjections()
       testPinyinReverseTriggerProjection()
       testChineseProfileProjectionAndCodec()
@@ -95,6 +96,41 @@ struct LinnetSettingsProjectionRendererTests {
         }
       }
     }
+  }
+
+  private static func testExpandedCounts() throws {
+    let original = LinnetSettingsDocument.default
+    require(original.appearance.expandedHorizontalCount == 5 && original.appearance.expandedVerticalCount == 5,
+      "expanded counts must default to five")
+    let oldAppearance = Data("{\"pageSize\":9}".utf8)
+    let decoded = try JSONDecoder().decode(LinnetSettingsDocument.Appearance.self, from: oldAppearance)
+    require(decoded.pageSize == 9 && decoded.expandedHorizontalCount == 5 && decoded.expandedVerticalCount == 5,
+      "older settings changed compact count or did not acquire expanded defaults")
+    require(decoded.expandedHorizontalRows == 3, "older settings must default to three expanded rows")
+    for count in 3...5 {
+      var document = original
+      document.appearance.expandedHorizontalCount = count
+      document.appearance.expandedHorizontalRows = 8 - count
+      document.appearance.expandedVerticalCount = count + 2
+      let projections = LinnetSettingsProjectionRenderer.renderProjections(document: document)
+      let baseline = LinnetSettingsProjectionRenderer.renderProjections(document: original)
+      require(projections.filter { $0.key != LinnetSettingsProjectionRenderer.squirrelCustomFile }
+        == baseline.filter { $0.key != LinnetSettingsProjectionRenderer.squirrelCustomFile },
+        "expanded count changed Rime pages, schema or compact input behavior")
+      let roundTrip = try JSONDecoder().decode(LinnetSettingsDocument.self, from: JSONEncoder().encode(document))
+      require(roundTrip == document, "expanded counts did not survive save and reload")
+      let live = document.appearance.livePanelProjection(over: original.appearance)
+      require(live.expandedHorizontalCount == count && live.expandedHorizontalRows == 8 - count &&
+        live.expandedVerticalCount == count + 2 && live.pageSize == 9,
+        "live panel apply mixed expanded counts with compact pages")
+    }
+    var invalid = original
+    invalid.appearance.expandedHorizontalCount = 1
+    invalid.appearance.expandedHorizontalRows = 100
+    invalid.appearance.expandedVerticalCount = 100
+    require(invalid.normalized().appearance.expandedHorizontalCount == 3 &&
+      invalid.normalized().appearance.expandedHorizontalRows == 5 &&
+      invalid.normalized().appearance.expandedVerticalCount == 7, "expanded count bounds were not enforced")
   }
 
   private static func testFontPresetProjection() {

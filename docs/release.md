@@ -61,8 +61,11 @@ export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release-preflight.XXX
 ```
 
 本机固定 Keychain 的密码是 Linnet 专用随机密码，不是 macOS 登录密码；如果配置或
-预检出现密码框，应取消并排查。由于 CMS 签名时间会改变字节，本地预检输出不得作为
-安装验收或正式发布候选。
+预检出现密码框，应取消并排查。本地固定 CMS 签名包允许用于专用虚拟机的开发探索
+测试，记录精确源码与包摘要，不得上传或公开。组件、布局、Settings 与性能测试在
+开发机使用隔离数据；虚拟机用于真实键盘输入、安装升级、可能需要注销的生命周期
+以及第二个 iCloud 端点。由于 CMS 签名时间会改变字节，本地测试不能替代正式发布前
+对 Action 原始产物的安装验收，也不要求为每轮开发探索先触发 Action。
 
 正式候选只能由 `scripts/release-control candidate` 创建携带本地验收收据的
 annotated `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动；裸标签会被拒绝。

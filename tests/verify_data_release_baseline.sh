@@ -142,8 +142,10 @@ check.call("content-identity-transition", :pass) do |document|
 end
 check.call("min-core-identity-transition", :pass) do |document|
   pack = document.fetch("packs").fetch("english")
-  pack["min_core"] = "0.1.2"
-  pack["version"] = "#{pack.fetch("version")}.min-core-0.1.2"
+  minimum = pack.fetch("min_core").split(".").map(&:to_i)
+  minimum[-1] += 1
+  pack["min_core"] = minimum.join(".")
+  pack["version"] = "#{pack.fetch("version")}.min-core-#{pack.fetch("min_core")}"
   pack["sequence"] += 1
   document["catalog_sequence"] += 1
 end

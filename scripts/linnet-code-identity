@@ -266,8 +266,8 @@ require_inventory() {
   done <<<"${expected}"
 }
 
-readonly standalone_settings_inventory=$'Contents/Frameworks/librime.1.dylib\nContents/MacOS/Settings'
-readonly host_inventory=$'Contents/Applications/Settings.app/Contents/Frameworks/librime.1.dylib\nContents/Applications/Settings.app/Contents/MacOS/Settings\nContents/Frameworks/librime.1.dylib\nContents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/MacOS/Linnet'
+readonly standalone_settings_inventory=$'Contents/Frameworks/librime.1.dylib\nContents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/MacOS/Settings'
+readonly host_inventory=$'Contents/Applications/Settings.app/Contents/Frameworks/librime.1.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/Applications/Settings.app/Contents/MacOS/Settings\nContents/Frameworks/librime.1.dylib\nContents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/MacOS/Linnet'
 
 sign_code() {
   local path="$1"
@@ -337,6 +337,7 @@ verify_product() (
   local metadata_projection
   local product_version
   local product_build
+  local product_inventory="${host_inventory}"
 
   require_verification_bundle "${host_app}" host
   embedded_settings_app="${host_app}/Contents/Applications/Settings.app"
@@ -356,7 +357,12 @@ verify_product() (
   [[ "$(plutil -extract LinnetCodeSigningProfile raw -o - \
     "${embedded_settings_app}/Contents/Info.plist" 2>/dev/null || true)" == \
     "${signing_profile}" ]] || fail_identity "embedded Settings code-signing profile mismatch"
-  require_inventory "${host_app}" "${host_inventory}"
+  if [[ -n "${published_revision}" ]]; then
+    # Historical layouts are owned by their pinned package and signed bundle
+    # seal, not today's build inventory. Verify every actual Mach-O below.
+    product_inventory="$(mach_o_inventory "${host_app}")"
+  fi
+  require_inventory "${host_app}" "${product_inventory}"
   if [[ -n "${standalone_settings_app}" ]]; then
     require_verification_bundle "${standalone_settings_app}" settings
     [[ "$(bundle_identifier "${standalone_settings_app}")" == "${settings_bundle_id}" ]] ||
@@ -396,7 +402,7 @@ verify_product() (
       "${verification_scratch}" "host-$(tr '/.' '--' <<<"${relative}")")"
     [[ "${actual_leaf}" == "${expected_leaf}" ]] ||
       fail_identity "Host code leaf mismatch"
-  done <<<"${host_inventory}"
+  done <<<"${product_inventory}"
   actual_leaf="$(verify_code "${embedded_settings_app}" "${expected_leaf}" \
     "${verification_scratch}" embedded-settings-bundle "${settings_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "embedded Settings leaf mismatch"
@@ -538,19 +544,15 @@ sign_product() {
       fail_identity "failed to project the code-signing profile"
   done
 
-  sign_code "${standalone_settings_app}/Contents/Frameworks/librime.1.dylib" \
-    "${identity}" "${keychain}"
-  sign_code "${standalone_settings_app}" "${identity}" "${keychain}" "${entitlements}"
-  sign_code "${embedded_settings_app}/Contents/Frameworks/librime.1.dylib" \
-    "${identity}" "${keychain}"
-  sign_code "${embedded_settings_app}" "${identity}" "${keychain}" "${entitlements}"
-  sign_code "${host_app}/Contents/Frameworks/librime.1.dylib" "${identity}" "${keychain}"
-  for plugin in librime-lua.dylib librime-octagram.dylib librime-predict.dylib \
-    librime-smart-english.dylib; do
-    sign_code "${host_app}/Contents/Frameworks/rime-plugins/${plugin}" \
-      "${identity}" "${keychain}"
+  for signed_app in "${standalone_settings_app}" "${embedded_settings_app}" "${host_app}"; do
+    sign_code "${signed_app}/Contents/Frameworks/librime.1.dylib" "${identity}" "${keychain}"
+    for plugin in librime-lua.dylib librime-octagram.dylib librime-predict.dylib \
+      librime-smart-english.dylib; do
+      sign_code "${signed_app}/Contents/Frameworks/rime-plugins/${plugin}" \
+        "${identity}" "${keychain}"
+    done
+    sign_code "${signed_app}" "${identity}" "${keychain}" "${entitlements}"
   done
-  sign_code "${host_app}" "${identity}" "${keychain}" "${entitlements}"
   actual_projection="$(verify_product "${host_app}" "${standalone_settings_app}")"
   [[ "${actual_projection}" == "${expected_projection}" ]] ||
     fail_identity "signed product differs from its external identity contract"

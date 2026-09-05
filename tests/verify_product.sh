@@ -128,6 +128,8 @@ for retired in ComponentInputModeDict PrimaryInputModeIdentifier; do
   ! plutil -extract "${retired}" raw -o - "${info}" >/dev/null 2>&1
 done
 
+run_phase "packaged Rime modules" tests/verify_packaged_rime.sh \
+  "${app}" "${app}/Contents/Applications/Settings.app" "${settings}"
 run_phase "fixed-home signed Settings bundle" \
   tests/verify_visible_settings_fixture.sh --verify candidate
 run_phase "offline candidate process" env \

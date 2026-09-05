@@ -314,9 +314,7 @@ extension SquirrelPanel {
     let flow: LinnetCandidatePresentation.CandidateFlow = linear ? .horizontal : .vertical
     let visualRows = LinnetCandidatePresentation.visualRows(
       candidateCount: candidates.items.count,
-      pageSize: candidates.pageSize,
-      flow: flow,
-      expanded: candidates.isExpanded
+      flow: flow
     )
     let usesExpandedGrid = candidates.isExpanded
     let usesInlineLayout = linear
@@ -327,10 +325,14 @@ extension SquirrelPanel {
       ? inlineSeparator.boundingRect(with: .zero).width : 0
     let candidateLines = candidates.items.enumerated().map { itemIndex, item in
       let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
-      let labelAttrs = itemIndex == index ? theme.labelHighlightedAttrs : theme.labelAttrs
+      var labelAttrs = itemIndex == index ? theme.labelHighlightedAttrs : theme.labelAttrs
+      if usesExpandedGrid {
+        let font = (labelAttrs[.font] as? NSFont) ?? theme.font
+        labelAttrs[.font] = NSFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .regular)
+      }
       let commentAttrs = itemIndex == index ? theme.commentHighlightedAttrs : theme.commentAttrs
       let label = theme.candidateFormat.contains(/\[label\]/)
-        ? item.selectionLabel ?? "" : ""
+        ? (usesExpandedGrid ? "7" : item.selectionLabel ?? "") : ""
       let displayedComment = usesInlineComments
         ? LinnetCandidatePresentation.candidateComment(item.comment).displayText : ""
       return LinnetCandidatePresentation.candidateLine(
@@ -344,8 +346,10 @@ extension SquirrelPanel {
     }
     if usesExpandedGrid {
       view.candidateGridView.publish(
-        rows: visualRows,
+        columns: linear ? theme.expandedHorizontalCount : theme.expandedVerticalCount,
+        maximumRows: linear ? theme.expandedHorizontalRows : 3,
         lines: candidateLines,
+        highlighted: index,
         verticalText: vertical,
         columnSpacing: view.separatorWidth,
         rowSpacing: theme.linespace)

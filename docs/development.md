@@ -371,11 +371,39 @@ Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Rele
 
 ### Rime Core
 
+英文前缀优化来自独立研究的产品提交 `cdaf6bb` 与 `115887e`，研究数据和实验程序不进入产品。现有 TableTranslator 在 English schema 的 `completion_by_weight` 下，对两字符及以上前缀先展开最多 1,000 个 Prism key，按词频排序，后续按 key 偏移惰性读取，不能按重新排序后的候选序号跳过尾部。SmartEnglishFilter 复用原有学习／静态上下文排序；SmartEnglishTranslator 的纠错质量统一为 `frequency / 1e8`，不额外减 1。没有新模型、NSSpellChecker、索引或排序 owner。Smart English 规范构建统一使用 `-O2`。该内部 `LookupWords` C++ 签名变化同样要求重建全部原生插件；对应验收为 `tests/verify_rime_runtime.sh`，含常见前缀、完整候选集合、错拼、跨方案和输入连续性，原 p95/p99 门槛不变。研究中的排名取舍不能宣称为全场景无退步，最终 Core 与 English 词包必须联合加载后做真实输入验收。
+
 当前锁定的 librime 有三处直接影响输入交互的上游缺口：被 `uniquifier` 包裹的标点必须读取 genuine candidate；InputMethodKit 退出时的 composition abort 必须取消 `AsciiComposer` 内未完成的修饰键手势；`commit_text` 切换不得把零输入的被动预测当成用户选择。`patches/librime-linnet-core-interactions.patch` 在 librime 的原始 owner 内统一修复这三处，不改变标点内容、全半角、配对、数字上下文或输入方案所有权。未来上游提供等价修复后，必须同时移除该 patch、lock/build wiring 和对应结构守卫，并重跑 native runtime 与 product gates。
+
+引擎性能回移保持现有版本与单一 owner：核心交互补丁包含 librime [`1d0df6e`](https://github.com/rime/librime/commit/1d0df6e40cdcac17a986adc65e4668ae84ae0ada) 的 Prism / Syllabifier 临时字符串优化及上游边界测试；Lua 补丁包含 librime-lua [`ec52e48`](https://github.com/hchunhui/librime-lua/commit/ec52e48ea18f11af37717a01c337f853215cf70b) 的增量 GC。不引入该提交之前无关的 ReverseDb 路径变化，仍使用 Lua 5.4.8。Prism 的 C++ 参数类型改变，必须由 `no_download=1 ./action-install.sh` 一次重建引擎及插件，不能只替换单个 dylib。相关验收使用 `tests/verify_rime_runtime.sh --profile-key-matrix-probe` 与 `--mixed-input-probe`，不要求 App 或发布矩阵。
 
 ### Lua
 
 产品使用的 rime-ice Lua 源由 allowlist 选择并嵌入锁定 librime-lua plugin。日期/UUID 对 `linnet_pinyin` tag 的边界修正以精确 patch 应用。Lua state 生命周期补丁仍是当前 pin 的必要部分。只有未来上游明确保证 Lua state 晚于所有 gear/translation 销毁，或保证它们在 `Registry::Clear` / `lua_close` 前全部销毁，才可移除该补丁；移除时必须同时更新 lock/build wiring，并重跑 Lua lifetime、embedding、runtime 和 product gates。
+
+### Grammar 模型增量对照
+
+固定输入集只用于回归，不能单独证明模型更新有价值。先对锁定的旧、新 `.gram` 做语义差分，再生成受影响输入，最后人工判断候选变化是否合理。不要只比文件大小、二进制偏移或固定语料的总通过率。
+
+`tests/rime_grammar_delta.cc` 复用当前 Octagram `GramDb::Load` 和 Darts 遍历 API，以流式方式比较全部 key / weight，只输出新增、删除和调权条目，不反编译保存两份完整词表，也不实现新二进制格式。输出的负权重表示不存在；其余值是 `log(frequency) * 10000`，不是概率。`encoded_hex` 保留完整身份；`text` 只展示能按当前编码器无损往返的内容，不能还原时留空。
+
+准备好现有 native runtime 后，在仓库根目录执行（`old_model`、`new_model` 指向待比较文件）：
+
+```bash
+mkdir -p build/model-delta
+clang++ -std=c++17 -O3 -DGLOG_USE_GLOG_EXPORT tests/rime_grammar_delta.cc \
+  -Ibuild/upstreams/git/plugins/octagram/src -isystem librime/dist/include \
+  -isystem build/dependencies/boost lib/rime-plugins/librime-octagram.dylib \
+  lib/librime.1.dylib -o build/model-delta/compare
+DYLD_LIBRARY_PATH="$PWD/lib:$PWD/lib/rime-plugins" build/model-delta/compare \
+  "$old_model" "$new_model" > build/model-delta/changes.tsv \
+  2> build/model-delta/summary.log
+ruby tests/select_grammar_delta_cases.rb build/model-delta/changes.tsv build/model-delta
+```
+
+抽样器按新增／删除／调权方向及词长分层，每层按 key 的 SHA-256 确定性选择至多 64 条，补上权重变化最大的 64 条。读音取自当前 `linnet_zh.dict.yaml` 导入图，记录实际分词、来源、多音歧义及无法生成输入的条目；生成的目标词不是独立质量 oracle。句尾 `$` 是 Octagram 的 rear 规则，不是用户输入字符：抽样报告单列排除数量，需补上有前文的句子复核；其他非汉字／不可还原 key 同样不得记为 PASS。
+
+把 `delta-inputs.txt` 送入现有 `rime_golden_probe`，旧、新模型分别使用独立 shared/user 目录和新进程，其余 runtime、schema、词典及用户初始状态必须一致。比较首选、前五项及目标排名，保留模型 SHA-256、完整差分、生成输入和原始输出。对发现的反例用独立初始用户状态重验。抽样升降数量不代表整体质量提升率；出现明确退步时保留旧模型，不按更新日期自动替换。此对照只在模型变更时执行，不进入每次代码小改的常规矩阵。
 
 ## 验证层级
 
@@ -407,8 +435,10 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | 个人数据或备份 | `tests/verify_swift_units.sh --only personal-data,settings-session,backup-store` |
 | Rime 路径或 session | `tests/verify_swift_units.sh --only rime-path,rime-session-lease` |
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
+| App 内嵌 Rime 与插件 | `tests/verify_packaged_rime.sh APP APP/Contents/Applications/Settings.app`；直接加载产物中的库，不使用开发机的动态库搜索路径 |
 | 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
 | Installer 脚本 | 生成精确候选后，只在专用虚拟机执行真实首次安装、升级、Core、Complete、卸载和重装 |
+| 产物私有路径扫描 | `ruby tests/verify_artifact_privacy.rb`；再用 `scripts/build-privacy scan APP` 检查已有产物，无需重建 |
 | 发布事务脚本 | `tests/verify_action_publication.sh`；仅发布链变更或候选 Action 执行 |
 
 Swift 夹具通过 `LinnetTestScratch.directory` 使用本轮测试专属目录；不要直接使用
