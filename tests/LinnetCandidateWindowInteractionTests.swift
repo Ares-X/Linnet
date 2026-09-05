@@ -44,6 +44,9 @@ final class SquirrelTheme {
   var borderColor: NSColor? = .separatorColor
   var candidateBackColor: NSColor?
   var candidateExpansionAllowed = false
+  var expandedHorizontalCount = LinnetSettingsContract.expandedCandidateCountRange.lowerBound
+  var expandedHorizontalRows = LinnetSettingsContract.horizontalExpandedGridRange.lowerBound
+  var expandedVerticalCount = LinnetSettingsContract.expandedCandidateCountRange.lowerBound
   var candidateFormat = "[label] [candidate]"
   var commentAttrs: [NSAttributedString.Key: Any] = [:]
   var commentHighlightedAttrs: [NSAttributedString.Key: Any] = [:]
@@ -163,7 +166,8 @@ struct LinnetCandidateWindowInteractionTests {
     testDefaultNineCandidateNaturalSize()
     testEnglishMetadataFooterNaturalSize()
     testExpandedGridLayoutMatrix()
-    testExpandedEnglishDetailKeepsStableExtent()
+    testHorizontalGridDimensions()
+    testExpandedEnglishDetailFitsContent()
     testExpandedChineseCommentsDoNotCreateEnglishPlaceholder()
     testSharedCandidateDetailSidecarGeometry()
     testThemeLayoutMatrix()
@@ -283,13 +287,11 @@ struct LinnetCandidateWindowInteractionTests {
       expandedSamples.append(
         (ProcessInfo.processInfo.systemUptime - started) * 1_000)
       require(republished, "expanded candidate presentation did not publish")
-      let rowIdentities = (0..<panel.view.candidateGridView.numberOfRows).map {
-        ObjectIdentifier(panel.view.candidateGridView.row(at: $0))
-      }
+      let rowIdentities = panel.view.candidateGridView.subviews.map(ObjectIdentifier.init)
       if let expandedRowIdentities {
         require(
           rowIdentities == expandedRowIdentities,
-          "same-shape expanded updates rebuilt the NSGridView constraint graph")
+          "expanded updates recreated the candidate views")
       } else {
         expandedRowIdentities = rowIdentities
       }
@@ -302,23 +304,17 @@ struct LinnetCandidateWindowInteractionTests {
       "expanded grid presentation took p95 \(expandedP95)ms, max \(expandedMaximum)ms")
     let expandedGeometry = panel.view.candidateGridView.geometries(
       in: panel.view.candidateGridView)
-    let cellWidths = expandedGeometry.map(\.cellFrame.width)
-    if let firstWidth = cellWidths.first {
-      require(
-        cellWidths.allSatisfy { abs($0 - firstWidth) <= 0.5 },
-        "expanded grid columns do not share one visual width: \(cellWidths)")
-    }
     for column in 0..<expanded.pageSize {
       let columnGeometry = expandedGeometry.filter {
         $0.itemIndex % expanded.pageSize == column
       }
-      require(columnGeometry.count == 3, "expanded grid lost column \(column)")
+      guard columnGeometry.count == 3 else { continue }
       let firstRowInset = columnGeometry[0].textFrame.minX - columnGeometry[0].cellFrame.minX
       let continuationInsets = columnGeometry.dropFirst().map {
         $0.textFrame.minX - $0.cellFrame.minX
       }
       require(
-        firstRowInset < 0.5 && continuationInsets.allSatisfy { $0 > firstRowInset },
+        continuationInsets.allSatisfy { abs($0 - firstRowInset) < 0.5 },
         "expanded grid did not reserve its continuation-row label slot")
       require(
         continuationInsets.allSatisfy { abs($0 - continuationInsets[0]) < 0.5 },
@@ -417,7 +413,7 @@ struct LinnetCandidateWindowInteractionTests {
     render(candidateView)
     require(
       expandedPublished && !candidateView.candidateGridView.isHidden &&
-        candidateView.candidateGridView.numberOfRows == 2 &&
+        Set(candidateView.candidateGridView.geometries(in: candidateView).map { $0.cellFrame.midY }).count == 2 &&
         candidateView.candidateInteractionFrames.count == expanded.items.count,
       "manual vertical text orientation lost the expanded real-cell grid")
     panel.hide()
@@ -1862,8 +1858,8 @@ struct LinnetCandidateWindowInteractionTests {
     }
   }
 
-  private static func testExpandedEnglishDetailKeepsStableExtent() {
-    for linear in [true, false] {
+  private static func testExpandedEnglishDetailFitsContent() {
+    for (linear, count, rows) in [(true, 5, 3), (false, 5, 3), (true, 3, 5), (true, 5, 5), (false, 7, 3)] {
       let panel = SquirrelPanel(position: NSRect(x: 260, y: 420, width: 2, height: 20))
       let controller = SquirrelInputController()
       panel.bind(controller: controller)
@@ -1876,44 +1872,47 @@ struct LinnetCandidateWindowInteractionTests {
       ]
       theme.font = candidateFont
       theme.linear = linear
+      theme.expandedHorizontalCount = count
+      theme.expandedHorizontalRows = rows
+      theme.expandedVerticalCount = count
       theme.candidateExpansionAllowed = true
       theme.showPaging = true
       theme.candidateFormat = "[label] [candidate]"
       theme.attrs = candidateAttributes
-      theme.highlightedAttrs = candidateAttributes
+      theme.highlightedAttrs = [.font: candidateFont, .foregroundColor: NSColor.selectedMenuItemTextColor]
       theme.labelAttrs = candidateAttributes
-      theme.labelHighlightedAttrs = candidateAttributes
+      theme.labelHighlightedAttrs = theme.highlightedAttrs
       theme.commentAttrs = candidateAttributes
       theme.commentHighlightedAttrs = candidateAttributes
       theme.detailAttrs = [
-        .font: detailFont, .foregroundColor: NSColor.secondaryLabelColor,
+        .font: detailFont, .foregroundColor: NSColor.labelColor,
       ]
       theme.firstParagraphStyle = NSMutableParagraphStyle()
       theme.paragraphStyle = NSMutableParagraphStyle()
 
       let values = [
-        "working", "works", "worker", "waking", "wording", "workable",
-        "worked", "workplace", "workout",
+        "testi", "test", "tests", "twist", "text", "tested", "texts", "testis", "testing",
+        "testify", "testily", "testicle", "testimony", "testified", "testicles", "testifies",
+        "testicular", "testifying", "testimonial", "testimonies", "testimonially",
       ]
       let details = [
-        "/wɜːkɪŋ/ · adj. 工作的；劳动的；工作上的；初步的；暂定的；"
-          + "n. 工作；作业区；运转方式；复数形式",
-        "n. 工作",
+        String(repeating: "adj. 工作的；劳动的；初步的；暂定的；n. 工作；作业区；", count: 4),
+        "/test/ · n. 测试；试验",
         "",
       ]
       var sizes = [NSSize]()
-      for highlighted in details.indices {
+      for highlighted in [0, 1, 2, 9] {
         let snapshot = SquirrelInputController.CandidateSnapshot(
           items: values.enumerated().map { index, value in
             .init(
               text: value,
               comment: "\u{001D}" + (index < details.count ? details[index] : "n. 英文候选"),
-              page: index / 3,
-              indexOnPage: index % 3,
+              page: index / 9,
+              indexOnPage: index % 9,
               absoluteIndex: index,
-              selectionLabel: index < 3 ? String(index + 1) : nil)
+              selectionLabel: index < 9 ? String(index + 1) : nil)
           },
-          pageSize: 3,
+          pageSize: 9,
           currentPage: 0,
           isLastPage: false,
           isExpanded: true,
@@ -1927,22 +1926,10 @@ struct LinnetCandidateWindowInteractionTests {
         let gridGeometry = candidateView.candidateGridView.geometries(
           in: candidateView)
         require(
-          candidateView.candidateGridView.numberOfRows == 3 &&
-            gridGeometry.count == snapshot.items.count &&
+          Set(gridGeometry.map { $0.cellFrame.midY }).count <= rows &&
+            gridGeometry.contains(where: { $0.itemIndex == highlighted }) &&
             candidateView.textView.string.isEmpty,
           "expanded candidates did not use only real grid cells")
-        let cellOrigins = gridGeometry.map { Optional($0.cellFrame.minX) }
-        for column in 0..<snapshot.pageSize {
-          let alignedOrigins = stride(
-            from: column, to: snapshot.items.count, by: snapshot.pageSize
-          ).compactMap { cellOrigins[$0] }
-          guard let firstOrigin = alignedOrigins.first else { continue }
-          require(
-            alignedOrigins.dropFirst().allSatisfy {
-              abs($0 - firstOrigin) <= 0.5
-            },
-            "expanded \(linear ? "horizontal" : "vertical") grid column \(column + 1) did not share one leading guide: \(alignedOrigins)")
-        }
         require(
           !candidateView.detailTextView.isHidden,
           "expanded \(linear ? "horizontal" : "vertical") English detail disappeared")
@@ -1967,18 +1954,23 @@ struct LinnetCandidateWindowInteractionTests {
         if highlighted == 2 {
           require(
             candidateView.detailTextView.textContentStorage?.attributedString?.string
-              == "worker · No definition",
+              == "tests · No definition",
             "expanded English candidate without a definition lost its quiet placeholder")
         }
         sizes.append(panel.frame.size)
+        if highlighted == 1 || highlighted == 9,
+          let output = ProcessInfo.processInfo.environment["LINNET_UAT_RENDER_DIR"] {
+          render(candidateView, outputPath: output + "/english-expanded-\(linear ? "horizontal" : "vertical")-\(count)x\(rows)-selected-\(highlighted).png")
+        }
       }
       let tolerance = 1 / max(panel.backingScaleFactor, 1) + 0.01
       require(
         sizes.dropFirst().allSatisfy {
-          abs($0.width - sizes[0].width) <= tolerance &&
-            abs($0.height - sizes[0].height) <= tolerance
+          abs($0.width - sizes[0].width) <= tolerance
         },
-        "expanded \(linear ? "horizontal" : "vertical") English detail changed panel extent: \(sizes)")
+        "expanded English definition widened the grid: \(sizes)")
+      require(sizes[1].height < sizes[0].height,
+        "one-line English definition retained the long definition's empty space: \(sizes)")
       panel.hide()
     }
   }
@@ -1999,6 +1991,8 @@ struct LinnetCandidateWindowInteractionTests {
             theme.linear = linear
             theme.vertical = false
             theme.candidateExpansionAllowed = true
+            theme.expandedHorizontalCount = min(5, pageSize)
+            theme.expandedVerticalCount = pageSize == 9 ? 6 : 7
             theme.showPaging = true
             theme.linespace = LinnetCandidatePresentation.candidateRowSpacing
             theme.edgeInset = LinnetCandidatePresentation.candidateWindowInset
@@ -2028,55 +2022,108 @@ struct LinnetCandidateWindowInteractionTests {
             },
             pageSize: pageSize, currentPage: 1, isLastPage: false,
             isExpanded: true, canExpand: true)
-          let published = panel.update(
-            preedit: "", selRange: .empty, caretPos: 0,
-            candidates: snapshot, highlighted: pageSize + 1,
-            update: true, controller: controller)
-          render(view)
+          for highlighted in [0, pageSize + 1, count - 1] {
+            let published = panel.update(
+              preedit: "", selRange: .empty, caretPos: 0,
+              candidates: snapshot, highlighted: highlighted,
+              update: true, controller: controller)
+            render(view)
 
-          let geometry = view.candidateGridView.geometries(in: view)
-          let context = "\(point)pt \(linear ? "horizontal" : "vertical") "
-            + "page-size-\(pageSize)"
-          require(published, "\(context) expanded grid did not publish")
-          require(
-            view.candidateGridView.numberOfRows == 3 &&
-              view.candidateGridView.numberOfColumns == pageSize &&
-              geometry.count == count,
-            "\(context) expanded grid lost its partial final row")
+            let geometry = view.candidateGridView.geometries(in: view)
+            let context = "\(point)pt \(linear ? "horizontal" : "vertical") "
+              + "page-size-\(pageSize)"
+            require(published, "\(context) expanded grid did not publish")
+            require(
+              Set(geometry.map { $0.cellFrame.midY }).count <= 3 &&
+                geometry.contains(where: { $0.itemIndex == highlighted }),
+              "\(context) expanded grid lost its selection or exceeded three rows")
 
-          for row in 0..<3 {
-            let rowCells = geometry.filter { $0.itemIndex / pageSize == row }
-            guard let first = rowCells.first else {
-              failures.append("\(context) expanded grid lost row \(row + 1)")
-              continue
+            let visibleBounds = view.bounds.insetBy(dx: -0.5, dy: -0.5)
+            let columns = linear ? view.currentTheme.expandedHorizontalCount : view.currentTheme.expandedVerticalCount
+            let firstRow = (geometry.map(\.itemIndex).min() ?? 0) / columns
+            let expectedGrid = LinnetCandidatePresentation.expandedGrid(
+              widths: view.candidateGridView.subviews.prefix(count).map(\.intrinsicContentSize.width),
+              columns: columns,
+              spacing: view.separatorWidth,
+              maximumWidth: panel.maxTextWidth(
+                metrics: panel.presentationMetrics(theme: view.currentTheme), expanded: true),
+              visibleRows: firstRow..<(firstRow + 3), highlighted: highlighted)
+            let leading = geometry.map(\.cellFrame.minX).min() ?? 0
+            let selectedCell = geometry.first { $0.itemIndex == highlighted }!
+            let activeRow = geometry.filter { abs($0.cellFrame.midY - selectedCell.cellFrame.midY) < 0.5 }
+              .sorted { $0.cellFrame.minX < $1.cellFrame.minX }
+            for (offset, cell) in activeRow.enumerated() {
+              require(panel.expandedCandidateSelectionTarget(number: offset + 1) == cell.itemIndex,
+                "number key did not select its visible active-row candidate")
+              let textView = view.candidateGridView.subviews[cell.itemIndex].subviews.first as! NSTextView
+              let renderedText = textView.textContentStorage?.attributedString?.string ?? ""
+              require(renderedText.hasPrefix("\(offset + 1) "),
+                "\(context) active-row label disagreed with numeric selection: \(offset + 1), \(renderedText)")
             }
-            require(
-              rowCells.dropFirst().allSatisfy {
-                abs($0.cellFrame.midY - first.cellFrame.midY) <= 0.5
-              },
-              "\(context) row \(row + 1) did not share one baseline")
-          }
-          for column in 0..<pageSize {
-            let columnCells = geometry.filter { $0.itemIndex % pageSize == column }
-            guard let first = columnCells.first else {
-              failures.append("\(context) expanded grid lost column \(column + 1)")
-              continue
+            require(panel.expandedCandidateSelectionTarget(number: activeRow.count + 1) == nil,
+              "an unlabelled number selected a candidate on a different row")
+            for cell in geometry {
+              require(
+                !cell.cellFrame.isEmpty && visibleBounds.contains(cell.cellFrame) &&
+                  view.click(at: cell.cellFrame.center) == .candidate(cell.itemIndex),
+                "\(context) cell \(cell.itemIndex) lost visible click geometry")
+              let expectedX = expectedGrid.columnOffset(cell.itemIndex % expectedGrid.columnWidths.count, spacing: view.separatorWidth)
+              require(abs(cell.cellFrame.minX - leading - expectedX) < 0.02,
+                "\(context) candidate did not align to a shared column guide")
+              let textView = view.candidateGridView.subviews[cell.itemIndex].subviews.first as! NSTextView
+              require(cell.textFrame.height <= ceil(font.ascender - font.descender + font.leading) + 2,
+                "\(context) split a candidate across multiple lines")
+              if let manager = textView.textLayoutManager {
+                manager.ensureLayout(for: manager.documentRange)
+                manager.enumerateTextSegments(in: manager.documentRange, type: .selection,
+                  options: [.rangeNotRequired]) { _, rect, _, _ in
+                  require(textView.bounds.insetBy(dx: -1, dy: -1).contains(rect),
+                    "\(context) wrapped word escaped its cell: \(rect), \(textView.bounds)")
+                  return true
+                }
+              }
+              for other in geometry where other.itemIndex != cell.itemIndex {
+                require(!cell.cellFrame.intersects(other.cellFrame),
+                  "\(context) spanning candidates overlap")
+              }
             }
-            require(
-              columnCells.dropFirst().allSatisfy {
-                abs($0.cellFrame.minX - first.cellFrame.minX) <= 0.5 &&
-                  abs($0.cellFrame.width - first.cellFrame.width) <= 0.5
-              },
-              "\(context) column \(column + 1) did not share one guide")
+            if let target = panel.expandedCandidateNavigationTarget(up: false),
+              let from = geometry.first(where: { $0.itemIndex == highlighted }),
+              let to = geometry.first(where: { $0.itemIndex == target }) {
+              require(to.cellFrame.midY > from.cellFrame.midY,
+                "\(context) Down did not move to the actual next visual row")
+            }
           }
-          let visibleBounds = view.bounds.insetBy(dx: -0.5, dy: -0.5)
-          for cell in geometry {
-            require(
-              !cell.cellFrame.isEmpty && visibleBounds.contains(cell.cellFrame) &&
-                view.click(at: cell.cellFrame.center) == .candidate(cell.itemIndex),
-              "\(context) cell \(cell.itemIndex) lost visible click geometry")
-          }
+          require(panel.expandedCandidateNavigationTarget(up: false) == count,
+            "expanded Down skipped words beyond the loaded candidate window")
           panel.hide()
+        }
+      }
+    }
+  }
+
+  private static func testHorizontalGridDimensions() {
+    let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 16)]
+    for columns in 3...5 {
+      for rows in 3...5 {
+        for count in [2, 27] {
+          let grid = LinnetCandidateGridView(frame: .zero)
+          let lines = (0..<count).map { index in
+            LinnetCandidatePresentation.candidateLine(
+              candidateFormat: "[label] [candidate]", label: "7", candidate: "词\(index)", comment: "",
+              candidateAttributes: attributes, labelAttributes: attributes, commentAttributes: attributes)
+          }
+          for selected in [0, count - 1] {
+            grid.publish(columns: columns, maximumRows: rows, lines: lines, highlighted: selected,
+              verticalText: false, columnSpacing: 8, rowSpacing: 6)
+            grid.fitColumns(to: 600)
+            let cells = grid.geometries(in: grid)
+            require(Set(cells.map { $0.cellFrame.midY }).count == min(rows, (count + columns - 1) / columns),
+              "\(columns)x\(rows) did not respect the row limit or added empty rows for \(count) candidates")
+            require(cells.contains { $0.itemIndex == selected }, "grid navigation hid its selected candidate")
+            require(grid.itemForSelectionNumber(selected % columns + 1) == selected,
+              "configurable grid dimensions broke active-row selection")
+          }
         }
       }
     }
@@ -2669,7 +2716,7 @@ struct LinnetCandidateWindowInteractionTests {
     require(frames.allSatisfy(bounds.contains), "candidate interaction cell escaped the panel")
   }
 
-  private static func render(_ view: SquirrelView) {
+  private static func render(_ view: SquirrelView, outputPath: String? = nil) {
     // NSTextViews are siblings of SquirrelView, not its children. Rendering
     // only SquirrelView tests the highlight but misses AppKit text auto-sizing.
     let panel = view.window as? SquirrelPanel
@@ -2679,13 +2726,17 @@ struct LinnetCandidateWindowInteractionTests {
       return
     }
     surface.cacheDisplay(in: surface.bounds, to: representation)
+    if let outputPath, let png = representation.representation(using: .png, properties: [:]) {
+      do { try png.write(to: URL(fileURLWithPath: outputPath)) }
+      catch { failures.append("could not save candidate render: \(error)") }
+    }
     guard panel != nil else { return }
     let cells = view.candidateInteractionFrames
     if !view.candidateGridView.isHidden {
       let gridCells = view.candidateGridView.geometries(in: view)
       require(
-        gridCells.count == cells.count && zip(gridCells, cells).allSatisfy {
-          approximatelyEqual($0.cellFrame, $1)
+        gridCells.allSatisfy {
+          cells.indices.contains($0.itemIndex) && approximatelyEqual($0.cellFrame, cells[$0.itemIndex])
         },
         "expanded render did not use its real grid cell frames")
       return

@@ -793,7 +793,10 @@ class SmartEnglishTranslator : public Translator {
     for (const auto& word : index_.LookupCorrections(normalized)) {
       if (word.text == normalized) continue;
       auto candidate = New<SimpleCandidate>(kCorrectionCandidateType, segment.start, segment.end, word.text);
-      candidate->set_quality(word.weight);
+      // TableTranslation expresses a complete word's lexical weight as
+      // exp(log(frequency / 1e8)). Use that same scale when merging corrections;
+      // raw corpus counts otherwise overwhelm every ordinary completion.
+      candidate->set_quality(word.weight / 1e8);
       result->Append(candidate);
     }
     for (const auto& word : PinyinWords(normalized)) {

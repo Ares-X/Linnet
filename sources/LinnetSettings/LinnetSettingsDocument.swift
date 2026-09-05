@@ -160,6 +160,9 @@ extension LinnetSettingsDocument {
     var englishCandidateLayout: CandidateLayout
     var candidateBrowsingMode: CandidateBrowsingMode
     var pageSize: Int
+    var expandedHorizontalCount: Int
+    var expandedHorizontalRows: Int
+    var expandedVerticalCount: Int
 
     static let `default` = Appearance(
       fontPoint: defaultFontPoint,
@@ -180,7 +183,10 @@ extension LinnetSettingsDocument {
       pageSize: Int,
       candidateBrowsingMode: CandidateBrowsingMode = .expandable,
       themeFamily: ThemeFamily = ThemeFamily.defaultValue,
-      fontPreset: FontPreset = .system
+      fontPreset: FontPreset = .system,
+      expandedHorizontalCount: Int = LinnetSettingsContract.horizontalExpandedGridRange.upperBound,
+      expandedHorizontalRows: Int = LinnetSettingsContract.horizontalExpandedGridRange.lowerBound,
+      expandedVerticalCount: Int = LinnetSettingsContract.expandedCandidateCountRange.lowerBound
     ) {
       self.fontPoint = fontPoint
       self.themeFamily = themeFamily
@@ -190,6 +196,9 @@ extension LinnetSettingsDocument {
       self.englishCandidateLayout = englishCandidateLayout
       self.candidateBrowsingMode = candidateBrowsingMode
       self.pageSize = pageSize
+      self.expandedHorizontalCount = expandedHorizontalCount
+      self.expandedHorizontalRows = expandedHorizontalRows
+      self.expandedVerticalCount = expandedVerticalCount
     }
 
     init(from decoder: Decoder) throws {
@@ -265,6 +274,25 @@ extension LinnetSettingsDocument {
       let decodedPageSize =
         try container.decodeIfPresent(Int.self, forKey: .pageSize) ?? Self.defaultPageSize
       pageSize = Self.pageSizeOptions.contains(decodedPageSize) ? decodedPageSize : Self.defaultPageSize
+      expandedHorizontalCount = Self.clampHorizontalGrid(
+        try container.decodeIfPresent(Int.self, forKey: .expandedHorizontalCount)
+          ?? LinnetSettingsContract.horizontalExpandedGridRange.upperBound)
+      expandedHorizontalRows = Self.clampHorizontalGrid(
+        try container.decodeIfPresent(Int.self, forKey: .expandedHorizontalRows)
+          ?? LinnetSettingsContract.horizontalExpandedGridRange.lowerBound)
+      expandedVerticalCount = Self.clampExpandedCount(
+        try container.decodeIfPresent(Int.self, forKey: .expandedVerticalCount)
+          ?? LinnetSettingsContract.expandedCandidateCountRange.lowerBound)
+    }
+
+    static func clampExpandedCount(_ value: Int) -> Int {
+      let range = LinnetSettingsContract.expandedCandidateCountRange
+      return min(range.upperBound, max(range.lowerBound, value))
+    }
+
+    static func clampHorizontalGrid(_ value: Int) -> Int {
+      let range = LinnetSettingsContract.horizontalExpandedGridRange
+      return min(range.upperBound, max(range.lowerBound, value))
     }
 
     static func clampFontPoint(_ value: Double) -> Double {
@@ -464,6 +492,9 @@ extension LinnetSettingsDocument {
     var result = self
     result.schemaVersion = Self.currentSchemaVersion
     result.appearance.fontPoint = Self.Appearance.clampFontPoint(appearance.fontPoint)
+    result.appearance.expandedHorizontalCount = Self.Appearance.clampHorizontalGrid(appearance.expandedHorizontalCount)
+    result.appearance.expandedHorizontalRows = Self.Appearance.clampHorizontalGrid(appearance.expandedHorizontalRows)
+    result.appearance.expandedVerticalCount = Self.Appearance.clampExpandedCount(appearance.expandedVerticalCount)
     if !Self.Appearance.pageSizeOptions.contains(result.appearance.pageSize) {
       result.appearance.pageSize = Self.Appearance.defaultPageSize
     }

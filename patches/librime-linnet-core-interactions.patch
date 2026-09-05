@@ -45,10 +45,10 @@ index d526130..55605cf 100644
    string GetScriptText() const;
    Preedit GetPreedit() const;
 diff --git a/src/rime/dict/dictionary.cc b/src/rime/dict/dictionary.cc
-index 58f21a3..fd16651 100644
+index 58f21a3..76e9e91 100644
 --- a/src/rime/dict/dictionary.cc
 +++ b/src/rime/dict/dictionary.cc
-@@ -66,6 +66,24 @@ struct Chunk {
+@@ -66,18 +66,42 @@ struct Chunk {
    bool is_predictive_match() const { return matching_code_size < code.size(); }
  };
  
@@ -72,8 +72,74 @@ index 58f21a3..fd16651 100644
 +
  struct QueryResult {
    vector<Chunk> chunks;
++  bool completion_by_weight = false;
  };
-@@ -154,26 +172,26 @@ an<DictEntry> DictEntryIterator::Peek() {
+ 
+-bool compare_chunk_by_head_element(const Chunk& a, const Chunk& b) {
++bool compare_chunk_by_head_element(const Chunk& a, const Chunk& b,
++                                   bool completion_by_weight) {
+   if (!a.entries || a.cursor >= a.size)
+     return false;
+   if (!b.entries || b.cursor >= b.size)
+     return true;
+   if (a.is_exact_match() != b.is_exact_match())
+     return a.is_exact_match() > b.is_exact_match();
+-  if (a.remaining_code.length() != b.remaining_code.length())
++  // Exact words retain priority; completion length is not word frequency.
++  if (a.remaining_code.empty() != b.remaining_code.empty())
++    return a.remaining_code.empty();
++  if (!completion_by_weight &&
++      a.remaining_code.length() != b.remaining_code.length())
+     return a.remaining_code.length() < b.remaining_code.length();
+   return a.credibility + a.entries[a.cursor].weight >
+          b.credibility + b.entries[b.cursor].weight;  // by weight desc
+@@ -134,10 +158,44 @@ void DictEntryIterator::AddChunk(dictionary::Chunk&& chunk) {
+ 
+ void DictEntryIterator::Sort() {
+   auto& chunks = query_result_->chunks;
++  if (query_result_->completion_by_weight) {
++    // The suffix is already sorted. Only the consumed chunk's new head can
++    // move; reinsertion avoids rescanning every completion for every candidate.
++    auto first = chunks.begin() + chunk_index_;
++    auto position = std::upper_bound(
++        first + 1, chunks.end(), *first, [](const auto& a, const auto& b) {
++          return dictionary::compare_chunk_by_head_element(a, b, true);
++        });
++    std::rotate(first, first + 1, position);
++    return;
++  }
+   // partial-sort remaining chunks, move best match to chunk_index_
+   std::partial_sort(chunks.begin() + chunk_index_,
+                     chunks.begin() + chunk_index_ + 1, chunks.end(),
+-                    dictionary::compare_chunk_by_head_element);
++                    [this](const auto& a, const auto& b) {
++                      return dictionary::compare_chunk_by_head_element(
++                          a, b, query_result_->completion_by_weight);
++                    });
++}
++
++void DictEntryIterator::SortByWeight(size_t input_length) {
++  query_result_->completion_by_weight = true;
++  entry_.reset();
++  auto& chunks = query_result_->chunks;
++  for (auto& chunk : chunks) {
++    // A shortened derived spelling (LIB -> libc) is still a completion, even
++    // when the Prism key itself matches the complete input. Preserve the
++    // original syllable identity used by TableTranslation and user learning.
++    if (chunk.remaining_code.empty() && chunk.code.size() == 1) {
++      const auto spelling = chunk.table->GetSyllableById(chunk.code.front());
++      if (spelling.size() > input_length)
++        chunk.remaining_code = spelling.substr(input_length);
++    }
++  }
++  std::sort(chunks.begin() + chunk_index_, chunks.end(),
++            [](const auto& a, const auto& b) {
++              return dictionary::compare_chunk_by_head_element(a, b, true);
++            });
+ }
+ 
+ void DictEntryIterator::AddFilter(DictEntryFilter filter) {
+@@ -154,26 +212,26 @@ an<DictEntry> DictEntryIterator::Peek() {
    if (!entry_ && !exhausted()) {
      // get next entry from current chunk
      const auto& chunk = query_result_->chunks[chunk_index_];
@@ -115,18 +181,52 @@ index 58f21a3..fd16651 100644
  bool DictEntryIterator::FindNextEntry() {
    if (exhausted()) {
      return false;
+@@ -300,7 +358,8 @@ size_t Dictionary::LookupWords(DictEntryIterator* result,
+                                const string& str_code,
+                                bool predictive,
+                                size_t expand_search_limit,
+-                               const hash_set<string>* blacklist) {
++                               const hash_set<string>* blacklist,
++                               size_t expand_search_start) {
+   DLOG(INFO) << "lookup: " << str_code;
+   if (!loaded())
+     return 0;
+@@ -315,7 +374,9 @@ size_t Dictionary::LookupWords(DictEntryIterator* result,
+   }
+   DLOG(INFO) << "found " << keys.size() << " matching keys thru the prism.";
+   size_t code_length(str_code.length());
+-  for (auto& match : keys) {
++  for (size_t key_index = expand_search_start; key_index < keys.size();
++       ++key_index) {
++    const auto& match = keys[key_index];
+     SpellingAccessor accessor(prism_->QuerySpelling(match.value));
+     while (!accessor.exhausted()) {
+       SyllableId syllable_id = accessor.syllable_id();
 diff --git a/src/rime/dict/dictionary.h b/src/rime/dict/dictionary.h
-index f1127e5..61d7876 100644
+index f1127e5..b0ee8a5 100644
 --- a/src/rime/dict/dictionary.h
 +++ b/src/rime/dict/dictionary.h
-@@ -36,6 +36,7 @@ class RIME_DLL DictEntryIterator : public DictEntryFilterBinder {
+@@ -34,8 +34,10 @@ class RIME_DLL DictEntryIterator : public DictEntryFilterBinder {
+ 
+   void AddChunk(dictionary::Chunk&& chunk);
    void Sort();
++  void SortByWeight(size_t input_length);
    void AddFilter(DictEntryFilter filter) override;
    an<DictEntry> Peek();
 +  an<DictEntry> FindRemainingEntry(const string& text) const;
    bool Next();
    bool Skip(size_t num_entries);
    bool exhausted() const;
+@@ -84,7 +86,8 @@ class Dictionary : public Class<Dictionary, const Ticket&> {
+                               const string& str_code,
+                               bool predictive,
+                               size_t limit = 0,
+-                              const hash_set<string>* blacklist = nullptr);
++                              const hash_set<string>* blacklist = nullptr,
++                              size_t expand_search_start = 0);
+   // translate syllable id sequence to string code
+   RIME_DLL bool Decode(const Code& code, vector<string>* result);
+ 
 diff --git a/src/rime/gear/ascii_composer.cc b/src/rime/gear/ascii_composer.cc
 index e49dc38..aa04631 100644
 --- a/src/rime/gear/ascii_composer.cc
@@ -2329,3 +2429,323 @@ index 9a2eb3d..385d080 100644
  template <>
  RIME_DLL string UserDbComponent<LevelDb>::extension() const {
    return ".userdb";
+diff --git a/src/rime/gear/table_translator.cc b/src/rime/gear/table_translator.cc
+index 67bc229..e8e6c0f 100644
+--- a/src/rime/gear/table_translator.cc
++++ b/src/rime/gear/table_translator.cc
+@@ -117,6 +117,7 @@ bool TableTranslation::PreferUserPhrase() {
+ class LazyTableTranslation : public TableTranslation {
+  public:
+   static const size_t kInitialSearchLimit = 10;
++  static const size_t kInitialWeightedSearchLimit = 1000;
+   static const size_t kExpandingFactor = 10;
+ 
+   LazyTableTranslation(TableTranslator* translator,
+@@ -133,6 +134,8 @@ class LazyTableTranslation : public TableTranslation {
+   Dictionary* dict_;
+   const hash_set<string>* blacklist_;
+   UserDictionary* user_dict_;
++  const bool completion_by_weight_;
++  size_t search_start_ = 0;
+   size_t limit_;
+   size_t user_dict_limit_;
+   string user_dict_key_;
+@@ -153,7 +156,10 @@ LazyTableTranslation::LazyTableTranslation(TableTranslator* translator,
+       dict_(translator->dict()),
+       blacklist_(&translator->blacklist()),
+       user_dict_(enable_user_dict ? translator->user_dict() : NULL),
+-      limit_(kInitialSearchLimit),
++      completion_by_weight_(translator->completion_by_weight() &&
++                            input.size() >= 2),
++      limit_(completion_by_weight_ ? kInitialWeightedSearchLimit
++                                   : kInitialSearchLimit),
+       user_dict_limit_(kInitialSearchLimit) {
+   FetchUserPhrases(translator) || FetchMoreUserPhrases();
+   FetchMoreTableEntries();
+@@ -189,6 +195,20 @@ bool LazyTableTranslation::FetchMoreUserPhrases() {
+ bool LazyTableTranslation::FetchMoreTableEntries() {
+   if (!dict_ || limit_ == 0)
+     return false;
++  if (completion_by_weight_) {
++    // Bound typing work; later pages retain every remaining Prism key.
++    // ExpandSearch has a stable breadth-first prefix. Skip keys, not ranked
++    // entries: sorting a larger batch and skipping its first entries would
++    // silently lose newly recalled high-frequency words.
++    DictEntryIterator more;
++    const size_t found = dict_->LookupWords(
++        &more, input_, true, limit_, blacklist_, search_start_);
++    search_start_ = found;
++    limit_ = found < limit_ ? 0 : limit_ * kExpandingFactor;
++    more.SortByWeight(input_.size());
++    iter_ = std::move(more);
++    return true;
++  }
+   size_t previous_entry_count = iter_.entry_count();
+   DLOG(INFO) << "fetching more table entries: limit = " << limit_
+              << ", count = " << previous_entry_count;
+@@ -213,6 +233,8 @@ TableTranslator::TableTranslator(const Ticket& ticket)
+   if (!engine_)
+     return;
+   if (Config* config = engine_->schema()->config()) {
++    config->GetBool(name_space_ + "/completion_by_weight",
++                    &completion_by_weight_);
+     config->GetBool(name_space_ + "/enable_charset_filter",
+                     &enable_charset_filter_);
+     config->GetBool(name_space_ + "/enable_sentence", &enable_sentence_);
+diff --git a/src/rime/gear/table_translator.h b/src/rime/gear/table_translator.h
+index 7057ed4..c00d10e 100644
+--- a/src/rime/gear/table_translator.h
++++ b/src/rime/gear/table_translator.h
+@@ -36,8 +36,10 @@ class TableTranslator : public Translator,
+                                bool include_prefix_phrases = false);
+   string GetPrecedingText(size_t start) const;
+   UnityTableEncoder* encoder() const { return encoder_.get(); }
++  bool completion_by_weight() const { return completion_by_weight_; }
+ 
+  protected:
++  bool completion_by_weight_ = false;
+   bool enable_charset_filter_ = false;
+   bool enable_encoder_ = false;
+   bool enable_sentence_ = true;
+diff --git a/src/rime/algo/syllabifier.cc b/src/rime/algo/syllabifier.cc
+index b7ed6b79..11d0efc5 100644
+--- a/src/rime/algo/syllabifier.cc
++++ b/src/rime/algo/syllabifier.cc
+@@ -7,6 +7,7 @@
+ //
+ #include <algorithm>
+ #include <queue>
++#include <string_view>
+ #include <boost/range/adaptor/reversed.hpp>
+ #include <rime/algo/syllabifier.h>
+ #include <rime/dict/corrector.h>
+@@ -65,14 +66,16 @@ int Syllabifier::BuildSyllableGraph(const string& input,
+     // see where we can go by advancing a syllable
+     vector<Prism::Match> matches;
+     set<SyllableId> exact_match_syllables;
+-    auto current_input = input.substr(begin_pos);
++    std::string_view current_input(input.data() + begin_pos,
++                                   input.length() - begin_pos);
+     prism.CommonPrefixSearch(current_input, &matches);
+     if (corrector_) {
+       for (auto& m : matches) {
+         exact_match_syllables.insert(m.value);
+       }
+       Corrections corrections;
+-      corrector_->ToleranceSearch(prism, current_input, &corrections, 5);
++      corrector_->ToleranceSearch(prism, string{current_input}, &corrections,
++                                  5);
+       for (const auto& m : corrections) {
+         for (auto accessor = prism.QuerySpelling(m.first);
+              !accessor.exhausted(); accessor.Next()) {
+@@ -304,4 +307,4 @@ void Syllabifier::EnableCorrection(Corrector* corrector) {
+   corrector_ = corrector;
+ }
+ 
+-}  // namespace rime
++}  // namespace rime
+\ No newline at end of file
+diff --git a/src/rime/dict/prism.cc b/src/rime/dict/prism.cc
+index 6ea7d264..17d2e588 100644
+--- a/src/rime/dict/prism.cc
++++ b/src/rime/dict/prism.cc
+@@ -16,8 +16,11 @@ namespace rime {
+ namespace {
+ 
+ struct node_t {
+-  string key;
++  node_t(size_t node_pos, size_t key_length)
++      : node_pos(node_pos), key_length(key_length) {}
++
+   size_t node_pos;
++  size_t key_length;
+ };
+ 
+ // 在 SpellingDescriptor::type 的高位記錄 is_correction, 避開符號位
+@@ -269,17 +272,16 @@ bool Prism::GetValue(const string& key, int* value) const {
+ 
+ // Given a key, search all the keys in the tree that share
+ // a common prefix with that key.
+-void Prism::CommonPrefixSearch(const string& key, vector<Match>* result) {
++void Prism::CommonPrefixSearch(std::string_view key, vector<Match>* result) {
+   if (!result || key.empty())
+     return;
+-  size_t len = key.length();
+-  result->resize(len);
+-  size_t num_results =
+-      trie_->commonPrefixSearch(key.c_str(), &result->front(), len, len);
++  result->resize(key.length());
++  size_t num_results = trie_->commonPrefixSearch(key.data(), &result->front(),
++                                                 key.length(), key.length());
+   result->resize(num_results);
+ }
+ 
+-void Prism::ExpandSearch(const string& key,
++void Prism::ExpandSearch(std::string_view key,
+                          vector<Match>* result,
+                          size_t limit) {
+   if (!result)
+@@ -288,7 +290,8 @@ void Prism::ExpandSearch(const string& key,
+   size_t count = 0;
+   size_t node_pos = 0;
+   size_t key_pos = 0;
+-  int ret = trie_->traverse(key.c_str(), node_pos, key_pos);
++  const char* search_key = key.empty() ? "" : key.data();
++  int ret = trie_->traverse(search_key, node_pos, key_pos, key.length());
+   // key is not a valid path
+   if (ret == -2)
+     return;
+@@ -297,25 +300,23 @@ void Prism::ExpandSearch(const string& key,
+     if (limit && ++count >= limit)
+       return;
+   }
++  const char* alphabet =
++      (format_ > 1.0 - DBL_EPSILON) ? metadata_->alphabet : kDefaultAlphabet;
+   std::queue<node_t> q;
+-  q.push({key, node_pos});
++  q.emplace(node_pos, key_pos);
+   while (!q.empty()) {
+-    node_t node = q.front();
++    const node_t node = q.front();
+     q.pop();
+-    const char* c =
+-        (format_ > 1.0 - DBL_EPSILON) ? metadata_->alphabet : kDefaultAlphabet;
+-    for (; *c; ++c) {
+-      string k = node.key + *c;
+-      size_t k_pos = node.key.length();
+-      size_t n_pos = node.node_pos;
+-      ret = trie_->traverse(k.c_str(), n_pos, k_pos);
+-      if (ret <= -2) {
+-        // ignore
+-      } else if (ret == -1) {
+-        q.push({k, n_pos});
+-      } else {
+-        q.push({k, n_pos});
+-        result->push_back(Match{ret, k_pos});
++    for (const char* c = alphabet; *c; ++c) {
++      size_t next_node_pos = node.node_pos;
++      size_t next_key_pos = 0;
++      ret = trie_->traverse(c, next_node_pos, next_key_pos, 1);
++      if (ret <= -2)
++        continue;
++      const size_t matched_length = node.key_length + next_key_pos;
++      q.emplace(next_node_pos, matched_length);
++      if (ret >= 0) {
++        result->push_back(Match{ret, matched_length});
+         if (limit && ++count >= limit)
+           return;
+       }
+diff --git a/src/rime/dict/prism.h b/src/rime/dict/prism.h
+index 84e064a0..b0fbfb29 100644
+--- a/src/rime/dict/prism.h
++++ b/src/rime/dict/prism.h
+@@ -9,6 +9,7 @@
+ #ifndef RIME_PRISM_H_
+ #define RIME_PRISM_H_
+ 
++#include <string_view>
+ #include <darts.h>
+ #include <rime/common.h>
+ #include <rime/algo/spelling.h>
+@@ -79,8 +80,8 @@ class Prism : public MappedFile {
+ 
+   RIME_DLL bool HasKey(const string& key);
+   RIME_DLL bool GetValue(const string& key, int* value) const;
+-  RIME_DLL void CommonPrefixSearch(const string& key, vector<Match>* result);
+-  RIME_DLL void ExpandSearch(const string& key,
++  RIME_DLL void CommonPrefixSearch(std::string_view key, vector<Match>* result);
++  RIME_DLL void ExpandSearch(std::string_view key,
+                              vector<Match>* result,
+                              size_t limit);
+   SpellingAccessor QuerySpelling(SyllableId spelling_id);
+@@ -100,4 +101,4 @@ class Prism : public MappedFile {
+ 
+ }  // namespace rime
+ 
+-#endif  // RIME_PRISM_H_
++#endif  // RIME_PRISM_H_
+\ No newline at end of file
+diff --git a/test/prism_test.cc b/test/prism_test.cc
+index 9803a30f..04bccd39 100644
+--- a/test/prism_test.cc
++++ b/test/prism_test.cc
+@@ -5,6 +5,7 @@
+ // 2011-05-17 Zou xu <zouivex@gmail.com>
+ //
+ #include <algorithm>
++#include <string_view>
+ #include <gtest/gtest.h>
+ #include <rime/dict/prism.h>
+ 
+@@ -17,7 +18,6 @@ class RimePrismTest : public ::testing::Test {
+   virtual void SetUp() {
+     prism_.reset(new Prism(path{"prism_test.bin"}));
+     prism_->Remove();
+-
+     set<string> keyset;
+     keyset.insert("google");   // 4
+     keyset.insert("good");     // 2
+@@ -38,7 +38,6 @@ class RimePrismTest : public ::testing::Test {
+ 
+ TEST_F(RimePrismTest, SaveAndLoad) {
+   EXPECT_TRUE(prism_->Save());
+-
+   Prism test(prism_->file_path());
+   EXPECT_TRUE(test.Load());
+ 
+@@ -57,7 +56,6 @@ TEST_F(RimePrismTest, GetValue) {
+   int value = -1;
+   EXPECT_TRUE(prism_->GetValue("adobe", &value));
+   EXPECT_EQ(value, 0);
+-
+   value = -1;
+   EXPECT_TRUE(prism_->GetValue("baidu", &value));
+   EXPECT_EQ(value, 1);
+@@ -74,7 +72,6 @@ TEST_F(RimePrismTest, CommonPrefixMatch) {
+   EXPECT_EQ(result[1].value, 3);   // goodbye
+   EXPECT_EQ(result[1].length, 7);  // goodbye
+ }
+-
+ TEST_F(RimePrismTest, ExpandSearch) {
+   vector<Prism::Match> result;
+ 
+@@ -88,3 +85,39 @@ TEST_F(RimePrismTest, ExpandSearch) {
+   EXPECT_EQ(result[2].value, 3);   // goodbye
+   EXPECT_EQ(result[2].length, 7);  // goodbye
+ }
++TEST_F(RimePrismTest, ExpandSearchLimit) {
++  vector<Prism::Match> result;
++  prism_->ExpandSearch("goo", &result, 2);
++  // result is good and google.
++
++  ASSERT_EQ(result.size(), 2);
++  EXPECT_EQ(result[0].value, 2);
++  EXPECT_EQ(result[0].length, 4);
++  EXPECT_EQ(result[1].value, 4);
++  EXPECT_EQ(result[1].length, 6);
++}
++
++TEST_F(RimePrismTest, CommonPrefixSearchWithLength) {
++  const string input("xxgoodbye");
++  vector<Prism::Match> result;
++
++  prism_->CommonPrefixSearch(std::string_view(input).substr(2, 4), &result);
++  ASSERT_EQ(result.size(), 1);
++  EXPECT_EQ(result[0].value, 2);
++  EXPECT_EQ(result[0].length, 4);
++}
++
++TEST_F(RimePrismTest, ExpandSearchWithLength) {
++  const string input("xxgoodbye");
++  vector<Prism::Match> result;
++
++  prism_->ExpandSearch(std::string_view(input).substr(2, 3), &result, 10);
++
++  ASSERT_EQ(result.size(), 3);
++  EXPECT_EQ(result[0].value, 2);
++  EXPECT_EQ(result[0].length, 4);
++  EXPECT_EQ(result[1].value, 4);
++  EXPECT_EQ(result[1].length, 6);
++  EXPECT_EQ(result[2].value, 3);
++  EXPECT_EQ(result[2].length, 7);
++}

@@ -466,7 +466,7 @@ extension SquirrelView {
   }
 
   /// Expanded selection and background paths are derived only from the real
-  /// NSGridView cell frames. Text frames are used solely for the underline and
+  /// Candidate cell frames. Text frames are used solely for the underline and
   /// bar treatments that intentionally follow the glyph line.
   func expandedCandidatePath(
     cellFrame: NSRect,

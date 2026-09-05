@@ -128,13 +128,40 @@ struct AppearanceTabView: View {
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("settings.appearance.browsing")
-        Text(
-          // Keep the complete localization key intact for String Catalog lookup.
-          // swiftlint:disable:next line_length
-          "Chinese and English keep independent horizontal or vertical layouts. Expandable browsing starts compact, then pressing [ or ] (or - or =) to switch candidate pages expands up to three pages automatically. Every new composition starts collapsed. These changes take effect after Apply Changes."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        if model.configuration.documentDraft.appearance.candidateBrowsingMode == .expandable {
+          Picker("Horizontal expansion: columns",
+                 selection: $model.configuration.documentDraft.appearance.expandedHorizontalCount) {
+            ForEach(LinnetSettingsContract.horizontalExpandedGridRange, id: \.self) { count in
+              Text("\(count)").tag(count)
+            }
+          }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("settings.appearance.expandedHorizontalCount")
+          Picker("Horizontal expansion: maximum rows",
+                 selection: $model.configuration.documentDraft.appearance.expandedHorizontalRows) {
+            ForEach(LinnetSettingsContract.horizontalExpandedGridRange, id: \.self) { count in
+              Text("\(count)").tag(count)
+            }
+          }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("settings.appearance.expandedHorizontalRows")
+          Picker("Vertical expansion: candidates per row",
+                 selection: $model.configuration.documentDraft.appearance.expandedVerticalCount) {
+            ForEach(LinnetSettingsContract.expandedCandidateCountRange, id: \.self) { count in
+              Text("\(count)").tag(count)
+            }
+          }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("settings.appearance.expandedVerticalCount")
+          Text("Expansion counts only affect the open grid. Collapsed candidates keep the candidates-per-page setting.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text(
+            "Expanded columns stay aligned. Long words use fewer columns rather than wrapping; fewer candidates use fewer rows."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
       }
       .padding(8)
     }

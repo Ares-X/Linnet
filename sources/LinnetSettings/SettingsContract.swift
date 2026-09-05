@@ -7,6 +7,9 @@ import Darwin
 import Foundation
 
 enum LinnetSettingsContract {
+  static let expandedCandidateCountRange = 5...7
+  static let horizontalExpandedGridRange = 3...5
+
   static let englishSchemaID = "linnet_en"
   /// The durable native learning-data logical view required before a Host may
   /// pause and release its database to Settings. This is not an app ABI.

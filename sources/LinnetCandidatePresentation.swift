@@ -30,7 +30,6 @@ enum LinnetCandidatePresentation {
   // limit for malformed dictionary metadata, not a display budget.
   static let maximumDetailCharacterCount = 256
   static let maximumFooterDetailLineCount = 3
-  static let maximumExpandedPageCount = 3
   static let maximumExpandedCandidateCount = 27
   static let smartEnglishDetailPrefix = "\u{001D}"
 
@@ -160,6 +159,7 @@ enum LinnetCandidatePresentation {
   struct CandidateLine {
     let attributedString: NSAttributedString
     let labelPrefix: NSAttributedString
+    let labelRange: NSRange
   }
 
   enum SecondaryTextPlacement {
@@ -223,6 +223,7 @@ enum LinnetCandidatePresentation {
     let normalizedComment = comment.precomposedStringWithCanonicalMapping
     let line = NSMutableAttributedString()
     var labelPrefix: NSAttributedString?
+    var labelRange = NSRange(location: 0, length: 0)
     var remainingFormat = candidateFormat
     while !remainingFormat.isEmpty {
       let replacements: [FormatReplacement] = [
@@ -252,6 +253,9 @@ enum LinnetCandidatePresentation {
         labelPrefix = NSAttributedString(attributedString: line)
       }
       let replacementStart = line.length
+      if token == "[label]" {
+        labelRange = NSRange(location: replacementStart, length: label.utf16.count)
+      }
       line.append(NSAttributedString(
         string: next.replacement.value,
         attributes: next.replacement.attributes))
@@ -277,7 +281,8 @@ enum LinnetCandidatePresentation {
     }
     return CandidateLine(
       attributedString: NSAttributedString(attributedString: line),
-      labelPrefix: labelPrefix ?? NSAttributedString())
+      labelPrefix: labelPrefix ?? NSAttributedString(),
+      labelRange: labelRange)
   }
 
   /// The only candidate-font resolver used by the live AppKit surface and the
@@ -376,9 +381,7 @@ extension LinnetCandidatePresentation {
     pageSize: Int
   ) -> Range<Int>? {
     guard anchorPage >= 0, currentPage >= 0, pageSize > 0 else { return nil }
-    let visiblePageCount = max(
-      1,
-      min(maximumExpandedPageCount, maximumExpandedCandidateCount / pageSize))
+    let visiblePageCount = max(1, maximumExpandedCandidateCount / pageSize)
     var firstPage = anchorPage
     if currentPage < firstPage {
       firstPage = currentPage
@@ -391,37 +394,71 @@ extension LinnetCandidatePresentation {
     }
     let (start, startOverflow) = firstPage.multipliedReportingOverflow(by: pageSize)
     guard !startOverflow else { return nil }
-    let (candidateBound, candidateBoundOverflow) =
-      pageSize.multipliedReportingOverflow(by: visiblePageCount)
-    guard !candidateBoundOverflow else { return nil }
-    let pageBound = min(maximumExpandedCandidateCount, candidateBound)
-    let (end, endOverflow) = start.addingReportingOverflow(pageBound)
+    let (end, endOverflow) = start.addingReportingOverflow(maximumExpandedCandidateCount)
     guard !endOverflow else { return nil }
     return start..<end
   }
 
-  /// Maps absolute-order snapshot offsets to visual rows. Expansion always adds
-  /// one row per Rime page, matching the native macOS candidate grid and the
-  /// Selector's Left/Right cell plus Up/Down page navigation contract.
-  /// Every item offset appears exactly once, so click indices remain independent
-  /// from the visual order.
-  static func visualRows(
-    candidateCount: Int,
-    pageSize: Int,
-    flow: CandidateFlow,
-    expanded: Bool
-  ) -> [[Int]] {
-    guard candidateCount > 0, pageSize > 0 else { return [] }
-    let indices = Array(0..<candidateCount)
-    guard expanded else {
-      switch flow {
-      case .horizontal: return [indices]
-      case .vertical: return indices.map { [$0] }
+  struct ExpandedGrid {
+    struct Placement: Equatable {
+      let item: Int
+      let row: Int
+      let column: Int
+    }
+    let columnWidths: [CGFloat]
+    let placements: [Placement]
+    let visibleRows: Range<Int>
+
+    func columnOffset(_ column: Int, spacing: CGFloat) -> CGFloat {
+      columnWidths.prefix(column).reduce(0, +) + spacing * CGFloat(column)
+    }
+  }
+
+  /// Runtime and Settings share the same packing; neither reorders candidates.
+  static func expandedGrid(
+    widths: [CGFloat], columns: Int, spacing: CGFloat, maximumWidth: CGFloat,
+    visibleRows: Range<Int>, highlighted: Int? = nil
+  ) -> ExpandedGrid {
+    guard !widths.isEmpty, columns > 0 else {
+      return ExpandedGrid(columnWidths: [], placements: [], visibleRows: 0..<0)
+    }
+    // Keep whole words and shared column guides. The configured count is the
+    // upper limit, not a reason to squeeze each word into an equal-width slot.
+    for count in stride(from: min(columns, widths.count), through: 1, by: -1) {
+      let rowCount = max(1, visibleRows.count)
+      var firstRow = min(visibleRows.lowerBound, max(0, (widths.count - 1) / count - rowCount + 1))
+      if let highlighted {
+        let selectedRow = highlighted / count
+        firstRow = min(firstRow, selectedRow)
+        firstRow = max(firstRow, selectedRow - rowCount + 1)
+      }
+      let rows = firstRow..<(firstRow + rowCount)
+      var columnWidths = [CGFloat](repeating: 1, count: count)
+      for item in widths.indices where rows.contains(item / count) {
+        columnWidths[item % count] = max(columnWidths[item % count], widths[item])
+      }
+      let total = columnWidths.reduce(0, +) + spacing * CGFloat(count - 1)
+      if total <= maximumWidth || count == 1 {
+        columnWidths = columnWidths.map { min(max(1, maximumWidth), $0) }
+        let placements = widths.indices.map { item in
+          ExpandedGrid.Placement(item: item, row: item / count, column: item % count)
+        }
+        return ExpandedGrid(columnWidths: columnWidths, placements: placements, visibleRows: rows)
       }
     }
+    preconditionFailure("A nonempty grid always fits a bounded single column")
+  }
 
-    return stride(from: 0, to: candidateCount, by: pageSize).map { start in
-      Array(start..<min(candidateCount, start + pageSize))
+  /// Compact candidate order; expanded packing is owned by expandedGrid.
+  static func visualRows(
+    candidateCount: Int,
+    flow: CandidateFlow
+  ) -> [[Int]] {
+    guard candidateCount > 0 else { return [] }
+    let indices = Array(0..<candidateCount)
+    switch flow {
+    case .horizontal: return [indices]
+    case .vertical: return indices.map { [$0] }
     }
   }
 

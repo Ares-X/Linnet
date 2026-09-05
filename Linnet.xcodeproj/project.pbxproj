@@ -523,6 +523,7 @@
 				D30000000000000000000023 /* Settings Sources */,
 				D30000000000000000000021 /* Settings Frameworks */,
 				D30000000000000000000024 /* Copy Settings Runtime */,
+				2C6B9F992BCD083D00E327DF /* Copy Rime plugins */,
 			);
 			buildRules = (
 			);

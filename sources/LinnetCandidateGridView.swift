@@ -8,11 +8,8 @@
 
 import AppKit
 
-final class LinnetCandidateGridView: NSGridView {
-  private struct GridShape: Equatable {
-    let rows: Int
-    let columns: Int
-  }
+final class LinnetCandidateGridView: NSView {
+  private typealias Placement = LinnetCandidatePresentation.ExpandedGrid.Placement
 
   struct CellGeometry {
     let itemIndex: Int
@@ -28,6 +25,7 @@ final class LinnetCandidateGridView: NSGridView {
     private var labelPrefixExtent: CGFloat = 0
     private var leadingPadding: CGFloat = 0
     private var verticalText = false
+    private var sourceLine: LinnetCandidatePresentation.CandidateLine?
 
     init() {
       super.init(frame: .zero)
@@ -38,7 +36,6 @@ final class LinnetCandidateGridView: NSGridView {
       textView.isVerticallyResizable = false
       textView.textContainerInset = .zero
       textView.textContainer?.lineFragmentPadding = 0
-      textView.textContainer?.maximumNumberOfLines = 1
       textView.textContainer?.lineBreakMode = .byTruncatingTail
       textView.setAccessibilityElement(false)
       addSubview(textView)
@@ -57,6 +54,7 @@ final class LinnetCandidateGridView: NSGridView {
       verticalText: Bool
     ) {
       self.itemIndex = itemIndex
+      sourceLine = line
       let measured = line.attributedString.boundingRect(
         with: NSSize(
           width: CGFloat.greatestFiniteMagnitude,
@@ -76,6 +74,7 @@ final class LinnetCandidateGridView: NSGridView {
         : NSSize(width: textSize.width + leadingPadding, height: textSize.height)
       textView.textContentStorage?.attributedString = line.attributedString
       textView.setLayoutOrientation(verticalText ? .vertical : .horizontal)
+      textView.textContainer?.maximumNumberOfLines = 1
       isHidden = false
       invalidateIntrinsicContentSize()
       needsLayout = true
@@ -83,6 +82,7 @@ final class LinnetCandidateGridView: NSGridView {
 
     func clear() {
       itemIndex = nil
+      sourceLine = nil
       measuredSize = .zero
       textSize = .zero
       labelPrefixExtent = 0
@@ -95,6 +95,17 @@ final class LinnetCandidateGridView: NSGridView {
     }
 
     override var intrinsicContentSize: NSSize { measuredSize }
+
+    func displaySelectionLabel(_ number: Int?) {
+      guard let line = sourceLine, line.labelRange.length == 1 else { return }
+      let text = NSMutableAttributedString(attributedString: line.attributedString)
+      if let number {
+        text.replaceCharacters(in: line.labelRange, with: String(number))
+      } else {
+        text.addAttribute(.foregroundColor, value: NSColor.clear, range: line.labelRange)
+      }
+      textView.textContentStorage?.attributedString = text
+    }
 
     override func layout() {
       super.layout()
@@ -135,34 +146,40 @@ final class LinnetCandidateGridView: NSGridView {
   }
 
   private var cellPool: [CandidateCellView] = []
-  private var gridShape: GridShape?
-  private var naturalColumnWidths: [CGFloat] = []
-  private var naturalRowHeights: [CGFloat] = []
+  private var placements: [Placement] = []
+  private var displayedPlacements: [Placement] = []
+  private var columnCount = 0
+  private var itemCount = 0
+  private var highlighted = 0
+  private var firstVisibleRow = 0
+  private var maximumRows = 3
+  private var columnSpacing: CGFloat = 0
+  private var rowSpacing: CGFloat = 0
+  private var gridSize: NSSize = .zero
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
-    xPlacement = .fill
-    yPlacement = .fill
     isHidden = true
     setAccessibilityElement(false)
   }
 
   required init?(coder: NSCoder) { nil }
 
+  override var intrinsicContentSize: NSSize { gridSize }
+  override var fittingSize: NSSize { gridSize }
+
   func publish(
-    rows: [[Int]],
+    columns: Int,
+    maximumRows: Int,
     lines: [LinnetCandidatePresentation.CandidateLine],
+    highlighted: Int,
     verticalText: Bool,
     columnSpacing: CGFloat,
     rowSpacing: CGFloat
   ) {
-    guard !rows.isEmpty else {
-      clear()
-      return
-    }
-    let columnCount = rows.map(\.count).max() ?? 0
+    let columnCount = min(columns, lines.count)
     guard columnCount > 0,
-      rows.count <= LinnetCandidatePresentation.maximumExpandedCandidateCount / columnCount
+      lines.count <= LinnetCandidatePresentation.maximumExpandedCandidateCount
     else {
       clear()
       return
@@ -170,9 +187,13 @@ final class LinnetCandidateGridView: NSGridView {
     if cellPool.isEmpty {
       cellPool = (0..<LinnetCandidatePresentation.maximumExpandedCandidateCount)
         .map { _ in CandidateCellView() }
+      cellPool.forEach { addSubview($0) }
     }
-    ensureGrid(rows: rows.count, columns: columnCount)
-
+    self.columnCount = columnCount
+    self.maximumRows = max(1, maximumRows)
+    if itemCount != lines.count { firstVisibleRow = 0 }
+    self.itemCount = lines.count
+    self.highlighted = highlighted
     self.columnSpacing = max(0, columnSpacing)
     self.rowSpacing = max(0, rowSpacing)
     // macOS keeps a stable label slot: rows without selection keys start
@@ -180,75 +201,101 @@ final class LinnetCandidateGridView: NSGridView {
     let labelGutter = lines.map {
       CandidateCellView.width(of: $0.labelPrefix)
     }.max().map(ceil) ?? 0
-    for (rowIndex, row) in rows.enumerated() {
-      for column in 0..<columnCount {
-        let cell = cellPool[rowIndex * columnCount + column]
-        guard row.indices.contains(column), lines.indices.contains(row[column]) else {
-          cell.clear()
-          continue
-        }
-        cell.publish(
-          itemIndex: row[column], line: lines[row[column]],
-          labelGutter: labelGutter, verticalText: verticalText)
+    for index in cellPool.indices {
+      guard lines.indices.contains(index) else {
+        cellPool[index].clear()
+        continue
       }
+      cellPool[index].publish(
+        itemIndex: index, line: lines[index],
+        labelGutter: labelGutter, verticalText: verticalText)
     }
-    let visibleCells = cellPool.prefix(rows.count * columnCount).filter { !$0.isHidden }
-    let columnWidth = visibleCells.map(\.intrinsicContentSize.width).max() ?? 1
-    let rowHeight = visibleCells.map(\.intrinsicContentSize.height).max() ?? 1
-    naturalColumnWidths = Array(repeating: columnWidth, count: columnCount)
-    naturalRowHeights = Array(repeating: rowHeight, count: rows.count)
-    fitColumns(to: nil)
     isHidden = false
     invalidateIntrinsicContentSize()
     needsLayout = true
-    layoutSubtreeIfNeeded()
   }
 
   func clear() {
     cellPool.forEach { $0.clear() }
-    naturalColumnWidths = []
-    naturalRowHeights = []
+    placements = []
+    displayedPlacements = []
+    itemCount = 0
+    firstVisibleRow = 0
+    gridSize = .zero
     isHidden = true
     frame = .zero
     invalidateIntrinsicContentSize()
   }
 
-  /// NSGridView does not reliably promote a changed child intrinsic width
-  /// after pooled cells are republished. Own the column guides explicitly so
-  /// labels and candidates stay on one line; only an actual screen-width cap
-  /// is allowed to truncate a cell.
+  /// Each column fits its visible words, with one shared origin for all rows.
+  /// Whole words determine column widths; a narrow window uses fewer columns.
   func fitColumns(to maximumWidth: CGFloat?) {
-    guard !naturalColumnWidths.isEmpty else { return }
-    let spacing = columnSpacing * CGFloat(max(0, naturalColumnWidths.count - 1))
-    let naturalWidth = naturalColumnWidths[0]
-    let width = maximumWidth.map {
-      min(naturalWidth, max(1, ($0 - spacing) / CGFloat(naturalColumnWidths.count)))
-    } ?? naturalWidth
-    for index in naturalColumnWidths.indices {
-      column(at: index).width = width
+    guard itemCount > 0, columnCount > 0 else { return }
+    let widths = cellPool.prefix(itemCount).map(\.intrinsicContentSize.width)
+    let spacing = columnSpacing * CGFloat(columnCount - 1)
+    let layout = LinnetCandidatePresentation.expandedGrid(
+      widths: widths, columns: columnCount, spacing: columnSpacing,
+      maximumWidth: maximumWidth ?? ((widths.max() ?? 1) * CGFloat(columnCount) + spacing),
+      visibleRows: firstVisibleRow..<(firstVisibleRow + maximumRows), highlighted: highlighted)
+    let packed = layout.placements
+    let visibleRows = layout.visibleRows
+    firstVisibleRow = visibleRows.lowerBound
+    let selectedRow = packed[highlighted].row
+    placements = packed
+    let activeItems = packed.filter { $0.row == selectedRow }.map(\.item)
+    for placement in packed {
+      cellPool[placement.item].displaySelectionLabel(
+        activeItems.firstIndex(of: placement.item).map { $0 + 1 })
     }
-    for (index, height) in naturalRowHeights.enumerated() {
-      row(at: index).height = height
+    let visible = packed.filter { visibleRows.contains($0.row) }
+    displayedPlacements = visible
+    for cell in cellPool { cell.isHidden = true }
+    let rowHeights = (firstVisibleRow...(visible.last?.row ?? firstVisibleRow)).map { row in
+      visible.filter { $0.row == row }.map {
+        cellPool[$0.item].isHidden = false
+        return cellPool[$0.item].intrinsicContentSize.height
+      }.max() ?? 1
     }
+    let usedColumns = visible.map { $0.column + 1 }.max() ?? 1
+    gridSize = NSSize(
+      width: layout.columnWidths.prefix(usedColumns).reduce(0, +) + columnSpacing * CGFloat(usedColumns - 1),
+      height: rowHeights.reduce(0, +) + rowSpacing * CGFloat(rowHeights.count - 1))
+    var top = gridSize.height
+    for (offset, height) in rowHeights.enumerated() {
+      for placement in visible where placement.row == offset + firstVisibleRow {
+        cellPool[placement.item].frame = NSRect(
+          x: layout.columnOffset(placement.column, spacing: columnSpacing),
+          y: top - height,
+          width: layout.columnWidths[placement.column],
+          height: height)
+      }
+      top -= height + rowSpacing
+    }
+    needsLayout = true
+    layoutSubtreeIfNeeded()
     invalidateIntrinsicContentSize()
   }
 
-  private func ensureGrid(rows: Int, columns: Int) {
-    let shape = GridShape(rows: rows, columns: columns)
-    guard gridShape != shape else { return }
-    while numberOfRows > 0 { removeRow(at: 0) }
-    for row in 0..<rows {
-      let start = row * columns
-      addRow(with: Array(cellPool[start..<(start + columns)]))
-    }
-    gridShape = shape
+  func adjacentItem(from index: Int, up towardPreviousRow: Bool) -> Int? {
+    guard let current = placements.first(where: { $0.item == index }) else { return nil }
+    let targetRow = current.row + (towardPreviousRow ? -1 : 1)
+    return placements.filter { $0.row == targetRow }.min {
+      abs($0.column - current.column) < abs($1.column - current.column)
+    }?.item
+  }
+
+  func itemForSelectionNumber(_ number: Int) -> Int? {
+    guard let row = placements.first(where: { $0.item == highlighted })?.row,
+      number > 0 else { return nil }
+    let items = placements.filter { $0.row == row }
+    return items.indices.contains(number - 1) ? items[number - 1].item : nil
   }
 
   func geometries(in target: NSView) -> [CellGeometry] {
     guard !isHidden else { return [] }
     layoutSubtreeIfNeeded()
-    return cellPool
-      .compactMap { $0.geometry(in: target) }
+    return displayedPlacements
+      .compactMap { cellPool[$0.item].geometry(in: target) }
       .sorted { $0.itemIndex < $1.itemIndex }
   }
 }

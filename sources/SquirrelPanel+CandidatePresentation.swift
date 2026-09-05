@@ -117,6 +117,29 @@ extension SquirrelPanel {
     return NSScreen.screens.contains { $0.frame.contains(rect.origin) }
   }
   func mousePosition(for event: NSEvent) -> NSPoint { view.convert(event.locationInWindow, from: nil) }
+
+  func expandedCandidateNavigationTarget(up towardPreviousRow: Bool) -> Int? {
+    guard let publication, publicationIsCurrent(publication),
+      let candidateSnapshot, candidateSnapshot.isExpanded, !candidateSnapshot.items.isEmpty
+    else { return nil }
+    if let target = view.candidateGridView.adjacentItem(from: index, up: towardPreviousRow),
+      candidateSnapshot.items.indices.contains(target) {
+      return candidateSnapshot.items[target].absoluteIndex
+    }
+    // Crossing the loaded window requests its next neighbour, not an entire
+    // Rime page: page-sized steps would skip words in a variable-length row.
+    let edge = towardPreviousRow ? candidateSnapshot.items.first! : candidateSnapshot.items.last!
+    return max(0, edge.absoluteIndex + (towardPreviousRow ? -1 : 1))
+  }
+
+  func expandedCandidateSelectionTarget(number: Int) -> Int? {
+    guard let publication, publicationIsCurrent(publication),
+      let candidateSnapshot, candidateSnapshot.isExpanded,
+      let item = view.candidateGridView.itemForSelectionNumber(number),
+      candidateSnapshot.items.indices.contains(item) else { return nil }
+    return candidateSnapshot.items[item].absoluteIndex
+  }
+
   func beginCandidatePress(_ event: NSEvent) {
     guard let publication, publicationIsCurrent(publication) else { return }
     candidateInteraction.beginPress(view.click(at: mousePosition(for: event)))
@@ -259,35 +282,6 @@ extension SquirrelPanel {
     return view.detailContentRect
   }
 
-  /// Expanded browsing keeps one selected-candidate definition surface stable
-  /// while the Rime-owned highlight moves through the grid. Compact browsing
-  /// remains content-sized.
-  func selectedDetailSurfaceSize(
-    geometry: LinnetCandidatePresentation.CandidateDetailGeometry,
-    candidateSize: NSSize,
-    measuredDetailSize: NSSize,
-    theme: SquirrelTheme,
-    reservesExpandedDetail: Bool
-  ) -> NSSize {
-    guard reservesExpandedDetail else { return measuredDetailSize }
-    let detailFont = (theme.detailAttrs[.font] as? NSFont) ?? theme.font
-    let lineHeight = max(
-      1, ceil(detailFont.ascender - detailFont.descender + detailFont.leading))
-    switch geometry.placement {
-    case .footer:
-      return NSSize(
-        width: geometry.fittedDetailWidth(
-          candidateWidth: candidateSize.width,
-          detailWidth: geometry.detailColumnMaximumWidth ?? candidateSize.width),
-        height: lineHeight * CGFloat(
-          LinnetCandidatePresentation.maximumFooterDetailLineCount))
-    case .sidecar:
-      return NSSize(
-        width: geometry.detailColumnMaximumWidth ?? measuredDetailSize.width,
-        height: candidateSize.height)
-    }
-  }
-
   // Get the window size, the windows will be the dirtyRect in
   // SquirrelView.drawRect
   // swiftlint:disable:next cyclomatic_complexity
@@ -344,14 +338,8 @@ extension SquirrelPanel {
         theme: theme,
         textContainer: detailTextContainer,
         textLayoutManager: detailTextLayoutManager)
-      let detailSize = selectedDetailSurfaceSize(
-        geometry: detailGeometry,
-        candidateSize: contentRect.size,
-        measuredDetailSize: NSSize(
-          width: ceil(detailRect.width),
-          height: ceil(detailRect.height)),
-        theme: theme,
-        reservesExpandedDetail: candidateSnapshot?.isExpanded == true)
+      let detailSize = NSSize(
+        width: ceil(detailRect.width), height: ceil(detailRect.height))
       detailFrames = detailGeometry.frames(
         candidateSize: contentRect.size,
         detailSize: detailSize,

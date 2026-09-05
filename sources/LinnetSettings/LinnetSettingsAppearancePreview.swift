@@ -236,6 +236,9 @@ enum LinnetSettingsAppearancePreview {
     let englishCandidateLayout: LinnetSettingsDocument.CandidateLayout
     let candidateBrowsingMode: LinnetSettingsDocument.CandidateBrowsingMode
     let pageSize: Int
+    let expandedHorizontalCount: Int
+    let expandedHorizontalRows: Int
+    let expandedVerticalCount: Int
     let fontPreset: LinnetSettingsDocument.FontPreset
     let candidateFontPoint: Double
     let labelFontPoint: Double
@@ -283,6 +286,9 @@ enum LinnetSettingsAppearancePreview {
       englishCandidateLayout: appearance.englishCandidateLayout,
       candidateBrowsingMode: appearance.candidateBrowsingMode,
       pageSize: appearance.pageSize,
+      expandedHorizontalCount: appearance.expandedHorizontalCount,
+      expandedHorizontalRows: appearance.expandedHorizontalRows,
+      expandedVerticalCount: appearance.expandedVerticalCount,
       fontPreset: appearance.fontPreset,
       candidateFontPoint: LinnetSettingsDocument.Appearance.clampFontPoint(appearance.fontPoint),
       labelFontPoint: LinnetSettingsDocument.Appearance.labelFontPoint(for: appearance.fontPoint),
@@ -508,10 +514,9 @@ private extension LinnetSettingsAppearancePreviewView {
       layout == .horizontal ? .horizontal : .vertical
     let rows = LinnetCandidatePresentation.visualRows(
       candidateCount: values.count,
-      pageSize: preview.pageSize,
-      flow: flow,
-      expanded: expanded)
-    let labelFont = LinnetCandidatePresentation.platformFont(
+      flow: flow)
+    let labelFont = expanded ? NSFont.monospacedDigitSystemFont(
+      ofSize: CGFloat(preview.labelFontPoint), weight: .regular) : LinnetCandidatePresentation.platformFont(
       fontNames: preview.fontPreset.fontFamilies,
       size: CGFloat(preview.labelFontPoint))
     let candidateFont = LinnetCandidatePresentation.platformFont(
@@ -521,20 +526,32 @@ private extension LinnetSettingsAppearancePreviewView {
     let inlineSpacing = LinnetCandidatePresentation.inlineCandidateSeparatorWidth(
       font: candidateFont)
     if expanded {
+      let columns = layout == .horizontal ? preview.expandedHorizontalCount : preview.expandedVerticalCount
+      let maximumRows = layout == .horizontal ? preview.expandedHorizontalRows : 3
+      let widths = values.map {
+        LinnetSettingsAppearancePreview.candidateLine(
+          "7", $0, selected: false, preview, fonts: fonts).size().width.rounded(.up)
+      }
+      let layout = LinnetCandidatePresentation.expandedGrid(
+        widths: widths, columns: columns, spacing: inlineSpacing,
+        maximumWidth: CGFloat(columns) * candidateFont.pointSize * 6,
+        visibleRows: 0..<maximumRows)
       Grid(
         alignment: .leading,
         horizontalSpacing: inlineSpacing,
         verticalSpacing: LinnetCandidatePresentation.candidateRowSpacing
       ) {
-        ForEach(Array(rows.enumerated()), id: \.offset) { row in
+        ForEach(0..<min(maximumRows, (layout.placements.last?.row ?? 0) + 1), id: \.self) { row in
           GridRow {
-            ForEach(row.element, id: \.self) { index in
+            ForEach(layout.placements.filter { $0.row == row }, id: \.item) { cell in
               LinnetSettingsAppearancePreview.candidate(
-                index < preview.pageSize ? String(index + 1) : "",
-                values[index],
-                selected: index == 0,
+                row == 0 ? String(cell.item + 1) : "",
+                values[cell.item],
+                selected: cell.item == 0,
                 preview,
                 fonts: fonts)
+                .padding(.leading, row == 0 ? 0 : ("7" as NSString).size(withAttributes: [.font: labelFont]).width)
+                .frame(width: layout.columnWidths[cell.column], alignment: .leading)
             }
           }
         }
@@ -690,7 +707,7 @@ private extension LinnetSettingsAppearancePreviewView {
       size: CGFloat(preview.detailFontPoint))
     let detailAttributes: [NSAttributedString.Key: Any] = [
       .font: detailFont,
-      .foregroundColor: preview.palette.secondary.nsColor,
+      .foregroundColor: preview.palette.primary.nsColor,
       .baselineOffset: LinnetCandidatePresentation.secondaryBaselineOffset(
         primaryFont: detailFont,
         secondaryFont: detailFont,

@@ -36,12 +36,12 @@
     "librime_core_interactions": {
       "target": "sources.librime",
       "path": "patches/librime-linnet-core-interactions.patch",
-      "sha256": "563e8c014ff5f3376b9b4cf96b1d6f26bce50324a2250120f8bf6d8e614df9ef"
+      "sha256": "03a8f1bde04980613e5f7059025d95e3f6512d5fbac963163e70dbf8ee2985e3"
     },
     "librime_lua_state_lifetime": {
       "target": "sources.librime.bundled_plugins.lua",
       "path": "patches/librime-lua-linnet-state-lifetime.patch",
-      "sha256": "54b6a6d344de9c3cd1957b813c37f06b98e4368748665e289a20e47e6eba4243"
+      "sha256": "ccec11ebaf8e4fd93532ea68b2d761b5e22cb0de16527f2078ad8c1149ca5191"
     },
     "librime_predict_session_state": {
       "target": "sources.librime.bundled_plugins.predict",
@@ -263,10 +263,10 @@
       "repository": "https://github.com/amzxyz/rime-wanxiang.git",
       "submodule_path": "upstreams/rime-wanxiang",
       "submodule_name": "rime-wanxiang",
-      "tag": "v17.3.0",
-      "tag_ref": "refs/tags/v17.3.0",
-      "commit": "296f90d17e6b587b6fabcd661686e66372f2afaa",
-      "tree": "e8ff1fda545cc0d8ea99271e8cfcc9986ae4fb21",
+      "tag": "v17.9.7",
+      "tag_ref": "refs/tags/v17.9.7",
+      "commit": "45fa1a6f3be81978323ec51f9b74e106522f8918",
+      "tree": "88e17ed88369affc4a35280aff50d19375b26cac",
       "declared_license": "CC-BY-4.0",
       "license_path": "LICENSE",
       "license_sha256": "9e5f1b3c610b9c2da5c313bf81d577a7d1acec686bdb0384edefa6df0f90cd94",

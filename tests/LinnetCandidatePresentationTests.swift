@@ -488,10 +488,6 @@ struct LinnetCandidatePresentationTests {
   /// inside it, then advances only far enough to reveal an out-of-window page.
   private static func testExpandedCandidateBounds() {
     require(
-      LinnetCandidatePresentation.maximumExpandedPageCount == 3,
-      "candidate disclosure exceeded the three-page product bound"
-    )
-    require(
       LinnetCandidatePresentation.maximumExpandedCandidateCount == 27,
       "candidate disclosure exceeded the 27-candidate product bound"
     )
@@ -501,8 +497,8 @@ struct LinnetCandidatePresentationTests {
       (0, 2, 9, 0..<27),
       (0, 3, 9, 9..<36),
       (1, 0, 9, 0..<27),
-      (4, 3, 5, 15..<30),
-      (3, 5, 3, 9..<18),
+      (4, 3, 5, 15..<42),
+      (3, 5, 3, 9..<36),
     ] {
       require(
         LinnetCandidatePresentation.expandedCandidateRange(
@@ -542,59 +538,44 @@ struct LinnetCandidatePresentationTests {
 
   private static func testCandidateRows() {
     for pageSize in [3, 5, 7, 9] {
-      let count = pageSize * 3
-      let compactHorizontal = LinnetCandidatePresentation.visualRows(
-        candidateCount: pageSize, pageSize: pageSize,
-        flow: .horizontal, expanded: false)
       require(
-        compactHorizontal == [Array(0..<pageSize)],
-        "compact horizontal candidates stopped using one Rime page"
-      )
-      let compactVertical = LinnetCandidatePresentation.visualRows(
-        candidateCount: pageSize, pageSize: pageSize,
-        flow: .vertical, expanded: false)
+        LinnetCandidatePresentation.visualRows(candidateCount: pageSize, flow: .horizontal)
+          == [Array(0..<pageSize)],
+        "compact horizontal candidates stopped using one Rime page")
       require(
-        compactVertical == (0..<pageSize).map { [$0] },
-        "compact vertical candidates stopped using one Rime page"
-      )
-
-      let horizontal = LinnetCandidatePresentation.visualRows(
-        candidateCount: count, pageSize: pageSize,
-        flow: .horizontal, expanded: true)
-      require(
-        horizontal == (0..<3).map { page in
-          Array((page * pageSize)..<((page + 1) * pageSize))
-        },
-        "expanded horizontal candidates are not one row per Rime page"
-      )
-
-      let verticalPreference = LinnetCandidatePresentation.visualRows(
-        candidateCount: count, pageSize: pageSize,
-        flow: .vertical, expanded: true)
-      require(
-        verticalPreference == horizontal,
-        "expanded vertical preference did not use the native row grid"
-      )
-      require(
-        horizontal.flatMap { $0 }.sorted() == Array(0..<count) &&
-          verticalPreference.flatMap { $0 }.sorted() == Array(0..<count),
-        "expanded presentation lost or duplicated an absolute candidate offset"
-      )
+        LinnetCandidatePresentation.visualRows(candidateCount: pageSize, flow: .vertical)
+          == (0..<pageSize).map { [$0] },
+        "compact vertical candidates stopped using one Rime page")
+      let widths = (0..<(pageSize * 3)).map { $0.isMultiple(of: 4) ? CGFloat(130) : 50 }
+      let grid = LinnetCandidatePresentation.expandedGrid(
+        widths: widths, columns: pageSize, spacing: 8, maximumWidth: 600, visibleRows: 0..<3)
+      require(grid.placements.map(\.item) == Array(widths.indices),
+        "expanded grid reordered or lost candidates")
+      require(grid.columnWidths.reduce(0, +) + 8 * CGFloat(grid.columnWidths.count - 1) <= 600,
+        "long candidates widened the grid beyond its boundary")
+      for cell in grid.placements {
+        require(cell.column == cell.item % grid.columnWidths.count && cell.row == cell.item / grid.columnWidths.count,
+          "candidate did not stay in its visible row and column")
+        if grid.visibleRows.contains(cell.row) {
+          require(grid.columnWidths[cell.column] >= widths[cell.item], "a whole word was squeezed into a narrow column")
+        }
+      }
     }
-
-    require(
-      LinnetCandidatePresentation.visualRows(
-        candidateCount: 0, pageSize: 9, flow: .horizontal, expanded: true).isEmpty,
-      "an empty candidate list created a visual row"
-    )
-    require(
-      LinnetCandidatePresentation.visualRows(
-        candidateCount: 14, pageSize: 5, flow: .vertical, expanded: true
-      ) == [
-        [0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13],
-      ],
-      "a partial final candidate page lost its native row mapping"
-    )
+    require(LinnetCandidatePresentation.visualRows(candidateCount: 0, flow: .horizontal).isEmpty,
+      "an empty candidate list created a visual row")
+    let bounded = LinnetCandidatePresentation.expandedGrid(
+      widths: [50, 50, 50, 75, 1000], columns: 5, spacing: 8, maximumWidth: 600, visibleRows: 0..<1)
+    require(bounded.columnWidths.reduce(0, +) + 8 * CGFloat(bounded.columnWidths.count - 1) <= 600,
+      "one long word enlarged the panel past its width limit")
+    let asymmetric = LinnetCandidatePresentation.expandedGrid(
+      widths: [60, 60, 60, 180, 60], columns: 5, spacing: 8, maximumWidth: 500, visibleRows: 0..<1)
+    require(asymmetric.columnWidths == [60, 60, 60, 180, 60],
+      "a long word must borrow available width instead of being capped at an equal column width")
+    let compact = LinnetCandidatePresentation.expandedGrid(
+      widths: [30, 40, 50, 35, 80, 45, 900, 900, 900],
+      columns: 3, spacing: 8, maximumWidth: 600, visibleRows: 0..<2)
+    require(compact.columnWidths == [35, 80, 50],
+      "columns must fit their own visible words, not the global or hidden longest word")
   }
 
   private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {

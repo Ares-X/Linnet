@@ -211,10 +211,13 @@ final class SettingsUITests: XCTestCase {
       ["Horizontal", "Vertical"],
       identifier: "settings.appearance.englishLayout",
       in: app)
-    try selectEachSegmentedOption(
-      ["Scrolling only", "Expandable"],
-      identifier: "settings.appearance.browsing",
-      in: app)
+    for mode in ["Expandable", "Scrolling only", "Expandable"] {
+      try selectEachSegmentedOption([mode], identifier: "settings.appearance.browsing", in: app)
+      for name in ["expandedHorizontalCount", "expandedHorizontalRows", "expandedVerticalCount"] {
+        XCTAssertEqual(app.descendants(matching: .any)["settings.appearance.\(name)"].exists,
+          mode == "Expandable", "Expansion controls must only exist in expandable mode")
+      }
+    }
 
     let preview = app.groups["Expanded candidate preview"]
     try reveal(
@@ -651,14 +654,10 @@ final class SettingsUITests: XCTestCase {
     try reveal(field, named: name, in: app)
     if focus {
       field.click()
-      field.typeKey("a", modifierFlags: [.command])
-      field.typeKey(.delete, modifierFlags: [])
-      field.typeText(value)
-    } else {
-      app.typeKey("a", modifierFlags: [.command])
-      app.typeKey(.delete, modifierFlags: [])
-      app.typeText(value)
     }
+    field.typeKey("a", modifierFlags: [.command])
+    field.typeKey(.delete, modifierFlags: [])
+    field.typeText(value)
   }
 
   @MainActor

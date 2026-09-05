@@ -1,6 +1,10 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Horizontal expansion: columns" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"横向展开：列数"}}}},
+    "Horizontal expansion: maximum rows" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"横向展开：最多行数"}}}},
+    "Vertical expansion: candidates per row" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"纵向展开：每行候选上限"}}}},
+    "Expansion counts only affect the open grid. Collapsed candidates keep the candidates-per-page setting." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"仅影响已经展开的网格；未展开时仍使用“每页候选词数量”。"}}}},
     "Update channel" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"更新频道"}}}},
     "Stable" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"正式版"}}}},
     "Preview" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"预览版"}}}},
@@ -155,7 +159,7 @@
     "Capitalize sentence starts" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"句首自动大写"}}}},
     "Chinese and English…" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"中文和英文…"}}}},
     "Chinese candidates" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"中文候选"}}}},
-    "Chinese and English keep independent horizontal or vertical layouts. Expandable browsing starts compact, then pressing [ or ] (or - or =) to switch candidate pages expands up to three pages automatically. Every new composition starts collapsed. These changes take effect after Apply Changes." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"中文和英文分别保存横排或竖排方向；“可展开”会先显示紧凑候选，随后按 [、]、- 或 = 切换候选页时自动展开最多三页。每次重新组词仍从收起状态开始。这些更改会在点按“应用更改”后生效。"}}}},
+    "Expanded columns stay aligned. Long words use fewer columns rather than wrapping; fewer candidates use fewer rows." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"展开后各列保持对齐。长词放不下时减少列数，不拆词换行；候选不足时减少行数。"}}}},
     "Chinese options" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"中文选项"}}}},
     "Chinese…" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"中文…"}}}},
     "Clear Learning" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"清除学习数据"}}}},

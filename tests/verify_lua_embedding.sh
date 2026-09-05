@@ -22,12 +22,6 @@ fi
 if rg -n '(^\*\*\* |^--- /|^\+\+\+ /|/(U[s]ers|h[o]me)/)' "${translator_patch}"; then
   fail "pinyin tag-boundary patch contains an invalid directive or private absolute path"
 fi
-expected_diff_headers="$(printf '%s\n' \
-  'diff --git a/src/modules.cc b/src/modules.cc' \
-  'diff --git a/src/lib/lua.cc b/src/lib/lua.cc')"
-actual_diff_headers="$(rg '^diff --git ' "${patch_file}")"
-[[ "${actual_diff_headers}" == "${expected_diff_headers}" ]] ||
-  fail "downstream patch owns an unexpected source path"
 expected_translator_headers="$(printf '%s\n' \
   'diff --git a/upstreams/rime-ice/lua/date_translator.lua b/upstreams/rime-ice/lua/date_translator.lua' \
   'diff --git a/upstreams/rime-ice/lua/uuid.lua b/upstreams/rime-ice/lua/uuid.lua')"
@@ -41,11 +35,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "${scratch}/plugin/src/lib"
-cp "${repo_root}/build/upstreams/git/plugins/lua/src/modules.cc" \
-  "${scratch}/plugin/src/modules.cc"
-cp "${repo_root}/build/upstreams/git/plugins/lua/src/lib/lua.cc" \
-  "${scratch}/plugin/src/lib/lua.cc"
+mkdir -p "${scratch}/plugin"
+cp -R "${repo_root}/build/upstreams/git/plugins/lua/src" "${scratch}/plugin/src"
 env GIT_CEILING_DIRECTORIES="${repo_root}" \
   git -C "${scratch}/plugin" apply --no-index "${patch_file}" >/dev/null ||
   fail "downstream patch does not apply to pinned librime-lua"

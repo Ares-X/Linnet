@@ -64,6 +64,9 @@ final class SquirrelTheme {
   private(set) var linear = false
   private(set) var vertical = false
   private(set) var candidateExpansionAllowed = false
+  private(set) var expandedHorizontalCount = LinnetSettingsContract.horizontalExpandedGridRange.upperBound
+  private(set) var expandedHorizontalRows = LinnetSettingsContract.horizontalExpandedGridRange.lowerBound
+  private(set) var expandedVerticalCount = LinnetSettingsContract.expandedCandidateCountRange.lowerBound
   private(set) var inlinePreedit = false
   private(set) var inlineCandidate = false
   private(set) var showPaging = false
@@ -139,7 +142,7 @@ final class SquirrelTheme {
       baseOffset: baseOffset, verticalText: vertical, placement: .inline)
   ]
   private(set) lazy var detailAttrs: [NSAttributedString.Key: Any] = [
-    .foregroundColor: commentTextColor ?? candidateTextColor,
+    .foregroundColor: candidateTextColor,
     .font: commentFont,
     .baselineOffset: LinnetCandidatePresentation.secondaryBaselineOffset(
       primaryFont: font, secondaryFont: commentFont,
@@ -206,6 +209,12 @@ final class SquirrelTheme {
     vertical ?= config.getString("style/text_orientation").map { $0 == "vertical" }
     candidateExpansionAllowed ?= config.getBool(
       "style/linnet_candidate_expansion_allowed")
+    expandedHorizontalCount ?= config.getString("style/linnet_expanded_horizontal_count").flatMap(Int.init)
+      .map { LinnetSettingsDocument.Appearance.clampHorizontalGrid($0) }
+    expandedHorizontalRows ?= config.getString("style/linnet_expanded_horizontal_rows").flatMap(Int.init)
+      .map { LinnetSettingsDocument.Appearance.clampHorizontalGrid($0) }
+    expandedVerticalCount ?= config.getString("style/linnet_expanded_vertical_count").flatMap(Int.init)
+      .map { LinnetSettingsDocument.Appearance.clampExpandedCount($0) }
     inlinePreedit ?= config.getBool("style/inline_preedit")
     inlineCandidate ?= config.getBool("style/inline_candidate")
     translucency ?= config.getBool("style/translucency")

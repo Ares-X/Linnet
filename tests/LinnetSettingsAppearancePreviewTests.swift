@@ -21,7 +21,39 @@ struct LinnetSettingsAppearancePreviewTests {
     testPreviewUsesTheCanonicalBilingualFontCascade()
     testMalformedThemeDataFailsClosed()
     testThemeCardsShowReadableCandidates()
+    testExpandedWordsRemainWhole()
     print("LinnetSettingsAppearancePreviewTests: PASS")
+  }
+
+  @MainActor
+  private static func testExpandedWordsRemainWhole() {
+    for direction in [LinnetSettingsDocument.CandidateLayout.horizontal, .vertical] {
+      var appearance = LinnetSettingsDocument.Appearance.default
+      appearance.candidateBrowsingMode = .expandable
+      appearance.englishCandidateLayout = direction
+      appearance.fontPoint = 32
+      appearance.expandedHorizontalCount = 5
+      appearance.expandedHorizontalRows = 5
+      let view = NSHostingView(rootView: LinnetSettingsAppearancePreviewView(appearance: appearance)
+        .padding(16).frame(width: 1100)
+        .background(Color(nsColor: .windowBackgroundColor)))
+      view.frame.size = view.fittingSize
+      view.layoutSubtreeIfNeeded()
+      guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+        fail("expanded preview cannot render")
+      }
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      guard let image = bitmap.cgImage,
+        let png = bitmap.representation(using: .png, properties: [:]) else {
+        fail("expanded preview has no image")
+      }
+      do {
+        try png.write(to: URL(fileURLWithPath: "build/settings-expanded-\(direction.rawValue).png"))
+      } catch { fail("cannot save expanded preview: \(error)") }
+      let text = themeCandidateText(in: image, widthInPoints: view.bounds.width)
+      let word = direction == .horizontal ? "pronunciation" : "completion"
+      require(text.contains(word), "expanded preview split or hid \(word): \(text)")
+    }
   }
 
   @MainActor
@@ -444,9 +476,13 @@ struct LinnetSettingsAppearancePreviewTests {
     for pageSize in LinnetSettingsDocument.Appearance.pageSizeOptions {
       var appearance = LinnetSettingsDocument.Appearance.default
       appearance.pageSize = pageSize
+      appearance.expandedHorizontalCount = 4
+      appearance.expandedHorizontalRows = 5
+      appearance.expandedVerticalCount = 7
       let preview = projected(appearance, systemIsDark: false, catalog: catalog)
       require(
-        preview.pageSize == pageSize,
+        preview.pageSize == pageSize && preview.expandedHorizontalCount == 4 &&
+          preview.expandedHorizontalRows == 5 && preview.expandedVerticalCount == 7,
         "candidate preview ignored the selected page size \(pageSize)"
       )
     }
