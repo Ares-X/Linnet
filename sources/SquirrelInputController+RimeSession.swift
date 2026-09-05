@@ -185,6 +185,22 @@ extension SquirrelInputController {
 
   private func synchronizeCandidateLayoutOptions() {
     guard let panel = NSApp.squirrelAppDelegate.panel else { return }
+    // The panel owns visual rows; the Rime processor still owns printable-key
+    // classification and selection. Empty targets retain compact paging.
+    for (property, previous) in [
+      ("linnet/candidate_previous_row_v1", true),
+      ("linnet/candidate_next_row_v1", false),
+    ] {
+      let target: String
+      if panel.candidateSnapshot?.isExpanded == true {
+        target = String(panel.expandedCandidateNavigationTarget(up: previous) ?? -1)
+      } else {
+        target = panel.view.currentTheme.candidateExpansionAllowed ? "expand" : ""
+      }
+      property.withCString { name in
+        target.withCString { value in rimeAPI.set_property(session, name, value) }
+      }
+    }
     let navigationLayout = LinnetCandidatePresentation.rimeNavigationLayout(
       flow: panel.linear ? .horizontal : .vertical,
       verticalText: panel.vertical,
