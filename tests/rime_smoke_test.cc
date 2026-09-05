@@ -1967,6 +1967,37 @@ void ExpectCandidatePagingShortcuts(RimeApi_stdbool* api,
     }
     expect_expansion_request(session, true, "missing after accepted previous paging");
     api->destroy_session(session);
+
+    // The compact page has nine entries, but the host displays five columns.
+    // First open without moving; then follow the visual row, not page_size.
+    const RimeSessionId grid = CreateSchemaSession(api, schema_id);
+    Enter(api, grid, input);
+    const auto expect_selected = [&](int expected) {
+      RimeContext_stdbool context = {};
+      RIME_STRUCT_INIT(RimeContext_stdbool, context);
+      if (!api->get_context(grid, &context)) Fail("could not inspect grid selection");
+      const int selected = context.menu.page_no * context.menu.page_size +
+                           context.menu.highlighted_candidate_index;
+      api->free_context(&context);
+      if (selected != expected) Fail("expanded paging did not follow the visual row");
+    };
+    api->set_property(grid, "linnet/candidate_next_row_v1", "expand");
+    if (!api->process_key(grid, std::get<0>(key_case), 0)) {
+      Fail("first paging key did not request expansion");
+    }
+    expect_expansion_request(grid, true, "missing on first expansion");
+    expect_selected(0);
+    api->set_property(grid, "linnet/candidate_next_row_v1", "5");
+    if (!api->process_key(grid, std::get<0>(key_case), 0)) {
+      Fail("expanded paging did not reach the next row");
+    }
+    expect_selected(5);
+    api->set_property(grid, "linnet/candidate_previous_row_v1", "0");
+    if (!api->process_key(grid, std::get<2>(key_case), 0)) {
+      Fail("expanded paging did not return within the first compact page");
+    }
+    expect_selected(0);
+    api->destroy_session(grid);
   }
 }
 

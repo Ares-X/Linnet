@@ -88,6 +88,16 @@ Action 构建、签名并检查发布文件，只允许推进预览频道。此�
 正式版仍须在已完成验收的源码上使用完整收据申请新候选。
 `archive` 只构建、签名、打包及检查最终文件，不隐式调用候选运行测试；需要这些
 检查时显式运行 `make community-verified`，不要把它当作无需测试的打包命令。
+
+针对已审阅的小范围修复，维护者可在同一 `build/linnet-source-verification.json`
+记录 format 3 的范围验收：绑定 `source_tree`，在 `scope` 说明改动与验收范围，
+`checks` 逐项记录实际执行的 `command`、`result: PASS` 和 `evidence`，
+`not_exercised` 明列未执行或用户明确不要求重复的项目。这不是全量通过收据；
+已通过且实现未再变化的相关检查可复用，说明对应证据即可。使用原有 `candidate`
+命令及唯一 Action 构建产物，正式 `authorize` 前仍须完成精确产物的虚拟机实际输入
+和升级验收。用户要求不重复本机全量 UI 时，不运行本机 XCUITest，也不将其记为 PASS。
+签名、版本、完整性和远端发布资产检查不因范围验收而减少。
+
 同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
 标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
 `community-signing` Environment 中的 P12 和密码创建临时 Keychain，并只运行一次

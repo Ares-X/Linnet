@@ -50,6 +50,8 @@ using namespace smart_english_domain;
 constexpr char kSuppressFollowingSpaceProperty[] = "linnet/suppress_following_space_v1",
                kPredictionNavigationProperty[] = "linnet/prediction_navigation_v1",
                kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1",
+               kCandidatePreviousRowProperty[] = "linnet/candidate_previous_row_v1",
+               kCandidateNextRowProperty[] = "linnet/candidate_next_row_v1",
                kCandidateExpansionRequestProperty[] =
                    "linnet/candidate_expansion_request_v1";
 constexpr std::size_t kPinyinKeyLimit = 64,
@@ -370,8 +372,8 @@ class LinnetInteractionProcessor : public Processor {
     const bool next =
         key.keycode() == XK_bracketright || key.keycode() == XK_equal;
     if (!previous && !next) return kNoop;
-    // A paging symbol owns the key only when it can move to a real adjacent
-    // page. Every boundary case stays on the normal punctuation/input path.
+    // A paging symbol owns the key only when there is a real adjacent row
+    // (or compact page). Boundaries keep normal punctuation/input behavior.
     if (!context || context->composition().empty()) return kNoop;
 
     Segment& segment = context->composition().back();
@@ -381,8 +383,19 @@ class LinnetInteractionProcessor : public Processor {
     const int page_size = engine_->schema()->page_size();
     if (page_size <= 0) return kNoop;
     const size_t selected = segment.selected_index;
+    const string row_target = context->get_property(
+        previous ? kCandidatePreviousRowProperty : kCandidateNextRowProperty);
     size_t target = 0;
-    if (previous) {
+    if (!row_target.empty() && row_target != "expand") {
+      int row_index = -1;
+      std::istringstream(row_target) >> row_index;
+      if (row_index < 0 || static_cast<size_t>(row_index) == selected ||
+          segment.menu->Prepare(static_cast<size_t>(row_index) + 1) <=
+              static_cast<size_t>(row_index)) {
+        return kNoop;
+      }
+      target = static_cast<size_t>(row_index);
+    } else if (previous) {
       if (selected < static_cast<size_t>(page_size)) return kNoop;
       target = selected - static_cast<size_t>(page_size);
     } else {
@@ -398,7 +411,9 @@ class LinnetInteractionProcessor : public Processor {
       target = (std::min)(selected + static_cast<size_t>(page_size),
                           static_cast<size_t>(candidate_count - 1));
     }
-    context->Highlight(target);
+    // The first key opens the grid without jumping by the compact page size.
+    // Subsequent keys use the host's actual adjacent visual row.
+    if (row_target != "expand") context->Highlight(target);
     segment.tags.insert("paging");
     context->set_property(kCandidateExpansionRequestProperty, "1");
     return kAccepted;

@@ -2052,6 +2052,10 @@ struct LinnetCandidateWindowInteractionTests {
             let selectedCell = geometry.first { $0.itemIndex == highlighted }!
             let activeRow = geometry.filter { abs($0.cellFrame.midY - selectedCell.cellFrame.midY) < 0.5 }
               .sorted { $0.cellFrame.minX < $1.cellFrame.minX }
+            if activeRow.first?.itemIndex == 0 {
+              require(panel.expandedCandidateNavigationTarget(up: true) == highlighted,
+                "previous-row navigation moved sideways within the first row")
+            }
             for (offset, cell) in activeRow.enumerated() {
               require(panel.expandedCandidateSelectionTarget(number: offset + 1) == cell.itemIndex,
                 "number key did not select its visible active-row candidate")

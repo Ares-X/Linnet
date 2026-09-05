@@ -58,6 +58,25 @@ source_tree() (
 verify_receipt() {
   ruby -rjson -e '
     receipt = JSON.parse(STDIN.read)
+    if receipt["format"] == 3
+      # Record actual checks and omissions, never an unrun full-suite PASS.
+      # Installed acceptance still precedes byte-bound publication approval.
+      abort "invalid scoped source acceptance" unless receipt.keys.sort ==
+        %w[checks format not_exercised scope source_tree] &&
+        receipt["source_tree"] == ARGV.fetch(0) &&
+        receipt["source_tree"].match?(/\A[0-9a-f]{40}\z/) &&
+        receipt["scope"].is_a?(String) && !receipt["scope"].strip.empty? &&
+        receipt["checks"].is_a?(Array) && !receipt["checks"].empty? &&
+        receipt["checks"].all? { |check|
+          check.is_a?(Hash) && check.keys.sort == %w[command evidence result] &&
+          check["result"] == "PASS" && %w[command evidence].all? { |key|
+            check[key].is_a?(String) && !check[key].strip.empty?
+          }
+        } && receipt["not_exercised"].is_a?(Array) &&
+        receipt["not_exercised"].all? { |value| value.is_a?(String) && !value.strip.empty? }
+      puts "PASS (scoped maintainer review; see recorded omissions)"
+      exit
+    end
     if receipt["format"] == 2
       abort "preview-only acceptance cannot authorize a stable release" unless ARGV.fetch(1) == "candidate"
       abort "invalid preview acceptance" unless receipt.keys.sort ==
