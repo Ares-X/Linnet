@@ -87,12 +87,14 @@ enum LinnetDirectoryDelta {
     return .base
   }
 
-  static func apply(base: URL, delta: URL, output: URL) throws {
+  // Language packs use their catalog-bound manifest and file hashes instead of
+  // filesystem identity. Core and backup callers retain exact tree verification.
+  static func apply(base: URL, delta: URL, output: URL, verifyTreeIdentity: Bool = true) throws {
     let work = try scratch(beside: output)
     defer { try? FileManager.default.removeItem(at: work) }
     let batch = work.appending(path: "payload.batch")
     let header = try read(delta, extracting: batch)
-    guard try digest(base) == header.baseSHA256 else {
+    if verifyTreeIdentity, try digest(base) != header.baseSHA256 {
       throw Failure.invalid("installed baseline does not match")
     }
     try FileManager.default.createDirectory(
@@ -100,7 +102,8 @@ enum LinnetDirectoryDelta {
     do {
       try clone(base, to: output)
       try rsync(["--read-batch=\(batch.path)", output.path + "/"])
-      guard try digest(output) == header.targetSHA256, try digest(base) == header.baseSHA256 else {
+      if verifyTreeIdentity,
+        try digest(output) != header.targetSHA256 || digest(base) != header.baseSHA256 {
         throw Failure.invalid("reconstructed target or original baseline differs")
       }
     } catch {

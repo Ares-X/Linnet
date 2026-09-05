@@ -5,7 +5,9 @@
 # a frozen candidate is copied to a disposable standard App path because
 # production Settings intentionally recognizes only installed `.app` Hosts.
 # --ui-test runs SettingsUITests with a separate UAT bundle identity and the
-# one fixed home required by the UI-test contract. Installed-product UAT is a
+# one fixed home required by the UI-test contract. This isolates files, not
+# the desktop: XCUITest controls the login session's mouse, keyboard and focus.
+# Run it only on a dedicated test desktop. Installed-product UAT is a
 # later artifact boundary and is not claimed by either mode.
 
 set -euo pipefail

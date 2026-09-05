@@ -3,9 +3,9 @@ import Foundation
 
 /// Settings-only owner for choosing how canonical Linnet release URLs are fetched.
 ///
-/// The canonical catalog owns GitHub URLs and pack identity. A mirror changes
-/// only the pack request route; the catalog always comes directly from the
-/// official HTTPS endpoint, and downloaded packs are verified by their owners.
+/// The canonical catalog owns GitHub URLs and artifact identity. A mirror changes
+/// the Core and language-data request route; the catalog always comes directly
+/// from the official HTTPS endpoint, and artifacts are verified by their owners.
 struct LinnetSettingsDownloadSource: Equatable, Sendable {
   enum Mode: String, CaseIterable, Sendable {
     case github

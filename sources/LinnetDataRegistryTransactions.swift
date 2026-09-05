@@ -228,9 +228,9 @@ extension LinnetDataRegistry {
       switch transfer {
       case .delta(_, let base):
         let baseRoot = rootDirectory.appending(path: base.relativePath, directoryHint: .isDirectory)
-        let baseManifest = try readOwnedFile(baseRoot.appending(path: "manifest.json"))
-        guard Self.sha256(baseManifest) == base.manifestSHA256 else { throw Failure.invalidActiveState }
-        try LinnetDirectoryDelta.apply(base: baseRoot, delta: resolvedPackage, output: partial)
+        guard try verifiedInstalledPack(at: baseRoot) == base else { throw Failure.invalidActiveState }
+        try LinnetDirectoryDelta.apply(
+          base: baseRoot, delta: resolvedPackage, output: partial, verifyTreeIdentity: false)
         let staged = try verifiedInstalledManifest(at: partial)
         (manifest, manifestData) = (staged.manifest, staged.manifestData)
       case .complete:

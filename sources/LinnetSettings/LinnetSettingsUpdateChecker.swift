@@ -10,6 +10,7 @@ private let linnetUpdateLogger = Logger(
 protocol LinnetCoreDownloading: Sendable {
   func download(
     _ core: LinnetDataChannel.Core,
+    source: LinnetSettingsDownloadSource,
     progress: @escaping @Sendable (Double) -> Void
   ) async throws -> URL
 }
@@ -26,6 +27,7 @@ struct LinnetCoreDownloader: LinnetCoreDownloading {
 
   func download(
     _ core: LinnetDataChannel.Core,
+    source: LinnetSettingsDownloadSource,
     progress: @escaping @Sendable (Double) -> Void
   ) async throws -> URL {
     let root = try resolvedDownloadsDirectory()
@@ -41,7 +43,7 @@ struct LinnetCoreDownloader: LinnetCoreDownloading {
       path: core.artifactURL.lastPathComponent,
       directoryHint: .notDirectory
     )
-    let transport = LinnetSettingsDownloadTransport(source: .direct)
+    let transport = LinnetSettingsDownloadTransport(source: source)
     try await transport.downloadArtifact(
       from: core.artifactURL,
       expectedBytes: core.bytes,
@@ -419,7 +421,7 @@ extension LinnetSettingsUpdateChecker {
     startCheck(replacingCurrent: true)
   }
 
-  func downloadCoreUpdate(_ core: LinnetDataChannel.Core) {
+  func downloadCoreUpdate(_ core: LinnetDataChannel.Core, source: LinnetSettingsDownloadSource) {
     if case .downloading(let downloadingCore, _) = coreDownloadState,
       downloadingCore == core {
       return
@@ -431,7 +433,7 @@ extension LinnetSettingsUpdateChecker {
     coreDownloadTask = Task { [weak self] in
       guard let self else { return }
       do {
-        let file = try await coreDownloader.download(core) { [weak self] progress in
+        let file = try await coreDownloader.download(core, source: source) { [weak self] progress in
           Task { @MainActor [weak self] in
             self?.recordCoreDownloadProgress(
               progress, core: core, cycle: activeCycle)

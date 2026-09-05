@@ -179,7 +179,7 @@
     "Open GH-Proxy Service Information" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"打开 GH-Proxy 服务说明"}}}},
     "This built-in mirror is unavailable. Choose another source before updating." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"此内置镜像已不可用。更新前请选择其他下载来源。"}}}},
     "GitHub Direct is the default. Choose a mirror only when direct downloads are unreliable." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"默认使用 GitHub 直连。仅在直连下载不稳定时选择镜像。"}}}},
-    "The selected source is used only for future language-data downloads. Linnet never switches or falls back to another source automatically." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"所选来源仅用于之后的语言数据下载；Linnet 不会自动切换或回退到其他来源。"}}}},
+    "The selected source applies to future Core and language-data downloads. Update checks still use GitHub directly. Linnet never switches sources automatically." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"所选来源用于之后的核心及语言数据下载。检查更新仍直接访问 GitHub；Linnet 不会自动切换下载来源。"}}}},
     "Linnet verifies every downloaded release pack before activation." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"Linnet 会在启用前验证每个下载的发布包。"}}}},
     "Choose and save a valid download source before checking for updates." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"检查更新前，请选择并保存有效的下载来源。"}}}},
     "Data services are unavailable." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"数据服务当前不可用。"}}}},

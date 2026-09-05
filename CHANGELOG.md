@@ -4,6 +4,11 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.17 — 预览版
+
+- 修复语言数据差分更新因普通目录读写权限不同而被误拒绝的问题；仍检查词包内容是否完整，可重试已有的语言数据更新。
+- 核心更新下载和重试现在使用设置中选择的下载源，与语言数据更新保持一致。
+
 ## 0.1.16 — 预览版
 
 ### Smart English
