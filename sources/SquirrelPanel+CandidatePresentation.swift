@@ -161,7 +161,19 @@ extension SquirrelPanel {
     item.target = self
     item.representedObject = (publication, candidateSnapshot.items[itemIndex].absoluteIndex)
     menu.addItem(item)
+    let add = NSMenuItem(
+      title: NSLocalizedString("Add to Custom Words…", comment: "Candidate context menu"),
+      action: #selector(addCandidateToCustomWords(_:)), keyEquivalent: "")
+    add.target = self
+    add.representedObject = (publication, candidateSnapshot.items[itemIndex].text)
+    menu.addItem(add)
     return menu
+  }
+
+  @objc func addCandidateToCustomWords(_ item: NSMenuItem) {
+    guard let (publication, value) = item.representedObject as? (Publication, String),
+      publicationIsCurrent(publication) else { return }
+    NSApp.squirrelAppDelegate.presentSettings(customWord: value)
   }
 
   @objc func forgetCandidateLearning(_ item: NSMenuItem) {

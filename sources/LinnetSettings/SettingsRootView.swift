@@ -39,6 +39,7 @@ struct SettingsRootView: View {
   @State private var pendingBackupRemoval: LinnetBackupStore.BackupRecord?
   @State private var pendingLegacyImport: SettingsDataCoordinator.LegacyImportCandidate?
   @State private var pendingCloudBackupUpload = false
+  @State private var selectedTab = 0
 
   var body: some View {
     VStack(spacing: 0) {
@@ -57,7 +58,7 @@ struct SettingsRootView: View {
       if model.diagnostics == nil { model.refreshDiagnostics() }
     }
     .confirmationDialog(
-      "Upload an incremental recovery backup?",
+      "Upload a recovery backup?",
       isPresented: $pendingCloudBackupUpload,
       titleVisibility: .visible
     ) {
@@ -65,7 +66,7 @@ struct SettingsRootView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text(
-        "The first upload creates a full recovery baseline. Later uploads add an immutable delta only. Local data is not changed."
+        "Back up personal dictionaries and learned words to iCloud Drive. Only changed content is uploaded; local data is not changed."
       )
     }
     .confirmationDialog(
@@ -174,6 +175,13 @@ struct SettingsRootView: View {
     }
     .background(SettingsWindowCloseGuard(model: model, locale: interfaceLanguage.locale))
     .onAppear { registerApplicationDelegate() }
+    .onOpenURL { url in
+      guard let value = LinnetSettingsContract.customWordValue(from: url) else { return }
+      // Keep any unsaved edits. The new word is a draft requiring an explicit code and Apply.
+      model.configuration.personalDraft.customWords.insert(.init(value: value, code: ""), at: 0)
+      selectedTab = 2
+      (NSApp.delegate as? SettingsApplicationDelegate)?.requestSettingsWindowPresentation(in: NSApp)
+    }
     .onChange(of: interfaceLanguageRawValue) { _ in registerApplicationDelegate() }
     .environment(\.locale, interfaceLanguage.locale)
   }
@@ -200,13 +208,16 @@ struct SettingsRootView: View {
   }
 
   private var tabs: some View {
-    TabView {
+    TabView(selection: $selectedTab) {
       AppearanceTabView(model: model)
         .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
+        .tag(0)
       InputTabView(model: model)
         .tabItem { Label("Input", systemImage: "keyboard") }
+        .tag(1)
       DictionaryTabView(model: model)
         .tabItem { Label("Dictionary", systemImage: "text.book.closed") }
+        .tag(2)
       DataTabView(
         model: model,
         updateChecker: model.updateChecker,
@@ -220,6 +231,7 @@ struct SettingsRootView: View {
       .tabItem {
         Label("Data & Updates", systemImage: "arrow.triangle.2.circlepath")
       }
+      .tag(3)
     }
   }
 

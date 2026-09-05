@@ -82,6 +82,11 @@ ruby -e '
   )
 ' "${shared}/default.yaml"
 cp data/linnet/linnet_algebra.yaml "${shared}/linnet_algebra.yaml"
+if [[ "${runtime_probe}" == --mixed-input-probe ]]; then
+  # Contextual ranking must use the installed product's LTS model, not the
+  # compact build-time projection retained in the generated data/plum cache.
+  printf 'grammar:\n  language: wanxiang-lts-zh-hans\n' > "${shared}/linnet_grammar_active.yaml"
+fi
 ruby -e '
   path = ARGV.fetch(0)
   source = File.binread(path)

@@ -41,10 +41,38 @@ extension DataTabView {
       .font(.caption2)
       .foregroundStyle(.secondary)
 
+      if model.cloudSyncEnabled {
+        LabeledContent("Last successful learning sync on this Mac") {
+          if let date = model.cloudSyncStatus?.lastSuccess {
+            Text(date, format: .dateTime.year().month().day().hour().minute())
+          } else {
+            Text("No successful sync recorded")
+          }
+        }
+        if let status = model.cloudSyncStatus {
+          switch status.result {
+          case .learningSyncCompleted:
+            Text("This Mac has finished merging and exporting learning data. iCloud may still be transferring it to your other Macs.")
+              .font(.caption).foregroundStyle(.secondary)
+          case .learningSyncDeferred:
+            Text("Some learning data is still pending. Finish typing, then use Sync Learning Now to retry.")
+              .font(.caption).foregroundStyle(.orange)
+          case .learningSyncUnavailable:
+            Text("The last sync could not access iCloud Drive. Check iCloud Drive in System Settings, then retry.")
+              .font(.caption).foregroundStyle(.orange)
+          case .learningSyncFailed:
+            Text("The last learning sync failed. Your local learning is kept; use Sync Learning Now to retry.")
+              .font(.caption).foregroundStyle(.orange)
+          default:
+            EmptyView()
+          }
+        }
+      }
+
       HStack {
         Button("Sync Learning Now") { model.synchronizeLearningNow() }
           .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
-        Button("Upload Incremental Backup…") { pendingCloudBackupUpload = true }
+        Button("Upload Recovery Backup…") { pendingCloudBackupUpload = true }
           .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
         Button("Review Recovery Backup…") {
           Task {

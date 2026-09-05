@@ -11,6 +11,23 @@ enum LinnetSettingsContract {
   static let horizontalExpandedGridRange = 3...5
 
   static let englishSchemaID = "linnet_en"
+
+  // A draft-only Settings entry point. Opening a URL never saves personal data.
+  static func customWordURL(value: String) -> URL? {
+    var components = URLComponents()
+    components.scheme = "linnet-settings"
+    components.host = "custom-word"
+    components.queryItems = [URLQueryItem(name: "value", value: value)]
+    return components.url
+  }
+
+  static func customWordValue(from url: URL) -> String? {
+    guard url.scheme == "linnet-settings", url.host == "custom-word",
+      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+      let value = components.queryItems?.first(where: { $0.name == "value" })?.value,
+      !value.isEmpty else { return nil }
+    return value
+  }
   /// The durable native learning-data logical view required before a Host may
   /// pause and release its database to Settings. This is not an app ABI.
   static let nativeLearningDataVersion: UInt = 1
@@ -245,6 +262,36 @@ enum LinnetSettingsContract {
   private static let cloudSyncEnabledKey = "cloud_sync.enabled_v1"
   private static let legacyCloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
   private static let cloudSyncLastAttemptKey = "cloud_sync.last_attempt_v1"
+  private static let cloudSyncStatusKey = "cloud_sync.status_v1"
+  static let cloudSyncStatusChanged = Notification.Name("Linnet.learningSyncStatusChanged")
+
+  struct CloudSyncStatus {
+    let result: RuntimeReplyCode
+    let finishedAt: Date
+    let lastSuccess: Date?
+  }
+
+  static func cloudSyncStatus(startingAt bundle: Bundle = .main) -> CloudSyncStatus? {
+    guard let stored = hostDefaults(startingAt: bundle)?.dictionary(forKey: cloudSyncStatusKey),
+      let raw = stored["result"] as? String, let result = RuntimeReplyCode(rawValue: raw),
+      let finishedAt = stored["finishedAt"] as? Date else { return nil }
+    return .init(result: result, finishedAt: finishedAt, lastSuccess: stored["lastSuccess"] as? Date)
+  }
+
+  @discardableResult
+  static func setCloudSyncResult(
+    _ result: RuntimeReplyCode, at date: Date = Date(), startingAt bundle: Bundle = .main
+  ) -> Bool {
+    guard let defaults = hostDefaults(startingAt: bundle) else { return false }
+    var stored = defaults.dictionary(forKey: cloudSyncStatusKey) ?? [:]
+    stored["result"] = result.rawValue
+    stored["finishedAt"] = date
+    if result == .learningSyncCompleted { stored["lastSuccess"] = date }
+    defaults.set(stored, forKey: cloudSyncStatusKey)
+    DistributedNotificationCenter.default().postNotificationName(
+      cloudSyncStatusChanged, object: nil, userInfo: nil, deliverImmediately: true)
+    return true
+  }
   private static let inputMethodConnectionKey = "InputMethodConnectionName"
   static func hostBundle(startingAt bundle: Bundle = .main) -> Bundle? {
     if isInputMethod(bundle) {

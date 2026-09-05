@@ -1002,6 +1002,7 @@
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "resources/Settings-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "$(LINNET_PRODUCT_NAME)";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
@@ -1033,6 +1034,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "resources/Settings-Info.plist";
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = "$(LINNET_PRODUCT_NAME)";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";

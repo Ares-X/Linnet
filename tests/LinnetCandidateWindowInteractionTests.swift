@@ -1,6 +1,18 @@
 import AppKit
 import Foundation
 
+final class CandidateSettingsStub {
+  var customWords: [String] = []
+  func presentSettings(customWord: String?) {
+    if let customWord { customWords.append(customWord) }
+  }
+}
+
+extension NSApplication {
+  private static let candidateSettings = CandidateSettingsStub()
+  var squirrelAppDelegate: CandidateSettingsStub { Self.candidateSettings }
+}
+
 extension NSRange {
   static let empty = NSRange(location: NSNotFound, length: 0)
 }
@@ -689,17 +701,27 @@ struct LinnetCandidateWindowInteractionTests {
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true, controller: controller)
     let point = panel.view.candidateInteractionFrames[1].center
-    guard let item = panel.candidateContextMenu(at: point)?.items.first else {
+    guard let menu = panel.candidateContextMenu(at: point),
+      let item = menu.items.first, menu.items.count == 2 else {
       failures.append("candidate context menu missing")
       return
     }
     panel.forgetCandidateLearning(item)
     require(controller.forgottenCandidateIndices == [102], "forget did not target clicked candidate")
     require(controller.selectedCandidateIndices.isEmpty, "forget committed a candidate")
+    let add = menu.items[1]
+    let before = NSApp.squirrelAppDelegate.customWords.count
+    panel.addCandidateToCustomWords(add)
+    require(NSApp.squirrelAppDelegate.customWords.last == "乙",
+      "custom word draft did not use the clicked candidate text")
+    require(controller.selectedCandidateIndices.isEmpty, "custom word action committed a candidate")
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true, controller: controller)
     panel.forgetCandidateLearning(item)
+    panel.addCandidateToCustomWords(add)
+    require(NSApp.squirrelAppDelegate.customWords.count == before + 1,
+      "stale menu opened a custom word draft")
     require(controller.forgottenCandidateIndices == [102], "stale menu forgot a new candidate")
     require(panel.candidateContextMenu(at: NSPoint(x: -10, y: -10)) == nil,
       "empty candidate area has a forget action")

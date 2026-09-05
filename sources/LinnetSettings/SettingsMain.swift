@@ -51,6 +51,7 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var cloudSyncEnabled = false
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
   @Published private(set) var cloudSyncPreparing = false
+  @Published var cloudSyncStatus: LinnetSettingsContract.CloudSyncStatus?
   @Published var cloudRecoveryRepairConfirmationRequired = false
   @Published var languageDataRepairTarget: SettingsLanguageDataUpdateTarget?
 
@@ -140,6 +141,7 @@ final class SettingsModel: ObservableObject {
     personalValidation = .valid(initialConfiguration.personalDraft)
     legacyImportState = .unavailable
     cloudSyncEnabled = LinnetSettingsContract.cloudSyncEnabled(startingAt: bundle)
+    cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus(startingAt: bundle)
     schedulePersonalValidation()
     updateObservation = updateChecker.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
@@ -351,7 +353,10 @@ extension SettingsModel {
     cloudSyncPreparing = true
     Task { [weak self] in
       guard let self else { return }
-      defer { self.cloudSyncPreparing = false }
+      defer {
+        self.cloudSyncPreparing = false
+        self.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
+      }
       do {
         try await self.coordinator.synchronizeLearningNow()
         self.status = .cloudSyncCompleted

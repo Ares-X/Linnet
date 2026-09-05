@@ -2,6 +2,17 @@ import AppKit
 import InputMethodKit
 import os
 
+extension LinnetRimeSyncResult {
+  var replyCode: LinnetSettingsContract.RuntimeReplyCode {
+    switch self {
+    case .completed: .learningSyncCompleted
+    case .deferred: .learningSyncDeferred
+    case .failed: .learningSyncFailed
+    case .unavailable: .learningSyncUnavailable
+    }
+  }
+}
+
 private let linnetRuntimeLogger = Logger(
   subsystem: Bundle.main.bundleIdentifier ?? "Linnet",
   category: "Runtime"
@@ -380,30 +391,25 @@ extension SquirrelApplicationDelegate {
         guard let self else { return }
         let health = runtimeHealth()
         let status: LinnetSettingsContract.RuntimeStatus
-        let code: LinnetSettingsContract.RuntimeReplyCode
         let detail: String
         switch result {
         case .completed:
           status = .running
-          code = .learningSyncCompleted
           detail = "Immediate learning synchronization completed."
         case .deferred:
           status = .degraded
-          code = .learningSyncDeferred
           detail = "Immediate learning synchronization was deferred without losing pending input."
         case .unavailable:
           status = .rejected
-          code = .learningSyncUnavailable
           detail = "The learning synchronization location is unavailable."
         case .failed:
           status = .failed
-          code = .learningSyncFailed
           detail = "Immediate learning synchronization failed."
         }
         transactionReply(.init(
           transactionID: request.transactionID,
           status: status,
-          code: code,
+          code: result.replyCode,
           detail: detail,
           health: health))
       }

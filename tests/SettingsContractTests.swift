@@ -11,6 +11,12 @@ struct SettingsContractTests {
   static func main() {
     do {
       testPinyinReverseLookupExamples()
+      let value = "C++ / 接口 & WAF?#\n长词"
+      guard let url = LinnetSettingsContract.customWordURL(value: value),
+        LinnetSettingsContract.customWordValue(from: url) == value,
+        LinnetSettingsContract.customWordValue(from: URL(string: "https://custom-word?value=test")!) == nil,
+        LinnetSettingsContract.customWordValue(from: URL(string: "linnet-settings://custom-word")!) == nil
+      else { fail("candidate draft URL lost text or accepted an unrelated action") }
       testCoreActivationGate()
       testHostPreferenceDomainSelection()
       try testLegacyRuntimeHealthWithoutIdentity()
@@ -340,6 +346,18 @@ struct SettingsContractTests {
     }
 
     defaults.removeObject(forKey: cloudSyncEnabledKey)
+    guard LinnetSettingsContract.cloudSyncStatus(startingAt: settings) == nil else {
+      fail("an attempt timestamp was misrepresented as successful sync")
+    }
+    let finishedAt = attemptedAt.addingTimeInterval(30)
+    let failedAt = finishedAt.addingTimeInterval(60)
+    guard LinnetSettingsContract.setCloudSyncResult(.learningSyncCompleted, at: finishedAt, startingAt: host),
+      LinnetSettingsContract.cloudSyncStatus(startingAt: settings)?.lastSuccess == finishedAt,
+      LinnetSettingsContract.setCloudSyncResult(.learningSyncFailed, at: failedAt, startingAt: host),
+      let status = LinnetSettingsContract.cloudSyncStatus(startingAt: settings),
+      status.result == .learningSyncFailed, status.finishedAt == failedAt,
+      status.lastSuccess == finishedAt
+    else { fail("sync outcome persistence lost the last success or concealed failure") }
     defaults.set(Data("legacy-bookmark".utf8), forKey: legacyCloudSyncFolderBookmarkKey)
     guard LinnetSettingsContract.cloudSyncEnabled(startingAt: settings),
       defaults.bool(forKey: cloudSyncEnabledKey),

@@ -1034,23 +1034,6 @@ index aef6217..ebce6e7 100644
    return exhausted();
  }
  
-@@ -687,7 +827,15 @@ void ScriptTranslation::EnrollEntries(
-       DictEntryList& homophones = entries_by_end_pos[y.first];
-       while (homophones.size() < translator_->max_homophones() &&
-              !y.second.exhausted()) {
--        homophones.push_back(y.second.Peek());
-+        auto entry = y.second.Peek();
-+        // Uppercase components are supplied only by the user's explicit span.
-+        // Dictionary spellings must not turn lowercase pinyin into acronyms.
-+        if (!translator_->sentence_with_uppercase_syllable() ||
-+            std::none_of(entry->text.begin(), entry->text.end(), [](char byte) {
-+              return byte >= 'A' && byte <= 'Z';
-+            })) {
-+          homophones.push_back(entry);
-+        }
-         if (!y.second.Next())
-           break;
-       }
 @@ -697,7 +845,8 @@ void ScriptTranslation::EnrollEntries(
  
  WordGraph ScriptTranslation::PrepareForMakingSentence(

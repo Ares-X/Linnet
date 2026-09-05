@@ -1085,17 +1085,6 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
               entity.first,
           false);
     }
-    const RimeSessionId lowercase =
-        CreateSchemaSession(api, profile.first.c_str());
-    Enter(api, lowercase, profile.second + "ai" + profile.second);
-    const auto lowercase_candidates = CandidateOrigins(lowercase);
-    if (std::any_of(lowercase_candidates.begin(), lowercase_candidates.end(),
-                    [](const auto& candidate) {
-                      return candidate.type == "linnet_mixed";
-                    })) {
-      Fail(profile.first + " inferred an uppercase entity from lowercase input");
-    }
-    api->destroy_session(lowercase);
     for (const char* input : {"ai", "cpu"}) {
       const RimeSessionId standalone_entity =
           CreateSchemaSession(api, profile.first.c_str());
@@ -1289,7 +1278,6 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
   api->destroy_session(ambiguous);
 
   for (const char* input : {
-           "liaojieaijishu", "xuexicsjiting", "csai",
            "jintiankaihuigaidaoxiawusandian", "mingtianzaoshangyaoqujichang",
            "qingbawenjianfadaowodeyouxiang", "woxiangzhidaojutiyuanyin"}) {
     const RimeSessionId lowercase =
@@ -1303,6 +1291,29 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
       Fail(std::string("lowercase sentence inferred an uppercase entity: ") + input);
     }
     api->destroy_session(lowercase);
+  }
+
+  // Lowercase acronyms may compete on the native sentence score, without
+  // borrowing the preserved candidate slot reserved for explicit uppercase.
+  for (const auto& sample :
+       std::array<std::pair<const char*, const char*>, 3>{{
+           {"jianchacpuzhanyong", "检查CPU占用"},
+           {"xiugaidnsshezhi", "修改DNS设置"},
+           {"qingqiushiyonghttpsxieyi", "请求使用HTTPS协议"},
+       }}) {
+    const RimeSessionId inferred = CreateSchemaSession(api, "linnet_zh_pinyin");
+    Enter(api, inferred, sample.first);
+    const auto candidates = CandidateOrigins(inferred);
+    if (candidates.empty() || candidates.front().type != "linnet_mixed" ||
+        BaseText(candidates.front().text) != sample.second) {
+      Fail(std::string("native scoring lost a contextual lowercase acronym: ") +
+           sample.first);
+    }
+    if (!api->process_key(inferred, '1', 0) ||
+        BaseText(TakeCommit(api, inferred)) != sample.second) {
+      Fail("lowercase acronym sentence could not be selected and committed");
+    }
+    api->destroy_session(inferred);
   }
 
   for (const char* input : {"https://api.example.com", "v0.1.18", "URLSession",
