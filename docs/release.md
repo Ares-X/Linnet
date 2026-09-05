@@ -86,6 +86,8 @@ candidate Action 不补跑产品验收。独立应用身份和数据目录不等
 为当前 tree 记录 `preview_only` 与 `NOT_EXERCISED`，不伪造通过项；随后仍由同一
 Action 构建、签名并检查发布文件，只允许推进预览频道。此记录不能授权正式发布；
 正式版仍须在已完成验收的源码上使用完整收据申请新候选。
+`archive` 只构建、签名、打包及检查最终文件，不隐式调用候选运行测试；需要这些
+检查时显式运行 `make community-verified`，不要把它当作无需测试的打包命令。
 同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
 标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
 `community-signing` Environment 中的 P12 和密码创建临时 Keychain，并只运行一次
