@@ -161,7 +161,7 @@ extension SettingsModel {
           throw LinnetDataRegistry.Failure.invalidActiveState
         }
         let update = try registry.beginDataChannelUpdate(
-          accepting: catalog, edition: requestedEdition)
+          accepting: catalog, edition: requestedEdition, allowCompleteRepair: allowCompleteRepair)
         let downloadDirectory = update.downloadDirectory
         defer { try? registry.cancelDataChannelUpdate(transactionID: update.transactionID) }
         var targetPacks: [LinnetDataRegistry.ActivePack] = []
@@ -185,7 +185,9 @@ extension SettingsModel {
             try await transport.downloadArtifact(from: url, expectedBytes: bytes, to: package)
             try Task.checkCancellation()
             await self?.setLanguageDataUpdateState(target, .verifying)
-            let staged = try registry.verifyAndStagePack(package: package, artifact: artifact, transfer: transfer)
+            let staged = try registry.verifyAndStagePack(
+              package: package, artifact: artifact, transfer: transfer,
+              allowCompleteRepair: allowCompleteRepair)
             targetPacks.append(staged)
           } catch {
             try Task.checkCancellation()

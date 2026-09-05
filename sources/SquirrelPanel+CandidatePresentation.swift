@@ -148,6 +148,27 @@ extension SquirrelPanel {
     candidateInteraction.beginPress(view.click(at: mousePosition(for: event)))
     publishCandidatePointerFeedback()
   }
+
+  func candidateContextMenu(at point: NSPoint) -> NSMenu? {
+    guard let publication, publicationIsCurrent(publication),
+      case .candidate(let itemIndex) = view.click(at: point),
+      let candidateSnapshot, candidateSnapshot.items.indices.contains(itemIndex)
+    else { return nil }
+    let menu = NSMenu()
+    let item = NSMenuItem(
+      title: NSLocalizedString("Forget Learning for This Candidate", comment: "Candidate context menu"),
+      action: #selector(forgetCandidateLearning(_:)), keyEquivalent: "")
+    item.target = self
+    item.representedObject = (publication, candidateSnapshot.items[itemIndex].absoluteIndex)
+    menu.addItem(item)
+    return menu
+  }
+
+  @objc func forgetCandidateLearning(_ item: NSMenuItem) {
+    guard let (publication, absoluteIndex) = item.representedObject as? (Publication, Int),
+      publicationIsCurrent(publication) else { return }
+    inputController?.forgetCandidate(absoluteIndex: absoluteIndex)
+  }
   func finishCandidatePress(_ event: NSEvent) {
     guard let publication, publicationIsCurrent(publication),
       let inputController

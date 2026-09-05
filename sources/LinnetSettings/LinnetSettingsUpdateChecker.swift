@@ -73,6 +73,39 @@ struct LinnetCoreDownloader: LinnetCoreDownloading {
 /// orchestration. The running Host remains the sole exit-safety authority.
 @MainActor
 final class LinnetSettingsUpdateChecker: ObservableObject {
+  enum CheckFailure: Equatable {
+    case network, conflictingPack, invalidCatalog, unavailable
+
+    init(_ error: Error) {
+      if let error = error as? LinnetDataChannel.Failure {
+        switch error {
+        case .conflictingPack: self = .conflictingPack
+        case .invalidCatalog: self = .invalidCatalog
+        default: self = .unavailable
+        }
+      } else if let error = error as? URLError,
+        [.notConnectedToInternet, .timedOut, .networkConnectionLost,
+         .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(error.code) {
+        self = .network
+      } else {
+        self = .unavailable
+      }
+    }
+
+    var message: String {
+      switch self {
+      case .network:
+        "Could not connect to the update service. Check your network or proxy settings and try again."
+      case .conflictingPack:
+        "Installed language-pack metadata differs from this channel for the same version. Your data is unchanged. Use Repair Language Update below to download the channel's packs."
+      case .invalidCatalog:
+        "The update catalog is invalid. Your installation is unchanged. Try again later; if this persists, contact the maintainer."
+      case .unavailable:
+        "Could not complete the update check. Try again later; if this persists, contact the maintainer."
+      }
+    }
+  }
+
   enum UpdateChannel: String, CaseIterable, Identifiable, Sendable {
     case stable
     case preview
@@ -189,7 +222,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
 
   @Published private(set) var availability: LinnetDataChannel.UpdateAvailability?
   @Published private(set) var active = false
-  @Published private(set) var failed = false
+  @Published private(set) var failure: CheckFailure?
   @Published private(set) var installedIdentity: LinnetSettingsContract.ProductIdentity?
   @Published private(set) var runtimeVersionState: RuntimeVersionState =
     .checking(installed: nil)
@@ -268,7 +301,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     task?.cancel()
     cycle &+= 1
     active = false
-    failed = false
+    failure = nil
     availability = nil
     resetCoreDownload()
     updateChannel = channel
@@ -369,7 +402,7 @@ extension LinnetSettingsUpdateChecker {
     cycle &+= 1
     let activeCycle = cycle
     active = true
-    failed = false
+    failure = nil
     availability = nil
     guard let installedIdentity else {
       active = false
@@ -399,7 +432,7 @@ extension LinnetSettingsUpdateChecker {
         linnetUpdateLogger.error(
           "Update check failed: \(error.localizedDescription, privacy: .private)"
         )
-        await self?.finishFailure(cycle: activeCycle)
+        await self?.finishFailure(CheckFailure(error), cycle: activeCycle)
       }
     }
   }
@@ -669,7 +702,7 @@ extension LinnetSettingsUpdateChecker {
     }
     availability = result
     active = false
-    failed = false
+    failure = nil
     task = nil
   }
 
@@ -679,11 +712,11 @@ extension LinnetSettingsUpdateChecker {
     task = nil
   }
 
-  private func finishFailure(cycle activeCycle: UInt64) {
+  private func finishFailure(_ reason: CheckFailure, cycle activeCycle: UInt64) {
     guard activeCycle == cycle else { return }
     availability = nil
     active = false
-    failed = true
+    failure = reason
     task = nil
   }
 

@@ -174,6 +174,7 @@ struct LinnetDataRegistryTests {
     run("failed prepare cleanup owner", fixtureSigning, failedPreparationRetainsTransactionCleanupOwner)
     run("prepared crash recovery", fixtureSigning, preparedDataChannelCrashRestoresPreviousActive)
     run("committed receipt recovery", fixtureSigning, dataChannelReceiptFollowsPublication)
+    run("explicit conflicting pack repair", fixtureSigning, explicitRepairPreservesActiveAndPersonalData)
     run("generation retention", fixtureSigning, threeGenerationsRetainCurrentAndOneRollback)
     run("scoped reconciliation", fixtureSigning, reconciliationIsScopedAndIdempotent)
     run("bounded transaction root GC", fixtureSigning, oversizedTransactionRootDeletesNothing)
@@ -891,6 +892,59 @@ struct LinnetDataRegistryTests {
     }
   }
 
+  private static func explicitRepairPreservesActiveAndPersonalData(
+    _ fixtureSigning: FixtureSigningOwner
+  ) throws {
+    try withFixture(fixtureSigning) { registry in
+      let snapshot = try registry.runtimeSnapshot()
+      let original = snapshot.state.packs.first { $0.kind == .english }!
+      let originalRoot = registry.rootDirectory.appending(path: original.relativePath)
+      let oldManifest = try Data(contentsOf: originalRoot.appending(path: "manifest.json"))
+      var object = try JSONSerialization.jsonObject(with: oldManifest) as! [String: Any]
+      object["min_core"] = "0.9.0"
+      let manifest = try JSONDecoder().decode(
+        LinnetPackContract.Manifest.self, from: JSONSerialization.data(withJSONObject: object))
+      let manifestData = try LinnetPackContract.canonicalManifestData(manifest)
+      let replacement = LinnetDataRegistry.activePack(
+        from: manifest, manifestSHA256: LinnetPackContract.sha256(manifestData), separateRepairCopy: true)
+      let files = try Dictionary(uniqueKeysWithValues: manifest.files.map {
+        ($0.path, try Data(contentsOf: originalRoot.appending(path: $0.path)))
+      })
+      try writeFixturePack(
+        .init(pack: replacement, manifestData: manifestData, files: files),
+        to: registry.rootDirectory.appending(path: replacement.relativePath))
+      try FileManager.default.createDirectory(at: registry.userDataDirectory, withIntermediateDirectories: true)
+      let personal = registry.userDataDirectory.appending(path: "learning-fixture.txt")
+      let personalData = Data("user words remain unchanged".utf8)
+      try personalData.write(to: personal)
+      var target = snapshot.state.packs.filter { $0.kind != .english }
+      target.append(replacement)
+      let verified = LinnetDataChannel.Verified(
+        catalog: dataChannelCatalog(for: target, sequence: 1), digest: String(repeating: "c", count: 64))
+      requireFailure(.invalidActiveState) {
+        _ = try registry.beginDataChannelUpdate(accepting: verified, edition: .standard)
+      }
+      let update = try registry.beginDataChannelUpdate(
+        accepting: verified, edition: .standard, allowCompleteRepair: true)
+      let prepared = try registry.prepareDataChannelUpdate(update, target: target)
+      let beforeActivation = try registry.runtimeSnapshot()
+      require(beforeActivation.state.packs == snapshot.state.packs,
+        "preparation changed active packs")
+      try exchangeDirectories(registry.activeSharedDataDirectory, prepared.directory)
+      try registry.commitDataChannelUpdate(transactionID: prepared.transactionID)
+      let repaired = try registry.runtimeSnapshot()
+      require(repaired.state.packs.contains(replacement), "repair was not activated")
+      require(repaired.state.rollbackPacks == [original], "repair lost original rollback pack")
+      let retainedPersonal = try Data(contentsOf: personal)
+      let retainedManifest = try Data(contentsOf: originalRoot.appending(path: "manifest.json"))
+      require(retainedPersonal == personalData, "repair changed learning data")
+      require(retainedManifest == oldManifest,
+        "repair overwrote original manifest")
+      let repeated = try registry.beginDataChannelUpdate(accepting: verified, edition: .standard)
+      try registry.cancelDataChannelUpdate(transactionID: repeated.transactionID)
+    }
+  }
+
   private static func dataChannelReceiptFollowsPublication(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
@@ -978,6 +1032,10 @@ struct LinnetDataRegistryTests {
         digest: String(repeating: "c", count: 64))
       requireFailure(.staleDataChannel) {
         _ = try registry.beginDataChannelUpdate(accepting: replay, edition: .standard)
+      }
+      requireFailure(.staleDataChannel) {
+        _ = try registry.beginDataChannelUpdate(
+          accepting: replay, edition: .standard, allowCompleteRepair: true)
       }
       _ = chflags(downloadBlocker.path, 0)
       _ = try registry.runtimeSnapshot()

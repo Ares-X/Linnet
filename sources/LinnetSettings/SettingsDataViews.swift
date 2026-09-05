@@ -36,9 +36,7 @@ extension DataTabView {
       }
 
       Text(
-        // Keep the complete localization key intact for String Catalog lookup.
-        // swiftlint:disable:next line_length
-        "Rime incrementally merges learned Chinese and English words between your Macs. Linnet checks at most once per hour while it is running; the next activation catches up. It does not read or merge the user dictionary format itself."
+        "Learned Chinese and English words sync between your Macs while Linnet is running. Use Sync Learning Now to check without waiting for the next automatic sync."
       )
       .font(.caption2)
       .foregroundStyle(.secondary)
@@ -58,7 +56,7 @@ extension DataTabView {
             || model.operationActive || model.portableInspectionActive || model.cloudSyncPreparing)
       }
       Text(
-        "Recovery backups also include personal words, disabled words, and Text Expander data. The first upload creates a baseline; later uploads are incremental and manual."
+        "Recovery backups are uploaded manually. They also include custom words, disabled words, and Text Expander entries; enabling learning sync does not upload them automatically."
       )
       .font(.caption2)
       .foregroundStyle(.secondary)
@@ -368,8 +366,9 @@ extension DataTabView {
     if updateChecker.active {
       Label("Checking for updates…", systemImage: "arrow.triangle.2.circlepath")
         .foregroundStyle(.secondary)
-    } else if updateChecker.failed {
-      Label("Update check failed. Try again when you are online.", systemImage: "wifi.exclamationmark")
+    } else if let failure = updateChecker.failure {
+      Label(LocalizedStringKey(failure.message),
+            systemImage: failure == .network ? "wifi.exclamationmark" : "exclamationmark.triangle")
         .foregroundStyle(.orange)
     } else {
       switch updateChecker.availability {

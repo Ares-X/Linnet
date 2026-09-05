@@ -640,8 +640,6 @@ struct DataTabView: View {
             Text("Language data").font(.callout.weight(.medium))
             Text("Update language data without reinstalling Linnet.")
               .font(.caption).foregroundStyle(.secondary)
-            Text("Updates are built by Linnet from pinned upstream projects. Settings downloads only Linnet release packs, never raw upstream dictionaries or models.")
-              .font(.caption2).foregroundStyle(.secondary)
             if let message = languageDataUpdateDescription {
               Text(message)
                 .font(.caption2).foregroundStyle(.secondary)
@@ -663,6 +661,9 @@ struct DataTabView: View {
                 || model.packDownloadActive || model.operationActive)
         }
         downloadSourceControls
+        Button("Repair Language Update…") { model.languageDataRepairTarget = .currentEdition }
+          .disabled(
+            !model.languageDataUpdatesAvailable || model.packDownloadActive || model.operationActive)
         Divider()
         HStack {
           VStack(alignment: .leading, spacing: 2) {

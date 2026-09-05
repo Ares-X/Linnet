@@ -118,6 +118,7 @@ final class SquirrelInputController {
   }
 
   private(set) var selectedCandidateIndices: [Int] = []
+  private(set) var forgottenCandidateIndices: [Int] = []
   private(set) var pageDirections: [Bool] = []
   private(set) var refreshCount = 0
   var activeClient: Any?
@@ -132,6 +133,9 @@ final class SquirrelInputController {
   func selectCandidate(absoluteIndex: Int) -> Bool {
     selectedCandidateIndices.append(absoluteIndex)
     return true
+  }
+  func forgetCandidate(absoluteIndex: Int) {
+    forgottenCandidateIndices.append(absoluteIndex)
   }
 
   func resetSelectedCandidates() {
@@ -155,6 +159,7 @@ struct LinnetCandidateWindowInteractionTests {
     testSyntheticHoverLifecycle()
     testCandidateControlPointerFeedback()
     testCandidatePressPublicationIdentity()
+    testCandidateForgetPublicationIdentity()
     testSameControllerReactivationInvalidatesOldPublication()
     testInputControllerOwnerSwapInvalidatesCandidateInteraction()
     testPreciseWheelPagingSemantics()
@@ -671,6 +676,33 @@ struct LinnetCandidateWindowInteractionTests {
     require(
       cancelledIntent == nil && staleEndIntent == nil,
       "a cancelled precise gesture still paged")
+  }
+
+  private static func testCandidateForgetPublicationIdentity() {
+    let panel = SquirrelPanel(position: NSRect(x: 120, y: 120, width: 2, height: 20))
+    defer { panel.hide() }
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller)
+    let candidates = candidatePublication([
+      (text: "甲", absoluteIndex: 101), (text: "乙", absoluteIndex: 102)])
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true, controller: controller)
+    let point = panel.view.candidateInteractionFrames[1].center
+    guard let item = panel.candidateContextMenu(at: point)?.items.first else {
+      failures.append("candidate context menu missing")
+      return
+    }
+    panel.forgetCandidateLearning(item)
+    require(controller.forgottenCandidateIndices == [102], "forget did not target clicked candidate")
+    require(controller.selectedCandidateIndices.isEmpty, "forget committed a candidate")
+    _ = panel.update(
+      preedit: "", selRange: .empty, caretPos: 0,
+      candidates: candidates, highlighted: 0, update: true, controller: controller)
+    panel.forgetCandidateLearning(item)
+    require(controller.forgottenCandidateIndices == [102], "stale menu forgot a new candidate")
+    require(panel.candidateContextMenu(at: NSPoint(x: -10, y: -10)) == nil,
+      "empty candidate area has a forget action")
   }
 
   private static func testCandidatePressPublicationIdentity() {

@@ -942,9 +942,9 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
     const char* expected;
   };
   constexpr std::array<MixedCase, 3> kCases{{
-      {"xuexicsjiting", "学习CS急停"},
-      {"liaojieaijishu", "了解AI技术"},
-      {"shiyongcpuxingneng", "使用CPU性能"},
+      {"xuexiCSjiting", "学习CS急停"},
+      {"liaojieAIjishu", "了解AI技术"},
+      {"shiyongCPUxingneng", "使用CPU性能"},
   }};
 
   bool verified_mixed_learning_round_trip = false;
@@ -1064,15 +1064,15 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
   for (const auto& profile : LoadFormalProfileReviewedInputs()) {
     for (const auto& entity :
          std::array<std::pair<const char*, const char*>, 2>{{
-             {"cs", "CS"},
-             {"cpu", "CPU"},
+             {"CS", "CS"},
+             {"CPU", "CPU"},
          }}) {
       expect_mixed(
           profile.first, std::string(entity.first) + profile.second,
           std::string(entity.second) + "你好",
           profile.first + " did not preserve sentence-initial " +
               entity.first + " before its reviewed remaining syllables",
-          std::strcmp(entity.first, "cs") == 0);
+          std::strcmp(entity.first, "CS") == 0);
       expect_mixed(
           profile.first, profile.second + entity.first,
           "你好" + std::string(entity.second),
@@ -1085,44 +1085,17 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
               entity.first,
           false);
     }
-    const RimeSessionId ai_collision =
+    const RimeSessionId lowercase =
         CreateSchemaSession(api, profile.first.c_str());
-    Enter(api, ai_collision, profile.second + "ai");
-    const auto ai_candidates = CandidateOrigins(ai_collision);
-    ExpectNoFullSpanUnprojectedMixed(
-        ai_candidates, profile.second.size() + 2,
-        profile.first + " AI collision");
-    const auto ai_mixed = std::find_if(
-        ai_candidates.begin(), ai_candidates.end(), [&](const auto& candidate) {
-          return candidate.type == "linnet_mixed" &&
-                 BaseText(candidate.text) == "你好AI" &&
-                 candidate.start == 0 &&
-                 candidate.end == profile.second.size() + 2;
-        });
-    const auto same_span_chinese = std::find_if(
-        ai_candidates.begin(), ai_candidates.end(), [&](const auto& candidate) {
-          return candidate.genuine_language == "linnet_zh" &&
-                 candidate.type != "linnet_mixed" &&
-                 !ContainsAscii(BaseText(candidate.text)) &&
-                 candidate.start == 0 &&
-                 candidate.end == profile.second.size() + 2;
-        });
-    const bool valid_collision_order =
-        same_span_chinese == ai_candidates.end()
-            ? ai_mixed == ai_candidates.begin()
-            : same_span_chinese < ai_mixed;
-    if (ai_mixed == ai_candidates.end() || !valid_collision_order) {
-      std::cerr << "AI collision origins for " << profile.first << ":";
-      for (const auto& candidate : ai_candidates) {
-        std::cerr << " [" << BaseText(candidate.text) << ":"
-                  << candidate.type << ":" << candidate.genuine_type << "]";
-      }
-      std::cerr << '\n';
-      api->destroy_session(ai_collision);
-      Fail(profile.first +
-           " did not preserve both ordinary Chinese and the explicit AI alternative");
+    Enter(api, lowercase, profile.second + "ai" + profile.second);
+    const auto lowercase_candidates = CandidateOrigins(lowercase);
+    if (std::any_of(lowercase_candidates.begin(), lowercase_candidates.end(),
+                    [](const auto& candidate) {
+                      return candidate.type == "linnet_mixed";
+                    })) {
+      Fail(profile.first + " inferred an uppercase entity from lowercase input");
     }
-    api->destroy_session(ai_collision);
+    api->destroy_session(lowercase);
     for (const char* input : {"ai", "cpu"}) {
       const RimeSessionId standalone_entity =
           CreateSchemaSession(api, profile.first.c_str());
@@ -1229,9 +1202,9 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
     api->destroy_session(ordinary);
   }
 
-  expect_mixed("linnet_zh_pinyin", "csjiting", "CS急停",
+  expect_mixed("linnet_zh_pinyin", "CSjiting", "CS急停",
                "a leading letter-only entity did not compose", false);
-  expect_mixed("linnet_zh_pinyin", "xuexihttpsjishu",
+  expect_mixed("linnet_zh_pinyin", "xuexiHTTPSjishu",
                "学习HTTPS技术",
                "overlapping HTTP/HTTPS entities did not select HTTPS", false);
 
@@ -1315,63 +1288,33 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
   }
   api->destroy_session(ambiguous);
 
-  const RimeSessionId adjacent_entities =
-      CreateSchemaSession(api, "linnet_zh_pinyin");
-  Enter(api, adjacent_entities, "csai");
-  const auto adjacent_candidates = CandidateOrigins(adjacent_entities);
-  ExpectNoFullSpanUnprojectedMixed(adjacent_candidates, 4,
-                                   "adjacent entity input csai");
-  const auto adjacent_mixed = std::find_if(
-      adjacent_candidates.begin(), adjacent_candidates.end(),
-      [](const auto& candidate) { return candidate.type == "linnet_mixed"; });
-  const bool invalid_mixed_text = std::any_of(
-      adjacent_candidates.begin(), adjacent_candidates.end(),
-      [](const auto& candidate) {
-        const std::string text = BaseText(candidate.text);
-        if (candidate.genuine_language == "linnet_zh" &&
-            text.find("CSAI") != std::string::npos) {
-          return true;
-        }
-        if (candidate.type != "linnet_mixed") return false;
-        const bool has_ascii_letter =
-            std::any_of(text.begin(), text.end(), [](unsigned char byte) {
-              return (byte >= 'a' && byte <= 'z') ||
-                     (byte >= 'A' && byte <= 'Z');
-            });
-        const bool has_non_ascii =
-            std::any_of(text.begin(), text.end(),
-                        [](unsigned char byte) { return byte >= 0x80; });
-        const bool multiple_entities =
-            candidate.genuine_type == "sentence" &&
-            candidate.sentence_uppercase_entity_count > 1;
-        return !has_ascii_letter || !has_non_ascii || multiple_entities ||
-               !candidate.sentence_components_follow_mixed_contract;
-      });
-  const auto same_span_chinese = std::find_if(
-      adjacent_candidates.begin(), adjacent_candidates.end(),
-      [](const auto& candidate) {
-        return candidate.genuine_language == "linnet_zh" &&
-               candidate.type != "linnet_mixed" &&
-               !ContainsAscii(BaseText(candidate.text)) &&
-               candidate.start == 0 && candidate.end == 4;
-      });
-  const bool chinese_precedes_mixed =
-      adjacent_mixed == adjacent_candidates.end() ||
-      same_span_chinese == adjacent_candidates.end() ||
-      same_span_chinese < adjacent_mixed;
-  if (invalid_mixed_text || !chinese_precedes_mixed) {
-    std::cerr << "Adjacent origins for 'csai':";
-    for (const auto& candidate : adjacent_candidates) {
-      std::cerr << " [" << BaseText(candidate.text) << ":"
-                << candidate.type << ":" << candidate.genuine_type << ":"
-                << candidate.genuine_language << ":" << candidate.start
-                << "-" << candidate.end << "]";
+  for (const char* input : {
+           "liaojieaijishu", "xuexicsjiting", "csai",
+           "jintiankaihuigaidaoxiawusandian", "mingtianzaoshangyaoqujichang",
+           "qingbawenjianfadaowodeyouxiang", "woxiangzhidaojutiyuanyin"}) {
+    const RimeSessionId lowercase =
+        CreateSchemaSession(api, "linnet_zh_pinyin");
+    Enter(api, lowercase, input);
+    const auto candidates = CandidateOrigins(lowercase);
+    if (std::any_of(candidates.begin(), candidates.end(),
+                    [](const auto& candidate) {
+                      return candidate.type == "linnet_mixed";
+                    })) {
+      Fail(std::string("lowercase sentence inferred an uppercase entity: ") + input);
     }
-    std::cerr << '\n';
-    api->destroy_session(adjacent_entities);
-    Fail("adjacent English entities synthesized pure English or displaced Chinese");
+    api->destroy_session(lowercase);
   }
-  api->destroy_session(adjacent_entities);
+
+  for (const char* input : {"https://api.example.com", "v0.1.18", "URLSession",
+                            "HTTPServer2", "WAF"}) {
+    const RimeSessionId raw = CreateSchemaSession(api, "linnet_zh_pinyin");
+    Enter(api, raw, input);
+    api->process_key(raw, XK_Return, 0);
+    if (TakeCommit(api, raw) != input) {
+      Fail(std::string("mixed selection changed literal input: ") + input);
+    }
+    api->destroy_session(raw);
+  }
 }
 
 void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
@@ -1417,7 +1360,7 @@ void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
 }
 
 void ExpectNativeMixedLearningEnabled(RimeApi_stdbool* api) {
-  constexpr char kInput[] = "shuanghezhancsjiting";
+  constexpr char kInput[] = "shuanghezhanCSjiting";
   constexpr char kLearnedText[] = "霜河栈CS急停";
   const RimeSessionId session =
       CreateSchemaSession(api, "linnet_zh_pinyin");
@@ -1442,7 +1385,7 @@ void ExpectNativeMixedLearningEnabled(RimeApi_stdbool* api) {
 }
 
 void ExpectNativeMixedLearningDisabled(RimeApi_stdbool* api) {
-  constexpr char kInput[] = "shuanghezhancsjiting";
+  constexpr char kInput[] = "shuanghezhanCSjiting";
   constexpr char kLearnedText[] = "霜河栈CS急停";
   const RimeSessionId session =
       CreateSchemaSession(api, "linnet_zh_pinyin");
@@ -1458,7 +1401,7 @@ void ExpectNativeMixedLearningDisabled(RimeApi_stdbool* api) {
 
   const RimeSessionId static_mixed =
       CreateSchemaSession(api, "linnet_zh_pinyin");
-  Enter(api, static_mixed, "xuexicsjiting");
+  Enter(api, static_mixed, "xuexiCSjiting");
   const auto static_candidates = CandidateOrigins(static_mixed);
   if (std::none_of(
           static_candidates.begin(), static_candidates.end(), [](const auto& candidate) {
@@ -7093,7 +7036,7 @@ int main(int argc, char** argv) {
   if (mixed_input_probe) {
     ExpectSupplementalExtendedChineseCoverage(api);
     ExpectNativeMixedInput(api);
-    BenchmarkSchema(api, "linnet_zh_pinyin", "xuexicsjiting");
+    BenchmarkSchema(api, "linnet_zh_pinyin", "xuexiCSjiting");
     api->finalize();
     std::cout << "rime_smoke_test: modeless mixed input: PASS\n";
     return 0;
@@ -7114,7 +7057,7 @@ int main(int argc, char** argv) {
   }
 
   if (mixed_latency_probe) {
-    BenchmarkSchema(api, "linnet_zh_pinyin", "xuexicsjiting", false);
+    BenchmarkSchema(api, "linnet_zh_pinyin", "xuexiCSjiting", false);
     api->finalize();
     std::cout << "rime_smoke_test: mixed-input latency measurement: COMPLETE\n";
     return 0;

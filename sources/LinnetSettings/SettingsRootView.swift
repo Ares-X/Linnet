@@ -94,7 +94,7 @@ struct SettingsRootView: View {
       }
       Button("Cancel", role: .cancel) { model.languageDataRepairTarget = nil }
     } message: {
-      Text("The differential update could not finish. Installed data is unchanged. Retry later, or confirm a full download of changed packs. Unchanged packs and personal data are kept.")
+      Text("Download complete copies of changed or conflicting packs from the selected channel. Unchanged packs, learned words, and personal settings are kept. Your current data stays active until the replacement is ready.")
     }
     .confirmationDialog(
       "Import existing Rime / Hallelujah data?",

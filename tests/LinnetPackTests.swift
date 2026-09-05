@@ -16,6 +16,7 @@ struct LinnetPackTests {
     try validCatalogSelectedPackStagesThroughRegistry()
     try sameVersionNewSequenceUsesDistinctIdentityPath()
     try installedSameVersionStagesIdempotently()
+    try conflictingPackRepairPreservesOriginal()
     try undeclaredInstalledFileFailsClosed()
     try declaredParentSymlinkFailsClosed()
     try corruptInstalledSameIdentityFailsClosed()
@@ -243,6 +244,42 @@ struct LinnetPackTests {
       requirePackFailure(.invalidManifest("core version authority")) {
         _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       }
+    }
+  }
+
+  private static func conflictingPackRepairPreservesOriginal() throws {
+    try withFixture { registry in
+      let original = registry.downloadsDirectory.appending(path: "original.linnetpack")
+      let replacement = registry.downloadsDirectory.appending(path: "replacement.linnetpack")
+      // Same payload and release number, different compatibility metadata:
+      // this is the private/public catalog conflict seen during VM acceptance.
+      _ = try makePack(original, payload: Data("words".utf8), minCore: "1.0.0")
+      _ = try makePack(replacement, payload: Data("words".utf8), minCore: "0.9.0")
+      let first = try registry.verifyAndStagePack(
+        package: original, artifact: catalogArtifact(original), transfer: .complete)
+      let artifact = try catalogArtifact(replacement)
+      requireRegistryFailure(.invalidActiveState) {
+        _ = try registry.verifyAndStagePack(package: replacement, artifact: artifact, transfer: .complete)
+      }
+      let repaired = try registry.verifyAndStagePack(
+        package: replacement, artifact: artifact, transfer: .complete, allowCompleteRepair: true)
+      require(first.relativePath != repaired.relativePath, "repair overwrote live pack")
+      require(try registry.verifiedInstalledPack(at: registry.rootDirectory.appending(
+        path: first.relativePath, directoryHint: .isDirectory)) == first,
+        "repair changed original pack")
+      _ = try registry.verifiedInstalledManifest(for: repaired)
+      let repeated = try registry.verifyAndStagePack(
+        package: replacement, artifact: artifact, transfer: .complete, allowCompleteRepair: true)
+      require(repeated == repaired, "repeated repair created a second copy")
+      var remaining = 100
+      let pending = try registry.supersededPackCleanups(
+        active: [first], rollback: [], pending: [LinnetDataRegistry.packPath(artifact)],
+        now: Date(), remaining: &remaining)
+      require(pending.isEmpty, "cleanup removed a downloading repair")
+      remaining = 100
+      let unused = try registry.supersededPackCleanups(
+        active: [first], rollback: [], pending: [], now: Date(), remaining: &remaining)
+      require(unused.map(\.relativePath) == [repaired.relativePath], "cancelled repair was not collectable")
     }
   }
 

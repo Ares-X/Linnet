@@ -43,6 +43,16 @@ extension SquirrelInputController {
     return success
   }
 
+  func forgetCandidate(absoluteIndex: Int) {
+    guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
+      activeClient != nil, sessionIsCurrent(), absoluteIndex >= 0
+    else { return }
+    // Rime owns learning and refreshes the composition after a deletion.
+    // Its Bool only confirms dispatch, not that a dictionary entry existed.
+    _ = rimeAPI.delete_candidate(session, absoluteIndex)
+    rimeUpdate()
+  }
+
   /// Rebuilds the current candidate snapshot after a panel-only interaction,
   /// such as expanding or collapsing disclosure. It never edits Rime input.
   func refreshCandidatePresentation() {

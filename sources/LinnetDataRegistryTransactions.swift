@@ -33,16 +33,19 @@ extension LinnetDataRegistry {
 
   func beginDataChannelUpdate(
     accepting catalog: LinnetDataChannel.Verified,
-    edition: Edition
+    edition: Edition,
+    allowCompleteRepair: Bool = false
   ) throws -> DataChannelUpdateTransaction {
     try prepareMutableDirectories()
     let receipt = try receiptForCatalog(catalog)
     guard let set = catalog.catalog.activationSet(for: edition) else {
       throw Failure.invalidActiveState
     }
-    try validateDataChannelReceipt(receipt, artifacts: set.packs)
+    try validateDataChannelReceipt(
+      receipt, artifacts: set.packs, allowCompleteRepair: allowCompleteRepair)
     let snapshot = try runtimeSnapshot(reconcilingStorage: false)
-    switch set.updateSelection(installedPacks: snapshot.state.packs) {
+    switch set.updateSelection(
+      installedPacks: snapshot.state.packs, allowCompleteRepair: allowCompleteRepair) {
     case .localAhead: throw Failure.staleDataChannel
     case .conflict: throw Failure.invalidActiveState
     case .current, .available: break
@@ -62,6 +65,7 @@ extension LinnetDataRegistry {
           edition: edition,
           artifacts: set.packs,
           baseRevision: snapshot.activeRevision,
+          allowCompleteRepair: allowCompleteRepair ? true : nil,
           phase: .downloading,
           candidateRevision: nil),
         to: directory.appending(path: Self.languageTransactionMarkerName))
@@ -183,7 +187,8 @@ extension LinnetDataRegistry {
   /// Full or differential transport must reconstruct the same manifest/files.
   func verifyAndStagePack(
     package: URL, artifact: LinnetDataChannel.Artifact,
-    transfer: LinnetDataChannel.PackTransfer
+    transfer: LinnetDataChannel.PackTransfer,
+    allowCompleteRepair: Bool = false
   ) throws -> ActivePack {
     try prepareMutableDirectories()
     let resolvedPackage = package.resolvingSymlinksInPath().standardizedFileURL
@@ -215,11 +220,13 @@ extension LinnetDataRegistry {
       at: kindRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     guard Self.isSecureOwnedDirectory(kindRoot) else { throw Failure.unsafePath(kindRoot.path) }
     let identity = Self.packIdentity(sequence: artifact.sequence, version: artifact.version)
-    let final = kindRoot.appending(path: identity, directoryHint: .isDirectory)
+    var final = kindRoot.appending(path: identity, directoryHint: .isDirectory)
+    var separateRepairCopy = false
     if FileManager.default.fileExists(atPath: final.path) {
       let installed = try verifiedInstalledPack(at: final)
-      guard artifact.matches(installed) else { throw Failure.invalidActiveState }
-      return installed
+      if artifact.matches(installed) { return installed }
+      guard allowCompleteRepair else { throw Failure.invalidActiveState }
+      separateRepairCopy = true
     }
 
     let partial = kindRoot.appending(path: ".\(identity).partial-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -243,9 +250,18 @@ extension LinnetDataRegistry {
       case .current, .requiresCompleteRepair:
         throw Failure.invalidActiveState
       }
-      let active = Self.activePack(from: manifest, manifestSHA256: Self.sha256(manifestData))
+      let active = Self.activePack(
+        from: manifest, manifestSHA256: Self.sha256(manifestData),
+        separateRepairCopy: separateRepairCopy)
       guard artifact.matches(active) else {
         throw LinnetPackContract.Failure.invalidManifest("catalog artifact identity")
+      }
+      final = rootDirectory.appending(path: active.relativePath, directoryHint: .isDirectory)
+      if FileManager.default.fileExists(atPath: final.path) {
+        guard try verifiedInstalledPack(at: final) == active else { throw Failure.invalidActiveState }
+        try prepareOwnedTreeForRemoval(partial)
+        try FileManager.default.removeItem(at: partial)
+        return active
       }
       try makeImmutable(partial)
       try FileManager.default.moveItem(at: partial, to: final)
@@ -312,11 +328,7 @@ extension LinnetDataRegistry {
     let current = Dictionary(uniqueKeysWithValues: state.packs.map { ($0.kind, $0) })
     let requested = Dictionary(uniqueKeysWithValues: target.map { ($0.kind, $0) })
     for pack in target {
-      if let previous = current[pack.kind] {
-        guard pack.sequence > previous.sequence
-          || (pack.sequence == previous.sequence && Self.sameImmutablePack(previous, pack))
-        else { throw Failure.invalidActiveState }
-      } else {
+      if current[pack.kind] == nil {
         guard pack.kind == .extended else { throw Failure.invalidActiveState }
       }
     }
@@ -641,6 +653,7 @@ extension LinnetDataRegistry {
       for entry in entries {
         let relative = "Data/Packs/\(kind.rawValue)/\(entry.lastPathComponent)"
         guard !retained.contains(relative),
+          !pending.contains(where: { relative.hasPrefix($0 + "-") }),
           validatedPackDeletion(at: entry, kind: kind)
             || validatedPartialPackDeletion(at: entry, kind: kind, now: now)
         else {
@@ -657,14 +670,15 @@ extension LinnetDataRegistry {
     kind: LinnetPackContract.Kind
   ) -> Bool {
     guard Self.isSecureOwnedDirectory(directory), contains(directory.resolvingSymlinksInPath()),
-      let identity: PackDeletionIdentity = readOwnedJSON(
-        directory.appending(path: "manifest.json")),
+      let manifestData = try? readOwnedFile(directory.appending(path: "manifest.json")),
+      let identity = try? JSONDecoder().decode(PackDeletionIdentity.self, from: manifestData),
       identity.kind == kind,
       identity.packID == kind.packID,
       Self.isSafeIdentifier(identity.version), identity.sequence > 0,
       Self.isSHA256(identity.contentSHA256),
-      directory.lastPathComponent == Self.packIdentity(
-        sequence: identity.sequence, version: identity.version)
+      [Self.packIdentity(sequence: identity.sequence, version: identity.version),
+       Self.packIdentity(sequence: identity.sequence, version: identity.version) + "-" + Self.sha256(manifestData)]
+        .contains(directory.lastPathComponent)
     else { return false }
     return true
   }
