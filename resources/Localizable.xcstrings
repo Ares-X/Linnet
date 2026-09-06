@@ -5,7 +5,7 @@
     "Last successful learning sync on this Mac" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"本机上次成功同步学习词"}}}},
     "No successful sync recorded" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"尚无成功同步记录"}}}},
     "This Mac has finished merging and exporting learning data. iCloud may still be transferring it to your other Macs." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"本机已完成学习数据的合并与导出，iCloud 可能仍在向其他 Mac 传输。"}}}},
-    "Some learning data is still pending. Finish typing, then use Sync Learning Now to retry." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"部分学习数据仍待同步。完成当前输入后，可点击“立即同步学习词”重试。"}}}},
+    "Some learning data is still pending because a dictionary is inactive or changing. Your local learning is kept; keep using Linnet and retry later." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"部分词典尚未加载或正在变化，学习数据仍待同步。本机学习记录已保留，可继续使用 Linnet，稍后重试。"}}}},
     "The last sync could not access iCloud Drive. Check iCloud Drive in System Settings, then retry." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"上次同步无法访问 iCloud Drive。请在系统设置中检查 iCloud Drive 后重试。"}}}},
     "The last learning sync failed. Your local learning is kept; use Sync Learning Now to retry." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"上次学习词同步失败，本机学习记录已保留。可点击“立即同步学习词”重试。"}}}},
     "Upload Recovery Backup…" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"上传恢复备份…"}}}},
