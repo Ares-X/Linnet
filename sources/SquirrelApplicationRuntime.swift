@@ -121,6 +121,9 @@ extension SquirrelApplicationDelegate {
       return false
     }
     rimeAPI.initialize(nil)
+    // Personal-data activation skips maintenance, but later Settings changes
+    // still need the deployment tasks that finalize unloaded.
+    rimeAPI.deployer_initialize(nil)
     let smartEnglishLoaded = "smart_english".withCString {
       rimeAPI.find_module($0) != nil
     }
