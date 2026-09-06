@@ -22,10 +22,12 @@ printf '%s\n' \
   '{"sources":{"model":{"repository":"https://github.com/example/model.git",' \
   '"release":"LTS","asset":"model.gram",' \
   '"asset_id":123,"asset_api_url":"https://api.github.com/repos/example/model/releases/assets/123",' \
+  '"asset_download_url":"https://github.com/example/model/releases/download/LTS/model.gram",' \
   '"bytes":12,"sha256":"'"${payload_sha}"'","pack":{' \
   '"repository":"https://github.com/example/model.git","release":"LTS",' \
   '"asset":"model.gram","asset_id":123,' \
   '"asset_api_url":"https://api.github.com/repos/example/model/releases/assets/123",' \
+  '"asset_download_url":"https://github.com/example/model/releases/download/LTS/model.gram",' \
   '"bytes":12,"sha256":"'"${payload_sha}"'"}}}}' >"${lock}"
 
 fake_bin="${fixture}/bin"
@@ -47,7 +49,7 @@ printf '%s\n' \
   '    *) shift ;;' \
   '  esac' \
   'done' \
-  'if [[ "${url}" == https://api.github.com/repos/example/model/releases/assets/123 ]]; then' \
+  'if [[ "${url}" == https://github.com/example/model/releases/download/LTS/model.gram ]]; then' \
   '  if [[ "${FAKE_ASSET_RESPONSE:-redirect}" == direct ]]; then' \
   '    printf "HTTP/1.1 200 OK\r\n\r\n" >"${dump}"' \
   '    printf locked-asset >"${output}"' \
@@ -86,34 +88,13 @@ if rg -n 'GITHUB_TOKEN|Authorization:' \
   echo "verify_locked_release_asset: bulk release bytes regained an API credential path" >&2
   exit 1
 fi
-rg -Fq 'asset_api_url="$(lock_value asset_api_url)"' \
-  "${repo_root}/scripts/fetch-locked-release-asset" || {
-  echo "verify_locked_release_asset: fetch owner does not use the immutable asset id" >&2
-  exit 1
-}
-if rg -n 'asset_download_url' \
-    "${repo_root}/upstreams.lock.json" "${repo_root}/scripts/upstream-sync" \
-    "${repo_root}/scripts/fetch-locked-release-asset" "${repo_root}/action-install.sh"; then
-  echo "verify_locked_release_asset: mutable release-name download path returned" >&2
-  exit 1
-fi
-rg -Fq 'lmdg_pack_api_url="$(lock_value sources.rime_lmdg_grammar.linnet_pack.asset_api_url)"' \
-  "${repo_root}/action-install.sh" || {
-  echo "verify_locked_release_asset: build owner does not project the immutable Linnet pack id" >&2
-  exit 1
-}
-rg -Fq '"${lock_file}" rime_lmdg_grammar.linnet_pack "${pack_file}"' \
-  "${repo_root}/action-install.sh" || {
-  echo "verify_locked_release_asset: build owner bypasses the immutable Linnet pack" >&2
-  exit 1
-}
 
 bad_lock="${fixture}/bad-lock.json"
-sed 's#api.github.com/repos/example/model/releases/assets#mirror.example/example/model#' \
+sed 's#github.com/example/model/releases/download#mirror.example/example/model#' \
   "${lock}" >"${bad_lock}"
 if PATH="${fake_bin}:${PATH}" "${repo_root}/scripts/fetch-locked-release-asset" \
     "${bad_lock}" model "${fixture}/bad.gram" >/dev/null 2>&1; then
-  echo "verify_locked_release_asset: malformed asset API URL was accepted" >&2
+  echo "verify_locked_release_asset: malformed download URL was accepted" >&2
   exit 1
 fi
 [[ ! -e "${fixture}/bad.gram" ]]

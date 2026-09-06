@@ -46,13 +46,22 @@ rescue URI::InvalidURIError
   fail_lock("#{name}.repository is not a valid URL")
 end
 
-def validate_release_asset_identity(source, name)
-  validate_repository(source, name)
-  require_string(source, "release", SAFE_COMPONENT)
-  require_string(source, "asset", SAFE_COMPONENT)
+def validate_release_download(source, name)
+  repository_path = URI.parse(require_string(source, "repository")).path
+  repository_slug = repository_path.delete_prefix("/").delete_suffix(".git")
+  release = require_string(source, "release", SAFE_COMPONENT)
+  asset = require_string(source, "asset", SAFE_COMPONENT)
+  expected_download_url =
+    "https://github.com/#{repository_slug}/releases/download/#{release}/#{asset}"
+  fail_lock("#{name} download URL must match its repository, release, and asset") unless
+    require_string(source, "asset_download_url") == expected_download_url
   fail_lock("invalid #{name} asset size") unless
     source["bytes"].is_a?(Integer) && source["bytes"].positive?
   require_string(source, "sha256", SHA256)
+end
+
+def validate_release_asset_identity(source, name)
+  validate_release_download(source, name)
   asset_id = source["asset_id"]
   fail_lock("#{name} asset id must be a positive integer") unless
     asset_id.is_a?(Integer) && asset_id.positive?
@@ -462,11 +471,12 @@ def load_lock
   require_string(rime_lmdg_grammar, "license_sha256", SHA256)
   linnet_pack = require_hash(rime_lmdg_grammar, "linnet_pack")
   expected_pack_keys = %w[
-    asset asset_api_url asset_id bytes release repository sha256
+    asset asset_download_url bytes release repository sha256
   ]
   fail_lock("unexpected Linnet LTS pack identity shape") unless
     linnet_pack.keys.sort == expected_pack_keys
-  validate_release_asset_identity(linnet_pack, "Linnet LTS pack")
+  validate_repository(linnet_pack, "rime_lmdg_grammar.linnet_pack")
+  validate_release_download(linnet_pack, "Linnet LTS pack")
   unless require_string(linnet_pack, "repository") ==
          "https://github.com/Ares-X/Linnet.git"
     fail_lock("the grammar recovery pack must be owned by Ares-X/Linnet")
@@ -590,11 +600,8 @@ def release_asset_status(source)
   expected_url = "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
   fail_lock("remote grammar asset API URL is inconsistent") unless
     asset.fetch("url") == expected_url
-  expected_browser_url =
-    "https://github.com/#{repository_slug}/releases/download/" \
-    "#{source.fetch('release')}/#{source.fetch('asset')}"
   fail_lock("remote grammar download URL is inconsistent") unless
-    asset.fetch("browser_download_url") == expected_browser_url
+    asset.fetch("browser_download_url") == source.fetch("asset_download_url")
   current = asset_id == source.fetch("asset_id") &&
     bytes == source.fetch("bytes") && sha256 == source.fetch("sha256")
   status = current ? "current" : "review #{sha256[0, 12]} (asset #{asset_id})"

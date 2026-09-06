@@ -26,19 +26,21 @@ lock_value() {
 }
 
 repository="$(lock_value repository)"
-asset_id="$(lock_value asset_id)"
-asset_api_url="$(lock_value asset_api_url)"
+release="$(lock_value release)"
+asset="$(lock_value asset)"
+asset_download_url="$(lock_value asset_download_url)"
 expected_bytes="$(lock_value bytes)"
 expected_sha256="$(lock_value sha256)"
 [[ "${repository}" =~ ^https://github\.com/([^/]+/[^/]+)\.git$ ]] ||
   fail_asset "repository is not one GitHub HTTPS Git URL"
 repository_slug="${BASH_REMATCH[1]}"
-[[ "${asset_id}" =~ ^[1-9][0-9]*$ ]] || fail_asset "asset id is invalid"
+[[ "${release}" =~ ^[A-Za-z0-9._-]+$ ]] || fail_asset "release is invalid"
+[[ "${asset}" =~ ^[A-Za-z0-9._-]+$ ]] || fail_asset "asset name is invalid"
 [[ "${expected_bytes}" =~ ^[1-9][0-9]*$ ]] || fail_asset "asset byte count is invalid"
 [[ "${expected_sha256}" =~ ^[0-9a-f]{64}$ ]] || fail_asset "asset digest is invalid"
-expected_asset_api_url="https://api.github.com/repos/${repository_slug}/releases/assets/${asset_id}"
-[[ "${asset_api_url}" == "${expected_asset_api_url}" ]] ||
-  fail_asset "asset API URL differs from repository and immutable id"
+expected_download_url="https://github.com/${repository_slug}/releases/download/${release}/${asset}"
+[[ "${asset_download_url}" == "${expected_download_url}" ]] ||
+  fail_asset "asset download URL differs from repository, release, and name"
 
 download="$(mktemp "${output_parent}/.$(basename "${output}").download.XXXXXX")"
 headers="$(mktemp "${output_parent}/.$(basename "${output}").headers.XXXXXX")"
@@ -59,10 +61,8 @@ trap cleanup_asset EXIT INT TERM HUP
 
 status="$(curl --silent --show-error --proto '=https' --connect-timeout 30 --max-time 600 \
   -H 'User-Agent: Linnet-locked-release-asset' \
-  -H 'Accept: application/octet-stream' \
-  -H 'X-GitHub-Api-Version: 2022-11-28' \
   --dump-header "${headers}" --output "${download}" --write-out '%{http_code}' \
-  "${asset_api_url}")" || fail_asset "GitHub asset request failed"
+  "${asset_download_url}")" || fail_asset "GitHub asset request failed"
 locations="$(awk '
   tolower(substr($0, 1, 9)) == "location:" {
     sub(/^[^:]*:[[:space:]]*/, "")

@@ -85,9 +85,10 @@ octagram_data_git_tree="$(lock_value sources.rime_octagram_data.tree)"
 octagram_license_path="$(lock_value sources.rime_octagram_data.license_path)"
 octagram_license_sha="$(lock_value sources.rime_octagram_data.license_sha256)"
 lmdg_model_name="$(lock_value sources.rime_lmdg_grammar.asset)"
-lmdg_asset_api_url="$(lock_value sources.rime_lmdg_grammar.asset_api_url)"
+lmdg_asset_download_url="$(lock_value sources.rime_lmdg_grammar.asset_download_url)"
 lmdg_pack_name="$(lock_value sources.rime_lmdg_grammar.linnet_pack.asset)"
-lmdg_pack_api_url="$(lock_value sources.rime_lmdg_grammar.linnet_pack.asset_api_url)"
+lmdg_pack_download_url="$(
+    lock_value sources.rime_lmdg_grammar.linnet_pack.asset_download_url)"
 product_version="$(sed -n \
     's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
     config/LinnetProduct.xcconfig | LC_ALL=C sort -u)"
@@ -221,7 +222,7 @@ fetch_grammar_model() (
     extracted_dir="${download_dir}/extracted"
     extracted_model="${extracted_dir}/${lmdg_model_name}"
     echo "Restoring the locked Wanxiang LTS grammar from Linnet data:" >&2
-    echo "  ${lmdg_pack_api_url}" >&2
+    echo "  ${lmdg_pack_download_url}" >&2
     scripts/fetch-locked-release-asset \
         "${lock_file}" rime_lmdg_grammar.linnet_pack "${pack_file}"
     make -C "${project_root}" --no-print-directory linnet-pack-tool
@@ -255,8 +256,8 @@ fi
 if ! scripts/verify-linnet-grammar-model "${grammar_model}" >/dev/null 2>&1; then
     if [[ -n "${no_download:-}" ]]; then
         echo "Missing or stale Rime grammar model in offline mode: ${grammar_model}" >&2
-        echo "Restore it from ${lmdg_pack_api_url}." >&2
-        echo "The reviewed upstream identity is ${lmdg_asset_api_url}." >&2
+        echo "Restore it from ${lmdg_pack_download_url}." >&2
+        echo "The reviewed upstream identity is ${lmdg_asset_download_url}." >&2
         exit 1
     fi
     fetch_grammar_model "${grammar_model}"
