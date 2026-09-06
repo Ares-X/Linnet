@@ -8,7 +8,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ThemePreviewRoot,
   [Parameter(Mandatory = $true)]
-  [string]$InputDefaults,
+  [string]$InputPolicyRoot,
   [string]$BuildRoot = ""
 )
 
@@ -168,7 +168,7 @@ $DataRoot = (Resolve-Path -LiteralPath $DataRoot).Path
 $EmbeddedLuaHeader = (Resolve-Path -LiteralPath $EmbeddedLuaHeader).Path
 $WeaselConfig = (Resolve-Path -LiteralPath $WeaselConfig).Path
 $ThemePreviewRoot = (Resolve-Path -LiteralPath $ThemePreviewRoot).Path
-$InputDefaults = (Resolve-Path -LiteralPath $InputDefaults).Path
+$InputPolicyRoot = (Resolve-Path -LiteralPath $InputPolicyRoot).Path
 $ExpectedThemePreviews = @(
   "color_scheme_linnet_clay_light.png",
   "color_scheme_linnet_glass_light.png",
@@ -359,7 +359,11 @@ $OutputData = Join-Path $Projection "output\data"
 Copy-DataTree (Join-Path $DataRoot "plum") $OutputData
 Copy-DataTree (Join-Path $DataRoot "opencc") (Join-Path $OutputData "opencc")
 Copy-Item -LiteralPath $WeaselConfig -Destination (Join-Path $OutputData "weasel.yaml")
-Copy-Item -LiteralPath $InputDefaults -Destination (Join-Path $OutputData "linnet_windows_defaults.yaml")
+foreach ($Policy in @("linnet_windows_defaults.yaml", "linnet_grammar_active.yaml")) {
+  Copy-Item -LiteralPath (Join-Path $InputPolicyRoot $Policy) -Destination $OutputData
+}
+# The compact grammar is only a developer fixture, not a product model.
+Remove-Item -LiteralPath (Join-Path $OutputData "zh-hans-t-essay-bgw.gram")
 # Rime applies the shared Core defaults before the user's default.custom.yaml.
 # The Swift renderer owns these policies; this boundary only adds its include.
 Add-Content -LiteralPath (Join-Path $OutputData "default.yaml") -Encoding UTF8 `

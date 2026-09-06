@@ -20,7 +20,6 @@ protocol LinnetCoreUpdateInstalling: Sendable {
   ) async throws -> LinnetPreparedCoreUpdate
   func exchange(_ update: LinnetPreparedCoreUpdate) async throws
   func discard(_ update: LinnetPreparedCoreUpdate) async
-  func removeStaleUpdates(beside installedApp: URL) async
 }
 
 /// Owns the user-domain filesystem mutation for a verified online Core.
@@ -94,22 +93,6 @@ struct LinnetCoreUpdateInstaller: LinnetCoreUpdateInstalling {
   func discard(_ update: LinnetPreparedCoreUpdate) async {
     await Task.detached {
       try? FileManager.default.removeItem(at: update.stagingRoot)
-    }.value
-  }
-
-  func removeStaleUpdates(beside installedApp: URL) async {
-    await Task.detached {
-      let parent = installedApp.deletingLastPathComponent()
-      guard let children = try? FileManager.default.contentsOfDirectory(
-        at: parent, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-      else { return }
-      for child in children where child.lastPathComponent.hasPrefix(".linnet-core-update.") {
-        guard let values = try? child.resourceValues(
-          forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-          values.isDirectory == true, values.isSymbolicLink != true
-        else { continue }
-        try? FileManager.default.removeItem(at: child)
-      }
     }.value
   }
 

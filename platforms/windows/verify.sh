@@ -209,6 +209,8 @@ mkdir -p "${shared}/opencc" "${user}"
 cp -R data/plum/. "${shared}/"
 cp -R data/opencc/. "${shared}/opencc/"
 cp build/windows-inputs/linnet_windows_defaults.yaml "${shared}/"
+cp build/windows-inputs/linnet_grammar_active.yaml "${shared}/"
+rm "${shared}/zh-hans-t-essay-bgw.gram"
 ruby -e 'File.open(ARGV.fetch(0), "a") { |file|
   file.puts "\n__patch: linnet_windows_defaults:/patch"
 }' "${shared}/default.yaml"

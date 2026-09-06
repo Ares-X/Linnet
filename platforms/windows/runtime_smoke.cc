@@ -222,6 +222,17 @@ int main(int argc, char** argv) {
   api->destroy_session(english);
 
   const RimeSessionId pinyin = CreateSession(api, "linnet_zh_pinyin");
+  RimeConfig schema_config = {};
+  if (!api->schema_open("linnet_zh_pinyin", &schema_config)) {
+    Fail("deployed Chinese configuration is unavailable");
+  }
+  char grammar[128] = {};
+  const bool has_grammar = api->config_get_string(
+      &schema_config, "grammar/language", grammar, sizeof(grammar));
+  api->config_close(&schema_config);
+  if (!has_grammar || std::string(grammar) != "wanxiang-lts-zh-hans") {
+    Fail("Windows must use the product LTS model, not the developer fixture");
+  }
   ExpectCandidate(api, pinyin, "nihao", "你好");
   api->set_option(pinyin, "traditionalization", True);
   ExpectCandidate(api, pinyin, "ceshi", "測試");

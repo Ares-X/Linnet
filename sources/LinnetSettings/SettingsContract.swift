@@ -11,6 +11,8 @@ enum LinnetSettingsContract {
   static let horizontalExpandedGridRange = 3...5
 
   static let englishSchemaID = "linnet_en"
+  static let chineseLearningDictionary = "linnet_zh"
+  static let learningDictionaries = Set([chineseLearningDictionary, englishSchemaID])
 
   // A draft-only Settings entry point. Opening a URL never saves personal data.
   static func customWordURL(value: String) -> URL? {
@@ -267,15 +269,13 @@ enum LinnetSettingsContract {
 
   struct CloudSyncStatus {
     let result: RuntimeReplyCode
-    let finishedAt: Date
     let lastSuccess: Date?
   }
 
   static func cloudSyncStatus(startingAt bundle: Bundle = .main) -> CloudSyncStatus? {
     guard let stored = hostDefaults(startingAt: bundle)?.dictionary(forKey: cloudSyncStatusKey),
-      let raw = stored["result"] as? String, let result = RuntimeReplyCode(rawValue: raw),
-      let finishedAt = stored["finishedAt"] as? Date else { return nil }
-    return .init(result: result, finishedAt: finishedAt, lastSuccess: stored["lastSuccess"] as? Date)
+      let raw = stored["result"] as? String, let result = RuntimeReplyCode(rawValue: raw) else { return nil }
+    return .init(result: result, lastSuccess: stored["lastSuccess"] as? Date)
   }
 
   @discardableResult
@@ -285,7 +285,6 @@ enum LinnetSettingsContract {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
     var stored = defaults.dictionary(forKey: cloudSyncStatusKey) ?? [:]
     stored["result"] = result.rawValue
-    stored["finishedAt"] = date
     if result == .learningSyncCompleted { stored["lastSuccess"] = date }
     defaults.set(stored, forKey: cloudSyncStatusKey)
     DistributedNotificationCenter.default().postNotificationName(

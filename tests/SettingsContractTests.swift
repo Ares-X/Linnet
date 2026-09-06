@@ -355,7 +355,7 @@ struct SettingsContractTests {
       LinnetSettingsContract.cloudSyncStatus(startingAt: settings)?.lastSuccess == finishedAt,
       LinnetSettingsContract.setCloudSyncResult(.learningSyncFailed, at: failedAt, startingAt: host),
       let status = LinnetSettingsContract.cloudSyncStatus(startingAt: settings),
-      status.result == .learningSyncFailed, status.finishedAt == failedAt,
+      status.result == .learningSyncFailed,
       status.lastSuccess == finishedAt
     else { fail("sync outcome persistence lost the last success or concealed failure") }
     defaults.set(Data("legacy-bookmark".utf8), forKey: legacyCloudSyncFolderBookmarkKey)

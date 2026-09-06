@@ -93,12 +93,7 @@ inline bool IsSuffix(const std::string& value) {
   return kSuffixes.find(value) != kSuffixes.end();
 }
 
-inline bool IsContextToken(const std::string& value) {
-  return IsLowerWord(value) || IsSuffix(value);
-}
-
-inline std::string LowerAsciiWord(const std::string& value,
-                                  bool allow_apostrophe = false) {
+inline std::string LowerAsciiWord(const std::string& value) {
   if (value.empty()) return {};
   std::string result;
   result.reserve(value.size());
@@ -108,7 +103,7 @@ inline std::string LowerAsciiWord(const std::string& value,
         (byte >= 'A' && byte <= 'Z')) {
       result.push_back(static_cast<char>(std::tolower(byte)));
       has_letter = true;
-    } else if (allow_apostrophe && byte == '\'') {
+    } else if (byte == '\'') {
       result.push_back('\'');
     } else {
       return {};
@@ -117,8 +112,16 @@ inline std::string LowerAsciiWord(const std::string& value,
   return has_letter ? result : std::string();
 }
 
-inline std::string NormalizeCandidate(const std::string& value,
-                                      bool allow_apostrophe = true) {
+inline bool IsEnglishWord(const std::string& value) {
+  return !value.empty() && value.front() != '\'' && value.back() != '\'' &&
+         LowerAsciiWord(value) == value;
+}
+
+inline bool IsContextToken(const std::string& value) {
+  return IsEnglishWord(value) || IsSuffix(value);
+}
+
+inline std::string NormalizeCandidate(const std::string& value) {
   const std::size_t offset =
       !value.empty() && value.front() == ' ' ? 1 : 0;
   const std::string candidate = value.substr(offset);
@@ -130,8 +133,7 @@ inline std::string NormalizeCandidate(const std::string& value,
     const std::string token = LowerAsciiWord(
         candidate.substr(begin, end == std::string::npos
                                     ? std::string::npos
-                                    : end - begin),
-        allow_apostrophe);
+                                    : end - begin));
     if (token.empty()) return {};
     if (!normalized.empty()) normalized.push_back(' ');
     normalized += token;

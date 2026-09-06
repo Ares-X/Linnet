@@ -10,7 +10,11 @@ struct WindowsInputDefaults {
     guard CommandLine.arguments.count == 2,
       let defaults = projections[LinnetSettingsProjectionRenderer.defaultCustomFile]
     else { exit(64) }
+    let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
     try defaults.write(
-      toFile: CommandLine.arguments[1], atomically: true, encoding: .utf8)
+      to: output.appendingPathComponent("linnet_windows_defaults.yaml"),
+      atomically: true, encoding: .utf8)
+    try LinnetDataRegistry.activeGrammarConfiguration.write(
+      to: output.appendingPathComponent("linnet_grammar_active.yaml"), options: .atomic)
   }
 }

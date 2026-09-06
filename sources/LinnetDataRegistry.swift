@@ -5,6 +5,7 @@ import Foundation
 /// mutable per-user state. Callers consume a validated snapshot; they never
 /// search the App bundle, Packs, or UserData for alternative data sources.
 struct LinnetDataRegistry: Sendable {
+  static let activeGrammarConfiguration = Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8)
   static let stateFormat = "io.github.ares-x.linnet.active-set.v1"
   static let languageTransactionMarkerName = ".linnet-language-transaction.json"
   static let personalScratchMarkerName = ".linnet-personal-scratch.json"

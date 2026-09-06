@@ -19,7 +19,9 @@ schema downloader are not product authorities. Windows consumes the exact
 `data/plum` and `data/opencc` projection made by `scripts/stage-linnet-data` on
 macOS CI. Shared input defaults are exported by the existing Settings projection
 renderer at build time and included through Rime's native `__patch` mechanism,
-before user customization. Windows does not duplicate those policies or ship a
+before user customization. The grammar selection is exported from the shared
+data registry too: Windows uses the shipped Wanxiang LTS model, not the compact
+developer fixture. Windows does not duplicate those policies or ship a
 Swift runtime. `weasel.yaml` owns candidate window presentation and application
 integration, not input behavior.
 
@@ -82,7 +84,7 @@ git -C librime submodule update --init --recursive --depth 1
 platforms/windows/prepare.ps1 `
   -DataRoot C:\path\to\shared-data `
   -EmbeddedLuaHeader C:\path\to\linnet_embedded_lua.h `
-  -InputDefaults C:\path\to\linnet_windows_defaults.yaml `
+  -InputPolicyRoot C:\path\to\windows-inputs `
   -WeaselConfig C:\path\to\weasel.yaml `
   -ThemePreviewRoot C:\path\to\preview
 platforms/windows/build.ps1 -BoostRoot C:\path\to\boost_1_89_0

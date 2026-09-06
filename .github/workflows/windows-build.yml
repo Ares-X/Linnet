@@ -70,7 +70,7 @@ jobs:
             -EmbeddedLuaHeader (Join-Path $windowsInputs 'build/windows-inputs/linnet_embedded_lua.h') `
             -WeaselConfig (Join-Path $windowsInputs 'build/windows-inputs/weasel.yaml') `
             -ThemePreviewRoot (Join-Path $windowsInputs 'build/windows-inputs/preview') `
-            -InputDefaults (Join-Path $windowsInputs 'build/windows-inputs/linnet_windows_defaults.yaml')
+            -InputPolicyRoot (Join-Path $windowsInputs 'build/windows-inputs')
 
       - name: Build Windows installer
         shell: pwsh

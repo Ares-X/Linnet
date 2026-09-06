@@ -309,7 +309,15 @@ extension SquirrelApplicationDelegate {
 extension SquirrelApplicationDelegate {
   func performRimeUserDataSync(directory: URL) -> LinnetRimeSyncOutcome {
     guard activeDataTransaction == nil, canAcceptRimeInput else { return .busy }
-    switch directory.path.withCString({ rimeAPI.sync_user_data_step($0) }) {
+    let result = LinnetSettingsContract.chineseLearningDictionary.withCString { chinese in
+      LinnetSettingsContract.englishSchemaID.withCString { english in
+        let names: [UnsafePointer<CChar>?] = [chinese, english, nil]
+        return names.withUnsafeBufferPointer { names in
+          directory.path.withCString { rimeAPI.sync_user_data_step($0, names.baseAddress) }
+        }
+      }
+    }
+    switch result {
     case 0: return .completed
     case 1: return .inProgress
     case 2: return .deferred

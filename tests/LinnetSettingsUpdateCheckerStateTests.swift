@@ -284,6 +284,42 @@ struct LinnetSettingsUpdateCheckerStateTests {
         "online Core activation bypassed or duplicated the Host exit owner"
       )
 
+      // Cancellation is a failed activation, never a permanently busy UI.
+      let cancelledRequester = RuntimeRequester(
+        health: health(productIdentity: installed), cancelActivation: true)
+      let cancelledChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: cancelledRequester,
+        coreDownloader: StubCoreDownloader(destination: downloaded),
+        coreInstaller: StubCoreInstaller(prepared: prepared))
+      cancelledChecker.refreshRuntime()
+      await waitUntil("cancellation fixture did not diagnose the current Host") {
+        cancelledChecker.runtimeVersionState == .current(installed)
+      }
+      cancelledChecker.downloadCoreUpdate(core, source: .direct)
+      await waitUntil("cancellation fixture did not prepare Core") {
+        cancelledChecker.coreDownloadState == .ready(core: core, update: prepared)
+      }
+      cancelledChecker.applyDownloadedCoreUpdate()
+      await waitUntil("cancelled Core activation remained permanently busy") {
+        !cancelledChecker.activationInProgress
+      }
+      require(cancelledChecker.coreDownloadState == .failed(core: core),
+        "cancelled Core activation lost its failure state")
+
+      let cancelledInstalledChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: RuntimeRequester(
+          health: health(productIdentity: older), cancelActivation: true))
+      cancelledInstalledChecker.refreshRuntime()
+      await waitUntil("installed cancellation fixture did not become activatable") {
+        cancelledInstalledChecker.runtimeVersionState == .pending(installed: installed, running: older)
+      }
+      cancelledInstalledChecker.activateInstalledCore()
+      await waitUntil("cancelled installed activation remained permanently busy") {
+        !cancelledInstalledChecker.activationInProgress
+      }
+
       let legacyCore = LinnetDataChannel.Core(
         version: core.version, build: core.build, revision: core.revision,
         bytes: core.bytes, sha256: core.sha256,
@@ -353,15 +389,18 @@ struct LinnetSettingsUpdateCheckerStateTests {
     private let lock = NSLock()
     private let health: LinnetSettingsContract.RuntimeHealth
     private let activationReplyCode: LinnetSettingsContract.RuntimeReplyCode
+    private let cancelActivation: Bool
     private var recordedCommands: [LinnetSettingsContract.DataCommand] = []
 
     init(
       health: LinnetSettingsContract.RuntimeHealth,
       activationReplyCode: LinnetSettingsContract.RuntimeReplyCode =
-        .coreActivationInputSourceActive
+        .coreActivationInputSourceActive,
+      cancelActivation: Bool = false
     ) {
       self.health = health
       self.activationReplyCode = activationReplyCode
+      self.cancelActivation = cancelActivation
     }
 
     var commands: [LinnetSettingsContract.DataCommand] {
@@ -383,6 +422,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
           health: health
         )
       }
+      if cancelActivation { throw CancellationError() }
       return .init(
         transactionID: request.transactionID,
         status: .rejected,
@@ -439,7 +479,6 @@ struct LinnetSettingsUpdateCheckerStateTests {
 
     func exchange(_: LinnetPreparedCoreUpdate) async throws { }
     func discard(_: LinnetPreparedCoreUpdate) async { }
-    func removeStaleUpdates(beside _: URL) async { }
   }
 
   private struct BundleFixture {

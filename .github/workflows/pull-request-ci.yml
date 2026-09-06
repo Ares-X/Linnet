@@ -73,6 +73,7 @@ jobs:
             data/opencc
             build/windows-inputs/linnet_embedded_lua.h
             build/windows-inputs/linnet_windows_defaults.yaml
+            build/windows-inputs/linnet_grammar_active.yaml
             build/windows-inputs/weasel.yaml
             build/windows-inputs/preview
 

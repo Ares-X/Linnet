@@ -225,7 +225,7 @@ extension LinnetDataRegistry {
     } catch {
       throw Failure.invalidActiveState
     }
-    guard grammar == Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8) else {
+    guard grammar == Self.activeGrammarConfiguration else {
       throw Failure.invalidActiveState
     }
   }

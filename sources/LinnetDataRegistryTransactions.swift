@@ -384,7 +384,7 @@ extension LinnetDataRegistry {
 
     let generation = snapshot.state.generation + 1
     let grammar = candidate.appending(path: "linnet_grammar_active.yaml")
-    try Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8)
+    try Self.activeGrammarConfiguration
       .write(to: grammar, options: .atomic)
     try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: grammar.path)
     guard let chinese = packs.first(where: { $0.kind == .chinese }) else {
