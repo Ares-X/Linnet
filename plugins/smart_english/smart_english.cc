@@ -220,6 +220,8 @@ bool IsForcedRawOnlySegment(Segment& segment) {
 }
 
 bool IsRawLikeSegment(Segment& segment) {
+  const auto selected = segment.GetSelectedCandidate();
+  if (selected && selected->type() == kMixedCandidateType) return false;
   return segment.HasTag("raw") || segment.HasTag("zz_code_token") ||
          segment.HasTag("text_expander") || segment.HasTag("punct_number") ||
          IsForcedRawOnlySegment(segment);

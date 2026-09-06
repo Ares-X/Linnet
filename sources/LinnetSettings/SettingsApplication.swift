@@ -3,7 +3,9 @@ import SwiftUI
 
 @MainActor
 final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
-  weak var model: SettingsModel?
+  weak var model: SettingsModel? {
+    didSet { refreshSyncStatus() }
+  }
   var interfaceLocale = Locale.autoupdatingCurrent
   private var settingsWindowPresentationPending = false
 
@@ -11,9 +13,18 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     guard let application = notification.object as? NSApplication else { return }
+    DistributedNotificationCenter.default().addObserver(
+      self, selector: #selector(refreshSyncStatus),
+      name: LinnetSettingsContract.cloudSyncStatusChanged, object: nil,
+      suspensionBehavior: .deliverImmediately)
     requestSettingsWindowPresentation(in: application)
   }
 
+  func applicationDidBecomeActive(_ notification: Notification) { refreshSyncStatus() }
+
+  @objc private func refreshSyncStatus() {
+    model?.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
+  }
   func applicationDidUpdate(_ notification: Notification) {
     guard let application = notification.object as? NSApplication else { return }
     presentSettingsWindowIfReady(in: application)
@@ -57,7 +68,7 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
     return .terminateLater
   }
 
-  private func requestSettingsWindowPresentation(in application: NSApplication) {
+  func requestSettingsWindowPresentation(in application: NSApplication) {
     settingsWindowPresentationPending = true
     presentSettingsWindowIfReady(in: application)
   }
@@ -85,6 +96,7 @@ struct LinnetSettingsApp: App {
   var body: some Scene {
     WindowGroup {
       SettingsRootView()
+        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         .frame(
           minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth,
           idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth,

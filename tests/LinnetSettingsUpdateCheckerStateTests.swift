@@ -4,6 +4,23 @@ import Foundation
 @main
 struct LinnetSettingsUpdateCheckerStateTests {
   @MainActor static func main() async {
+    for code: URLError.Code in [.notConnectedToInternet, .timedOut, .networkConnectionLost,
+                               .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed] {
+      require(LinnetSettingsUpdateChecker.CheckFailure(URLError(code)) == .network,
+              "connection failure lost its network diagnosis")
+    }
+    require(LinnetSettingsUpdateChecker.CheckFailure(
+      LinnetDataChannel.Failure.conflictingPack(.english)) == .conflictingPack,
+      "pack conflict was reported as a network failure")
+    require(LinnetSettingsUpdateChecker.CheckFailure(
+      LinnetDataChannel.Failure.invalidCatalog("JSON")) == .invalidCatalog,
+      "invalid catalog lost its diagnosis")
+    require(LinnetSettingsUpdateChecker.CheckFailure(
+      LinnetSettingsDownloadTransport.Failure.httpStatus(503)) == .unavailable,
+      "server failure was misreported as a local network problem")
+    require(LinnetSettingsUpdateChecker.CheckFailure(
+      URLError(.serverCertificateUntrusted)) == .unavailable,
+      "certificate failure was misreported as an offline device")
     let defaultsSuite = "LinnetSettingsUpdateChannelTests-\(UUID().uuidString)"
     guard let updateDefaults = UserDefaults(suiteName: defaultsSuite) else {
       fail("could not create isolated update-channel defaults")

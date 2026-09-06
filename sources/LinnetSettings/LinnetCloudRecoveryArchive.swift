@@ -21,7 +21,7 @@ enum LinnetCloudRecoveryArchive {
     var errorDescription: String? {
       switch self {
       case .needsConfirmedRepair:
-        "No verified cloud recovery baseline is available; explicit repair confirmation is required."
+        "The cloud recovery chain cannot be extended; confirm a new full baseline."
       case .cloudItemUnavailable(let name):
         "The iCloud recovery item is not available locally: \(name)."
       case .invalid(let detail): "Invalid cloud recovery archive: \(detail)."
@@ -95,6 +95,11 @@ enum LinnetCloudRecoveryArchive {
 
     let archiveRoot = root(in: cloudFolder)
     let latest = try latestVerified(in: archiveRoot, workspace: work)
+    if repair {
+      return .init(
+        kind: .uploaded,
+        verifiedAt: try publishBase(target, payloadIdentity: identity, archiveRoot: archiveRoot))
+    }
     switch latest {
     case .verified(let head, let baseline):
       guard head.payloadIdentity != identity else {
@@ -109,10 +114,7 @@ enum LinnetCloudRecoveryArchive {
         kind: .uploaded,
         verifiedAt: try publishBase(target, payloadIdentity: identity, archiveRoot: archiveRoot))
     case .unusable:
-      guard repair else { throw Failure.needsConfirmedRepair }
-      return .init(
-        kind: .uploaded,
-        verifiedAt: try publishBase(target, payloadIdentity: identity, archiveRoot: archiveRoot))
+      throw Failure.needsConfirmedRepair
     }
   }
 
@@ -364,7 +366,9 @@ private extension LinnetCloudRecoveryArchive {
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     encoder.dateEncodingStrategy = .millisecondsSince1970
     let data = try encoder.encode(head)
-    guard data.count <= maximumHeadBytes else { throw Failure.invalid("head size") }
+    guard data.count <= maximumHeadBytes, head.deltas.count <= 1024 else {
+      throw Failure.needsConfirmedRepair
+    }
     let millis = Int64(head.createdAt.timeIntervalSince1970 * 1000)
     let destination = archiveRoot.appending(
       path: "heads/\(String(format: "%020lld", millis))-\(head.operationID.uuidString).json",

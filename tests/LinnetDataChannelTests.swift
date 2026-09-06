@@ -151,7 +151,22 @@ struct LinnetDataChannelTests {
         currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: [installedStandard[0], conflictingEnglish, installedStandard[2]])
       LinnetTestFailure.fail("same-sequence different content was accepted as current or an update")
-    } catch LinnetDataChannel.Failure.invalidCatalog { }
+    } catch LinnetDataChannel.Failure.conflictingPack(.english) { }
+    let repairSet = catalog.activationSet(for: .standard)!
+    let conflicted = [installedStandard[0], conflictingEnglish, installedStandard[2]]
+    if case .available(let repaired) = repairSet.updateSelection(
+      installedPacks: conflicted, allowCompleteRepair: true) {
+      require(repaired.map(\.kind) == [.english], "repair must only replace conflicting packs")
+    } else { LinnetTestFailure.fail("explicit repair rejected conflicting metadata") }
+    let newer = LinnetDataRegistry.ActivePack(
+      packID: conflictingEnglish.packID, kind: .english,
+      version: conflictingEnglish.version, sequence: 99, dataABI: conflictingEnglish.dataABI,
+      contentSHA256: conflictingEnglish.contentSHA256, minCore: conflictingEnglish.minCore,
+      requirements: [], relativePath: conflictingEnglish.relativePath,
+      manifestSHA256: conflictingEnglish.manifestSHA256)
+    if case .localAhead = repairSet.updateSelection(
+      installedPacks: [installedStandard[0], newer, installedStandard[2]], allowCompleteRepair: true) {
+    } else { LinnetTestFailure.fail("explicit repair allowed pack downgrade") }
     require(
       try verified.catalog.updateAvailability(
         currentVersion: "1.0.0", currentBuild: 8,

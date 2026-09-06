@@ -150,6 +150,8 @@ extension SettingsModel {
     case .transactionBusy: .hostBusy
     case .appearanceDeployFailed: .deploymentFailed
     case .staleCandidate: .staleHostState
+    case .learningSyncUnavailable: .cloudSyncUnavailable
+    case .learningSyncFailed: .cloudSyncFailed
     default: .hostRejected
     }
   }

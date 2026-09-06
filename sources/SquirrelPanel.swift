@@ -96,6 +96,11 @@ final class SquirrelPanel: NSPanel {
     switch event.type {
     case .leftMouseDown: beginCandidatePress(event)
     case .leftMouseUp: finishCandidatePress(event)
+    case .rightMouseDown:
+      if let menu = candidateContextMenu(at: mousePosition(for: event)) {
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+        return
+      }
     case .leftMouseDragged, .mouseEntered, .mouseMoved: moveCandidatePointer(event)
     case .mouseExited:
       candidateInteraction.leavePointer()

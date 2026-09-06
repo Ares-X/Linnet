@@ -226,6 +226,21 @@ struct LinnetBackupStoreTests {
     guard repaired.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
       fail("confirmed cloud repair did not publish a base")
     }
+    // A still-readable chain can also require a new baseline when it cannot
+    // accept another delta. Explicit confirmation must not be ignored merely
+    // because the old head is valid or its content is unchanged.
+    let confirmed = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: true)
+    guard confirmed.kind == .uploaded else {
+      fail("confirmed renewal of a valid recovery baseline was treated as a no-op")
+    }
+    let heads = try fileManager.contentsOfDirectory(
+      at: cloudRoot.appending(path: "heads"), includingPropertiesForKeys: nil)
+      .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    guard let head = heads.first,
+      let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: head)) as? [String: Any],
+      let deltas = metadata["deltas"] as? [Any], deltas.isEmpty else {
+      fail("confirmed recovery renewal did not start a fresh baseline")
+    }
   }
 
   private static func testPortableCodec() throws {

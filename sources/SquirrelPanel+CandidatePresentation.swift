@@ -148,6 +148,39 @@ extension SquirrelPanel {
     candidateInteraction.beginPress(view.click(at: mousePosition(for: event)))
     publishCandidatePointerFeedback()
   }
+
+  func candidateContextMenu(at point: NSPoint) -> NSMenu? {
+    guard let publication, publicationIsCurrent(publication),
+      case .candidate(let itemIndex) = view.click(at: point),
+      let candidateSnapshot, candidateSnapshot.items.indices.contains(itemIndex)
+    else { return nil }
+    let menu = NSMenu()
+    let item = NSMenuItem(
+      title: NSLocalizedString("Forget Learning for This Candidate", comment: "Candidate context menu"),
+      action: #selector(forgetCandidateLearning(_:)), keyEquivalent: "")
+    item.target = self
+    item.representedObject = (publication, candidateSnapshot.items[itemIndex].absoluteIndex)
+    menu.addItem(item)
+    let add = NSMenuItem(
+      title: NSLocalizedString("Add to Custom Words…", comment: "Candidate context menu"),
+      action: #selector(addCandidateToCustomWords(_:)), keyEquivalent: "")
+    add.target = self
+    add.representedObject = (publication, candidateSnapshot.items[itemIndex].text)
+    menu.addItem(add)
+    return menu
+  }
+
+  @objc func addCandidateToCustomWords(_ item: NSMenuItem) {
+    guard let (publication, value) = item.representedObject as? (Publication, String),
+      publicationIsCurrent(publication) else { return }
+    NSApp.squirrelAppDelegate.presentSettings(customWord: value)
+  }
+
+  @objc func forgetCandidateLearning(_ item: NSMenuItem) {
+    guard let (publication, absoluteIndex) = item.representedObject as? (Publication, Int),
+      publicationIsCurrent(publication) else { return }
+    inputController?.forgetCandidate(absoluteIndex: absoluteIndex)
+  }
   func finishCandidatePress(_ event: NSEvent) {
     guard let publication, publicationIsCurrent(publication),
       let inputController
@@ -164,8 +197,6 @@ extension SquirrelPanel {
         absoluteIndex: candidateSnapshot.items[itemIndex].absoluteIndex)
     case .control(let action):
       _ = performControl(action)
-    case .none:
-      break
     }
   }
   func moveCandidatePointer(_ event: NSEvent) {
@@ -185,8 +216,6 @@ extension SquirrelPanel {
       hit = .candidate(itemIndex)
     case .control(let action):
       hit = .control(action)
-    case .some(.none):
-      hit = nil
     case nil:
       hit = nil
     default:

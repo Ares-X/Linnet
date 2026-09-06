@@ -25,7 +25,6 @@ final class SquirrelView: NSView {
   static let controlPointerFeedbackLayerName = "linnetCandidateControlPointerFeedback"
 
   enum CandidateHit: Equatable {
-    case none
     case candidate(Int)
     case control(LinnetCandidatePresentation.CandidateControlAction)
   }
@@ -421,8 +420,8 @@ extension SquirrelView {
     candidateGridView.layoutSubtreeIfNeeded()
   }
 
-  func click(at clickPoint: NSPoint) -> CandidateHit {
-    guard presentationMetrics != nil else { return .none }
+  func click(at clickPoint: NSPoint) -> CandidateHit? {
+    guard presentationMetrics != nil else { return nil }
     if let nextPage = pagingLayout.nextPage, nextPage.cell.contains(clickPoint) {
       switch controlMode {
       case .paging: return .control(.pageDown)
@@ -442,7 +441,7 @@ extension SquirrelView {
       return .candidate(candidateIndex)
     }
     if let candidateIndex = Self.candidateIndex(at: clickPoint, paths: candidateInteractionPaths) { return .candidate(candidateIndex) }
-    return .none
+    return nil
   }
 
   static func candidateIndex(at point: NSPoint, paths: [CGPath?]) -> Int? { paths.firstIndex { $0?.contains(point) == true } }

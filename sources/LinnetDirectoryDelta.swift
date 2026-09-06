@@ -137,7 +137,8 @@ enum LinnetDirectoryDelta {
     }
     for app in [installed, staged] {
       guard
-        try FileManager.default.contentsOfDirectory(atPath: app.path) == ["Contents"] else {
+        try FileManager.default.contentsOfDirectory(atPath: app.path)
+          .filter({ $0 != ".DS_Store" }) == ["Contents"] else {
         throw Failure.invalid("App publication layout")
       }
       try requireDirectory(app.appending(path: "Contents"))
@@ -178,6 +179,15 @@ enum LinnetDirectoryDelta {
       guard result.count < 32_768, path.utf8.count <= 1024,
         lstat(url.path, &info) == 0, info.st_uid == getuid(),
         info.st_mode & 0o6000 == 0 else { throw Failure.invalid("entry \(path)") }
+      // Finder's root-folder display metadata is not payload. The same
+      // inventory must exclude it for preparation, exchange and rollback;
+      // it stays with the registered App directory when Contents is swapped.
+      if path == ".DS_Store" {
+        guard info.st_mode & S_IFMT == S_IFREG else {
+          throw Failure.invalid("Finder metadata type")
+        }
+        continue
+      }
       let type: String, content: String
       switch info.st_mode & S_IFMT {
       case S_IFDIR:

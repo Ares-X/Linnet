@@ -24,6 +24,17 @@ struct SettingsPresentationStatusTests {
       english,
       chinese
     )
+    guard SettingsPresentationStatus.cloudSyncDeferred.presentation(locale: chinese).severity
+      == .informational else { fail("deferred learning sync was presented as an error or success") }
+    for status: SettingsPresentationStatus in [
+      .cloudSyncDeferred, .operationFailed(.cloudSyncUnavailable), .operationFailed(.cloudSyncFailed)
+    ] {
+      for locale in [english, chinese] {
+        guard !status.text(locale: locale).isEmpty,
+          status.text(locale: locale) != SettingsPresentationStatus.operationFailed(.hostRejected).text(locale: locale)
+        else { fail("a learning sync result lost its specific explanation") }
+      }
+    }
     expect(
       .cloudBackupUploaded(Date(timeIntervalSince1970: 0)),
       en: "Incremental recovery backup verified at \(Date(timeIntervalSince1970: 0).formatted()).",

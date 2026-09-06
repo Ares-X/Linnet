@@ -173,6 +173,10 @@ extension SquirrelApplicationDelegate {
   }
 
   @objc func openSettings() {
+    presentSettings(customWord: nil)
+  }
+
+  func presentSettings(customWord: String?) {
     let settingsURL = Bundle.main.bundleURL
       .appending(path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
     guard FileManager.default.fileExists(atPath: settingsURL.path) else {
@@ -185,14 +189,19 @@ extension SquirrelApplicationDelegate {
     // Settings owns activation and key-window ordering after launch or reopen.
     // Suppress LaunchServices' default activation so there is only one owner.
     configuration.activates = false
-    NSWorkspace.shared.openApplication(
-      at: settingsURL,
-      configuration: configuration
-    ) { _, error in
+    let completion: @Sendable (NSRunningApplication?, Error?) -> Void = { _, error in
       guard error == nil else {
         Self.showMessage(msgText: "Settings could not be opened.")
         return
       }
+    }
+    if let customWord, let url = LinnetSettingsContract.customWordURL(value: customWord) {
+      NSWorkspace.shared.open(
+        [url], withApplicationAt: settingsURL, configuration: configuration,
+        completionHandler: completion)
+    } else {
+      NSWorkspace.shared.openApplication(
+        at: settingsURL, configuration: configuration, completionHandler: completion)
     }
   }
 

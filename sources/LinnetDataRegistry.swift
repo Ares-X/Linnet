@@ -192,6 +192,7 @@ struct LinnetDataRegistry: Sendable {
     let edition: Edition
     let artifacts: [LinnetDataChannel.Artifact]
     let baseRevision: ActiveRevision
+    var allowCompleteRepair: Bool? = nil
     var phase: Phase
     var candidateRevision: ActiveRevision?
 
@@ -201,6 +202,7 @@ struct LinnetDataRegistry: Sendable {
       case createdAt = "created_at"
       case catalog, edition, artifacts
       case baseRevision = "base_revision"
+      case allowCompleteRepair = "allow_complete_repair"
       case phase
       case candidateRevision = "candidate_revision"
     }

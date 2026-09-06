@@ -699,9 +699,31 @@ struct SettingsDataCoordinatorTests {
       )
       let requestsBeforeLearningSync = requestOrder.currentRequestCount()
       try await coordinator.reloadLearningSyncConfiguration()
-      try await coordinator.synchronizeLearningNow()
+      guard try await coordinator.synchronizeLearningNow() else {
+        fail("completed learning synchronization was reported as deferred")
+      }
       guard requestOrder.currentRequestCount() == requestsBeforeLearningSync + 2 else {
         fail("learning synchronization did not use the typed Host IPC boundary")
+      }
+      for code: LinnetSettingsContract.RuntimeReplyCode in [
+        .learningSyncDeferred, .learningSyncUnavailable, .learningSyncFailed, .transactionBusy
+      ] {
+        let syncCoordinator = SettingsDataCoordinator(
+          bundle: settings, timeout: 10, dataRegistry: registry,
+          transactionRequester: FixtureTransactionRequester { request, _, _ in
+            .init(transactionID: request.transactionID, status: .running,
+              code: code, detail: "fixture synchronization result", health: nil)
+          })
+        do {
+          let completed = try await syncCoordinator.synchronizeLearningNow()
+          guard code == .learningSyncDeferred, !completed else {
+            fail("an unsuccessful learning sync was reported as completed")
+          }
+        } catch SettingsDataCoordinator.Failure.requestFailed(let actual) {
+          guard code != .learningSyncDeferred, actual == code else {
+            fail("deferred learning sync was rejected or its failure identity changed")
+          }
+        }
       }
       let oversizedHallelujah = fixtureRoot.appending(path: "oversized-substitutions.sqlite3")
       try makeSubstitutionDatabase(at: oversizedHallelujah)

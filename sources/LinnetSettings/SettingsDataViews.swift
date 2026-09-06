@@ -36,17 +36,43 @@ extension DataTabView {
       }
 
       Text(
-        // Keep the complete localization key intact for String Catalog lookup.
-        // swiftlint:disable:next line_length
-        "Rime incrementally merges learned Chinese and English words between your Macs. Linnet checks at most once per hour while it is running; the next activation catches up. It does not read or merge the user dictionary format itself."
+        "Learned Chinese and English words sync between your Macs while Linnet is running. Use Sync Learning Now to check without waiting for the next automatic sync."
       )
       .font(.caption2)
       .foregroundStyle(.secondary)
 
+      if model.cloudSyncEnabled {
+        LabeledContent("Last successful learning sync on this Mac") {
+          if let date = model.cloudSyncStatus?.lastSuccess {
+            Text(date, format: .dateTime.year().month().day().hour().minute())
+          } else {
+            Text("No successful sync recorded")
+          }
+        }
+        if let status = model.cloudSyncStatus {
+          switch status.result {
+          case .learningSyncCompleted:
+            Text("This Mac has finished merging and exporting learning data. iCloud may still be transferring it to your other Macs.")
+              .font(.caption).foregroundStyle(.secondary)
+          case .learningSyncDeferred:
+            Text("Some learning data is still pending because a dictionary is inactive or changing. Your local learning is kept; keep using Linnet and retry later.")
+              .font(.caption).foregroundStyle(.orange)
+          case .learningSyncUnavailable:
+            Text("The last sync could not access iCloud Drive. Check iCloud Drive in System Settings, then retry.")
+              .font(.caption).foregroundStyle(.orange)
+          case .learningSyncFailed:
+            Text("The last learning sync failed. Your local learning is kept; use Sync Learning Now to retry.")
+              .font(.caption).foregroundStyle(.orange)
+          default:
+            EmptyView()
+          }
+        }
+      }
+
       HStack {
         Button("Sync Learning Now") { model.synchronizeLearningNow() }
           .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
-        Button("Upload Incremental Backup…") { pendingCloudBackupUpload = true }
+        Button("Upload Recovery Backup…") { pendingCloudBackupUpload = true }
           .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
         Button("Review Recovery Backup…") {
           Task {
@@ -58,7 +84,7 @@ extension DataTabView {
             || model.operationActive || model.portableInspectionActive || model.cloudSyncPreparing)
       }
       Text(
-        "Recovery backups also include personal words, disabled words, and Text Expander data. The first upload creates a baseline; later uploads are incremental and manual."
+        "Recovery backups are uploaded manually. They also include custom words, disabled words, and Text Expander entries; enabling learning sync does not upload them automatically."
       )
       .font(.caption2)
       .foregroundStyle(.secondary)
@@ -368,8 +394,9 @@ extension DataTabView {
     if updateChecker.active {
       Label("Checking for updates…", systemImage: "arrow.triangle.2.circlepath")
         .foregroundStyle(.secondary)
-    } else if updateChecker.failed {
-      Label("Update check failed. Try again when you are online.", systemImage: "wifi.exclamationmark")
+    } else if let failure = updateChecker.failure {
+      Label(LocalizedStringKey(failure.message),
+            systemImage: failure == .network ? "wifi.exclamationmark" : "exclamationmark.triangle")
         .foregroundStyle(.orange)
     } else {
       switch updateChecker.availability {

@@ -14,6 +14,7 @@ struct LinnetRimeSyncControllerTests {
         try testIncrementalWorkYieldsAndCancellationStopsIt(root: root)
         try testWaitingWorkUsesLowFrequencyPolling(root: root)
         try testDeferredCycleRetainsHourlyWindow(root: root)
+        testTerminalStatusPublication(root: root)
       }
       testHourlyAutomaticLimit()
       testBoundedBusyRetry()
@@ -33,6 +34,35 @@ struct LinnetRimeSyncControllerTests {
         now: now, lastAttempt: now.addingTimeInterval(-3_600)
       ) == now
     else { fail("automatic synchronization was not limited to one hourly window") }
+  }
+
+  private static func testTerminalStatusPublication(root: URL) {
+    var results: [LinnetRimeSyncResult] = []
+    var outcome: LinnetRimeSyncOutcome = .completed
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: { .init(syncDirectory: root, lastAttempt: nil) },
+      recordAttempt: { _ in true }, recordResult: { results.append($0) },
+      operation: { _ in outcome }, cancelOperation: {})
+    // Automatic completion must be visible too, without a Settings request.
+    controller.start()
+    waitUntil { results.count == 1 }
+    guard results == [.completed] else { fail("automatic sync did not publish completion") }
+    outcome = .failed
+    var reply: LinnetRimeSyncResult?
+    controller.synchronizeNow { reply = $0 }
+    waitUntil { reply != nil }
+    guard results == [.completed, .failed], reply == .failed else {
+      fail("manual sync did not persist its actual terminal result before replying")
+    }
+    outcome = .inProgress
+    controller.start()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    controller.stop()
+    guard results == [.completed, .failed, .deferred] else {
+      fail("interrupted sync was displayed as a successful completion")
+    }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    guard results.count == 3 else { fail("cancelled sync published a later result") }
   }
 
   private static func testBoundedBusyRetry() {
@@ -62,6 +92,7 @@ struct LinnetRimeSyncControllerTests {
         recordedAttempts += 1
         return true
       },
+      recordResult: { _ in },
       operation: { directory in
         guard directory == sync else { fail("sync did not receive its explicit directory") }
         operations += 1
@@ -101,6 +132,7 @@ struct LinnetRimeSyncControllerTests {
         .init(syncDirectory: sync, lastAttempt: nil)
       },
       recordAttempt: { _ in false },
+      recordResult: { _ in },
       operation: { _ in
         operations += 1
         return .completed
@@ -149,6 +181,7 @@ struct LinnetRimeSyncControllerTests {
         return .init(syncDirectory: sync, lastAttempt: Date())
       },
       recordAttempt: { _ in recordedAttempts += 1; return true },
+      recordResult: { _ in },
       operation: { _ in
         operations += 1
         return .completed
@@ -182,6 +215,7 @@ struct LinnetRimeSyncControllerTests {
         .init(syncDirectory: nil, lastAttempt: nil)
       },
       recordAttempt: { _ in recordedAttempts += 1; return true },
+      recordResult: { _ in },
       operation: { _ in
         operations += 1
         return .completed
@@ -218,7 +252,7 @@ struct LinnetRimeSyncControllerTests {
         cloudReleased.wait()
         cloudFinished.signal()
         return .init(syncDirectory: root, lastAttempt: nil)
-      }, recordAttempt: { _ in true }, operation: { _ in
+      }, recordAttempt: { _ in true }, recordResult: { _ in }, operation: { _ in
         operations += 1
         return .completed
       }, cancelOperation: {})
@@ -250,6 +284,7 @@ struct LinnetRimeSyncControllerTests {
     let controller = LinnetRimeSyncController(
       loadConfiguration: { .init(syncDirectory: root, lastAttempt: nil) },
       recordAttempt: { _ in attempts += 1; return true },
+      recordResult: { _ in },
       operation: { _ in
         guard Thread.isMainThread else { fail("live database work escaped the input owner") }
         steps += 1
@@ -274,6 +309,7 @@ struct LinnetRimeSyncControllerTests {
     let controller = LinnetRimeSyncController(
       loadConfiguration: { .init(syncDirectory: root, lastAttempt: nil) },
       recordAttempt: { _ in true },
+      recordResult: { _ in },
       operation: { _ in
         callTimes.append(Date())
         return callTimes.count < 3 ? .waiting : .completed
@@ -305,7 +341,7 @@ struct LinnetRimeSyncControllerTests {
         lastAttempt = date
         recordedAttempts += 1
         return true
-      }, operation: { _ in
+      }, recordResult: { _ in }, operation: { _ in
         operations += 1
         return .deferred
       }, cancelOperation: {})

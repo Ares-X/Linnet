@@ -89,6 +89,7 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
         lastAttempt: LinnetSettingsContract.cloudSyncLastAttempt())
     },
     recordAttempt: { LinnetSettingsContract.setCloudSyncLastAttempt($0) },
+    recordResult: { LinnetSettingsContract.setCloudSyncResult($0.replyCode) },
     operation: { [weak self] directory in self?.performRimeUserDataSync(directory: directory) ?? .failed },
     cancelOperation: { [weak self] in _ = self?.rimeAPI.sync_user_data_step(nil) }
   )

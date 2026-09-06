@@ -181,12 +181,14 @@ enum LinnetDataChannel {
 
   enum Failure: LocalizedError, Equatable {
     case invalidCatalog(String)
+    case conflictingPack(LinnetPackContract.Kind)
     case invalidArtifact(String)
     case completeRepairRequired
 
     var errorDescription: String? {
       switch self {
       case .invalidCatalog(let detail): "Invalid Linnet data catalog: \(detail)."
+      case .conflictingPack(let kind): "Conflicting Linnet language-pack metadata: \(kind.rawValue)."
       case .invalidArtifact(let detail): "Invalid Linnet data artifact: \(detail)."
       case .completeRepairRequired: "A complete language-data repair needs your confirmation."
       }
@@ -206,7 +208,9 @@ enum LinnetDataChannel {
 
     /// A catalog describes one atomic set, not a menu of independently mixable
     /// packs. Never advertise or download a set that regresses any local pack.
-    func updateSelection(installedPacks: [LinnetDataRegistry.ActivePack]) -> UpdateSelection {
+    func updateSelection(
+      installedPacks: [LinnetDataRegistry.ActivePack], allowCompleteRepair: Bool = false
+    ) -> UpdateSelection {
       var updates: [Artifact] = []
       var localAhead = false
       for artifact in packs {
@@ -216,8 +220,9 @@ enum LinnetDataChannel {
             continue
           }
           if artifact.sequence == installed.sequence {
-            guard artifact.matches(installed) else {
-              return .conflict(artifact.kind)
+            if !artifact.matches(installed) {
+              guard allowCompleteRepair else { return .conflict(artifact.kind) }
+              updates.append(artifact)
             }
             continue
           }
@@ -284,7 +289,7 @@ enum LinnetDataChannel {
       case .current: return .current
       case .localAhead: return .localDataAhead
       case .available(let updates): artifacts = updates
-      case .conflict(let kind): throw Failure.invalidCatalog("conflicting pack sequence: \(kind.rawValue)")
+      case .conflict(let kind): throw Failure.conflictingPack(kind)
       }
       let updates = artifacts.map { artifact -> LanguageDataUpdate in
         let installed = installedPacks.first {
@@ -534,12 +539,16 @@ extension LinnetDataRegistry {
   }
 
   func validateDataChannelReceipt(
-    _ candidate: DataChannelReceipt, artifacts: [LinnetDataChannel.Artifact]
+    _ candidate: DataChannelReceipt, artifacts: [LinnetDataChannel.Artifact],
+    allowCompleteRepair: Bool = false
   ) throws {
     guard validDataChannelReceipt(candidate) else { throw Failure.invalidActiveState }
     let committed = try committedActiveState()
     guard let previous = committed.acceptedCatalog else { return }
     guard candidate.sequence >= previous.sequence else { throw Failure.staleDataChannel }
+    // Explicit repair can resolve conflicting metadata at the same release,
+    // but cannot replay an older catalog or downgrade any installed pack.
+    if allowCompleteRepair { return }
     switch (previous.packSnapshotDigest, candidate.packSnapshotDigest) {
     case (.some(let accepted), .some(let proposed)):
       guard candidate.sequence > previous.sequence || accepted == proposed else {
@@ -602,7 +611,9 @@ extension LinnetDataRegistry {
         packs.contains(where: { artifact.matches($0) })
       })
     else { throw Failure.invalidActiveState }
-    try validateDataChannelReceipt(record.catalog, artifacts: record.artifacts)
+    try validateDataChannelReceipt(
+      record.catalog, artifacts: record.artifacts,
+      allowCompleteRepair: record.allowCompleteRepair == true)
     return record
   }
 }

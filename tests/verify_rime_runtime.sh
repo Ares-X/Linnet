@@ -11,6 +11,8 @@ cd "${repo_root}"
 
 runtime_probe="${1:-}"
 if [[ "${1:-}" == --mixed-input-probe ||
+      "${1:-}" == --candidate-forget-probe ||
+      "${1:-}" == --raw-editing-probe ||
       "${1:-}" == --mixed-latency-probe ||
       "${1:-}" == --warm-session-probe ||
       "${1:-}" == --cold-client-probe ||
@@ -19,7 +21,7 @@ if [[ "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
+  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -82,6 +84,10 @@ ruby -e '
   )
 ' "${shared}/default.yaml"
 cp data/linnet/linnet_algebra.yaml "${shared}/linnet_algebra.yaml"
+# Every product selector uses the shipped LTS model, not the compact build-time
+# projection retained in data/plum. Otherwise the same ranking assertion tests
+# different language models in the full suite and the focused selector.
+printf 'grammar:\n  language: wanxiang-lts-zh-hans\n' > "${shared}/linnet_grammar_active.yaml"
 ruby -e '
   path = ARGV.fetch(0)
   source = File.binread(path)
@@ -218,6 +224,10 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime formal eight-profile key matrix: PASS"
   elif [[ "${runtime_probe}" == --live-sync-probe ]]; then
     echo "Linnet native Rime live synchronization: PASS"
+  elif [[ "${runtime_probe}" == --candidate-forget-probe ]]; then
+    echo "Linnet native Rime candidate forget focus: PASS"
+  elif [[ "${runtime_probe}" == --raw-editing-probe ]]; then
+    echo "Linnet native Rime raw spelling navigation: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi

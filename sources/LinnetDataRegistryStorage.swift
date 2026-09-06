@@ -49,7 +49,9 @@ extension LinnetDataRegistry {
     // each Host launch proportional to the full language-data footprint.
     let installed = try verifiedInstalledManifest(at: directory, verifyContents: false)
     guard Self.sha256(installed.manifestData) == pack.manifestSHA256,
-      Self.activePack(from: installed.manifest, manifestSHA256: pack.manifestSHA256) == pack
+      Self.activePack(
+        from: installed.manifest, manifestSHA256: pack.manifestSHA256,
+        separateRepairCopy: directory.lastPathComponent.hasSuffix("-" + pack.manifestSHA256)) == pack
     else { throw Failure.invalidActiveState }
     return installed
   }
@@ -79,7 +81,8 @@ extension LinnetDataRegistry {
     let installed = try verifiedInstalledManifest(at: directory)
     let manifestSHA256 = Self.sha256(installed.manifestData)
     let expectedPack = Self.activePack(
-      from: installed.manifest, manifestSHA256: manifestSHA256)
+      from: installed.manifest, manifestSHA256: manifestSHA256,
+      separateRepairCopy: directory.lastPathComponent.hasSuffix("-" + manifestSHA256))
     guard directory.standardizedFileURL == rootDirectory.appending(
       path: expectedPack.relativePath, directoryHint: .isDirectory).standardizedFileURL
     else { throw Failure.invalidActiveState }
@@ -423,9 +426,11 @@ extension LinnetDataRegistry {
 
   static func activePack(
     from manifest: LinnetPackContract.Manifest,
-    manifestSHA256: String
+    manifestSHA256: String,
+    separateRepairCopy: Bool = false
   ) -> ActivePack {
     let identity = packIdentity(sequence: manifest.sequence, version: manifest.version)
+      + (separateRepairCopy ? "-" + manifestSHA256 : "")
     return ActivePack(
       packID: manifest.packID,
       kind: manifest.kind,
@@ -669,7 +674,9 @@ extension LinnetDataRegistry {
       && pack.dataABI > 0
       && isSHA256(pack.contentSHA256)
       && LinnetPackContract.supportsCore(required: pack.minCore, actual: pack.minCore)
-      && pack.relativePath == "Data/Packs/\(pack.kind.rawValue)/\(identity)"
+      && ["Data/Packs/\(pack.kind.rawValue)/\(identity)",
+          "Data/Packs/\(pack.kind.rawValue)/\(identity)-\(pack.manifestSHA256)"]
+        .contains(pack.relativePath)
       && isSHA256(pack.manifestSHA256)
   }
 
