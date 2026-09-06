@@ -1,0 +1,17 @@
+#!/usr/bin/env ruby
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Render the same version notes before building and when staging releases.
+abort "usage: release_version_changes VERSION" unless ARGV.size == 1
+version = ARGV.fetch(0)
+lines = File.readlines(File.expand_path('../CHANGELOG.md', __dir__), chomp: false)
+prefix = "## #{version} — "
+starts = lines.each_index.select { |index| lines.fetch(index).start_with?(prefix) }
+abort "CHANGELOG must contain exactly one #{version} section" unless starts.size == 1
+first = starts.fetch(0) + 1
+last = (first...lines.size).find { |index| lines.fetch(index).start_with?("## ") } || lines.size
+body = lines[first...last].join.strip
+abort "CHANGELOG #{version} section is empty" if body.empty?
+abort "CHANGELOG #{version} section needs a category heading" unless body.match?(/^### /)
+abort "CHANGELOG #{version} section needs a user-visible change" unless body.match?(/^- /)
+puts body
