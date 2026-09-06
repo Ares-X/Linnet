@@ -30,7 +30,8 @@ private extension SettingsPresentationSeverity {
 }
 
 struct SettingsRootView: View {
-  @StateObject private var model = SettingsModel()
+  @ObservedObject var model: SettingsModel
+  let applicationDelegate: SettingsApplicationDelegate
   @AppStorage(SettingsInterfaceLanguage.defaultsKey)
   private var interfaceLanguageRawValue = SettingsInterfaceLanguage.system.rawValue
   @State private var pendingClear: Set<SettingsDataCoordinator.LearningDomain>?
@@ -39,7 +40,6 @@ struct SettingsRootView: View {
   @State private var pendingBackupRemoval: LinnetBackupStore.BackupRecord?
   @State private var pendingLegacyImport: SettingsDataCoordinator.LegacyImportCandidate?
   @State private var pendingCloudBackupUpload = false
-  @State private var selectedTab = 0
 
   var body: some View {
     VStack(spacing: 0) {
@@ -174,15 +174,10 @@ struct SettingsRootView: View {
       Text(verbatim: SettingsBackupRemovalCopy.message(locale: interfaceLanguage.locale))
     }
     .background(SettingsWindowCloseGuard(model: model, locale: interfaceLanguage.locale))
-    .onAppear { registerApplicationDelegate() }
-    .onOpenURL { url in
-      guard let value = LinnetSettingsContract.customWordValue(from: url) else { return }
-      // Keep any unsaved edits. The new word is a draft requiring an explicit code and Apply.
-      model.configuration.personalDraft.customWords.insert(.init(value: value, code: ""), at: 0)
-      selectedTab = 2
-      (NSApp.delegate as? SettingsApplicationDelegate)?.requestSettingsWindowPresentation(in: NSApp)
+    .onAppear { applicationDelegate.interfaceLocale = interfaceLanguage.locale }
+    .onChange(of: interfaceLanguageRawValue) { _ in
+      applicationDelegate.interfaceLocale = interfaceLanguage.locale
     }
-    .onChange(of: interfaceLanguageRawValue) { _ in registerApplicationDelegate() }
     .environment(\.locale, interfaceLanguage.locale)
   }
 
@@ -208,7 +203,7 @@ struct SettingsRootView: View {
   }
 
   private var tabs: some View {
-    TabView(selection: $selectedTab) {
+    TabView(selection: $model.selectedTab) {
       AppearanceTabView(model: model)
         .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
         .tag(0)
@@ -237,12 +232,6 @@ struct SettingsRootView: View {
 
   private var interfaceLanguage: SettingsInterfaceLanguage {
     SettingsInterfaceLanguage(rawValue: interfaceLanguageRawValue) ?? .system
-  }
-
-  private func registerApplicationDelegate() {
-    guard let delegate = NSApp.delegate as? SettingsApplicationDelegate else { return }
-    delegate.model = model
-    delegate.interfaceLocale = interfaceLanguage.locale
   }
 
   private func presented<Value>(_ value: Binding<Value?>) -> Binding<Bool> {

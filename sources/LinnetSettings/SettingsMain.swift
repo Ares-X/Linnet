@@ -21,6 +21,7 @@ private let settingsModelLogger = Logger(
 
 @MainActor
 final class SettingsModel: ObservableObject {
+  @Published var selectedTab = 0
   @Published var backupRetentionPolicy: LinnetSettingsContract.BackupRetentionPolicy
   @Published var configuration: SettingsConfigurationSession {
     didSet {
