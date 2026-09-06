@@ -56,7 +56,7 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
       for: sender.keyWindow ?? sender.windows.first(where: \.isVisible),
       canApply: model.canApplyChanges,
       locale: interfaceLocale
-    ) { choice in
+    ) { [model] choice in
       switch choice {
       case .apply:
         model.applyConfiguration { accepted in
