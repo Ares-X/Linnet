@@ -5,9 +5,6 @@ import Foundation
 /// It snapshots learning and prepares isolated personal-table databases; the
 /// Host remains the only owner that publishes those bytes to the live runtime.
 struct RimeUserDataBridge {
-  static let chineseSchema = "linnet_zh"
-  static let englishSchema = "linnet_en"
-  static let learningSchemas = Set([chineseSchema, englishSchema])
   enum PersonalDictionary: String, CaseIterable, Hashable, Sendable {
     case customWords = "linnet_custom_words"
     case textExpander = "linnet_text_expander"
@@ -90,8 +87,8 @@ struct RimeUserDataBridge {
 
   private let rime = rime_get_api_stdbool().pointee
   fileprivate static let legacyMappings = [
-    "rime_ice": chineseSchema,
-    "melt_eng": englishSchema
+    "rime_ice": LinnetSettingsContract.chineseLearningDictionary,
+    "melt_eng": LinnetSettingsContract.englishSchemaID
   ]
 
   func prepareLegacyDirectory(
@@ -128,7 +125,7 @@ struct RimeUserDataBridge {
     product: String,
     schemas: Set<String>
   ) throws -> [LearningFile] {
-    guard schemas.isSubset(of: Self.learningSchemas) else {
+    guard schemas.isSubset(of: LinnetSettingsContract.learningDictionaries) else {
       throw Failure.invalidSchema("portable export")
     }
     guard !schemas.isEmpty else { return [] }
@@ -169,7 +166,7 @@ struct RimeUserDataBridge {
   ) throws {
     try requireDirectory(candidate)
     for item in imports {
-      guard Self.learningSchemas.contains(item.schema) else {
+      guard LinnetSettingsContract.learningDictionaries.contains(item.schema) else {
         throw Failure.invalidSchema(item.schema)
       }
       try requireRegularFile(item.file)
@@ -205,7 +202,7 @@ struct RimeUserDataBridge {
     // profile is owned by default.custom.yaml's schema-list projection; probing
     // it last would mutate user.yaml and create a competing selection owner.
     let schemas = LinnetSettingsContract.ChineseProfile.allCases.map(\.schemaID)
-      + [Self.englishSchema]
+      + [LinnetSettingsContract.englishSchemaID]
     for schema in schemas {
       try smoke(schema: schema, substitutionProbe: substitutionProbe)
     }
@@ -323,7 +320,7 @@ extension RimeUserDataBridge {
     }
     var files: [LearningFile] = []
     for source in mappings.keys.sorted() where available.contains(source) {
-      guard let target = mappings[source], Self.learningSchemas.contains(target) else {
+      guard let target = mappings[source], LinnetSettingsContract.learningDictionaries.contains(target) else {
         throw Failure.invalidSchema(mappings[source] ?? source)
       }
       let file = destination.appending(path: "\(target).txt")

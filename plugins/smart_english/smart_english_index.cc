@@ -15,7 +15,7 @@
 namespace linnet {
 namespace {
 
-constexpr std::size_t kMaxLookupWords = 64, kMaxStaticWords = 1024;
+constexpr std::size_t kMaxLookupWords = 64;
 constexpr std::size_t kPhonexDistanceThreshold = 6;
 constexpr std::size_t kMaxCorrectionKeys = 64, kMaxCorrectionInput = 64;
 constexpr std::size_t kMinCrossBucketCorrectionLength = 8;
@@ -126,11 +126,6 @@ bool IsMetadataKey(const std::string& value) {
   return true;
 }
 
-bool IsContextToken(const std::string& value) {
-  static const std::set<std::string> kSuffixes = {"'d", "'ll", "'m", "'re", "'s", "'ve"};
-  return IsLowerWord(value) || kSuffixes.find(value) != kSuffixes.end();
-}
-
 bool IsMetadataValue(const std::string& value) {
   if (value.empty() || value.size() > 4096) return false;
   return std::none_of(value.begin(), value.end(), [](unsigned char byte) { return byte == 0 || byte == '\r' || byte == '\n' || byte == '\t'; });
@@ -152,7 +147,7 @@ bool SmartEnglishIndex::LookupWords(const std::string& key, std::size_t limit, W
   result->reserve(raw.size());
   for (std::size_t ordinal = 0; ordinal < raw.size(); ++ordinal) {
     const auto& entry = raw[ordinal];
-    const bool valid_text = shape == WordShape::kLowerWord ? IsLowerWord(entry.text) : shape == WordShape::kPrintableEnglish ? IsPinyinValue(entry.text) : IsContextToken(entry.text);
+    const bool valid_text = shape == WordShape::kLowerWord ? IsLowerWord(entry.text) : IsPinyinValue(entry.text);
     if (!valid_text || !std::isfinite(entry.weight) || entry.weight <= 0.0 || !seen.insert(entry.text).second) {
       result->clear();
       return false;
@@ -320,16 +315,6 @@ bool SmartEnglishIndex::LookupMetadata(const std::string& displayed_word,
   LookupSingleton("m/ipa/" + source_word, &metadata.ipa);
   *result = std::move(metadata);
   return true;
-}
-
-std::map<std::string, std::size_t> SmartEnglishIndex::LookupStaticOrdinals(const std::string& validated_key) const {
-  std::vector<SmartEnglishWord> words;
-  if (validated_key.rfind("n/", 0) != 0 || !LookupWords(validated_key, kMaxStaticWords, WordShape::kContextToken, &words)) {
-    return {};
-  }
-  std::map<std::string, std::size_t> result;
-  for (std::size_t ordinal = 0; ordinal < words.size(); ++ordinal) result.emplace(words[ordinal].text, ordinal);
-  return result;
 }
 
 }  // namespace linnet

@@ -1033,7 +1033,7 @@ struct SettingsDataCoordinatorTests {
         fixtureRoot: fixtureRoot
       )
       var originalLearning: [String: [String: String]] = [:]
-      for schema in RimeUserDataBridge.learningSchemas.sorted() {
+      for schema in LinnetSettingsContract.learningDictionaries.sorted() {
         try seedRawDictionary(schema, directory: live, fixtureRoot: fixtureRoot)
         let state = try rawDictionaryState(schema, directory: live)
         guard state["#@/tick"] == "1000",
@@ -1691,7 +1691,7 @@ struct SettingsDataCoordinatorTests {
       )
       let exported = try LinnetBackupStore.decodePortable(Data(contentsOf: portableURL))
       guard Set(exported.categories) == Set(LinnetBackupStore.Category.allCases),
-        Set(exported.learning.map(\.schema)) == RimeUserDataBridge.learningSchemas
+        Set(exported.learning.map(\.schema)) == LinnetSettingsContract.learningDictionaries
       else {
         fail("portable export did not contain the requested canonical categories")
       }
@@ -1733,7 +1733,7 @@ struct SettingsDataCoordinatorTests {
       let portableData = try LinnetBackupStore.encodePortable(
         personalData: portableReplacement,
         learning: [
-          RimeUserDataBridge.chineseSchema:
+          LinnetSettingsContract.chineseLearningDictionary:
             "# Rime user dictionary export\n你好\tni hao\t19\n"
         ],
         categories: [.customWords, .chineseLearning],

@@ -7,7 +7,6 @@
 #include <rime/common.h>
 
 #include <cstddef>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -37,10 +36,9 @@ class SmartEnglishIndex {
   bool LookupMetadata(const std::string& displayed_word,
                       const std::string& source_word,
                       SmartEnglishMetadata* result) const;
-  std::map<std::string, std::size_t> LookupStaticOrdinals(const std::string& validated_key) const;
 
  private:
-  enum class WordShape { kLowerWord, kPrintableEnglish, kContextToken };
+  enum class WordShape { kLowerWord, kPrintableEnglish };
   bool LookupWords(const std::string& key, std::size_t limit, WordShape shape, std::vector<SmartEnglishWord>* result) const;
   bool LookupSingleton(const std::string& key, std::string* result) const;
   static std::string EncodePhonex(const std::string& input);

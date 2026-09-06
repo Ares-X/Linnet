@@ -91,7 +91,7 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate {
     recordAttempt: { LinnetSettingsContract.setCloudSyncLastAttempt($0) },
     recordResult: { LinnetSettingsContract.setCloudSyncResult($0.replyCode) },
     operation: { [weak self] directory in self?.performRimeUserDataSync(directory: directory) ?? .failed },
-    cancelOperation: { [weak self] in _ = self?.rimeAPI.sync_user_data_step(nil) }
+    cancelOperation: { [weak self] in _ = self?.rimeAPI.sync_user_data_step(nil, nil) }
   )
   func applicationWillFinishLaunching(_ notification: Notification) {
     panel = SquirrelPanel(position: .zero)

@@ -16,7 +16,7 @@ extension SettingsDataCoordinator {
     }
   }
 
-  /// Whether this cycle completed; an inactive/changing dictionary is deferred,
+  /// Whether this cycle completed; a changing dictionary is deferred,
   /// not a rejected request. The Host remains the synchronization result owner.
   func synchronizeLearningNow() async throws -> Bool {
     let result = try await request(
@@ -366,7 +366,7 @@ extension SettingsDataCoordinator {
   ) throws -> [String: String] {
     var result: [String: String] = [:]
     for item in files {
-      guard RimeUserDataBridge.learningSchemas.contains(item.schema),
+      guard LinnetSettingsContract.learningDictionaries.contains(item.schema),
         result[item.schema] == nil
       else {
         throw Failure.invalidOperation("learning snapshot schema")
@@ -385,7 +385,7 @@ extension SettingsDataCoordinator {
     _ learning: [String: String],
     at directory: URL
   ) throws -> [RimeUserDataBridge.LearningImport] {
-    guard Set(learning.keys).isSubset(of: RimeUserDataBridge.learningSchemas) else {
+    guard Set(learning.keys).isSubset(of: LinnetSettingsContract.learningDictionaries) else {
       throw Failure.invalidOperation("learning replacement schema")
     }
     try ensureDirectory(directory)
@@ -416,10 +416,10 @@ extension SettingsDataCoordinator {
       try requireRegularFile(file)
       let schema: String
       switch name {
-      case "\(RimeUserDataBridge.chineseSchema).txt":
-        schema = RimeUserDataBridge.chineseSchema
-      case "\(RimeUserDataBridge.englishSchema).txt":
-        schema = RimeUserDataBridge.englishSchema
+      case "\(LinnetSettingsContract.chineseLearningDictionary).txt":
+        schema = LinnetSettingsContract.chineseLearningDictionary
+      case "\(LinnetSettingsContract.englishSchemaID).txt":
+        schema = LinnetSettingsContract.englishSchemaID
       default:
         throw Failure.invalidOperation("restore learning schema")
       }
@@ -428,7 +428,7 @@ extension SettingsDataCoordinator {
   }
 
   func removeCandidateLearning(_ schemas: Set<String>, from candidate: URL) throws {
-    guard schemas.isSubset(of: RimeUserDataBridge.learningSchemas) else {
+    guard schemas.isSubset(of: LinnetSettingsContract.learningDictionaries) else {
       throw Failure.invalidOperation("learning replacement schema")
     }
     for schema in schemas {

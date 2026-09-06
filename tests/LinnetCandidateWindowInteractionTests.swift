@@ -2716,6 +2716,38 @@ struct LinnetCandidateWindowInteractionTests {
       failures.append("\(fontPoint)pt \(style.rawValue) selection lost its TextKit range")
       return
     }
+    // Exercise the actual path builder with zero highlight radius, including
+    // the non-selected background's optional outward expansion.
+    let oldRadius = view.lightTheme.hilitedCornerRadius
+    view.lightTheme.hilitedCornerRadius = 0
+    for expansion: CGFloat in [0, 2] {
+      guard let path = view.drawPath(
+        highlightedRange: ranges[0],
+        context: .init(
+          backgroundRect: bounds, preeditRect: .zero,
+          containingRect: bounds, extraExpansion: expansion,
+          usesSelectionStyle: false))
+      else {
+        failures.append("zero-radius candidate lost its drawing path")
+        continue
+      }
+      path.applyWithBlock { pointer in
+        let element = pointer.pointee
+        let count: Int
+        switch element.type {
+        case .moveToPoint, .addLineToPoint: count = 1
+        case .addQuadCurveToPoint: count = 2
+        case .addCurveToPoint: count = 3
+        case .closeSubpath: count = 0
+        @unknown default: count = 0
+        }
+        for index in 0..<count {
+          require(element.points[index].x.isFinite && element.points[index].y.isFinite,
+            "zero-radius candidate emitted a non-finite path coordinate")
+        }
+      }
+    }
+    view.lightTheme.hilitedCornerRadius = oldRadius
     var glyphRect = view.contentRect(range: textRange)
     glyphRect.origin.x += LinnetCandidatePresentation.candidateWindowInset.width
     glyphRect.origin.y += LinnetCandidatePresentation.candidateWindowInset.height

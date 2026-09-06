@@ -47,8 +47,8 @@ actor SettingsDataCoordinator {
 
     var schema: String {
       switch self {
-      case .chinese: RimeUserDataBridge.chineseSchema
-      case .english: RimeUserDataBridge.englishSchema
+      case .chinese: LinnetSettingsContract.chineseLearningDictionary
+      case .english: LinnetSettingsContract.englishSchemaID
       }
     }
   }

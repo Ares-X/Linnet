@@ -36,7 +36,7 @@
     "librime_core_interactions": {
       "target": "sources.librime",
       "path": "patches/librime-linnet-core-interactions.patch",
-      "sha256": "9f60788f31a1e747fa78e76b868d4b3295fcb72292ceea94ad6498b3f271f60f"
+      "sha256": "fd4cdd6e3f3571f4966f82e43db6c8416645ad7244388e8bf483c31429b0520f"
     },
     "librime_lua_state_lifetime": {
       "target": "sources.librime.bundled_plugins.lua",
@@ -46,7 +46,7 @@
     "librime_predict_session_state": {
       "target": "sources.librime.bundled_plugins.predict",
       "path": "patches/librime-predict-linnet-session-state.patch",
-      "sha256": "fbfbce1bc0f4bc194471b47ed508a0c74940d9eec91b2f53045c3a4a866909d4"
+      "sha256": "00074e8aad35bea37ca6872b9b10c7ca833cc1731a80e73f1c94395a060556e3"
     }
   },
   "sources": {
