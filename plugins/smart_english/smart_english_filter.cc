@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <functional>
-#include <limits>
 #include <utility>
 #include <vector>
 
@@ -213,7 +212,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     an<Candidate> candidate, genuine;
     string word;
     std::size_t original = 0;
-    std::size_t static_rank = std::numeric_limits<std::size_t>::max();
     std::uint16_t session_count = 0;
     bool raw = false, exact = false, ambiguous_english = false,
          chinese = false, mixed = false,
@@ -240,8 +238,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
                            ? SessionBigrams::Load(
                                  context->get_property(kBigramProperty))
                            : SessionBigrams{};
-  const auto static_ranks = index_.LookupStaticOrdinals(
-      context->get_property(rime::predict::kStaticKeyProperty));
   bool has_exact = false, has_ambiguous_english = false,
        has_pinyin = false, has_mixed = false;
   for (auto& item : candidates) {
@@ -253,7 +249,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     item.chinese = !item.mixed && phrase && phrase->language() &&
                    phrase->language()->name() == "linnet_zh";
     item.exact = !input_word.empty() && item.word == input_word &&
-                 IsLinnetEnglishPhrase(item.genuine) &&
+                 (IsLinnetEnglishPhrase(item.genuine) || IsCustomPhrase(item.genuine)) &&
                  (!phrase || phrase->is_exact_match()) &&
                  item.candidate->type() != "linnet_correction";
     // A table phrase whose spelling differs from the live segment reached us
@@ -266,10 +262,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     item.session_count = previous.empty() || item.word.empty()
                              ? 0
                              : bigrams.Count(previous, item.word);
-    const auto static_rank = static_ranks.find(item.word);
-    if (static_rank != static_ranks.end()) {
-      item.static_rank = static_rank->second;
-    }
   }
   // Exact dictionary identity owns bilingual intent for complete words. Keep
   // single-letter Chinese ambiguity and exact Chinese phrases ahead of weaker
@@ -379,14 +371,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
         if (left_session != right_session) return left_session;
         if (left.session_count != right.session_count) {
           return left.session_count > right.session_count;
-        }
-        const bool left_static =
-            left.static_rank != std::numeric_limits<std::size_t>::max();
-        const bool right_static =
-            right.static_rank != std::numeric_limits<std::size_t>::max();
-        if (left_static != right_static) return left_static;
-        if (left.static_rank != right.static_rank) {
-          return left.static_rank < right.static_rank;
         }
         return left.original < right.original;
       });

@@ -285,10 +285,6 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
     refreshInstalledIdentity()
     runtimeVersionState = .checking(installed: installedIdentity)
-    if let hostBundleURL {
-      let installer = self.coreInstaller
-      Task { await installer.removeStaleUpdates(beside: hostBundleURL) }
-    }
   }
 
   func check() {
@@ -351,7 +347,7 @@ extension LinnetSettingsUpdateChecker {
       var hostAcceptedActivation = false
       do {
         let reply = try await request(.activateCore, timeout: 4)
-        guard !Task.isCancelled else { return }
+        try Task.checkCancellation()
         if let issue = coreActivationIssue(for: reply.code) {
           finishRuntimeTransition(
             .blocked(
@@ -377,8 +373,6 @@ extension LinnetSettingsUpdateChecker {
         try await launchCanonicalHost()
         let health = try await awaitInstalledHost(identity: identities.installed)
         finishRuntimeApplied(health, cycle: activeCycle)
-      } catch is CancellationError {
-        return
       } catch {
         if hostAcceptedActivation {
           finishRuntimeTransition(
@@ -527,14 +521,13 @@ extension LinnetSettingsUpdateChecker {
     }
     runtimeTask?.cancel()
     runtimeCycle &+= 1
-    let activeRuntimeCycle = runtimeCycle
     coreDownloadState = .applying(core: core, update: update)
     runtimeTask = Task { [weak self] in
       guard let self else { return }
       var exchanged = false
       do {
         let reply = try await request(.activateCore, timeout: 4)
-        guard !Task.isCancelled else { return }
+        try Task.checkCancellation()
         if let issue = coreActivationIssue(for: reply.code) {
           coreDownloadState = .blocked(core: core, update: update, issue: issue)
           runtimeTask = nil
@@ -549,10 +542,7 @@ extension LinnetSettingsUpdateChecker {
         try await launchCanonicalHost()
         let target = LinnetSettingsContract.ProductIdentity(
           version: core.version, build: core.build, revision: core.revision)
-        let health = try await awaitInstalledHost(identity: target)
-        guard activeRuntimeCycle == runtimeCycle,
-          health.productIdentity == target
-        else { throw CancellationError() }
+        _ = try await awaitInstalledHost(identity: target)
         await coreInstaller.discard(update)
         coreDownloadState = .applied(target)
         runtimeVersionState = .applied(target)
@@ -560,26 +550,27 @@ extension LinnetSettingsUpdateChecker {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
           NSApp.terminate(nil)
         }
-      } catch is CancellationError {
-        return
       } catch {
-        if exchanged {
-          do {
-            try await stopCanonicalHostForRollback()
-            try await coreInstaller.exchange(update)
-            try await launchCanonicalHost()
-            _ = try await awaitInstalledHost(identity: update.baseIdentity)
-            await coreInstaller.discard(update)
-            coreDownloadState = .failed(core: core)
-          } catch {
-            coreDownloadState = .recoveryRequired(core: core)
+        // Recovery must finish even when the activation task was cancelled.
+        await Task { @MainActor in
+          if exchanged {
+            do {
+              try await self.stopCanonicalHostForRollback()
+              try await self.coreInstaller.exchange(update)
+              try await self.launchCanonicalHost()
+              _ = try await self.awaitInstalledHost(identity: update.baseIdentity)
+              await self.coreInstaller.discard(update)
+              self.coreDownloadState = .failed(core: core)
+            } catch {
+              self.coreDownloadState = .recoveryRequired(core: core)
+            }
+          } else {
+            self.coreDownloadState = .failed(core: core)
+            await self.coreInstaller.discard(update)
           }
-        } else {
-          coreDownloadState = .failed(core: core)
-          await coreInstaller.discard(update)
-        }
-        runtimeTask = nil
-        refreshRuntime()
+          self.runtimeTask = nil
+          self.refreshRuntime()
+        }.value
       }
     }
   }

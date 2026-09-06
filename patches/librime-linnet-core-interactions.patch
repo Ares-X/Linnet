@@ -1314,20 +1314,20 @@ index a69ae74..af51517 100644
  
    the<Engine> engine_;
 diff --git a/src/rime_api.h b/src/rime_api.h
-index 2fccde0..2fce13b 100644
 --- a/src/rime_api.h
 +++ b/src/rime_api.h
-@@ -505,6 +505,13 @@ typedef struct RIME_FLAVORED(rime_api_t) {
+@@ -505,6 +505,14 @@
                                                size_t index);
  
    Bool (*change_page)(RimeSessionId session_id, Bool backward);
 +  // End an external client lifecycle by preserving the exact raw input.
 +  // Return True if this call committed raw input.
 +  Bool (*commit_raw_input)(RimeSessionId session_id);
-+  // Linnet: append-only ABI; nullptr cancels. 1=pending, 0=done,
-+  // 2=deferred (inactive/changing dictionary), 3=background I/O waiting,
-+  // -1=failed.
-+  int (*sync_user_data_step)(const char* sync_directory);
++  // Linnet's package-bound sync API. A null directory cancels. The caller
++  // supplies a null-terminated list of learning database names for each cycle.
++  // 1=pending, 0=done, 2=changing dictionary, 3=background I/O waiting, -1=failed.
++  int (*sync_user_data_step)(const char* sync_directory,
++                            const char* const* dictionary_names);
  } RIME_FLAVORED(RimeApi);
  
  //! API entry
@@ -1391,22 +1391,36 @@ index 30f4514..9368c75 100644
    return &s_api;
  }
 diff --git a/src/rime/dict/user_dictionary.h b/src/rime/dict/user_dictionary.h
-index 5ebeac0..db984de 100644
 --- a/src/rime/dict/user_dictionary.h
 +++ b/src/rime/dict/user_dictionary.h
-@@ -111,6 +111,7 @@ class UserDictionaryComponent : public UserDictionary::Component {
+@@ -6,6 +6,8 @@
+ //
+ #ifndef RIME_USER_DICTIONARY_H_
+ #define RIME_USER_DICTIONARY_H_
++
++#include <future>
+ 
+ #include <time.h>
+ #include <rime/common.h>
+@@ -111,9 +113,14 @@
    UserDictionaryComponent();
    UserDictionary* Create(const Ticket& ticket);
    UserDictionary* Create(const string& dict_name, const string& db_class);
-+  an<Db> FindDb(const string& dict_name);
++  an<Db> GetDb(const string& dict_name, const string& db_class);
++  bool PrepareDb(const string& dict_name, an<Db>* database);
++  void WaitForPendingDbOpens();
  
   private:
++  static an<Db> NewDb(const string& dict_name, const string& db_class);
    hash_map<string, weak<Db>> db_pool_;
++  hash_map<string, std::future<an<Db>>> opening_dbs_;
+ };
+ 
+ }  // namespace rime
 diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
-index 2944c2d..1a5486a 100644
 --- a/src/rime/dict/user_dictionary.cc
 +++ b/src/rime/dict/user_dictionary.cc
-@@ -360,6 +360,7 @@ size_t UserDictionary::LookupWords(UserDictEntryIterator* result,
+@@ -360,6 +360,7 @@
                                     bool predictive,
                                     size_t limit,
                                     string* resume_key) {
@@ -1414,7 +1428,7 @@ index 2944c2d..1a5486a 100644
    TickCount present_tick = tick_ + 1;
    size_t len = input.length();
    size_t start = result->cache_size();
-@@ -425,6 +426,9 @@ bool UserDictionary::UpdateEntry(const DictEntry& entry, int commits) {
+@@ -425,6 +426,9 @@
  bool UserDictionary::UpdateEntry(const DictEntry& entry,
                                   int commits,
                                   const string& new_entry_prefix) {
@@ -1424,7 +1438,7 @@ index 2944c2d..1a5486a 100644
    string code_str(entry.custom_code);
    if (code_str.empty() && !TranslateCodeToString(entry.code, &code_str))
      return false;
-@@ -488,6 +492,7 @@ bool UserDictionary::NewTransaction() {
+@@ -488,6 +492,7 @@
    if (!db)
      return false;
    CommitPendingTransaction();
@@ -1432,19 +1446,71 @@ index 2944c2d..1a5486a 100644
    transaction_time_ = time(NULL);
    return db->BeginTransaction();
  }
-@@ -585,6 +590,12 @@ UserDictionary* UserDictionaryComponent::Create(const string& dict_name,
-   return new UserDictionary(dict_name, db);
- }
+@@ -572,17 +577,57 @@
  
-+an<Db> UserDictionaryComponent::FindDb(const string& dict_name) {
-+  const auto found = db_pool_.find(dict_name);
-+  auto db = found == db_pool_.end() ? nullptr : found->second.lock();
-+  return db && db->loaded() ? db : nullptr;
+ UserDictionary* UserDictionaryComponent::Create(const string& dict_name,
+                                                 const string& db_class) {
++  return new UserDictionary(dict_name, GetDb(dict_name, db_class));
 +}
 +
++an<Db> UserDictionaryComponent::NewDb(const string& dict_name,
++                                     const string& db_class) {
++  auto* component = Db::Require(db_class);
++  if (!component) {
++    LOG(ERROR) << "undefined db class '" << db_class << "'.";
++    return nullptr;
++  }
++  return an<Db>(component->Create(dict_name));
++}
++
++an<Db> UserDictionaryComponent::GetDb(const string& dict_name,
++                                    const string& db_class) {
+   auto db = db_pool_[dict_name].lock();
+   if (!db) {
+-    auto component = Db::Require(db_class);
+-    if (!component) {
+-      LOG(ERROR) << "undefined db class '" << db_class << "'.";
+-      return NULL;
+-    }
+-    db.reset(component->Create(dict_name));
++    const auto opening = opening_dbs_.find(dict_name);
++    if (opening == opening_dbs_.end()) {
++      db = NewDb(dict_name, db_class);
++    } else {
++      // A client requesting this cold dictionary shares its pending open.
++      // Other dictionaries and existing input sessions do not wait here.
++      db = opening->second.get();
++      opening_dbs_.erase(opening);
++    }
+     db_pool_[dict_name] = db;
+   }
+-  return new UserDictionary(dict_name, db);
++  return db;
++}
++
++bool UserDictionaryComponent::PrepareDb(const string& dict_name, an<Db>* database) {
++  if ((*database = db_pool_[dict_name].lock())) return true;
++  auto opening = opening_dbs_.find(dict_name);
++  if (opening == opening_dbs_.end()) {
++    // Construct the object on the owning thread; only its unopened disk state
++    // belongs to the worker until the future publishes the finished instance.
++    auto db = NewDb(dict_name, "userdb");
++    opening = opening_dbs_.emplace(dict_name, std::async(std::launch::async, [db] {
++      return db && !db->disabled() && db->Open() ? db : nullptr;
++    })).first;
++  }
++  if (opening->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
++    return false;
++  *database = GetDb(dict_name, "userdb");
++  return true;
++}
++
++void UserDictionaryComponent::WaitForPendingDbOpens() {
++  for (auto& opening : opening_dbs_) opening.second.wait();
++  opening_dbs_.clear();
+ }
+ 
  UserDictionary* UserDictionaryComponent::Create(const Ticket& ticket) {
-   if (!ticket.schema)
-     return NULL;
 diff --git a/src/rime/dict/user_db.h b/src/rime/dict/user_db.h
 index 6740e99..3b9f6ba 100644
 --- a/src/rime/dict/user_db.h
@@ -1659,17 +1725,17 @@ index e859ab0..d81e3e6 100644
      fout << "# " << file_description << std::endl;
    }
 diff --git a/src/rime/lever/user_dict_manager.h b/src/rime/lever/user_dict_manager.h
-index 3cefa8f..843f943 100644
 --- a/src/rime/lever/user_dict_manager.h
 +++ b/src/rime/lever/user_dict_manager.h
-@@ -36,6 +36,13 @@ class RIME_DLL UserDictManager {
+@@ -36,6 +36,14 @@
    bool Synchronize(const string& dict_name);
    bool SynchronizeAll();
  
 +  // Main-thread cooperative learning sync. 1=pending, 0=done,
-+  // 2=deferred (inactive/changing dictionary), -1=failed.
++  // 2=deferred (changing dictionary), -1=failed.
 +  // nullptr cancels uncommitted work without waiting for cloud I/O.
-+  static int SynchronizeIncrementally(const char* sync_directory);
++  static int SynchronizeIncrementally(const char* sync_directory,
++                                     const char* const* dictionary_names = nullptr);
 +  // Runtime mutation and shutdown boundaries cancel and join the worker.
 +  static void CancelAndWaitForIncrementalSynchronization();
 +
@@ -1677,10 +1743,9 @@ index 3cefa8f..843f943 100644
    Deployer* deployer_;
    path path_;
 diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_manager.cc
-index e0331e4..d2ea2cf 100644
 --- a/src/rime/lever/user_dict_manager.cc
 +++ b/src/rime/lever/user_dict_manager.cc
-@@ -224,3 +224,324 @@ bool UserDictManager::SynchronizeAll() {
+@@ -224,3 +224,309 @@
  }
  
  }  // namespace rime
@@ -1724,7 +1789,6 @@ index e0331e4..d2ea2cf 100644
 +struct SyncIO {
 +  enum class Work { waiting, publish, cancel };
 +  path directory;
-+  path user_directory;
 +  string user_id;
 +  vector<string> names;
 +  vector<an<SyncSnapshot>> incoming;
@@ -1750,9 +1814,8 @@ index e0331e4..d2ea2cf 100644
 +};
 +
 +an<SyncSnapshot> ReadSnapshot(const path& file, const string& name) {
-+  if (!fs::is_regular_file(fs::symlink_status(file)) ||
-+      fs::file_size(file) > 16 * 1024 * 1024)
-+    throw std::runtime_error("invalid or oversized learning snapshot");
++  if (!fs::is_regular_file(fs::symlink_status(file)))
++    throw std::runtime_error("invalid learning snapshot file");
 +  auto snapshot = New<SyncSnapshot>(name);
 +  UserDbHelper helper(snapshot);
 +  if (!helper.UniformRestore(file, true) || !helper.IsUserDb() ||
@@ -1764,22 +1827,13 @@ index e0331e4..d2ea2cf 100644
 +void ReadCloud(SyncIO& io) {
 +  if (!fs::is_directory(io.directory))
 +    throw std::runtime_error("learning sync directory is unavailable");
-+  for (const auto& entry : fs::directory_iterator(io.user_directory)) {
-+    const auto name = entry.path().filename().u8string();
-+    if (entry.is_directory() && !entry.is_symlink() &&
-+        name.size() > 7 && name.substr(name.size() - 7) == ".userdb")
-+      io.names.push_back(name.substr(0, name.size() - 7));
-+  }
-+  size_t bytes = 0;
 +  for (const auto& peer : fs::directory_iterator(io.directory)) {
-+    if (!peer.is_directory() || peer.is_symlink()) continue;
++    if (!peer.is_directory() || peer.is_symlink() ||
++        peer.path().filename() == io.user_id) continue;
 +    for (const auto& name : io.names) {
 +      if (io.publication == 2) return;
 +      const auto file = peer.path() / (name + UserDb::snapshot_extension());
 +      if (!fs::exists(file)) continue;
-+      bytes += fs::file_size(file);
-+      if (bytes > 32 * 1024 * 1024)
-+        throw std::runtime_error("learning sync window exceeds 32 MiB");
 +      io.incoming.push_back(ReadSnapshot(file, name));
 +    }
 +  }
@@ -1798,9 +1852,6 @@ index e0331e4..d2ea2cf 100644
 +    try {
 +      if (!snapshot->Backup(temporary))
 +        throw std::runtime_error("learning snapshot write failed");
-+      // Publication must satisfy the exact reader contract, including the
-+      // serialized-size bound. A failure never replaces the last readable file.
-+      ReadSnapshot(temporary, snapshot->name());
 +      int expected = 0;
 +      if (!io.publication.compare_exchange_strong(expected, 1)) {
 +        fs::remove(temporary);
@@ -1844,17 +1895,19 @@ index e0331e4..d2ea2cf 100644
 +
 +struct LiveSync {
 +  an<SyncIO> io;
++  // Borrow the same canonical instances as input sessions. Holding them for
++  // the cycle makes synchronization independent of schema/client lifetimes.
++  map<string, an<Db>> databases;
++  size_t prepared = 0;
 +  size_t imported = 0;
 +  size_t exported = 0;
 +  the<DbSource> source;  // Only a worker-owned in-memory incoming snapshot.
 +  bool source_complete = false;
 +  an<SyncSnapshot> snapshot;
-+  weak<Db> snapshot_owner;
 +  uint64_t snapshot_revision = 0;
 +  an<DbAccessor> records;
 +  bool writing = false;
 +  bool deferred = false;
-+  size_t exported_bytes = 0;
 +
 +  int Step() {
 +    const int result = io->result.load(std::memory_order_acquire);
@@ -1865,21 +1918,21 @@ index e0331e4..d2ea2cf 100644
 +    auto* component = dynamic_cast<UserDictionaryComponent*>(
 +        UserDictionary::Require("user_dictionary"));
 +    if (!component) return -1;
++    if (prepared < io->names.size()) {
++      const auto& name = io->names[prepared];
++      an<Db> database;
++      if (!component->PrepareDb(name, &database)) return 3;
++      if (!database || !dynamic_cast<LevelDb*>(database.get()) ||
++          database->disabled() || !database->loaded()) return -1;
++      databases.emplace(name, std::move(database));
++      ++prepared;
++      return 1;
++    }
 +    string key, value;
 +    if (imported < io->incoming.size()) {
 +      const auto& incoming = io->incoming[imported];
-+      auto database = component->FindDb(incoming->name());
-+      if (!database) {
-+        deferred = true; source.reset(); ++imported;
-+        return 1;
-+      }
++      const auto& database = databases.at(incoming->name());
 +      auto* level = dynamic_cast<LevelDb*>(database.get());
-+      if (!level) {
-+        // A same-name Settings mirror may use the .userdb suffix while the
-+        // live Host database is a read-only StableDb. It is not learning data.
-+        source.reset(); ++imported;
-+        return 1;
-+      }
 +      if (level->in_transaction()) return 1;  // Preserve local undo.
 +      if (!source && level->merge_phase() != UserDbMergePhase::none)
 +        return level->DrainUserDbMerge(deadline) ? 1 : -1;
@@ -1908,20 +1961,13 @@ index e0331e4..d2ea2cf 100644
 +    }
 +    if (exported < io->names.size()) {
 +      const auto& name = io->names[exported];
-+      auto database = component->FindDb(name);
-+      auto* level = database ? dynamic_cast<LevelDb*>(database.get()) : nullptr;
-+      if (database && !level) {
-+        // Only live LevelDb dictionaries own Rime learning. Custom words and
-+        // Text Expander can have writable Settings mirrors with this suffix.
-+        records.reset(); ++exported;
-+        return 1;
-+      }
-+      if (level && level->merge_phase() != UserDbMergePhase::none) {
++      const auto& database = databases.at(name);
++      auto* level = dynamic_cast<LevelDb*>(database.get());
++      if (level->merge_phase() != UserDbMergePhase::none) {
 +        if (level->in_transaction()) return 1;
 +        return level->DrainUserDbMerge(deadline) ? 1 : -1;
 +      }
-+      if (!database || (snapshot && (snapshot_owner.lock() != database ||
-+                                    snapshot_revision != level->write_revision()))) {
++      if (snapshot && snapshot_revision != level->write_revision()) {
 +        deferred = true;
 +        snapshot.reset();
 +        records.reset(); ++exported;
@@ -1930,7 +1976,6 @@ index e0331e4..d2ea2cf 100644
 +      if (!snapshot) {
 +        if (level->in_transaction()) return 1;
 +        snapshot = New<SyncSnapshot>(name);
-+        snapshot_owner = database;
 +        snapshot_revision = level->write_revision();
 +        DbSource metadata(database.get());
 +        while (metadata.MetaGet(&key, &value)) snapshot->MetaUpdate(key, value);
@@ -1945,8 +1990,6 @@ index e0331e4..d2ea2cf 100644
 +          break;
 +        }
 +        if (!snapshot->Update(key, value)) return -1;
-+        exported_bytes += key.size() + value.size();
-+        if (exported_bytes > 32 * 1024 * 1024) return -1;
 +        if (Clock::now() >= deadline) break;
 +      }
 +      return 1;
@@ -1963,7 +2006,8 @@ index e0331e4..d2ea2cf 100644
 +an<SyncIO> outstanding_io;
 +}  // namespace
 +
-+int UserDictManager::SynchronizeIncrementally(const char* sync_directory) {
++int UserDictManager::SynchronizeIncrementally(
++    const char* sync_directory, const char* const* dictionary_names) {
 +  if (!sync_directory) {
 +    if (outstanding_io) outstanding_io->publication.exchange(2);
 +    live_sync.reset();
@@ -1979,7 +2023,9 @@ index e0331e4..d2ea2cf 100644
 +      auto io = New<SyncIO>();
 +      const auto& deployer = Service::instance().deployer();
 +      io->directory = path(sync_directory);
-+      io->user_directory = deployer.user_data_dir;
++      if (!dictionary_names || !*dictionary_names) return -1;
++      for (auto name = dictionary_names; *name; ++name)
++        io->names.emplace_back(*name);
 +      io->user_id = deployer.user_id;
 +      if (io->user_id.empty() || path(io->user_id).filename() != path(io->user_id) ||
 +          io->user_id == "." || io->user_id == "..") return -1;
@@ -2000,9 +2046,13 @@ index e0331e4..d2ea2cf 100644
 +
 +void UserDictManager::CancelAndWaitForIncrementalSynchronization() {
 +  SynchronizeIncrementally(nullptr);
-+  if (!outstanding_io) return;
-+  outstanding_io->Join();
-+  outstanding_io.reset();
++  if (outstanding_io) {
++    outstanding_io->Join();
++    outstanding_io.reset();
++  }
++  auto* component = dynamic_cast<UserDictionaryComponent*>(
++      UserDictionary::Require("user_dictionary"));
++  if (component) component->WaitForPendingDbOpens();
 +}
 +}  // namespace rime
 diff --git a/src/rime/dict/level_db.h b/src/rime/dict/level_db.h

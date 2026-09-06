@@ -649,7 +649,7 @@ index a90fcae..edbd5f9 100644
 +      return {};
 +    for (; index < word.size(); ++index) {
 +      const unsigned char ch = word[index];
-+      if (ch < 'a' || ch > 'z')
++      if ((ch < 'a' || ch > 'z') && ch != '\'')
 +        return {};
 +    }
 +    words.push_back(word);

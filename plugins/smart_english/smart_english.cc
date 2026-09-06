@@ -983,7 +983,7 @@ class SmartEnglishTranslator : public Translator {
         genuine->type() == kCorrectionCandidateType ||
         genuine->type() == "prediction" ||
         genuine->type() == "linnet_pinyin";
-    if ((IsLinnetEnglishPhrase(genuine) || smart_candidate) && (IsOrdinarySegment(segment) || segment.HasTag("zz_english") || segment.HasTag("prediction")) && IsLowerWord(value)) {
+    if ((IsLinnetEnglishPhrase(genuine) || smart_candidate) && (IsOrdinarySegment(segment) || segment.HasTag("zz_english") || segment.HasTag("prediction")) && IsEnglishWord(value)) {
       return {CommitClass::kEnglishWord, value, '\0'};
     }
     if (genuine->type() != "sentence" &&
@@ -995,7 +995,7 @@ class SmartEnglishTranslator : public Translator {
       return {CommitClass::kSpacedBoundary, {}, '\0'};
     }
     if (schema_id_ == "linnet_en" && IsCustomPhrase(genuine) && IsOrdinarySegment(segment)) {
-      if (IsLowerWord(value)) return {CommitClass::kEnglishWord, value, '\0'};
+      if (IsEnglishWord(value)) return {CommitClass::kEnglishWord, value, '\0'};
       if (!value.empty()) return {CommitClass::kSpacedBoundary, value, '\0'};
     }
     if (genuine->text().size() == 1) {

@@ -55,7 +55,7 @@ extension DataTabView {
             Text("This Mac has finished merging and exporting learning data. iCloud may still be transferring it to your other Macs.")
               .font(.caption).foregroundStyle(.secondary)
           case .learningSyncDeferred:
-            Text("Some learning data is still pending because a dictionary is inactive or changing. Your local learning is kept; keep using Linnet and retry later.")
+            Text("Learning data changed during synchronization or an input transaction is still active. Your local learning is kept; retry when the current input is finished.")
               .font(.caption).foregroundStyle(.orange)
           case .learningSyncUnavailable:
             Text("The last sync could not access iCloud Drive. Check iCloud Drive in System Settings, then retry.")

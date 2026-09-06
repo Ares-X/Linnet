@@ -148,10 +148,17 @@ publication. Acceptance requires a RED/ GREEN live-session regression, slow-sync
 concurrent typing, merge/undo/clock/cancel checks and the integrated local gates.
 Installed IMK behavior is not established by native or scheduler fixtures.
 
-Final-review correction freeze: a sync step must only borrow a naturally loaded
-Db, never open or retain it across input callbacks. Cold dictionaries are
-explicitly deferred until naturally used; one cold dictionary must not prevent
-other active dictionaries from syncing. Export uses the Db's actual write
+2026-09-06 correction supersedes the earlier cold-dictionary deferral contract:
+learning synchronization owns references to the caller-selected Chinese and
+English learning databases for the duration of each cycle, using the same Rime
+factory pool as input sessions. An existing cold learning database is opened
+on a background task without requiring a user input session; an input client
+requesting that same database shares its pending open. Runtime shutdown and
+data replacement join pending opens at their existing lifecycle boundary. Directory suffixes and current schema
+selection do not determine the learning scope. Pending input transactions and
+concurrent writes retain their existing merge/undo boundaries. Opening a cold
+database is included in the measured 15 ms maximum cold-sync-step budget.
+Export uses the Db's actual write
 generation (including deletion, not the learning clock) to reject a snapshot
 changed between slices. A source merge retains its original local learning
 clock across slices while never lowering the current durable clock. Every
@@ -224,7 +231,11 @@ and pending remote rows form one native transaction, not independent clock
 fallbacks. Sync's batch writer is replaced, not retained alongside the new path.
 The existing local undo transaction, bounded input-thread work, worker-owned
 cloud I/O and atomic cloud rename protect distinct mutation/time boundaries.
-Serialized output must satisfy the same 16 MiB limit as input before rename.
+The 2026-08-31 size guard was superseded on 2026-09-06: reader and writer
+no longer impose arbitrary per-file or aggregate learning-data quotas. The
+standard Rime serializer writes to the temporary file before atomic rename;
+local exports are excluded from peer discovery. Large peer import/export and
+self-snapshot exclusion are covered by the existing live-sync selector.
 
 Allowed implementation: native LevelDb, UserDbMerger and incremental manager in
 the existing patch, its lock digest, focused native regressions and this ledger;

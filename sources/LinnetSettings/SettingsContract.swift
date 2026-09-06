@@ -11,6 +11,8 @@ enum LinnetSettingsContract {
   static let horizontalExpandedGridRange = 3...5
 
   static let englishSchemaID = "linnet_en"
+  static let chineseLearningDictionary = "linnet_zh"
+  static let learningDictionaries = Set([chineseLearningDictionary, englishSchemaID])
 
   // A draft-only Settings entry point. Opening a URL never saves personal data.
   static func customWordURL(value: String) -> URL? {
