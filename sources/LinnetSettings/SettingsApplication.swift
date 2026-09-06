@@ -3,13 +3,9 @@ import SwiftUI
 
 @MainActor
 final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
-  weak var model: SettingsModel? {
-    didSet { refreshSyncStatus() }
-  }
+  let model = SettingsModel()
   var interfaceLocale = Locale.autoupdatingCurrent
   private var settingsWindowPresentationPending = false
-
-  func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool { true }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     guard let application = notification.object as? NSApplication else { return }
@@ -22,8 +18,17 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidBecomeActive(_ notification: Notification) { refreshSyncStatus() }
 
+  func application(_ application: NSApplication, open urls: [URL]) {
+    for url in urls {
+      guard let value = LinnetSettingsContract.customWordValue(from: url) else { continue }
+      model.configuration.personalDraft.customWords.insert(.init(value: value, code: ""), at: 0)
+      model.selectedTab = 2
+      requestSettingsWindowPresentation(in: application)
+    }
+  }
+
   @objc private func refreshSyncStatus() {
-    model?.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
+    model.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
   }
   func applicationDidUpdate(_ notification: Notification) {
     guard let application = notification.object as? NSApplication else { return }
@@ -39,7 +44,6 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard let model else { return .terminateNow }
     if model.operationActive {
       NSSound.beep()
       return .terminateCancel
@@ -52,7 +56,7 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
       for: sender.keyWindow ?? sender.windows.first(where: \.isVisible),
       canApply: model.canApplyChanges,
       locale: interfaceLocale
-    ) { choice in
+    ) { [model] choice in
       switch choice {
       case .apply:
         model.applyConfiguration { accepted in
@@ -94,9 +98,8 @@ struct LinnetSettingsApp: App {
   private var applicationDelegate
 
   var body: some Scene {
-    WindowGroup {
-      SettingsRootView()
-        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+    Window("Linnet", id: "settings") {
+      SettingsRootView(model: applicationDelegate.model, applicationDelegate: applicationDelegate)
         .frame(
           minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth,
           idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth,
@@ -107,7 +110,6 @@ struct LinnetSettingsApp: App {
       width: LinnetSettingsLayoutMetrics.defaultWindowWidth,
       height: LinnetSettingsLayoutMetrics.defaultWindowHeight)
     .windowResizability(.contentMinSize)
-    .commands { CommandGroup(replacing: .newItem) {} }
   }
 }
 
