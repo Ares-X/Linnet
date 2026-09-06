@@ -56,12 +56,12 @@ struct LinnetCandidateInteractionState<Hit: Equatable> {
     pointerHit = hit
   }
 
-  mutating func beginPress(_ hit: Hit) {
+  mutating func beginPress(_ hit: Hit?) {
     pointerHit = hit
     pressedHit = hit
   }
 
-  mutating func finishPress(_ hit: Hit) -> Hit? {
+  mutating func finishPress(_ hit: Hit?) -> Hit? {
     defer {
       pointerHit = hit
       pressedHit = nil
@@ -249,9 +249,6 @@ extension SquirrelView {
     case .control(let action):
       candidateIndex = nil
       controlAction = action
-    case .some(.none):
-      candidateIndex = nil
-      controlAction = nil
     case nil:
       candidateIndex = nil
       controlAction = nil

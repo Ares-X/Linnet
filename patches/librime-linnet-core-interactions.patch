@@ -32,6 +32,55 @@ index ec840a3..c83c0d2 100644
  string Context::GetCommitText() const {
    if (get_option("dumb"))
      return string();
+@@ -148,15 +171,39 @@
+   return true;
+ }
+ 
+-bool Context::DeleteCandidate(size_t index) {
+-  if (composition_.empty())
+-    return false;
+-  Segment& seg(composition_.back());
+-  seg.selected_index = index;
+-  DLOG(INFO) << "Deleting candidate: " << seg.GetSelectedCandidate()->text();
+-  delete_notifier_(this);
+-  return true;  // CAVEAT: this doesn't mean anything is deleted for sure
+-}
++bool Context::DeleteCandidate(size_t index) {
++  if (composition_.empty())
++    return false;
++  Segment& seg(composition_.back());
++  auto previous = seg.GetSelectedCandidate();
++  const size_t previous_index = seg.selected_index;
++  const size_t prepared = seg.menu ? seg.menu->candidate_count() : 0;
++  auto target = seg.menu ? seg.menu->GetCandidateAt(index) : nullptr;
++  if (!target)
++    return false;
++  seg.selected_index = index;
++  DLOG(INFO) << "Deleting candidate: " << target->text();
++  delete_notifier_(this);
++  // A pointer action on another candidate must not move keyboard focus.
++  // Refind the original text in the already-browsed window after reordering.
++  // Deleting the current selection retains Rime's normal successor behavior.
++  if (index != previous_index && previous && !composition_.empty()) {
++    auto menu = composition_.back().menu;
++    if (menu) {
++      const size_t count = menu->Prepare(prepared);
++      for (size_t next = 0; next < count; ++next) {
++        auto candidate = menu->GetCandidateAt(next);
++        if (candidate && candidate->text() == previous->text() &&
++            candidate->start() == previous->start() &&
++            candidate->end() == previous->end()) {
++          Highlight(next);
++          break;
++        }
++      }
++    }
++  }
++  return true;  // CAVEAT: this doesn't mean anything is deleted for sure
++}
+ 
+ bool Context::DeleteCurrentSelection() {
+   if (composition_.empty())
 diff --git a/src/rime/context.h b/src/rime/context.h
 index d526130..55605cf 100644
 --- a/src/rime/context.h
@@ -840,7 +889,7 @@ index aef6217..ebce6e7 100644
    if (!result || !result->Evaluate(
                       dict_.get(), enable_user_dict ? user_dict_.get() : NULL)) {
      return nullptr;
-@@ -365,8 +395,94 @@ Spans ScriptSyllabifier::Syllabify(const Phrase* phrase) {
+@@ -365,8 +395,98 @@ Spans ScriptSyllabifier::Syllabify(const Phrase* phrase) {
  }
  
  size_t ScriptSyllabifier::BuildSyllableGraph(Prism& prism) {
@@ -872,12 +921,16 @@ index aef6217..ebce6e7 100644
 +  }
 +
 +  const auto build_part = [&](const string& part, SyllableGraph* graph) {
-+    Syllabifier syllabifier(translator_->delimiters(),
-+                            translator_->enable_completion(),
-+                            translator_->strict_spelling());
-+    if (corrector_) syllabifier.EnableCorrection(corrector_);
-+    return static_cast<size_t>(
++    if (part.empty()) return size_t(0);
++    // A code-shaped input needs complete Chinese spelling on either side,
++    // not a sentence invented from abbreviated or corrected Latin letters.
++    // Ordinary Chinese still uses the translator's normal spelling policy.
++    Syllabifier syllabifier(translator_->delimiters(), false, true);
++    const auto consumed = static_cast<size_t>(
 +        syllabifier.BuildSyllableGraph(part, prism, graph));
++    return consumed == part.size() &&
++                   graph->vertices.at(consumed) == kNormalSpelling
++               ? consumed : size_t(0);
 +  };
 +  SyllableGraph prefix;
 +  SyllableGraph suffix;

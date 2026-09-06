@@ -3202,8 +3202,10 @@ void ExpectRawLikeArrowEditing(RimeApi_stdbool* api) {
     bool linear;
     bool vertical;
   };
-  constexpr std::array<Fixture, 3> fixtures = {{
+  constexpr std::array<Fixture, 5> fixtures = {{
       {"URLSession", "zz_code_token", false, false},
+      {"HTTPServer", "zz_code_token", false, false},
+      {"JSONDecoder", "zz_code_token", false, false},
       {"x;br", "text_expander", false, false},
       {"bdbdbdbd", "", true, true},
   }};
@@ -6876,7 +6878,38 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
 
 }  // namespace
 
+static void ExpectCandidateForgetFocus(RimeApi_stdbool* api) {
+  for (const auto& [schema, input] : std::vector<std::pair<std::string, std::string>>{
+           {"linnet_zh_pinyin", "shi"}, {"linnet_en", "tes"}}) {
+    for (size_t target : {size_t(0), size_t(8)}) {
+      const auto session = CreateSchemaSession(api, schema.c_str());
+      Enter(api, session, input);
+      auto live = rime::Service::instance().GetSession(session);
+      auto* context = live->context();
+      auto menu = context->composition().back().menu;
+      if (!menu || menu->Prepare(15) < 9 || !api->highlight_candidate(session, 2))
+        Fail("forget focus fixture did not prepare a browsable menu");
+      const auto selected = context->GetSelectedCandidate()->text();
+      if (!api->delete_candidate(session, target) ||
+          !context->GetSelectedCandidate() ||
+          context->GetSelectedCandidate()->text() != selected ||
+          context->input() != input)
+        Fail(schema + ": forgetting another candidate moved focus or changed input");
+      ExpectNoCommit(api, session, "forget another candidate");
+      api->clear_composition(session);
+      if (api->delete_candidate(session, 0))
+        Fail("an absent forget target was accepted");
+      api->destroy_session(session);
+    }
+  }
+  std::cout << "candidate forget preserves Chinese/English focus before/after selection: PASS\n";
+}
+
 int main(int argc, char** argv) {
+  const bool raw_editing_probe =
+      argc == 4 && std::strcmp(argv[3], "--raw-editing-probe") == 0;
+  const bool candidate_forget_probe =
+      argc == 4 && std::strcmp(argv[3], "--candidate-forget-probe") == 0;
   const bool live_sync_probe =
       argc == 4 && std::strcmp(argv[3], "--live-sync-probe") == 0;
   const bool input_options_probe =
@@ -6917,7 +6950,7 @@ int main(int argc, char** argv) {
   const bool cold_client_probe =
       argc == 4 && std::strcmp(argv[3], "--cold-client-probe") == 0;
   if (argc != 3 && !input_options_probe && !input_switches_probe &&
-      !settings_off_probe && !learning_off_probe &&
+      !settings_off_probe && !learning_off_probe && !candidate_forget_probe && !raw_editing_probe &&
       !profile_key_matrix_probe &&
       !lifecycle_raw_exit_probe &&
       !page_size_probe && !english_profile_probe &&
@@ -6928,7 +6961,7 @@ int main(int argc, char** argv) {
       !mixed_latency_probe && !warm_session_probe && !cold_client_probe && !live_sync_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|"
-         "--profile-key-matrix-probe|"
+         "--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|"
          "--lifecycle-raw-exit-probe|"
          "--page-size-probe EXPECTED|"
          "--english-profile-probe PROFILE CHINESE_SCHEMA CODE PREFIX|"
@@ -6978,6 +7011,16 @@ int main(int argc, char** argv) {
     Fail("octagram module was not loaded");
   }
   ExpectSchemaList(api);
+  if (candidate_forget_probe) {
+    ExpectCandidateForgetFocus(api);
+    api->finalize();
+    return 0;
+  }
+  if (raw_editing_probe) {
+    ExpectRawLikeArrowEditing(api);
+    api->finalize();
+    return 0;
+  }
   if (live_sync_probe) {
     ExpectLiveUserDataSync(api);
     api->finalize();

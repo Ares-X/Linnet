@@ -25,8 +25,6 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   @objc private func refreshSyncStatus() {
     model?.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
   }
-
-
   func applicationDidUpdate(_ notification: Notification) {
     guard let application = notification.object as? NSApplication else { return }
     presentSettingsWindowIfReady(in: application)
@@ -98,6 +96,7 @@ struct LinnetSettingsApp: App {
   var body: some Scene {
     WindowGroup {
       SettingsRootView()
+        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         .frame(
           minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth,
           idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth,

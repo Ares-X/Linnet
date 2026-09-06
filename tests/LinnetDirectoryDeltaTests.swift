@@ -100,6 +100,11 @@ extension LinnetPackTests {
     let bookmark = try installed.bookmarkData(options: .minimalBookmark)
     let baseDigest = try LinnetDirectoryDelta.digest(installed)
     let targetDigest = try LinnetDirectoryDelta.digest(candidate)
+    let finderMetadata = installed.appending(path: ".DS_Store")
+    try Data("local Finder view".utf8).write(to: finderMetadata)
+    let digestWithFinderMetadata = try LinnetDirectoryDelta.digest(installed)
+    precondition(digestWithFinderMetadata == baseDigest,
+      "Finder metadata changed the published payload identity")
     for expectedContents in ["new", "old"] {
       if expectedContents == "new" {
         try LinnetDirectoryDelta.exchangeApp(installed: installed, staged: staged, delta: delta)
@@ -109,6 +114,9 @@ extension LinnetPackTests {
       }
       let payload = try Data(contentsOf: installed.appending(path: "Contents/payload"))
       precondition(payload == Data(expectedContents.utf8), "App publication did not exchange exact contents")
+      let keptMetadata = try Data(contentsOf: finderMetadata)
+      precondition(keptMetadata == Data("local Finder view".utf8),
+        "update or rollback moved the registered folder's Finder metadata")
       var after = stat()
       precondition(lstat(installed.path, &after) == 0)
       guard before.st_dev == after.st_dev, before.st_ino == after.st_ino else {

@@ -449,6 +449,8 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
 | App 内嵌 Rime 与插件 | `tests/verify_packaged_rime.sh APP APP/Contents/Applications/Settings.app`；直接加载产物中的库，不使用开发机的动态库搜索路径 |
 | 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
+| 右键忘记候选与焦点 | `tests/verify_rime_runtime.sh --candidate-forget-probe` |
+| 原文光标编辑与代码词 | `tests/verify_rime_runtime.sh --raw-editing-probe`；混输边界同时运行 `--mixed-input-probe` |
 | Installer 脚本 | 生成精确候选后，只在专用虚拟机执行真实首次安装、升级、Core、Complete、卸载和重装 |
 | 产物私有路径扫描 | `ruby tests/verify_artifact_privacy.rb`；再用 `scripts/build-privacy scan APP` 检查已有产物，无需重建 |
 | 发布事务脚本 | `tests/verify_action_publication.sh`；仅发布链变更或候选 Action 执行 |

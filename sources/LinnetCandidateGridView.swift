@@ -293,7 +293,6 @@ final class LinnetCandidateGridView: NSView {
 
   func geometries(in target: NSView) -> [CellGeometry] {
     guard !isHidden else { return [] }
-    layoutSubtreeIfNeeded()
     return displayedPlacements
       .compactMap { cellPool[$0.item].geometry(in: target) }
       .sorted { $0.itemIndex < $1.itemIndex }

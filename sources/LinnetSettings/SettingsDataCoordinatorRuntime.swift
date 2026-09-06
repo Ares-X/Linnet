@@ -16,7 +16,9 @@ extension SettingsDataCoordinator {
     }
   }
 
-  func synchronizeLearningNow() async throws {
+  /// Whether this cycle completed; an inactive/changing dictionary is deferred,
+  /// not a rejected request. The Host remains the synchronization result owner.
+  func synchronizeLearningNow() async throws -> Bool {
     let result = try await request(
       makeRequest(
         transactionID: UUID(), command: .synchronizeLearning, candidate: nil,
@@ -25,8 +27,10 @@ extension SettingsDataCoordinator {
       replyTimeout: Self.learningSyncRequestTimeout,
       progress: { _ in }
     )
-    guard result.code == .learningSyncCompleted else {
-      throw Failure.requestFailed(result.code)
+    switch result.code {
+    case .learningSyncCompleted: return true
+    case .learningSyncDeferred: return false
+    default: throw Failure.requestFailed(result.code)
     }
   }
 

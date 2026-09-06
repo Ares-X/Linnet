@@ -36,6 +36,8 @@ enum SettingsPresentationFailure: Equatable {
   case configurationRecoveryFailed
   case staleHostState
   case hostRejected
+  case cloudSyncUnavailable
+  case cloudSyncFailed
   case unknown
 }
 
@@ -110,6 +112,7 @@ enum SettingsPresentationStatus: Equatable {
   case portableImported
   case cloudSyncEnabled
   case cloudSyncCompleted
+  case cloudSyncDeferred
   case cloudBackupUploaded(Date)
   case cloudBackupUnchanged(Date)
   case cloudBackupRepairRequired
@@ -194,6 +197,10 @@ enum SettingsPresentationStatus: Equatable {
       pair = ("iCloud Drive learning synchronization enabled.", "已启用 iCloud Drive 学习词同步。")
     case .cloudSyncCompleted:
       pair = ("Learning synchronization completed.", "学习词同步已完成。")
+    case .cloudSyncDeferred:
+      pair = (
+        "Some learning data is still pending. Your local learning is kept; retry later.",
+        "部分学习数据仍待同步。本机学习记录已保留，可稍后重试。")
     case .cloudBackupUploaded(let verifiedAt):
       pair = (
         "Incremental recovery backup verified at \(verifiedAt.formatted()).",
@@ -285,6 +292,7 @@ enum SettingsPresentationStatus: Equatable {
   private var severity: SettingsPresentationSeverity {
     switch self {
     case .ready,
+      .cloudSyncDeferred,
       .operationCancelled,
       .pack(_, .cancelled),
       .runtime(.paused):
@@ -425,6 +433,12 @@ private func failureText(_ failure: SettingsPresentationFailure) -> SettingsLoca
     )
   case .staleHostState: ("Language data changed before activation. Refresh and try again.", "语言数据在激活前已发生变化，请刷新后重试。")
   case .hostRejected: ("The input method rejected the operation.", "输入法拒绝了此操作。")
+  case .cloudSyncUnavailable:
+    ("The iCloud learning sync folder is unavailable. Check iCloud Drive and retry.",
+      "无法访问 iCloud 学习同步文件夹，请检查 iCloud Drive 后重试。")
+  case .cloudSyncFailed:
+    ("Learning synchronization could not finish. Your local learning is kept; retry later.",
+      "学习词同步未能完成。本机学习记录已保留，可稍后重试。")
   case .unknown: ("The operation failed.", "操作失败。")
   }
 }

@@ -197,8 +197,6 @@ extension SquirrelPanel {
         absoluteIndex: candidateSnapshot.items[itemIndex].absoluteIndex)
     case .control(let action):
       _ = performControl(action)
-    case .none:
-      break
     }
   }
   func moveCandidatePointer(_ event: NSEvent) {
@@ -218,8 +216,6 @@ extension SquirrelPanel {
       hit = .candidate(itemIndex)
     case .control(let action):
       hit = .control(action)
-    case .some(.none):
-      hit = nil
     case nil:
       hit = nil
     default:

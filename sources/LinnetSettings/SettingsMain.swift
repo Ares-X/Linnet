@@ -358,8 +358,8 @@ extension SettingsModel {
         self.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
       }
       do {
-        try await self.coordinator.synchronizeLearningNow()
-        self.status = .cloudSyncCompleted
+        let completed = try await self.coordinator.synchronizeLearningNow()
+        self.status = completed ? .cloudSyncCompleted : .cloudSyncDeferred
       } catch {
         settingsModelLogger.error(
           "Immediate learning sync request failed: \(error.localizedDescription, privacy: .private)"
