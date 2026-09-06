@@ -165,7 +165,7 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
    `linnet-preview/*` 标签。Ubuntu publisher 只公开 Core/data 预发布并非强制推进
    `preview-channel`，不推进 `data-channel`、不公开 `v<VERSION>`、不改变 Latest；
 5. 在前一公开版的 Settings 选择 Preview，完成真实在线发现、Core 安装、运行中生效、
-   语言数据和双向 iCloud 同步验收；再用同一目录完成“两轮同 leaf Core”。两轮都须
+   语言数据和双向 iCloud 同步验收；再用同一目录完成“两轮同 leaf Core 升级”。两轮都须
    无注销、无 Keychain 密码提示、Host PID 符合激活协议且 `AXHidden=false`，并保留
    enabled/selected、UserData、输入菜单、Settings 和真实输入；
 6. 全量验收通过后运行
@@ -199,7 +199,7 @@ macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、
 Core 更新只接受已安装的固定 CMS 身份；此前公开的旧 ad-hoc App 必须使用
 Complete 修复，不能进入 Core 的就地更新路径。
 Complete 仍须验证旧 App 的代码完整性和明确身份，在不修改既有 TIS 状态与个人数据的
-前提下替换 App。当前候选仍以步骤 4 的“两轮同 leaf Core”为发布前证据。
+前提下替换 App。当前候选仍以步骤 5 的“两轮同 leaf Core 升级”为发布前证据。
 
 Settings 只读取用户明确选择的 `data-channel` 或 `preview-channel` 指针，不读取
 可变 Release 别名，也不维护第二份 Core 版本清单；默认始终是正式频道，未知保存值
@@ -213,20 +213,22 @@ Secrets 中。它们不是 Apple 开发者凭据，也不会被打包、写入�
 ## 安装验收
 
 代码、静态产物和安装产品必须分别报告。首次 Complete 安装需验证一次注销
-后输入源可用；同一 bundle ID/path 的后续 Core 更新必须验证：Installer 返回
-`RestartAction=None`、登录会话不变、个人数据不变、输入源 enabled/selected
-意图不被覆盖，更新期间 Host PID 不变且 `AXHidden=false`；安装脚本不得启动、隐藏或替换
-Host，更新前已连接及更新后新打开的应用都可输入。安装后还须验证 Settings 分别显示
-installed/running version、build 和 revision。立即应用的唯一 owner 是 Host 的 typed
+后输入源可用；同一 bundle ID/path 的后续在线 Core 更新必须验证：无需 Installer、
+密码或注销，登录会话与个人数据不变，输入源 enabled/selected 意图不被覆盖。
+旧式 Core PKG 桥接另须验证 `RestartAction=None`，且安装阶段不改变 Host PID 或
+隐藏 Host（`AXHidden=false`）。更新前已连接及更新后新打开的应用都须可输入。
+Settings 分别显示 installed/running version、build 和 revision。立即应用的唯一 owner 是 Host 的 typed
 activation state：用户必须先通过系统菜单切走 Linnet，且不得有未完成输入或数据事务。
 TextEdit、Teams、Codex 及其他已连接应用始终保持打开；任一安全条件不满足时 Host
 保持运行且 Settings 显示拒绝原因。Settings 不关闭用户应用，也不程序化切换输入源。
 Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 canonical 路径启动并核对
 精确 revision；再单独验证 Host 自然重启后由新 build 提供输入。
-每个精确候选的“两轮同 leaf Core”必须使用
-同一组 Draft Release 原字节：第一轮从前一已验收的固定 CMS 版（首次公开后即前一公开版）
-升级，第二轮重装候选原字节；两轮均
-不得注销或索要 Keychain 密码，并须验证登录会话、enabled/selected、UserData、
+每个精确候选的“两轮同 leaf Core 升级”必须使用同一组 Draft Release 原字节。
+每轮均从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级到候选；第二轮先按
+正常卸载、安装流程重建较低版本基线，再重复相同在线升级。单独记录基线重建所需的
+注销与数据恢复，不将其计入在线升级流程。在线 Core 只接受更高版本，不提供同版本
+重装；同版本 App 修复由 Complete 负责，不能用它替代 Core 升级验收。
+两轮升级均不得注销或索要密码，并须验证登录会话、enabled/selected、UserData、
 输入菜单、Settings 和真实输入。Core 只接受固定 CMS App 以及唯一、精确匹配的 TIS
 source/bundle 身份；旧 ad-hoc App、App 缺失或注册缺失都在 payload 前失败并指向
 Complete。受支持签名 App 的缺失注册由 Complete 修复；重复、冲突、未知 bundle 或

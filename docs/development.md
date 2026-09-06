@@ -317,15 +317,17 @@ lifecycle 直接验证 Core 拒绝时不修改 App/Runtime，并验证 Complete 
 个人数据和输入源状态。
 
 每个精确候选仍须在同一真实账号使用 Action 生成的 Draft Release 原字节完成
-“两轮同 leaf Core”：先从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级
-到候选，再把同一候选的原字节重装一次。两轮都要
-证明 Installer 无注销、无 Keychain 密码提示、登录会话不变，并保留
+“两轮同 leaf Core 升级”：每轮都从前一已验收的固定 CMS 版（首次公开后即前一公开版）
+升级到同一候选。第二轮按正常卸载、安装流程重建较低版本基线；基线重建的注销与数据
+恢复单独记录，不属于在线升级。在线 Core 只接受更高版本；同版本 App 修复由 Complete
+负责，不能替代 Core 升级验收。两轮升级都要证明无需 Installer、密码或注销、登录会话不变，并保留
 enabled/selected、UserData、输入菜单、Settings 和真实输入。Complete 修复旧身份和
-同 leaf Core 更新都不重新 register、enable 或 select。Core preinstall 只验证候选、已安装
+同 leaf Core 更新都不重新 register、enable 或 select。旧式 Core PKG 的 preinstall 只验证候选、已安装
 App、Active data 与 package-owned read-only typed TIS 状态；脚本不关闭 Host 或任何
-用户应用，也不调用 `osascript`。Core 与 Complete 均不声明 `must-close`；安装过程
-持有 Settings 数据事务共用的 mutation lease，不关闭 Settings。运行中的 Host 必须保持同一
-PID，更新前已连接的应用与更新后新打开的应用都要继续输入。安装完成后，Settings
+用户应用，也不调用 `osascript`。旧式 Core PKG 与 Complete 均不声明 `must-close`；安装过程
+持有 Settings 数据事务共用的 mutation lease，不关闭 Settings；该安装阶段的 Host 必须保持同一
+PID。在线 Core 由 Settings 在 Host 接受退出后交换 App 并启动新 Host；所有升级前已连接
+应用与升级后新打开的应用都要继续输入。安装完成后，Settings
 必须分别显示磁盘与运行中的 version/build/revision；只有切换离开 Linnet、没有未完成
 composition 或数据事务时，Host 的 typed activation owner 才能接受自行退出。Settings
 随后只从 canonical 安装路径启动 Host，并在精确 revision 一致后报告生效；任一前提

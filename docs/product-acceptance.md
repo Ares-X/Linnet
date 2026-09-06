@@ -684,10 +684,14 @@ direct Core-upgrade source. Public 0.1.7 and older ad-hoc Apps must use Complete
 which verifies the legacy identity and repairs the App while preserving personal
 data and existing TIS state. The package lifecycle matrix proves both that Core
 rejects this edge before mutation and that Complete retains it as a repair path.
-Every exact candidate still requires `两轮同 leaf Core` on its immutable bytes: the
-previous accepted fixed-CMS build (the previous public build after the first
-publication) to candidate, then a byte-identical reinstall of that same candidate.
-Both rounds must prove no logout or Keychain password prompt, the
+Every exact candidate requires `两轮同 leaf Core 升级` on its immutable bytes.
+Each round upgrades the previous accepted fixed-CMS build (the previous public
+build after the first publication) to the same candidate. Before round two,
+recreate the lower-version baseline through the normal uninstall/install flow;
+record baseline logout and data restoration separately from the online upgrade.
+Online Core accepts only newer versions. Same-version App repair belongs to
+Complete and cannot substitute for Core upgrade acceptance.
+Both upgrades must prove no Installer, password prompt or logout, the
 same login session, retained enabled/selected intent and UserData, and working
 input menu, Settings and real input.
 
