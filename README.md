@@ -9,11 +9,13 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 **一个输入源，两种语言，一种连贯的输入体验。**
 
 > [!NOTE]
-> 当前正式 Release 只提供一个完整安装包 `Linnet.pkg`。它没有使用 Apple Developer ID 签名，也未经过公证；macOS 会要求用户手动确认信任。SHA-256 直接写在同一 Release 的说明中，Core 与语言数据组件则位于同仓库、明确标注的更新频道，不再与普通用户下载混在一起。
+> 首次安装请下载 `Linnet.pkg`。社区版没有 Apple Developer ID 签名或公证，macOS 可能要求手动确认信任；安装前请核对同一 Release 说明中的 SHA-256。
 
 **[下载最新版 Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-[产品体验](#产品体验) · [安装](#安装) · [使用指南](#使用指南) · [设置](#设置) · [隐私](#隐私) · [参与贡献](#参与贡献)
+本文对应本分支版本；正式可下载版本以 Latest Release 为准，各版本的功能与变化见[版本记录](CHANGELOG.md)。
+
+[产品体验](#产品体验) · [安装](#安装) · [使用指南](#使用指南) · [升级与卸载](#升级与卸载) · [隐私](#隐私) · [参与贡献](#参与贡献)
 
 ## 为什么选择 Linnet
 
@@ -22,17 +24,12 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中�
 - **真正面向英文输入**：Smart English 提供补全、拼写建议、IPA、中文释义、上下文预测与连续输入处理，同时始终保留原始输入。
 - **离线且可掌控**：个人词、学习数据、Text Expander 和备份默认保存在本机；启用后，macOS 通过 Linnet 固定的 `iCloud Drive/Linnet` 目录同步 Rime 学习词。
 - **原生 macOS 产品**：菜单栏状态、候选窗与 Settings 形成统一体验，并提供浅色、深色和多套候选主题。
+- **核心与语言数据分开更新**：更新界面或程序时复用已安装的词库和模型，语言包优先使用差分；支持设置内 Core 更新的版本无需关闭其他应用或再次注销。
+- **常用内容随手输入**：自定义词进入正常候选与学习流程，Text Expander 用短码展开地址、邮箱或固定回复；修改后只增量加载实际变化的个人词典。
 
 ### 基于成熟上游，由 Linnet 精校与增强
 
-Linnet 复用 Squirrel、librime、万象、RIME-LMDG、rime-ice 与 Hallelujah 的成熟能力，但不把上游直接拼装成产品。上游版本和输入摘要会被锁定；每次更新先在本地生成、比较并通过候选、数据和交互测试，再进入发布版本。Linnet 目前在这些基础上完成了：
-
-- **中文精校**：以万象词表和 LTS 语法模型为核心，保留八种全拼/双拼的一致词库与学习数据；通过可审计的审核表修正已确认的读音、错码与候选顺序，而不是运行时猜测或无差别合并其他中文词库。
-- **英文数据整理**：从 Hallelujah 与 rime-ice 的锁定输入中选择词频、发音、中文释义和补充词条，经过确定性归一化、去重、格式检查和人工质量审核后生成 Linnet 的英文数据。
-- **双语排序与输入语义**：在中文候选与明确英文单词发生碰撞时，结合当前拼音方案、完整编码、静态词频与学习结果决定顺序；补全、纠错、预测、大小写、Space/Return、数字键、方向键和原始输入都由 Linnet 的同一交互合同约束。
-- **macOS 产品增强**：在 Squirrel/librime 运行时之上提供单输入源三状态、光标旁状态提示、候选详情、七套主题、原生 Settings、个人数据管理，以及首次注销后无需再次注销的 Core 更新路径。
-
-具体上游版本、选取范围、修改方式和许可证见[第三方来源说明](THIRD_PARTY_NOTICES.md)与[开发指南](docs/development.md)。
+Linnet 基于 Squirrel／librime，结合万象词库、RIME-LMDG 模型、rime-ice 与 Hallelujah 的数据与能力，提供中文精校、原生 Smart English 扩展、候选交互及 macOS 设置与更新。来源、修改范围与许可证见[第三方来源说明](THIRD_PARTY_NOTICES.md)。
 
 ## 产品体验
 
@@ -44,18 +41,21 @@ Linnet 复用 Squirrel、librime、万象、RIME-LMDG、rime-ice 与 Hallelujah 
 | Smart English | `En` | 英文补全、纠错、释义、发音与上下文预测 |
 | 原始 ASCII | `A` | 代码、密码、终端和任何不希望被转换的文本 |
 
-独立轻按左 Shift 或右 Shift，在中文与 Smart English 之间切换；Caps Lock 进入或退出原始 ASCII。组合键、Shift 加字母以及长按 Shift 都不会误触发模式切换。
-若切换前仍有未上位的拼音或英文，Linnet 会先原样提交这些字母，不会替用户选择中文候选或英文补全。
+轻按左 Shift 或右 Shift 切换中文与 Smart English；Caps Lock 进入或退出原始 ASCII。
 
 ![Linnet 中文、Smart English 与原始 ASCII 三种输入状态的真实光标提示](resources/readme/input-modes.png)
 
-_由当前 `SquirrelPanel` / `SquirrelView` 生成的真实光标旁状态提示；菜单栏同步显示 `中`/`双`、`En` 或 `A`。_
+_光标旁提示当前输入状态；菜单栏同步显示 `中`/`双`、`En` 或 `A`。_
 
 ### 中文输入
 
-Linnet 首次使用默认全拼，也可以在 Settings 中选择自然码、小鹤、微软、搜狗、智能 ABC、紫光或拼音加加。八种方案共享中文词库与学习数据，切换方案不需要重新建立个人词频。
+Linnet 首次使用默认全拼，也可以在 Settings 中选择自然码、小鹤、微软、搜狗、智能 ABC、紫光或拼音加加。八种方案共享中文词库与学习数据，切换方案不需要重新建立个人词频。候选输出支持简体与繁体切换。
 
-中文候选支持横排或竖排、每页 3/5/7/9 项以及滚动或临时展开浏览。数字键可直接选择候选，鼠标、方向键、Page Up / Page Down 与候选窗按钮负责浏览；逗号、句号等遵循中英文标点状态，`/`、`+`、`=` 等普通运算符直接交给当前应用。
+中文可选择标准 Rime 学习、Linnet 增强学习或关闭学习；增强学习会对逐字组成的生僻词组补充学习强化。英文学习单独开关，关闭学习保留已有记录，重新启用后继续使用；需要删除时再到“数据与更新”中清理。
+
+中文候选支持横排、竖排与多行展开，未展开时每页可选 3／5／7／9 项。展开后用方向键在网格中移动，也可以选择始终按页滚动。
+
+在中文连续输入中，按住 Shift 输入全大写缩写时，缩写会保持原样，左右两侧的拼音仍继续匹配并组成中文句子。小写输入也可根据上下文提供中英混合候选，由整句评分参与排序，不强制置顶。
 
 常用辅助入口包括：
 
@@ -63,48 +63,51 @@ Linnet 首次使用默认全拼，也可以在 Settings 中选择自然码、小
 - `U` + 十六进制码点：Unicode 输入；
 - `cC` + 表达式：本地计算器；
 - `uU` + 全拼：部件拆字查询；
-- `;` 或 `|` + 当前拼音编码：在中文模式中反查英文。
+- `|` + 当前拼音编码：在中文模式中反查英文；也可在 Settings 中显式改用 `;`。
 
 ### Smart English
 
 Smart English 适合连续英文写作，也适合在中文工作流中临时输入术语：
 
-- 前缀补全、拼写建议与下一词预测；
+- 前缀补全、拼写纠错、模糊匹配与下一词预测，结合词频、学习记录和上下文排序；
 - 可选 IPA 和中文释义；
 - 保留首字母大写或全大写；
-- Space、Return、数字键和方向键均可按当前候选状态提交；Space 上屏时是否自动附加空格可在 Settings 中配置；
+- Space 上屏时是否自动附加空格可在 Settings 中配置；
 - URL、邮箱、路径、版本号和代码标识符尽可能保持原文；
-- 原始输入始终作为安全候选，不会被建议静默替换。
+- 原始输入始终保留；已构成完整英文词或明确的全大写缩写时，原文优先于更长的补全结果。
 
 Tab 可以设为智能接受、候选导航，或完全交给当前应用。按 `Esc` 可关闭本次预测并清除当前英文上下文。
 
 ![Linnet 拼音反查英文与 Smart English 的真实候选窗](resources/readme/bilingual-features.png)
 
-_由当前候选窗渲染链生成；输入串、候选、选中态和释义均使用真实产品布局。_
+_左侧为中文模式的拼音反查，右侧为带 IPA 和中文释义的英文补全。_
 
 ### 外观与个性化
 
-候选窗口提供宣纸、月华、青岩、陶印、雾青、原生玻璃和墨朱七套主题，每套都包含浅色与深色版本。中文与英文可以分别选择横排或竖排；字体、字号、候选数量和展开方式也可以独立调整。
+横向展开的列数与最多行数分别可选 3／4／5，默认 5 列、最多 3 行；纵向展开每行可选 5／6／7 项、最多 3 行。展开设置不影响紧凑状态的候选数量。
+
+候选窗口提供宣纸、月华、青岩、陶印、雾青、原生玻璃和墨朱七套主题，每套都包含浅色与深色版本。中文与英文可以分别选择紧凑状态下的横排或竖排；展开后统一使用多行网格。英文释义显示在网格下方，随高亮候选更新并按实际内容调整高度，不额外预留空白。字体、字号、候选数量和展开方式也可以独立调整。
 
 ![Linnet 七套候选窗主题的 Light 与 Dark 实际渲染](resources/readme/theme-gallery.png)
 
-_由当前 `data/squirrel.yaml` 通过 `SquirrelView` 生成的 20pt 实际渲染；透明度和系统材质会随 macOS 外观及当前应用背景变化。_
+### 下载大小与磁盘空间
 
-除了输入外观，Linnet 还支持：
+完整安装包包含程序、中文与英文词库、本地语言模型和辅助数据；核心更新只更新程序部分。以下是固定版本的参考值，采用十进制 MB：
 
-- 自定义词；
-- 按完整单词禁用英文候选；
-- 以 `x;` 开头的 Text Expander，例如 `x;addr`；
-- 中文、英文学习数据的独立开关与清理；
-- 个人数据导入、导出、自动备份与恢复。
-- 通过产品固定的 `iCloud Drive/Linnet` 目录增量同步中英文学习词，无需选择文件夹；自动检查严格限制为每小时最多一次，完整个人数据另以手动恢复归档传输。
+| 内容 | 大小 | 说明 |
+| --- | --- | --- |
+| 完整安装包 | **约 428 MB** | `Linnet.pkg`，包含离线语言数据 |
+| Core 更新包 | **约 7 MB** | 仅更新程序，复用已安装词库与模型 |
+| [当前锁定的 LTS 模型](upstreams.lock.json) | **420.25 MB** | 模型文件的未压缩大小，已包含在完整安装内容中，无需额外下载 |
+
+**下载大小不等于安装后占用。** 磁盘还会保存解压后的语言数据、生成的输入方案、学习记录与备份；总占用随使用情况变化。模型文件大小也不代表它会全量常驻内存。
+
+核心与词包分离后，日常程序升级可复用大体积语言数据。语言包更新优先使用差分，未变化的词包直接复用；无法使用差分时，设置会提示确认完整修复。
 
 ## 系统要求
 
 - Apple Silicon Mac（arm64）；
-- macOS 13 或更高版本；
-- Settings 支持 English 与简体中文；
-- 候选输出支持简体与繁体切换。
+- macOS 13 或更高版本。
 
 ## 安装
 
@@ -124,94 +127,93 @@ shasum -a 256 Linnet.pkg
 2. 在 macOS 安装器中依次选择 **继续 → 安装**并等待“安装成功”。Linnet 只安装到当前用户的 `~/Library/Input Methods/Linnet.app`；不要把 App 手工拖动或复制到其他目录。
 3. 保存工作，注销当前 macOS 账户并重新登录。这一步只在第一次安装时执行，用于让 macOS 完成输入源登记；以后安装 Core 更新不需要再次注销。
 4. 重新登录后打开 **系统设置 → 键盘 → 文本输入 → 编辑**。如果列表中已有 Linnet，确认它已启用；如果没有，点击 **+**，搜索或找到 **Linnet**，选择后点击 **添加**，并按 macOS 提示允许该输入源。
-5. 点击菜单栏输入菜单或按系统的输入源切换快捷键，选择带小鸟图标的 **Linnet**。这一步只选择 Linnet 输入源，不是在系统列表中分别添加中文和英文。
+5. 从菜单栏输入菜单中选择带小鸟图标的 **Linnet**。选择始终由用户和 macOS 管理，安装器不会代替你切换。这只是一个 Linnet 输入源，不需要分别添加中文和英文。
 6. 确认菜单栏显示 `中`/`双`，输入拼音可以提交中文候选；独立轻按 Shift 应显示 `En` 并输入英文，Caps Lock 应显示 `A`；输入菜单中的 **Settings** 应能打开设置窗口。
 
-已经完成过上述首次安装的用户，后续只使用对应 `core-v<version>` 页面的 Core 安装包；更新完成后原来的 Linnet 输入源仍保留，无需删除、重新添加或再次注销。
+已完成首次安装的用户，后续从 Settings 检查、下载并应用 Core 更新，不必重新添加输入源；旧版本需先完成一次桥接升级，见[升级与卸载](#升级与卸载)。**安装成功不等于新代码已经运行**：旧式安装包只替换磁盘文件，还需在设置中应用已安装的更新。具体操作见[应用核心更新](#应用核心更新)。
 
-Linnet 不会自动点击系统授权或替用户选择输入源。社区安装包没有 Apple Developer ID 签名或公证，因此“无法验证开发者”是预期提示；手动信任只应在文件名和同一 Release 说明中的 SHA-256 都校验成功后进行。不要关闭 Gatekeeper、不要清除隔离属性，也不要执行来源不明的安装命令。若系统报告校验和不一致、文件损坏或恶意软件，请停止安装。
+Linnet 不会自动点击系统授权、选择或停用输入源。若 Linnet 被 macOS 移除或停用，请在 **系统设置 → 键盘 → 文本输入 → 编辑** 中重新添加或启用。社区安装包没有 Apple Developer ID 签名或公证，因此“无法验证开发者”是预期提示；只应在文件名和 Release 中的 SHA-256 都校验成功后手动信任。不要关闭 Gatekeeper、清除隔离属性或执行来源不明的安装命令；校验和不一致或系统报告文件损坏时应立即停止。
 
 ## 使用指南
 
-### 切换输入状态
-
-- 中文 ↔ Smart English：独立轻按左 Shift 或右 Shift；
-- 任意模式 ↔ 原始 ASCII：Caps Lock；
-- 当前有组词时，Linnet 会按标准输入规则处理现有内容后再切换；
-- `Shift+字母`、带 Command/Option/Control 的 Shift 组合键与长按 Shift 不切换模式。
-
-系统输入菜单中的小鸟代表唯一的 Linnet 输入源；`中`、`双`、`En`、`A` 才是当前输入状态。
-
 ### 拼音反查英文
 
-在中文模式中，先输入 Settings 选择的触发键，再输入当前全拼或双拼编码。默认触发键是 `;`，备用触发键是 `|`。
+只记得中文意思时，可以用拼音找英文词，无需离开输入窗口。在中文模式中，先输入 Settings 选择的触发键，再输入当前全拼或双拼编码。默认触发键是 `|`；如果用户明确选择 `;`，分号才会成为反查触发键。
 
 ```text
-;suanfa  → algorithm
+|suanfa  → algorithm
 ```
 
-选择自然码后，同一示例可以写成 `;srfa`。Smart English 中也可直接输入纯字母拼音编码查看英文候选；普通英文候选仍排在前面，拼音结果不会取代原始输入。
+选择自然码后，同一示例可以写成 `|srfa`。Smart English 中直接输入当前全拼或双拼编码即可查看英文候选，不使用反查触发键；普通英文候选仍排在前面，拼音结果不会取代原始输入，`;` 等标点始终直接交给当前应用。
 
 ### 自定义词与 Text Expander
+
+在 **Settings → 词典**中配置常用名称、短语和固定文本：
 
 - **自定义词**由显示文本和小写 Rime code 组成，会进入正常候选和学习流程。
 - **禁用英文词**按大小写不敏感的完整词隐藏静态、学习、纠错、发音和预测候选。
 - **Text Expander**触发器必须以 `x;` 开头；未知触发器按原文保留，展开值不会再经过大小写、空格或释义处理。
 
+候选窗支持右键“添加到自定义词…”，将词填入词典草稿；确认编码后点击“应用更改”保存。也可以右键“忘记此候选的学习记录”；内置词仍可能出现。需要隐藏英文词时，使用“禁用英文词”。
+
+例如，添加触发器 `x;addr`，将展开值设为完整地址；以后输入这个短码即可展开保存的文本。
+
+点击 **应用更改** 保存。
+
 ## 设置
 
-从 macOS 输入菜单选择 **Settings**。设置窗口内嵌在 `Linnet.app` 中，不会作为独立应用安装，也不会常驻 Dock。
+从 macOS 输入菜单选择 **Settings**，界面支持 English 与简体中文。设置窗口内嵌在 `Linnet.app` 中，不会作为独立应用安装，也不会常驻 Dock。
 
 | 标签 | 可以管理的内容 |
 | --- | --- |
 | 外观 | 七套主题、浅色/深色、字体、字号、候选数量、横排/竖排与候选展开方式 |
-| 输入 | 全拼/双拼、中文学习、简繁、Emoji、标点、辅助码和拼音反查触发键 |
-| 词典 | 自定义词、禁用英文词、Text Expander，以及带自动备份的安全应用 |
-| 英文 | 自动大写、IPA、中文释义、上下文预测、拼写建议、英文学习、Space 尾随空格和 Tab 行为 |
-| 数据 | 组件版本、iCloud Drive 学习词同步、完整恢复归档、数据导入导出、学习数据清理、备份恢复与隐私处理后的诊断 |
+| 输入 | 中文区管理全拼/双拼、学习、简繁、Emoji、标点、辅助码和反查；Smart English 区管理自动大写、IPA、释义、预测、学习、Space 尾随空格和 Tab；英文纠错与模糊匹配始终可用 |
+| 词典 | 自定义词、禁用英文词与 Text Expander |
+| 数据与更新 | Core 与词包版本、iCloud Drive 增量学习同步、手动增量恢复备份、事务恢复记录、导入导出、学习数据清理与隐私处理后的诊断 |
 
 外观预览会使用所选主题、字号与布局；需要改变输入行为的选项在点击 **Apply Changes** 后生效。请不要手工编辑 Linnet 生成的 `linnet_user.custom.yaml`、`squirrel.custom.yaml`、`default.custom.yaml` 或 schema custom 文件。
 
-Settings 每次打开时会从同一 GitHub 仓库读取一个经过校验的小型 Catalog，并在“数据 → 版本”中安静显示“已是最新”、Core 更新或语言数据更新。输入进程始终离线；检查不会下载大型词库，也不会弹出系统通知。只有用户明确点击语言数据更新后，Settings 才会下载并校验语言包，再通过现有事务原子激活。
+在“数据与更新”中选择 **正式版**（默认）或 **预览版**，查看程序和词库的已安装与可用版本。语言数据优先使用差分更新，未变化的词包直接复用；差分失败时保留当前数据，并询问是否下载有变化的完整词包修复。
+
+若提示同版本词包冲突，或差分更新反复失败，可点击 **修复语言数据更新…**，确认后下载所选频道中有变化或冲突的完整词包。修复保留学习词、个人设置和未变化的词包，不降级词包，也不需要重装输入法。
 
 ## 升级与卸载
 
-Linnet 0.1 系列不在后台静默安装未经过 Apple Developer ID 签名和公证的
-Core/App。Settings 会检查并提醒新版本；点击 **View Core Update / 查看核心更新**
-会打开同仓库对应的 Core 页面，由用户核对 SHA-256 并按 macOS 提示确认安装。
-App 内部使用长期固定的免费 CMS 身份；旧 ad-hoc 版完成一次迁移后，后续同一
-身份的 Core 更新无需再次注销或重新添加输入法。安装与更新永远不会要求发布
-Keychain 密码；若看到此类提示，应取消并向项目报告。正式
-版本页只保留完整安装包；`core-v<version>` 预发布页服务已有用户免注销更新，
-`data-<sequence>` 预发布页服务 Settings 的语言数据频道。两者都不会成为
-Latest Release，也不会干扰首次安装下载。
+Linnet 不会在后台自动修改 Core。Settings 检查到更新后，只有用户点击 **下载核心更新 / Download Core Update** 才会下载并校验 Catalog 绑定的精确文件。安装了 0.1.15 桥接版后，后续 Core 可在设置中点击 **应用更新… / Apply Update…** 完成：先切换到其他输入法，其他应用保持打开，不需要 Installer、密码、注销或重启。
 
-已经完成首次安装和一次注销的用户，打开同版本 `core-v<version>` 页面，只下载：
+正式版本页只提供完整安装包；`core-v<version>` 预发布页供已有用户免注销更新，`data-<sequence>` 预发布页供 Settings 更新语言数据。它们不会成为 Latest Release。
 
-- `Linnet-<version>-arm64-Core-community-beta.pkg`。
+0.1.15 是一次性桥接版：0.1.14 及更早的固定 CMS 版本仍会下载旧式 Core PKG，并显示 **打开旧版安装器… / Open Legacy Installer…**；只需按 macOS 提示完成这一次升级。之后在 Settings 中下载并应用核心更新即可，不需要寻找发布页中的文件或手工比对哈希。0.1.7 或更早的旧 ad-hoc 版本、App 缺失或损坏时仍须运行完整 `Linnet.pkg` 修复。
 
-```bash
-LINNET_VERSION='X.Y.Z'
-shasum -a 256 "Linnet-${LINNET_VERSION}-arm64-Core-community-beta.pkg"
-```
+### 应用核心更新
 
-输出必须与 Core 更新页说明中的 SHA-256 完全一致。随后在 Finder 中按住 Control 点击 Core 安装包并选择 **打开**。Core 只更新 App，保持已安装语言包、个人数据以及输入源的启用/选择意图，不要求再次注销。已有安装不要使用 `Linnet.pkg`；Complete 会拒绝覆盖并提示改用 Core。若 Core 报告身份、版本或安装状态不一致，请停止，不要手工复制 App 或改用 Complete 绕过检查。
+1. 从 Linnet 输入菜单打开 **Settings**。
+2. 进入 **数据与更新 → 核心更新**（**Data & Updates → Core update**）。查看“已安装”和“正在运行”：前者是磁盘上的版本，后者是当前输入法进程实际加载的版本。
+3. 若有可下载的 Core 更新，先点击 **下载核心更新**，等待下载和验证完成。
+4. 完成或取消当前组词，再从 macOS 输入菜单切换到其他输入法，保留正在使用的应用窗口。
+5. 新式在线更新点击 **应用更新…**（**Apply Update…**）；若刚通过旧式 PKG 完成桥接，则点击 **应用已安装的更新…**（**Apply Installed Update…**）。不要把它们与用于保存设置的 **Apply Changes** 混淆。
+6. 操作完成后切回 Linnet，输入几个字确认候选窗正常；回到核心更新卡片，确认“正在运行”与“已安装”一致。
 
-卸载工具也在对应的 `core-v<version>` 更新页。下载并核对页面中的 SHA-256 后，先查看计划：
+升级后若 Settings 仍显示旧信息，请关闭设置窗口并从 Linnet 输入菜单重新打开，无需退出其他应用。
 
-```bash
-LINNET_VERSION='X.Y.Z'
-"./Linnet-${LINNET_VERSION}-Uninstall.command" --print-plan
-"./Linnet-${LINNET_VERSION}-Uninstall.command"
-```
+在线 Core 只提供更高版本升级；需要修复同版本 App 时，请使用完整 `Linnet.pkg`。没有待应用更新时，按钮置灰是正常的。有未保存的设置或正在进行的数据操作时，请先完成页面提示的操作。应用被阻止时，根据卡片说明处理后重试；Linnet 不会替你切换输入源或强制关闭用户应用。若旧版 Host 不支持当前会话内应用更新，会明确提示等下次正常登录或重启后生效，不应反复重装或删除输入源。支持会话内更新的 Host 无需注销。
 
-默认卸载会删除应用、语言包和生成数据，但保留个人词、学习数据、Text Expander、备份与偏好。完成后注销并重新登录。
+固定 CMS 版本之间的正常升级只使用 Core；0.1.7 或更早的旧 ad-hoc 版本，以及 App 缺失、损坏或发布身份不符时，使用完整 `Linnet.pkg`。Complete 保留健康的已安装词包与个人数据；若 App 已存在，它也不会触碰输入源状态。注册缺失或停用由 **系统设置 → 键盘 → 文本输入 → 编辑** 处理，而不是让安装器重复申请授权。重复、冲突或无法验证的系统残留必须先执行下文的离线卸载命令，再重新安装 Complete。不要手工复制 App 或绕过检查。
 
-只有确定不再需要任何 Linnet 用户数据时，才使用不可恢复的完整清理：
+### 卸载
+
+先从 macOS 输入菜单切换到其他输入法，注销并重新登录，然后只打开 Terminal。以下命令完全在本机运行，不下载或执行网络脚本。它会永久删除本机 Linnet App、全部本地个人数据、备份、偏好和安装记录；需要保留的数据请先导出。
 
 ```bash
-"./Linnet-${LINNET_VERSION}-Uninstall.command" --purge-user-data
+/usr/bin/find -P "$HOME/Library/Application Support/Linnet" -x -type d -exec /bin/chmod u+rwx {} + 2>/dev/null || true
+/bin/rm -rf -x -- "$HOME/Library/Input Methods/Linnet.app" "$HOME/Library/Application Support/Linnet"
+/usr/bin/defaults delete io.github.ares-x.inputmethod.Linnet 2>/dev/null || true
+/usr/bin/defaults delete io.github.ares-x.inputmethod.Linnet.settings 2>/dev/null || true
+/bin/rm -f -- "$HOME/Library/Preferences/io.github.ares-x.inputmethod.Linnet.plist" "$HOME/Library/Preferences/io.github.ares-x.inputmethod.Linnet.settings.plist"
+/usr/sbin/pkgutil --volume "$HOME" --pkgs | /usr/bin/grep '^io\.github\.ares-x\.inputmethod\.Linnet\..*\.pkg$' | while IFS= read -r receipt; do /usr/sbin/pkgutil --volume "$HOME" --forget "$receipt" >/dev/null; done
 ```
+
+完成后再次注销并重新登录，以刷新 macOS 输入源列表。iCloud Drive 中的同步数据与恢复备份，以及导出到其他目录的文件，需自行另行管理。
 
 ## 故障排查
 
@@ -230,7 +232,7 @@ LINNET_VERSION='X.Y.Z'
 
 ### Settings 无法应用
 
-不要手工修改生成的 YAML。前往 **数据 → Diagnostics** 刷新并复制诊断；公开前仍需人工检查文本与截图，避免包含个人信息。
+不要手工修改生成的 YAML。前往 **数据与更新 → 诊断**（**Data & Updates → Diagnostics**）刷新并复制诊断；公开前仍需人工检查文本与截图，避免包含个人信息。
 
 ### 报告问题
 
@@ -238,19 +240,23 @@ LINNET_VERSION='X.Y.Z'
 
 ## 隐私
 
-Linnet 没有账户体系、遥测、广告或分析 SDK，也不调用在线翻译、在线拼写或生成式模型。键入内容与个人输入数据留在本机：
+Linnet 没有账户体系、遥测、广告或分析 SDK，也不调用在线翻译、在线拼写或生成式模型。输入处理在本机完成；个人词典、学习数据和本地备份默认保存在以下目录：
 
 ```text
 ~/Library/Application Support/Linnet/
 ```
 
+启用 iCloud 同步或手动上传备份后，相应个人数据也会进入你的 iCloud Drive。
+
 只有用户在 Settings 中明确选择导入时，Linnet 才会读取其他 Rime 或 Hallelujah 数据。导出文件可能包含用户主动选择的个人数据，需由用户自行妥善保存与删除。
 
-iCloud Drive 学习词同步由用户显式启用，但目录固定为 `iCloud Drive/Linnet`，不提供目录选择器。Linnet 把其中的 `Linnet-Rime-Sync` 配置为 Rime 的标准 `sync_dir`，由 Rime 按设备导出并增量合并中英文学习词，同时明确关闭 Rime 的自动配置备份；自动周期最多每小时一次，输入框或数据事务忙时会延后，用户也可主动点按“立即同步”。Linnet 不实现第二套词频或冲突算法，也不直接访问 iCloud 账户；云端传输由 macOS 的 iCloud Drive 完成。
+iCloud 学习词同步为可选功能，通过 `iCloud Drive/Linnet` 同步中英文学习记录。自动检查最多每小时一次，也可点击“立即同步”，同步期间可以继续输入。
 
-自定义词、停用词、Text Expander 和设置不属于 Rime 学习词同步。需要迁移这些数据时，可手动上传或审阅 `Linnet-Full-Backup.linnet-data`；导入仍需确认，并会先创建本地备份。
+设置显示本机上次成功合并与导出学习数据的时间，以及失败或待重试的状态。本机完成不代表其他 Mac 已经收到数据；跨设备传输仍由 iCloud Drive 完成。
 
-只有 Settings 会联网：打开设置时向 GitHub 请求固定 Catalog 以检查版本，用户明确点击数据更新后才下载语言包。第三方下载镜像可能看到 IP、请求时间与公开文件 URL，但 Linnet 不会向 GitHub 或镜像发送个人词典、学习数据、备份、诊断或凭据。
+自动同步只处理学习词，自定义词、停用词、Text Expander 和设置不随之同步。迁移或恢复时，可在“数据与更新”中手动上传、审阅恢复备份，或导入导出个人数据；导入需确认，并会先创建本地备份。云端备份无法继续追加时，可确认新建完整备份，已有备份不会被删除。
+
+更新联网由 Settings 处理：打开设置时向 GitHub 请求小型更新目录以检查版本，用户明确点击核心或语言数据更新后才下载对应文件。两者都使用“数据与更新”中的下载源选择；更改来源只影响之后开始的下载，不会自动切换或回退。第三方下载镜像可能看到 IP、请求时间与公开文件 URL，但 Linnet 不会向 GitHub 或镜像发送个人词典、学习数据、备份、诊断或凭据。
 
 ## 参与贡献
 
@@ -258,20 +264,15 @@ iCloud Drive 学习词同步由用户显式启用，但目录固定为 `iCloud D
 
 ```bash
 ./action-build.sh release
-tests/verify_development.sh
-```
-
-已有完整依赖缓存时，可以离线构建：
-
-```bash
-no_download=1 ./action-build.sh release
+tests/verify_swift_units.sh --list
+tests/verify_swift_units.sh --only OWNER
 ```
 
 普通开发不需要签名证书，也不需要把本地构建注册为系统输入法。目录结构、数据生成、上游同步、测试层级与本机验收方法请阅读[开发指南](docs/development.md)；打包、签名和公开发布流程请阅读[发布指南](docs/release.md)。
 
 ## 版本、来源与许可证
 
-当前版本是 **0.1.13**（2026-08-25）。完整的用户可见变化见[版本记录](CHANGELOG.md)。
+当前正式版本见 [Latest Release](https://github.com/Ares-X/Linnet/releases/latest)，预览版本及用户可见变化见[版本记录](CHANGELOG.md)。
 
 Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上游项目的官方发行。本仓库已修改上游代码与数据；首个公开修改版日期为 2026-08-20。主要关系如下：
 
@@ -280,7 +281,7 @@ Linnet 是从 Squirrel 修改而来的独立社区发行版，不代表任何上
 | [Squirrel](https://github.com/rime/squirrel) / [librime](https://github.com/rime/librime) | macOS 输入法与 Rime 运行时基础；修改了产品身份、单输入源双语工作流、候选交互、原生 Settings 与发行打包 | GPL-3.0-only（Squirrel）；BSD-3-Clause（librime） |
 | [Rime Wanxiang](https://github.com/amzxyz/rime-wanxiang) | 中文词典核心与八种全拼/双拼布局；锁定上游表，并应用经过审核的读音、错码与排序修正 | CC BY 4.0 |
 | [RIME-LMDG](https://github.com/amzxyz/RIME-LMDG) | 锁定并离线打包 Wanxiang LTS 语法模型 | CC BY 4.0 |
-| [rime-ice](https://github.com/iDvel/rime-ice) / [HallelujahIM](https://github.com/dongyuwei/hallelujahIM) | 选取英文、部件、符号、Emoji/OpenCC、Lua、词频、发音与释义输入；经确定性归一化和人工审核生成 Linnet 数据 | GPL-3.0-only；精确适用范围见第三方声明 |
+| [rime-ice](https://github.com/iDvel/rime-ice) / [HallelujahIM](https://github.com/dongyuwei/hallelujahIM) | 选取 rime-ice 三字及以上中文扩展词及英文、部件、符号、Emoji/OpenCC、Lua 输入，并选取 Hallelujah 词频、发音与释义输入；经确定性投影、归一化和人工审核生成 Linnet 数据 | GPL-3.0-only；精确适用范围见第三方声明 |
 | librime-lua、librime-octagram、librime-predict 及其他运行时依赖 | 随 App 静态集成或嵌入，未作为第二套产品来源 | 以第三方声明、发行 NOTICE 与 SBOM 为准 |
 
 完整的来源范围、修改说明和许可证关系见[第三方来源、修改与许可证](THIRD_PARTY_NOTICES.md)，许可证文本见 [`LICENSES/`](LICENSES/)。正式发行包还会携带绑定到精确版本与提交的 `NOTICE.md`、`SBOM.spdx.json`、`VERSION.json` 和许可证文件，避免 README 摘要与实际交付内容漂移。

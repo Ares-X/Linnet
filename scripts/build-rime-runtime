@@ -64,6 +64,13 @@ capture() {
   printf '%s' "${output}"
 }
 
+# One worktree has one native-runtime mutation owner. The kernel-held lock is
+# released on every exit, including crashes, and is inherited by build tools.
+mkdir -p "${repo_root}/build"
+runtime_lock_path="${repo_root}/build/.linnet-rime-runtime.lock"
+exec 9>"${runtime_lock_path}"
+/usr/bin/lockf -s -t 0 9 || fail "another native runtime build owns this worktree"
+
 run "${upstream_sync}" verify
 
 offline=0
@@ -159,26 +166,289 @@ compute_runtime_fingerprint() {
   } | shasum -a 256 | awk '{print $1}'
 }
 runtime_fingerprint="$(compute_runtime_fingerprint)"
-if [[ -f "${runtime_fingerprint_stamp}" &&
-      "$(cat "${runtime_fingerprint_stamp}")" == "${runtime_fingerprint}" ]]; then
-  runtime_complete=1
-  for runtime_output in \
-      "${repo_root}/librime/dist/lib/rime-plugins/librime-predict.dylib" \
-      "${repo_root}/librime/dist/bin/rime_deployer" \
-      "${repo_root}/librime/dist/share/linnet-licenses" \
-      "${repo_root}/librime/share/opencc" \
-      "${repo_root}/build/dependencies/boost/boost"; do
-    [[ -e "${runtime_output}" ]] || { runtime_complete=0; break; }
+dist_target="${repo_root}/librime/dist"
+opencc_target="${repo_root}/librime/share/opencc"
+boost_target="${repo_root}/build/dependencies/boost"
+runtime_cache_target="${repo_root}/build/rime-runtime-cache"
+runtime_cache_format="linnet-rime-runtime-cache-v2"
+runtime_transient_roots=()
+
+is_safe_runtime_transient() {
+  case "$1" in
+    "${repo_root}/build/.rime-runtime-cache."??????|\
+    "${repo_root}/build/.rime-runtime-cache."??????.previous|\
+    "${repo_root}/build/.rime-runtime-restore."??????|\
+    "${repo_root}/build/.rime-runtime-publish."??????)
+      [[ -d "$1" && ! -L "$1" ]]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+cleanup_runtime_transients() {
+  local transient
+  [[ "${#runtime_transient_roots[@]}" -gt 0 ]] || return 0
+  for transient in "${runtime_transient_roots[@]}"; do
+    [[ ! -e "${transient}" && ! -L "${transient}" ]] && continue
+    is_safe_runtime_transient "${transient}" || return 1
+    rm -rf -- "${transient}"
   done
-  ls "${repo_root}"/librime/dist/lib/librime.*.dylib >/dev/null 2>&1 ||
-    runtime_complete=0
-  [[ "$(find "${repo_root}/librime/dist/share/linnet-licenses" \
-      -mindepth 1 -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')" == 12 ]] ||
-    runtime_complete=0
-  if [[ "${runtime_complete}" -eq 1 ]]; then
-    echo "build-rime-runtime: SKIP (locked inputs unchanged; runtime artifacts present)"
-    exit 0
+}
+
+runtime_paths_share_device() {
+  local expected path
+  expected="$(stat -f %d "${repo_root}/build")" || return 1
+  for path in "$@"; do
+    [[ "$(stat -f %d "${path}")" == "${expected}" ]] || return 1
+  done
+}
+
+# A prior SIGKILL cannot retain authority. The process lock proves none of
+# these strictly named work roots belongs to a live sibling invocation.
+shopt -s nullglob
+stale_runtime_roots=(
+  "${repo_root}"/build/.rime-runtime-cache.??????
+  "${repo_root}"/build/.rime-runtime-cache.??????.previous
+  "${repo_root}"/build/.rime-runtime-restore.??????
+  "${repo_root}"/build/.rime-runtime-publish.??????
+)
+shopt -u nullglob
+runtime_transient_roots=()
+if [[ "${#stale_runtime_roots[@]}" -gt 0 ]]; then
+  runtime_transient_roots=("${stale_runtime_roots[@]}")
+fi
+cleanup_runtime_transients || fail "unsafe native runtime residue"
+runtime_transient_roots=()
+trap cleanup_runtime_transients EXIT
+
+runtime_outputs_complete() {
+  local runtime_output
+  [[ -d "${dist_target}" && ! -L "${dist_target}" &&
+     -d "${opencc_target}" && ! -L "${opencc_target}" &&
+     -d "${boost_target}/boost" && ! -L "${boost_target}" ]] || return 1
+  for runtime_output in \
+      "${dist_target}/lib/rime-plugins/librime-predict.dylib" \
+      "${dist_target}/bin/rime_deployer" \
+      "${dist_target}/share/linnet-licenses"; do
+    [[ -e "${runtime_output}" ]] || return 1
+  done
+  compgen -G "${dist_target}/lib/librime.*.dylib" >/dev/null || return 1
+  [[ "$(find "${dist_target}/share/linnet-licenses" \
+      -mindepth 1 -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')" == 12 ]]
+}
+
+# The cache inventory is a deterministic contract over every directory, file,
+# mode, byte count, digest and symlink target. Cached paths are data, never
+# source authority, so reject anything outside the generated runtime alphabet.
+runtime_tree_inventory() {
+  ruby -rdigest -rfind -rpathname -e '
+    base = File.realpath(ARGV.fetch(0))
+    roots = ARGV.drop(1)
+    abort unless !roots.empty? && roots.uniq.size == roots.size &&
+      roots.all? { |root| root.match?(/\A[A-Za-z0-9._+@-]+\z/) } &&
+      Dir.children(base).sort == roots.sort
+    rows = []
+    roots.each do |root_name|
+      root = File.join(base, root_name)
+      Find.find(root) do |entry|
+        relative = Pathname.new(entry).relative_path_from(Pathname.new(base)).to_s
+        encoded = relative.dup.force_encoding("UTF-8")
+        parts = encoded.split("/", -1)
+        abort unless encoded.valid_encoding? && parts.all? { |part|
+          !part.empty? && part != "." && part != ".." &&
+            part.match?(/\A[A-Za-z0-9._+@-]+\z/)
+        }
+        stat = File.lstat(entry)
+        mode = format("%04o", stat.mode & 0o7777)
+        if stat.directory?
+          kind, size, digest = "directory", 0, "-"
+        elsif stat.file?
+          kind = "file"
+          size = stat.size
+          digest = Digest::SHA256.file(entry).hexdigest
+        elsif stat.symlink?
+          target = File.readlink(entry)
+          abort unless target.match?(/\A[A-Za-z0-9._+@-]+\z/)
+          kind = "symlink"
+          size = target.bytesize
+          digest = Digest::SHA256.hexdigest(target)
+        else
+          abort
+        end
+        rows << [relative, kind, mode, size, digest].join("\t")
+      end
+    end
+    puts rows.sort.join("\n")
+  ' "$@"
+}
+
+runtime_cache_is_valid() {
+  local cache_root="$1"
+  local actual_inventory actual_boost_inventory expected_inventory
+  local expected_boost_inventory expected_digest expected_boost_digest
+  [[ -d "${cache_root}" && ! -L "${cache_root}" ]] || return 1
+  ruby -e '
+    expected = %w[
+      boost.inventory boost.inventory.sha256 fingerprint format
+      inventory inventory.sha256 payload
+    ]
+    abort unless Dir.children(ARGV.fetch(0)).sort == expected
+  ' "${cache_root}" 2>/dev/null || return 1
+  [[ -f "${cache_root}/boost.inventory" && ! -L "${cache_root}/boost.inventory" &&
+     -f "${cache_root}/boost.inventory.sha256" &&
+       ! -L "${cache_root}/boost.inventory.sha256" &&
+     -f "${cache_root}/format" && ! -L "${cache_root}/format" &&
+     -f "${cache_root}/fingerprint" && ! -L "${cache_root}/fingerprint" &&
+     -f "${cache_root}/inventory" && ! -L "${cache_root}/inventory" &&
+     -f "${cache_root}/inventory.sha256" &&
+       ! -L "${cache_root}/inventory.sha256" &&
+     -d "${cache_root}/payload" && ! -L "${cache_root}/payload" ]] || return 1
+  [[ "$(<"${cache_root}/format")" == "${runtime_cache_format}" &&
+     "$(<"${cache_root}/fingerprint")" == "${runtime_fingerprint}" ]] || return 1
+  expected_digest="$(<"${cache_root}/inventory.sha256")"
+  expected_boost_digest="$(<"${cache_root}/boost.inventory.sha256")"
+  [[ "${expected_digest}" =~ ^[0-9a-f]{64}$ &&
+     "${expected_boost_digest}" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ "$(content_sha256 "${cache_root}/inventory")" == "${expected_digest}" ]] ||
+    return 1
+  [[ "$(content_sha256 "${cache_root}/boost.inventory")" == \
+     "${expected_boost_digest}" ]] || return 1
+  expected_inventory="$(<"${cache_root}/inventory")"
+  expected_boost_inventory="$(<"${cache_root}/boost.inventory")"
+  actual_inventory="$(runtime_tree_inventory \
+    "${cache_root}/payload" dist opencc 2>/dev/null)" || return 1
+  actual_boost_inventory="$(runtime_tree_inventory \
+    "${boost_target}" boost LICENSE_1_0.txt 2>/dev/null)" ||
+    return 1
+  [[ -n "${expected_inventory}" &&
+     "${actual_inventory}" == "${expected_inventory}" &&
+     -n "${expected_boost_inventory}" &&
+     "${actual_boost_inventory}" == "${expected_boost_inventory}" ]]
+}
+
+restore_runtime_cache() {
+  local restore_root restore_payload restored_inventory
+  restore_root="$(mktemp -d "${repo_root}/build/.rime-runtime-restore.XXXXXX")"
+  is_safe_runtime_transient "${restore_root}" || return 1
+  runtime_transient_roots+=("${restore_root}")
+  restore_payload="${restore_root}/payload"
+  mkdir -p "${restore_payload}"
+  if ! cp -R -X "${runtime_cache_target}/payload/." "${restore_payload}/"; then
+    rm -rf -- "${restore_root}"
+    return 1
   fi
+  restored_inventory="$(runtime_tree_inventory \
+    "${restore_payload}" dist opencc 2>/dev/null)" || {
+    rm -rf -- "${restore_root}"
+    return 1
+  }
+  if [[ "${restored_inventory}" != "$(<"${runtime_cache_target}/inventory")" ]]; then
+    rm -rf -- "${restore_root}"
+    return 1
+  fi
+  if [[ -e "${dist_target}" || -L "${dist_target}" ||
+        -e "${opencc_target}" || -L "${opencc_target}" ]]; then
+    rm -rf -- "${restore_root}"
+    return 1
+  fi
+  mkdir -p "$(dirname "${dist_target}")" "$(dirname "${opencc_target}")"
+  runtime_paths_share_device \
+    "$(dirname "${dist_target}")" "$(dirname "${opencc_target}")" || {
+    rm -rf -- "${restore_root}"
+    return 1
+  }
+  if ! ruby -e 'File.rename(ARGV.fetch(0), ARGV.fetch(1))' \
+      "${restore_payload}/dist" "${dist_target}"; then
+    rm -rf -- "${restore_root}"
+    return 1
+  fi
+  if ! ruby -e 'File.rename(ARGV.fetch(0), ARGV.fetch(1))' \
+      "${restore_payload}/opencc" "${opencc_target}"; then
+    ruby -e 'File.rename(ARGV.fetch(0), ARGV.fetch(1))' \
+      "${dist_target}" "${restore_payload}/dist" ||
+      fail "runtime cache restore rollback failed"
+    rm -rf -- "${restore_root}"
+    return 1
+  fi
+  rm -rf -- "${restore_root}"
+  if ! runtime_outputs_complete; then
+    rm -rf -- "${dist_target}" "${opencc_target}"
+    return 1
+  fi
+  printf '%s\n' "${runtime_fingerprint}" > "${runtime_fingerprint_stamp}.tmp"
+  mv "${runtime_fingerprint_stamp}.tmp" "${runtime_fingerprint_stamp}"
+}
+
+refresh_runtime_cache() {
+  local cache_parent cache_stage cache_backup
+  cache_parent="${repo_root}/build"
+  mkdir -p "${cache_parent}"
+  cache_stage="$(mktemp -d "${cache_parent}/.rime-runtime-cache.XXXXXX")"
+  is_safe_runtime_transient "${cache_stage}" || return 1
+  runtime_transient_roots+=("${cache_stage}")
+  mkdir -p "${cache_stage}/payload"
+  if ! cp -R -X "${dist_target}" "${cache_stage}/payload/dist" ||
+      ! cp -R -X "${opencc_target}" "${cache_stage}/payload/opencc"; then
+    rm -rf -- "${cache_stage}"
+    return 1
+  fi
+  printf '%s\n' "${runtime_cache_format}" > "${cache_stage}/format"
+  printf '%s\n' "${runtime_fingerprint}" > "${cache_stage}/fingerprint"
+  if ! runtime_tree_inventory "${cache_stage}/payload" dist opencc \
+      > "${cache_stage}/inventory" ||
+      ! runtime_tree_inventory "${boost_target}" boost LICENSE_1_0.txt \
+      > "${cache_stage}/boost.inventory"; then
+    rm -rf -- "${cache_stage}"
+    return 1
+  fi
+  content_sha256 "${cache_stage}/inventory" > "${cache_stage}/inventory.sha256"
+  content_sha256 "${cache_stage}/boost.inventory" \
+    > "${cache_stage}/boost.inventory.sha256"
+  runtime_cache_is_valid "${cache_stage}" || {
+    rm -rf -- "${cache_stage}"
+    return 1
+  }
+  cache_backup="${cache_stage}.previous"
+  runtime_transient_roots+=("${cache_backup}")
+  [[ ! -e "${cache_backup}" && ! -L "${cache_backup}" ]] || {
+    rm -rf -- "${cache_stage}"
+    return 1
+  }
+  if [[ -e "${runtime_cache_target}" || -L "${runtime_cache_target}" ]]; then
+    [[ -d "${runtime_cache_target}" && ! -L "${runtime_cache_target}" ]] || {
+      rm -rf -- "${cache_stage}"
+      return 1
+    }
+    mv "${runtime_cache_target}" "${cache_backup}"
+  fi
+  if ! mv "${cache_stage}" "${runtime_cache_target}"; then
+    [[ ! -e "${cache_backup}" ]] || mv "${cache_backup}" "${runtime_cache_target}"
+    return 1
+  fi
+  if ! runtime_cache_is_valid "${runtime_cache_target}"; then
+    mv "${runtime_cache_target}" "${cache_stage}" || return 1
+    [[ ! -e "${cache_backup}" ]] || mv "${cache_backup}" "${runtime_cache_target}"
+    return 1
+  fi
+  [[ ! -e "${cache_backup}" ]] || rm -rf -- "${cache_backup}"
+}
+
+# Restore only into a genuinely empty live boundary. A half-present runtime is
+# evidence for a cold rebuild, never permission to merge cached and live bytes.
+if [[ ! -e "${dist_target}" && ! -L "${dist_target}" &&
+      ! -e "${opencc_target}" && ! -L "${opencc_target}" &&
+      -d "${boost_target}/boost" ]] &&
+    runtime_cache_is_valid "${runtime_cache_target}" &&
+    restore_runtime_cache; then
+  echo "build-rime-runtime: RESTORE (verified locked runtime cache)"
+  exit 0
+fi
+
+if [[ -f "${runtime_fingerprint_stamp}" &&
+      "$(<"${runtime_fingerprint_stamp}")" == "${runtime_fingerprint}" ]] &&
+    runtime_outputs_complete && runtime_cache_is_valid "${runtime_cache_target}"; then
+  echo "build-rime-runtime: SKIP (locked inputs unchanged; runtime artifacts present)"
+  exit 0
 fi
 
 is_safe_runtime_work_root() {
@@ -196,9 +466,6 @@ new_boost=0
 had_dist=0
 had_opencc=0
 had_boost=0
-dist_target="${repo_root}/librime/dist"
-opencc_target="${repo_root}/librime/share/opencc"
-boost_target="${repo_root}/build/dependencies/boost"
 dist_backup="${work_root}/previous-dist"
 opencc_backup="${work_root}/previous-opencc"
 boost_backup="${work_root}/previous-boost"
@@ -218,6 +485,7 @@ cleanup() {
     [[ "${new_dist}" -eq 0 ]] || rm -rf -- "${dist_target}"
     [[ "${had_dist}" -eq 0 ]] || mv "${dist_backup}" "${dist_target}"
   fi
+  cleanup_runtime_transients || status=1
   rm -rf -- "${work_root}"
   exit "${status}"
 }
@@ -278,7 +546,8 @@ materialize_git() {
   configured_url="$(capture git -C "${directory}" remote get-url origin)"
   [[ "${configured_url}" == "${repository}" ]] || fail "cached source URL differs from lock"
 
-  if [[ "${offline}" -eq 0 ]]; then
+  if ! git -C "${directory}" cat-file -e "${commit}^{commit}" 2>/dev/null; then
+    [[ "${offline}" -eq 0 ]] || fail "offline source cache is missing the locked commit"
     run git -C "${directory}" fetch --no-tags --depth=1 origin "${commit}"
   fi
   git -C "${directory}" cat-file -e "${commit}^{commit}" || fail "locked source commit is unavailable"
@@ -729,7 +998,9 @@ fi
   fail "runtime SDK headers are incomplete"
 [[ -d "${deps_stage}/Linnet/share/opencc" ]] || fail "OpenCC runtime data is missing"
 
-publish_root="${work_root}/publish"
+publish_root="$(mktemp -d "${repo_root}/build/.rime-runtime-publish.XXXXXX")"
+is_safe_runtime_transient "${publish_root}" || fail "unsafe runtime publish root"
+runtime_transient_roots+=("${publish_root}")
 mkdir -p "${publish_root}/dist" "${publish_root}/opencc" "${publish_root}/boost"
 # Materialize the publication boundary without copying any build-machine
 # extended attributes. The final App scan validates the shipped result.
@@ -749,6 +1020,9 @@ run cp -R -X "${boost_root}/${boost_archive_root}/." "${publish_root}/boost"
 [[ ! -L "${dist_target}" && ! -L "${opencc_target}" && ! -L "${boost_target}" ]] ||
   fail "generated runtime target must not be a symlink"
 mkdir -p "$(dirname "${dist_target}")" "$(dirname "${opencc_target}")" "$(dirname "${boost_target}")"
+runtime_paths_share_device "$(dirname "${dist_target}")" \
+  "$(dirname "${opencc_target}")" "$(dirname "${boost_target}")" ||
+  fail "generated runtime targets cross a filesystem boundary"
 publishing=1
 if [[ -e "${dist_target}" ]]; then mv "${dist_target}" "${dist_backup}"; had_dist=1; fi
 mv "${publish_root}/dist" "${dist_target}"
@@ -761,7 +1035,9 @@ mv "${publish_root}/boost" "${boost_target}"
 new_boost=1
 publishing=0
 
+refresh_runtime_cache || fail "verified runtime cache refresh failed"
 mkdir -p "$(dirname "${runtime_fingerprint_stamp}")"
-printf '%s\n' "${runtime_fingerprint}" > "${runtime_fingerprint_stamp}"
+printf '%s\n' "${runtime_fingerprint}" > "${runtime_fingerprint_stamp}.tmp"
+mv "${runtime_fingerprint_stamp}.tmp" "${runtime_fingerprint_stamp}"
 
 echo "build-rime-runtime: PASS (locked core/lua/predict patches; arm64 runtime)"

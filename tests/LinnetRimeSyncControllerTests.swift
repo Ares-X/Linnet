@@ -6,11 +6,15 @@ struct LinnetRimeSyncControllerTests {
   static func main() {
     do {
       try withTemporaryDirectory { root in
-        try testInstallationProjection(root: root)
-        try testInstallationProjectionRejectsDuplicateOwner(root: root)
-        try testInstallationProjectionRejectsDuplicateBackupPolicy(root: root)
         try testControllerRateLimitAndManualOverride(root: root)
         try testDurableMarkerBlocksOperation(root: root)
+        try testUnavailableDirectoryRecoversOnManualRequest(root: root)
+        try testDisabledSyncDoesNotRun(root: root)
+        try testSlowConfigurationDoesNotBlockInput(root: root)
+        try testIncrementalWorkYieldsAndCancellationStopsIt(root: root)
+        try testWaitingWorkUsesLowFrequencyPolling(root: root)
+        try testDeferredCycleRetainsHourlyWindow(root: root)
+        testTerminalStatusPublication(root: root)
       }
       testHourlyAutomaticLimit()
       testBoundedBusyRetry()
@@ -18,70 +22,6 @@ struct LinnetRimeSyncControllerTests {
     } catch {
       fail("unexpected error: \(error)")
     }
-  }
-
-  private static func testInstallationProjection(root: URL) throws {
-    let user = root.appending(component: "UserData", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: user, withIntermediateDirectories: false)
-    let installation = user.appending(component: "installation.yaml")
-    try """
-      installation_id: mac-a
-      distribution_code_name: Linnet
-      nested:
-        sync_dir: keep-nested
-      sync_dir: old
-      """.write(to: installation, atomically: true, encoding: .utf8)
-    let sync = root.appending(component: "iCloud \"Linnet\"", directoryHint: .isDirectory)
-
-    try LinnetRimeSyncInstallation.project(syncDirectory: sync, userDirectory: user)
-    let projected = try String(contentsOf: installation, encoding: .utf8)
-    let rootProjection = projected.split(separator: "\n")
-      .first(where: { $0.hasPrefix("sync_dir: ") })
-    let decodedPath = try rootProjection.map {
-      try JSONDecoder().decode(
-        String.self, from: Data($0.dropFirst("sync_dir: ".count).utf8))
-    }
-    guard projected.contains("installation_id: mac-a"),
-      projected.contains("  sync_dir: keep-nested"),
-      projected.split(separator: "\n").filter({
-        $0 == "backup_config_files: false"
-      }).count == 1,
-      decodedPath == sync.path
-    else { fail("learning-only projection did not preserve the Rime installation owner") }
-
-    try LinnetRimeSyncInstallation.project(syncDirectory: nil, userDirectory: user)
-    let disconnected = try String(contentsOf: installation, encoding: .utf8)
-    guard disconnected.contains("installation_id: mac-a"),
-      disconnected.contains("  sync_dir: keep-nested"),
-      disconnected.split(separator: "\n").filter({
-        $0 == "backup_config_files: false"
-      }).count == 1,
-      !disconnected.split(separator: "\n").contains(where: { $0.hasPrefix("sync_dir:") })
-    else { fail("disconnect did not retain the learning-only synchronization policy") }
-  }
-
-  private static func testInstallationProjectionRejectsDuplicateOwner(root: URL) throws {
-    let user = root.appending(component: "Duplicate", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: user, withIntermediateDirectories: false)
-    let installation = user.appending(component: "installation.yaml")
-    try "installation_id: mac-b\nsync_dir: one\nsync_dir: two\n"
-      .write(to: installation, atomically: true, encoding: .utf8)
-    do {
-      try LinnetRimeSyncInstallation.project(syncDirectory: root, userDirectory: user)
-      fail("duplicate root sync_dir owners were accepted")
-    } catch LinnetRimeSyncInstallationFailure.duplicateSyncDirectory {}
-  }
-
-  private static func testInstallationProjectionRejectsDuplicateBackupPolicy(root: URL) throws {
-    let user = root.appending(component: "DuplicateBackup", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: user, withIntermediateDirectories: false)
-    let installation = user.appending(component: "installation.yaml")
-    try "installation_id: mac-c\nbackup_config_files: true\nbackup_config_files: false\n"
-      .write(to: installation, atomically: true, encoding: .utf8)
-    do {
-      try LinnetRimeSyncInstallation.project(syncDirectory: root, userDirectory: user)
-      fail("duplicate root automatic config backup policies were accepted")
-    } catch LinnetRimeSyncInstallationFailure.duplicateAutomaticConfigBackupPolicy {}
   }
 
   private static func testHourlyAutomaticLimit() {
@@ -94,6 +34,35 @@ struct LinnetRimeSyncControllerTests {
         now: now, lastAttempt: now.addingTimeInterval(-3_600)
       ) == now
     else { fail("automatic synchronization was not limited to one hourly window") }
+  }
+
+  private static func testTerminalStatusPublication(root: URL) {
+    var results: [LinnetRimeSyncResult] = []
+    var outcome: LinnetRimeSyncOutcome = .completed
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: { .init(syncDirectory: root, lastAttempt: nil) },
+      recordAttempt: { _ in true }, recordResult: { results.append($0) },
+      operation: { _ in outcome }, cancelOperation: {})
+    // Automatic completion must be visible too, without a Settings request.
+    controller.start()
+    waitUntil { results.count == 1 }
+    guard results == [.completed] else { fail("automatic sync did not publish completion") }
+    outcome = .failed
+    var reply: LinnetRimeSyncResult?
+    controller.synchronizeNow { reply = $0 }
+    waitUntil { reply != nil }
+    guard results == [.completed, .failed], reply == .failed else {
+      fail("manual sync did not persist its actual terminal result before replying")
+    }
+    outcome = .inProgress
+    controller.start()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    controller.stop()
+    guard results == [.completed, .failed, .deferred] else {
+      fail("interrupted sync was displayed as a successful completion")
+    }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    guard results.count == 3 else { fail("cancelled sync published a later result") }
   }
 
   private static func testBoundedBusyRetry() {
@@ -109,22 +78,26 @@ struct LinnetRimeSyncControllerTests {
 
   private static func testControllerRateLimitAndManualOverride(root: URL) throws {
     let user = try makeUserDirectory(root: root, name: "RateLimit")
+    let installation = user.appending(component: "installation.yaml")
+    let before = try Data(contentsOf: installation)
     let sync = root.appending(component: "Sync", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: sync, withIntermediateDirectories: false)
     var recordedAttempts = 0
     var operations = 0
     let controller = LinnetRimeSyncController(
       loadConfiguration: {
-        .init(userDirectory: user, syncDirectory: sync, lastAttempt: Date())
+        .init(syncDirectory: sync, lastAttempt: Date())
       },
       recordAttempt: { _ in
         recordedAttempts += 1
         return true
       },
-      operation: {
+      recordResult: { _ in },
+      operation: { directory in
+        guard directory == sync else { fail("sync did not receive its explicit directory") }
         operations += 1
         return .completed
-      })
+      }, cancelOperation: {})
 
     controller.start()
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
@@ -132,12 +105,16 @@ struct LinnetRimeSyncControllerTests {
       fail("the hourly automatic window performed an early write")
     }
 
-    controller.synchronizeNow()
-    guard operations == 1, recordedAttempts == 1 else {
+    var manualResult: LinnetRimeSyncResult?
+    controller.synchronizeNow { manualResult = $0 }
+    waitUntil { manualResult != nil }
+    guard operations == 1, recordedAttempts == 1, manualResult == .completed else {
       fail("an explicit manual synchronization did not override the automatic window once")
     }
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-    guard operations == 1, recordedAttempts == 1 else {
+    guard operations == 1, recordedAttempts == 1,
+      try Data(contentsOf: installation) == before
+    else {
       fail("a completed cycle scheduled another immediate write")
     }
     controller.stop()
@@ -145,22 +122,25 @@ struct LinnetRimeSyncControllerTests {
 
   private static func testDurableMarkerBlocksOperation(root: URL) throws {
     let user = try makeUserDirectory(root: root, name: "MarkerFailure")
+    let installation = user.appending(component: "installation.yaml")
+    let before = try Data(contentsOf: installation)
     let sync = root.appending(component: "MarkerSync", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: sync, withIntermediateDirectories: false)
     var operations = 0
     let controller = LinnetRimeSyncController(
       loadConfiguration: {
-        .init(userDirectory: user, syncDirectory: sync, lastAttempt: nil)
+        .init(syncDirectory: sync, lastAttempt: nil)
       },
       recordAttempt: { _ in false },
-      operation: {
+      recordResult: { _ in },
+      operation: { _ in
         operations += 1
         return .completed
-      })
+      }, cancelOperation: {})
 
     controller.start()
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-    guard operations == 0 else {
+    guard operations == 0, try Data(contentsOf: installation) == before else {
       fail("learning sync wrote before its hourly attempt marker was durable")
     }
     controller.stop()
@@ -169,19 +149,223 @@ struct LinnetRimeSyncControllerTests {
   private static func makeUserDirectory(root: URL, name: String) throws -> URL {
     let user = root.appending(component: name, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: user, withIntermediateDirectories: false)
-    try "installation_id: \(name)\n".write(
+    try """
+      # Rime-owned fields are not an online learning-sync transport.
+      installation_id: \(name)
+      distribution_code_name: Linnet
+      sync_dir: "user-configured-offline-sync"
+      backup_config_files: true
+      nested:
+        sync_dir: keep-nested
+
+      """.write(
       to: user.appending(component: "installation.yaml"),
       atomically: true,
       encoding: .utf8)
     return user
   }
 
+  private static func testUnavailableDirectoryRecoversOnManualRequest(root: URL) throws {
+    let user = try makeUserDirectory(root: root, name: "DirectoryRecovery")
+    let sync = root.appending(component: "RecoverySync", directoryHint: .isDirectory)
+    let installation = user.appending(component: "installation.yaml")
+    let before = try Data(contentsOf: installation)
+    var locationIsAvailable = false
+    var configurationLoads = 0
+    var operations = 0
+    var recordedAttempts = 0
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: {
+        configurationLoads += 1
+        guard locationIsAvailable else { throw POSIXError(.ENOENT) }
+        return .init(syncDirectory: sync, lastAttempt: Date())
+      },
+      recordAttempt: { _ in recordedAttempts += 1; return true },
+      recordResult: { _ in },
+      operation: { _ in
+        operations += 1
+        return .completed
+      }, cancelOperation: {})
+    controller.start()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    guard operations == 0, recordedAttempts == 0, configurationLoads == 1,
+      try Data(contentsOf: installation) == before
+    else { fail("an unavailable sync location started a write or erased the configured directory") }
+    locationIsAvailable = true
+    var manualResult: LinnetRimeSyncResult?
+    controller.synchronizeNow { manualResult = $0 }
+    waitUntil { manualResult != nil }
+    guard configurationLoads == 2, operations == 1, recordedAttempts == 1,
+      manualResult == .completed,
+      try Data(contentsOf: installation) == before
+    else {
+      fail("an enabled sync location stayed disconnected after becoming available")
+    }
+    controller.stop()
+  }
+
+  private static func testDisabledSyncDoesNotRun(root: URL) throws {
+    let user = try makeUserDirectory(root: root, name: "DisabledSync")
+    let installation = user.appending(component: "installation.yaml")
+    let before = try Data(contentsOf: installation)
+    var operations = 0
+    var recordedAttempts = 0
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: {
+        .init(syncDirectory: nil, lastAttempt: nil)
+      },
+      recordAttempt: { _ in recordedAttempts += 1; return true },
+      recordResult: { _ in },
+      operation: { _ in
+        operations += 1
+        return .completed
+      }, cancelOperation: {})
+    controller.start()
+    var manualResult: LinnetRimeSyncResult?
+    controller.synchronizeNow { manualResult = $0 }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    guard operations == 0, recordedAttempts == 0,
+      manualResult == .unavailable,
+      try Data(contentsOf: installation) == before
+    else { fail("disabled synchronization wrote a marker, installation, or learning data") }
+    controller.stop()
+  }
+
   private static func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {
-    var template = Array("/tmp/linnet-rime-sync.XXXXXX".utf8CString)
-    guard let path = mkdtemp(&template) else { throw POSIXError(.EIO) }
-    let root = URL(fileURLWithPath: String(cString: path), isDirectory: true)
+    let root = LinnetTestScratch.directory.appending(component: UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
     try body(root)
+  }
+
+  private static func testSlowConfigurationDoesNotBlockInput(root: URL) throws {
+    let user = try makeUserDirectory(root: root, name: "SlowCloud")
+    let before = try Data(contentsOf: user.appending(component: "installation.yaml"))
+    let cloudStarted = DispatchSemaphore(value: 0)
+    let cloudReleased = DispatchSemaphore(value: 0)
+    let cloudFinished = DispatchSemaphore(value: 0)
+    var operations = 0
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: {
+        guard !Thread.isMainThread else { fail("cloud I/O ran on the input thread") }
+        cloudStarted.signal()
+        cloudReleased.wait()
+        cloudFinished.signal()
+        return .init(syncDirectory: root, lastAttempt: nil)
+      }, recordAttempt: { _ in true }, recordResult: { _ in }, operation: { _ in
+        operations += 1
+        return .completed
+      }, cancelOperation: {})
+    let started = Date()
+    controller.start()
+    guard Date().timeIntervalSince(started) < 0.05,
+      cloudStarted.wait(timeout: .now() + 1) == .success
+    else { fail("configuration loading blocked the input run loop") }
+    // Cloud I/O is deliberately still blocked while input work runs and cancels.
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    controller.stop()
+    cloudReleased.signal()
+    guard cloudFinished.wait(timeout: .now() + 1) == .success else {
+      fail("cloud fixture did not finish")
+    }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    guard operations == 0,
+      try Data(contentsOf: user.appending(component: "installation.yaml")) == before
+    else { fail("cancelled configuration wrote or started stale sync work") }
+  }
+
+  private static func testIncrementalWorkYieldsAndCancellationStopsIt(root: URL) throws {
+    let user = try makeUserDirectory(root: root, name: "YieldingSync")
+    let installation = user.appending(component: "installation.yaml")
+    let originalInstallation = try Data(contentsOf: installation)
+    var steps = 0
+    var attempts = 0
+    var cancellations = 0
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: { .init(syncDirectory: root, lastAttempt: nil) },
+      recordAttempt: { _ in attempts += 1; return true },
+      recordResult: { _ in },
+      operation: { _ in
+        guard Thread.isMainThread else { fail("live database work escaped the input owner") }
+        steps += 1
+        return .inProgress
+      }, cancelOperation: { cancellations += 1 })
+    controller.start()
+    waitUntil { steps >= 4 }
+    let before = steps
+    let cancelBefore = cancellations
+    controller.stop()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.06))
+    guard attempts == 1, steps == before, cancellations == cancelBefore + 1,
+      try Data(contentsOf: installation) == originalInstallation
+    else {
+      fail("incremental work bypassed throttling or continued after cancellation")
+    }
+  }
+
+  private static func testWaitingWorkUsesLowFrequencyPolling(root: URL) throws {
+    var callTimes: [Date] = []
+    var result: LinnetRimeSyncResult?
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: { .init(syncDirectory: root, lastAttempt: nil) },
+      recordAttempt: { _ in true },
+      recordResult: { _ in },
+      operation: { _ in
+        callTimes.append(Date())
+        return callTimes.count < 3 ? .waiting : .completed
+      }, cancelOperation: {})
+    controller.synchronizeNow { result = $0 }
+    waitUntil { result != nil }
+    guard result == .completed, callTimes.count == 3 else {
+      fail("waiting synchronization did not reach its terminal result")
+    }
+    let intervals = zip(callTimes, callTimes.dropFirst()).map {
+      $1.timeIntervalSince($0)
+    }
+    guard intervals.allSatisfy({ $0 >= 0.075 }) else {
+      fail("background I/O waiting retained high-frequency main-run-loop polling")
+    }
+    controller.stop()
+  }
+
+  private static func testDeferredCycleRetainsHourlyWindow(root: URL) throws {
+    let user = try makeUserDirectory(root: root, name: "DeferredSync")
+    let installation = user.appending(component: "installation.yaml")
+    let before = try Data(contentsOf: installation)
+    var lastAttempt: Date?
+    var recordedAttempts = 0
+    var operations = 0
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: { .init(syncDirectory: root, lastAttempt: lastAttempt) },
+      recordAttempt: { date in
+        lastAttempt = date
+        recordedAttempts += 1
+        return true
+      }, recordResult: { _ in }, operation: { _ in
+        operations += 1
+        return .deferred
+      }, cancelOperation: {})
+    controller.start()
+    waitUntil { operations == 1 }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.06))
+    guard operations == 1, recordedAttempts == 1, let lastAttempt,
+      LinnetRimeSyncSchedule.nextAutomaticDate(now: lastAttempt, lastAttempt: lastAttempt)
+        == lastAttempt.addingTimeInterval(3_600)
+    else { fail("deferred learning sync immediately retried or lost its hourly marker") }
+    controller.reload()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    guard operations == 1, recordedAttempts == 1,
+      try Data(contentsOf: installation) == before
+    else { fail("deferred learning sync restarted before its next hourly window") }
+    controller.stop()
+  }
+
+  private static func waitUntil(_ condition: () -> Bool) {
+    let deadline = Date().addingTimeInterval(2)
+    while !condition(), Date() < deadline {
+      RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+    }
+    guard condition() else { fail("asynchronous synchronization did not progress") }
   }
 }
 

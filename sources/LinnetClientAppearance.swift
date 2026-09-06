@@ -14,15 +14,9 @@ enum LinnetClientAppearance {
     case system, light, dark
   }
 
-  enum Source: Equatable {
-    case client
-    case system
-  }
-
   struct Resolution {
     let appearance: NSAppearance
     let isDark: Bool
-    let source: Source
   }
 
   private static let windowAppearanceSelector =
@@ -36,8 +30,7 @@ enum LinnetClientAppearance {
     let appearance = clientAppearance ?? systemAppearance
     return Resolution(
       appearance: appearance,
-      isDark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua,
-      source: clientAppearance == nil ? .system : .client
+      isDark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     )
   }
 

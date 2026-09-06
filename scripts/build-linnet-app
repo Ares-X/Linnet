@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+
+require "fileutils"
+require "pathname"
+
+def fail_build(message)
+  warn "build-linnet-app: FAIL: #{message}"
+  exit 1
+end
+
+configuration = ARGV.shift
+derived_data_argument = ARGV.shift
+fail_build("usage: build-linnet-app <configuration> <derived-data> [xcodebuild arguments]") if
+  configuration.nil? || derived_data_argument.nil?
+fail_build("invalid configuration") unless configuration.match?(/\A[A-Za-z0-9._-]+\z/)
+
+project_root = File.realpath(File.join(__dir__, ".."))
+derived_data = File.expand_path(derived_data_argument)
+fail_build("derived-data path must be absolute") unless Pathname.new(derived_data).absolute?
+FileUtils.mkdir_p(derived_data)
+derived_data = File.realpath(derived_data)
+
+source_project = File.join(project_root, "Linnet.xcodeproj", "project.pbxproj")
+support_root = File.join(derived_data, "BuildSupport")
+generated_project = File.join(support_root, "Linnet.xcodeproj")
+generated_pbxproj = File.join(generated_project, "project.pbxproj")
+FileUtils.mkdir_p(generated_project)
+
+project = File.binread(source_project)
+application_type = 'productType = "com.apple.product-type.application";'
+bundle_type = 'productType = "com.apple.product-type.bundle";'
+targets = {
+  "8D1107260486CEB800E47090" => "Linnet",
+}
+
+targets.each do |identifier, name|
+  target_pattern = /(\n\t\t#{Regexp.escape(identifier)} \/\* #{Regexp.escape(name)} \*\/ = \{.*?\n\t\t\};)/m
+  matches = project.scan(target_pattern)
+  fail_build("canonical #{name} target is not unique") unless matches.length == 1
+  target = matches.first.first
+  fail_build("canonical #{name} target is not an application") unless
+    target.scan(application_type).length == 1
+  transformed = target.sub(application_type, bundle_type)
+  project.sub!(target, transformed)
+end
+
+project_directory = "\t\t\tprojectDirPath = #{project_root.dump};"
+fail_build("canonical projectDirPath is not unique") unless
+  project.scan("\t\t\tprojectDirPath = \"\";").length == 1
+project.sub!("\t\t\tprojectDirPath = \"\";", project_directory)
+
+temporary_pbxproj = "#{generated_pbxproj}.tmp.#{$$}"
+begin
+  File.open(temporary_pbxproj, "wb", 0o600) do |file|
+    file.write(project)
+    file.flush
+    file.fsync
+  end
+  if File.exist?(generated_pbxproj) && FileUtils.compare_file(temporary_pbxproj, generated_pbxproj)
+    FileUtils.rm_f(temporary_pbxproj)
+  else
+    File.rename(temporary_pbxproj, generated_pbxproj)
+  end
+ensure
+  FileUtils.rm_f(temporary_pbxproj)
+end
+
+xcodebuild = "/usr/bin/xcodebuild"
+command = [
+  xcodebuild,
+  "-project", generated_project,
+  "-target", "Linnet",
+  "-configuration", configuration,
+  "-showBuildTimingSummary",
+  "SYMROOT=#{File.join(derived_data, "Build", "Products")}",
+  "OBJROOT=#{File.join(derived_data, "Build", "Intermediates.noindex")}",
+  "MODULE_CACHE_DIR=#{File.join(derived_data, "ModuleCache.noindex")}",
+  "INDEX_DATA_STORE_DIR=#{File.join(derived_data, "Index.noindex", "DataStore")}",
+  "MACH_O_TYPE=mh_execute",
+  "PACKAGE_TYPE=com.apple.package-type.wrapper.application",
+  "GENERATE_PKGINFO_FILE=YES",
+  "WRAPPER_EXTENSION=app",
+  *ARGV,
+  "build",
+]
+exec(*command)

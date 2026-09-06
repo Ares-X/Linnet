@@ -35,8 +35,7 @@ struct LinnetVisibleSettingsFixtureProbe {
       }
 
       let snapshot = try registry.runtimeSnapshot()
-      guard sameFile(snapshot.rootDirectory, expectedRoot),
-        sameFile(
+      guard sameFile(
           registry.userDataDirectory,
           expectedRoot.appendingPathComponent("UserData", isDirectory: true)),
         sameFile(

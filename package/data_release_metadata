@@ -7,28 +7,39 @@ require "json"
 FORMAT = "io.github.ares-x.linnet.data-releases.v1"
 KINDS = %w[chinese english lts extended].freeze
 FIELDS = %w[version sequence data_abi min_core content_sha256].freeze
+IDENTITY_FIELDS = %w[content_sha256 data_abi min_core].freeze
+CORE_ARTIFACT_FORMATS = %w[installer-package app-tar-gzip].freeze
 SAFE_VERSION = /\A[0-9A-Za-z][0-9A-Za-z._-]*\z/
 SEMVER = /\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?\z/
 SHA256 = /\A[0-9a-f]{64}\z/
 RELEASE_METADATA_PATH = "config/linnet-data-releases.json"
 RELEASE_SOURCE_PREFIXES = %w[data/chinese/ data/linnet/ data/opencc/].freeze
-RELEASE_SOURCE_PATHS = %w[config/LinnetProduct.xcconfig].freeze
 
 def fail_metadata(message)
   warn "data_release_metadata: #{message}"
   exit 1
 end
 
-def load_metadata(path)
+def load_metadata(path, allow_legacy_core_artifact_format: false)
   fail_metadata("metadata must be a regular file") unless
     File.file?(path) && !File.symlink?(path)
   document = JSON.parse(File.read(path))
+  expected_keys = %w[catalog_sequence core_artifact_format format packs]
+  legacy_keys = %w[catalog_sequence format packs]
   fail_metadata("unexpected top-level shape") unless
-    document.is_a?(Hash) && document.keys.sort == %w[catalog_sequence format packs]
+    document.is_a?(Hash) &&
+      (document.keys.sort == expected_keys ||
+        (allow_legacy_core_artifact_format && document.keys.sort == legacy_keys))
+  # Historical v1 metadata predates the explicit field and only ever shipped
+  # installer packages. Accept that exact old shape at the comparison boundary.
+  document["core_artifact_format"] = "installer-package" unless
+    document.key?("core_artifact_format")
   fail_metadata("format mismatch") unless document.fetch("format") == FORMAT
   fail_metadata("catalog sequence is invalid") unless
     document.fetch("catalog_sequence").is_a?(Integer) &&
       document.fetch("catalog_sequence").positive?
+  fail_metadata("Core artifact format is invalid") unless
+    CORE_ARTIFACT_FORMATS.include?(document.fetch("core_artifact_format"))
   packs = document.fetch("packs")
   fail_metadata("pack set mismatch") unless
     packs.is_a?(Hash) && packs.keys.sort == KINDS.sort
@@ -86,7 +97,7 @@ def check_source_change(paths)
     path.start_with?("/") || path.split("/").include?("..")
   end
   source_changed = normalized.any? do |path|
-    RELEASE_SOURCE_PATHS.include?(path) ||
+    !path.start_with?("data/linnet/lua/") &&
       RELEASE_SOURCE_PREFIXES.any? { |prefix| path.start_with?(prefix) }
   end
   metadata_changed = normalized.include?(RELEASE_METADATA_PATH)
@@ -136,6 +147,9 @@ when "get"
 when "get-catalog-sequence"
   fail_metadata("usage: get-catalog-sequence FILE") unless ARGV.length == 1
   puts load_metadata(ARGV.fetch(0)).fetch("catalog_sequence")
+when "get-core-artifact-format"
+  fail_metadata("usage: get-core-artifact-format FILE") unless ARGV.length == 1
+  puts load_metadata(ARGV.fetch(0)).fetch("core_artifact_format")
 when "profile-receipt-version"
   fail_metadata("usage: profile-receipt-version FILE") unless ARGV.length == 1
   packs = load_metadata(ARGV.fetch(0)).fetch("packs")
@@ -154,25 +168,52 @@ when "check-active-core"
   fail_metadata("usage: check-active-core ACTIVE_STATE CORE_VERSION") unless ARGV.length == 2
   check_active_core(ARGV.fetch(0), ARGV.fetch(1))
   puts "Linnet active data Core compatibility: PASS"
+when "check-baseline"
+  fail_metadata("usage: check-baseline HISTORICAL CURRENT") unless ARGV.length == 2
+  historical_document = load_metadata(ARGV.fetch(0))
+  current_document = load_metadata(ARGV.fetch(1))
+  fail_metadata("catalog sequence regressed below the historical floor") if
+    current_document.fetch("catalog_sequence") < historical_document.fetch("catalog_sequence")
+  KINDS.each do |kind|
+    historical = historical_document.fetch("packs").fetch(kind)
+    current = current_document.fetch("packs").fetch(kind)
+    fail_metadata("#{kind} sequence regressed below the historical floor") if
+      current.fetch("sequence") < historical.fetch("sequence")
+    fail_metadata("#{kind} data ABI regressed below the historical floor") if
+      current.fetch("data_abi") < historical.fetch("data_abi")
+    if compare_semantic_versions(
+        current.fetch("min_core"), historical.fetch("min_core")).negative?
+      fail_metadata("#{kind} min_core regressed below the historical floor")
+    end
+  end
+  puts "Linnet data release historical floor: PASS"
 when "check-monotonic"
   fail_metadata("usage: check-monotonic PREVIOUS CURRENT") unless ARGV.length == 2
-  previous_document = load_metadata(ARGV.fetch(0))
+  previous_document = load_metadata(
+    ARGV.fetch(0), allow_legacy_core_artifact_format: true)
   current_document = load_metadata(ARGV.fetch(1))
   previous = previous_document.fetch("packs")
   current = current_document.fetch("packs")
   previous_catalog_sequence = previous_document.fetch("catalog_sequence")
   current_catalog_sequence = current_document.fetch("catalog_sequence")
-  fail_metadata("catalog sequence regressed") if
-    current_catalog_sequence < previous_catalog_sequence
-  if current != previous && current_catalog_sequence == previous_catalog_sequence
-    fail_metadata("pack metadata changed without a catalog sequence increment")
-  end
+  identity_changed = false
   KINDS.each do |kind|
     before = previous.fetch(kind)
     after = current.fetch(kind)
-    fail_metadata("#{kind} sequence regressed") if after.fetch("sequence") < before.fetch("sequence")
-    if after.fetch("sequence") == before.fetch("sequence") && after != before
-      fail_metadata("#{kind} metadata changed without a sequence increment")
+    before_identity = before.values_at(*IDENTITY_FIELDS)
+    after_identity = after.values_at(*IDENTITY_FIELDS)
+    pack_identity_changed = after_identity != before_identity
+    identity_changed ||= pack_identity_changed
+    # Merge and squash comparisons can span multiple valid data revisions.
+    # Immutable identities require ordering, not adjacent sequence numbers.
+    sequence_comparison = after.fetch("sequence") <=> before.fetch("sequence")
+    fail_metadata("#{kind} sequence does not match its release identity transition") unless
+      sequence_comparison == (pack_identity_changed ? 1 : 0)
+    version_changed = after.fetch("version") != before.fetch("version")
+    fail_metadata("#{kind} version does not match its release identity transition") unless
+      version_changed == pack_identity_changed
+    if after.fetch("data_abi") < before.fetch("data_abi")
+      fail_metadata("#{kind} data ABI regressed")
     end
     comparison = compare_semantic_versions(
       after.fetch("min_core"), before.fetch("min_core"))
@@ -180,11 +221,14 @@ when "check-monotonic"
       fail_metadata("#{kind} min_core regressed")
     end
   end
+  catalog_comparison = current_catalog_sequence <=> previous_catalog_sequence
+  fail_metadata("catalog sequence does not match the pack identity transition") unless
+    catalog_comparison == (identity_changed ? 1 : 0)
   puts "Linnet data release metadata monotonicity: PASS"
 when "check-source-change"
   fail_metadata("usage: check-source-change < CHANGED_PATHS") unless ARGV.empty?
   check_source_change($stdin.each_line.to_a)
   puts "Linnet data release source-change coupling: PASS"
 else
-  fail_metadata("usage: validate FILE | get FILE KIND FIELD | get-catalog-sequence FILE | profile-receipt-version FILE | check-core FILE CORE_VERSION | check-active-core ACTIVE_STATE CORE_VERSION | check-monotonic PREVIOUS CURRENT | check-source-change < CHANGED_PATHS")
+  fail_metadata("usage: validate FILE | get FILE KIND FIELD | get-catalog-sequence FILE | get-core-artifact-format FILE | profile-receipt-version FILE | check-core FILE CORE_VERSION | check-active-core ACTIVE_STATE CORE_VERSION | check-baseline HISTORICAL CURRENT | check-monotonic PREVIOUS CURRENT | check-source-change < CHANGED_PATHS")
 end

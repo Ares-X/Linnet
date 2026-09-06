@@ -9,9 +9,6 @@ config_version: '1.1'
 # _custom_: keyboard layout of your choice, e.g. 'com.apple.keylayout.USExtended' or simply 'USExtended'
 keyboard_layout: last
 
-# for veteran chord-typist
-chord_duration: 0.1  # seconds
-
 # options: always | never | appropriate
 show_notifications_when: appropriate
 
@@ -77,7 +74,7 @@ preset_color_schemes:
     hilited_candidate_text_color: 0x3A2B1D
     hilited_candidate_label_color: 0x746858
     hilited_comment_text_color: 0x746858
-    hilited_candidate_back_color: 0x787C38
+    hilited_candidate_back_color: 0x2B709A
     linnet_selection_style: underline
     corner_radius: 7
     hilited_corner_radius: 0
@@ -96,7 +93,7 @@ preset_color_schemes:
     hilited_candidate_text_color: 0xDFEBF3
     hilited_candidate_label_color: 0xA8B3BB
     hilited_comment_text_color: 0xA8B3BB
-    hilited_candidate_back_color: 0xAFB778
+    hilited_candidate_back_color: 0x73BDE1
     linnet_selection_style: underline
     corner_radius: 7
     hilited_corner_radius: 0
@@ -105,17 +102,17 @@ preset_color_schemes:
     name: 月华玉青／Moon Jade Light
     author: Linnet
     color_space: srgb
-    back_color: 0xF1F4ED
-    border_color: 0xC4CAB7
-    text_color: 0x2D3119
-    candidate_text_color: 0x2D3119
-    label_color: 0x687052
-    comment_text_color: 0x687052
-    hilited_text_color: 0x2D3119
-    hilited_candidate_text_color: 0x2D3119
-    hilited_candidate_label_color: 0x687052
-    hilited_comment_text_color: 0x687052
-    hilited_candidate_back_color: 0x7D8B4F
+    back_color: 0xEDF5E4
+    border_color: 0xACCAB0
+    text_color: 0x2C3B16
+    candidate_text_color: 0x2C3B16
+    label_color: 0x536546
+    comment_text_color: 0x536546
+    hilited_text_color: 0x2C3B16
+    hilited_candidate_text_color: 0x2C3B16
+    hilited_candidate_label_color: 0x536546
+    hilited_comment_text_color: 0x536546
+    hilited_candidate_back_color: 0x547B22
     linnet_selection_style: bar
     corner_radius: 10
     hilited_corner_radius: 0
@@ -134,7 +131,7 @@ preset_color_schemes:
     hilited_candidate_text_color: 0xF2F3F1
     hilited_candidate_label_color: 0xBABDB7
     hilited_comment_text_color: 0xBABDB7
-    hilited_candidate_back_color: 0xA1A87E
+    hilited_candidate_back_color: 0xABD775
     linnet_selection_style: bar
     corner_radius: 10
     hilited_corner_radius: 0
@@ -142,38 +139,40 @@ preset_color_schemes:
   linnet_sidecar_light:
     name: 青岩／Sidecar Slate Light
     author: Linnet
-    back_color: 0xF0EEE9
-    border_color: 0xD5CEC7
-    text_color: 0x2D2A1D
-    candidate_text_color: 0x2D2A1D
-    label_color: 0x6A655E
-    comment_text_color: 0x6A655E
-    hilited_text_color: 0x2D2A1D
-    hilited_candidate_text_color: 0x2D2A1D
-    hilited_candidate_label_color: 0x6A655E
-    hilited_comment_text_color: 0x6A655E
-    hilited_candidate_back_color: 0x827F5D
-    linnet_selection_style: bar
-    corner_radius: 9
-    hilited_corner_radius: 0
+    color_space: srgb
+    back_color: 0xF8EFE6
+    border_color: 0xCBB395
+    text_color: 0x50301C
+    candidate_text_color: 0x50301C
+    label_color: 0x795D46
+    comment_text_color: 0x795D46
+    hilited_text_color: 0xFFFFFF
+    hilited_candidate_text_color: 0xFFFFFF
+    hilited_candidate_label_color: 0xFFFFFF
+    hilited_comment_text_color: 0x795D46
+    hilited_candidate_back_color: 0x995725
+    linnet_selection_style: tile
+    corner_radius: 4
+    hilited_corner_radius: 2
 
   linnet_sidecar_dark:
     name: 青岩／Sidecar Slate Dark
     author: Linnet
-    back_color: 0x2A2720
-    border_color: 0x514A44
-    text_color: 0xF1ECE7
-    candidate_text_color: 0xF1ECE7
-    label_color: 0xB2AAA2
-    comment_text_color: 0xB2AAA2
-    hilited_text_color: 0xF1ECE7
-    hilited_candidate_text_color: 0xF1ECE7
-    hilited_candidate_label_color: 0xB2AAA2
-    hilited_comment_text_color: 0xB2AAA2
-    hilited_candidate_back_color: 0xA28F72
-    linnet_selection_style: bar
-    corner_radius: 9
-    hilited_corner_radius: 0
+    color_space: srgb
+    back_color: 0x40261A
+    border_color: 0x886243
+    text_color: 0xFFF0DC
+    candidate_text_color: 0xFFF0DC
+    label_color: 0xD0BCA3
+    comment_text_color: 0xD0BCA3
+    hilited_text_color: 0xFFFFFF
+    hilited_candidate_text_color: 0xFFFFFF
+    hilited_candidate_label_color: 0xFFFFFF
+    hilited_comment_text_color: 0xD0BCA3
+    hilited_candidate_back_color: 0x997241
+    linnet_selection_style: tile
+    corner_radius: 4
+    hilited_corner_radius: 2
 
   linnet_clay_light:
     name: 陶印／Clay Tiles Light

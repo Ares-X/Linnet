@@ -44,23 +44,12 @@ struct HallelujahSubstitutionImporterTests {
 
       let report = try importSource(
         sourceDatabase: source, destinationTable: destination)
-      expect(report.outcome == .imported, "first run must import")
       expect(report.importedCount == 4, "only non-conflicting normalized rows are imported")
-      expect(
-        report.collisions == [
-          .init(trigger: "x;foo", keptKey: "Foo", ignoredKey: "foo")
-        ], "ASCII case-fold collision is stable and reported")
-      expect(
-        report.existingConflicts == [
-          .init(trigger: "x;br", valuesMatch: false)
-        ], "existing x; row wins and is reported")
-      expect(report.fingerprint.count == 64, "fingerprint must be lowercase SHA-256")
       expect(try Data(contentsOf: source) == originalDatabase, "source SQLite bytes changed")
 
       let output = try String(contentsOf: destination, encoding: .utf8)
-      expect(
-        output.contains("#@/linnet_hallelujah_fingerprint\t\(report.fingerprint)\n"),
-        "fingerprint metadata is missing")
+      expect(try tableFingerprint(at: destination).count == 64,
+             "fingerprint must be lowercase SHA-256")
       expect(
         output.contains("# no comment\n"), "hash-leading values need the Rime no-comment contract")
       expect(output.contains("你好，世界 👋\tx;ni_hao\n"), "Unicode value was not preserved")
@@ -70,6 +59,8 @@ struct HallelujahSubstitutionImporterTests {
       expect(output.contains("# heading\tx;hash\n"), "hash-leading value was not preserved")
       expect(output.contains("Best regards,\tx;br\n"), "existing value was overwritten")
       expect(!output.contains("replacement must not win"), "source overwrote an existing trigger")
+      expect(output.contains("kept collision\tx;foo\n"), "stable case-fold winner changed")
+      expect(!output.contains("ignored collision"), "case-fold collision winner was duplicated")
       let codes = dataLines(output).map { $0.split(separator: "\t")[1] }
       expect(
         codes == ["x;br", "x;foo", "x;hash", "x;ni_hao", "x;unicode_line"],
@@ -78,10 +69,7 @@ struct HallelujahSubstitutionImporterTests {
       let beforeSecondRun = try Data(contentsOf: destination)
       let second = try importSource(
         sourceDatabase: source, destinationTable: destination)
-      expect(
-        second.outcome == .unchanged && second.importedCount == 0,
-        "same canonical source must be idempotent")
-      expect(second.fingerprint == report.fingerprint, "idempotent fingerprint changed")
+      expect(second.importedCount == 0, "same canonical source must be idempotent")
       expect(
         try Data(contentsOf: destination) == beforeSecondRun,
         "idempotent run rewrote destination bytes")
@@ -93,21 +81,21 @@ struct HallelujahSubstitutionImporterTests {
       let rows = [("Alpha", "一"), ("beta_2", "two"), ("Z-last", "末")]
       let first = directory.appendingPathComponent("first.sqlite3")
       let second = directory.appendingPathComponent("second.sqlite3")
+      let firstTable = directory.appendingPathComponent("first.txt")
+      let secondTable = directory.appendingPathComponent("second.txt")
       try makeDatabase(first, rows: rows)
       try makeDatabase(second, rows: rows.reversed())
-      let firstReport = try importSource(
-        sourceDatabase: first,
-        destinationTable: directory.appendingPathComponent("first.txt"))
-      let secondReport = try importSource(
-        sourceDatabase: second,
-        destinationTable: directory.appendingPathComponent("second.txt"))
+      _ = try importSource(sourceDatabase: first, destinationTable: firstTable)
+      _ = try importSource(sourceDatabase: second, destinationTable: secondTable)
+      let firstFingerprint = try tableFingerprint(at: firstTable)
+      let secondFingerprint = try tableFingerprint(at: secondTable)
       expect(
-        firstReport.fingerprint == secondReport.fingerprint,
+        firstFingerprint == secondFingerprint,
         "canonical fingerprint depends on SQLite insertion order")
       expect(
-        firstReport.fingerprint
+        firstFingerprint
           == "598a5a320b966bba11f75e1e0dc101ed6641d7de4e5ea5d288911b9e39123f56",
-        "canonical fingerprint contract changed: \(firstReport.fingerprint)")
+        "canonical fingerprint contract changed: \(firstFingerprint)")
     }
   }
 
@@ -195,7 +183,7 @@ struct HallelujahSubstitutionImporterTests {
       try FileManager.default.removeItem(at: source)
       let report = try HallelujahSubstitutionImporter.merge(
         prepared, destinationTable: destination, timeout: 10)
-      expect(report.outcome == .imported, "prepared source was not merged")
+      expect(report.importedCount == 1, "prepared source was not merged")
       expect(
         try String(contentsOf: destination, encoding: .utf8)
           .contains("prepared value\tx;snapshot\n"),
@@ -426,6 +414,14 @@ struct HallelujahSubstitutionImporterTests {
       prepared, destinationTable: destinationTable, timeout: 10)
   }
 
+  private static func tableFingerprint(at table: URL) throws -> String {
+    let prefix = "#@/linnet_hallelujah_fingerprint\t"
+    let contents = try String(contentsOf: table, encoding: .utf8)
+    guard let line = contents.split(separator: "\n").first(where: { $0.hasPrefix(prefix) })
+    else { fail("fingerprint metadata is missing") }
+    return String(line.dropFirst(prefix.count))
+  }
+
   private static func makeDatabase(
     _ url: URL,
     schema: String = "CREATE TABLE substitutions(key TEXT PRIMARY KEY, value TEXT)",
@@ -488,7 +484,7 @@ struct HallelujahSubstitutionImporterTests {
   }
 
   private static func inTemporaryDirectory(_ body: (URL) throws -> Void) throws {
-    let directory = FileManager.default.temporaryDirectory
+    let directory = LinnetTestScratch.directory
       .appendingPathComponent("LinnetImporterTests-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: directory) }

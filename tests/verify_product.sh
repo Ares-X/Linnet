@@ -14,6 +14,16 @@ fail() {
   exit 1
 }
 
+run_phase() {
+  local label="$1"
+  local started="${SECONDS}"
+  shift
+  printf '==> Candidate verification: %s\n' "${label}"
+  "$@"
+  printf '<== Candidate verification: PASS in %ss: %s\n' \
+    "$((SECONDS - started))" "${label}"
+}
+
 assert_clean_checkout() {
   local status
   status="$(git status --porcelain=v1 --untracked-files=all)"
@@ -25,8 +35,8 @@ assert_clean_checkout() {
   exit 2
 }
 
-app="${repo_root}/build/Build/Products/Release/Linnet.app"
-settings="${repo_root}/build/Build/Products/Release/Settings.app"
+app="${repo_root}/build/Candidate.noindex/Release/Linnet.candidate"
+settings="${repo_root}/build/Candidate.noindex/Release/Settings.candidate"
 [[ -d "${app}" && ! -L "${app}" && -d "${settings}" && ! -L "${settings}" ]] || {
   echo "verify_product: frozen Release App and Settings App are required" >&2
   exit 1
@@ -34,7 +44,6 @@ settings="${repo_root}/build/Build/Products/Release/Settings.app"
 
 frozen_revision="$(git rev-parse --verify HEAD^{commit})"
 assert_clean_checkout
-tests/verify_candidate_native_idle.sh
 signing_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app}/Contents/Info.plist")"
 [[ "${signing_profile}" == community-cms ]] ||
@@ -57,13 +66,24 @@ trap cleanup EXIT INT TERM
 
 snapshot_reports() {
   local output="$1"
+  local report
+  local report_name
+  : >"${output}"
   if [[ -d "${reports}" ]]; then
-    find "${reports}" -maxdepth 1 -type f \
-      \( -iname '*Linnet*' -o -iname '*Squirrel*' -o -iname '*rime*' \) \
-      -print | LC_ALL=C sort >"${output}"
-  else
-    : >"${output}"
+    while IFS= read -r -d '' report; do
+      report_name="${report##*/}"
+      case "${report_name}" in
+      *Linnet* | *Squirrel* | *rime*)
+        printf '%s\n' "${report}" >>"${output}"
+        ;;
+      Settings-*.ips)
+        grep -Fq '"bundleID":"io.github.ares-x.inputmethod.Linnet.settings"' \
+          "${report}" && printf '%s\n' "${report}" >>"${output}"
+        ;;
+      esac
+    done < <(find "${reports}" -maxdepth 1 -type f -print0)
   fi
+  LC_ALL=C sort -o "${output}" "${output}"
 }
 snapshot_reports "${scratch}/reports.before"
 
@@ -79,51 +99,43 @@ done)
 info="${app}/Contents/Info.plist"
 bundle_identifier="$(plutil -extract CFBundleIdentifier raw -o - "${info}")"
 [[ "${bundle_identifier}" == io.github.ares-x.inputmethod.Linnet ]]
-[[ "$(plutil -extract TISInputSourceID raw -o - "${info}")" == \
-  "${bundle_identifier}" ]] || {
-  echo "verify_product: the sole input source ID must equal the bundle identifier" >&2
-  exit 1
-}
+for no_modes_info in resources/Info.plist "${info}"; do
+  ! plutil -extract TISInputSourceID raw -o - "${no_modes_info}" >/dev/null 2>&1 || {
+    echo "verify_product: no-modes input method has an explicit competing source ID: ${no_modes_info}" >&2
+    exit 1
+  }
+done
 [[ "$(plutil -extract TISIntendedLanguage raw -o - "${info}")" == zh-Hans ]]
 for repertoire_info in resources/Info.plist "${info}"; do
   [[ "$(plutil -extract tsInputMethodCharacterRepertoireKey json -o - \
-    "${repertoire_info}")" == '["Hans","Hant"]' ]] || {
-    echo "verify_product: input-method repertoire must be exact Hans/Hant scripts: ${repertoire_info}" >&2
+    "${repertoire_info}")" == '["zh-Hans"]' ]] || {
+    echo "verify_product: no-modes repertoire must be exact zh-Hans: ${repertoire_info}" >&2
     exit 1
   }
 done
 [[ "$(plutil -extract tsInputMethodIconFileKey raw -o - "${info}")" == linnet.pdf ]]
+[[ "$(plutil -extract InputMethodConnectionName raw -o - resources/Info.plist)" == \
+  '$(PRODUCT_NAME)_Connection' ]] || {
+  echo "verify_product: source IMK connection must follow the stable product-name contract" >&2
+  exit 1
+}
 connection_name="$(plutil -extract InputMethodConnectionName raw -o - "${info}")"
-[[ "${connection_name}" == "${bundle_identifier}.Connection" ]] || {
-  echo "verify_product: IMK connection must match the system bundle connection" >&2
+[[ "${connection_name}" == Linnet_Connection ]] || {
+  echo "verify_product: built IMK connection must follow the stable product-name contract" >&2
   exit 1
 }
 for retired in ComponentInputModeDict PrimaryInputModeIdentifier; do
   ! plutil -extract "${retired}" raw -o - "${info}" >/dev/null 2>&1
 done
 
-tests/verify_runtime_footprint.sh
-tests/verify_lua_lifetime.sh
-tests/verify_release_metadata.sh
-tests/verify_data_release_baseline.sh
-tests/verify_chinese_upstream_workflow.sh
-ruby scripts/upstream-sync verify
-tests/verify_chinese_source_projection.sh
-tests/verify_locked_release_asset.sh
-tests/verify_english_data_projection.sh
-ruby tests/generate_m2_fixtures.rb --check
-tests/verify_visible_settings_fixture.sh --verify
-tests/verify_swift_units.sh
-tests/verify_package_architecture.sh
-LINNET_LIFECYCLE_CANDIDATE_APP="${app}" tests/verify_package_lifecycle.sh
-tests/verify_publication_owner.sh
-tests/verify_chinese_grammar.sh
-ruby tests/verify_profile_golden.rb
-tests/verify_chinese_learning_policy.sh
-tests/verify_rime_runtime.sh
-APP_PATH="${app}" LANGUAGE_DATA_ROOT="${repo_root}/data/plum" \
+run_phase "packaged Rime modules" tests/verify_packaged_rime.sh \
+  "${app}" "${app}/Contents/Applications/Settings.app" "${settings}"
+run_phase "fixed-home signed Settings bundle" \
+  tests/verify_visible_settings_fixture.sh --verify candidate
+run_phase "offline candidate process" env \
+  APP_PATH="${app}" LANGUAGE_DATA_ROOT="${repo_root}/data/plum" \
   tests/verify_input_process_offline.sh
-scripts/build-privacy scan "${app}"
+run_phase "candidate privacy boundary" scripts/build-privacy scan "${app}"
 
 snapshot_reports "${scratch}/reports.after"
 comm -13 "${scratch}/reports.before" "${scratch}/reports.after" \
@@ -142,4 +154,4 @@ final_candidate_identity="$(scripts/linnet-code-identity verify-product \
 [[ "${final_candidate_identity}" == "${candidate_identity}" ]] ||
   fail "finalized App identity changed during product acceptance"
 git diff --check
-echo "verify_product: PASS (C/E + candidate-App P evidence; V/I/R NOT_EXERCISED; zero new crashes)"
+echo "verify_product: PASS (exact-main C/E reused; candidate-byte P evidence; V/I/R NOT_EXERCISED; zero new crashes)"

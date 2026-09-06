@@ -13,6 +13,18 @@ git submodule update --init --depth 1 -- upstreams/weasel
 }
 
 mkdir -p build/windows-inputs
+xcrun swiftc -warnings-as-errors \
+  sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift \
+  sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
+  sources/LinnetSettings/SettingsContract.swift \
+  sources/LinnetSettings/PersonalDataStore.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
+  sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
+  platforms/windows/input_defaults.swift -o build/windows-inputs/input-defaults
+build/windows-inputs/input-defaults build/windows-inputs/linnet_windows_defaults.yaml
 ruby scripts/generate-linnet-lua-embedding \
   "${repo_root}/build/windows-inputs/linnet_embedded_lua.h"
 scripts/project-windows-weasel-config platforms/windows/weasel.base.yaml \

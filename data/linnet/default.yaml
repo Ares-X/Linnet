@@ -41,10 +41,16 @@ ascii_composer:
     Control_L: noop
     Control_R: noop
 
+# Printable paging is owned by LinnetInteractionProcessor because key_binder
+# cannot reject a previous/next key at the corresponding menu boundary.
+key_binder:
+  bindings: []
+
 # ── Punctuator ──────────────────────────────────────────────────────────────
 punctuator:
-  digit_separators: ",.:"
-  digit_separator_action: commit
+  # Punctuation follows the explicit Chinese/English punctuation setting in
+  # every context; no hidden numeric exception changes the selected mode.
+  digit_separators: ""
   full_shape:
     ' ' : { commit: '　' }
     '!' : { commit: '！' }
@@ -80,25 +86,25 @@ punctuator:
     '}' : { commit: '】' }
     '~' : { commit: '〜' }
   half_shape:
-    '!' : { commit: '！' }
-    '"' : { pair: ['“', '”'] }
-    '$' : { commit: '¥' }
-    '''' : { pair: ['‘', '’'] }
-    '(' : { commit: '（' }
-    ')' : { commit: '）' }
     ',' : { commit: '，' }
     '.' : { commit: '。' }
     ':' : { commit: '：' }
     ';' : { commit: '；' }
+    '''' : { pair: ['‘', '’'] }
+    '!' : { commit: '！' }
+    '"' : { pair: ['“', '”'] }
+    '$' : { commit: '¥' }
+    '(' : { commit: '（' }
+    ')' : { commit: '）' }
     '<' : { commit: '《' }
     '>' : { commit: '》' }
     '?' : { commit: '？' }
-    '[' : { commit: '【' }
     '\' : { commit: '、' }
-    ']' : { commit: '】' }
     '^' : { commit: '……' }
     '_' : { commit: '——' }
     '`' : { commit: '·' }
+    '[' : { commit: '【' }
+    ']' : { commit: '】' }
     '{' : { commit: '「' }
     '}' : { commit: '」' }
 
@@ -113,11 +119,11 @@ linnet:
     # through the Core-owned default.custom projection.
     zz_code_token: "^$"
     text_expander: "^x;[-0-9A-Za-z_]*$"
-    pinyin_reverse_lookup: "^;[a-z;']*$"
+    pinyin_reverse_lookup: "^[|][a-z;']*$"
 
   pinyin_reverse_lookup:
     tag: linnet_pinyin
-    prefix: ";"
+    prefix: "|"
     tips: "〔拼音反查英文〕"
     # Wanxiang dictionary syllables carry tone marks. This standard Rime
     # projection is the only runtime formatter from those syllables to the

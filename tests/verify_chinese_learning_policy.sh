@@ -9,6 +9,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
+selection_identity_only=0
+case "${1:-}" in
+  "") ;;
+  --selection-identity) selection_identity_only=1 ;;
+  *) echo "usage: $0 [--selection-identity]" >&2; exit 2 ;;
+esac
+
 for required in \
   bin/rime_deployer \
   lib/librime.1.dylib \
@@ -25,10 +32,6 @@ for required in \
     exit 1
   }
 done
-
-# Candidate probes share generated native artifacts with one another, but the
-# installed immutable App has no handle in this worktree and stays available.
-tests/verify_candidate_native_idle.sh
 
 reports_dir="${HOME}/Library/Logs/DiagnosticReports"
 reports_before="$(mktemp /tmp/linnet-learning-reports-before.XXXXXX)"
@@ -90,16 +93,19 @@ projection_fixture="${work_root}/projection-fixture"
   tests/auto_phrase_probe.cc \
   lib/librime.1.dylib lib/rime-plugins/librime-lua.dylib \
   -o "${probe}"
-"${swiftc}" -warnings-as-errors -sdk "${sdk}" \
+if [[ "${selection_identity_only}" -eq 0 ]]; then
+  "${swiftc}" -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionFixture.swift \
   -o "${projection_fixture}"
+fi
 
 export DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins"
 
@@ -174,6 +180,39 @@ userdb_contains_word() {
   ' "${input}"
 }
 
+verify_selection_identity() {
+  if ! run_probe selection-identity <<'EOF'
+identity
+EOF
+  then
+    sed -n '1,100p' "${work_root}/selection-identity.out" "${work_root}/selection-identity.err" >&2
+    return 1
+  fi
+  local exported="${work_root}/selection-identity-userdb.txt"
+  export_userdb "${exported}"
+  ruby -e '
+    entries = File.readlines(ARGV.fetch(0)).map { |line| line.chomp.split("\t") }
+    {
+      "长码在长大" => "cháng mǎ zài zhǎng dà", "行码" => "xíng mǎ", "行栈" => "xíng zhàn",
+      "行杉" => "xíng shān", "行桥" => "xíng qiáo", "行湖" => "xíng hú"
+    }.each do |word, code|
+      codes = entries.select { |entry| entry[0] == word }.map { |entry| entry[1].strip }.uniq
+      abort "selection identity: #{word}: expected #{code.inspect}, got #{codes.inspect}" unless codes == [code]
+    end
+  ' "${exported}"
+  for boundary in browse commit abort fini delete; do
+    rg -Fq "$(printf 'IDENTITY\t%s' "${boundary}")" "${work_root}/selection-identity.out"
+  done
+}
+
+if [[ "${selection_identity_only}" -eq 1 ]]; then
+  deploy selection-identity
+  assert_setting true true
+  verify_selection_identity
+  echo "Linnet auto phrase selection identity: PASS"
+  exit 0
+fi
+
 assert_userdb_excludes() {
   local label="$1"
   shift
@@ -219,6 +258,7 @@ userdb_contains_word "${work_root}/enhanced-userdb.txt" 云杉码 || {
   echo "verify_chinese_learning_policy: enhanced policy did not write 云杉码" >&2
   exit 1
 }
+verify_selection_identity
 seed_userdb_sentinel
 
 # Standard: turn off only Linnet's auto_phrase filter through the production

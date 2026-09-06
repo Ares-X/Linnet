@@ -3,13 +3,47 @@ import SwiftUI
 
 @MainActor
 final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
-  weak var model: SettingsModel?
+  let model = SettingsModel()
   var interfaceLocale = Locale.autoupdatingCurrent
+  private var settingsWindowPresentationPending = false
 
-  func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool { true }
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    guard let application = notification.object as? NSApplication else { return }
+    DistributedNotificationCenter.default().addObserver(
+      self, selector: #selector(refreshSyncStatus),
+      name: LinnetSettingsContract.cloudSyncStatusChanged, object: nil,
+      suspensionBehavior: .deliverImmediately)
+    requestSettingsWindowPresentation(in: application)
+  }
+
+  func applicationDidBecomeActive(_ notification: Notification) { refreshSyncStatus() }
+
+  func application(_ application: NSApplication, open urls: [URL]) {
+    for url in urls {
+      guard let value = LinnetSettingsContract.customWordValue(from: url) else { continue }
+      model.configuration.personalDraft.customWords.insert(.init(value: value, code: ""), at: 0)
+      model.selectedTab = 2
+      requestSettingsWindowPresentation(in: application)
+    }
+  }
+
+  @objc private func refreshSyncStatus() {
+    model.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
+  }
+  func applicationDidUpdate(_ notification: Notification) {
+    guard let application = notification.object as? NSApplication else { return }
+    presentSettingsWindowIfReady(in: application)
+  }
+
+  func applicationShouldHandleReopen(
+    _ sender: NSApplication,
+    hasVisibleWindows _: Bool
+  ) -> Bool {
+    requestSettingsWindowPresentation(in: sender)
+    return true
+  }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard let model else { return .terminateNow }
     if model.operationActive {
       NSSound.beep()
       return .terminateCancel
@@ -22,7 +56,7 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
       for: sender.keyWindow ?? sender.windows.first(where: \.isVisible),
       canApply: model.canApplyChanges,
       locale: interfaceLocale
-    ) { choice in
+    ) { [model] choice in
       switch choice {
       case .apply:
         model.applyConfiguration { accepted in
@@ -37,6 +71,25 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
     }
     return .terminateLater
   }
+
+  func requestSettingsWindowPresentation(in application: NSApplication) {
+    settingsWindowPresentationPending = true
+    presentSettingsWindowIfReady(in: application)
+  }
+
+  private func presentSettingsWindowIfReady(in application: NSApplication) {
+    guard settingsWindowPresentationPending,
+          let window = application.windows.first(where: { $0.canBecomeKey })
+    else { return }
+
+    settingsWindowPresentationPending = false
+    window.collectionBehavior.insert(.moveToActiveSpace)
+    application.activate(ignoringOtherApps: true)
+    if window.isMiniaturized {
+      window.deminiaturize(nil)
+    }
+    window.makeKeyAndOrderFront(nil)
+  }
 }
 
 @main
@@ -45,17 +98,18 @@ struct LinnetSettingsApp: App {
   private var applicationDelegate
 
   var body: some Scene {
-    WindowGroup {
-      SettingsRootView()
+    Window("Linnet", id: "settings") {
+      SettingsRootView(model: applicationDelegate.model, applicationDelegate: applicationDelegate)
         .frame(
           minWidth: LinnetSettingsLayoutMetrics.minimumWindowWidth,
           idealWidth: LinnetSettingsLayoutMetrics.defaultWindowWidth,
-          minHeight: 660,
-          idealHeight: 800)
+          minHeight: LinnetSettingsLayoutMetrics.minimumWindowHeight,
+          idealHeight: LinnetSettingsLayoutMetrics.defaultWindowHeight)
     }
-    .defaultSize(width: LinnetSettingsLayoutMetrics.defaultWindowWidth, height: 800)
+    .defaultSize(
+      width: LinnetSettingsLayoutMetrics.defaultWindowWidth,
+      height: LinnetSettingsLayoutMetrics.defaultWindowHeight)
     .windowResizability(.contentMinSize)
-    .commands { CommandGroup(replacing: .newItem) {} }
   }
 }
 

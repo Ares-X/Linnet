@@ -1,6 +1,12 @@
 import AppKit
+import os
 import SwiftUI
 import UniformTypeIdentifiers
+
+private let settingsPresentationLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet.Settings",
+  category: "Presentation"
+)
 
 enum SettingsOutcomeAcceptance {
   case accepted, conflict, rejected
@@ -14,6 +20,26 @@ struct SettingsOperationAcceptanceContext {
 
 @MainActor
 extension SettingsModel {
+  func observeCurrentConfiguration() -> SettingsConfigurationSession.ObservationResult? {
+    guard let userDirectory else { return nil }
+    do {
+      let personalSnapshot = try LinnetPersonalDataStore.snapshot(from: userDirectory)
+      let documentSnapshot = try LinnetSettingsDocumentStore.snapshot(from: userDirectory)
+      let personal = configuration.observePersonal(personalSnapshot)
+      let document = configuration.observeDocument(documentSnapshot)
+      if personal == .conflict || document == .conflict { return .conflict }
+      if personal == .reloaded || document == .reloaded { return .reloaded }
+      if personal == .unchanged && document == .unchanged { return .unchanged }
+      return .ignored
+    } catch {
+      configuration.markSourceUnreadable()
+      settingsPresentationLogger.error(
+        "Personal data could not be reloaded: \(error.localizedDescription, privacy: .private)"
+      )
+      return nil
+    }
+  }
+
   func presentStaleOperation() {
     switch observeCurrentConfiguration() {
     case .reloaded:
@@ -43,6 +69,7 @@ extension SettingsModel {
   }
 
   func presentationFailure(_ error: Error) -> SettingsPresentationFailure {
+    if error is LinnetBackupStore.Failure { return .incrementalBackupFailed }
     guard let failure = error as? SettingsDataCoordinator.Failure else { return .unknown }
     return switch failure {
     case .unavailable: .unavailable
@@ -54,6 +81,65 @@ extension SettingsModel {
     case .configurationRestoreFailed: .configurationRecoveryFailed
     case .timedOut: .timedOut
     case .cancelled: .unknown
+    case .cloudRecoveryRepairRequired: .invalidOperation
+    }
+  }
+
+  func acceptPersonalEffect(
+    _ outcome: SettingsDataCoordinator.Outcome,
+    ticket: SettingsConfigurationSession.PersonalTicket?
+  ) -> SettingsOutcomeAcceptance {
+    switch outcome.personalEffect {
+    case .observed:
+      return configuration.observePersonal(outcome.personalSnapshot) == .conflict
+        ? .conflict : .accepted
+    case .submittedDraft:
+      guard let ticket else { return .rejected }
+      return personalCommitAcceptance(
+        outcome.personalSnapshot, kind: .submittedDraft, ticket: ticket)
+    case .externalReplacement:
+      guard let ticket else { return .rejected }
+      return personalCommitAcceptance(
+        outcome.personalSnapshot, kind: .externalReplacement, ticket: ticket)
+    }
+  }
+
+  func personalCommitAcceptance(
+    _ snapshot: LinnetPersonalDataStore.Snapshot,
+    kind: SettingsConfigurationSession.PersonalCommitKind,
+    ticket: SettingsConfigurationSession.PersonalTicket
+  ) -> SettingsOutcomeAcceptance {
+    switch configuration.acceptPersonalCommit(snapshot, kind: kind, ticket: ticket) {
+    case .conflict: .conflict
+    case .rejectedStaleTicket: .rejected
+    case .accepted, .pendingEditsPreserved: .accepted
+    }
+  }
+
+  func acceptDocumentEffect(
+    _ outcome: SettingsDataCoordinator.Outcome,
+    ticket: SettingsConfigurationSession.DocumentTicket?
+  ) -> SettingsOutcomeAcceptance {
+    switch outcome.documentEffect {
+    case .observed:
+      return .accepted
+    case .submittedDraft(let snapshot), .externalReplacement(let snapshot):
+      guard let ticket else { return .rejected }
+      let kind: SettingsConfigurationSession.DocumentCommitKind
+      if case .externalReplacement = outcome.documentEffect {
+        kind = .externalReplacement
+      } else {
+        kind = .submittedDraft
+      }
+      switch configuration.acceptDocumentCommit(
+        snapshot, kind: kind, ticket: ticket
+      ) {
+      case .conflict: return .conflict
+      case .rejectedStaleTicket: return .rejected
+      case .accepted, .pendingEditsPreserved: return .accepted
+      }
+    case .submittedAppearance:
+      return .rejected
     }
   }
 
@@ -64,16 +150,15 @@ extension SettingsModel {
     case .transactionBusy: .hostBusy
     case .appearanceDeployFailed: .deploymentFailed
     case .staleCandidate: .staleHostState
+    case .learningSyncUnavailable: .cloudSyncUnavailable
+    case .learningSyncFailed: .cloudSyncFailed
     default: .hostRejected
     }
   }
 
-  func logDiagnostic(_ error: Error, context: String) {
-    print("\(context): \(error.localizedDescription)")
-  }
-
   var operationActive: Bool {
     activeOperation != nil || packDownloadActive || appearancePublishActive
+      || updateChecker.activationInProgress
   }
 
   var migrationAvailable: Bool {
@@ -124,19 +209,79 @@ extension SettingsModel {
     configuration.personalDraft.customWords.append(.init(value: "", code: ""))
   }
 
+  func customWordBinding(
+    _ row: LinnetPersonalData.CustomWord,
+    at index: Int
+  ) -> Binding<LinnetPersonalData.CustomWord> {
+    Binding(
+      get: {
+        let rows = self.configuration.personalDraft.customWords
+        guard rows.indices.contains(index), rows[index].id == row.id else { return row }
+        return rows[index]
+      },
+      set: { updatedRow in
+        guard self.configuration.personalDraft.customWords.indices.contains(index),
+          self.configuration.personalDraft.customWords[index].id == row.id
+        else { return }
+        self.configuration.personalDraft.customWords[index] = updatedRow
+      }
+    )
+  }
+
   func removeCustomWord(id wordID: UUID) {
     configuration.personalDraft.customWords.removeAll { $0.id == wordID }
   }
 
-  func addDisabledWord() { configuration.personalDraft.disabledWords.append("") }
+  func addDisabledWord() {
+    configuration.personalDraft.disabledWords.append(.init(value: ""))
+  }
 
-  func removeDisabledWord(at index: Int) {
-    guard configuration.personalDraft.disabledWords.indices.contains(index) else { return }
-    configuration.personalDraft.disabledWords.remove(at: index)
+  func disabledWordBinding(
+    _ row: LinnetPersonalData.DisabledWord,
+    at index: Int
+  ) -> Binding<LinnetPersonalData.DisabledWord> {
+    Binding(
+      get: {
+        let rows = self.configuration.personalDraft.disabledWords
+        guard rows.indices.contains(index), rows[index].identifier == row.identifier else {
+          return row
+        }
+        return rows[index]
+      },
+      set: { updatedRow in
+        guard self.configuration.personalDraft.disabledWords.indices.contains(index),
+          self.configuration.personalDraft.disabledWords[index].identifier == row.identifier
+        else { return }
+        self.configuration.personalDraft.disabledWords[index] = updatedRow
+      }
+    )
+  }
+
+  func removeDisabledWord(id wordID: UUID) {
+    configuration.personalDraft.disabledWords.removeAll { $0.identifier == wordID }
   }
 
   func addExpansion() {
     configuration.personalDraft.expansions.append(.init(value: "", trigger: "x;"))
+  }
+
+  func expansionBinding(
+    _ row: LinnetPersonalData.Expansion,
+    at index: Int
+  ) -> Binding<LinnetPersonalData.Expansion> {
+    Binding(
+      get: {
+        let rows = self.configuration.personalDraft.expansions
+        guard rows.indices.contains(index), rows[index].id == row.id else { return row }
+        return rows[index]
+      },
+      set: { updatedRow in
+        guard self.configuration.personalDraft.expansions.indices.contains(index),
+          self.configuration.personalDraft.expansions[index].id == row.id
+        else { return }
+        self.configuration.personalDraft.expansions[index] = updatedRow
+      }
+    )
   }
 
   func removeExpansion(id expansionID: UUID) {
@@ -168,14 +313,17 @@ extension SettingsModel {
   }
 
   private func personalValidationLocation(
-    _ issue: LinnetPersonalDataStore.Validation.Location,
+    _ issue: LinnetPersonalDataValidation.Location,
     chinese: Bool
   ) -> String {
     switch issue {
     case .customWord(let wordID, let field):
       return customWordLocation(wordID: wordID, field: field, chinese: chinese)
-    case .disabledWord(let index):
-      return chinese ? "禁用词第 \(index + 1) 行" : "Disabled word row \(index + 1)"
+    case .disabledWord(let wordID):
+      let row = configuration.personalDraft.disabledWords.firstIndex {
+        $0.identifier == wordID
+      }.map { $0 + 1 }
+      return chinese ? "禁用词第 \(row ?? 0) 行" : "Disabled word row \(row ?? 0)"
     case .expansion(let expansionID, let field):
       return expansionLocation(expansionID: expansionID, field: field, chinese: chinese)
     case .collection(let collection):
@@ -185,7 +333,7 @@ extension SettingsModel {
 
   private func customWordLocation(
     wordID: UUID,
-    field: LinnetPersonalDataStore.Validation.CustomField,
+    field: LinnetPersonalDataValidation.CustomField,
     chinese: Bool
   ) -> String {
     let row = configuration.personalDraft.customWords.firstIndex {
@@ -202,7 +350,7 @@ extension SettingsModel {
 
   private func expansionLocation(
     expansionID: UUID,
-    field: LinnetPersonalDataStore.Validation.ExpansionField,
+    field: LinnetPersonalDataValidation.ExpansionField,
     chinese: Bool
   ) -> String {
     let row = configuration.personalDraft.expansions.firstIndex {
@@ -218,7 +366,7 @@ extension SettingsModel {
   }
 
   private func collectionLocation(
-    _ collection: LinnetPersonalDataStore.Validation.Collection,
+    _ collection: LinnetPersonalDataValidation.Collection,
     chinese: Bool
   ) -> String {
     switch collection {
@@ -274,20 +422,6 @@ extension SettingsModel {
   var legacyImportCandidate: SettingsDataCoordinator.LegacyImportCandidate? {
     guard case .compatible(let candidate) = legacyImportState else { return nil }
     return candidate
-  }
-
-  var cloudBackupArchiveAvailable: Bool {
-    guard let archive = cloudBackupArchive else { return false }
-    var isDirectory = ObjCBool(false)
-    return FileManager.default.fileExists(
-      atPath: archive.path,
-      isDirectory: &isDirectory
-    ) && !isDirectory.boolValue
-  }
-
-  var cloudBackupArchive: URL? {
-    cloudSyncLocation?.folder.appending(
-      component: Self.cloudBackupName, directoryHint: .notDirectory)
   }
 
   func choosePortableImportSource(locale: Locale) -> URL? {
@@ -347,4 +481,5 @@ extension SettingsModel {
       }
     )
   }
+
 }

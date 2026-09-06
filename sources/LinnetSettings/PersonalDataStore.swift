@@ -27,9 +27,39 @@ struct LinnetPersonalData: Equatable, Sendable {
     }
   }
 
+  struct DisabledWord: Equatable, Sendable {
+    let identifier: UUID
+    var value: String
+
+    init(identifier: UUID = UUID(), value: String) {
+      self.identifier = identifier
+      self.value = value
+    }
+  }
+
   var customWords: [CustomWord]
-  var disabledWords: [String]
+  var disabledWords: [DisabledWord]
   var expansions: [Expansion]
+
+  init(
+    customWords: [CustomWord],
+    disabledWords: [String],
+    expansions: [Expansion]
+  ) {
+    self.customWords = customWords
+    self.disabledWords = disabledWords.map { .init(value: $0) }
+    self.expansions = expansions
+  }
+
+  init(
+    customWords: [CustomWord],
+    disabledWordRows: [DisabledWord],
+    expansions: [Expansion]
+  ) {
+    self.customWords = customWords
+    disabledWords = disabledWordRows
+    self.expansions = expansions
+  }
 
   static let empty = LinnetPersonalData(
     customWords: [],
@@ -46,75 +76,8 @@ enum LinnetPersonalDataStore {
 
   typealias CancellationCheck = @Sendable () throws -> Void
 
-  struct Snapshot: Equatable, Sendable {
-    let data: LinnetPersonalData
-    let revision: String
-  }
-
-  /// Decoded identity of the immutable backup-v2 personal-data boundary.
-  /// Only restore/import code may consume this retired physical format.
-  struct LegacyV2Snapshot: Equatable, Sendable {
-    let data: LinnetPersonalData
-    let sentenceCapitalization: Bool
-    let tabBehavior: String
-    let revision: String
-  }
-
-  enum Validation: Equatable, Sendable {
-    enum Collection: Equatable, Sendable {
-      case customWords
-      case disabledWords
-      case expansions
-    }
-
-    enum CustomField: Equatable, Sendable {
-      case value
-      case code
-    }
-
-    enum ExpansionField: Equatable, Sendable {
-      case value
-      case trigger
-    }
-
-    enum Location: Equatable, Sendable {
-      case customWord(UUID, CustomField)
-      case disabledWord(Int)
-      case expansion(UUID, ExpansionField)
-      case collection(Collection)
-    }
-
-    enum Reason: Equatable, Sendable {
-      case missing
-      case invalid
-      case tooLarge
-      case duplicate
-      case tooMany
-    }
-
-    struct Issue: Equatable, Sendable {
-      let location: Location
-      let reason: Reason
-    }
-
-    case valid(LinnetPersonalData)
-    case invalid(Issue)
-
-    var firstIssue: Issue? {
-      guard case .invalid(let issue) = self else { return nil }
-      return issue
-    }
-
-    var isValid: Bool { if case .valid = self { true } else { false } }
-  }
-
-  private enum CollectionValidation<Value> {
-    case valid(Value)
-    case invalid(Validation.Issue)
-  }
-
   enum Failure: LocalizedError, Equatable {
-    case invalidData(Validation.Issue)
+    case invalidData(LinnetPersonalDataValidation.Issue)
     case invalidFile(String)
     case unsafeFile(String)
     case fileTooLarge(String)
@@ -162,39 +125,6 @@ enum LinnetPersonalDataStore {
     return Snapshot(data: data, revision: try revision(for: data))
   }
 
-  /// Strict decoder for legal backup-v2 bytes written by bda21963. It reads
-  /// only the retired three-file set and reproduces that writer's revision;
-  /// steady-state load/write paths remain exclusively on the current format.
-  static func legacyV2Snapshot(from directory: URL) throws -> LegacyV2Snapshot {
-    let required = [customWordsFile, expansionsFile, legacyUserSettingsFile]
-    guard required.allSatisfy({
-      FileManager.default.fileExists(atPath: directory.appending(path: $0).path)
-    }) else {
-      throw Failure.invalidFile("backup-v2 personal files")
-    }
-    let customRows = try readTable(directory.appending(path: customWordsFile))
-    let expansionRows = try readTable(directory.appending(path: expansionsFile))
-    let interaction = try readLegacyUserSettings(
-      directory.appending(path: legacyUserSettingsFile))
-    let data = try normalized(
-      .init(
-        customWords: customRows.map { .init(value: $0.value, code: $0.code) },
-        disabledWords: interaction.disabledWords,
-        expansions: expansionRows.map { .init(value: $0.value, trigger: $0.code) }
-      ))
-    let serialization = try legacyV2RevisionSerialization(
-      for: data,
-      sentenceCapitalization: interaction.sentenceCapitalization,
-      tabBehavior: interaction.tabBehavior
-    )
-    return .init(
-      data: data,
-      sentenceCapitalization: interaction.sentenceCapitalization,
-      tabBehavior: interaction.tabBehavior,
-      revision: revision(for: serialization)
-    )
-  }
-
   static func revision(for data: LinnetPersonalData) throws -> String {
     try revision(for: revisionSerialization(for: data))
   }
@@ -217,11 +147,7 @@ enum LinnetPersonalDataStore {
     to directory: URL
   ) throws {
     for (name, contents) in try renderedPersonalFiles(for: data) {
-      try contents.write(
-        to: directory.appending(path: name),
-        atomically: true,
-        encoding: .utf8
-      )
+      try publishChangedFile(contents, to: directory.appending(path: name))
     }
   }
 
@@ -233,12 +159,24 @@ enum LinnetPersonalDataStore {
     to directory: URL
   ) throws {
     let (name, contents) = try renderedRuntimeSettings(for: data)
-    try contents.write(
-      to: directory.appending(path: name),
-      atomically: true,
-      encoding: .utf8
-    )
+    try publishChangedFile(contents, to: directory.appending(path: name))
     try retireLegacySettings(in: directory)
+  }
+
+  /// Identical publication must preserve the inode and its COW-shared blocks.
+  private static func publishChangedFile(_ contents: String, to file: URL) throws {
+    var info = stat()
+    if lstat(file.path, &info) == 0 {
+      let opened = try openBoundedFile(file)
+      defer { try? opened.handle.close() }
+      let existing = try opened.handle.read(upToCount: maximumFileBytes + 1) ?? Data()
+      try validateUnchangedFile(
+        opened.handle.fileDescriptor, before: opened.info, observedBytes: existing.count, file: file)
+      if existing == Data(contents.utf8) { return }
+    } else if errno != ENOENT {
+      throw Failure.unsafeFile(file.lastPathComponent)
+    }
+    try contents.write(to: file, atomically: true, encoding: .utf8)
   }
 
   /// Backup-boundary normalization fills only canonical personal files that
@@ -262,200 +200,6 @@ enum LinnetPersonalDataStore {
     }
   }
 
-  static func validate(_ data: LinnetPersonalData) -> Validation {
-    validate(data, checkCancellation: {})
-  }
-
-  static func validate(
-    _ data: LinnetPersonalData,
-    checkCancellation: CancellationCheck
-  ) rethrows -> Validation {
-    try checkCancellation()
-    guard data.customWords.count <= maximumRows else {
-      return invalid(.collection(.customWords), .tooMany)
-    }
-    guard data.disabledWords.count <= maximumRows else {
-      return invalid(.collection(.disabledWords), .tooMany)
-    }
-    guard data.expansions.count <= maximumRows else {
-      return invalid(.collection(.expansions), .tooMany)
-    }
-
-    let customWords: [LinnetPersonalData.CustomWord]
-    switch try validateCustomWords(data.customWords, checkCancellation: checkCancellation) {
-    case .valid(let rows): customWords = rows
-    case .invalid(let issue): return .invalid(issue)
-    }
-    let expansions: [LinnetPersonalData.Expansion]
-    switch try validateExpansions(data.expansions, checkCancellation: checkCancellation) {
-    case .valid(let rows): expansions = rows
-    case .invalid(let issue): return .invalid(issue)
-    }
-    let disabledWords: [String]
-    switch try validateDisabledWords(data.disabledWords, checkCancellation: checkCancellation) {
-    case .valid(let rows): disabledWords = rows
-    case .invalid(let issue): return .invalid(issue)
-    }
-    try checkCancellation()
-    return .valid(.init(
-      customWords: customWords,
-      disabledWords: disabledWords,
-      expansions: expansions))
-  }
-
-  private static func validateCustomWords(
-    _ rows: [LinnetPersonalData.CustomWord],
-    checkCancellation: CancellationCheck
-  ) rethrows -> CollectionValidation<[LinnetPersonalData.CustomWord]> {
-    var customFileBytes = table(name: customWordsFile, rows: []).utf8.count
-    var customCodes = Set<String>()
-    var customWords: [LinnetPersonalData.CustomWord] = []
-    for row in rows {
-      try checkCancellation()
-      let value = row.value.trimmingCharacters(in: .whitespaces)
-      let code = row.code.trimmingCharacters(in: .whitespaces).lowercased()
-      if value.isEmpty, code.isEmpty { continue }
-      if value.isEmpty { return invalidCollection(.customWord(row.id, .value), .missing) }
-      if code.isEmpty { return invalidCollection(.customWord(row.id, .code), .missing) }
-      guard fieldIsBounded(value) else {
-        return invalidCollection(.customWord(row.id, .value), .tooLarge)
-      }
-      guard fieldIsBounded(code) else {
-        return invalidCollection(.customWord(row.id, .code), .tooLarge)
-      }
-      guard validValue(value) else {
-        return invalidCollection(.customWord(row.id, .value), .invalid)
-      }
-      guard code.range(
-        of: #"^[a-z0-9;']+(?: [a-z0-9;']+)*$"#,
-        options: .regularExpression
-      ) != nil else {
-        return invalidCollection(.customWord(row.id, .code), .invalid)
-      }
-      guard customCodes.insert(code).inserted else {
-        return invalidCollection(.customWord(row.id, .code), .duplicate)
-      }
-      let lineBytes = value.utf8.count + 1 + code.utf8.count
-      guard lineBytes <= maximumLineBytes,
-        addRenderedBytes(lineBytes + (customWords.isEmpty ? 0 : 1), to: &customFileBytes)
-      else {
-        return invalidCollection(.collection(.customWords), .tooLarge)
-      }
-      customWords.append(LinnetPersonalData.CustomWord(id: row.id, value: value, code: code))
-    }
-    return .valid(customWords)
-  }
-
-  private static func validateExpansions(
-    _ rows: [LinnetPersonalData.Expansion],
-    checkCancellation: CancellationCheck
-  ) rethrows -> CollectionValidation<[LinnetPersonalData.Expansion]> {
-    var expansionFileBytes = table(name: expansionsFile, rows: []).utf8.count
-    var triggers = Set<String>()
-    var expansions: [LinnetPersonalData.Expansion] = []
-    for row in rows {
-      try checkCancellation()
-      let value = row.value.trimmingCharacters(in: .whitespaces)
-      let trigger = row.trigger.trimmingCharacters(in: .whitespaces)
-      if value.isEmpty, trigger.isEmpty || trigger == "x;" { continue }
-      if value.isEmpty { return invalidCollection(.expansion(row.id, .value), .missing) }
-      if trigger.isEmpty || trigger == "x;" {
-        return invalidCollection(.expansion(row.id, .trigger), .missing)
-      }
-      guard fieldIsBounded(value) else {
-        return invalidCollection(.expansion(row.id, .value), .tooLarge)
-      }
-      guard fieldIsBounded(trigger) else {
-        return invalidCollection(.expansion(row.id, .trigger), .tooLarge)
-      }
-      guard validValue(value) else {
-        return invalidCollection(.expansion(row.id, .value), .invalid)
-      }
-      guard trigger.range(
-        of: #"^x;[-0-9A-Za-z_]+$"#,
-        options: .regularExpression
-      ) != nil else {
-        return invalidCollection(.expansion(row.id, .trigger), .invalid)
-      }
-      guard triggers.insert(trigger).inserted else {
-        return invalidCollection(.expansion(row.id, .trigger), .duplicate)
-      }
-      let lineBytes = value.utf8.count + 1 + trigger.utf8.count
-      guard lineBytes <= maximumLineBytes,
-        addRenderedBytes(lineBytes + (expansions.isEmpty ? 0 : 1), to: &expansionFileBytes)
-      else {
-        return invalidCollection(.collection(.expansions), .tooLarge)
-      }
-      expansions.append(LinnetPersonalData.Expansion(id: row.id, value: value, trigger: trigger))
-    }
-    return .valid(expansions)
-  }
-
-  private static func validateDisabledWords(
-    _ rows: [String],
-    checkCancellation: CancellationCheck
-  ) rethrows -> CollectionValidation<[String]> {
-    var disabledWords: [String] = []
-    for (index, word) in rows.enumerated() {
-      try checkCancellation()
-      let normalized = word.trimmingCharacters(in: .whitespaces).lowercased()
-      if normalized.isEmpty { continue }
-      guard fieldIsBounded(normalized) else {
-        return invalidCollection(.disabledWord(index), .tooLarge)
-      }
-      guard validValue(normalized) else {
-        return invalidCollection(.disabledWord(index), .invalid)
-      }
-      disabledWords.append(normalized)
-    }
-    try checkCancellation()
-    let uniqueDisabledWords = Array(Set(disabledWords)).sorted()
-    if !uniqueDisabledWords.isEmpty {
-      var userSettingsBytes = 128
-      for (index, word) in uniqueDisabledWords.enumerated() {
-        try checkCancellation()
-        guard let json = try? JSONEncoder().encode(word) else {
-          return invalidCollection(.collection(.disabledWords), .invalid)
-        }
-        let lineBytes = 4 + json.count
-        guard lineBytes <= maximumLineBytes,
-          addRenderedBytes(lineBytes + (index == 0 ? 0 : 1), to: &userSettingsBytes)
-        else {
-          return invalidCollection(.collection(.disabledWords), .tooLarge)
-        }
-      }
-    }
-    return .valid(uniqueDisabledWords)
-  }
-
-  private static func invalid(
-    _ location: Validation.Location,
-    _ reason: Validation.Reason
-  ) -> Validation {
-    .invalid(.init(location: location, reason: reason))
-  }
-
-  private static func invalidCollection<Value>(
-    _ location: Validation.Location,
-    _ reason: Validation.Reason
-  ) -> CollectionValidation<Value> {
-    .invalid(.init(location: location, reason: reason))
-  }
-
-  private static func addRenderedBytes(_ bytes: Int, to total: inout Int) -> Bool {
-    guard bytes >= 0, bytes <= maximumFileBytes - total else { return false }
-    total += bytes
-    return true
-  }
-
-  static func normalized(_ data: LinnetPersonalData) throws -> LinnetPersonalData {
-    switch validate(data) {
-    case .valid(let normalized):
-      return normalized
-    case .invalid(let issue):
-      throw Failure.invalidData(issue)
-    }
-  }
 }
 
 extension LinnetPersonalDataStore {
@@ -464,12 +208,12 @@ extension LinnetPersonalDataStore {
     let code: String
   }
 
-  fileprivate static func validValue(_ value: String) -> Bool {
+  static func validValue(_ value: String) -> Bool {
     !value.isEmpty && !value.contains("\t") && !value.contains("\n") && !value.contains("\r")
       && !value.contains("\0")
   }
 
-  fileprivate static func fieldIsBounded(_ value: String) -> Bool {
+  static func fieldIsBounded(_ value: String) -> Bool {
     value.lengthOfBytes(using: .utf8) <= maximumFieldBytes
   }
 
@@ -504,7 +248,7 @@ extension LinnetPersonalDataStore {
     for data: LinnetPersonalData
   ) throws -> (name: String, contents: String) {
     let normalized = try normalized(data)
-    let contents = try userSettingsYAML(normalized.disabledWords)
+    let contents = try userSettingsYAML(normalized.disabledWords.map(\.value))
     try validateRenderedFiles([userSettingsFile: contents])
     return (userSettingsFile, contents)
   }
@@ -526,8 +270,8 @@ extension LinnetPersonalDataStore {
     for data: LinnetPersonalData
   ) throws -> [String: String] {
     let normalized = try normalized(data)
-    let disabledWords = try normalized.disabledWords.map { word -> String in
-      let data = try JSONEncoder().encode(word)
+    let disabledWords = try normalized.disabledWords.map { row -> String in
+      let data = try JSONEncoder().encode(row.value)
       guard let json = String(data: data, encoding: .utf8) else {
         throw Failure.invalidFile("disabled-words-revision")
       }
@@ -544,31 +288,6 @@ extension LinnetPersonalDataStore {
         rows: normalized.expansions.map { ($0.value, $0.trigger) }
       )
     ]
-  }
-
-  fileprivate static func legacyV2RevisionSerialization(
-    for data: LinnetPersonalData,
-    sentenceCapitalization: Bool,
-    tabBehavior: String
-  ) throws -> [String: String] {
-    let normalized = try normalized(data)
-    let files = [
-      customWordsFile: table(
-        name: customWordsFile,
-        rows: normalized.customWords.map { ($0.value, $0.code) }
-      ),
-      expansionsFile: table(
-        name: expansionsFile,
-        rows: normalized.expansions.map { ($0.value, $0.trigger) }
-      ),
-      legacyUserSettingsFile: try legacyV2UserSettingsYAML(
-        normalized.disabledWords,
-        sentenceCapitalization: sentenceCapitalization,
-        tabBehavior: tabBehavior
-      )
-    ]
-    try validateRenderedFiles(files)
-    return files
   }
 
   fileprivate static func readTable(_ file: URL) throws -> [TableRow] {
@@ -596,6 +315,25 @@ extension LinnetPersonalDataStore {
     let tabBehavior: String
   }
 
+  fileprivate struct LegacySettingsAccumulator {
+    var sawRoot = false
+    var inlineEmpty = false
+    var sentenceCapitalization = false
+    var tabBehavior = "smart_complete"
+    var sawSentenceCapitalization = false
+    var sawTabBehavior = false
+    var values: [String] = []
+  }
+
+  fileprivate struct UserSettingsPatchAccumulator {
+    var sawPatch = false
+    var sawDisabledWords = false
+    var inlineEmpty = false
+    var sawSentenceCapitalization = false
+    var sawTabBehavior = false
+    var values: [String] = []
+  }
+
   /// One-time adoption codec for the retired pre-release `linnet_user.yaml`.
   /// Steady-state reads use only `linnet_user.custom.yaml`.
   static func readLegacyUserSettings(_ file: URL) throws -> LegacyUserSettings {
@@ -606,149 +344,132 @@ extension LinnetPersonalDataStore {
         tabBehavior: "smart_complete"
       )
     }
-    var sawRoot = false
-    var inlineEmpty = false
-    var sentenceCapitalization = false
-    var tabBehavior = "smart_complete"
-    var sawSentenceCapitalization = false
-    var sawTabBehavior = false
-    var values: [String] = []
+    var accumulator = LegacySettingsAccumulator()
     try forEachBoundedLine(in: file) { line in
       if line.isEmpty || line.hasPrefix("#") { return }
-      if line == "disabled_words:" || line == "disabled_words: []" {
-        guard !sawRoot else { throw Failure.invalidFile(legacyUserSettingsFile) }
-        sawRoot = true
-        inlineEmpty = line.hasSuffix("[]")
-        return
-      }
-      if line.hasPrefix("sentence_capitalization: ") {
-        guard !sawSentenceCapitalization else {
-          throw Failure.invalidFile(legacyUserSettingsFile)
-        }
-        let value = String(line.dropFirst("sentence_capitalization: ".count))
-        guard value == "true" || value == "false" else {
-          throw Failure.invalidFile(legacyUserSettingsFile)
-        }
-        sentenceCapitalization = value == "true"
-        sawSentenceCapitalization = true
-        return
-      }
-      if line.hasPrefix("tab_behavior: ") {
-        let value = String(line.dropFirst("tab_behavior: ".count))
-        guard !sawTabBehavior, ["pass", "navigate", "smart_complete"].contains(value)
-        else { throw Failure.invalidFile(legacyUserSettingsFile) }
-        tabBehavior = value
-        sawTabBehavior = true
-        return
-      }
-      guard sawRoot, !inlineEmpty, line.hasPrefix("  - "),
-        let data = String(line.dropFirst(4)).data(using: .utf8),
-        let value = try? JSONDecoder().decode(String.self, from: data),
-        validValue(value)
-      else {
+      try parseLegacySettingsLine(line, accumulator: &accumulator)
+    }
+    guard accumulator.sawRoot else { throw Failure.invalidFile(legacyUserSettingsFile) }
+    return .init(
+      disabledWords: accumulator.values,
+      sentenceCapitalization: accumulator.sentenceCapitalization,
+      tabBehavior: accumulator.tabBehavior
+    )
+  }
+
+  fileprivate static func parseLegacySettingsLine(
+    _ line: String,
+    accumulator: inout LegacySettingsAccumulator
+  ) throws {
+    if line == "disabled_words:" || line == "disabled_words: []" {
+      guard !accumulator.sawRoot else { throw Failure.invalidFile(legacyUserSettingsFile) }
+      accumulator.sawRoot = true
+      accumulator.inlineEmpty = line.hasSuffix("[]")
+      return
+    }
+    if line.hasPrefix("sentence_capitalization: ") {
+      guard !accumulator.sawSentenceCapitalization else {
         throw Failure.invalidFile(legacyUserSettingsFile)
       }
-      guard fieldIsBounded(value) else { throw Failure.fileTooLarge(legacyUserSettingsFile) }
-      guard values.count < maximumRows else {
-        throw Failure.fileTooLarge(legacyUserSettingsFile)
+      let value = String(line.dropFirst("sentence_capitalization: ".count))
+      guard ["true", "false"].contains(value) else {
+        throw Failure.invalidFile(legacyUserSettingsFile)
       }
-      values.append(value)
+      accumulator.sentenceCapitalization = value == "true"
+      accumulator.sawSentenceCapitalization = true
+      return
     }
-    guard sawRoot else { throw Failure.invalidFile(legacyUserSettingsFile) }
-    return .init(
-      disabledWords: values,
-      sentenceCapitalization: sentenceCapitalization,
-      tabBehavior: tabBehavior
-    )
+    if line.hasPrefix("tab_behavior: ") {
+      let value = String(line.dropFirst("tab_behavior: ".count))
+      guard !accumulator.sawTabBehavior,
+        ["pass", "navigate", "smart_complete"].contains(value)
+      else { throw Failure.invalidFile(legacyUserSettingsFile) }
+      accumulator.tabBehavior = value
+      accumulator.sawTabBehavior = true
+      return
+    }
+    guard accumulator.sawRoot, !accumulator.inlineEmpty, line.hasPrefix("  - "),
+      let data = String(line.dropFirst(4)).data(using: .utf8),
+      let value = try? JSONDecoder().decode(String.self, from: data),
+      validValue(value)
+    else {
+      throw Failure.invalidFile(legacyUserSettingsFile)
+    }
+    guard fieldIsBounded(value), accumulator.values.count < maximumRows else {
+      throw Failure.fileTooLarge(legacyUserSettingsFile)
+    }
+    accumulator.values.append(value)
   }
 
   /// Reads the standard Rime patch emitted by the canonical writer.
   fileprivate static func readUserSettingsPatch(_ file: URL) throws -> [String] {
-    var sawPatch = false
-    var sawDisabledWords = false
-    var inlineEmpty = false
-    var sawSentenceCapitalization = false
-    var sawTabBehavior = false
-    var values: [String] = []
+    var accumulator = UserSettingsPatchAccumulator()
     try forEachBoundedLine(in: file) { line in
       if line.isEmpty || line.hasPrefix("#") { return }
       if line == "patch:" {
-        guard !sawPatch else { throw Failure.invalidFile(userSettingsFile) }
-        sawPatch = true
+        guard !accumulator.sawPatch else { throw Failure.invalidFile(userSettingsFile) }
+        accumulator.sawPatch = true
         return
       }
-      if line == "  disabled_words:" || line == "  disabled_words: []" {
-        guard sawPatch, !sawDisabledWords else { throw Failure.invalidFile(userSettingsFile) }
-        sawDisabledWords = true
-        inlineEmpty = line.hasSuffix("[]")
-        return
-      }
-      if line.hasPrefix("  sentence_capitalization: ") {
-        guard sawPatch, !sawSentenceCapitalization else {
-          throw Failure.invalidFile(userSettingsFile)
-        }
-        let value = String(line.dropFirst("  sentence_capitalization: ".count))
-        guard value == "true" || value == "false" else {
-          throw Failure.invalidFile(userSettingsFile)
-        }
-        sawSentenceCapitalization = true
-        return
-      }
-      if line.hasPrefix("  tab_behavior: ") {
-        let value = String(line.dropFirst("  tab_behavior: ".count))
-        guard sawPatch, !sawTabBehavior,
-          ["pass", "navigate", "smart_complete"].contains(value)
-        else { throw Failure.invalidFile(userSettingsFile) }
-        sawTabBehavior = true
-        return
-      }
-      guard sawPatch, sawDisabledWords, !inlineEmpty, line.hasPrefix("    - "),
-        let data = String(line.dropFirst(6)).data(using: .utf8),
-        let value = try? JSONDecoder().decode(String.self, from: data),
-        validValue(value)
-      else {
+      try parseUserSettingsPatchLine(line, accumulator: &accumulator)
+    }
+    guard accumulator.sawPatch, accumulator.sawDisabledWords else {
+      throw Failure.invalidFile(userSettingsFile)
+    }
+    return accumulator.values
+  }
+
+  fileprivate static func parseUserSettingsPatchLine(
+    _ line: String,
+    accumulator: inout UserSettingsPatchAccumulator
+  ) throws {
+    if line == "  disabled_words:" || line == "  disabled_words: []" {
+      guard accumulator.sawPatch, !accumulator.sawDisabledWords else {
         throw Failure.invalidFile(userSettingsFile)
       }
-      guard fieldIsBounded(value) else { throw Failure.fileTooLarge(userSettingsFile) }
-      guard values.count < maximumRows else { throw Failure.fileTooLarge(userSettingsFile) }
-      values.append(value)
+      accumulator.sawDisabledWords = true
+      accumulator.inlineEmpty = line.hasSuffix("[]")
+      return
     }
-    guard sawPatch, sawDisabledWords else { throw Failure.invalidFile(userSettingsFile) }
-    return values
+    if line.hasPrefix("  sentence_capitalization: ") {
+      let value = String(line.dropFirst("  sentence_capitalization: ".count))
+      guard accumulator.sawPatch, !accumulator.sawSentenceCapitalization,
+        ["true", "false"].contains(value)
+      else { throw Failure.invalidFile(userSettingsFile) }
+      accumulator.sawSentenceCapitalization = true
+      return
+    }
+    if line.hasPrefix("  tab_behavior: ") {
+      let value = String(line.dropFirst("  tab_behavior: ".count))
+      guard accumulator.sawPatch, !accumulator.sawTabBehavior,
+        ["pass", "navigate", "smart_complete"].contains(value)
+      else { throw Failure.invalidFile(userSettingsFile) }
+      accumulator.sawTabBehavior = true
+      return
+    }
+    guard accumulator.sawPatch, accumulator.sawDisabledWords,
+      !accumulator.inlineEmpty, line.hasPrefix("    - "),
+      let data = String(line.dropFirst(6)).data(using: .utf8),
+      let value = try? JSONDecoder().decode(String.self, from: data),
+      validValue(value)
+    else {
+      throw Failure.invalidFile(userSettingsFile)
+    }
+    guard fieldIsBounded(value), accumulator.values.count < maximumRows else {
+      throw Failure.fileTooLarge(userSettingsFile)
+    }
+    accumulator.values.append(value)
   }
 
   fileprivate static func forEachBoundedLine(
     in file: URL,
     _ body: (String) throws -> Void
   ) throws {
-    let descriptor = open(file.path, O_RDONLY | O_NOFOLLOW)
-    guard descriptor >= 0 else { throw Failure.unsafeFile(file.lastPathComponent) }
-    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    let opened = try openBoundedFile(file)
+    let handle = opened.handle
     defer { try? handle.close() }
-    var before = stat()
-    guard fstat(descriptor, &before) == 0,
-      (before.st_mode & S_IFMT) == S_IFREG,
-      before.st_uid == getuid()
-    else {
-      throw Failure.unsafeFile(file.lastPathComponent)
-    }
-    guard before.st_size >= 0, before.st_size <= maximumFileBytes else {
-      throw Failure.fileTooLarge(file.lastPathComponent)
-    }
     var buffer = Data()
     var observedBytes = 0
-
-    func process(_ bytes: Data.SubSequence) throws {
-      var lineBytes = bytes
-      if lineBytes.last == 0x0d { lineBytes = lineBytes.dropLast() }
-      guard lineBytes.count <= maximumLineBytes else {
-        throw Failure.fileTooLarge(file.lastPathComponent)
-      }
-      guard let line = String(data: Data(lineBytes), encoding: .utf8), !line.contains("\0") else {
-        throw Failure.invalidFile(file.lastPathComponent)
-      }
-      try body(line)
-    }
 
     while true {
       let chunk = try handle.read(upToCount: 32 * 1024) ?? Data()
@@ -761,7 +482,7 @@ extension LinnetPersonalDataStore {
       var lineStart = buffer.startIndex
       while lineStart < buffer.endIndex,
         let newline = buffer[lineStart...].firstIndex(of: 0x0a) {
-        try process(buffer[lineStart..<newline])
+        try processBoundedLine(buffer[lineStart..<newline], from: file, body: body)
         lineStart = buffer.index(after: newline)
       }
       if lineStart > buffer.startIndex {
@@ -771,8 +492,43 @@ extension LinnetPersonalDataStore {
         throw Failure.fileTooLarge(file.lastPathComponent)
       }
     }
-    if !buffer.isEmpty { try process(buffer[buffer.startIndex..<buffer.endIndex]) }
+    if !buffer.isEmpty {
+      try processBoundedLine(buffer[buffer.startIndex..<buffer.endIndex], from: file, body: body)
+    }
 
+    try validateUnchangedFile(
+      handle.fileDescriptor,
+      before: opened.info,
+      observedBytes: observedBytes,
+      file: file
+    )
+  }
+
+  fileprivate static func openBoundedFile(_ file: URL) throws -> (handle: FileHandle, info: stat) {
+    let descriptor = open(file.path, O_RDONLY | O_NOFOLLOW)
+    guard descriptor >= 0 else { throw Failure.unsafeFile(file.lastPathComponent) }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    var info = stat()
+    guard fstat(descriptor, &info) == 0,
+      (info.st_mode & S_IFMT) == S_IFREG,
+      info.st_uid == getuid()
+    else {
+      try? handle.close()
+      throw Failure.unsafeFile(file.lastPathComponent)
+    }
+    guard info.st_size >= 0, info.st_size <= maximumFileBytes else {
+      try? handle.close()
+      throw Failure.fileTooLarge(file.lastPathComponent)
+    }
+    return (handle, info)
+  }
+
+  fileprivate static func validateUnchangedFile(
+    _ descriptor: Int32,
+    before: stat,
+    observedBytes: Int,
+    file: URL
+  ) throws {
     var after = stat()
     guard fstat(descriptor, &after) == 0,
       observedBytes == Int(before.st_size),
@@ -788,6 +544,22 @@ extension LinnetPersonalDataStore {
     }
   }
 
+  fileprivate static func processBoundedLine(
+    _ bytes: Data.SubSequence,
+    from file: URL,
+    body: (String) throws -> Void
+  ) throws {
+    var lineBytes = bytes
+    if lineBytes.last == 0x0d { lineBytes = lineBytes.dropLast() }
+    guard lineBytes.count <= maximumLineBytes else {
+      throw Failure.fileTooLarge(file.lastPathComponent)
+    }
+    guard let line = String(data: Data(lineBytes), encoding: .utf8), !line.contains("\0") else {
+      throw Failure.invalidFile(file.lastPathComponent)
+    }
+    try body(line)
+  }
+
   fileprivate static func linesAreBounded(_ contents: String) -> Bool {
     var lineBytes = 0
     for byte in contents.utf8 {
@@ -801,7 +573,7 @@ extension LinnetPersonalDataStore {
     return lineBytes <= maximumLineBytes
   }
 
-  fileprivate static func table(name: String, rows: [(String, String)]) -> String {
+  static func table(name: String, rows: [(String, String)]) -> String {
     let body = rows.map { "\($0.0)\t\($0.1)" }.joined(separator: "\n")
     return """
       # Rime table
@@ -827,33 +599,6 @@ extension LinnetPersonalDataStore {
       ? ["  disabled_words: []"]
       : ["  disabled_words:"] + rows
     return (["patch:"] + disabledWords).joined(separator: "\n") + "\n"
-  }
-
-  fileprivate static func legacyV2UserSettingsYAML(
-    _ words: [String],
-    sentenceCapitalization: Bool,
-    tabBehavior: String
-  ) throws -> String {
-    guard ["pass", "navigate", "smart_complete"].contains(tabBehavior) else {
-      throw Failure.invalidFile(legacyUserSettingsFile)
-    }
-    let rows = try words.map { word -> String in
-      let data = try JSONEncoder().encode(word)
-      guard let json = String(data: data, encoding: .utf8) else {
-        throw Failure.invalidFile(legacyUserSettingsFile)
-      }
-      return "  - \(json)"
-    }
-    let disabledWords = words.isEmpty ? ["disabled_words: []"] : ["disabled_words:"] + rows
-    return
-      ([
-        "# Linnet user-managed settings",
-        "# encoding: utf-8",
-        ""
-      ] + disabledWords + [
-        "sentence_capitalization: \(sentenceCapitalization)",
-        "tab_behavior: \(tabBehavior)"
-      ]).joined(separator: "\n") + "\n"
   }
 
   fileprivate static func retireLegacySettings(in directory: URL) throws {

@@ -18,11 +18,15 @@ struct LinnetPackTool {
     }
   }
 
-  static func main() {
+  static func main() async {
     do {
       var arguments = Array(CommandLine.arguments.dropFirst())
       guard let command = arguments.first else { throw ToolFailure.usage(help) }
       arguments.removeFirst()
+      if command == "with-settings-mutation-lease" {
+        let status = try await withSettingsMutationLease(arguments)
+        exit(status)
+      }
       let options = try parse(arguments)
       switch command {
       case "build-installed": try buildInstalled(options)
@@ -37,6 +41,8 @@ struct LinnetPackTool {
       case "build-catalog": try buildCatalog(options)
       case "verify-catalog": try verifyCatalog(options)
       case "inspect-catalog": try inspectCatalog(options)
+      case "build-delta", "apply-delta", "delta-state", "tree-digest", "exchange-app-delta", "exchange-app":
+        try directoryDelta(command, options: options)
       default: throw ToolFailure.usage(help)
       }
     } catch {
@@ -60,11 +66,76 @@ struct LinnetPackTool {
         --chinese-pack DIR --english-pack DIR --lts-pack DIR \\
         --extended-pack DIR
       linnet-pack build-catalog --sequence N --core-version VERSION --output FILE
-        --core-build N --core-revision REVISION --core-package FILE
+        --core-build N --core-revision REVISION
+        (--core-package FILE | --core-archive FILE)
         --chinese-pack FILE --english-pack FILE --lts-pack FILE --extended-pack FILE
+        [--KIND-delta FILE --KIND-base-content SHA256]
       linnet-pack verify-catalog --catalog FILE --core-version VERSION
       linnet-pack inspect-catalog --catalog FILE --core-version VERSION
+      linnet-pack build-delta --base DIR --target DIR --output FILE
+      linnet-pack apply-delta --base DIR --delta FILE --output DIR
+      linnet-pack delta-state --base DIR --delta FILE
+      linnet-pack tree-digest --root DIR
+      linnet-pack exchange-app-delta --installed APP --staged APP --delta FILE
+      linnet-pack exchange-app --installed APP --staged APP --base-sha256 SHA --target-sha256 SHA
+      linnet-pack with-settings-mutation-lease --application-support DIR --core-version VERSION
+        --timeout-seconds N -- EXECUTABLE [ARGUMENTS...]
     """
+
+  static func withSettingsMutationLease(_ arguments: [String]) async throws -> Int32 {
+    guard let separator = arguments.firstIndex(of: "--"), separator + 1 < arguments.count else {
+      throw ToolFailure.usage(help)
+    }
+    let options = try parse(Array(arguments[..<separator]))
+    guard options.count == 3, let coreVersion = options["core-version"],
+      let timeoutText = options["timeout-seconds"], let timeout = TimeInterval(timeoutText),
+      timeout.isFinite, (0...30).contains(timeout)
+    else { throw ToolFailure.usage(help) }
+    let registry = try LinnetDataRegistry(
+      productName: "Linnet", coreVersion: coreVersion,
+      applicationSupportDirectory: requiredURL("application-support", options))
+    let lease = try await LinnetSettingsMutationLease.acquire(
+      at: registry.settingsMutationLeaseURL, timeout: timeout)
+    let executable = arguments[separator + 1]
+    guard executable.hasPrefix("/") else { throw ToolFailure.usage(help) }
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: executable)
+    child.arguments = Array(arguments.dropFirst(separator + 2))
+    return try withExtendedLifetime(lease) {
+      try child.run()
+      child.waitUntilExit()
+      return child.terminationReason == .exit ? child.terminationStatus : 128 + child.terminationStatus
+    }
+  }
+
+  static func directoryDelta(_ command: String, options: [String: String]) throws {
+    switch command {
+    case "exchange-app":
+      guard options.count == 4, let base = options["base-sha256"], let target = options["target-sha256"],
+        isSHA256(base), isSHA256(target) else { throw ToolFailure.usage(help) }
+      try LinnetDirectoryDelta.exchangeApp(installed: requiredURL("installed", options), staged: requiredURL("staged", options),
+        baseSHA256: base, targetSHA256: target)
+    case "tree-digest":
+      guard options.count == 1 else { throw ToolFailure.usage(help) }
+      print(try LinnetDirectoryDelta.digest(requiredURL("root", options)))
+    case "delta-state":
+      guard options.count == 2 else { throw ToolFailure.usage(help) }
+      print(try LinnetDirectoryDelta.state(
+        base: requiredURL("base", options), delta: requiredURL("delta", options)).rawValue)
+    case "build-delta":
+      guard options.count == 3 else { throw ToolFailure.usage(help) }
+      try LinnetDirectoryDelta.build(
+        base: requiredURL("base", options), target: requiredURL("target", options), output: requiredURL("output", options))
+    case "apply-delta":
+      guard options.count == 3 else { throw ToolFailure.usage(help) }
+      try LinnetDirectoryDelta.apply(
+        base: requiredURL("base", options), delta: requiredURL("delta", options), output: requiredURL("output", options))
+    default:
+      guard options.count == 3 else { throw ToolFailure.usage(help) }
+      try LinnetDirectoryDelta.exchangeApp(
+        installed: requiredURL("installed", options), staged: requiredURL("staged", options), delta: requiredURL("delta", options))
+    }
+  }
 
   static func buildInstalled(_ options: [String: String]) throws {
     guard options.count == 8,
@@ -149,11 +220,11 @@ struct LinnetPackTool {
     guard inventory.entries == manifest.files,
       inventory.contentSHA256 == manifest.contentSHA256
     else { throw ToolFailure.invalidSource("installed pack differs from its manifest") }
-    let encoded = try LinnetPackContract.compressZlib(source: raw, to: compressed)
+    let encoded = try LinnetPackEncoder.compressZlib(source: raw, to: compressed)
     guard encoded.unpackedBytes == inventory.bytes,
       encoded.unpackedSHA256 == inventory.contentSHA256
     else { throw ToolFailure.invalidSource("container payload differs from its manifest") }
-    try LinnetPackContract.writeContainer(
+    try LinnetPackEncoder.writeContainer(
       manifestData: manifestData, payload: compressed, to: output)
   }
 
@@ -285,12 +356,18 @@ struct LinnetPackTool {
   }
 
   static func buildCatalog(_ options: [String: String]) throws {
-    guard options.count == 10,
+    let deltaKinds = LinnetPackContract.Kind.allCases.filter { options["\($0.rawValue)-delta"] != nil }
+    guard options.count == 10 + deltaKinds.count * 2,
       let sequenceValue = options["sequence"], let sequence = UInt64(sequenceValue),
       let coreVersion = options["core-version"],
       let coreBuildValue = options["core-build"], let coreBuild = UInt64(coreBuildValue),
       let coreRevision = options["core-revision"]
     else { throw ToolFailure.usage(help) }
+    let coreInputs = [
+      ("core-package", LinnetDataChannel.CoreArtifactFormat.installerPackage),
+      ("core-archive", LinnetDataChannel.CoreArtifactFormat.appArchive),
+    ].filter { options[$0.0] != nil }
+    guard coreInputs.count == 1 else { throw ToolFailure.usage(help) }
     let output = try requiredURL("output", options)
     guard !FileManager.default.fileExists(atPath: output.path) else {
       throw ToolFailure.unsafeOutput("refusing to overwrite catalog")
@@ -300,35 +377,61 @@ struct LinnetPackTool {
       ("lts-pack", .lts), ("extended-pack", .extended),
     ]
     let artifacts = try inputs.map { option, expected in
-      try publishedArtifact(
+      var artifact = try publishedArtifact(
         at: requiredURL(option, options), expected: expected,
         coreVersion: coreVersion)
+      if deltaKinds.contains(expected) {
+        guard let base = options["\(expected.rawValue)-base-content"], isSHA256(base) else {
+          throw ToolFailure.usage(help)
+        }
+        let file = try requiredURL("\(expected.rawValue)-delta", options)
+        let identity = try releaseFileIdentity(file)
+        let name = expected.releaseAssetName.replacingOccurrences(
+          of: ".linnetpack", with: "-from-\(base).linnetdelta")
+        guard file.lastPathComponent == name else { throw ToolFailure.invalidSource("delta asset name") }
+        artifact.deltas = [.init(
+          baseContentSHA256: base, bytes: identity.bytes, sha256: identity.sha256,
+          url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-\(sequence)/\(name)")!)]
+      }
+      return artifact
     }
+    let coreInput = coreInputs[0]
     let core = try publishedCore(
-      at: requiredURL("core-package", options), version: coreVersion,
-      build: coreBuild, revision: coreRevision)
+      at: requiredURL(coreInput.0, options), version: coreVersion,
+      build: coreBuild, revision: coreRevision,
+      artifactFormat: coreInput.1)
     let data = try LinnetDataCatalogBuilder.build(
       sequence: sequence, coreVersion: coreVersion, core: core, artifacts: artifacts)
     try writeExclusive(data, to: output, mode: 0o444)
   }
 
   static func publishedCore(
-    at url: URL, version: String, build: UInt64, revision: String
+    at url: URL,
+    version: String,
+    build: UInt64,
+    revision: String,
+    artifactFormat: LinnetDataChannel.CoreArtifactFormat
   ) throws -> LinnetDataCatalogBuilder.PublishedCore {
+    let identity = try releaseFileIdentity(url)
+    return .init(
+      version: version, build: build, revision: revision,
+      bytes: identity.bytes, sha256: identity.sha256,
+      artifactFormat: artifactFormat)
+  }
+
+  static func releaseFileIdentity(_ url: URL) throws -> (bytes: UInt64, sha256: String) {
     let values = try url.resourceValues(
       forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
     guard values.isRegularFile == true, values.isSymbolicLink != true,
       let fileSize = values.fileSize, fileSize > 0
-    else { throw ToolFailure.invalidSource("Core package is unsafe") }
+    else { throw ToolFailure.invalidSource("release artifact is unsafe") }
     let handle = try FileHandle(forReadingFrom: url)
     defer { try? handle.close() }
     var hasher = SHA256()
     while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
       hasher.update(data: chunk)
     }
-    return .init(
-      version: version, build: build, revision: revision,
-      bytes: UInt64(fileSize), sha256: hex(hasher.finalize()))
+    return (UInt64(fileSize), hex(hasher.finalize()))
   }
 
   static func verifiedCatalog(
@@ -346,26 +449,16 @@ struct LinnetPackTool {
     expected: LinnetPackContract.Kind,
     coreVersion: String
   ) throws -> LinnetDataCatalogBuilder.PublishedArtifact {
-    let values = try url.resourceValues(
-      forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-    guard values.isRegularFile == true, values.isSymbolicLink != true,
-      let fileSize = values.fileSize, fileSize > 0
-    else { throw ToolFailure.invalidSource("catalog pack is unsafe") }
+    let identity = try releaseFileIdentity(url)
     let verified = try LinnetPackContract.verify(
       package: url, coreVersion: coreVersion)
     guard verified.manifest.kind == expected else {
       throw ToolFailure.invalidSource("catalog pack kind mismatch")
     }
-    let handle = try FileHandle(forReadingFrom: url)
-    defer { try? handle.close() }
-    var hasher = SHA256()
-    while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
-      hasher.update(data: chunk)
-    }
     return .init(
       manifest: verified.manifest,
-      bytes: UInt64(fileSize),
-      containerSHA256: hex(hasher.finalize()))
+      bytes: identity.bytes,
+      containerSHA256: identity.sha256)
   }
 
   static func verified(_ options: [String: String]) throws -> LinnetPackContract.VerifiedPack {
@@ -409,15 +502,15 @@ extension LinnetPackTool {
 
   static func activePack(
     from root: URL,
-    expected: LinnetDataRegistry.PackKind,
+    expected: LinnetPackContract.Kind,
     coreVersion: String
   ) throws -> LinnetDataRegistry.ActivePack {
     let (manifest, manifestData) = try verifiedInstalledManifest(
       at: root, coreVersion: coreVersion)
     let identity = "\(manifest.sequence)-\(manifest.version)"
-    guard LinnetDataRegistry.PackKind(rawValue: manifest.kind.rawValue) == expected,
+    guard manifest.kind == expected,
       root.lastPathComponent == identity,
-      LinnetPackContract.Kind(rawValue: expected.rawValue)?.packID == manifest.packID
+      expected.packID == manifest.packID
     else { throw ToolFailure.invalidSource("package manifest does not match its identity") }
     return .init(
       packID: manifest.packID,
@@ -427,9 +520,7 @@ extension LinnetPackTool {
       dataABI: manifest.dataABI,
       contentSHA256: manifest.contentSHA256,
       minCore: manifest.minCore,
-      requirements: manifest.requires.map {
-        .init(kind: LinnetDataRegistry.PackKind(rawValue: $0.kind.rawValue)!, dataABI: $0.dataABI)
-      },
+      requirements: manifest.requires,
       relativePath: "Data/Packs/\(manifest.kind.rawValue)/\(identity)",
       manifestSHA256: hex(SHA256.hash(data: manifestData)))
   }

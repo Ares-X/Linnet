@@ -73,10 +73,9 @@ community_certificate_contract() {
   ruby -rjson -e '
     document = JSON.parse(File.binread(ARGV.fetch(0)))
     abort unless document.keys.sort ==
-      %w[certificate_sha1 certificate_sha256 format legacy_migration_acceptance profile]
-    abort unless document.fetch("format") == 2 &&
-      document.fetch("profile") == "community-cms" &&
-      document.fetch("legacy_migration_acceptance").is_a?(Hash)
+      %w[certificate_sha1 certificate_sha256 format profile]
+    abort unless document.fetch("format") == 1 &&
+      document.fetch("profile") == "community-cms"
     sha1 = document.fetch("certificate_sha1")
     sha256 = document.fetch("certificate_sha256")
     abort unless sha1.match?(/\A[0-9A-F]{40}\z/) &&
@@ -223,6 +222,23 @@ require_bundle() {
     fail_identity "unsafe or unexpected App bundle: ${expected_name}"
 }
 
+require_verification_bundle() {
+  local bundle="$1"
+  local product="$2"
+  local accepted_names
+  case "${product}" in
+    host) accepted_names='Linnet.app|Linnet.candidate|Linnet.payload' ;;
+    settings) accepted_names='Settings.app|Settings.candidate' ;;
+    *) fail_identity "unknown product verification boundary" ;;
+  esac
+  [[ "${bundle}" == /* && -d "${bundle}" && ! -L "${bundle}" ]] ||
+    fail_identity "unsafe product verification bundle"
+  case "${product}:${bundle##*/}" in
+    host:Linnet.app|host:Linnet.candidate|host:Linnet.payload|settings:Settings.app|settings:Settings.candidate) ;;
+    *) fail_identity "unexpected product verification bundle: ${accepted_names}" ;;
+  esac
+}
+
 bundle_identifier() {
   plutil -extract CFBundleIdentifier raw -o - "$1/Contents/Info.plist" 2>/dev/null
 }
@@ -250,8 +266,8 @@ require_inventory() {
   done <<<"${expected}"
 }
 
-readonly standalone_settings_inventory=$'Contents/Frameworks/librime.1.dylib\nContents/MacOS/Settings'
-readonly host_inventory=$'Contents/Applications/Settings.app/Contents/Frameworks/librime.1.dylib\nContents/Applications/Settings.app/Contents/MacOS/Settings\nContents/Frameworks/librime.1.dylib\nContents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/MacOS/Linnet'
+readonly standalone_settings_inventory=$'Contents/Frameworks/librime.1.dylib\nContents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/MacOS/Settings'
+readonly host_inventory=$'Contents/Applications/Settings.app/Contents/Frameworks/librime.1.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Applications/Settings.app/Contents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/Applications/Settings.app/Contents/MacOS/Settings\nContents/Frameworks/librime.1.dylib\nContents/Frameworks/rime-plugins/librime-lua.dylib\nContents/Frameworks/rime-plugins/librime-octagram.dylib\nContents/Frameworks/rime-plugins/librime-predict.dylib\nContents/Frameworks/rime-plugins/librime-smart-english.dylib\nContents/MacOS/Linnet'
 
 sign_code() {
   local path="$1"
@@ -313,17 +329,17 @@ verify_product() (
   set -euo pipefail
   local host_app="$1"
   local standalone_settings_app="${2:-}"
+  local published_revision="${3:-}"
   local embedded_settings_app
-  local scratch
-  local scratch_root
   local expected_leaf
   local actual_leaf
   local signing_profile
   local metadata_projection
   local product_version
   local product_build
+  local product_inventory="${host_inventory}"
 
-  require_bundle "${host_app}" Linnet.app
+  require_verification_bundle "${host_app}" host
   embedded_settings_app="${host_app}/Contents/Applications/Settings.app"
   require_bundle "${embedded_settings_app}" Settings.app
   [[ "$(bundle_identifier "${host_app}")" == "${host_bundle_id}" ]] ||
@@ -341,9 +357,14 @@ verify_product() (
   [[ "$(plutil -extract LinnetCodeSigningProfile raw -o - \
     "${embedded_settings_app}/Contents/Info.plist" 2>/dev/null || true)" == \
     "${signing_profile}" ]] || fail_identity "embedded Settings code-signing profile mismatch"
-  require_inventory "${host_app}" "${host_inventory}"
+  if [[ -n "${published_revision}" ]]; then
+    # Historical layouts are owned by their pinned package and signed bundle
+    # seal, not today's build inventory. Verify every actual Mach-O below.
+    product_inventory="$(mach_o_inventory "${host_app}")"
+  fi
+  require_inventory "${host_app}" "${product_inventory}"
   if [[ -n "${standalone_settings_app}" ]]; then
-    require_bundle "${standalone_settings_app}" Settings.app
+    require_verification_bundle "${standalone_settings_app}" settings
     [[ "$(bundle_identifier "${standalone_settings_app}")" == "${settings_bundle_id}" ]] ||
       fail_identity "standalone Settings signing identifier input is invalid"
     [[ "$(plutil -extract LinnetCodeSigningProfile raw -o - \
@@ -352,13 +373,19 @@ verify_product() (
     require_inventory "${standalone_settings_app}" "${standalone_settings_inventory}"
   fi
 
-  scratch_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)" ||
+  # Keep these values in the isolated subshell until its EXIT trap runs. Bash
+  # can discard function-local variables before that trap after a failed
+  # command substitution, masking the real verification error and leaking the
+  # verification directory.
+  verification_scratch_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)" ||
     fail_identity "the canonical temporary root is unavailable"
-  scratch="$(mktemp -d "${scratch_root}/linnet-code-identity.XXXXXX")"
+  verification_scratch="$(
+    mktemp -d "${verification_scratch_root}/linnet-code-identity.XXXXXX"
+  )"
   cleanup_verification() {
-    if [[ "${scratch%/*}" == "${scratch_root}" &&
-      "${scratch##*/}" == linnet-code-identity.* ]]; then
-      /bin/rm -rf -- "${scratch}"
+    if [[ "${verification_scratch%/*}" == "${verification_scratch_root}" &&
+      "${verification_scratch##*/}" == linnet-code-identity.* ]]; then
+      /bin/rm -rf -- "${verification_scratch}"
     fi
   }
   # Verification owns one isolated shell so its cleanup and strict failure
@@ -368,34 +395,34 @@ verify_product() (
   trap cleanup_verification EXIT
 
   expected_leaf="$(verify_code "${host_app}/Contents/Frameworks/librime.1.dylib" \
-    '' "${scratch}" host-runtime)"
+    '' "${verification_scratch}" host-runtime)"
   while IFS= read -r relative; do
     [[ -n "${relative}" ]] || continue
     actual_leaf="$(verify_code "${host_app}/${relative}" "${expected_leaf}" \
-      "${scratch}" "host-$(tr '/.' '--' <<<"${relative}")")"
+      "${verification_scratch}" "host-$(tr '/.' '--' <<<"${relative}")")"
     [[ "${actual_leaf}" == "${expected_leaf}" ]] ||
       fail_identity "Host code leaf mismatch"
-  done <<<"${host_inventory}"
+  done <<<"${product_inventory}"
   actual_leaf="$(verify_code "${embedded_settings_app}" "${expected_leaf}" \
-    "${scratch}" embedded-settings-bundle "${settings_bundle_id}")"
+    "${verification_scratch}" embedded-settings-bundle "${settings_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "embedded Settings leaf mismatch"
   if [[ -n "${standalone_settings_app}" ]]; then
     while IFS= read -r relative; do
       [[ -n "${relative}" ]] || continue
       actual_leaf="$(verify_code "${standalone_settings_app}/${relative}" "${expected_leaf}" \
-        "${scratch}" "standalone-$(tr '/.' '--' <<<"${relative}")")"
+        "${verification_scratch}" "standalone-$(tr '/.' '--' <<<"${relative}")")"
       [[ "${actual_leaf}" == "${expected_leaf}" ]] ||
         fail_identity "standalone Settings code leaf mismatch"
     done <<<"${standalone_settings_inventory}"
     actual_leaf="$(verify_code "${standalone_settings_app}" "${expected_leaf}" \
-      "${scratch}" standalone-settings-bundle "${settings_bundle_id}")"
+      "${verification_scratch}" standalone-settings-bundle "${settings_bundle_id}")"
     [[ "${actual_leaf}" == "${expected_leaf}" ]] ||
       fail_identity "standalone Settings leaf mismatch"
   fi
   codesign --verify --deep --strict "${host_app}" >/dev/null 2>&1 ||
     fail_identity "Host nested-code verification failed"
   actual_leaf="$(verify_code "${host_app}" "${expected_leaf}" \
-    "${scratch}" host-bundle "${host_bundle_id}")"
+    "${verification_scratch}" host-bundle "${host_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "Host leaf mismatch"
   if [[ "${signing_profile}" == community-cms ]]; then
     [[ "${expected_leaf}" == "$(community_certificate_contract | sed -n '2p')" ]] ||
@@ -464,14 +491,22 @@ verify_product() (
   ' "${host_app}/Contents/Resources/LinnetRelease/VERSION.json" \
     "${signing_profile}" "${expected_leaf}" "${product_version}" "${product_build}")" ||
     fail_identity "signed release metadata is invalid"
-  "${project_root}/scripts/generate-release-metadata" \
-    "${project_root}/upstreams.lock.json" "${scratch}/expected-release-metadata" \
-    "${product_version}" "${product_build}" 1704067200 \
-    "${metadata_projection}" >/dev/null ||
-    fail_identity "canonical release metadata cannot be projected"
-  diff -qr "${scratch}/expected-release-metadata" \
-    "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||
-    fail_identity "signed release metadata differs from the canonical projection"
+  if [[ -n "${published_revision}" ]]; then
+    # The caller has pinned the historical package bytes. Verify that signed
+    # metadata names that exact revision, not a projection of today's inputs.
+    [[ "$(printf '%s' "${metadata_projection}" | plutil -extract candidate_revision raw -o - -)" == \
+      "${published_revision}" ]] || fail_identity "published App revision differs from its pinned baseline"
+  else
+    "${project_root}/scripts/generate-release-metadata" \
+      "${project_root}/upstreams.lock.json" \
+      "${verification_scratch}/expected-release-metadata" \
+      "${product_version}" "${product_build}" 1704067200 \
+      "${metadata_projection}" >/dev/null ||
+      fail_identity "canonical release metadata cannot be projected"
+    diff -qr "${verification_scratch}/expected-release-metadata" \
+      "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||
+      fail_identity "signed release metadata differs from the canonical projection"
+  fi
   printf '%s\n' "${metadata_projection}"
 )
 
@@ -487,8 +522,8 @@ sign_product() {
   local expected_projection
   local actual_projection
 
-  require_bundle "${host_app}" Linnet.app
-  require_bundle "${standalone_settings_app}" Settings.app
+  require_verification_bundle "${host_app}" host
+  require_verification_bundle "${standalone_settings_app}" settings
   require_bundle "${embedded_settings_app}" Settings.app
   [[ "$(bundle_identifier "${host_app}")" == "${host_bundle_id}" &&
     "$(bundle_identifier "${standalone_settings_app}")" == "${settings_bundle_id}" &&
@@ -509,19 +544,15 @@ sign_product() {
       fail_identity "failed to project the code-signing profile"
   done
 
-  sign_code "${standalone_settings_app}/Contents/Frameworks/librime.1.dylib" \
-    "${identity}" "${keychain}"
-  sign_code "${standalone_settings_app}" "${identity}" "${keychain}" "${entitlements}"
-  sign_code "${embedded_settings_app}/Contents/Frameworks/librime.1.dylib" \
-    "${identity}" "${keychain}"
-  sign_code "${embedded_settings_app}" "${identity}" "${keychain}" "${entitlements}"
-  sign_code "${host_app}/Contents/Frameworks/librime.1.dylib" "${identity}" "${keychain}"
-  for plugin in librime-lua.dylib librime-octagram.dylib librime-predict.dylib \
-    librime-smart-english.dylib; do
-    sign_code "${host_app}/Contents/Frameworks/rime-plugins/${plugin}" \
-      "${identity}" "${keychain}"
+  for signed_app in "${standalone_settings_app}" "${embedded_settings_app}" "${host_app}"; do
+    sign_code "${signed_app}/Contents/Frameworks/librime.1.dylib" "${identity}" "${keychain}"
+    for plugin in librime-lua.dylib librime-octagram.dylib librime-predict.dylib \
+      librime-smart-english.dylib; do
+      sign_code "${signed_app}/Contents/Frameworks/rime-plugins/${plugin}" \
+        "${identity}" "${keychain}"
+    done
+    sign_code "${signed_app}" "${identity}" "${keychain}" "${entitlements}"
   done
-  sign_code "${host_app}" "${identity}" "${keychain}" "${entitlements}"
   actual_projection="$(verify_product "${host_app}" "${standalone_settings_app}")"
   [[ "${actual_projection}" == "${expected_projection}" ]] ||
     fail_identity "signed product differs from its external identity contract"
@@ -554,7 +585,12 @@ case "${command}" in
       fail_identity "usage: verify-product HOST_APP [STANDALONE_SETTINGS_APP]"
     verify_product "$2" "${3:-}"
     ;;
+  verify-published)
+    [[ "$#" -eq 3 && "$3" =~ ^[0-9a-f]{40}$ ]] ||
+      fail_identity "usage: verify-published HOST_APP EXACT_REVISION"
+    verify_product "$2" "" "$3"
+    ;;
   *)
-    fail_identity "usage: preflight | inspect-contract | sign-product HOST_APP STANDALONE_SETTINGS_APP | verify-product HOST_APP [STANDALONE_SETTINGS_APP]"
+    fail_identity "usage: preflight | inspect-contract | sign-product HOST_APP STANDALONE_SETTINGS_APP | verify-product HOST_APP [STANDALONE_SETTINGS_APP] | verify-published HOST_APP EXACT_REVISION"
     ;;
 esac

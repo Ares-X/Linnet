@@ -11,6 +11,9 @@ set -euo pipefail
 channel="${1:-}"
 version="${2:-}"
 catalog_sequence="${3:-}"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+core_artifact_format="$("${project_root}/package/data_release_metadata" \
+  get-core-artifact-format "${project_root}/config/linnet-data-releases.json")"
 
 fail_manifest() {
   echo "release_asset_manifest: $*" >&2
@@ -29,9 +32,12 @@ public_assets() {
 }
 
 core_assets() {
-  printf '%s\n' \
-    "Linnet-${version}-arm64-Core-community-beta.pkg" \
-    "Linnet-${version}-Uninstall.command"
+  case "${core_artifact_format}" in
+    installer-package) printf '%s\n' "Linnet-${version}-arm64-Core-community-beta.pkg" ;;
+    app-tar-gzip) printf '%s\n' "Linnet-${version}-arm64-Core.linnetcore" ;;
+    *) fail_manifest "unknown Core artifact format" ;;
+  esac
+  printf '%s\n' Linnet-Data-Channel.json
 }
 
 data_assets() {
@@ -39,8 +45,23 @@ data_assets() {
     Linnet-Chinese.linnetpack \
     Linnet-English.linnetpack \
     Linnet-Extended.linnetpack \
-    Linnet-LTS.linnetpack \
-    Linnet-Data-Channel.json
+    Linnet-LTS.linnetpack
+  ruby -rjson -e '
+    baselines = JSON.parse(File.read(ARGV.fetch(0)))
+    releases = JSON.parse(File.read(ARGV.fetch(1)))
+    abort "invalid baseline format" unless baselines.fetch("format") == 1
+    names = {"chinese" => "Chinese", "english" => "English", "lts" => "LTS", "extended" => "Extended"}
+    abort "baseline kind mismatch" unless baselines.fetch("pack_baselines").keys.sort == names.keys.sort
+    names.each do |kind, name|
+      baseline = baselines.fetch("pack_baselines").fetch(kind)
+      release = releases.fetch("packs").fetch(kind)
+      abort "baseline is not bound to target pack sequence" unless baseline.fetch("target_sequence") == release.fetch("sequence")
+      base = baseline.fetch("content_sha256")
+      abort "invalid baseline content" unless base.match?(/\A[0-9a-f]{64}\z/)
+      baselines.fetch("sources").fetch(baseline.fetch("source"))
+      puts "Linnet-#{name}-from-#{base}.linnetdelta" unless base == release.fetch("content_sha256")
+    end
+  ' "${project_root}/config/linnet-update-baselines.json" "${project_root}/config/linnet-data-releases.json"
 }
 
 case "${channel}" in

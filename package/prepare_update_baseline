@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Resolve an immutable published baseline. Network transport remains owned by
+# fetch-locked-release-asset; a cache hit still verifies the pinned package.
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+lock="${project_root}/config/linnet-update-baselines.json"
+kind="${1:-}"
+fail() { echo "prepare_update_baseline: $*" >&2; exit 1; }
+[[ $# == 1 ]] || fail "usage: chinese|english|lts|extended|delta-KIND"
+delta_only=false
+case "${kind}" in
+  chinese|english|lts|extended)
+    source_key="$(plutil -extract "pack_baselines.${kind}.source" raw -o - "${lock}")" ;;
+  delta-chinese|delta-english|delta-lts|delta-extended)
+    kind="${kind#delta-}"
+    delta_only=true
+    source_key="$(plutil -extract "pack_baselines.${kind}.delta_source" raw -o - "${lock}")" ;;
+  *) fail "invalid baseline kind" ;;
+esac
+[[ "${source_key}" =~ ^[a-z0-9_]+$ ]] || fail "invalid source key"
+field() { plutil -extract "sources.${source_key}.$1" raw -o - "${lock}"; }
+digest="$(field sha256)"
+bytes="$(field bytes)"
+revision="$(field revision)"
+asset="$(field asset)"
+[[ "${digest}" =~ ^[0-9a-f]{64}$ && "${revision}" =~ ^[0-9a-f]{40}$ &&
+  "${bytes}" =~ ^[1-9][0-9]*$ && "${asset}" =~ ^[A-Za-z0-9._-]+$ ]] || fail "invalid source identity"
+cache_parent="${project_root}/build/update-baselines"
+mkdir -p "${cache_parent}"
+[[ ! -L "${cache_parent}" ]] || fail "unsafe cache root"
+cache="${cache_parent}/${digest}"
+mkdir -p "${cache}"
+[[ ! -L "${cache}" ]] || fail "unsafe cache entry"
+package="${cache}/${asset}"
+if [[ ! -e "${package}" && ! -L "${package}" ]]; then
+  "${project_root}/scripts/fetch-locked-release-asset" "${lock}" "${source_key}" "${package}" >&2
+fi
+[[ -f "${package}" && ! -L "${package}" && "$(stat -f %z "${package}")" == "${bytes}" &&
+  "$(shasum -a 256 "${package}" | awk '{print $1}')" == "${digest}" ]] ||
+  fail "cached package differs from its immutable identity"
+if [[ "${delta_only}" == true ]]; then
+  [[ "${asset}" == *.linnetdelta ]] || fail "published delta source is not a delta"
+  printf '%s\n' "${package}"
+  exit 0
+fi
+[[ "${asset}" == Linnet.pkg ]] || fail "baseline source must be a Complete installer"
+expanded="${cache}/expanded"
+if [[ ! -e "${expanded}" && ! -L "${expanded}" ]]; then
+  work="$(mktemp -d "${cache}/.extract.XXXXXX")"
+  cleanup() {
+    [[ "${work}" == "${cache}/.extract."?????? ]] || return
+    chmod -R u+w "${work}" 2>/dev/null || true
+    /bin/rm -rf -- "${work}"
+  }
+  trap cleanup EXIT
+  pkgutil --expand-full "${package}" "${work}/expanded" >&2
+  mv "${work}/expanded" "${expanded}"
+fi
+[[ -d "${expanded}" && ! -L "${expanded}" ]] || fail "unsafe extracted baseline"
+app="${expanded}/Linnet-Core.component.pkg/Payload/Linnet.payload"
+identity="$("${project_root}/scripts/linnet-code-identity" verify-published "${app}" "${revision}")"
+[[ "$(printf '%s' "${identity}" | plutil -extract candidate_revision raw -o - -)" == "${revision}" ]] ||
+  fail "extracted App differs from the pinned revision"
+asset="$("${project_root}/build/linnet-pack" asset-name --kind "${kind}")"
+component="${asset%.linnetpack}.component.pkg"
+parent="${expanded}/${component}/Payload/Data/Packs/${kind}"
+[[ -d "${parent}" && ! -L "${parent}" ]] || fail "missing baseline pack"
+roots=()
+while IFS= read -r -d '' root; do roots+=("${root}"); done < <(find "${parent}" -mindepth 1 -maxdepth 1 -type d -print0)
+[[ ${#roots[@]} == 1 ]] || fail "ambiguous baseline pack"
+core_version="$(plutil -extract CFBundleShortVersionString raw -o - "${app}/Contents/Info.plist")"
+manifest="$("${project_root}/build/linnet-pack" inspect-installed --root "${roots[0]}" --core-version "${core_version}")"
+expected="$(plutil -extract "pack_baselines.${kind}.content_sha256" raw -o - "${lock}")"
+[[ "$(printf '%s' "${manifest}" | plutil -extract content_sha256 raw -o - -)" == "${expected}" ]] ||
+  fail "extracted pack differs from its pinned content"
+printf '%s\n' "${roots[0]}"

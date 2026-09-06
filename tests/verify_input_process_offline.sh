@@ -17,9 +17,13 @@ if [[ -z "${app_path}" ]]; then
   fail "APP_PATH must name the built input-method App"
 fi
 app_path="${app_path%/}"
-if [[ ! -d "${app_path}" || "${app_path##*/}" != *.app ]]; then
+if [[ ! -d "${app_path}" || -L "${app_path}" ]]; then
   fail "APP_PATH is not an App bundle"
 fi
+case "${app_path##*/}" in
+  Linnet.app|Linnet.candidate) ;;
+  *) fail "APP_PATH is not an accepted Linnet product bundle" ;;
+esac
 if [[ -z "${language_data_root}" || ! -d "${language_data_root}" ]]; then
   fail "LANGUAGE_DATA_ROOT must name the staged language-pack payload"
 fi
@@ -169,29 +173,33 @@ if rg -n 'AF_INET6?|SOCK_DGRAM|socketpair|getaddrinfo|getnameinfo|sendto|recv(fr
     "${local_ipc_owner}"; then
   fail "the local IPC owner escaped its AF_UNIX stream contract"
 fi
-[[ "$(rg -F -c 'socket(AF_UNIX, SOCK_STREAM, 0)' "${local_ipc_owner}")" -eq 2 ]] ||
+[[ "$(rg -F -c 'socket(AF_UNIX, SOCK_STREAM, 0)' "${local_ipc_owner}")" -eq 3 ]] ||
   fail "the local IPC owner changed its socket creation contract"
 for call_contract in \
-  'Darwin.bind(fileDescriptor, address, length)' \
-  'listen(fileDescriptor, 8)' \
+  'Darwin.bind(fd, address, length)' \
+  'listen(fd, 8)' \
   'accept(listener, nil, nil)' \
-  'Darwin.connect(fileDescriptor, address, length)' \
   'MSG_DONTWAIT | MSG_NOSIGNAL)'
 do
   [[ "$(rg -F -c "${call_contract}" "${local_ipc_owner}")" -eq 1 ]] ||
     fail "the local IPC owner changed its system-call set"
 done
-[[ "$(rg -c --pcre2 "${local_ipc_source_pattern}" "${local_ipc_owner}")" -eq 5 ]] ||
+# One connection drives each client request; the other classifies an existing
+# owner-only endpoint before the Host may replace a genuinely stale socket.
+[[ "$(rg -F -c 'Darwin.connect' "${local_ipc_owner}")" -eq 2 ]] ||
+  fail "the local IPC owner changed its client/probe connection contract"
+[[ "$(rg -c --pcre2 "${local_ipc_source_pattern}" "${local_ipc_owner}")" -eq 6 ]] ||
   fail "the local IPC owner gained another network-shaped call"
-[[ "$(rg -F -c 'getpeereid(fileDescriptor, &uid, &gid)' "${local_ipc_owner}")" -eq 1 ]] ||
+[[ "$(rg -F -c 'getpeereid(descriptor, &uid, &gid)' "${local_ipc_owner}")" -eq 1 ]] ||
   fail "the local IPC owner lost peer-UID authentication"
-[[ "$(rg -F -c 'getsockopt(fileDescriptor, SOL_LOCAL, LOCAL_PEERPID' "${local_ipc_owner}")" -eq 1 ]] ||
+[[ "$(rg -F -c 'getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID' "${local_ipc_owner}")" -eq 1 ]] ||
   fail "the local IPC owner lost peer-PID authentication"
-# Same-user local IPC has one identity owner: kernel UID/PID plus the exact
-# counterpart executable path. Product code signing is a release boundary, not
-# a second runtime IPC identity system.
-[[ "$(rg -F -c 'proc_pidpath(pid' "${local_ipc_owner}")" -eq 1 ]] ||
-  fail "the local IPC owner lost exact peer executable authentication"
+# Same-user local IPC has one stable identity owner: the owner-only AF_UNIX
+# endpoint plus kernel UID/PID. Executable paths cannot own runtime identity
+# because a live InputMethodKit Host intentionally outlives Core replacement.
+if rg -n 'peerExecutableURL|proc_pidpath' "${local_ipc_owner}"; then
+  fail "the retired executable-path identity returned"
+fi
 if rg -n 'import Security|Sec(Code|StaticCode|Certificate)|kSecCode|CC_SHA256|leafCertificate|peerBundleIdentifier' \
     "${local_ipc_owner}"; then
   fail "the local IPC owner regained certificate-based peer identity"
@@ -316,7 +324,7 @@ actual_local_ipc_symbols="$(
   rg -o --pcre2 '_(socket|connect|send|accept|listen|bind)(?=[[:space:]@]|$)' \
     "${scratch_root}/input-symbols" | LC_ALL=C sort -u
 )"
-expected_local_ipc_symbols=$'_accept\n_bind\n_listen\n_send\n_socket'
+expected_local_ipc_symbols=$'_accept\n_bind\n_connect\n_listen\n_send\n_socket'
 [[ "${actual_local_ipc_symbols}" == "${expected_local_ipc_symbols}" ]] ||
   fail "the main executable changed its exact local IPC server symbol set"
 

@@ -7,7 +7,30 @@ import Darwin
 import Foundation
 
 enum LinnetSettingsContract {
+  static let expandedCandidateCountRange = 5...7
+  static let horizontalExpandedGridRange = 3...5
+
   static let englishSchemaID = "linnet_en"
+
+  // A draft-only Settings entry point. Opening a URL never saves personal data.
+  static func customWordURL(value: String) -> URL? {
+    var components = URLComponents()
+    components.scheme = "linnet-settings"
+    components.host = "custom-word"
+    components.queryItems = [URLQueryItem(name: "value", value: value)]
+    return components.url
+  }
+
+  static func customWordValue(from url: URL) -> String? {
+    guard url.scheme == "linnet-settings", url.host == "custom-word",
+      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+      let value = components.queryItems?.first(where: { $0.name == "value" })?.value,
+      !value.isEmpty else { return nil }
+    return value
+  }
+  /// The durable native learning-data logical view required before a Host may
+  /// pause and release its database to Settings. This is not an app ABI.
+  static let nativeLearningDataVersion: UInt = 1
 
   enum ChineseProfile: String, Codable, CaseIterable, Equatable, Sendable {
     case fullPinyin = "full_pinyin"
@@ -32,9 +55,10 @@ enum LinnetSettingsContract {
       }
     }
 
-    /// A presentation-only, reviewed example for the same canonical word in
-    /// every profile. Runtime decoding remains owned by the active Rime Prism.
-    var reverseLookupExampleCode: String {
+    /// A reviewed ordinary spelling for the same canonical word in every
+    /// profile. Settings uses it as an example; runtime readiness uses it to
+    /// traverse the selected Prism and dictionaries without committing text.
+    var representativeInputCode: String {
       switch self {
       case .natural, .flypy, .microsoft, .sogou: "srfa"
       case .fullPinyin: "suanfa"
@@ -73,6 +97,10 @@ enum LinnetSettingsContract {
     case activateLanguage = "activate_language"
     case cancel
     case diagnose
+    /// User-requested replacement of an installed Core. The running Host may
+    /// accept only after Linnet is inactive, composition and data mutation are
+    /// idle, and the requesting Settings process is still alive.
+    case activateCore = "activate_core"
     /// Atomically publishes a candidate settings document whose differences
     /// are limited to the panel-live appearance subset, then reconciles and
     /// redeploys squirrel.yaml without rebuilding dictionaries.
@@ -80,6 +108,12 @@ enum LinnetSettingsContract {
     /// Atomically publishes a candidate settings document, reconciles all
     /// derived config files, and reloads the fixed schema configuration set.
     case reloadConfiguration = "reload_configuration"
+    /// Reloads the Host-owned learning synchronization schedule after the
+    /// shared preference changes. No Rime database work runs in Settings.
+    case reloadLearningSync = "reload_learning_sync"
+    /// Runs one immediate Host-owned incremental learning synchronization and
+    /// returns only after the Host has a terminal attempt result.
+    case synchronizeLearning = "synchronize_learning"
   }
 
   enum RuntimeStatus: String, Codable, Equatable, Sendable {
@@ -92,6 +126,7 @@ enum LinnetSettingsContract {
     case rolledBack
     case rejected
     case failed
+    case terminating
   }
 
   enum RuntimePhase: String, Codable, Equatable, Sendable {
@@ -127,9 +162,42 @@ enum LinnetSettingsContract {
     case rollbackFailed = "rollback_failed"
     case deadlineExpired = "deadline_expired"
     case requesterExited = "requester_exited"
+    case coreActivationAccepted = "core_activation_accepted"
+    case coreActivationInputSourceActive = "core_activation_input_source_active"
+    case coreActivationInputSourceUnavailable = "core_activation_input_source_unavailable"
+    case coreActivationCompositionActive = "core_activation_composition_active"
+    case coreActivationDataTransactionActive = "core_activation_data_transaction_active"
+    /// Decode-only compatibility for published older Hosts, including 0.1.10's
+    /// unknown-TIS reply. Retire with the fixtures only when every supported
+    /// Host uses the current input-source-unavailable code and no legacy blocker.
+    case coreActivationApplicationsRunning = "core_activation_applications_running"
+    case coreActivationUnknownClient = "core_activation_unknown_client"
+    case coreActivationRequesterUnavailable = "core_activation_requester_unavailable"
+    case learningSyncConfigurationReloaded = "learning_sync_configuration_reloaded"
+    case learningSyncCompleted = "learning_sync_completed"
+    case learningSyncDeferred = "learning_sync_deferred"
+    case learningSyncUnavailable = "learning_sync_unavailable"
+    case learningSyncFailed = "learning_sync_failed"
+  }
+
+  enum CoreActivationBlocker: String, Codable, Equatable, Sendable {
+    case inputSourceActive = "input_source_active"
+    case inputSourceUnavailable = "input_source_unavailable"
+    case compositionActive = "composition_active"
+    case dataTransactionActive = "data_transaction_active"
+    case applicationsStillRunning = "applications_still_running"
+    case unknownClient = "unknown_client"
+    case requesterUnavailable = "requester_unavailable"
+  }
+
+  struct ProductIdentity: Codable, Equatable, Sendable {
+    let version: String
+    let build: UInt64
+    let revision: String
   }
 
   struct RuntimeHealth: Codable, Equatable, Sendable {
+    let productIdentity: ProductIdentity?
     let state: RuntimeStatus
     let phase: RuntimePhase
     let rimeVersion: String
@@ -137,6 +205,7 @@ enum LinnetSettingsContract {
     let octagramAvailable: Bool
     let availableSchemaCount: Int
     let requiredSchemaCount: Int
+    let activeTransactionID: UUID?
     let activeSettingsRevision: String?
   }
 
@@ -152,6 +221,9 @@ enum LinnetSettingsContract {
     /// Only a configuration recovery may accept the first operation's
     /// committed revision as an alternative to the original base revision.
     let alternateSettingsRevision: String?
+    /// A missing value denotes a published Settings client that predates the
+    /// durable native learning-data logical view declaration.
+    let nativeLearningDataVersion: UInt?
 
     init(
       transactionID: UUID,
@@ -162,7 +234,8 @@ enum LinnetSettingsContract {
       expectedActiveGeneration: Int? = nil,
       expectedActiveStateSHA256: String? = nil,
       expectedSettingsRevision: String? = nil,
-      alternateSettingsRevision: String? = nil
+      alternateSettingsRevision: String? = nil,
+      nativeLearningDataVersion: UInt? = LinnetSettingsContract.nativeLearningDataVersion
     ) {
       self.transactionID = transactionID
       self.command = command
@@ -173,6 +246,7 @@ enum LinnetSettingsContract {
       self.expectedActiveStateSHA256 = expectedActiveStateSHA256
       self.expectedSettingsRevision = expectedSettingsRevision
       self.alternateSettingsRevision = alternateSettingsRevision
+      self.nativeLearningDataVersion = nativeLearningDataVersion
     }
   }
 
@@ -188,12 +262,37 @@ enum LinnetSettingsContract {
   private static let cloudSyncEnabledKey = "cloud_sync.enabled_v1"
   private static let legacyCloudSyncFolderBookmarkKey = "cloud_sync.folder_bookmark_v1"
   private static let cloudSyncLastAttemptKey = "cloud_sync.last_attempt_v1"
-  private static let inputMethodConnectionKey = "InputMethodConnectionName"
-  static let cloudSyncConfigurationDidChange = Notification.Name(
-    "io.github.ares-x.inputmethod.Linnet.cloud-sync-configuration-v1")
-  static let cloudSyncNowRequested = Notification.Name(
-    "io.github.ares-x.inputmethod.Linnet.cloud-sync-now-v1")
+  private static let cloudSyncStatusKey = "cloud_sync.status_v1"
+  static let cloudSyncStatusChanged = Notification.Name("Linnet.learningSyncStatusChanged")
 
+  struct CloudSyncStatus {
+    let result: RuntimeReplyCode
+    let finishedAt: Date
+    let lastSuccess: Date?
+  }
+
+  static func cloudSyncStatus(startingAt bundle: Bundle = .main) -> CloudSyncStatus? {
+    guard let stored = hostDefaults(startingAt: bundle)?.dictionary(forKey: cloudSyncStatusKey),
+      let raw = stored["result"] as? String, let result = RuntimeReplyCode(rawValue: raw),
+      let finishedAt = stored["finishedAt"] as? Date else { return nil }
+    return .init(result: result, finishedAt: finishedAt, lastSuccess: stored["lastSuccess"] as? Date)
+  }
+
+  @discardableResult
+  static func setCloudSyncResult(
+    _ result: RuntimeReplyCode, at date: Date = Date(), startingAt bundle: Bundle = .main
+  ) -> Bool {
+    guard let defaults = hostDefaults(startingAt: bundle) else { return false }
+    var stored = defaults.dictionary(forKey: cloudSyncStatusKey) ?? [:]
+    stored["result"] = result.rawValue
+    stored["finishedAt"] = date
+    if result == .learningSyncCompleted { stored["lastSuccess"] = date }
+    defaults.set(stored, forKey: cloudSyncStatusKey)
+    DistributedNotificationCenter.default().postNotificationName(
+      cloudSyncStatusChanged, object: nil, userInfo: nil, deliverImmediately: true)
+    return true
+  }
+  private static let inputMethodConnectionKey = "InputMethodConnectionName"
   static func hostBundle(startingAt bundle: Bundle = .main) -> Bundle? {
     if isInputMethod(bundle) {
       return bundle
@@ -243,7 +342,6 @@ enum LinnetSettingsContract {
     }
     defaults.set(true, forKey: cloudSyncEnabledKey)
     defaults.removeObject(forKey: legacyCloudSyncFolderBookmarkKey)
-    _ = defaults.synchronize()
     return true
   }
 
@@ -255,7 +353,7 @@ enum LinnetSettingsContract {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
     defaults.set(enabled, forKey: cloudSyncEnabledKey)
     defaults.removeObject(forKey: legacyCloudSyncFolderBookmarkKey)
-    return defaults.synchronize()
+    return true
   }
 
   static func cloudSyncLastAttempt(startingAt bundle: Bundle = .main) -> Date? {
@@ -269,7 +367,7 @@ enum LinnetSettingsContract {
   ) -> Bool {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
     defaults.set(date, forKey: cloudSyncLastAttemptKey)
-    return defaults.synchronize()
+    return true
   }
 
   static func dataRegistry(startingAt bundle: Bundle = .main) -> LinnetDataRegistry? {
@@ -287,14 +385,6 @@ enum LinnetSettingsContract {
     return try? LinnetDataRegistry(productName: productName, coreVersion: coreVersion)
   }
 
-  static func hostUserDirectory(startingAt bundle: Bundle = .main) -> URL? {
-    dataRegistry(startingAt: bundle)?.userDataDirectory
-  }
-
-  static func dataTransactionsRoot(startingAt bundle: Bundle = .main) -> URL? {
-    dataRegistry(startingAt: bundle)?.transactionsDirectory
-  }
-
   static func validDataRequest(_ request: DataRequest) -> Bool {
     request.requesterPID > 0 && request.deadline.timeIntervalSince1970.isFinite
       && validDataRequestShape(
@@ -304,23 +394,6 @@ enum LinnetSettingsContract {
         expectedDigest: request.expectedActiveStateSHA256,
         expectedSettingsRevision: request.expectedSettingsRevision,
         alternateSettingsRevision: request.alternateSettingsRevision)
-  }
-
-  static func validRuntimeReply(_ reply: RuntimeReply) -> Bool {
-    guard !reply.detail.isEmpty else { return false }
-    guard let health = reply.health else { return true }
-    let validSettingsRevision: Bool
-    if let activeSettingsRevision = health.activeSettingsRevision {
-      validSettingsRevision = isSHA256(activeSettingsRevision)
-    } else {
-      validSettingsRevision = health.state == .degraded
-    }
-    return [.running, .paused, .degraded].contains(health.state)
-      && !health.rimeVersion.isEmpty
-      && health.availableSchemaCount >= 0
-      && health.requiredSchemaCount > 0
-      && health.availableSchemaCount <= health.requiredSchemaCount
-      && validSettingsRevision
   }
 
   static func requesterIsAlive(_ pid: Int32) -> Bool {
@@ -335,6 +408,58 @@ enum LinnetSettingsContract {
 }
 
 extension LinnetSettingsContract {
+  static func productIdentity(startingAt bundle: Bundle = .main) -> ProductIdentity? {
+    guard let host = hostBundle(startingAt: bundle) else { return nil }
+    return productIdentity(at: host.bundleURL)
+  }
+
+  static func productIdentity(at hostURL: URL) -> ProductIdentity? {
+    guard
+      // Bundle caches Info.plist for the process lifetime. Installed identity
+      // must read both files from disk; Host captures this result once at start.
+      let infoData = try? Data(contentsOf: hostURL.appending(path: "Contents/Info.plist")),
+      let info = try? PropertyListSerialization.propertyList(
+        from: infoData, options: [], format: nil) as? [String: Any],
+      let version = info["CFBundleShortVersionString"] as? String,
+      !version.isEmpty,
+      let buildText = info["CFBundleVersion"] as? String,
+      let build = UInt64(buildText), build > 0,
+      let data = try? Data(contentsOf: hostURL.appending(
+        path: "Contents/Resources/LinnetRelease/VERSION.json")),
+      let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      document["version"] as? String == version,
+      document["build"] as? String == buildText,
+      let source = document["source"] as? [String: Any],
+      let revision = source["candidate_revision"] as? String,
+      isRevision(revision)
+    else { return nil }
+    return .init(version: version, build: build, revision: revision)
+  }
+
+  static func validRuntimeReply(_ reply: RuntimeReply) -> Bool {
+    guard !reply.detail.isEmpty else { return false }
+    guard let health = reply.health else { return true }
+    let validSettingsRevision: Bool
+    if let activeSettingsRevision = health.activeSettingsRevision {
+      validSettingsRevision = isSHA256(activeSettingsRevision)
+    } else {
+      validSettingsRevision = health.state == .degraded
+    }
+    let validProductIdentity = if let productIdentity = health.productIdentity {
+      !productIdentity.version.isEmpty && productIdentity.build > 0
+        && isRevision(productIdentity.revision)
+    } else {
+      true
+    }
+    return [.running, .paused, .degraded].contains(health.state)
+      && validProductIdentity
+      && !health.rimeVersion.isEmpty
+      && health.availableSchemaCount >= 0
+      && health.requiredSchemaCount > 0
+      && health.availableSchemaCount <= health.requiredSchemaCount
+      && validSettingsRevision
+  }
+
   fileprivate static func validDataRequestShape(
     command: DataCommand,
     candidate: URL?,
@@ -380,6 +505,12 @@ extension LinnetSettingsContract {
     }
   }
 
+  fileprivate static func isRevision(_ value: String) -> Bool {
+    value.count == 40 && value.unicodeScalars.allSatisfy {
+      CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+    }
+  }
+
   fileprivate static func isInputMethod(_ bundle: Bundle) -> Bool {
     bundle.object(forInfoDictionaryKey: inputMethodConnectionKey) != nil
   }
@@ -390,7 +521,77 @@ extension LinnetSettingsContract {
     else {
       return nil
     }
-    return UserDefaults(suiteName: identifier)
+    return preferenceDefaults(
+      hostIdentifier: identifier,
+      runningIdentifier: Bundle.main.bundleIdentifier)
   }
 
+  /// The Host's own preferences are its standard domain. Embedded Settings
+  /// crosses the bundle boundary and therefore opens the Host-named suite.
+  static func preferenceDefaults(
+    hostIdentifier: String,
+    runningIdentifier: String?
+  ) -> UserDefaults? {
+    if hostIdentifier == runningIdentifier {
+      return .standard
+    }
+    return UserDefaults(suiteName: hostIdentifier)
+  }
+
+}
+
+/// The single interpretation owner for optional HIToolbox selection evidence.
+/// A missing or empty identifier is unknown, never proof that Linnet is inactive.
+enum LinnetInputSourceSelection: Equatable, Sendable {
+  case linnet
+  case other
+  case unknown
+
+  static func classify(
+    currentIdentifier: String?,
+    linnetIdentifier: String
+  ) -> Self {
+    guard let currentIdentifier, !currentIdentifier.isEmpty else {
+      return .unknown
+    }
+    return currentIdentifier == linnetIdentifier ? .linnet : .other
+  }
+}
+
+/// Pure fail-closed decision owner for the explicit Core activation boundary.
+/// Switching away from Linnet ends active input ownership; inactive client
+/// processes do not need to exit before the Host replaces itself.
+enum LinnetCoreActivationGate {
+  enum Decision: Equatable, Sendable {
+    case ready
+    case blocked(LinnetSettingsContract.RuntimeReplyCode)
+
+    var isReady: Bool { self == .ready }
+  }
+
+  static func evaluate(
+    selectedInputSource: LinnetInputSourceSelection,
+    compositionIsActive: Bool,
+    dataTransactionIsActive: Bool,
+    requesterIsAlive: Bool
+  ) -> Decision {
+    if dataTransactionIsActive {
+      return .blocked(.coreActivationDataTransactionActive)
+    }
+    switch selectedInputSource {
+    case .linnet:
+      return .blocked(.coreActivationInputSourceActive)
+    case .unknown:
+      return .blocked(.coreActivationInputSourceUnavailable)
+    case .other:
+      break
+    }
+    if compositionIsActive {
+      return .blocked(.coreActivationCompositionActive)
+    }
+    guard requesterIsAlive else {
+      return .blocked(.coreActivationRequesterUnavailable)
+    }
+    return .ready
+  }
 }

@@ -9,6 +9,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-2022
+    timeout-minutes: 75
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -68,7 +69,8 @@ jobs:
             -DataRoot (Join-Path $windowsInputs 'data') `
             -EmbeddedLuaHeader (Join-Path $windowsInputs 'build/windows-inputs/linnet_embedded_lua.h') `
             -WeaselConfig (Join-Path $windowsInputs 'build/windows-inputs/weasel.yaml') `
-            -ThemePreviewRoot (Join-Path $windowsInputs 'build/windows-inputs/preview')
+            -ThemePreviewRoot (Join-Path $windowsInputs 'build/windows-inputs/preview') `
+            -InputDefaults (Join-Path $windowsInputs 'build/windows-inputs/linnet_windows_defaults.yaml')
 
       - name: Build Windows installer
         shell: pwsh

@@ -6,14 +6,6 @@ import SQLite3
 /// Offline, one-shot migration from Hallelujah's substitution store into the
 /// Linnet `x;` stable table. The input process never links or calls this type.
 enum HallelujahSubstitutionImporter {
-  private struct ColumnDefinition {
-    let name: String
-    let type: String
-    let notNull: Int32
-    let primaryKey: Int32
-    let defaultIsNull: Bool
-  }
-
   static let maximumSourceDatabaseBytes = 64 * 1024 * 1024
   static let maximumSourceSidecarBytes = 64 * 1024 * 1024
   static let maximumSourceAggregateBytes = 128 * 1024 * 1024
@@ -25,30 +17,13 @@ enum HallelujahSubstitutionImporter {
 
   typealias CancellationCheck = () throws -> Void
 
-  enum Outcome: Equatable, Sendable { case imported, unchanged }
-
-  struct Collision: Equatable, Sendable {
-    let trigger: String
-    let keptKey: String
-    let ignoredKey: String
-  }
-
-  struct ExistingConflict: Equatable, Sendable {
-    let trigger: String
-    let valuesMatch: Bool
-  }
-
   struct SmokeProbe: Equatable, Sendable {
     let trigger: String
     let expectedValue: String
   }
 
   struct Report: Equatable, Sendable {
-    let outcome: Outcome
-    let fingerprint: String
     let importedCount: Int
-    let collisions: [Collision]
-    let existingConflicts: [ExistingConflict]
     let smokeProbe: SmokeProbe?
   }
 
@@ -58,7 +33,6 @@ enum HallelujahSubstitutionImporter {
   struct PreparedSource: Sendable {
     fileprivate let sourceDatabase: URL
     fileprivate let entries: [Entry]
-    fileprivate let collisions: [Collision]
     let fingerprint: String
 
     var substitutionCount: Int { entries.count }
@@ -92,6 +66,20 @@ enum HallelujahSubstitutionImporter {
     let trigger: String
     let value: String
     let weight: String?
+  }
+
+  private struct SourceColumn {
+    let name: String
+    let type: String
+    let required: Bool
+    let primaryKey: Bool
+    let defaultIsNull: Bool
+  }
+
+  private struct ExistingTableAccumulator {
+    var entries: [String: Entry] = [:]
+    var fingerprint: String?
+    var commentsEnabled = true
   }
 
   private static let fingerprintKey = "/linnet_hallelujah_fingerprint"
@@ -146,13 +134,12 @@ enum HallelujahSubstitutionImporter {
     let control = OperationControl(timeout: timeout, cancellation: cancellation)
     try control.checkpoint()
     try validateSourceFootprint(sourceDatabase)
-    let loaded = try loadSource(sourceDatabase, control: control)
+    let entries = try loadSource(sourceDatabase, control: control)
     try validateSourceFootprint(sourceDatabase)
-    let fingerprint = try contentFingerprint(loaded.entries, control: control)
+    let fingerprint = try contentFingerprint(entries, control: control)
     return PreparedSource(
       sourceDatabase: URL(fileURLWithPath: try resolvedPath(sourceDatabase)),
-      entries: loaded.entries,
-      collisions: loaded.collisions,
+      entries: entries,
       fingerprint: fingerprint
     )
   }
@@ -173,26 +160,20 @@ enum HallelujahSubstitutionImporter {
     let existing = try loadExisting(destinationTable, control: control)
     if existing.fingerprint == prepared.fingerprint {
       return Report(
-        outcome: .unchanged, fingerprint: prepared.fingerprint, importedCount: 0,
-        collisions: prepared.collisions, existingConflicts: [],
+        importedCount: 0,
         smokeProbe: existing.entries.first.map {
           SmokeProbe(trigger: $0.trigger, expectedValue: $0.value)
         })
     }
 
     var merged = Dictionary(uniqueKeysWithValues: existing.entries.map { ($0.trigger, $0) })
-    var conflicts: [ExistingConflict] = []
     var importedCount = 0
     for entry in prepared.entries {
       try control.checkpoint()
-      if let current = merged[entry.trigger] {
-        conflicts.append(
-          ExistingConflict(trigger: entry.trigger, valuesMatch: current.value == entry.value))
-      } else {
-        guard merged.count < maximumRows else { throw Failure.outputTooLarge }
-        merged[entry.trigger] = entry
-        importedCount += 1
-      }
+      if merged[entry.trigger] != nil { continue }
+      guard merged.count < maximumRows else { throw Failure.outputTooLarge }
+      merged[entry.trigger] = entry
+      importedCount += 1
     }
 
     let rows = merged.values.sorted { $0.trigger < $1.trigger }
@@ -209,9 +190,7 @@ enum HallelujahSubstitutionImporter {
       throw Failure.writeFailed
     }
     return Report(
-      outcome: .imported, fingerprint: prepared.fingerprint, importedCount: importedCount,
-      collisions: prepared.collisions,
-      existingConflicts: conflicts.sorted { $0.trigger < $1.trigger },
+      importedCount: importedCount,
       smokeProbe: rows.first.map {
         SmokeProbe(trigger: $0.trigger, expectedValue: $0.value)
       })
@@ -223,20 +202,8 @@ extension HallelujahSubstitutionImporter {
   private static func loadSource(
     _ url: URL,
     control: OperationControl
-  ) throws -> (entries: [Entry], collisions: [Collision]) {
-    var database: OpaquePointer?
-    guard
-      sqlite3_open_v2(
-        try resolvedPath(url),
-        &database,
-        SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_NOFOLLOW,
-        nil
-      )
-        == SQLITE_OK, let database
-    else {
-      if database != nil { sqlite3_close_v2(database) }
-      try control.rethrowInterruption(or: .sourceOpen)
-    }
+  ) throws -> [Entry] {
+    let database = try openSourceDatabase(url, control: control)
     defer { sqlite3_close_v2(database) }
     sqlite3_progress_handler(
       database,
@@ -252,17 +219,47 @@ extension HallelujahSubstitutionImporter {
     }
     try control.checkpoint()
     try validateSchema(database, control: control)
-
-    var statement: OpaquePointer?
-    guard
-      sqlite3_prepare_v2(
-        database, "SELECT key, value FROM substitutions ORDER BY key COLLATE BINARY", -1,
-        &statement, nil) == SQLITE_OK, let statement
-    else { try control.rethrowInterruption(or: .sourceRead) }
+    let statement = try substitutionStatement(database, control: control)
     defer { sqlite3_finalize(statement) }
+    return try readSourceRows(statement, control: control)
+  }
 
-    var entries: [String: (entry: Entry, originalKey: String)] = [:]
-    var collisions: [Collision] = []
+  private static func openSourceDatabase(
+    _ url: URL,
+    control: OperationControl
+  ) throws -> OpaquePointer {
+    var database: OpaquePointer?
+    guard sqlite3_open_v2(
+      try resolvedPath(url),
+      &database,
+      SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_NOFOLLOW,
+      nil
+    ) == SQLITE_OK, let database else {
+      if database != nil { sqlite3_close_v2(database) }
+      try control.rethrowInterruption(or: .sourceOpen)
+    }
+    return database
+  }
+
+  private static func substitutionStatement(
+    _ database: OpaquePointer,
+    control: OperationControl
+  ) throws -> OpaquePointer {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(
+      database, "SELECT key, value FROM substitutions ORDER BY key COLLATE BINARY", -1,
+      &statement, nil
+    ) == SQLITE_OK, let statement else {
+      try control.rethrowInterruption(or: .sourceRead)
+    }
+    return statement
+  }
+
+  private static func readSourceRows(
+    _ statement: OpaquePointer,
+    control: OperationControl
+  ) throws -> [Entry] {
+    var entries: [String: Entry] = [:]
     var row = 0
     var aggregateBytes = 0
     while true {
@@ -284,15 +281,10 @@ extension HallelujahSubstitutionImporter {
       guard let trigger = normalizeTrigger(key) else { throw Failure.invalidTrigger(row: row) }
       try validateValue(value, row: row)
       let entry = Entry(trigger: trigger, value: value, weight: nil)
-      if let prior = entries[trigger] {
-        collisions.append(
-          Collision(trigger: trigger, keptKey: prior.originalKey, ignoredKey: key))
-      } else {
-        entries[trigger] = (entry, key)
-      }
+      if entries[trigger] == nil { entries[trigger] = entry }
     }
     try control.checkpoint()
-    return (entries.values.map(\.entry).sorted { $0.trigger < $1.trigger }, collisions)
+    return entries.values.sorted { $0.trigger < $1.trigger }
   }
 
   private static func validateSchema(
@@ -320,25 +312,26 @@ extension HallelujahSubstitutionImporter {
         == SQLITE_OK, let schemaStatement
     else { try control.rethrowInterruption(or: .invalidSchema) }
     defer { sqlite3_finalize(schemaStatement) }
-    var columns: [ColumnDefinition] = []
+    var columns: [SourceColumn] = []
     var result = sqlite3_step(schemaStatement)
     while result == SQLITE_ROW {
       guard let name = rawText(schemaStatement, column: 1),
         let type = rawText(schemaStatement, column: 2)
       else { try control.rethrowInterruption(or: .invalidSchema) }
-      columns.append(.init(
+      columns.append(SourceColumn(
         name: name,
         type: type.uppercased(),
-        notNull: sqlite3_column_int(schemaStatement, 3),
-        primaryKey: sqlite3_column_int(schemaStatement, 5),
-        defaultIsNull: sqlite3_column_type(schemaStatement, 4) == SQLITE_NULL))
+        required: sqlite3_column_int(schemaStatement, 3) != 0,
+        primaryKey: sqlite3_column_int(schemaStatement, 5) != 0,
+        defaultIsNull: sqlite3_column_type(schemaStatement, 4) == SQLITE_NULL
+      ))
       result = sqlite3_step(schemaStatement)
     }
     guard result == SQLITE_DONE, columns.count == 2,
-      columns[0].name == "key", columns[0].type == "TEXT", columns[0].notNull == 0,
-      columns[0].primaryKey == 1, columns[0].defaultIsNull,
-      columns[1].name == "value", columns[1].type == "TEXT", columns[1].notNull == 0,
-      columns[1].primaryKey == 0, columns[1].defaultIsNull
+      columns[0].name == "key", columns[0].type == "TEXT", !columns[0].required,
+      columns[0].primaryKey, columns[0].defaultIsNull,
+      columns[1].name == "value", columns[1].type == "TEXT", !columns[1].required,
+      !columns[1].primaryKey, columns[1].defaultIsNull
     else { try control.rethrowInterruption(or: .invalidSchema) }
   }
 
@@ -376,8 +369,8 @@ extension HallelujahSubstitutionImporter {
       default: return nil
       }
     }
-    guard let key = String(bytes: normalized, encoding: .utf8) else { return nil }
-    return "x;" + key
+    guard let suffix = String(bytes: normalized, encoding: .utf8) else { return nil }
+    return "x;" + suffix
   }
 
   private static func validateValue(_ value: String, row: Int) throws {
@@ -411,9 +404,25 @@ extension HallelujahSubstitutionImporter {
     _ url: URL,
     control: OperationControl
   ) throws -> (entries: [Entry], fingerprint: String?) {
+    guard let contents = try existingTableContents(url, control: control) else {
+      return ([], nil)
+    }
+    var accumulator = ExistingTableAccumulator()
+    try parseExistingTable(contents, control: control, accumulator: &accumulator)
+    try validateFingerprint(accumulator.fingerprint)
+    return (
+      accumulator.entries.values.sorted { $0.trigger < $1.trigger },
+      accumulator.fingerprint
+    )
+  }
+
+  private static func existingTableContents(
+    _ url: URL,
+    control: OperationControl
+  ) throws -> String? {
     var info = stat()
     if lstat(url.path, &info) != 0 {
-      if errno == ENOENT { return ([], nil) }
+      if errno == ENOENT { return nil }
       throw Failure.invalidExistingTable(line: 0)
     }
     let data: Data
@@ -435,9 +444,14 @@ extension HallelujahSubstitutionImporter {
     guard let contents = String(data: data, encoding: .utf8) else {
       throw Failure.invalidExistingTable(line: 0)
     }
-    var entries: [String: Entry] = [:]
-    var fingerprint: String?
-    var commentsEnabled = true
+    return contents
+  }
+
+  private static func parseExistingTable(
+    _ contents: String,
+    control: OperationControl,
+    accumulator: inout ExistingTableAccumulator
+  ) throws {
     var cursor = contents.startIndex
     var lineNumber = 0
     while cursor < contents.endIndex {
@@ -453,59 +467,68 @@ extension HallelujahSubstitutionImporter {
       }
       let rawLine = String(lineSlice)
       let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
-      try parseExistingLine(
-        line,
-        number: lineNumber,
-        entries: &entries,
-        fingerprint: &fingerprint,
-        commentsEnabled: &commentsEnabled
-      )
+      try parseExistingLine(line, lineNumber: lineNumber, accumulator: &accumulator)
     }
-    if let fingerprint,
-      fingerprint.utf8.count != 64
-        || fingerprint.utf8.contains(where: {
-          !(48...57).contains($0) && !(97...102).contains($0)
-        }) {
-      throw Failure.invalidExistingTable(line: 0)
-    }
-    return (entries.values.sorted { $0.trigger < $1.trigger }, fingerprint)
   }
 
-  /// Owns the accepted Rime-table line grammar. The reader above owns only
-  /// bounded byte traversal and delegates every non-byte interpretation here.
   private static func parseExistingLine(
     _ line: String,
-    number: Int,
-    entries: inout [String: Entry],
-    fingerprint: inout String?,
-    commentsEnabled: inout Bool
+    lineNumber: Int,
+    accumulator: inout ExistingTableAccumulator
   ) throws {
     if line.isEmpty { return }
-    if commentsEnabled, line == "# no comment" {
-      commentsEnabled = false
-      return
-    }
-    if commentsEnabled, line.hasPrefix("#") {
-      let prefix = "#@\(fingerprintKey)\t"
-      if line.hasPrefix(prefix) {
-        guard fingerprint == nil else { throw Failure.invalidExistingTable(line: number) }
-        fingerprint = String(line.dropFirst(prefix.count))
+    if accumulator.commentsEnabled {
+      if line == "# no comment" {
+        accumulator.commentsEnabled = false
+        return
       }
-      return
+      if line.hasPrefix("#") {
+        try parseExistingComment(line, lineNumber: lineNumber, accumulator: &accumulator)
+        return
+      }
     }
     let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-    guard fields.count == 2 || fields.count == 3,
+    guard [2, 3].contains(fields.count),
       fields.allSatisfy({ $0.utf8.count <= maximumFieldBytes }),
       !fields[0].isEmpty, fields[1].hasPrefix("x;"),
       let trigger = normalizeTrigger(String(fields[1].dropFirst(2)))
     else {
-      throw Failure.invalidExistingTable(line: number)
+      throw Failure.invalidExistingTable(line: lineNumber)
     }
-    try validateValue(fields[0], row: number)
-    guard entries[trigger] == nil else { throw Failure.duplicateExistingTrigger(trigger) }
-    guard entries.count < maximumRows else { throw Failure.tooManyRows }
-    entries[trigger] = Entry(
-      trigger: trigger, value: fields[0], weight: fields.count == 3 ? fields[2] : nil)
+    try validateValue(fields[0], row: lineNumber)
+    guard accumulator.entries[trigger] == nil else {
+      throw Failure.duplicateExistingTrigger(trigger)
+    }
+    guard accumulator.entries.count < maximumRows else { throw Failure.tooManyRows }
+    accumulator.entries[trigger] = Entry(
+      trigger: trigger,
+      value: fields[0],
+      weight: fields.count == 3 ? fields[2] : nil
+    )
+  }
+
+  private static func parseExistingComment(
+    _ line: String,
+    lineNumber: Int,
+    accumulator: inout ExistingTableAccumulator
+  ) throws {
+    let prefix = "#@\(fingerprintKey)\t"
+    guard line.hasPrefix(prefix) else { return }
+    guard accumulator.fingerprint == nil else {
+      throw Failure.invalidExistingTable(line: lineNumber)
+    }
+    accumulator.fingerprint = String(line.dropFirst(prefix.count))
+  }
+
+  private static func validateFingerprint(_ fingerprint: String?) throws {
+    guard let fingerprint else { return }
+    guard fingerprint.utf8.count == 64,
+      !fingerprint.utf8.contains(where: {
+        !(48...57).contains($0) && !(97...102).contains($0)
+      })
+    else {
+      throw Failure.invalidExistingTable(line: 0)
+    }
   }
 
   private static func render(

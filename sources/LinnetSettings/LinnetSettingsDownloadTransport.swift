@@ -80,25 +80,32 @@ struct LinnetSettingsDownloadTransport: @unchecked Sendable {
       configuration: configuration,
       idleNanoseconds: Self.nanoseconds(policy.idleTimeout),
       deadlineUptimeNanoseconds: try deadline(maximum: policy.catalogTimeout),
-      maximumRedirects: policy.maximumRedirects
+      maximumRedirects: policy.maximumRedirects,
+      progress: { _ in }
     )
     guard let data = try await transfer.run() else { throw Failure.invalidResponse }
     return data
   }
 
-  func downloadPack(_ artifact: LinnetDataChannel.Artifact, to destination: URL) async throws {
-    guard artifact.bytes > 0,
-      artifact.bytes <= LinnetPackContract.maximumContainerBytes
+  func downloadArtifact(
+    from url: URL,
+    expectedBytes: UInt64,
+    to destination: URL,
+    progress: @escaping @Sendable (Double) -> Void = { _ in }
+  ) async throws {
+    guard expectedBytes > 0,
+      expectedBytes <= LinnetPackContract.maximumContainerBytes
     else { throw Failure.responseTooLarge }
     let configuration = try configuredSession()
     let transfer = try Transfer(
-      request: request(for: artifact.url, source: source),
+      request: request(for: url, source: source),
       source: source,
-      mode: .pack(expectedBytes: artifact.bytes, destination: destination),
+      mode: .pack(expectedBytes: expectedBytes, destination: destination),
       configuration: configuration,
       idleNanoseconds: Self.nanoseconds(policy.idleTimeout),
       deadlineUptimeNanoseconds: try deadline(maximum: policy.operationTimeout),
-      maximumRedirects: policy.maximumRedirects
+      maximumRedirects: policy.maximumRedirects,
+      progress: progress
     )
     _ = try await transfer.run()
   }
@@ -179,6 +186,7 @@ private extension LinnetSettingsDownloadTransport {
     private let idleNanoseconds: UInt64
     private let deadlineUptimeNanoseconds: UInt64
     private let maximumRedirects: Int
+    private let progress: @Sendable (Double) -> Void
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Data?, Error>?
     private var session: URLSession?
@@ -195,10 +203,14 @@ private extension LinnetSettingsDownloadTransport {
     private var sink: LinnetSettingsExclusiveFileSink?
 
     init(
-      request: URLRequest, source: LinnetSettingsDownloadSource, mode: Mode,
+      request: URLRequest,
+      source: LinnetSettingsDownloadSource,
+      mode: Mode,
       configuration: URLSessionConfiguration,
-      idleNanoseconds: UInt64, deadlineUptimeNanoseconds: UInt64,
-      maximumRedirects: Int
+      idleNanoseconds: UInt64,
+      deadlineUptimeNanoseconds: UInt64,
+      maximumRedirects: Int,
+      progress: @escaping @Sendable (Double) -> Void
     ) throws {
       guard let url = request.url, source.allowsTransferURL(url) else {
         throw Failure.invalidURL
@@ -213,6 +225,7 @@ private extension LinnetSettingsDownloadTransport {
       self.idleNanoseconds = idleNanoseconds
       self.deadlineUptimeNanoseconds = deadlineUptimeNanoseconds
       self.maximumRedirects = maximumRedirects
+      self.progress = progress
       if case .pack(_, let destination) = mode {
         sink = try LinnetSettingsExclusiveFileSink(destination: destination)
       }
@@ -266,18 +279,11 @@ private extension LinnetSettingsDownloadTransport {
       }
     }
 
-    private func nextTimeoutDeadline() -> UInt64? {
-      lock.lock()
-      defer { lock.unlock() }
-      guard !terminal else { return nil }
-      let idleSum = lastProgressUptimeNanoseconds.addingReportingOverflow(idleNanoseconds)
-      let idleDeadline = idleSum.overflow ? UInt64.max : idleSum.partialValue
-      return min(deadlineUptimeNanoseconds, idleDeadline)
-    }
-
     func urlSession(
-      _ session: URLSession, task: URLSessionTask,
-      willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+      _ session: URLSession,
+      task: URLSessionTask,
+      willPerformHTTPRedirection response: HTTPURLResponse,
+      newRequest request: URLRequest,
       completionHandler: @escaping (URLRequest?) -> Void
     ) {
       lock.lock()
@@ -295,7 +301,8 @@ private extension LinnetSettingsDownloadTransport {
     }
 
     func urlSession(
-      _ session: URLSession, dataTask: URLSessionDataTask,
+      _ session: URLSession,
+      dataTask: URLSessionDataTask,
       didReceive response: URLResponse,
       completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
@@ -329,10 +336,12 @@ private extension LinnetSettingsDownloadTransport {
     }
 
     func urlSession(
-      _ session: URLSession, dataTask: URLSessionDataTask,
+      _ session: URLSession,
+      dataTask: URLSessionDataTask,
       didReceive data: Data
     ) {
       var failure: Error?
+      var reportedProgress: Double?
       lock.lock()
       if !terminal && responseAccepted {
         let count = UInt64(data.count)
@@ -348,6 +357,9 @@ private extension LinnetSettingsDownloadTransport {
               try sink.write(data)
             }
             receivedBytes += count
+            if case .pack(let expectedBytes, _) = mode {
+              reportedProgress = min(1, Double(receivedBytes) / Double(expectedBytes))
+            }
             if count > 0 {
               lastProgressUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
             }
@@ -357,11 +369,13 @@ private extension LinnetSettingsDownloadTransport {
         }
       }
       lock.unlock()
+      if let reportedProgress { progress(reportedProgress) }
       if let failure { complete(.failure(failure)) }
     }
 
     func urlSession(
-      _ session: URLSession, task: URLSessionTask,
+      _ session: URLSession,
+      task: URLSessionTask,
       didCompleteWithError error: Error?
     ) {
       if let error {
@@ -396,39 +410,6 @@ private extension LinnetSettingsDownloadTransport {
         }
         complete(.success(nil), publishingFile: true)
       }
-    }
-
-    private func validate(_ response: URLResponse) throws -> UInt64? {
-      guard let response = response as? HTTPURLResponse,
-        response.url.map(source.allowsTransferURL) == true
-      else { throw Failure.invalidResponse }
-      guard response.statusCode == 200 else { throw Failure.httpStatus(response.statusCode) }
-      if let encoding = response.value(forHTTPHeaderField: "Content-Encoding") {
-        guard encoding.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-          == "identity"
-        else { throw Failure.unsupportedContentEncoding }
-      }
-      let length = try Self.contentLength(response)
-      if let length {
-        switch mode {
-        case .catalog:
-          guard length <= mode.maximumBytes else { throw Failure.responseTooLarge }
-        case .pack(let expected, _):
-          guard length == expected else { throw Failure.lengthMismatch }
-        }
-      }
-      if case .pack = mode, sink == nil { throw Failure.invalidResponse }
-      return length
-    }
-
-    private static func contentLength(_ response: HTTPURLResponse) throws -> UInt64? {
-      guard let value = response.value(forHTTPHeaderField: "Content-Length") else { return nil }
-      let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !trimmed.isEmpty,
-        trimmed.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }),
-        let length = UInt64(trimmed)
-      else { throw Failure.invalidContentLength }
-      return length
     }
 
     private func complete(_ proposed: Result<Data?, Error>, publishingFile: Bool = false) {
@@ -471,5 +452,57 @@ private extension LinnetSettingsDownloadTransport {
       }
       continuation?.resume(with: result)
     }
+  }
+}
+
+private extension LinnetSettingsDownloadTransport.Transfer {
+  func validate(_ response: URLResponse) throws -> UInt64? {
+    guard let response = response as? HTTPURLResponse,
+      response.url.map(source.allowsTransferURL) == true
+    else { throw LinnetSettingsDownloadTransport.Failure.invalidResponse }
+    guard response.statusCode == 200 else {
+      throw LinnetSettingsDownloadTransport.Failure.httpStatus(response.statusCode)
+    }
+    if let encoding = response.value(forHTTPHeaderField: "Content-Encoding") {
+      guard encoding.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        == "identity"
+      else { throw LinnetSettingsDownloadTransport.Failure.unsupportedContentEncoding }
+    }
+    let length = try Self.contentLength(response)
+    if let length {
+      switch mode {
+      case .catalog:
+        guard length <= mode.maximumBytes else {
+          throw LinnetSettingsDownloadTransport.Failure.responseTooLarge
+        }
+      case .pack(let expected, _):
+        guard length == expected else {
+          throw LinnetSettingsDownloadTransport.Failure.lengthMismatch
+        }
+      }
+    }
+    if case .pack = mode, sink == nil {
+      throw LinnetSettingsDownloadTransport.Failure.invalidResponse
+    }
+    return length
+  }
+
+  static func contentLength(_ response: HTTPURLResponse) throws -> UInt64? {
+    guard let value = response.value(forHTTPHeaderField: "Content-Length") else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty,
+      trimmed.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }),
+      let length = UInt64(trimmed)
+    else { throw LinnetSettingsDownloadTransport.Failure.invalidContentLength }
+    return length
+  }
+
+  func nextTimeoutDeadline() -> UInt64? {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !terminal else { return nil }
+    let idleSum = lastProgressUptimeNanoseconds.addingReportingOverflow(idleNanoseconds)
+    let idleDeadline = idleSum.overflow ? UInt64.max : idleSum.partialValue
+    return min(deadlineUptimeNanoseconds, idleDeadline)
   }
 }

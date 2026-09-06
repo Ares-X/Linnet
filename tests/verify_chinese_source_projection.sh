@@ -48,6 +48,7 @@ selector_marker = /\Axform\/[ⅠⅡⅢⅣⅤⅥⅦⅧ]+\//
 generic_single_tone = %q{derive/^(.).+(\d)$/$1$2/}
 natural_single_key_a = %q{derive/^aa(\d)$/a/}
 full_broad_tail_start = %q{derive/([qtpdjlxbnm])iao$/$1ioa/}
+english_entity_projection = %q{xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/}
 full_individual_omissions = [
   %q{abbrev/^ng(\d)$/ng/},
   %q{erase/^ng(\d)$/},
@@ -62,8 +63,15 @@ single_abbreviations = [
 profiles.each do |local_name, source_name|
   source_profile = source.fetch(source_name)
   raise "unexpected upstream profile shape" unless source_profile.keys == ["__append"]
-  source_rules = source_profile.fetch("__append")
+  # Upstream 17.9.7 repeats the identical m̄ normalization in full pinyin.
+  # Linnet projects it once; repeated identical transforms add no behavior.
+  source_rules = source_profile.fetch("__append").each_with_object([]) do |rule, rules|
+    rules << rule unless rule == %q{xform/m̄([a-z]*)$/m$1①/} && rules.last == rule
+  end
   local_rules = local.fetch(local_name)
+  raise "#{local_name} entity projection must be its final algebra rule" unless
+    local_rules.last == english_entity_projection &&
+      local_rules.count(english_entity_projection) == 1
   raise "selector marker leaked into #{local_name}" if
     local_rules.any? { |rule| rule.match?(selector_marker) }
 
@@ -79,7 +87,7 @@ profiles.each do |local_name, source_name|
       actual_source_rules.sort == expected_source_rules.sort
     extra = local_rules.reject { |rule| source_rules.include?(rule) }
     raise "undeclared full-pinyin rule" unless
-      extra == [%q{derive/^([jqxy])v/$1u/}]
+      extra == [%q{derive/^([jqxy])v/$1u/}, english_entity_projection]
     next
   end
 
@@ -136,7 +144,7 @@ fi
 
 if rg -n '"(delta_dictionaries|longtail_dictionary)"' \
     upstreams.lock.json scripts/upstream-sync tests/verify_product.sh; then
-  fail "rime-ice Chinese dictionaries returned to the locked product inputs"
+  fail "the retired generated rime-ice delta owners returned"
 fi
 
 dictionary_imports() {
@@ -147,8 +155,9 @@ dictionary_imports() {
   ' "$1"
 }
 
-expected_core=$'linnet_reviewed\ndicts/zi\ndicts/jichu\ndicts/lianxiang\ndicts/cuoyin\ndicts/duoyin\ndicts/shici\ndicts/diming'
-expected_complete="${expected_core}"$'\ndicts/yixue\ndicts/huaxue\ndicts/yaopin\ndicts/mingren\ndicts/yiren\ndicts/wuzhong\ndicts/renming\ndicts/taifeng\ndicts/fangyan'
+expected_wanxiang_core=$'linnet_reviewed\nlinnet_english_entities\ndicts/zi\ndicts/jichu\ndicts/lianxiang\ndicts/cuoyin\ndicts/duoyin\ndicts/shici\ndicts/diming'
+expected_core="${expected_wanxiang_core}"$'\ndicts/ext'
+expected_complete="${expected_wanxiang_core}"$'\ndicts/yixue\ndicts/huaxue\ndicts/yaopin\ndicts/mingren\ndicts/yiren\ndicts/wuzhong\ndicts/renming\ndicts/taifeng\ndicts/fangyan\ndicts/ext'
 [[ "$(dictionary_imports data/linnet/linnet_zh.dict.yaml)" == "${expected_core}" ]] ||
   fail "the Core dictionary does not import the canonical direct tables"
 [[ "$(dictionary_imports data/linnet/linnet_zh_full.dict.yaml)" == "${expected_complete}" ]] ||
@@ -206,8 +215,8 @@ awk -F '\t' '
   $0 == "..." { body = 1; next }
   body && $0 !~ /^#/ && NF >= 3 { print $1 "\t" $2 }
 ' "${reviewed_dictionary}" | LC_ALL=C sort > "${scratch}/actual-reviewed.tsv"
-[[ "$(wc -l < "${scratch}/actual-reviewed.tsv" | tr -d ' ')" == 55 ]] ||
-  fail "the reviewed dictionary must contain exactly 55 accepted rows"
+[[ "$(wc -l < "${scratch}/actual-reviewed.tsv" | tr -d ' ')" == 57 ]] ||
+  fail "the reviewed dictionary must contain exactly 57 accepted rows"
 diff -u "${scratch}/expected-reviewed.tsv" "${scratch}/actual-reviewed.tsv" >/dev/null ||
   fail "the reviewed dictionary diverges from the accepted pronunciation/ranking ledgers"
 
@@ -218,6 +227,171 @@ for table in zi jichu lianxiang cuoyin duoyin shici diming \
   rg -Fq "dicts/${table}.dict.yaml" scripts/stage-linnet-data ||
     fail "staging does not project the locked table: ${table}"
 done
+ice_extended_dictionary="upstreams/rime-ice/cn_dicts/ext.dict.yaml"
+[[ -f "${ice_extended_dictionary}" && ! -L "${ice_extended_dictionary}" ]] ||
+  fail "the locked rime-ice extended dictionary is missing"
+[[ "$(rg -F -c 'cn_dicts/ext.dict.yaml' scripts/stage-linnet-data)" -eq 1 ]] ||
+  fail "staging must project exactly one rime-ice Chinese supplement"
+[[ -x scripts/project-rime-ice-ext ]] ||
+  fail "the rime-ice external-format projector is missing or not executable"
+projected_ext="${scratch}/dicts/ext.dict.yaml"
+projector_report="$(scripts/project-rime-ice-ext \
+  "${ice_extended_dictionary}" \
+  upstreams/rime-wanxiang/dicts \
+  "${projected_ext}" \
+  100000)"
+[[ "${projector_report}" == *" verified accepted; skipped "* ]] ||
+  fail "the supplement projector did not report its verified-only boundary"
+! rg -Fq 'best_guess' scripts/project-rime-ice-ext ||
+  fail "the supplement projector restored inferred multi-reading acceptance"
+if rg -Fq $'希尔瓦娜斯\t' "${projected_ext}"; then
+  fail "an ambiguous reviewed name leaked back into the automatic supplement"
+fi
+rg -Fq $'希尔瓦娜斯\txī ěr wǎ nà sī\t151' "${reviewed_dictionary}" ||
+  fail "the reviewed name exception is missing from the declarative owner"
+python3 - "${projected_ext}" <<'PY'
+import importlib.machinery
+import importlib.util
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+projected_path = Path(sys.argv[1])
+projector_path = Path("scripts/project-rime-ice-ext")
+loader = importlib.machinery.SourceFileLoader("linnet_ext_projector", str(projector_path))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+projector = importlib.util.module_from_spec(spec)
+loader.exec_module(projector)
+
+wanxiang_root = Path("upstreams/rime-wanxiang/dicts")
+source_path = Path("upstreams/rime-ice/cn_dicts/ext.dict.yaml")
+source_rows = list(projector.dictionary_rows(source_path))
+source_texts = {text for _, text, _, _ in source_rows}
+owned_texts = set()
+core_weights = defaultdict(int)
+abel_prize = None
+for table in projector.CORE_TABLES:
+    for _, text, code, weight in projector.dictionary_rows(
+        wanxiang_root / f"{table}.dict.yaml"
+    ):
+        if text in source_texts:
+            owned_texts.add(text)
+        if text == "阿贝尔奖":
+            abel_prize = (code, weight)
+        plain = " ".join(projector.tone_to_plain(code).split())
+        core_weights[plain] = max(core_weights[plain], weight)
+
+if abel_prize != ("ā bèi ěr jiǎng", 52):
+    raise SystemExit(f"Wanxiang science sample drifted: 阿贝尔奖={abel_prize}")
+
+readings = projector.load_zi(wanxiang_root / "zi.dict.yaml")
+source_status = {}
+for _, text, code, _ in source_rows:
+    if text in owned_texts:
+        continue
+    plain = " ".join(projector.tone_to_plain(code).split())
+    resolved, status = projector.resolve_tones(text, plain, readings)
+    source_status[(text, resolved)] = status
+
+lengths = Counter()
+admitted_statuses = Counter()
+seen = set()
+same_code_collisions = 0
+projected_rows = {}
+for _, text, code, weight in projector.dictionary_rows(projected_path):
+    key = (text, code)
+    if key in seen:
+        raise SystemExit(f"duplicate projected row: {text}")
+    seen.add(key)
+    if text in owned_texts:
+        raise SystemExit(f"projected supplement duplicated Wanxiang text: {text}")
+    status = source_status.get(key)
+    if status != "verified":
+        raise SystemExit(f"projected supplement admitted non-verified input: {text}")
+    admitted_statuses[status] += 1
+    plain = " ".join(projector.tone_to_plain(code).split())
+    core_weight = core_weights.get(plain)
+    if core_weight is not None and weight >= core_weight:
+        raise SystemExit(
+            f"projected supplement can outrank Wanxiang for {plain}: "
+            f"{text}={weight}, Wanxiang={core_weight}"
+        )
+    if core_weight is not None:
+        same_code_collisions += 1
+    lengths[len(text)] += 1
+    projected_rows[text] = (code, weight)
+
+if admitted_statuses != Counter({"verified": sum(lengths.values())}):
+    raise SystemExit(f"projected supplement status mix changed: {admitted_statuses}")
+
+# This is a reviewed value sample, not an inferred quality score. It keeps one
+# real product row in every accepted length/rank stratum and across distinct
+# domains so a large but low-value projection cannot satisfy the gate by count.
+reviewed_samples = {
+    "person": ("阿黛尔", "ā dài ěr", 13, 3),
+    "science": ("零点定理", "líng diǎn dìng lǐ", 6, 4),
+    "medicine": ("阿尔茨海默", "ā ěr cí hǎi mò", 151, 5),
+    "education": ("阿亨科技大学", "ā hēng kē jì dà xué", 163, 6),
+    "technology": ("生成式人工智能", "shēng chéng shì rén gōng zhì néng", 163, 7),
+}
+for domain, (text, expected_code, expected_weight, expected_length) in reviewed_samples.items():
+    actual = projected_rows.get(text)
+    if actual != (expected_code, expected_weight) or len(text) != expected_length:
+        raise SystemExit(
+            f"reviewed {domain} supplement sample drifted: {text}={actual}"
+        )
+if {sample[2] for sample in reviewed_samples.values()} != {6, 13, 151, 163}:
+    raise SystemExit("reviewed supplement samples lost a projected rank stratum")
+if same_code_collisions < 4000:
+    raise SystemExit(
+        f"supplement/core collision proof became vacuous: {same_code_collisions}"
+    )
+
+minimums = {3: 18000, 4: 40000, 5: 25000, 6: 9000, 7: 4500}
+for length, minimum in minimums.items():
+    actual = (
+        sum(count for row_length, count in lengths.items() if row_length >= 7)
+        if length == 7
+        else lengths[length]
+    )
+    if actual < minimum:
+        raise SystemExit(
+            f"verified supplement length stratum {length} has {actual}, expected {minimum}"
+        )
+print(
+    "verified supplement quality: PASS "
+    f"({sum(lengths.values())} rows; best_guess=0; unverified=0; "
+    f"reviewed domains={len(reviewed_samples)}; "
+    f"same-code floors={same_code_collisions}; "
+    f"length strata {dict(sorted(lengths.items()))})"
+)
+PY
+rg -Fq '"dicts/diming.dict.yaml", "dicts/ext.dict.yaml"' \
+  sources/LinnetPackContract.swift ||
+  fail "the Chinese pack contract does not own the projected supplement"
+rg -Fq 'for name in zi jichu lianxiang cuoyin duoyin shici diming ext; do' \
+  package/stage_language_pack_sources ||
+  fail "the Chinese pack staging owner omits the projected supplement"
+ruby -e '
+  source = File.binread("package/stage_language_pack_sources")
+  standard = %q{verify_dictionary_root "${chinese}/linnet_zh.dict.yaml" \
+  "${chinese}" "${english}" --}
+  complete = %q{verify_dictionary_root "${extended}/linnet_zh_full.dict.yaml" \
+  "${chinese}" "${english}" "${extended}" --}
+  abort "Standard Chinese cannot resolve the English entity dictionary" unless
+    source.include?(standard)
+  abort "Complete Chinese cannot resolve the English entity dictionary" unless
+    source.include?(complete)
+' || fail "Chinese pack dictionary roots lost their cross-pack entity owner"
+[[ "$(rg -F -c 'linnet_english_entities.dict.yaml' scripts/stage-linnet-data)" -ge 4 ]] ||
+  fail "staging does not fingerprint, validate, copy, and inventory the English entities"
+if rg -n $'^.{1,2}\t' "${projected_ext}"; then
+  fail "the extended supplement admitted a one- or two-character row"
+fi
+if rg -n 'cn_dicts/(base|tencent|41448|8105|others)[.]dict[.]yaml' \
+    scripts/stage-linnet-data data/linnet/linnet_zh*.dict.yaml; then
+  fail "an undeclared rime-ice Chinese table entered the product graph"
+fi
 rg -Fq "${source_patch}" scripts/stage-linnet-data ||
   fail "staging does not apply the reviewed source patch"
 rg -Fq "${reviewed_dictionary}" scripts/stage-linnet-data ||

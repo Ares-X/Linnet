@@ -1,14 +1,17 @@
 SHELL := /bin/bash
 
-.PHONY: all install deps release debug community community-verified
+.PHONY: all release debug community community-verified
 
 all: release
-install: install-release
 
 RIME_BIN_DIR = librime/dist/bin
 RIME_LIB_DIR = librime/dist/lib
 DERIVED_DATA_PATH = build
-XCODE_DESTINATION ?= generic/platform=macOS
+LOCAL_DERIVED_DATA_PATH = $(abspath $(DERIVED_DATA_PATH)/Local)
+LOCAL_RELEASE_PRODUCTS = $(LOCAL_DERIVED_DATA_PATH)/Build/Products/Release
+CANDIDATE_RELEASE_PRODUCTS = $(abspath $(DERIVED_DATA_PATH)/Candidate.noindex/Release)
+CANDIDATE_RELEASE_APP = $(CANDIDATE_RELEASE_PRODUCTS)/Linnet.candidate
+CANDIDATE_RELEASE_SETTINGS = $(CANDIDATE_RELEASE_PRODUCTS)/Settings.candidate
 ARCHIVE_OUTPUT_DIR ?= $(abspath package/release)
 
 RIME_LIBRARY_FILE_NAME = librime.1.dylib
@@ -20,12 +23,10 @@ RIME_TOOLS = bin/rime_deployer bin/rime_dict_manager
 SMART_ENGLISH_PLUGIN = lib/rime-plugins/librime-smart-english.dylib
 SMART_ENGLISH_SOURCES = plugins/smart_english/smart_english.cc \
 	plugins/smart_english/smart_english_filter.cc \
-	plugins/smart_english/smart_english_index.cc \
-	plugins/smart_english/smart_english_mixed_decoder.cc
+	plugins/smart_english/smart_english_index.cc
 SMART_ENGLISH_HEADERS = plugins/smart_english/smart_english_domain.h \
 	plugins/smart_english/smart_english_filter.h \
-	plugins/smart_english/smart_english_index.h \
-	plugins/smart_english/smart_english_mixed_decoder.h
+	plugins/smart_english/smart_english_index.h
 SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
 	librime/dist/include/rime/gear/selector.h \
 	librime/dist/include/glog/logging.h \
@@ -34,48 +35,25 @@ SMART_ENGLISH_SDK_HEADERS = librime/dist/include/rime/predict/predict_engine.h \
 ENGLISH_DATA_GENERATOR = build/linnet-english-data-generator
 ENGLISH_DATA_GENERATOR_SOURCES = tools/LinnetEnglishDataSources.swift \
 	tools/LinnetEnglishDataGenerator.swift
-PLUM_DATA = data/plum/default.yaml \
-	data/plum/linnet_algebra.yaml \
-	data/plum/linnet_zh.schema.yaml \
-	data/plum/linnet_zh_pinyin.schema.yaml \
-	data/plum/linnet_zh_flypy.schema.yaml \
-	data/plum/linnet_zh_mspy.schema.yaml \
-	data/plum/linnet_zh_sogou.schema.yaml \
-	data/plum/linnet_zh_abc.schema.yaml \
-	data/plum/linnet_zh_ziguang.schema.yaml \
-	data/plum/linnet_zh_jiajia.schema.yaml \
-	data/plum/symbols_v.yaml \
-	data/plum/symbols_caps_v.yaml \
-	data/plum/radical_pinyin.dict.yaml \
-	data/plum/radical_pinyin.schema.yaml \
-	data/plum/linnet_en.schema.yaml \
-	data/plum/linnet_user.yaml \
-	data/plum/linnet_en.dict.yaml \
-	data/plum/linnet_zh.dict.yaml \
-	data/plum/linnet_reviewed.dict.yaml \
-	data/plum/dicts/zi.dict.yaml \
-	data/plum/dicts/jichu.dict.yaml \
-	data/plum/dicts/lianxiang.dict.yaml \
-	data/plum/dicts/cuoyin.dict.yaml \
-	data/plum/dicts/duoyin.dict.yaml \
-	data/plum/dicts/shici.dict.yaml \
-	data/plum/dicts/diming.dict.yaml \
-	data/plum/dicts/yixue.dict.yaml \
-	data/plum/dicts/huaxue.dict.yaml \
-	data/plum/dicts/yaopin.dict.yaml \
-	data/plum/dicts/mingren.dict.yaml \
-	data/plum/dicts/yiren.dict.yaml \
-	data/plum/dicts/wuzhong.dict.yaml \
-	data/plum/dicts/renming.dict.yaml \
-	data/plum/dicts/taifeng.dict.yaml \
-	data/plum/dicts/fangyan.dict.yaml \
-	data/plum/linnet.smart.db \
-	data/plum/linnet.english-data-manifest.json \
-	data/plum/wanxiang-lts-zh-hans.gram \
-	data/plum/zh-hans-t-essay-bgw.gram
-OPENCC_DATA = data/opencc/TSCharacters.ocd2 \
-	data/opencc/TSPhrases.ocd2 \
-	data/opencc/t2s.json
+LINNET_DATA_REGISTRY_SOURCES = sources/LinnetPackContract.swift \
+	sources/LinnetDataChannel.swift \
+	sources/LinnetDataRegistry.swift \
+	sources/LinnetDirectoryDelta.swift \
+	sources/LinnetDataRegistryTransactions.swift \
+	sources/LinnetDataRegistryStorage.swift
+LINNET_PACK_TOOL = build/linnet-pack
+LINNET_PACK_TOOL_SOURCES = $(LINNET_DATA_REGISTRY_SOURCES) \
+	sources/LinnetSettings/LinnetSettingsMutationLease.swift \
+	tools/LinnetDataCatalogBuilder.swift \
+	tools/LinnetPackEncoder.swift \
+	tools/LinnetPackTool.swift
+LINNET_RUNTIME_INSPECTOR = build/linnet-runtime-inspector
+LINNET_RUNTIME_INSPECTOR_SOURCES = $(LINNET_DATA_REGISTRY_SOURCES) \
+	tools/LinnetRuntimeInspector.swift
+INPUT_SOURCE_REGISTRATION_INSPECTOR = build/input-source-registration-inspector
+INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES = \
+	sources/LinnetInputSourceRegistration.swift \
+	tools/LinnetInputSourceRegistrationInspector.swift
 DEPS_CHECK = $(RIME_LIBRARY) $(SMART_ENGLISH_PLUGIN)
 
 CXX ?= $(shell xcrun --find clang++)
@@ -94,7 +72,8 @@ PRIVATE_CXX_FLAGS = "-ffile-prefix-map=$(abspath .)=Linnet/Workspace" \
 	-fdebug-compilation-dir=.
 
 .PHONY: copy-rime-binaries verify-rime-binaries smart-english-plugin \
-	english-data-generator
+	english-data-generator linnet-pack-tool linnet-runtime-inspector \
+	input-source-registration-inspector
 
 copy-rime-binaries:
 	@set -e; \
@@ -139,18 +118,42 @@ smart-english-plugin: $(SMART_ENGLISH_PLUGIN)
 
 english-data-generator: $(ENGLISH_DATA_GENERATOR)
 
+linnet-pack-tool: $(LINNET_PACK_TOOL)
+
+linnet-runtime-inspector: $(LINNET_RUNTIME_INSPECTOR)
+
+input-source-registration-inspector: $(INPUT_SOURCE_REGISTRATION_INSPECTOR)
+
 $(ENGLISH_DATA_GENERATOR): $(ENGLISH_DATA_GENERATOR_SOURCES)
 	@mkdir -p $(@D)
 	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
 		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 \
 		$(ENGLISH_DATA_GENERATOR_SOURCES) -o $(ENGLISH_DATA_GENERATOR)
 
-$(SMART_ENGLISH_PLUGIN): $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
+$(LINNET_PACK_TOOL): $(LINNET_PACK_TOOL_SOURCES)
+	@mkdir -p $(@D)
+	$(SWIFTC) -warnings-as-errors -sdk "$(MACOS_SDK)" \
+		$(LINNET_PACK_TOOL_SOURCES) -o $(LINNET_PACK_TOOL)
+
+$(LINNET_RUNTIME_INSPECTOR): $(LINNET_RUNTIME_INSPECTOR_SOURCES)
+	@mkdir -p $(@D)
+	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
+		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 \
+		$(LINNET_RUNTIME_INSPECTOR_SOURCES) -o $(LINNET_RUNTIME_INSPECTOR)
+
+$(INPUT_SOURCE_REGISTRATION_INSPECTOR): $(INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES)
+	@mkdir -p $(@D)
+	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
+		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 -framework Carbon \
+		$(INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES) \
+		-o $(INPUT_SOURCE_REGISTRATION_INSPECTOR)
+
+$(SMART_ENGLISH_PLUGIN): Makefile $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
 		$(SMART_ENGLISH_SDK_HEADERS) \
 		$(RIME_LIB_DIR)/$(RIME_LIBRARY_FILE_NAME) \
 		$(RIME_LIB_DIR)/rime-plugins/librime-predict.dylib
 	@mkdir -p $(@D)
-	@set -o pipefail; $(CXX) -std=c++17 -arch arm64 -mmacosx-version-min=13.0 \
+	@set -o pipefail; $(CXX) -std=c++17 -O2 -arch arm64 -mmacosx-version-min=13.0 \
 		-isysroot "$(MACOS_SDK)" -Wall -Wextra -Werror \
 		-Wno-missing-field-initializers \
 		-DGLOG_USE_GLOG_EXPORT \
@@ -162,26 +165,6 @@ $(SMART_ENGLISH_PLUGIN): $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
 		$(RIME_LIB_DIR)/rime-plugins/librime-predict.dylib \
 		-o $(SMART_ENGLISH_PLUGIN) \
 		2>&1 | scripts/build-privacy redact
-
-.PHONY: data plum-data opencc-data
-
-data: plum-data opencc-data
-
-$(PLUM_DATA):
-	$(MAKE) plum-data
-
-$(OPENCC_DATA):
-	$(MAKE) opencc-data
-
-plum-data:
-	@echo "Linnet data is pinned and assembled by ./action-install.sh"
-	@false
-
-opencc-data:
-	@echo "Linnet OpenCC data is pinned and assembled by ./action-install.sh"
-	@false
-
-deps: verify-rime-binaries data
 
 BUILD_SETTINGS += COMPILER_INDEX_STORE_ENABLE=YES
 
@@ -201,26 +184,77 @@ endef
 
 define build-linnet-app
 	@set -e; set -o pipefail; \
-	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Linnet.app)"; \
-	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app)"; \
+	app_path="$(LOCAL_DERIVED_DATA_PATH)/Build/Products/$(1)/Linnet.app"; \
+	settings_app_path="$(LOCAL_DERIVED_DATA_PATH)/Build/Products/$(1)/Settings.app"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
-		xcodebuild -project Linnet.xcodeproj -configuration $(1) -scheme Linnet \
-			-destination '$(XCODE_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) \
-			-showBuildTimingSummary $(BUILD_SETTINGS) build; \
+	build_stamp="$(LOCAL_DERIVED_DATA_PATH)/Build/Products/$(1)/.linnet-build-complete"; \
+	production_bundle_identifier="$$(sed -n 's/^LINNET_BUNDLE_IDENTIFIER = //p' config/LinnetProduct.xcconfig)"; \
+	[[ "$${production_bundle_identifier}" =~ ^[A-Za-z0-9.-]+$$ ]] || { \
+		echo 'Linnet build: canonical bundle identifier is unavailable' >&2; exit 1; \
+	}; \
+	local_bundle_identifier="$${production_bundle_identifier}.local-build"; \
+	rewrite_bundle_identifier() { \
+		local bundle_path="$$1" identifier="$$2" info_path; \
+		if [ ! -e "$${bundle_path}" ] && [ ! -L "$${bundle_path}" ]; then return 0; fi; \
+		info_path="$${bundle_path}/Contents/Info.plist"; \
+		[ -d "$${bundle_path}" ] && [ ! -L "$${bundle_path}" ] && \
+			[ -f "$${info_path}" ] && [ ! -L "$${info_path}" ] || { \
+			echo "Linnet build: unsafe App identity boundary: $${bundle_path}" >&2; return 1; \
+		}; \
+		/usr/bin/plutil -replace CFBundleIdentifier -string "$${identifier}" "$${info_path}"; \
+		[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${info_path}")" = \
+			"$${identifier}" ]; \
+	}; \
+	if [ -L "$${build_stamp}" ]; then unlink "$${build_stamp}"; \
+	else /bin/rm -f -- "$${build_stamp}"; fi; \
 	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
+	rewrite_bundle_identifier "$${app_path}" "$${local_bundle_identifier}"; \
+	rewrite_bundle_identifier "$${settings_app_path}" "$${local_bundle_identifier}.settings"; \
+	rewrite_bundle_identifier "$${embedded_settings_app_path}" "$${local_bundle_identifier}.settings"; \
+	scripts/build-linnet-app "$(1)" "$(LOCAL_DERIVED_DATA_PATH)" \
+		$(BUILD_SETTINGS) LINNET_BUNDLE_IDENTIFIER="$${local_bundle_identifier}"; \
 	scripts/build-privacy sanitize-localizations \
 		"$${app_path}" "$${embedded_settings_app_path}" "$${settings_app_path}"; \
+	[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${app_path}/Contents/Info.plist")" = \
+		"$${local_bundle_identifier}" ]; \
+	[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${settings_app_path}/Contents/Info.plist")" = \
+		"$${local_bundle_identifier}.settings" ]; \
+	[ "$$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$${embedded_settings_app_path}/Contents/Info.plist")" = \
+		"$${local_bundle_identifier}.settings" ]; \
+	/usr/bin/touch "$${build_stamp}"; \
 	echo "Linnet $(1) App: BUILT (local, unsigned)"
 endef
 
 define finalize-linnet-candidate
-	@set -e; \
-	app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)"; \
-	settings_app_path="$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Settings.app)"; \
+	@set -e; set -o pipefail; \
+	local_products="$(LOCAL_RELEASE_PRODUCTS)"; \
+	candidate_products="$(CANDIDATE_RELEASE_PRODUCTS)"; \
+	candidate_parent="$${candidate_products%/*}"; \
+	candidate_intermediates="$${candidate_parent}/Intermediates.noindex"; \
+	production_bundle_identifier="$$(sed -n 's/^LINNET_BUNDLE_IDENTIFIER = //p' config/LinnetProduct.xcconfig)"; \
+	[[ "$${production_bundle_identifier}" =~ ^[A-Za-z0-9.-]+$$ ]] || { \
+		echo 'Linnet candidate: canonical bundle identifier is unavailable' >&2; exit 1; \
+	}; \
+	mkdir -p "$${candidate_intermediates}"; \
+	[ -d "$${candidate_intermediates}" ] && [ ! -L "$${candidate_intermediates}" ] || { \
+		echo 'Linnet candidate: unsafe candidate intermediates' >&2; exit 1; \
+	}; \
+	staging_products="$$(mktemp -d "$${candidate_intermediates}/Release.XXXXXX")"; \
+	cleanup_staging() { \
+		if [[ -n "$${staging_products:-}" && \
+			"$${staging_products}" == "$${candidate_intermediates}/Release."* ]]; then \
+			chmod -R u+w "$${staging_products}" 2>/dev/null || true; \
+			/bin/rm -rf -- "$${staging_products}"; \
+		fi; \
+	}; \
+	trap cleanup_staging EXIT INT TERM HUP; \
+	scripts/stage-linnet-candidate "$${local_products}" "$${staging_products}" \
+		"$${production_bundle_identifier}"; \
+	app_path="$${staging_products}/Linnet.candidate"; \
+	settings_app_path="$${staging_products}/Settings.candidate"; \
 	embedded_settings_app_path="$${app_path}/Contents/Applications/Settings.app"; \
 	release_metadata_root="$${app_path}/Contents/Resources/LinnetRelease"; \
 	code_identity_projection="$$(scripts/linnet-code-identity inspect-contract)"; \
-	$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path}); \
 	product_version="$$(plutil -extract CFBundleShortVersionString raw -o - "$${app_path}/Contents/Info.plist")"; \
 	product_build="$$(plutil -extract CFBundleVersion raw -o - "$${app_path}/Contents/Info.plist")"; \
 	scripts/generate-release-metadata "$(abspath upstreams.lock.json)" \
@@ -229,6 +263,18 @@ define finalize-linnet-candidate
 	scripts/linnet-code-identity sign-product "$${app_path}" "$${settings_app_path}"; \
 	scripts/build-privacy scan "$${app_path}"; \
 	scripts/linnet-code-identity verify-product "$${app_path}" "$${settings_app_path}" >/dev/null; \
+	if [ -L "$${candidate_products}" ]; then \
+		echo 'Linnet candidate: refusing to replace a symlink candidate' >&2; exit 1; \
+	elif [ -e "$${candidate_products}" ]; then \
+		[ -d "$${candidate_products}" ] || { \
+			echo 'Linnet candidate: existing candidate is not a directory' >&2; exit 1; \
+		}; \
+		chmod -R u+w "$${candidate_products}"; \
+		/bin/rm -rf -- "$${candidate_products}"; \
+	fi; \
+	/bin/mv "$${staging_products}" "$${candidate_products}"; \
+	staging_products=''; \
+	trap - EXIT INT TERM HUP; \
 	echo "Linnet Release Candidate: PASS (community-cms signed, metadata bound, privacy scanned)"
 endef
 
@@ -246,30 +292,28 @@ community: release
 community-verified: community
 	./tests/verify_product.sh release
 
-.PHONY: package archive install install-debug install-release
+.PHONY: package archive
 
 # The stable community PKG follows Squirrel's pkgbuild/component route, then
 # wraps the component with visible license, upstream notice and privacy pages.
 # Creation and static expansion do not install, launch or register the App.
-package: community-verified
+# Runtime acceptance is explicit (community-verified), not a packaging side effect.
+package: community linnet-pack-tool linnet-runtime-inspector \
+	input-source-registration-inspector
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
+	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_package \
-		"$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)" \
+		"$(CANDIDATE_RELEASE_APP)" \
 		"$(ARCHIVE_OUTPUT_DIR)"
 
 # Keep the portable ZIP as a second, manual per-user distribution. The PKG is
 # the canonical normal-install artifact and is built first.
 archive: package
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
+	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_archive \
-		"$(abspath $(DERIVED_DATA_PATH)/Build/Products/Release/Linnet.app)" \
+		"$(CANDIDATE_RELEASE_APP)" \
 		"$(ARCHIVE_OUTPUT_DIR)"
-
-# No build target may mutate the developer machine. Users install the produced
-# PKG explicitly with macOS Installer after checksum verification.
-install install-debug install-release:
-	@echo "Linnet build automation never installs, launches or registers the input method." >&2
-	@false
 
 .PHONY: clean clean-deps
 
@@ -286,7 +330,6 @@ clean-package:
 	rm -rf package/*appcast.xml > /dev/null 2>&1 || true
 	rm -rf package/*.pkg > /dev/null 2>&1 || true
 	rm -rf package/release/*.pkg > /dev/null 2>&1 || true
-	rm -rf package/release/*-Uninstall.command > /dev/null 2>&1 || true
 	rm -rf package/sign_update > /dev/null 2>&1 || true
 
 clean-deps:

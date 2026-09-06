@@ -11,8 +11,20 @@ struct SettingsContractTests {
   static func main() {
     do {
       testPinyinReverseLookupExamples()
+      let value = "C++ / 接口 & WAF?#\n长词"
+      guard let url = LinnetSettingsContract.customWordURL(value: value),
+        LinnetSettingsContract.customWordValue(from: url) == value,
+        LinnetSettingsContract.customWordValue(from: URL(string: "https://custom-word?value=test")!) == nil,
+        LinnetSettingsContract.customWordValue(from: URL(string: "linnet-settings://custom-word")!) == nil
+      else { fail("candidate draft URL lost text or accepted an unrelated action") }
+      testCoreActivationGate()
+      testHostPreferenceDomainSelection()
+      try testLegacyRuntimeHealthWithoutIdentity()
+      try testLegacyCoreActivationBlockerWireCodes()
+      try testNativeLearningDataVersionWireCompatibility()
       try inTemporaryBundleTree { host, settings, hostIdentifier, productName in
         testHostDerivation(host: host, settings: settings)
+        testProductIdentity(host: host, settings: settings)
         testSuitePersistence(host: host, settings: settings, hostIdentifier: hostIdentifier)
         testInvalidStoredValueFallsBack(
           settings: settings,
@@ -24,6 +36,7 @@ struct SettingsContractTests {
           hostIdentifier: hostIdentifier,
           productName: productName
         )
+        try testInstalledIdentityAfterUpdate(host: host, settings: settings)
       }
       print("SettingsContractTests: PASS")
     } catch {
@@ -44,10 +57,188 @@ struct SettingsContractTests {
     ]
     guard Dictionary(
       uniqueKeysWithValues: LinnetSettingsContract.ChineseProfile.allCases.map {
-        ($0, $0.reverseLookupExampleCode)
+        ($0, $0.representativeInputCode)
       }) == expected
     else {
       fail("a Settings reverse-lookup example diverged from its selected profile")
+    }
+  }
+
+  private static func testCoreActivationGate() {
+    guard LinnetInputSourceSelection.classify(
+      currentIdentifier: "io.github.ares-x.inputmethod.Linnet",
+      linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .linnet,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: "unrelated.example",
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .other,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: nil,
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .unknown,
+      LinnetInputSourceSelection.classify(
+        currentIdentifier: "",
+        linnetIdentifier: "io.github.ares-x.inputmethod.Linnet") == .unknown
+    else {
+      fail("optional HIToolbox evidence no longer preserves an unknown state")
+    }
+
+    guard LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .other,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      requesterIsAlive: true
+    ).isReady else {
+      fail("inactive clients still blocked explicit Core activation")
+    }
+
+    let activeSource = LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .linnet,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      requesterIsAlive: true
+    )
+    let activeComposition = LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .other,
+      compositionIsActive: true,
+      dataTransactionIsActive: false,
+      requesterIsAlive: true
+    )
+    let activeTransaction = LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .other,
+      compositionIsActive: false,
+      dataTransactionIsActive: true,
+      requesterIsAlive: true
+    )
+    let unknownSource = LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .unknown,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      requesterIsAlive: true
+    )
+    guard unknownSource != .blocked(.coreActivationUnknownClient) else {
+      fail("the current Host emitted a legacy unknown-client diagnosis for unavailable TIS state")
+    }
+    guard activeSource == .blocked(.coreActivationInputSourceActive),
+      activeComposition == .blocked(.coreActivationCompositionActive),
+      activeTransaction == .blocked(.coreActivationDataTransactionActive),
+      unknownSource == .blocked(.coreActivationInputSourceUnavailable)
+    else {
+      fail("Core activation no longer fails closed at every Host mutation boundary")
+    }
+
+    guard LinnetCoreActivationGate.evaluate(
+      selectedInputSource: .other,
+      compositionIsActive: false,
+      dataTransactionIsActive: false,
+      requesterIsAlive: false
+    ) == .blocked(.coreActivationRequesterUnavailable) else {
+      fail("a missing Settings requester did not block Core activation")
+    }
+  }
+
+  private static func testHostPreferenceDomainSelection() {
+    let identifier = "io.github.linnet.tests.preferences.\(UUID().uuidString)"
+    guard LinnetSettingsContract.preferenceDefaults(
+      hostIdentifier: identifier,
+      runningIdentifier: identifier
+    ) === UserDefaults.standard else {
+      fail("the running Host did not use its standard preference domain")
+    }
+    guard let embedded = LinnetSettingsContract.preferenceDefaults(
+      hostIdentifier: identifier,
+      runningIdentifier: "\(identifier).settings"
+    ), embedded !== UserDefaults.standard else {
+      fail("embedded Settings did not use the Host-named preference suite")
+    }
+    embedded.removePersistentDomain(forName: identifier)
+  }
+
+  private static func testLegacyRuntimeHealthWithoutIdentity() throws {
+    let transactionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    let document: [String: Any] = [
+      "transactionID": transactionID.uuidString,
+      "status": "running",
+      "code": "diagnostics_ready",
+      "detail": "Runtime diagnostics are available.",
+      "health": [
+        "productIdentity": NSNull(),
+        "coreActivationReadiness": "ready",
+        "connectedInputClientCount": 0,
+        "state": "running",
+        "phase": "running",
+        "rimeVersion": "1.17.0",
+        "smartEnglishAvailable": true,
+        "octagramAvailable": true,
+        "availableSchemaCount": 9,
+        "requiredSchemaCount": 9,
+        "activeTransactionID": NSNull(),
+        "activeSettingsRevision": String(repeating: "a", count: 64),
+      ],
+    ]
+    let data = try JSONSerialization.data(withJSONObject: document)
+    let reply = try JSONDecoder().decode(
+      LinnetSettingsContract.RuntimeReply.self, from: data)
+    guard reply.transactionID == transactionID,
+      reply.health?.productIdentity == nil,
+      LinnetSettingsContract.validRuntimeReply(reply)
+    else {
+      fail("the shipped build60 identity-free health shape is no longer valid")
+    }
+  }
+
+  /// Retain until the legacy producers, including published 0.1.10's
+  /// unknown-TIS path, have left the supported Host range.
+  private static func testLegacyCoreActivationBlockerWireCodes() throws {
+    let fixtures: [(wireCode: String, code: LinnetSettingsContract.RuntimeReplyCode)] = [
+      ("core_activation_applications_running", .coreActivationApplicationsRunning),
+      ("core_activation_unknown_client", .coreActivationUnknownClient),
+    ]
+    for (index, fixture) in fixtures.enumerated() {
+      let transactionID = UUID(
+        uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 2))!
+      let document: [String: Any] = [
+        "transactionID": transactionID.uuidString,
+        "status": "rejected",
+        "code": fixture.wireCode,
+        "detail": "Published 0.1.9 Host blocked Core activation.",
+        "health": NSNull(),
+      ]
+      let data = try JSONSerialization.data(withJSONObject: document)
+      let reply = try JSONDecoder().decode(
+        LinnetSettingsContract.RuntimeReply.self,
+        from: data)
+      guard reply.transactionID == transactionID,
+        reply.status == .rejected,
+        reply.code == fixture.code,
+        reply.health == nil,
+        LinnetSettingsContract.validRuntimeReply(reply)
+      else {
+        fail("published 0.1.9 blocker wire code \(fixture.wireCode) changed meaning")
+      }
+    }
+  }
+
+  private static func testNativeLearningDataVersionWireCompatibility() throws {
+    let legacy = LinnetSettingsContract.DataRequest(
+      transactionID: UUID(), command: .pause, candidate: nil,
+      requesterPID: getpid(), deadline: Date().addingTimeInterval(10),
+      nativeLearningDataVersion: nil)
+    let legacyData = try JSONEncoder().encode(legacy)
+    let legacyDocument = try JSONSerialization.jsonObject(with: legacyData) as? [String: Any]
+    let decodedLegacy = try JSONDecoder().decode(
+      LinnetSettingsContract.DataRequest.self, from: legacyData)
+    let current = LinnetSettingsContract.DataRequest(
+      transactionID: UUID(), command: .pause, candidate: nil,
+      requesterPID: getpid(), deadline: Date().addingTimeInterval(10))
+    let decodedCurrent = try JSONDecoder().decode(
+      LinnetSettingsContract.DataRequest.self,
+      from: JSONEncoder().encode(current))
+    guard legacyDocument?["nativeLearningDataVersion"] == nil,
+      decodedLegacy.nativeLearningDataVersion == nil,
+      decodedCurrent == current,
+      decodedCurrent.nativeLearningDataVersion
+        == LinnetSettingsContract.nativeLearningDataVersion
+    else {
+      fail("native learning-data capability wire compatibility changed")
     }
   }
 
@@ -58,6 +249,54 @@ struct SettingsContractTests {
       derivedFromSettings.bundleURL.standardizedFileURL == host.bundleURL.standardizedFileURL
     else {
       fail("the nested Settings bundle did not derive its input-method host")
+    }
+  }
+
+  private static func testProductIdentity(host: Bundle, settings: Bundle) {
+    let expected = LinnetSettingsContract.ProductIdentity(
+      version: "1.0.0",
+      build: 7,
+      revision: String(repeating: "a", count: 40)
+    )
+    guard LinnetSettingsContract.productIdentity(startingAt: host) == expected,
+      LinnetSettingsContract.productIdentity(startingAt: settings) == expected
+    else {
+      fail("installed and running product identity did not share one bundle owner")
+    }
+  }
+
+  private static func testInstalledIdentityAfterUpdate(host: Bundle, settings: Bundle) throws {
+    let running = LinnetSettingsContract.productIdentity(startingAt: host)
+    guard var info = host.infoDictionary, running?.build == 7 else {
+      throw TestFailure.invalidFixture
+    }
+    // Keep the same Bundle instances alive, as Host and Settings do during an
+    // update. Foundation caches Info.plist, while VERSION.json is read afresh.
+    info["CFBundleShortVersionString"] = "1.0.1"
+    info["CFBundleVersion"] = "8"
+    try writeInfoPlist(at: host.bundleURL, values: info)
+    let document: [String: Any] = [
+      "version": "1.0.1", "build": "8",
+      "source": ["candidate_revision": String(repeating: "b", count: 40)],
+    ]
+    let releaseURL = host.bundleURL.appendingPathComponent("Contents/Resources/LinnetRelease/VERSION.json")
+    try JSONSerialization.data(withJSONObject: document).write(to: releaseURL, options: .atomic)
+    let installed = LinnetSettingsContract.ProductIdentity(
+      version: "1.0.1", build: 8, revision: String(repeating: "b", count: 40))
+    guard LinnetSettingsContract.productIdentity(startingAt: settings) == installed,
+      running?.build == 7 else {
+      fail("an open Settings process lost the installed identity after a Core update")
+    }
+    // Missing and inconsistent on-disk metadata must still be rejected; a stale
+    // Bundle cache is not a fallback source of installed product identity.
+    info["CFBundleVersion"] = "9"
+    try writeInfoPlist(at: host.bundleURL, values: info)
+    guard LinnetSettingsContract.productIdentity(startingAt: settings) == nil else {
+      fail("inconsistent installed product metadata was accepted")
+    }
+    try FileManager.default.removeItem(at: releaseURL)
+    guard LinnetSettingsContract.productIdentity(startingAt: settings) == nil else {
+      fail("missing installed product metadata was replaced with a cached identity")
     }
   }
 
@@ -107,6 +346,18 @@ struct SettingsContractTests {
     }
 
     defaults.removeObject(forKey: cloudSyncEnabledKey)
+    guard LinnetSettingsContract.cloudSyncStatus(startingAt: settings) == nil else {
+      fail("an attempt timestamp was misrepresented as successful sync")
+    }
+    let finishedAt = attemptedAt.addingTimeInterval(30)
+    let failedAt = finishedAt.addingTimeInterval(60)
+    guard LinnetSettingsContract.setCloudSyncResult(.learningSyncCompleted, at: finishedAt, startingAt: host),
+      LinnetSettingsContract.cloudSyncStatus(startingAt: settings)?.lastSuccess == finishedAt,
+      LinnetSettingsContract.setCloudSyncResult(.learningSyncFailed, at: failedAt, startingAt: host),
+      let status = LinnetSettingsContract.cloudSyncStatus(startingAt: settings),
+      status.result == .learningSyncFailed, status.finishedAt == failedAt,
+      status.lastSuccess == finishedAt
+    else { fail("sync outcome persistence lost the last success or concealed failure") }
     defaults.set(Data("legacy-bookmark".utf8), forKey: legacyCloudSyncFolderBookmarkKey)
     guard LinnetSettingsContract.cloudSyncEnabled(startingAt: settings),
       defaults.bool(forKey: cloudSyncEnabledKey),
@@ -124,17 +375,15 @@ struct SettingsContractTests {
       fail("could not reopen the host preference suite")
     }
     defaults.set("all", forKey: backupRetentionPolicyKey)
-    guard defaults.synchronize(),
-      LinnetSettingsContract.backupRetentionPolicy(startingAt: settings) == .keepLatest30
+    guard LinnetSettingsContract.backupRetentionPolicy(startingAt: settings) == .keepLatest30
     else {
       fail("invalid backup retention did not use the product default")
     }
     defaults.removePersistentDomain(forName: hostIdentifier)
-    defaults.synchronize()
   }
 
   private static func testUserDirectoryDerivation(settings: Bundle, productName: String) {
-    guard let actual = LinnetSettingsContract.hostUserDirectory(startingAt: settings)
+    guard let actual = LinnetSettingsContract.dataRegistry(startingAt: settings)?.userDataDirectory
     else {
       fail("the host user directory could not be derived")
     }
@@ -157,12 +406,15 @@ struct SettingsContractTests {
     hostIdentifier _: String,
     productName: String
   ) {
-    guard let userDirectory = LinnetSettingsContract.hostUserDirectory(startingAt: settings),
-      let transactionsRoot = LinnetSettingsContract.dataTransactionsRoot(startingAt: settings),
-      transactionsRoot == userDirectory.deletingLastPathComponent().appending(
+    guard let registry = LinnetSettingsContract.dataRegistry(startingAt: settings) else {
+      fail("the data transaction registry could not be derived")
+    }
+    let userDirectory = registry.userDataDirectory
+    let transactionsRoot = registry.transactionsDirectory
+    guard transactionsRoot == userDirectory.deletingLastPathComponent().appending(
         component: "Transactions", directoryHint: .isDirectory)
     else {
-      fail("data transaction roots are not derived from the host contract")
+      fail("the data transaction root is not derived from the host contract")
     }
 
     let transactionID = UUID()
@@ -214,6 +466,8 @@ struct SettingsContractTests {
       code: .diagnosticsReady,
       detail: "fixture running",
       health: .init(
+        productIdentity: .init(
+          version: "1.0.0", build: 7, revision: String(repeating: "a", count: 40)),
         state: .running,
         phase: .running,
         rimeVersion: "1.16.0",
@@ -221,6 +475,7 @@ struct SettingsContractTests {
         octagramAvailable: true,
         availableSchemaCount: 9,
         requiredSchemaCount: 9,
+        activeTransactionID: nil,
         activeSettingsRevision: settingsDigest))
     guard LinnetSettingsContract.validDataRequest(expectedPause),
       LinnetSettingsContract.validDataRequest(expectedActivate),
@@ -288,13 +543,27 @@ struct SettingsContractTests {
       deadline: deadline,
       expectedSettingsRevision: settingsDigest,
       alternateSettingsRevision: replacementSettingsDigest)
+    let validCoreActivation = LinnetSettingsContract.DataRequest(
+      transactionID: transactionID,
+      command: .activateCore,
+      candidate: nil,
+      requesterPID: requesterPID,
+      deadline: deadline)
+    let invalidCoreActivation = LinnetSettingsContract.DataRequest(
+      transactionID: transactionID,
+      command: .activateCore,
+      candidate: candidate,
+      requesterPID: requesterPID,
+      deadline: deadline)
     guard !LinnetSettingsContract.validDataRequest(missingCandidate),
       !LinnetSettingsContract.validDataRequest(missingCAS),
       !LinnetSettingsContract.validDataRequest(invalidPause),
       !LinnetSettingsContract.validDataRequest(invalidReload),
       !LinnetSettingsContract.validDataRequest(invalidRefreshWithoutCAS),
       LinnetSettingsContract.validDataRequest(validRecoveryReload),
-      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh)
+      !LinnetSettingsContract.validDataRequest(invalidRecoveryRefresh),
+      LinnetSettingsContract.validDataRequest(validCoreActivation),
+      !LinnetSettingsContract.validDataRequest(invalidCoreActivation)
     else {
       fail("invalid command and candidate combinations were accepted")
     }
@@ -303,7 +572,7 @@ struct SettingsContractTests {
   private static func inTemporaryBundleTree(
     _ body: (Bundle, Bundle, String, String) throws -> Void
   ) throws {
-    let directory = FileManager.default.temporaryDirectory
+    let directory = LinnetTestScratch.directory
       .appendingPathComponent(
         "LinnetSettingsContractTests-\(UUID().uuidString)", isDirectory: true)
     let hostURL = directory.appendingPathComponent("Host.app", isDirectory: true)
@@ -323,9 +592,21 @@ struct SettingsContractTests {
         "CFBundleName": "Host",
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "1.0.0",
+        "CFBundleVersion": "7",
         "InputMethodConnectionName": "Linnet_Test_Connection",
       ]
     )
+    let releaseDirectory = hostURL.appendingPathComponent(
+      "Contents/Resources/LinnetRelease", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: releaseDirectory, withIntermediateDirectories: true)
+    let versionDocument: [String: Any] = [
+      "version": "1.0.0",
+      "build": "7",
+      "source": ["candidate_revision": String(repeating: "a", count: 40)],
+    ]
+    let versionData = try JSONSerialization.data(withJSONObject: versionDocument)
+    try versionData.write(to: releaseDirectory.appendingPathComponent("VERSION.json"))
     try writeInfoPlist(
       at: settingsURL,
       values: [

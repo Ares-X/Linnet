@@ -1,14 +1,13 @@
 import AppKit
 import Darwin
 import Foundation
+import SwiftUI
+import Vision
 
 @main
 struct LinnetSettingsAppearancePreviewTests {
-  static func main() {
-    testVisualThemeSelectorSourceContract()
-    testExactTypographyOverflowSourceContract()
-    testCandidateDetailGeometrySourceContract()
-    testPreviewDisclosureStateIsPerLanguage()
+  @MainActor static func main() {
+    testCloudThemeRecognition()
     testBundledThemeSourceIsComplete()
     testCatalogOwnsThemePairs()
     testThemeProjectionReadsTheCanonicalSource()
@@ -16,173 +15,163 @@ struct LinnetSettingsAppearancePreviewTests {
     testThemePairsRemainDistinctAndReadable()
     testTranslucentSelectionContrast()
     testMoonJadeAndNativeGlassVisualRoles()
+    testSlateAndMoonHaveDifferentVisualStructures()
     testSystemModeAndTypographyStayDraftDerived()
     testPreviewUsesSelectedPageSize()
     testPreviewUsesTheCanonicalBilingualFontCascade()
     testMalformedThemeDataFailsClosed()
+    testThemeCardsShowReadableCandidates()
+    testExpandedWordsRemainWhole()
     print("LinnetSettingsAppearancePreviewTests: PASS")
   }
 
-  private static func testVisualThemeSelectorSourceContract() {
-    let settingsViews = source("sources/LinnetSettings/SettingsViews.swift")
-    let preview = source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
-
-    require(!settingsViews.contains("Picker(\"Theme\""),
-            "the retired Theme menu returned to the leading Settings column")
-    require(occurrences(of: "LinnetSettingsThemeFamilyPicker(", in: settingsViews) == 1,
-            "Appearance must expose exactly one visual theme-selection entry point")
-    require(occurrences(of: "struct LinnetSettingsThemeFamilyPicker: View", in: preview) == 1,
-            "the visual theme selector must have exactly one view owner")
-    require(preview.contains("ForEach(LinnetSettingsDocument.ThemeFamily.allCases"),
-            "the visual selector no longer projects every canonical theme family")
-    require(preview.contains("Button {")
-              && occurrences(of: "selection = family", in: preview) == 1,
-            "theme cards must be direct, keyboard-accessible Button controls")
-    require(preview.contains("catalog.pair(for: family)"),
-            "theme cards must reuse the Catalog-owned Light/Dark pair")
+  @MainActor
+  private static func testExpandedWordsRemainWhole() {
+    for direction in [LinnetSettingsDocument.CandidateLayout.horizontal, .vertical] {
+      var appearance = LinnetSettingsDocument.Appearance.default
+      appearance.candidateBrowsingMode = .expandable
+      appearance.englishCandidateLayout = direction
+      appearance.fontPoint = 32
+      appearance.expandedHorizontalCount = 5
+      appearance.expandedHorizontalRows = 5
+      let view = NSHostingView(rootView: LinnetSettingsAppearancePreviewView(appearance: appearance)
+        .padding(16).frame(width: 1100)
+        .background(Color(nsColor: .windowBackgroundColor)))
+      view.frame.size = view.fittingSize
+      view.layoutSubtreeIfNeeded()
+      guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+        fail("expanded preview cannot render")
+      }
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      guard let image = bitmap.cgImage,
+        let png = bitmap.representation(using: .png, properties: [:]) else {
+        fail("expanded preview has no image")
+      }
+      do {
+        try png.write(to: URL(fileURLWithPath: "build/settings-expanded-\(direction.rawValue).png"))
+      } catch { fail("cannot save expanded preview: \(error)") }
+      let text = themeCandidateText(in: image, widthInPoints: view.bounds.width)
+      let word = direction == .horizontal ? "pronunciation" : "completion"
+      require(text.contains(word), "expanded preview split or hid \(word): \(text)")
+    }
   }
 
-  private static func testExactTypographyOverflowSourceContract() {
-    let preview = source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
-    let liveTheme = source("sources/SquirrelTheme.swift")
-    let livePanel = source("sources/SquirrelPanel.swift")
-    require(!preview.contains(".minimumScaleFactor("),
-            "candidate preview text must not shrink below the configured point size")
-    require(!preview.contains(".lineLimit(1)"),
-            "candidate preview text must not ellipsize when horizontal space is tight")
-    require(preview.contains("ScrollView(.horizontal, showsIndicators: false)"),
-            "exact-size candidate and detail content must receive horizontal scrolling")
-    require(!liveTheme.contains("NSFont.userFont("),
-            "the live default font bypasses the shared candidate typography owner")
-    require(!preview.contains("enum LinnetSettingsFontProjection"),
-            "Settings retained a second candidate-font resolver")
-    require(!preview.contains("design: .rounded"),
-            "candidate labels retained a preview-only rounded font")
-    require(
-      occurrences(of: "LinnetCandidatePresentation.platformFont(", in: preview) == 3,
-      "candidate, label, and detail text must consume the one shared font resolver")
-    require(!preview.contains(".thinMaterial"),
-            "Settings retained a second candidate material approximation")
-    require(!preview.contains(".padding(.horizontal, 7)"),
-            "Settings retained a preview-only candidate horizontal inset")
-    require(!preview.contains(".padding(.vertical, 4)"),
-            "Settings retained a preview-only candidate vertical inset")
-    require(!preview.contains(".firstTextBaseline"),
-            "Settings retained a SwiftUI-only candidate baseline owner")
-    require(!preview.contains("let labelSpacing ="),
-            "Settings retained a candidate-font gap instead of the live separator metric")
-    require(!preview.contains(".padding(\n      .horizontal,\n      LinnetCandidatePresentation.inlineCandidateSeparatorWidth"),
-            "Settings retained unconditional half-separator cell padding")
-    require(!preview.contains(".padding(.vertical, LinnetCandidatePresentation.candidateRowSpacing / 2)"),
-            "Settings retained unconditional half-row cell padding")
-    require(
-      preview.contains("LinnetCandidatePresentation.candidateLine(") &&
-        livePanel.contains("LinnetCandidatePresentation.candidateLine("),
-      "Settings and the live panel do not consume one attributed candidate-line owner")
-    require(
-      liveTheme.contains("LinnetCandidatePresentation.secondaryBaselineOffset("),
-      "the live theme retained a private secondary-baseline formula")
-    let detailBlock = sourceSlice(
-      preview,
-      from: "private func candidateDetail(",
-      through: "private func candidateCell<Content: View>(")
-    require(
-      detailBlock.contains("LinnetCandidatePresentation.candidateLine("),
-      "Settings detail retained a second attributed-text compositor")
-    require(
-      detailBlock.contains("LinnetCandidatePresentation.selectedDetailText("),
-      "Settings detail stopped sharing live metadata normalization")
-    require(!detailBlock.contains("HStack(spacing: 8)"),
-            "Settings detail retained a preview-only metadata gap")
-    require(!detailBlock.contains(".italic()"),
-            "Settings detail retained preview-only IPA styling")
-    require(detailBlock.contains("placement: .standaloneDetail"),
-            "Settings detail reused the inline candidate baseline")
-    require(
-      preview.contains("LinnetCandidatePresentation.candidateSelectionInsets("),
-      "Settings does not project selection-specific live spacing")
-    require(
-      preview.contains(".offset(x: -selectionInsets.left)"),
-      "Settings bar selection does not consume the shared leading gutter")
+  @MainActor
+  private static func testThemeCardsShowReadableCandidates() {
+    _ = NSApplication.shared
+    let originalAppearance = NSApp.appearance
+    defer { NSApp.appearance = originalAppearance }
+    for name in [NSAppearance.Name.aqua, .darkAqua] {
+      NSApp.appearance = NSAppearance(named: name)
+      verifyThemeCards(appearance: name)
+    }
   }
 
-  private static func sourceSlice(
-    _ source: String,
-    from startMarker: String,
-    through endMarker: String
-  ) -> String {
-    guard let start = source.range(of: startMarker),
-      let end = source.range(of: endMarker, range: start.upperBound..<source.endIndex)
-    else { fail("source slice markers are missing") }
-    return String(source[start.lowerBound..<end.lowerBound])
+  @MainActor
+  private static func verifyThemeCards(appearance: NSAppearance.Name) {
+    for width in [CGFloat(680), 900] {
+      let view = NSHostingView(rootView: LinnetSettingsThemeFamilyPicker(
+        selection: .constant(.nativeGlass), mode: .constant(.system))
+        .padding(16).frame(width: width)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.colorScheme, appearance == .darkAqua ? .dark : .light))
+      view.appearance = NSAppearance(named: appearance)
+      view.frame.size = view.fittingSize
+      view.layoutSubtreeIfNeeded()
+      guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+        fail("theme picker cannot render its actual view")
+      }
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      guard let image = bitmap.cgImage else { fail("theme picker image is empty") }
+      print("Theme picker render: \(appearance.rawValue) \(width)pt, \(bitmap.pixelsWide)x\(bitmap.pixelsHigh)px")
+      guard let png = bitmap.representation(using: .png, properties: [:]) else {
+        fail("cannot encode rendered theme evidence")
+      }
+      do {
+        try png.write(to: URL(fileURLWithPath: "build/settings-theme-preview-\(appearance.rawValue)-\(Int(width)).png"))
+      } catch { fail("cannot save rendered theme evidence: \(error)") }
+      let text = themeCandidateText(in: image, widthInPoints: width)
+      let samples = text.components(separatedBy: "输入").count - 1
+      if samples < 14 {
+        // Failed hosted jobs discard local files; retain the synthetic fixture
+        // in their existing log without introducing another artifact uploader.
+        print("LINNET_THEME_PREVIEW_FAILURE_PNG_BASE64=\(png.base64EncodedString())")
+      }
+      require(samples >= 14,
+        "\(appearance) \(width)pt theme picker must show a readable Light/Dark candidate for all seven themes; found \(samples): \(text)")
+    }
   }
 
-  private static func testCandidateDetailGeometrySourceContract() {
-    let owner = source("sources/LinnetCandidatePresentation.swift")
-    let liveTheme = source("sources/SquirrelTheme.swift")
-    let livePanel = source("sources/SquirrelPanel.swift")
-      + source("sources/SquirrelPanel+CandidatePresentation.swift")
-    let preview = source("sources/LinnetSettings/LinnetSettingsAppearancePreview.swift")
-    let candidateSurface = sourceSlice(
-      preview,
-      from: "  private func candidateSurface(",
-      through: "  private func candidateList(")
-    let previewLayout = sourceSlice(
-      preview,
-      from: "private struct LinnetCandidateDetailSurfaceLayout: Layout",
-      through: "struct LinnetSettingsAppearancePreviewView: View")
-
-    require(
-      owner.contains("static func candidateDetailGeometry(") &&
-        livePanel.contains("LinnetCandidatePresentation.candidateDetailGeometry(") &&
-        preview.contains("LinnetCandidatePresentation.candidateDetailGeometry("),
-      "live and Settings did not consume one candidate-detail geometry owner")
-    require(
-      livePanel.contains("detailGeometry.frames(") &&
-        previewLayout.contains("geometry.frames("),
-      "a candidate-detail consumer retained private frame calculation")
-    require(
-      candidateSurface.contains("LinnetCandidateDetailSurfaceLayout(geometry: detailGeometry)"),
-      "Settings candidate detail bypassed the shared geometry at the SwiftUI boundary")
-    require(
-      !candidateSurface.contains("HStack(alignment: .top, spacing: 10)") &&
-        !candidateSurface.contains("minWidth: 110") &&
-        !candidateSurface.contains("idealWidth: 130") &&
-        !candidateSurface.contains("maxWidth: 160") &&
-        !preview.contains("candidateListViewport(") &&
-        !preview.contains("candidateDetailViewport("),
-      "Settings retained its independent sidecar/footer geometry or fixed width")
-    require(
-      !livePanel.contains("widestCandidate + 20") &&
-        !liveTheme.contains("var detailPlacement:") &&
-        !owner.contains("static func detailPlacement(forLinearLayout:"),
-      "the retired live placement/gap path remains authoritative")
+  private static func themeCandidateText(in image: CGImage, widthInPoints: CGFloat) -> String {
+    // OCR observes one fixed 2 px/pt sRGB representation, independent of the
+    // host display's backing scale and bitmap color space. Keep the original
+    // capture as evidence; do not retry OCR or accept a lower sample count.
+    let width = Int((widthInPoints * 2).rounded())
+    let height = Int((CGFloat(image.height) * CGFloat(width) / CGFloat(image.width)).rounded())
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+      let context = CGContext(data: nil, width: width, height: height,
+        bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { fail("cannot create fixed-density OCR image") }
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    guard let recognitionImage = context.makeImage() else { fail("OCR image is empty") }
+    let request = VNRecognizeTextRequest()
+    request.recognitionLanguages = ["zh-Hans", "en-US"]
+    request.recognitionLevel = .accurate
+    do {
+      try VNImageRequestHandler(cgImage: recognitionImage).perform([request])
+    } catch { fail("theme preview OCR unavailable: \(error)") }
+    return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
   }
 
-  private static func testPreviewDisclosureStateIsPerLanguage() {
-    var state = LinnetSettingsAppearancePreview.DisclosureState()
-    require(!state.isExpanded(.chinese) && !state.isExpanded(.english),
-            "candidate previews did not begin independently collapsed")
-    state.toggle(.chinese)
-    require(state.isExpanded(.chinese),
-            "the Chinese candidate preview did not expand")
-    require(!state.isExpanded(.english),
-            "expanding Chinese also expanded the independent English preview")
-    state.toggle(.english)
-    require(state.isExpanded(.chinese) && state.isExpanded(.english),
-            "the English candidate preview could not expand independently")
-    state.toggle(.chinese)
-    require(!state.isExpanded(.chinese) && state.isExpanded(.english),
-            "collapsing Chinese also collapsed the independent English preview")
-    state.reset()
-    require(!state.isExpanded(.chinese) && !state.isExpanded(.english),
-            "changing browsing capability did not reset both transient previews")
+  private static func testCloudThemeRecognition() {
+    // Exact unedited Action 33302408070 screenshot, including the Xuan dark
+    // underline that whole-grid recognition previously mistook for missing text.
+    let url = URL(fileURLWithPath: "tests/fixtures/settings-theme-cloud-dark-680.png")
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+      let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+    else { fail("cannot read cloud theme regression image") }
+    require(image.width == 680 && image.height == 501, "cloud regression image dimensions changed")
+    let text = themeCandidateText(in: image, widthInPoints: 680)
+    require(text.components(separatedBy: "输入").count - 1 == 14,
+      "all fourteen visible cloud samples must be recognized: \(text)")
+    testMissingCloudSamples(image)
+  }
+
+  private static func testMissingCloudSamples(_ image: CGImage) {
+    // These rectangles describe the immutable cloud fixture, not inferred
+    // production geometry. Erase each sample separately: none may be hidden
+    // by recognition of its thirteen siblings. Also reject a blank grid.
+    for sample in 0...14 {
+      guard let context = CGContext(data: nil, width: image.width, height: image.height,
+        bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+      else { fail("cannot create missing-sample regression image") }
+      context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+      let family = sample / 2
+      let top = 76 + (family / 3) * 115 + (sample % 2) * 37
+      let region = sample == 14
+        ? CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        : CGRect(x: 36 + (family % 3) * 210, y: image.height - top - 33, width: 188, height: 33)
+      context.setFillColor(CGColor(gray: 0, alpha: 1))
+      context.fill(region)
+      guard let missing = context.makeImage() else { fail("missing-sample image is empty") }
+      let text = themeCandidateText(in: missing, widthInPoints: 680)
+      require(text.components(separatedBy: "输入").count - 1 < 14,
+        "OCR accepted missing sample \(sample): \(text)")
+    }
+    guard let clipped = image.cropping(to: CGRect(x: 0, y: 0, width: 680, height: 335))
+    else { fail("cannot create clipped cloud fixture") }
+    require(themeCandidateText(in: clipped, widthInPoints: 680).components(separatedBy: "输入").count - 1 < 14,
+      "OCR accepted a clipped theme grid")
+    print("Cloud theme OCR regression: PASS (14 visible; each of 14 missing, blank and clipped rejected)")
   }
 
   private static func testBundledThemeSourceIsComplete() {
     let catalog = canonicalCatalog()
     require(
-      catalog.linnetSchemeIDs == [
+      Set(catalog.schemes.keys) == [
         "linnet_paper_light", "linnet_paper_dark",
         "linnet_moon_jade_light", "linnet_moon_jade_dark",
         "linnet_sidecar_light", "linnet_sidecar_dark",
@@ -239,10 +228,9 @@ struct LinnetSettingsAppearancePreviewTests {
         guard let source = catalog.scheme(for: appearance, systemIsDark: mode == .dark) else {
           fail("missing source projection for \(family) \(mode)")
         }
-        require(preview.schemeID == source.identifier, "preview must retain the canonical scheme identity")
         require(preview.palette == source.palette, "preview colors must come from the canonical scheme")
         for language in LinnetSettingsAppearancePreview.PreviewLanguage.allCases {
-          require(preview.detailGeometry(for: language).placement == .footer,
+          require(preview.detailGeometry(for: language, expanded: false).placement == .footer,
                   "a horizontal bilingual layout must keep selected detail below")
         }
         require(preview.selectionStyle == source.selectionStyle,
@@ -261,20 +249,25 @@ struct LinnetSettingsAppearancePreviewTests {
         appearance.englishCandidateLayout = englishLayout
         let preview = projected(appearance, systemIsDark: false, catalog: catalog)
         require(
-          preview.detailGeometry(for: .chinese).placement
+          preview.detailGeometry(for: .chinese, expanded: false).placement
             == (chineseLayout == .vertical ? .sidecar : .footer),
           "Chinese preview detail placement diverged from its layout")
         require(
-          preview.detailGeometry(for: .english).placement
+          preview.detailGeometry(for: .english, expanded: false).placement
             == (englishLayout == .vertical ? .sidecar : .footer),
           "English preview detail placement diverged from its layout")
+        for language in LinnetSettingsAppearancePreview.PreviewLanguage.allCases {
+          require(
+            preview.detailGeometry(for: language, expanded: true).placement == .footer,
+            "expanded preview detail did not follow the native row grid")
+        }
       }
     }
 
     let expectedRadii: [LinnetSettingsDocument.ThemeFamily: (Double, Double)] = [
       .paperLedger: (7, 0),
       .moonJade: (10, 0),
-      .sidecarSlate: (9, 0),
+      .sidecarSlate: (4, 2), // Crisp opaque Slate tiles, distinct from Moon's bar.
       .clayTiles: (12, 7),
       .mistJade: (10, 6),
       .nativeGlass: (10, 6),
@@ -348,7 +341,7 @@ struct LinnetSettingsAppearancePreviewTests {
 
   private static func testTranslucentSelectionContrast() {
     let catalog = canonicalCatalog()
-    let materialBaselines: [(Bool, [LinnetSettingsAppearancePreview.RimeColor])] = [
+    let materialBaselines: [(Bool, [LinnetSettingsAppearancePreview.ColorComponents])] = [
       (false, [.init(0xFFFFFF), .init(0xF4F4F4), .init(0xECECEC)]),
       (true, [.init(0x1C1C1E), .init(0x242426), .init(0x2C2C2E)]),
     ]
@@ -406,6 +399,19 @@ struct LinnetSettingsAppearancePreviewTests {
     }
   }
 
+  private static func testSlateAndMoonHaveDifferentVisualStructures() {
+    let catalog = canonicalCatalog()
+    guard let moon = catalog.pair(for: .moonJade), let slate = catalog.pair(for: .sidecarSlate) else {
+      fail("missing Moon/Slate themes")
+    }
+    for (moonScheme, slateScheme) in [(moon.light, slate.light), (moon.dark, slate.dark)] {
+      require(moonScheme.selectionStyle == .bar && slateScheme.selectionStyle == .tile,
+              "Moon and Slate must not differ only by a slight color shift")
+      require(slateScheme.highlightedCornerRadius <= 3 && !slateScheme.isTranslucent,
+              "Slate must retain crisp opaque selection instead of another rounded glass tile")
+    }
+  }
+
   private static func testThemeIdentityDoesNotDependOnDisplayName() {
     let renamed = canonicalSource()
       .replacingOccurrences(of: "Paper Ledger Light", with: "Renamed Light")
@@ -442,7 +448,11 @@ struct LinnetSettingsAppearancePreviewTests {
 
     let light = projected(appearance, systemIsDark: false, catalog: catalog)
     let dark = projected(appearance, systemIsDark: true, catalog: catalog)
-    require(light.schemeID != dark.schemeID, "system mode must select the corresponding source scheme")
+    guard let lightSource = catalog.scheme(for: appearance, systemIsDark: false),
+      let darkSource = catalog.scheme(for: appearance, systemIsDark: true)
+    else { fail("system mode source schemes are missing") }
+    require(light.palette == lightSource.palette && dark.palette == darkSource.palette,
+            "system mode must select the corresponding source palette")
     require(!light.isDark && dark.isDark, "system mode must follow the supplied system appearance")
     require(dark.fontPreset == .editorial, "preview must consume the draft typeface")
     require(dark.candidateFontPoint == 22, "preview must consume the draft candidate size")
@@ -466,9 +476,13 @@ struct LinnetSettingsAppearancePreviewTests {
     for pageSize in LinnetSettingsDocument.Appearance.pageSizeOptions {
       var appearance = LinnetSettingsDocument.Appearance.default
       appearance.pageSize = pageSize
+      appearance.expandedHorizontalCount = 4
+      appearance.expandedHorizontalRows = 5
+      appearance.expandedVerticalCount = 7
       let preview = projected(appearance, systemIsDark: false, catalog: catalog)
       require(
-        preview.pageSize == pageSize,
+        preview.pageSize == pageSize && preview.expandedHorizontalCount == 4 &&
+          preview.expandedHorizontalRows == 5 && preview.expandedVerticalCount == 7,
         "candidate preview ignored the selected page size \(pageSize)"
       )
     }
@@ -515,10 +529,6 @@ struct LinnetSettingsAppearancePreviewTests {
     return contents
   }
 
-  private static func occurrences(of needle: String, in haystack: String) -> Int {
-    haystack.components(separatedBy: needle).count - 1
-  }
-
   private static func projected(
     _ appearance: LinnetSettingsDocument.Appearance,
     systemIsDark: Bool,
@@ -542,14 +552,16 @@ struct LinnetSettingsAppearancePreviewTests {
   }
 
   private static func contrast(
-    _ lhs: LinnetSettingsAppearancePreview.RimeColor,
-    _ rhs: LinnetSettingsAppearancePreview.RimeColor
+    _ lhs: LinnetSettingsAppearancePreview.ColorComponents,
+    _ rhs: LinnetSettingsAppearancePreview.ColorComponents
   ) -> Double {
     let values = [relativeLuminance(lhs), relativeLuminance(rhs)].sorted()
     return (values[1] + 0.05) / (values[0] + 0.05)
   }
 
-  private static func relativeLuminance(_ color: LinnetSettingsAppearancePreview.RimeColor) -> Double {
+  private static func relativeLuminance(
+    _ color: LinnetSettingsAppearancePreview.ColorComponents
+  ) -> Double {
     func linear(_ byte: UInt8) -> Double {
       let value = Double(byte) / 255
       return value <= 0.03928
@@ -562,9 +574,9 @@ struct LinnetSettingsAppearancePreviewTests {
   }
 
   private static func compositedContrast(
-    foreground: LinnetSettingsAppearancePreview.RimeColor,
-    surface: LinnetSettingsAppearancePreview.RimeColor,
-    over baseline: LinnetSettingsAppearancePreview.RimeColor
+    foreground: LinnetSettingsAppearancePreview.ColorComponents,
+    surface: LinnetSettingsAppearancePreview.ColorComponents,
+    over baseline: LinnetSettingsAppearancePreview.ColorComponents
   ) -> Double {
     func channel(_ foreground: UInt8, _ background: UInt8, alpha: UInt8) -> Double {
       let opacity = Double(alpha) / 255

@@ -8,8 +8,8 @@ export LC_ALL=C
 readonly host_bundle_id='io.github.ares-x.inputmethod.Linnet'
 readonly script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly metadata_path="${script_root}/candidate-app-identity.json"
+readonly release_tool="${script_root}/linnet-pack"
 readonly user_home="${HOME:-}"
-readonly app_path="${user_home}/Library/Input Methods/Linnet.app"
 readonly current_uid="$(/usr/bin/id -u)"
 readonly legacy_max_version='0.1.11'
 readonly legacy_max_build='28'
@@ -127,10 +127,29 @@ semver_compare() {
   printf '%s\n' 0
 }
 
-[[ "$#" -eq 1 ]] || fail_identity "usage: existing | installed"
+[[ "$#" -ge 1 ]] || fail_identity "usage: existing | installed | packaged | staged APP"
 readonly verification_mode="$1"
 case "${verification_mode}" in
-  existing|installed) ;;
+  existing|installed)
+    [[ "$#" -eq 1 ]] || fail_identity "unexpected App path"
+    readonly app_path="${user_home}/Library/Input Methods/Linnet.app"
+    ;;
+  staged)
+    [[ "$#" -eq 2 && ( "$2" == \
+      "${user_home}/Library/Input Methods/.linnet-core."??????"/Linnet.app" || \
+      "$2" == "${user_home}/Library/Application Support/Linnet/.linnet-complete/App/Linnet.payload" ) ]] ||
+      fail_identity "staged App is outside the package transaction"
+    readonly app_path="$2"
+    secure_owned_path "${app_path%/*}" directory &&
+      [[ "$(cd "${app_path%/*}" && pwd -P)" == "${app_path%/*}" ]] ||
+      fail_identity "staged App parent is unsafe"
+    ;;
+  packaged)
+    [[ "$#" -eq 1 ]] || fail_identity "unexpected packaged App path"
+    readonly app_path="${script_root}/Linnet.payload"
+    secure_owned_path "${script_root}" directory ||
+      fail_identity "packaged App parent is unsafe"
+    ;;
   *) fail_identity "verification mode is invalid" ;;
 esac
 
@@ -157,18 +176,24 @@ expected_profile="$(read_value "${metadata_path}" profile)" ||
   fail_identity "candidate signing profile is unavailable"
 expected_leaf="$(read_value "${metadata_path}" leaf_certificate_sha256)" ||
   fail_identity "candidate signing leaf is unavailable"
+expected_leaf_sha1="$(read_value "${metadata_path}" leaf_certificate_sha1)" ||
+  fail_identity "candidate signing leaf requirement is unavailable"
+expected_tree="$(read_value "${metadata_path}" app_tree_sha256)" ||
+  fail_identity "candidate App tree identity is unavailable"
 [[ "${expected_bundle_id}" == "${host_bundle_id}" &&
-  "${expected_format}" == 3 &&
+  "${expected_format}" == 4 &&
   "${expected_profile}" == community-cms &&
   "${expected_version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$ &&
   "${expected_build}" =~ ^(0|[1-9][0-9]*)$ &&
   "${expected_revision}" =~ ^[0-9a-f]{40}$ &&
-  "${expected_leaf}" =~ ^[0-9a-f]{64}$ ]] ||
+  "${expected_leaf}" =~ ^[0-9a-f]{64}$ &&
+  "${expected_leaf_sha1}" =~ ^[0-9A-F]{40}$ &&
+  "${expected_tree}" =~ ^[0-9a-f]{64}$ ]] ||
   fail_identity "candidate identity metadata shape is invalid"
 
 if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
   if [[ "${verification_mode}" == existing ]]; then
-    printf '%s\n' missing-app-install
+    printf '%s\n' clean-complete-install
     exit 0
   fi
   fail_identity "installed App is missing"
@@ -189,9 +214,6 @@ readonly info_path="${app_path}/Contents/Info.plist"
 readonly version_path="${app_path}/Contents/Resources/LinnetRelease/VERSION.json"
 secure_owned_path "${info_path}" file && secure_owned_path "${version_path}" file ||
   fail_identity "installed App identity files are unsafe"
-
-/usr/bin/codesign --verify --deep --strict "${app_path}" >/dev/null 2>&1 ||
-  fail_identity "installed App code signature is invalid"
 
 actual_bundle_id="$(read_value "${info_path}" CFBundleIdentifier)" ||
   fail_identity "installed App bundle identifier is unavailable"
@@ -253,35 +275,27 @@ community-cms)
   [[ "${actual_profile}" == community-cms &&
     "${embedded_kind}" == external-cms ]] ||
     fail_identity "installed App is not a community CMS release"
-  scratch_root="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P)" ||
-    fail_identity "temporary root is unavailable"
-  scratch="$(/usr/bin/mktemp -d "${scratch_root}/linnet-candidate-app-identity.XXXXXX")" ||
-    fail_identity "temporary identity directory cannot be created"
-  cleanup_identity() {
-    if [[ "${scratch%/*}" == "${scratch_root}" &&
-      "${scratch##*/}" == linnet-candidate-app-identity.* &&
-      -d "${scratch}" && ! -L "${scratch}" ]]; then
-      /bin/rm -rf -- "${scratch}"
-    fi
-  }
-  trap cleanup_identity EXIT INT TERM HUP
-  certificate_prefix="${scratch}/leaf"
-  /usr/bin/codesign -d --extract-certificates="${certificate_prefix}" \
-    "${app_path}" >/dev/null 2>&1 ||
-    fail_identity "installed App signing certificate is unavailable"
-  [[ -s "${certificate_prefix}0" && ! -L "${certificate_prefix}0" ]] ||
-    fail_identity "installed App signing certificate is missing"
-  actual_leaf="$(/usr/bin/shasum -a 256 "${certificate_prefix}0" | \
-    /usr/bin/awk '{print $1}')" ||
-    fail_identity "installed App signing leaf cannot be read"
+  # Publication verifies the complete CMS chain before packaging. Installation
+  # must not require the maintainer certificate in the user's trust store; it
+  # binds the packaged bytes to the same fixed leaf through the designated
+  # requirement, verifies the installed code integrity, then verifies the exact
+  # target tree for packaged, staged and post-install candidate modes below.
+  expected_requirement="designated => identifier \"${host_bundle_id}\" and certificate leaf = H\"$(
+    /usr/bin/tr '[:upper:]' '[:lower:]' <<<"${expected_leaf_sha1}")\""
+  actual_requirement="$(/usr/bin/codesign -d -r- "${app_path}" 2>&1 |
+    /usr/bin/grep '^designated => ')" ||
+    fail_identity "installed App signing requirement is unavailable"
+  [[ "${actual_requirement}" == "${expected_requirement}" ]] ||
+    fail_identity "installed App signing requirement does not match"
+  /usr/bin/codesign --verify --deep --strict "${app_path}" >/dev/null 2>&1 ||
+    fail_identity "installed App code signature is invalid"
   embedded_leaf="$(read_value "${version_path}" \
     distribution.application_code_signature.leaf_certificate_sha256)" ||
     fail_identity "installed release signing leaf is unavailable"
   embedded_same_leaf="$(read_value "${version_path}" \
     distribution.application_code_signature.host_settings_same_leaf)" ||
     fail_identity "installed release signing policy is unavailable"
-  [[ "${actual_leaf}" == "${expected_leaf}" &&
-    "${embedded_leaf}" == "${actual_leaf}" &&
+  [[ "${embedded_leaf}" == "${expected_leaf}" &&
     "${embedded_same_leaf}" == true ]] ||
     fail_identity "installed release signing leaf does not match"
   identity_transition=same-community-cms-leaf
@@ -291,6 +305,10 @@ community-adhoc)
     "${actual_profile}" == community-adhoc &&
     "${embedded_kind}" == adhoc ]] ||
     fail_identity "installed App is not an admitted legacy community release"
+  # This one-time legacy edge has no certificate trust chain. Verify its ad-hoc
+  # code integrity without imposing that check on current community CMS users.
+  /usr/bin/codesign --verify --deep --strict "${app_path}" >/dev/null 2>&1 ||
+    fail_identity "legacy App code signature is invalid"
   legacy_version_comparison="$(semver_compare "${actual_version}" \
     "${legacy_max_version}")" ||
     fail_identity "legacy App version is invalid"
@@ -311,7 +329,13 @@ community-adhoc)
   ;;
 esac
 
-if [[ "${verification_mode}" == installed ]]; then
+if [[ "${verification_mode}" != existing ]]; then
+  secure_owned_path "${release_tool}" file && [[ -x "${release_tool}" ]] ||
+    fail_identity "candidate tree verifier is unavailable or unsafe"
+  actual_tree="$("${release_tool}" tree-digest --root "${app_path}")" ||
+    fail_identity "candidate App tree cannot be verified"
+  [[ "${actual_tree}" == "${expected_tree}" ]] ||
+    fail_identity "candidate App tree differs from the packaged target"
   [[ "${actual_version}" == "${expected_version}" &&
     "${actual_build}" == "${expected_build}" &&
     "${embedded_revision}" == "${expected_revision}" ]] ||
@@ -324,10 +348,6 @@ if (( version_comparison > 0 )); then
 fi
 if (( 10#${actual_build} > 10#${expected_build} )); then
   fail_identity "installed App build is newer than this Core candidate"
-fi
-if (( version_comparison == 0 )) && [[ "${actual_build}" == "${expected_build}" &&
-  "${embedded_revision}" != "${expected_revision}" ]]; then
-  fail_identity "installed App revision conflicts with this Core candidate"
 fi
 
 printf '%s\n' "${identity_transition}"

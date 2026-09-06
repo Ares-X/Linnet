@@ -218,7 +218,7 @@ c212	canonical:sentences	linnet_zh_pinyin	zhunbeihaolejiugaosuwo	准备好了就
 c213	canonical:sentences	linnet_zh_pinyin	womenmingtianjian	我们明天见	1
 c214	canonical:sentences	linnet_zh_pinyin	zhelidekongqizhenxinxian	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh_pinyin	xiexienidebangzhu	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh_pinyin	;yun	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh_pinyin	|yun	confused	5
 v_lve	supplemental:v_final	linnet_zh_pinyin	lve	略	5
 zero_ai	supplemental:zero_initial	linnet_zh_pinyin	ai	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh_pinyin	zhishi	知识	5
@@ -440,7 +440,7 @@ c212	canonical:sentences	linnet_zh	vpbzhklejqgksuwo	准备好了就告诉我	1
 c213	canonical:sentences	linnet_zh	womfmytmjm	我们明天见	1
 c214	canonical:sentences	linnet_zh	velideksqivfxnxm	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh	xxxxnidebhvu	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh	;yp	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh	|yp	confused	5
 v_lve	supplemental:v_final	linnet_zh	lt	略	5
 zero_ai	supplemental:zero_initial	linnet_zh	ai	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh	viui	知识	5
@@ -662,7 +662,7 @@ c212	canonical:sentences	linnet_zh_flypy	vybwhclejqgcsuwo	准备好了就告诉�
 c213	canonical:sentences	linnet_zh_flypy	womfmktmjm	我们明天见	1
 c214	canonical:sentences	linnet_zh_flypy	velideksqivfxbxm	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh_flypy	xpxpnidebhvu	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh_flypy	;yy	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh_flypy	|yy	confused	5
 v_lve	supplemental:v_final	linnet_zh_flypy	lt	略	5
 zero_ai	supplemental:zero_initial	linnet_zh_flypy	ai	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh_flypy	viui	知识	5
@@ -884,7 +884,7 @@ c212	canonical:sentences	linnet_zh_mspy	vpbzhklejqgksuwo	准备好了就告诉�
 c213	canonical:sentences	linnet_zh_mspy	womfm;tmjm	我们明天见	1
 c214	canonical:sentences	linnet_zh_mspy	velideksqivfxnxm	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh_mspy	xxxxnidebhvu	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh_mspy	;yp	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh_mspy	|yp	confused	5
 v_lve	supplemental:v_final	linnet_zh_mspy	lt	略	5
 zero_ai	supplemental:zero_initial	linnet_zh_mspy	ol	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh_mspy	viui	知识	5
@@ -1106,7 +1106,7 @@ c212	canonical:sentences	linnet_zh_sogou	vpbzhklejqgksuwo	准备好了就告诉�
 c213	canonical:sentences	linnet_zh_sogou	womfm;tmjm	我们明天见	1
 c214	canonical:sentences	linnet_zh_sogou	velideksqivfxnxm	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh_sogou	xxxxnidebhvu	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh_sogou	;yp	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh_sogou	|yp	confused	5
 v_lve	supplemental:v_final	linnet_zh_sogou	lt	略	5
 zero_ai	supplemental:zero_initial	linnet_zh_sogou	ol	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh_sogou	viui	知识	5
@@ -1328,7 +1328,7 @@ c212	canonical:sentences	linnet_zh_abc	anbqhklejrgksuwo	准备好了就告诉我
 c213	canonical:sentences	linnet_zh_abc	womfmytwjw	我们明天见	1
 c214	canonical:sentences	linnet_zh_abc	aelideksqiafxcxw	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh_abc	xxxxnidebhau	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh_abc	;yn	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh_abc	|yn	confused	5
 v_lve	supplemental:v_final	linnet_zh_abc	lm	略	5
 zero_ai	supplemental:zero_initial	linnet_zh_abc	ol	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh_abc	aivi	知识	5
@@ -1550,7 +1550,7 @@ c212	canonical:sentences	linnet_zh_ziguang	umbkhqlejjgqsuwo	准备好了就告�
 c213	canonical:sentences	linnet_zh_ziguang	womwm;tfjf	我们明天见	1
 c214	canonical:sentences	linnet_zh_ziguang	uelidekhqiuwxyxf	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh_ziguang	xdxdnidebsuu	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh_ziguang	;ym	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh_ziguang	|ym	confused	5
 v_lve	supplemental:v_final	linnet_zh_ziguang	ln	略	5
 zero_ai	supplemental:zero_initial	linnet_zh_ziguang	op	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh_ziguang	uiii	知识	5
@@ -1772,7 +1772,7 @@ c212	canonical:sentences	linnet_zh_jiajia	vzbwhdlejngdsuwo	准备好了就告诉
 c213	canonical:sentences	linnet_zh_jiajia	womrmqtjjj	我们明天见	1
 c214	canonical:sentences	linnet_zh_jiajia	velidekyqivrxlxj	这里的空气真新鲜	1
 c215	canonical:sentences	linnet_zh_jiajia	xmxmnidebgvu	谢谢你的帮助	1
-reverse_yun	supplemental:pinyin_reverse	linnet_zh_jiajia	;yz	confused	5
+reverse_yun	supplemental:pinyin_reverse	linnet_zh_jiajia	|yz	confused	5
 v_lve	supplemental:v_final	linnet_zh_jiajia	lx	略	5
 zero_ai	supplemental:zero_initial	linnet_zh_jiajia	as	爱	5
 retroflex_zhishi	supplemental:zh_ch_sh	linnet_zh_jiajia	viii	知识	5

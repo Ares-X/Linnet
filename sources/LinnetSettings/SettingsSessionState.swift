@@ -78,6 +78,10 @@ struct SettingsConfigurationSession: Equatable, Sendable {
   mutating func markSourceUnreadable() {
     readiness = .sourceUnreadable
   }
+  mutating func setServicesAvailable(_ available: Bool) {
+    guard readiness != .sourceUnreadable else { return }
+    readiness = available ? .ready : .servicesUnavailable
+  }
   func makeDocumentTicket() -> DocumentTicket? {
     guard canPersist, let documentBaselineRevision else { return nil }
     return DocumentTicket(
@@ -245,8 +249,8 @@ final class SettingsPersonalValidationExecutor {
   typealias Evaluator = @Sendable (
     LinnetPersonalData,
     LinnetPersonalDataStore.CancellationCheck
-  ) throws -> LinnetPersonalDataStore.Validation
-  typealias Completion = @MainActor @Sendable (LinnetPersonalDataStore.Validation) -> Void
+  ) throws -> LinnetPersonalDataValidation
+  typealias Completion = @MainActor @Sendable (LinnetPersonalDataValidation) -> Void
 
   private final class CancellationToken: @unchecked Sendable {
     private let lock = NSLock()

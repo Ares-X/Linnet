@@ -33,7 +33,21 @@ index 3f4e59d..b962e92 100644
    if (rime_api->start_maintenance(/*full_check = */ False)) {
      m_disabled = true;
    }
-@@ -555,7 +555,7 @@ void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
+@@ -502,8 +502,12 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
+   cinfo.labels.resize(ctx.menu.num_candidates);
+   for (int i = 0; i < ctx.menu.num_candidates; ++i) {
+     cinfo.candies[i].str = escape_string(u8tow(ctx.menu.candidates[i].text));
+     if (ctx.menu.candidates[i].comment) {
++      // Smart English marks definition comments for richer frontends. Weasel
++      // displays the same text inline and must not render the wire marker.
++      const char* comment = ctx.menu.candidates[i].comment;
++      if (*comment == '\x1d') ++comment;
+       cinfo.comments[i].str =
+-          escape_string(u8tow(ctx.menu.candidates[i].comment));
++          escape_string(u8tow(comment));
+     }
+     if (RIME_STRUCT_HAS_MEMBER(ctx, ctx.select_labels) && ctx.select_labels) {
+@@ -555,7 +559,7 @@ void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
  }
  
  bool RimeWithWeaselHandler::_IsDeployerRunning() {
@@ -1670,7 +1684,7 @@ index 3d5130c..ae70f24 100644
    "UninstallString"
    StrCmp $R0 "" done
  
-@@ -153,89 +167,210 @@ skip:
+@@ -153,89 +167,211 @@ skip:
    Abort
  
  uninst:
@@ -1734,6 +1748,7 @@ index 3d5130c..ae70f24 100644
 +  SetErrorLevel $R4
 +  Abort
 +old_frontend_removed:
++  ClearErrors
 +  Rename "$LinnetPriorRoot" "$LinnetRollbackRoot"
 +  IfErrors old_package_not_preserved
 +  StrCpy $LinnetRollbackReady 1
@@ -1765,7 +1780,7 @@ index 3d5130c..ae70f24 100644
 +  Push $R5
 +  Return
 +restore_prior_frontend_server:
-+  Exec "$LinnetPriorRoot\LinnetServer.exe"
++  Exec '"$LinnetPriorRoot\LinnetServer.exe"'
 +  Push 0
 +FunctionEnd
 +
@@ -1995,7 +2010,7 @@ index 3d5130c..ae70f24 100644
  
    SetOutPath $INSTDIR
  
-@@ -314,28 +450,66 @@ program_files:
+@@ -314,28 +450,67 @@ program_files:
    IfErrors +2 0
    StrCpy $R2 "/t"
  
@@ -2013,6 +2028,7 @@ index 3d5130c..ae70f24 100644
 +
 +  StrCmp $LinnetRollbackReady 1 0 build_backup_done
 +  IfFileExists "$LinnetUserDataRoot\build\*.*" 0 build_backup_done
++  ClearErrors
 +  Rename "$LinnetUserDataRoot\build" "$LinnetUserBuildRollback"
 +  IfErrors build_backup_failed
 +  StrCpy $LinnetBuildRollbackReady 1

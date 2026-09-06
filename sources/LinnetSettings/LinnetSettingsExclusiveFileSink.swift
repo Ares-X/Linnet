@@ -1,129 +1,94 @@
-import Darwin
 import Foundation
 
-/// Settings-only mutation boundary for publishing one immutable downloaded pack.
-/// It never interprets pack identity; the canonical catalog and pack verifier own that fact.
+/// Streams one download into a sibling temporary file and publishes it without
+/// replacing an existing destination. Catalog and pack verification stay with
+/// their existing owners.
 final class LinnetSettingsExclusiveFileSink {
   typealias Failure = LinnetSettingsDownloadTransport.Failure
 
-  private var parentDescriptor: Int32 = -1
-  private var outputDescriptor: Int32 = -1
-  private let partialName: String
-  private let finalName: String
+  private let destination: URL
+  private let partial: URL
+  private var handle: FileHandle?
   private var active = true
 
   init(destination: URL) throws {
     guard destination.isFileURL, !destination.hasDirectoryPath,
-      !destination.lastPathComponent.isEmpty,
-      destination.lastPathComponent.utf8.count <= 180
+      !destination.lastPathComponent.isEmpty
     else { throw Failure.unsafeDestination }
-    finalName = destination.lastPathComponent
-    partialName = ".\(finalName).partial-\(UUID().uuidString)"
+
     let parent = destination.deletingLastPathComponent()
-    parentDescriptor = open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-    guard parentDescriptor >= 0 else { throw Failure.unsafeDestination }
+    var isDirectory = ObjCBool(false)
+    guard FileManager.default.fileExists(
+      atPath: parent.path, isDirectory: &isDirectory
+    ), isDirectory.boolValue else { throw Failure.unsafeDestination }
+    guard !Self.itemExists(at: destination) else { throw Failure.destinationExists }
 
-    var parentInfo = stat()
-    guard fstat(parentDescriptor, &parentInfo) == 0,
-      (parentInfo.st_mode & S_IFMT) == S_IFDIR,
-      parentInfo.st_uid == getuid(),
-      (parentInfo.st_mode & (S_IWGRP | S_IWOTH)) == 0
-    else {
-      let code = errno
-      closeParent()
-      throw code == 0 ? Failure.unsafeDestination : Failure.storage(code)
-    }
-
-    var destinationInfo = stat()
-    let existing = finalName.withCString {
-      fstatat(parentDescriptor, $0, &destinationInfo, AT_SYMLINK_NOFOLLOW)
-    }
-    guard existing != 0 else {
-      closeParent()
-      throw Failure.destinationExists
-    }
-    guard errno == ENOENT else {
-      let code = errno
-      closeParent()
-      throw Failure.storage(code)
-    }
-
-    outputDescriptor = partialName.withCString {
-      openat(parentDescriptor, $0,
-        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-    }
-    guard outputDescriptor >= 0 else {
-      let code = errno
-      closeParent()
-      throw Failure.storage(code)
+    self.destination = destination
+    partial = parent.appending(
+      path: ".\(destination.lastPathComponent).partial-\(UUID().uuidString)")
+    guard FileManager.default.createFile(
+      atPath: partial.path,
+      contents: nil,
+      attributes: [.posixPermissions: 0o600]
+    ) else { throw Failure.storage(EIO) }
+    do {
+      handle = try FileHandle(forWritingTo: partial)
+    } catch {
+      try? FileManager.default.removeItem(at: partial)
+      throw Failure.storage(Self.code(for: error))
     }
   }
 
   deinit { try? discard() }
 
   func write(_ data: Data) throws {
-    guard active, outputDescriptor >= 0 else { throw Failure.storage(EBADF) }
-    try data.withUnsafeBytes { rawBuffer in
-      guard var pointer = rawBuffer.baseAddress else { return }
-      var remaining = rawBuffer.count
-      while remaining > 0 {
-        let written = Darwin.write(outputDescriptor, pointer, remaining)
-        if written < 0 && errno == EINTR { continue }
-        guard written > 0 else { throw Failure.storage(errno == 0 ? EIO : errno) }
-        remaining -= written
-        pointer = pointer.advanced(by: written)
-      }
+    guard active, let handle else { throw Failure.storage(EBADF) }
+    do {
+      try handle.write(contentsOf: data)
+    } catch {
+      throw Failure.storage(Self.code(for: error))
     }
   }
 
   func publish() throws {
-    guard active, outputDescriptor >= 0, parentDescriptor >= 0 else {
-      throw Failure.storage(EBADF)
-    }
-    while fsync(outputDescriptor) != 0 {
-      if errno == EINTR { continue }
-      throw Failure.storage(errno)
-    }
-    guard fchmod(outputDescriptor, 0o444) == 0 else { throw Failure.storage(errno) }
-    let descriptor = outputDescriptor
-    outputDescriptor = -1
-    guard Darwin.close(descriptor) == 0 else { throw Failure.storage(errno) }
-
-    let renamed = partialName.withCString { source in
-      finalName.withCString { destination in
-        renameatx_np(parentDescriptor, source, parentDescriptor, destination,
-          UInt32(RENAME_EXCL | RENAME_NOFOLLOW_ANY))
+    guard active, let handle else { throw Failure.storage(EBADF) }
+    do {
+      try handle.synchronize()
+      try handle.close()
+      self.handle = nil
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o444], ofItemAtPath: partial.path)
+      try FileManager.default.moveItem(at: partial, to: destination)
+      active = false
+    } catch {
+      if Self.itemExists(at: destination) {
+        throw Failure.destinationExists
       }
+      throw Failure.storage(Self.code(for: error))
     }
-    guard renamed == 0 else { throw Failure.storage(errno) }
-    active = false
-    closeParent()
   }
 
   func discard() throws {
-    guard active else {
-      closeParent()
-      return
-    }
-    var failure: Int32?
-    if outputDescriptor >= 0 {
-      let descriptor = outputDescriptor
-      outputDescriptor = -1
-      if Darwin.close(descriptor) != 0 { failure = errno }
-    }
-    if parentDescriptor >= 0 {
-      let removed = partialName.withCString { unlinkat(parentDescriptor, $0, 0) }
-      if removed != 0 && errno != ENOENT { failure = failure ?? errno }
-    }
+    guard active else { return }
     active = false
-    closeParent()
-    if let failure { throw Failure.storage(failure) }
+    var firstError: Error?
+    if let handle {
+      do { try handle.close() } catch { firstError = error }
+      self.handle = nil
+    }
+    if Self.itemExists(at: partial) {
+      do { try FileManager.default.removeItem(at: partial) } catch {
+        firstError = firstError ?? error
+      }
+    }
+    if let firstError { throw Failure.storage(Self.code(for: firstError)) }
   }
 
-  private func closeParent() {
-    guard parentDescriptor >= 0 else { return }
-    let descriptor = parentDescriptor
-    parentDescriptor = -1
-    _ = Darwin.close(descriptor)
+  private static func itemExists(at url: URL) -> Bool {
+    (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
+  }
+
+  private static func code(for error: Error) -> Int32 {
+    Int32(clamping: (error as NSError).code)
   }
 }

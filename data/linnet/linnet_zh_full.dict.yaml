@@ -2,8 +2,9 @@
 # encoding: utf-8
 #
 # Linnet Complete extends the same reviewed + locked Wanxiang Core graph with
-# all nine declared professional tables. Rime remains the one merge/ranking
-# owner; no generated duplicate projection is shipped.
+# all nine declared professional tables, followed by the same low-weight
+# rime-ice ext supplement. Rime remains the one merge/ranking owner; no
+# generated duplicate projection is shipped.
 
 ---
 name: linnet_zh
@@ -12,6 +13,7 @@ sort: by_weight
 use_preset_vocabulary: false
 import_tables:
   - linnet_reviewed
+  - linnet_english_entities
   - dicts/zi
   - dicts/jichu
   - dicts/lianxiang
@@ -28,4 +30,5 @@ import_tables:
   - dicts/renming
   - dicts/taifeng
   - dicts/fangyan
+  - dicts/ext
 ...

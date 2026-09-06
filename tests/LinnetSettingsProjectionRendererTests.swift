@@ -5,7 +5,7 @@ import Foundation
 @main
 struct LinnetSettingsProjectionRendererTests {
   static func main() {
-    let directory = FileManager.default.temporaryDirectory.appending(
+    let directory = LinnetTestScratch.directory.appending(
       path: "LinnetSettingsProjectionRendererTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )
@@ -19,6 +19,7 @@ struct LinnetSettingsProjectionRendererTests {
       testLightweightAppearanceProjection()
       testFontPointProjection()
       testPageSizeProjection()
+      try testExpandedCounts()
       testSwitchProjections()
       testPinyinReverseTriggerProjection()
       testChineseProfileProjectionAndCodec()
@@ -31,6 +32,7 @@ struct LinnetSettingsProjectionRendererTests {
       try testNewerDocumentFailsClosed(in: directory)
       try testOversizedSettingsDocumentFailsClosed(in: directory)
       try testProjectionReconciliationLifecycle(in: directory)
+      try testCoreThemeReconciliation(in: directory)
       try testAtomicDocumentExchange(in: directory)
       print("LinnetSettingsProjectionRendererTests: PASS")
     } catch {
@@ -94,6 +96,41 @@ struct LinnetSettingsProjectionRendererTests {
         }
       }
     }
+  }
+
+  private static func testExpandedCounts() throws {
+    let original = LinnetSettingsDocument.default
+    require(original.appearance.expandedHorizontalCount == 5 && original.appearance.expandedVerticalCount == 5,
+      "expanded counts must default to five")
+    let oldAppearance = Data("{\"pageSize\":9}".utf8)
+    let decoded = try JSONDecoder().decode(LinnetSettingsDocument.Appearance.self, from: oldAppearance)
+    require(decoded.pageSize == 9 && decoded.expandedHorizontalCount == 5 && decoded.expandedVerticalCount == 5,
+      "older settings changed compact count or did not acquire expanded defaults")
+    require(decoded.expandedHorizontalRows == 3, "older settings must default to three expanded rows")
+    for count in 3...5 {
+      var document = original
+      document.appearance.expandedHorizontalCount = count
+      document.appearance.expandedHorizontalRows = 8 - count
+      document.appearance.expandedVerticalCount = count + 2
+      let projections = LinnetSettingsProjectionRenderer.renderProjections(document: document)
+      let baseline = LinnetSettingsProjectionRenderer.renderProjections(document: original)
+      require(projections.filter { $0.key != LinnetSettingsProjectionRenderer.squirrelCustomFile }
+        == baseline.filter { $0.key != LinnetSettingsProjectionRenderer.squirrelCustomFile },
+        "expanded count changed Rime pages, schema or compact input behavior")
+      let roundTrip = try JSONDecoder().decode(LinnetSettingsDocument.self, from: JSONEncoder().encode(document))
+      require(roundTrip == document, "expanded counts did not survive save and reload")
+      let live = document.appearance.livePanelProjection(over: original.appearance)
+      require(live.expandedHorizontalCount == count && live.expandedHorizontalRows == 8 - count &&
+        live.expandedVerticalCount == count + 2 && live.pageSize == 9,
+        "live panel apply mixed expanded counts with compact pages")
+    }
+    var invalid = original
+    invalid.appearance.expandedHorizontalCount = 1
+    invalid.appearance.expandedHorizontalRows = 100
+    invalid.appearance.expandedVerticalCount = 100
+    require(invalid.normalized().appearance.expandedHorizontalCount == 3 &&
+      invalid.normalized().appearance.expandedHorizontalRows == 5 &&
+      invalid.normalized().appearance.expandedVerticalCount == 7, "expanded count bounds were not enforced")
   }
 
   private static func testFontPresetProjection() {
@@ -163,9 +200,16 @@ struct LinnetSettingsProjectionRendererTests {
       LinnetSettingsDocument.CandidateBrowsingMode.allCases == [.scrollingOnly, .expandable],
       LinnetSettingsDocument.Appearance.default.candidateBrowsingMode == .expandable,
       LinnetSettingsDocument.Appearance.default.pageSize == 9,
-      LinnetSettingsDocument.Input.default.pinyinReverseTrigger == .semicolon
+      LinnetSettingsDocument.Input.default.pinyinReverseTrigger == .verticalBar
     else {
       fail("candidate font bounds or the bilingual layout defaults drifted")
+    }
+    let bundledDefaults = try? String(
+      contentsOfFile: "data/linnet/default.yaml", encoding: .utf8)
+    guard bundledDefaults?.contains("pinyin_reverse_lookup: \"^[|][a-z;']*$\"") == true,
+      bundledDefaults?.contains("prefix: \"|\"") == true
+    else {
+      fail("the bundled reverse-lookup base no longer matches the document-owned | default")
     }
     let projections = LinnetSettingsProjectionRenderer.renderProjections(
       document: .default
@@ -183,6 +227,16 @@ struct LinnetSettingsProjectionRendererTests {
         == coreInteractionProjection + defaultSchemaOrderProjection,
       "the default Core projection did not own the complete installed interaction policy"
     )
+    guard let coreProjection = projections[
+      LinnetSettingsProjectionRenderer.defaultCustomFile
+    ],
+      coreProjection.contains("\"punctuator/half_shape/,\": { commit: \"，\" }"),
+      coreProjection.contains("\"punctuator/half_shape/.\": { commit: \"。\" }"),
+      coreProjection.contains("\"punctuator/half_shape/:\": { commit: \"：\" }"),
+      coreProjection.contains("\"punctuator/half_shape/;\": { commit: \"；\" }")
+    else {
+      fail("the Core projection did not repair Chinese punctuation in an older language pack")
+    }
     for name in schemaFiles {
       guard let contents = projections[name] else {
         fail("the default interaction projection was absent from \(name)")
@@ -190,7 +244,9 @@ struct LinnetSettingsProjectionRendererTests {
       guard contents.contains(
         "\"linnet_english_interaction/sentence_capitalization\": false"),
         contents.contains("\"linnet_english_interaction/tab_behavior\": \"smart_complete\""),
-        contents.contains("\"linnet_english_interaction/space_adds_trailing_space\": true")
+        contents.contains("\"linnet_english_interaction/space_adds_trailing_space\": true"),
+        !contents.contains("recognizer/patterns/linnet_pinyin"),
+        !contents.contains("linnet_pinyin/prefix")
       else {
         fail("the default interaction settings were not authoritative in \(name)")
       }
@@ -199,45 +255,53 @@ struct LinnetSettingsProjectionRendererTests {
 
   private static func testPinyinReverseTriggerProjection() {
     var document = LinnetSettingsDocument.default
-    document.input.pinyinReverseTrigger = .verticalBar
+    document.input.pinyinReverseTrigger = .semicolon
     let projections = LinnetSettingsProjectionRenderer.renderProjections(
       document: document)
-    let reverseLookupFiles =
-      LinnetSettingsProjectionRenderer.chineseCustomFiles
-      + [LinnetSettingsProjectionRenderer.englishCustomFile]
+    let reverseLookupFiles = LinnetSettingsProjectionRenderer.chineseCustomFiles
     guard Set(projections.keys)
-      == Set(reverseLookupFiles + [LinnetSettingsProjectionRenderer.defaultCustomFile])
+      == Set(reverseLookupFiles + [
+        LinnetSettingsProjectionRenderer.englishCustomFile,
+        LinnetSettingsProjectionRenderer.defaultCustomFile,
+      ])
     else {
-      fail("the reverse-lookup trigger did not project to both language modes")
+      fail("the reverse-lookup trigger did not project to every Chinese mode")
     }
     for file in reverseLookupFiles {
       guard let contents = projections[file],
         contents.contains(
-          "\"recognizer/patterns/linnet_pinyin\": \"^[|][a-z;']*$\""),
-        contents.contains("\"linnet_pinyin/prefix\": \"|\"")
+          "\"recognizer/patterns/linnet_pinyin\": \"^;[a-z;']*$\""),
+        contents.contains("\"linnet_pinyin/prefix\": \";\"")
       else {
         fail("the reverse-lookup recognizer and affix prefix diverged in \(file)")
       }
+    }
+    guard let english = projections[LinnetSettingsProjectionRenderer.englishCustomFile],
+      !english.contains("recognizer/patterns/linnet_pinyin"),
+      !english.contains("linnet_pinyin/prefix"),
+      english.contains("\"linnet_pinyin/prism\": \"linnet_zh_pinyin\"")
+    else {
+      fail("the Chinese reverse-lookup trigger leaked into Smart English")
     }
 
     do {
       let encoded = try JSONEncoder().encode(document)
       let decoded = try JSONDecoder().decode(
         LinnetSettingsDocument.self, from: encoded)
-      guard decoded.input.pinyinReverseTrigger == .verticalBar else {
+      guard decoded.input.pinyinReverseTrigger == .semicolon else {
         fail("the reverse-lookup trigger did not survive the document codec")
       }
     } catch {
       fail("the reverse-lookup trigger codec failed: \(error)")
     }
 
-    document.input.pinyinReverseTrigger = .semicolon
+    document.input.pinyinReverseTrigger = .verticalBar
     let restored = LinnetSettingsProjectionRenderer.renderProjections(document: document)
     guard restored.values.allSatisfy({
       !$0.contains("recognizer/patterns/linnet_pinyin")
         && !$0.contains("linnet_pinyin/prefix")
     }) else {
-      fail("restoring the bundled reverse-lookup trigger left a projection")
+      fail("restoring the bundled | reverse-lookup trigger left a projection")
     }
 
     let invalid = Data("""
@@ -246,7 +310,7 @@ struct LinnetSettingsProjectionRendererTests {
     do {
       let decoded = try JSONDecoder().decode(
         LinnetSettingsDocument.self, from: invalid)
-      guard decoded.input.pinyinReverseTrigger == .semicolon else {
+      guard decoded.input.pinyinReverseTrigger == .verticalBar else {
         fail("an invalid reverse-lookup trigger did not fail closed to the bundled key")
       }
     } catch {
@@ -303,7 +367,7 @@ struct LinnetSettingsProjectionRendererTests {
       require(
         english?.contains("\"linnet_pinyin/prism\": \"\(prism)\"") == true &&
           english?.contains("\"linnet_mode_switch/chinese_schema\": \"\(prism)\"") == true,
-        "the selected Chinese profile did not explicitly own English lookup and Shift return"
+        "the selected Chinese profile did not own Smart English lookup and Shift return"
       )
       require(
         defaultCustom == expectedDefault,
@@ -529,21 +593,30 @@ struct LinnetSettingsProjectionRendererTests {
   }
 
   private static func testEnglishExperienceProjections() {
+    do {
+      let legacy = Data("{\"english\":{\"spellingCorrection\":false}}".utf8)
+      let restored = try JSONDecoder().decode(LinnetSettingsDocument.self, from: legacy)
+      let encoded = try JSONEncoder().encode(restored)
+      guard !String(decoding: encoded, as: UTF8.self).contains("spellingCorrection"),
+        LinnetSettingsProjectionRenderer.renderProjections(document: restored).values.allSatisfy({
+          !$0.contains("spelling_correction")
+        })
+      else { fail("a retired English correction switch survived import or runtime projection") }
+    } catch { fail("legacy English preferences did not migrate: \(error)") }
     var document = LinnetSettingsDocument.default
     document.english.showIPA = false
     document.english.showTranslation = false
     document.english.predictionEnabled = false
-    document.english.spellingCorrection = false
     document.english.spaceAddsTrailingSpace = false
     let projections = LinnetSettingsProjectionRenderer.renderProjections(document: document)
     guard let english = projections[LinnetSettingsProjectionRenderer.englishCustomFile],
       english.contains("\"linnet_english_interaction/show_ipa\": false"),
       english.contains("\"linnet_english_interaction/show_translation\": false"),
       english.contains("\"switches/@1/reset\": 0"),
-      english.contains("\"linnet_english_interaction/spelling_correction\": false"),
+      !english.contains("spelling_correction"),
       english.contains("\"linnet_english_interaction/space_adds_trailing_space\": false")
     else {
-      fail("English display, prediction, or correction settings were not projected")
+      fail("English display, prediction, or trailing-space settings were not projected")
     }
     for file in LinnetSettingsProjectionRenderer.chineseCustomFiles {
       guard let contents = projections[file],
@@ -628,7 +701,6 @@ struct LinnetSettingsProjectionRendererTests {
         decoded.english.showIPA,
         decoded.english.showTranslation,
         decoded.english.predictionEnabled,
-        decoded.english.spellingCorrection,
         decoded.english.spaceAddsTrailingSpace
       else {
         fail("an older settings document did not adopt the shipped behavior defaults")
@@ -646,7 +718,8 @@ struct LinnetSettingsProjectionRendererTests {
           LinnetSettingsDocument.self, from: previousDefaults)
         guard decoded.schemaVersion == LinnetSettingsDocument.currentSchemaVersion,
           decoded.appearance.englishCandidateLayout == .horizontal,
-          decoded.appearance.pageSize == 9
+          decoded.appearance.pageSize == 9,
+          decoded.input.pinyinReverseTrigger == .verticalBar
         else {
           fail("v\(previousVersion) shipped layout and page defaults were not migrated")
         }
@@ -664,7 +737,7 @@ struct LinnetSettingsProjectionRendererTests {
       guard decoded.schemaVersion == LinnetSettingsDocument.currentSchemaVersion,
         decoded.appearance.englishCandidateLayout == .vertical,
         decoded.appearance.pageSize == 5,
-        decoded.input.pinyinReverseTrigger == .semicolon
+        decoded.input.pinyinReverseTrigger == .verticalBar
       else {
         fail("the v4 trigger migration changed an explicit vertical/five choice")
       }
@@ -935,6 +1008,44 @@ struct LinnetSettingsProjectionRendererTests {
     }
   }
 
+  private static func testCoreThemeReconciliation(in directory: URL) throws {
+    let core = directory.appending(path: "core-squirrel.yaml")
+    let user = directory.appending(path: "core-theme-user")
+    let staging = user.appending(path: "build")
+    try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    let projected = user.appending(path: "squirrel.yaml")
+    let compiled = staging.appending(path: "squirrel.yaml")
+    let custom = user.appending(path: "squirrel.custom.yaml")
+    let preference = "patch:\n  style/font_point: 32\n"
+    try preference.write(to: custom, atomically: true, encoding: .utf8)
+    let first = "config_version: '1.1'\nstyle:\n  color_scheme: core_first\n"
+    try first.write(to: core, atomically: true, encoding: .utf8)
+    try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+      source: core, to: user, stagingDirectory: staging)
+    require(try Data(contentsOf: projected) == Data(first.utf8), "Core theme was not projected")
+    let identity = try fileIdentity(projected)
+    try Data("compiled".utf8).write(to: compiled)
+    try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+      source: core, to: user, stagingDirectory: staging)
+    require(try fileIdentity(projected) == identity, "unchanged Core theme was rewritten")
+    require(FileManager.default.fileExists(atPath: compiled.path), "unchanged theme invalidated its cache")
+
+    let second = first.replacingOccurrences(of: "core_first", with: "core_second")
+    try second.write(to: core, atomically: true, encoding: .utf8)
+    // No delay or config_version bump: content alone owns the transition.
+    try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+      source: core, to: user, stagingDirectory: staging)
+    require(try Data(contentsOf: projected) == Data(second.utf8), "Core theme update was lost")
+    require(!FileManager.default.fileExists(atPath: compiled.path), "changed theme retained stale compiled output")
+    require(try String(contentsOf: custom, encoding: .utf8) == preference, "Core update changed user preferences")
+    do {
+      try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+        source: directory.appending(path: "missing-core"), to: user, stagingDirectory: staging)
+      fail("missing Core theme was accepted")
+    } catch LinnetSettingsProjectionRenderer.Failure.unsafeFile { }
+    require(try Data(contentsOf: projected) == Data(second.utf8), "missing Core theme mutated the current projection")
+  }
+
   private static func testAtomicDocumentExchange(in directory: URL) throws {
     let live = directory.appending(path: "exchange-live", directoryHint: .isDirectory)
     let candidate = directory.appending(path: "exchange-candidate", directoryHint: .isDirectory)
@@ -988,6 +1099,13 @@ struct LinnetSettingsProjectionRendererTests {
       "ascii_composer/switch_key/Shift_L": commit_code
       "ascii_composer/switch_key/Shift_R": commit_code
       "linnet/recognizer_patterns/zz_code_token": "^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$"
+      "punctuator/half_shape/,": { commit: "，" }
+      "punctuator/half_shape/.": { commit: "。" }
+      "punctuator/half_shape/:": { commit: "：" }
+      "punctuator/half_shape/;": { commit: "；" }
+      "punctuator/half_shape/'": { pair: ["‘", "’"] }
+      "punctuator/half_shape/[": { commit: "【" }
+      "punctuator/half_shape/]": { commit: "】" }
 
     """
 
@@ -1011,7 +1129,7 @@ struct LinnetSettingsProjectionRendererTests {
     exit(EXIT_FAILURE)
   }
 
-  private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {
-    guard condition() else { fail(message) }
+  private static func require(_ condition: Bool, _ message: String) {
+    guard condition else { fail(message) }
   }
 }

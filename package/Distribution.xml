@@ -17,40 +17,33 @@
     <line choice="profile"/>
   </choices-outline>
   <choice id="core" visible="false">
-    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"/>
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.core.pkg"/>
   </choice>
   <choice id="chinese" visible="false">
-    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.chinese.pkg"/>
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.chinese.pkg"/>
   </choice>
   <choice id="english" visible="false">
-    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.english.pkg"/>
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.english.pkg"/>
   </choice>
   <choice id="lts" visible="false">
-    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.lts.pkg"/>
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.lts.pkg"/>
   </choice>
   <choice id="extended" visible="false">
-    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.extended.pkg"/>
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.extended.pkg"/>
   </choice>
   <choice id="profile" visible="false">
-    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.profile.pkg"/>
+    <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.profile.pkg"/>
   </choice>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg"
-    version="@CORE_VERSION@" auth="none"
-    onConclusion="RequireLogout">Linnet-Core.component.pkg</pkg-ref>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.chinese.pkg"
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.core.pkg"
+    version="@CORE_VERSION@" auth="none">Linnet-Core.component.pkg</pkg-ref>
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.chinese.pkg"
     version="@CHINESE_SEQUENCE@" auth="none">Linnet-Chinese.component.pkg</pkg-ref>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.english.pkg"
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.english.pkg"
     version="@ENGLISH_SEQUENCE@" auth="none">Linnet-English.component.pkg</pkg-ref>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.lts.pkg"
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.lts.pkg"
     version="@LTS_SEQUENCE@" auth="none">Linnet-LTS.component.pkg</pkg-ref>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.data.extended.pkg"
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.data.extended.pkg"
     version="@EXTENDED_SEQUENCE@" auth="none">Linnet-Extended.component.pkg</pkg-ref>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.profile.pkg"
+  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.complete.profile.pkg"
     version="@PROFILE_RECEIPT_VERSION@" auth="none">Linnet-Profile.component.pkg</pkg-ref>
-  <pkg-ref id="io.github.ares-x.inputmethod.Linnet.core.pkg">
-    <must-close>
-      <app id="io.github.ares-x.inputmethod.Linnet"/>
-      <app id="io.github.ares-x.inputmethod.Linnet.settings"/>
-    </must-close>
-  </pkg-ref>
 </installer-gui-script>

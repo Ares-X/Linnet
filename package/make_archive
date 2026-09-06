@@ -16,8 +16,9 @@ fail_archive() {
 [[ "$#" -eq 2 ]] || fail_archive "usage: APP OUTPUT_DIRECTORY"
 [[ "${app_path}" == /* && -d "${app_path}" && ! -L "${app_path}" ]] ||
   fail_archive "APP must be an absolute, non-symlink App bundle"
-[[ "${app_path##*/}" == Linnet.app ]] || fail_archive "unexpected App name"
-for tool in awk cmp cp find git mkdir mktemp mv pkgutil plutil ruby sort stat tr wc; do
+[[ "${app_path##*/}" == Linnet.candidate ]] ||
+  fail_archive "unexpected frozen candidate name"
+for tool in awk cmp cp find git gzip mkdir mktemp mv pkgutil plutil ruby sort stat tar tr wc; do
   command -v "${tool}" >/dev/null 2>&1 || fail_archive "required tool is unavailable: ${tool}"
 done
 
@@ -33,6 +34,7 @@ data_release_tool="${project_root}/package/data_release_metadata"
 "${data_release_tool}" validate "${data_release_file}" >/dev/null
 "${data_release_tool}" check-core "${data_release_file}" "${version}" >/dev/null
 catalog_sequence="$("${data_release_tool}" get-catalog-sequence "${data_release_file}")"
+core_artifact_format="$("${data_release_tool}" get-core-artifact-format "${data_release_file}")"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
   fail_archive "LINNET_CANDIDATE_REVISION must name the exact candidate Git OID"
 [[ "$(git -C "${project_root}" rev-parse --verify HEAD^{commit})" == "${candidate_revision}" ]] ||
@@ -58,25 +60,14 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-if [[ -n "${release_tool}" ]]; then
-  [[ "${release_tool}" == /* && -f "${release_tool}" && ! -L "${release_tool}" && -x "${release_tool}" ]] ||
-    fail_archive "LINNET_RELEASE_TOOL must name the precompiled pack CLI"
-  pack_tool="${release_tool}"
-else
-  command -v xcrun >/dev/null 2>&1 || fail_archive "required tool is unavailable: xcrun"
-  pack_tool="${work_root}/linnet-pack"
-  xcrun swiftc -warnings-as-errors \
-      "${project_root}/sources/LinnetPackContract.swift" \
-      "${project_root}/sources/LinnetDataChannel.swift" \
-      "${project_root}/sources/LinnetDataRegistry.swift" \
-      "${project_root}/tools/LinnetDataCatalogBuilder.swift" \
-      "${project_root}/tools/LinnetPackTool.swift" -o "${pack_tool}"
-fi
+[[ "${release_tool}" == /* && -f "${release_tool}" && ! -L "${release_tool}" &&
+   -x "${release_tool}" ]] ||
+  fail_archive "LINNET_RELEASE_TOOL must name the canonical precompiled pack CLI"
+pack_tool="${release_tool}"
 signing_profile="$(plutil -extract LinnetCodeSigningProfile raw -o - \
   "${app_path}/Contents/Info.plist" 2>/dev/null || true)"
 case "${signing_profile}" in
   community-cms)
-    verification_scope=publication
     code_identity="$("${project_root}/scripts/linnet-code-identity" \
       verify-product "${app_path}")" ||
       fail_archive "community App identity is invalid"
@@ -93,14 +84,31 @@ ruby -rjson -e '
     identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
 ' "${code_identity}" "${candidate_revision}" ||
   fail_archive "App identity differs from the candidate revision"
-LINNET_RELEASE_TOOL="${pack_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
-  "${project_root}/package/verify_package" "${core_pkg}" "${app_path}" core \
-    "${verification_scope}"
-LINNET_RELEASE_TOOL="${pack_tool}" LINNET_CANDIDATE_REVISION="${candidate_revision}" \
-  "${project_root}/package/verify_package" "${complete_pkg}" "${app_path}" complete \
-    "${verification_scope}"
+
 expanded_complete="${work_root}/expanded-complete"
 pkgutil --expand-full "${complete_pkg}" "${expanded_complete}"
+core_artifact="${core_pkg}"
+core_catalog_option=--core-package
+if [[ "${core_artifact_format}" == app-tar-gzip ]]; then
+  core_artifact="${output_dir}/${release_prefix}-Core.linnetcore"
+  core_catalog_option=--core-archive
+  archive_tar="${work_root}/${release_prefix}-Core.tar"
+  archive_candidate="${work_root}/${release_prefix}-Core.linnetcore"
+  # Both delivery formats carry the exact same finalized package payload.
+  tar -cf "${archive_tar}" --no-acls --no-fflags --no-mac-metadata --no-xattrs \
+    -C "${expanded_complete}/Linnet-Core.component.pkg/Payload" Linnet.payload
+  gzip -n -c "${archive_tar}" >"${archive_candidate}"
+  if [[ -e "${core_artifact}" ]]; then
+    [[ -f "${core_artifact}" && ! -L "${core_artifact}" ]] &&
+      cmp -s "${archive_candidate}" "${core_artifact}" ||
+      fail_archive "existing Core App archive bytes differ"
+  else
+    mv "${archive_candidate}" "${core_artifact}"
+  fi
+elif [[ "${core_artifact_format}" != installer-package ]]; then
+  fail_archive "unknown Core artifact format"
+fi
+delta_options=()
 
 publish_pack() {
   local expanded="$1"
@@ -152,9 +160,42 @@ publish_pack() {
       fail_archive "unsafe existing release output: ${archive_name}"
     cmp -s "${candidate}" "${output_dir}/${archive_name}" ||
       fail_archive "existing pack bytes differ: ${archive_name}"
-    return
+  else
+    cp "${candidate}" "${output_dir}/${archive_name}"
   fi
-  cp "${candidate}" "${output_dir}/${archive_name}"
+  local baseline_file="${project_root}/config/linnet-update-baselines.json"
+  local base_content base_root delta_name delta reconstructed transport
+  base_content="$(plutil -extract "pack_baselines.${kind}.content_sha256" raw -o - "${baseline_file}")"
+  [[ "${base_content}" != "${package_content_sha}" ]] || return 0
+  [[ "$(plutil -extract "pack_baselines.${kind}.target_sequence" raw -o - "${baseline_file}")" == "${pack_sequence}" ]] ||
+    fail_archive "${kind} delta is not bound to the current pack sequence"
+  base_root="$("${project_root}/package/prepare_update_baseline" "${kind}")"
+  delta_name="${archive_name%.linnetpack}-from-${base_content}.linnetdelta"
+  delta="${work_root}/${delta_name}"
+  reconstructed="${work_root}/reconstructed-${kind}"
+  transport="$(ruby -rjson -e '
+    baseline = JSON.parse(File.read(ARGV.fetch(0))).fetch("pack_baselines").fetch(ARGV.fetch(1))
+    puts baseline.key?("delta_source") ? "published" : "new"
+  ' "${baseline_file}" "${kind}")"
+  if [[ "${transport}" == published ]]; then
+    cp "$("${project_root}/package/prepare_update_baseline" "delta-${kind}")" "${delta}"
+  elif [[ -f "${output_dir}/${delta_name}" && ! -L "${output_dir}/${delta_name}" ]]; then
+    cp "${output_dir}/${delta_name}" "${delta}"
+  else
+    "${pack_tool}" build-delta --base "${base_root}" --target "${pack_root}" --output "${delta}"
+  fi
+  "${pack_tool}" apply-delta --base "${base_root}" --delta "${delta}" --output "${reconstructed}"
+  "${pack_tool}" inspect-installed --root "${reconstructed}" --core-version "${version}" \
+    >"${work_root}/reconstructed-${kind}.json"
+  cmp -s "${installed_manifest}" "${work_root}/reconstructed-${kind}.json" ||
+    fail_archive "${kind} delta does not reconstruct the accepted pack"
+  if [[ -e "${output_dir}/${delta_name}" ]]; then
+    [[ -f "${output_dir}/${delta_name}" && ! -L "${output_dir}/${delta_name}" ]] &&
+      cmp -s "${delta}" "${output_dir}/${delta_name}" || fail_archive "existing delta bytes differ"
+  else
+    cp "${delta}" "${output_dir}/${delta_name}"
+  fi
+  delta_options+=("--${kind}-delta" "${output_dir}/${delta_name}" "--${kind}-base-content" "${base_content}")
 }
 
 publish_pack "${expanded_complete}" Linnet-Chinese.component.pkg chinese
@@ -168,11 +209,11 @@ publish_catalog() {
   "${pack_tool}" build-catalog --sequence "${catalog_sequence}" \
     --core-version "${version}" --output "${candidate}" \
     --core-build "${build}" --core-revision "${candidate_revision}" \
-    --core-package "${core_pkg}" \
+    "${core_catalog_option}" "${core_artifact}" \
     --chinese-pack "${output_dir}/Linnet-Chinese.linnetpack" \
     --english-pack "${output_dir}/Linnet-English.linnetpack" \
     --lts-pack "${output_dir}/Linnet-LTS.linnetpack" \
-    --extended-pack "${output_dir}/Linnet-Extended.linnetpack" ||
+    --extended-pack "${output_dir}/Linnet-Extended.linnetpack" "${delta_options[@]}" ||
     fail_archive "cannot build data Catalog"
   "${pack_tool}" verify-catalog --catalog "${candidate}" \
     --core-version "${version}" >/dev/null
@@ -182,6 +223,7 @@ publish_catalog() {
     catalog = JSON.parse(File.read(ARGV.shift))
     expected_sequence = Integer(ARGV.shift)
     root = ARGV.shift
+    core_artifact = ARGV.shift
     expected_version = ARGV.shift
     manifests = ARGV.to_h { |path|
       manifest = JSON.parse(File.read(path))
@@ -189,11 +231,10 @@ publish_catalog() {
     }
     abort "catalog sequence mismatch" unless catalog.fetch("sequence") == expected_sequence
     core = catalog.fetch("core")
-    core_package = File.join(root, "Linnet-#{core.fetch("version")}-arm64-Core-community-beta.pkg")
     abort "catalog Core version mismatch" unless core.fetch("version") == expected_version
-    abort "catalog Core byte count mismatch" unless core.fetch("bytes") == File.size(core_package)
+    abort "catalog Core byte count mismatch" unless core.fetch("bytes") == File.size(core_artifact)
     abort "catalog Core digest mismatch" unless
-      core.fetch("sha256") == Digest::SHA256.file(core_package).hexdigest
+      core.fetch("sha256") == Digest::SHA256.file(core_artifact).hexdigest
     catalog.fetch("activation_sets").each do |set|
       set.fetch("packs").each do |artifact|
         manifest = manifests.fetch(artifact.fetch("kind"))
@@ -210,9 +251,16 @@ publish_catalog() {
         abort "catalog byte count mismatch" unless artifact.fetch("bytes") == File.size(asset)
         abort "catalog container digest mismatch" unless
           artifact.fetch("container_sha256") == Digest::SHA256.file(asset).hexdigest
+        artifact.fetch("deltas", []).each do |delta|
+          delta_name = File.basename(delta.fetch("url"))
+          delta_file = File.join(root, delta_name)
+          abort "delta artifact type mismatch" unless File.file?(delta_file) && !File.symlink?(delta_file)
+          abort "delta byte identity mismatch" unless delta.fetch("bytes") == File.size(delta_file) &&
+            delta.fetch("sha256") == Digest::SHA256.file(delta_file).hexdigest
+        end
       end
     end
-  ' "${work_root}/catalog-1.json" "${catalog_sequence}" "${output_dir}" "${version}" \
+  ' "${work_root}/catalog-1.json" "${catalog_sequence}" "${output_dir}" "${core_artifact}" "${version}" \
     "${work_root}/manifest-1-chinese.json" "${work_root}/manifest-1-english.json" \
     "${work_root}/manifest-1-lts.json" "${work_root}/manifest-1-extended.json" ||
     fail_archive "external catalog differs from the accepted pack set"
@@ -230,5 +278,9 @@ publish_catalog() {
 }
 
 publish_catalog
+
+if [[ "${core_artifact_format}" == app-tar-gzip ]]; then
+  /bin/rm -f -- "${core_pkg}"
+fi
 
 echo "Linnet deterministic language packs and Catalog: PASS"

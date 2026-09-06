@@ -40,7 +40,6 @@
 #include "smart_english_domain.h"
 #include "smart_english_filter.h"
 #include "smart_english_index.h"
-#include "smart_english_mixed_decoder.h"
 
 namespace linnet {
 namespace {
@@ -50,7 +49,11 @@ using namespace smart_english_domain;
 
 constexpr char kSuppressFollowingSpaceProperty[] = "linnet/suppress_following_space_v1",
                kPredictionNavigationProperty[] = "linnet/prediction_navigation_v1",
-               kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1";
+               kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1",
+               kCandidatePreviousRowProperty[] = "linnet/candidate_previous_row_v1",
+               kCandidateNextRowProperty[] = "linnet/candidate_next_row_v1",
+               kCandidateExpansionRequestProperty[] =
+                   "linnet/candidate_expansion_request_v1";
 constexpr std::size_t kPinyinKeyLimit = 64,
                       kPinyinInputByteLimit = 96,
                       kPinyinTraversalLimit = 4096;
@@ -97,6 +100,7 @@ void ResetContinuationState(Context* context,
   context->set_property(kSpacingProperty, "");
   SetSentenceBoundary(context, false);
   context->set_property(kSuppressFollowingSpaceProperty, "");
+  context->set_property(kCandidateExpansionRequestProperty, "");
 }
 
 char ShiftedAscii(char key) {
@@ -216,6 +220,8 @@ bool IsForcedRawOnlySegment(Segment& segment) {
 }
 
 bool IsRawLikeSegment(Segment& segment) {
+  const auto selected = segment.GetSelectedCandidate();
+  if (selected && selected->type() == kMixedCandidateType) return false;
   return segment.HasTag("raw") || segment.HasTag("zz_code_token") ||
          segment.HasTag("text_expander") || segment.HasTag("punct_number") ||
          IsForcedRawOnlySegment(segment);
@@ -232,9 +238,10 @@ bool ContinuesPredictionContext(int keycode) {
          keycode == XK_asciitilde;
 }
 
-// Linnet owns selection validity, Tab, raw-caret, and passive-prediction state
-// before Rime Predictor/Selector/Navigator. Stock Selector/Navigator remain the
-// sole owners of ordinary candidate and spelling-arrow movement.
+// Linnet owns selection validity, menu-bounded printable paging, Tab, raw-caret,
+// and passive-prediction state before Rime Predictor/Selector/Navigator. Stock
+// Selector/Navigator remain the sole owners of ordinary candidate and
+// spelling-arrow movement.
 class LinnetInteractionProcessor : public Processor {
  public:
   explicit LinnetInteractionProcessor(const Ticket& ticket)
@@ -286,6 +293,9 @@ class LinnetInteractionProcessor : public Processor {
         context->composition().back().HasTag("prediction")) {
       return ProcessPrediction(context, key);
     }
+    const ProcessResult printable_paging =
+        ProcessPrintablePagingKey(context, key);
+    if (printable_paging != kNoop) return printable_paging;
     if (key.keycode() == XK_Tab) return ProcessTab(context, key);
 
     if (!context->composition().empty()) {
@@ -299,6 +309,15 @@ class LinnetInteractionProcessor : public Processor {
       } else {
         const ProcessResult selection = ProcessSelectionKey(context, key);
         if (selection != kNoop) return selection;
+        const int keycode = key.keycode();
+        const bool unconfigured_digit =
+            (keycode >= XK_0 && keycode <= XK_9) ||
+            (keycode >= XK_KP_0 && keycode <= XK_KP_9);
+        if (IsPlainKey(key) && unconfigured_digit) {
+          CommitCurrentSelection(context, PostCommitPrediction::kDismiss,
+                                 false);
+          return kRejected;
+        }
       }
     }
 
@@ -345,6 +364,61 @@ class LinnetInteractionProcessor : public Processor {
   bool HasPredictionSegment(const Context* context) const {
     return context && !context->composition().empty() &&
            context->composition().back().HasTag("prediction");
+  }
+
+  ProcessResult ProcessPrintablePagingKey(Context* context,
+                                          const KeyEvent& key) const {
+    if (!IsPlainKey(key)) return kNoop;
+    const bool previous =
+        key.keycode() == XK_bracketleft || key.keycode() == XK_minus;
+    const bool next =
+        key.keycode() == XK_bracketright || key.keycode() == XK_equal;
+    if (!previous && !next) return kNoop;
+    // A paging symbol owns the key only when there is a real adjacent row
+    // (or compact page). Boundaries keep normal punctuation/input behavior.
+    if (!context || context->composition().empty()) return kNoop;
+
+    Segment& segment = context->composition().back();
+    if (!segment.menu || IsRawLikeSegment(segment) || !engine_->schema()) {
+      return kNoop;
+    }
+    const int page_size = engine_->schema()->page_size();
+    if (page_size <= 0) return kNoop;
+    const size_t selected = segment.selected_index;
+    const string row_target = context->get_property(
+        previous ? kCandidatePreviousRowProperty : kCandidateNextRowProperty);
+    size_t target = 0;
+    if (!row_target.empty() && row_target != "expand") {
+      int row_index = -1;
+      std::istringstream(row_target) >> row_index;
+      if (row_index < 0 || static_cast<size_t>(row_index) == selected ||
+          segment.menu->Prepare(static_cast<size_t>(row_index) + 1) <=
+              static_cast<size_t>(row_index)) {
+        return kNoop;
+      }
+      target = static_cast<size_t>(row_index);
+    } else if (previous) {
+      if (selected < static_cast<size_t>(page_size)) return kNoop;
+      target = selected - static_cast<size_t>(page_size);
+    } else {
+      const size_t page_start =
+          (selected / static_cast<size_t>(page_size)) *
+          static_cast<size_t>(page_size);
+      const size_t next_page_start = page_start + page_size;
+      const int candidate_count =
+          segment.menu->Prepare(next_page_start + page_size);
+      if (candidate_count <= static_cast<int>(next_page_start)) {
+        return kNoop;
+      }
+      target = (std::min)(selected + static_cast<size_t>(page_size),
+                          static_cast<size_t>(candidate_count - 1));
+    }
+    // The first key opens the grid without jumping by the compact page size.
+    // Subsequent keys use the host's actual adjacent visual row.
+    if (row_target != "expand") context->Highlight(target);
+    segment.tags.insert("paging");
+    context->set_property(kCandidateExpansionRequestProperty, "1");
+    return kAccepted;
   }
 
   void HardStop(Context* context) const {
@@ -674,7 +748,7 @@ class SmartEnglishTranslator : public Translator {
  public:
   explicit SmartEnglishTranslator(const Ticket& ticket)
       : Translator(ticket), schema_id_(ticket.schema ? ticket.schema->schema_id() : string()), options_(InteractionOptions::Load(ticket.schema)),
-        predict_engine_(PredictEngineComponent::Shared()->GetInstance(ticket)), index_(predict_engine_), mixed_decoder_(ticket) {
+        predict_engine_(PredictEngineComponent::Shared()->GetInstance(ticket)), index_(predict_engine_) {
     if (!engine_) return;
     Context* context = engine_->context();
     commit_connection_ = context->commit_notifier().connect([this](Context* ctx) { OnCommit(ctx); });
@@ -685,7 +759,16 @@ class SmartEnglishTranslator : public Translator {
   an<Translation> Query(const string& input, const Segment& segment) override {
     auto result = New<FifoTranslation>();
     if (!predict_engine_) return result;
-    if (segment.HasTag("zz_code_token") || segment.HasTag("zz_english")) {
+    const string normalized = LowerAsciiWord(input);
+    // Uppercase letters are explicit English intent even while a Chinese
+    // schema owns the session. Give that literal input the same typed identity
+    // as Smart English's raw spelling so a completion cannot replace it. The
+    // filter still retires this echo when an exact dictionary row exists.
+    const bool explicit_chinese_mode_english =
+        schema_id_ != kSmartEnglishSchema && segment.HasTag("abc") &&
+        !normalized.empty() && input != normalized;
+    if (segment.HasTag("zz_code_token") || segment.HasTag("zz_english") ||
+        explicit_chinese_mode_english) {
       const char* candidate_type = segment.HasTag("zz_code_token")
                                        ? "raw"
                                        : kForcedRawCandidateType;
@@ -723,20 +806,15 @@ class SmartEnglishTranslator : public Translator {
       }
       return result;
     }
-    if (schema_id_ != kSmartEnglishSchema && IsOrdinarySegment(segment)) {
-      for (const auto& candidate : mixed_decoder_.Query(input, segment)) {
-        result->Append(candidate);
-      }
-    }
     if (!segment.HasTag("zz_english")) return result;
-    const string normalized = LowerAsciiWord(input);
-    if (options_.spelling_correction) {
-      for (const auto& word : index_.LookupCorrections(normalized)) {
-        if (word.text == normalized) continue;
-        auto candidate = New<SimpleCandidate>(kCorrectionCandidateType, segment.start, segment.end, word.text);
-        candidate->set_quality(word.weight);
-        result->Append(candidate);
-      }
+    for (const auto& word : index_.LookupCorrections(normalized)) {
+      if (word.text == normalized) continue;
+      auto candidate = New<SimpleCandidate>(kCorrectionCandidateType, segment.start, segment.end, word.text);
+      // TableTranslation expresses a complete word's lexical weight as
+      // exp(log(frequency / 1e8)). Use that same scale when merging corrections;
+      // raw corpus counts otherwise overwhelm every ordinary completion.
+      candidate->set_quality(word.weight / 1e8);
+      result->Append(candidate);
     }
     for (const auto& word : PinyinWords(normalized)) {
       auto candidate = New<SimpleCandidate>("linnet_pinyin", segment.start,
@@ -1008,7 +1086,6 @@ class SmartEnglishTranslator : public Translator {
   const InteractionOptions options_;
   const an<PredictEngine> predict_engine_;
   const SmartEnglishIndex index_;
-  ModelessMixedDecoder mixed_decoder_;
   bool pinyin_decoder_initialized_ = false;
   bool pinyin_formatter_loaded_ = false;
   the<Dictionary> pinyin_dictionary_;

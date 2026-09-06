@@ -7,6 +7,8 @@ param(
   [string]$WeaselConfig,
   [Parameter(Mandatory = $true)]
   [string]$ThemePreviewRoot,
+  [Parameter(Mandatory = $true)]
+  [string]$InputDefaults,
   [string]$BuildRoot = ""
 )
 
@@ -166,6 +168,7 @@ $DataRoot = (Resolve-Path -LiteralPath $DataRoot).Path
 $EmbeddedLuaHeader = (Resolve-Path -LiteralPath $EmbeddedLuaHeader).Path
 $WeaselConfig = (Resolve-Path -LiteralPath $WeaselConfig).Path
 $ThemePreviewRoot = (Resolve-Path -LiteralPath $ThemePreviewRoot).Path
+$InputDefaults = (Resolve-Path -LiteralPath $InputDefaults).Path
 $ExpectedThemePreviews = @(
   "color_scheme_linnet_clay_light.png",
   "color_scheme_linnet_glass_light.png",
@@ -198,10 +201,12 @@ foreach ($RequiredData in @(
   "dicts/yiren.dict.yaml",
   "dicts/yixue.dict.yaml",
   "dicts/zi.dict.yaml",
+  "dicts/ext.dict.yaml",
   "linnet.english-data-manifest.json",
   "linnet.smart.db",
   "linnet_algebra.yaml",
   "linnet_en.dict.yaml",
+  "linnet_english_entities.dict.yaml",
   "linnet_en.schema.yaml",
   "linnet_grammar_active.yaml",
   "linnet_reviewed.dict.yaml",
@@ -354,6 +359,11 @@ $OutputData = Join-Path $Projection "output\data"
 Copy-DataTree (Join-Path $DataRoot "plum") $OutputData
 Copy-DataTree (Join-Path $DataRoot "opencc") (Join-Path $OutputData "opencc")
 Copy-Item -LiteralPath $WeaselConfig -Destination (Join-Path $OutputData "weasel.yaml")
+Copy-Item -LiteralPath $InputDefaults -Destination (Join-Path $OutputData "linnet_windows_defaults.yaml")
+# Rime applies the shared Core defaults before the user's default.custom.yaml.
+# The Swift renderer owns these policies; this boundary only adds its include.
+Add-Content -LiteralPath (Join-Path $OutputData "default.yaml") -Encoding UTF8 `
+  -Value "`n__patch: linnet_windows_defaults:/patch"
 Copy-DataTree $ThemePreviewRoot (Join-Path $OutputData "preview")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE.txt") `
   -Destination (Join-Path $Projection "output\LICENSE.txt")

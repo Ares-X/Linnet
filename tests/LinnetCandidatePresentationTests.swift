@@ -6,6 +6,7 @@ struct LinnetCandidatePresentationTests {
   static func main() {
     testExpandedCandidateBounds()
     testCandidateRows()
+    testExpandedNavigationLayout()
 
     require(
       LinnetCandidatePresentation.candidateWindowInset == CGSize(width: 7, height: 6) &&
@@ -27,26 +28,7 @@ struct LinnetCandidatePresentationTests {
     testInputModeTransitions()
     testIdleMenuPresentationState()
     testHighlightedCandidateBounds()
-
-    var accessibilitySurface =
-      LinnetCandidatePresentation.AccessibilitySurface.candidates
-    require(
-      accessibilitySurface.exposesCandidateList &&
-        accessibilitySurface.localizedLabelKey == "Candidate window",
-      "candidate publication lost its list accessibility container"
-    )
-    accessibilitySurface = .inputModeStatus
-    require(
-      !accessibilitySurface.exposesCandidateList &&
-        accessibilitySurface.localizedLabelKey == "Input mode",
-      "status publication retained the candidate-list accessibility container"
-    )
-    accessibilitySurface = .candidates
-    require(
-      accessibilitySurface.exposesCandidateList &&
-        accessibilitySurface.localizedLabelKey == "Candidate window",
-      "candidate publication did not restore its accessibility container"
-    )
+    testCandidateSelectionLabels()
 
     require(
       LinnetCandidatePresentation.usesInlineComments(
@@ -62,80 +44,64 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.selectedDetailText("  short definition  ") == "short definition",
       "short detail was not normalized"
     )
-    let long = String(repeating: "释", count: 90)
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "/wɜːk/ · n. 工作；职业；v. 运行；奏效；adj. 工作的"
+      ) == "/wɜːk/ · n. 工作；职业\nv. 运行；奏效\nadj. 工作的",
+      "selected English detail did not start each part of speech on its own line"
+    )
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "n. 品牌；name. 林内特；v. 命名；adj. 专有的"
+      ) == "n. 品牌\nname. 林内特\nv. 命名\nadj. 专有的",
+      "name, verb, and adjective detail groups did not receive separate lines"
+    )
+    require(
+      LinnetCandidatePresentation.selectedDetailText(
+        "n. 光；lit. 字面义；fig. 比喻义"
+      ) == "n. 光\nlit. 字面义\nfig. 比喻义",
+      "literal and figurative definition groups did not receive separate lines"
+    )
+    let long = String(repeating: "释", count: 300)
     let bounded = LinnetCandidatePresentation.selectedDetailText(long)
     require(
-      bounded.count == LinnetCandidatePresentation.maximumDetailCharacterCount,
-      "detail budget changed"
+      LinnetCandidatePresentation.maximumDetailCharacterCount == 256 &&
+        bounded.count == LinnetCandidatePresentation.maximumDetailCharacterCount,
+      "detail was still truncated at the former 72-character display budget"
     )
-    require(bounded.last == "…", "truncated detail has no ellipsis")
-
-    let ranges = [
-      NSRange(location: 0, length: 3),
-      NSRange(location: 5, length: 4),
-      NSRange(location: 11, length: 5),
-    ]
-    guard let insertion = LinnetCandidatePresentation.sidecarInsertion(
-      candidateRanges: ranges, anchorIndex: 1, insertedLength: 7)
-    else { fail("valid selected candidate was rejected") }
-    require(insertion.location == 9, "sidecar did not follow the selected candidate")
-    require(insertion.candidateRanges[0] == ranges[0], "earlier candidate moved")
-    require(insertion.candidateRanges[1] == ranges[1], "selected candidate range changed")
-    require(
-      insertion.candidateRanges[2] == NSRange(location: 18, length: 5),
-      "later candidate did not move with inserted detail"
-    )
-    require(
-      LinnetCandidatePresentation.sidecarInsertion(
-        candidateRanges: ranges, anchorIndex: 3, insertedLength: 2) == nil,
-      "invalid selected candidate was accepted"
-    )
-
-    // A vertical expanded grid is rendered in visual row order, while the
-    // ranges remain indexed by the candidates' absolute order. Inserting a
-    // sidecar must therefore shift ranges by their physical text position,
-    // not by their logical candidate index.
-    let reorderedRanges = [
-      NSRange(location: 0, length: 3),
-      NSRange(location: 20, length: 4),
-      NSRange(location: 5, length: 3),
-    ]
-    guard let reorderedInsertion = LinnetCandidatePresentation.sidecarInsertion(
-      candidateRanges: reorderedRanges, anchorIndex: 2, insertedLength: 4)
-    else { fail("valid expanded-grid sidecar anchor was rejected") }
-    require(
-      reorderedInsertion.location == 8,
-      "expanded-grid sidecar did not follow its visual-row anchor"
-    )
-    require(
-      reorderedInsertion.candidateRanges[1] == NSRange(location: 24, length: 4),
-      "a physically later candidate did not move with expanded-grid detail"
-    )
-    require(
-      reorderedInsertion.candidateRanges[2] == reorderedRanges[2],
-      "the sidecar anchor range changed"
-    )
+    require(bounded.last == "…", "safety-bounded detail has no ellipsis")
 
     require(
-      LinnetCandidatePresentation.accessibilityAnnouncement(
-        candidate: "interface", comment: "  n. 接口  ", page: 2, indexOnPage: 1
-      ) == "Page 3, candidate 2, interface, n. 接口",
-      "candidate accessibility announcement lost position or definition"
+      LinnetCandidatePresentation.candidateComment("［shì］")
+        == .init(displayText: "［shì］", belongsToSmartEnglish: false),
+      "ordinary Chinese spelling comments were classified as English details"
     )
     require(
-      LinnetCandidatePresentation.accessibilityAnnouncement(
-        candidate: "候选", comment: "", page: 0, indexOnPage: 0
-      ) == "Page 1, candidate 1, 候选",
-      "empty candidate comment produced accessibility noise"
-    )
-    require(
-      LinnetCandidatePresentation.accessibilityAnnouncement(
-        candidate: "candidate", comment: "definition", page: -1, indexOnPage: 0
-      ) == nil,
-      "invalid highlighted candidate was announced"
+      LinnetCandidatePresentation.candidateComment("\u{001D}n. 工作")
+        == .init(displayText: "n. 工作", belongsToSmartEnglish: true),
+      "the Smart English detail marker was not removed at the presentation boundary"
     )
 
     print("LinnetCandidatePresentationTests: PASS")
+  }
+
+  private static func testCandidateSelectionLabels() {
+    for (index, expected) in ["1", "2", "3", "4", "5", "6", "7", "8", "9"].enumerated() {
+      require(
+        LinnetCandidatePresentation.candidateSelectionLabel(
+          at: index, labels: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        ) == expected,
+        "Rime's 1-9 candidate labels were not preserved"
+      )
+    }
+    require(
+      LinnetCandidatePresentation.candidateSelectionLabel(at: 1, labels: ["asdf"]) == "s",
+      "single-string custom selection labels were not preserved"
+    )
+    require(
+      LinnetCandidatePresentation.candidateSelectionLabel(at: 2, labels: []) == "3",
+      "missing custom labels did not use the visible one-based candidate index"
+    )
   }
 
   private static func testInputModeTransitions() {
@@ -257,19 +223,6 @@ struct LinnetCandidatePresentationTests {
         currentPage: 0, pageSize: 9, candidateCount: 0, highlighted: 1
       ) == nil,
       "an empty candidate page accepted a nonzero highlight"
-    )
-
-    guard let builder = try? String(
-      contentsOfFile: "sources/LinnetRimeCandidateSnapshotBuilder.swift",
-      encoding: .utf8)
-    else { fail("candidate snapshot builder source could not be read") }
-    require(
-      !builder.contains("let compactHighlighted = min("),
-      "candidate snapshot builder still clamps an invalid Rime highlight"
-    )
-    require(
-      builder.contains("highlightedItemIndex: highlightedOnPage"),
-      "candidate snapshot builder does not consume the validated highlight directly"
     )
   }
 
@@ -453,14 +406,23 @@ struct LinnetCandidatePresentationTests {
     require(
       footer.placement == .footer &&
         footer.spacing == LinnetCandidatePresentation.candidateRowSpacing &&
-        footer.textSeparator == "\n",
-      "horizontal candidate detail lost its shared footer policy")
+        footer.detailColumnMaximumWidth == 256,
+      "horizontal candidate detail lost its compact footer policy")
     require(
       footerFrames.candidate == CGRect(x: 0, y: 0, width: 100, height: 20) &&
         footerFrames.divider == nil &&
         footerFrames.detail == CGRect(x: 0, y: 26, width: 40, height: 10) &&
         footerFrames.size == CGSize(width: 100, height: 36),
       "footer candidate and detail no longer share one spatial geometry")
+
+    let longFooterFrames = footer.frames(
+      candidateSize: CGSize(width: 72, height: 24),
+      detailSize: CGSize(width: 900, height: 54),
+      dividerSize: CGSize(width: 1, height: 24))
+    require(
+      longFooterFrames.detail.width == 72 &&
+        longFooterFrames.size.width == 72,
+      "a horizontal definition can still widen its candidate row")
 
     let sidecar = LinnetCandidatePresentation.candidateDetailGeometry(
       forLinearLayout: false)
@@ -470,7 +432,7 @@ struct LinnetCandidatePresentationTests {
       dividerSize: CGSize(width: 1, height: 60))
     require(
       sidecar.placement == .sidecar &&
-        sidecar.textSeparator == "\t│\t",
+        sidecar.detailColumnMaximumWidth == 104,
       "vertical candidate detail lost its shared sidecar policy")
     require(
       sidecarFrames.candidate == CGRect(x: 0, y: 0, width: 40, height: 60) &&
@@ -478,90 +440,142 @@ struct LinnetCandidatePresentationTests {
         sidecarFrames.detail == CGRect(x: 53, y: 0, width: 30, height: 12) &&
         sidecarFrames.size == CGSize(width: 83, height: 60),
       "sidecar candidate, divider, and detail no longer share one spatial geometry")
+    let tallSidecarFrames = sidecar.frames(
+      candidateSize: CGSize(width: 40, height: 60),
+      detailSize: CGSize(width: 104, height: 240),
+      dividerSize: CGSize(width: 1, height: 240))
+    let nextPageSidecarFrames = sidecar.frames(
+      candidateSize: CGSize(width: 40, height: 60),
+      detailSize: CGSize(width: 80, height: 20),
+      dividerSize: CGSize(width: 1, height: 20))
+    require(
+      tallSidecarFrames.detail.height == 60 &&
+        tallSidecarFrames.divider?.height == 60 &&
+        tallSidecarFrames.size.height == 60 &&
+        nextPageSidecarFrames.size.height == tallSidecarFrames.size.height,
+      "sidecar detail can still grow or destabilize candidate-owned page height")
+
+    let longDefinitionFrames = sidecar.frames(
+      candidateSize: CGSize(width: 112, height: 156),
+      detailSize: CGSize(width: 680, height: 18),
+      dividerSize: CGSize(width: 1, height: 156))
+    require(
+      longDefinitionFrames.detail.width <= 120 &&
+        longDefinitionFrames.size.width <= 245,
+      "a long English definition can still stretch the vertical candidate panel")
+
+    for (fontPoint, expectedDetailWidth) in [
+      (CGFloat(12), CGFloat(104)),
+      (CGFloat(15), CGFloat(104)),
+      (CGFloat(16), CGFloat(104)),
+      (CGFloat(32), CGFloat(136))
+    ] {
+      let geometry = LinnetCandidatePresentation.candidateDetailGeometry(
+        forLinearLayout: false,
+        candidateFontPoint: fontPoint)
+      let frames = geometry.frames(
+        candidateSize: CGSize(width: 500, height: 180),
+        detailSize: CGSize(width: 500, height: 180),
+        dividerSize: CGSize(width: 1, height: 180))
+      require(
+        geometry.detailColumnMaximumWidth == expectedDetailWidth &&
+          frames.detail.width == expectedDetailWidth,
+        "\(fontPoint)pt canonical sidecar detail escaped its exact width owner")
+    }
   }
 
-  /// Expansion starts at the current Rime page and may inspect at most three
-  /// pages or 27 candidates. The iterator may stop earlier at end-of-list.
+  /// Expansion keeps its visible page window stable while the highlight moves
+  /// inside it, then advances only far enough to reveal an out-of-window page.
   private static func testExpandedCandidateBounds() {
-    require(
-      LinnetCandidatePresentation.maximumExpandedPageCount == 3,
-      "candidate disclosure exceeded the three-page product bound"
-    )
     require(
       LinnetCandidatePresentation.maximumExpandedCandidateCount == 27,
       "candidate disclosure exceeded the 27-candidate product bound"
     )
-    for (page, pageSize, expected) in [
-      (0, 9, 0..<27),
-      (2, 9, 18..<45),
-      (4, 5, 20..<35),
-      (3, 3, 9..<18),
+    for (anchorPage, currentPage, pageSize, expected) in [
+      (0, 0, 9, 0..<27),
+      (0, 1, 9, 0..<27),
+      (0, 2, 9, 0..<27),
+      (0, 3, 9, 9..<36),
+      (1, 0, 9, 0..<27),
+      (4, 3, 5, 15..<42),
+      (3, 5, 3, 9..<36),
     ] {
       require(
         LinnetCandidatePresentation.expandedCandidateRange(
-          page: page, pageSize: pageSize) == expected,
-        "expanded candidate iterator lost its current-page bound for page \(page), size \(pageSize)"
+          anchorPage: anchorPage,
+          currentPage: currentPage,
+          pageSize: pageSize) == expected,
+        "expanded candidate window did not keep page \(currentPage) visible from anchor \(anchorPage), size \(pageSize)"
       )
     }
   }
 
+  private static func testExpandedNavigationLayout() {
+    let compactHorizontal = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .horizontal, verticalText: false, expanded: false)
+    require(
+      compactHorizontal.linear && !compactHorizontal.vertical,
+      "compact horizontal candidates lost their stock Left/Right navigation")
+
+    let compactVertical = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .vertical, verticalText: false, expanded: false)
+    require(
+      !compactVertical.linear && !compactVertical.vertical,
+      "compact vertical candidates lost their stock Up/Down navigation")
+
+    let expandedHorizontal = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .horizontal, verticalText: true, expanded: true)
+    require(
+      expandedHorizontal.linear && !expandedHorizontal.vertical,
+      "expanded horizontal grid did not map Left/Right within rows and Up/Down across rows")
+
+    let expandedVertical = LinnetCandidatePresentation.rimeNavigationLayout(
+      flow: .vertical, verticalText: false, expanded: true)
+    require(
+      expandedVertical.linear && !expandedVertical.vertical,
+      "expanded vertical preference did not switch to the native row grid")
+  }
+
   private static func testCandidateRows() {
     for pageSize in [3, 5, 7, 9] {
-      let count = pageSize * 3
-      let compactHorizontal = LinnetCandidatePresentation.visualRows(
-        candidateCount: pageSize, pageSize: pageSize,
-        flow: .horizontal, expanded: false)
       require(
-        compactHorizontal == [Array(0..<pageSize)],
-        "compact horizontal candidates stopped using one Rime page"
-      )
-      let compactVertical = LinnetCandidatePresentation.visualRows(
-        candidateCount: pageSize, pageSize: pageSize,
-        flow: .vertical, expanded: false)
+        LinnetCandidatePresentation.visualRows(candidateCount: pageSize, flow: .horizontal)
+          == [Array(0..<pageSize)],
+        "compact horizontal candidates stopped using one Rime page")
       require(
-        compactVertical == (0..<pageSize).map { [$0] },
-        "compact vertical candidates stopped using one Rime page"
-      )
-
-      let horizontal = LinnetCandidatePresentation.visualRows(
-        candidateCount: count, pageSize: pageSize,
-        flow: .horizontal, expanded: true)
-      require(
-        horizontal == (0..<3).map { page in
-          Array((page * pageSize)..<((page + 1) * pageSize))
-        },
-        "expanded horizontal candidates are not one row per Rime page"
-      )
-
-      let vertical = LinnetCandidatePresentation.visualRows(
-        candidateCount: count, pageSize: pageSize,
-        flow: .vertical, expanded: true)
-      require(
-        vertical == (0..<pageSize).map { row in
-          [row, pageSize + row, pageSize * 2 + row]
-        },
-        "expanded vertical candidates are not one column per Rime page"
-      )
-      require(
-        horizontal.flatMap { $0 }.sorted() == Array(0..<count) &&
-          vertical.flatMap { $0 }.sorted() == Array(0..<count),
-        "expanded presentation lost or duplicated an absolute candidate offset"
-      )
+        LinnetCandidatePresentation.visualRows(candidateCount: pageSize, flow: .vertical)
+          == (0..<pageSize).map { [$0] },
+        "compact vertical candidates stopped using one Rime page")
+      let widths = (0..<(pageSize * 3)).map { $0.isMultiple(of: 4) ? CGFloat(130) : 50 }
+      let grid = LinnetCandidatePresentation.expandedGrid(
+        widths: widths, columns: pageSize, spacing: 8, maximumWidth: 600, visibleRows: 0..<3)
+      require(grid.placements.map(\.item) == Array(widths.indices),
+        "expanded grid reordered or lost candidates")
+      require(grid.columnWidths.reduce(0, +) + 8 * CGFloat(grid.columnWidths.count - 1) <= 600,
+        "long candidates widened the grid beyond its boundary")
+      for cell in grid.placements {
+        require(cell.column == cell.item % grid.columnWidths.count && cell.row == cell.item / grid.columnWidths.count,
+          "candidate did not stay in its visible row and column")
+        if grid.visibleRows.contains(cell.row) {
+          require(grid.columnWidths[cell.column] >= widths[cell.item], "a whole word was squeezed into a narrow column")
+        }
+      }
     }
-
-    require(
-      LinnetCandidatePresentation.visualRows(
-        candidateCount: 0, pageSize: 9, flow: .horizontal, expanded: true).isEmpty,
-      "an empty candidate list created a visual row"
-    )
-    require(
-      LinnetCandidatePresentation.visualRows(
-        candidateCount: 14, pageSize: 5, flow: .vertical, expanded: true
-      ) == [
-        [0, 5, 10], [1, 6, 11], [2, 7, 12], [3, 8, 13], [4, 9],
-      ],
-      "a partial final candidate page lost its vertical column mapping"
-    )
+    require(LinnetCandidatePresentation.visualRows(candidateCount: 0, flow: .horizontal).isEmpty,
+      "an empty candidate list created a visual row")
+    let bounded = LinnetCandidatePresentation.expandedGrid(
+      widths: [50, 50, 50, 75, 1000], columns: 5, spacing: 8, maximumWidth: 600, visibleRows: 0..<1)
+    require(bounded.columnWidths.reduce(0, +) + 8 * CGFloat(bounded.columnWidths.count - 1) <= 600,
+      "one long word enlarged the panel past its width limit")
+    let asymmetric = LinnetCandidatePresentation.expandedGrid(
+      widths: [60, 60, 60, 180, 60], columns: 5, spacing: 8, maximumWidth: 500, visibleRows: 0..<1)
+    require(asymmetric.columnWidths == [60, 60, 60, 180, 60],
+      "a long word must borrow available width instead of being capped at an equal column width")
+    let compact = LinnetCandidatePresentation.expandedGrid(
+      widths: [30, 40, 50, 35, 80, 45, 900, 900, 900],
+      columns: 3, spacing: 8, maximumWidth: 600, visibleRows: 0..<2)
+    require(compact.columnWidths == [35, 80, 50],
+      "columns must fit their own visible words, not the global or hidden longest word")
   }
 
   private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {

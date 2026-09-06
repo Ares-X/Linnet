@@ -1,21 +1,38 @@
 双韵（Linnet）安装完成。
 
-首次 Complete 会注册并请求启用 Linnet，但不会替你选择输入源。
-Core 只刷新同一注册，并保留更新前的 enabled/disabled 与
-selected 状态。
+只有首次创建 App 时，Complete 才注册输入源并向 macOS 提交一次启用请求。
+已有 App 的 Complete 修复与 Core 更新都不注册、启用或选择输入源；允许与菜单
+选择始终由用户和 macOS 管理。
+健康安装的常规升级只使用 Core。Core 不重新注册输入源，并保留系统状态与现有
+应用的输入连接，不会再次请求启用授权。
 
 如果这是首次完整安装：
 
 1. 保存工作，注销当前 macOS 账户，再登录同一账户。只退出应用不足以刷新
    InputMethodKit 输入源列表。
-2. 打开 系统设置 → 键盘 → 文本输入 → 编辑，添加 Linnet；如果 macOS 请求
-   允许 Linnet，请选择“允许”。
-3. 确认 Linnet 已在启用列表中，再从菜单栏输入菜单选择 Linnet。
+2. 如果 macOS 首次请求允许 Linnet，请选择“允许”。
+3. 从菜单栏输入菜单中选择 Linnet；安装器不会代替你切换输入源。
 
-Core 更新在替换前由 Installer 要求关闭 Host/Settings，替换后只温和退出可能被
-InputMethodKit 重启的 Host，再刷新同一个输入源身份；它不请求注销，也不改变
-enabled/disabled 或 selected 状态。当前候选仍须通过真实安装升级 UAT，才能把
-免注销作为发布结论。
+若 Core 报告未匹配精确发布基线或 App 字节损坏，请由用户主动运行 `Linnet.pkg`
+完整修复；Core 不会静默切换到完整安装。若输入菜单缺少或停用了 Linnet，请在
+系统设置 → 键盘 → 文本输入 → 编辑 中添加或启用；已有 App 的修复不会重复申请授权。
+若 Core 报告重复、冲突或无法验证的注册残留，
+请先运行 README 中的离线卸载命令，再安装 Complete。
+不要把 Complete 用作健康安装的常规升级，也不要用它绕过被拒绝的 App 身份或版本。
+
+卸载前先切换到其他输入法，注销并重新登录，然后只打开 Terminal。README
+直接给出完全离线的本地命令；命令会永久删除 App、全部 Linnet 数据、备份、
+偏好和 Installer receipts，需要保留的数据请先导出。
+
+Core 安装时，Settings 与其他应用保持打开；它不停止正在服务的 InputMethodKit Host，
+也不触碰输入源注册、启用或选择状态。Settings 正在修改数据时，请完成该操作后重试安装。
+现有应用继续使用当前 Host；用户切换到其他输入法，
+且没有未完成组合或数据事务时，可在 Settings 中明确请求新 Core 接管。其他应用保持打开；
+否则新 Core 在下次正常登录或重启后接管。当前候选仍须通过真实安装升级 UAT，才能把
+免注销与输入连续性作为发布结论。
+
+从 0.1.10 升级后，备份、导入或修改数据前，请关闭并重新打开升级前已打开的
+Settings 窗口。旧窗口不认识新的增量学习格式，其数据操作会被拒绝；无需退出其他应用。
 
 日常使用：
 
@@ -25,7 +42,7 @@ enabled/disabled 或 selected 状态。当前候选仍须通过真实安装升�
 - 在 Settings 选择默认简体或繁体输出。
 - 从原生 Linnet 输入菜单选择 Settings。它内嵌于 Linnet，不作为独立产品
   安装、不常驻 Dock，并在最后一个窗口关闭后退出。
-- Settings 可分别开关智能英文上下文预测、拼写纠错和选词学习。候选字号
+- 智能英文始终提供拼写纠错和模糊匹配；Settings 可分别开关上下文预测和选词学习。候选字号
   范围为 12–32 pt，所有字体预设只使用 macOS 内置字体。
 
 许可信息：
@@ -40,25 +57,47 @@ enabled/disabled 或 selected 状态。当前候选仍须通过真实安装升�
 
 双韵 (Linnet) installation is complete.
 
-A first Complete installation registers and requests enablement for Linnet but
-does not select the input source for you. Core keeps enabled/disabled unchanged
-and conditionally restores Linnet only when it was selected before or during
-that update; a newer choice of another input source is preserved.
+Only creation of the first installed App registers Linnet and submits one
+standard macOS enablement request. Complete repair of an existing App and every
+Core update leave registration, enablement and selection untouched. Healthy installations
+use Core for routine updates. Core does not
+re-register the source or stop the live InputMethodKit Host, so existing
+applications keep their input connections.
 
 For a first Complete installation:
 
 1. Save open work, log out of the current macOS account, and log in again.
    Quitting applications alone does not refresh the InputMethodKit source list.
-2. Open System Settings > Keyboard > Text Input > Edit, add Linnet, and choose
-   Allow if macOS asks for permission.
-3. Confirm that Linnet is enabled, then select it from the menu-bar input menu.
+2. Choose Allow if macOS asks for first-use permission.
+3. Select Linnet yourself and confirm that it appears in the menu-bar input menu.
 
-Core has Installer close Host and Settings before replacement, then one new-Host
-transition cleanly stops any InputMethodKit-relaunched Host, refreshes the same
-input-source identity, and conditionally restores a selected Linnet without
-overriding a newer choice. It does not request logout or change enabled/disabled.
-This candidate still requires installed upgrade UAT before no-logout behavior is
-an accepted release claim.
+If Core reports a non-matching published baseline or damaged App bytes,
+explicitly run `Linnet.pkg` for Complete repair; Core never falls back silently.
+If Linnet is missing or disabled, add or enable it in System Settings > Keyboard
+> Text Input > Edit; an existing-App repair never resubmits authorization.
+If Core reports duplicate, conflicting, or unverifiable registration remnants,
+run the offline uninstall commands in README, then install Complete.
+Do not use Complete for a routine healthy upgrade or to bypass a rejected App
+identity or version.
+
+Before uninstalling, switch to another input source, sign out and back in, then
+open only Terminal. README provides direct offline commands that permanently
+remove the App, all Linnet data, backups, preferences and Installer receipts.
+Export anything you need before running them.
+
+During a Core installation, Settings and other applications stay open.
+If Settings is modifying data, finish that operation before retrying installation.
+Core does not stop the live Host or touch input-source registration,
+enablement, or selection. Existing
+applications keep using the current Host. The new Core can take over after an explicit request once
+Linnet is inactive and no composition or data transaction is in progress.
+Other applications stay open while Settings starts and verifies the new Core.
+This candidate still requires installed upgrade UAT before no-logout and input
+continuity are accepted release claims.
+
+After upgrading from 0.1.10, reopen a Settings window that was already open
+before using data operations. The old window cannot read the new incremental
+learning format; its data requests are rejected. Other applications stay open.
 
 Daily use:
 
@@ -71,8 +110,8 @@ Daily use:
 - Choose Settings from the native Linnet input menu. It is embedded in Linnet,
   is not installed as a separate product, does not remain in the Dock, and
   exits when its last window closes.
-- Settings can independently enable Smart English context prediction, spelling
-  correction, and selection learning. Candidate font size is limited to
+- Smart English always provides spelling correction and fuzzy matching. Settings
+  can independently enable context prediction and selection learning. Candidate font size is limited to
   12–32 pt, and every font preset uses only fonts built into macOS.
 
 Licenses:

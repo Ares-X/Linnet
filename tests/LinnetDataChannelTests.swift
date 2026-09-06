@@ -20,35 +20,169 @@ struct LinnetDataChannelTests {
     require(
       LinnetDataChannel.minimumCatalogSequence == 4,
       "Core catalog replay floor drifted from the first public data release")
-    require(
-      LinnetDataChannel.service == .published,
-      "published update channel remained unavailable")
-
     let catalog = makeCatalog()
+    try differentialCatalogContract(catalog)
     let data = try catalogData(catalog)
     let verified = try LinnetDataChannel.verify(data, coreVersion: "1.0.0")
     require(verified.catalog.sequence == 5, "valid canonical catalog")
+    let archiveCore = LinnetDataChannel.Core(
+      version: "1.0.1", build: 9,
+      revision: String(repeating: "f", count: 40), bytes: 17,
+      sha256: String(repeating: "e", count: 64), artifactFormat: .appArchive,
+      artifactURL: URL(string:
+        "https://github.com/Ares-X/Linnet/releases/download/core-v1.0.1/Linnet-1.0.1-arm64-Core.linnetcore")!,
+      releaseURL: URL(string:
+        "https://github.com/Ares-X/Linnet/releases/tag/core-v1.0.1")!)
+    let archiveData = try catalogData(.init(
+      format: LinnetDataChannel.format, sequence: catalog.sequence,
+      core: archiveCore, activationSets: catalog.activationSets))
+    let archiveCatalog = try LinnetDataChannel.verifyPublished(archiveData).catalog
     require(
-      verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 7)
+      archiveCatalog.core.artifactFormat == .appArchive &&
+        archiveCatalog.core.artifactURL == archiveCore.artifactURL,
+      "Catalog v2 lost the canonical Core App archive")
+    let archiveJSON = try JSONSerialization.jsonObject(with: archiveData) as! [String: Any]
+    let archiveCoreJSON = archiveJSON["core"] as! [String: Any]
+    require(
+      archiveCoreJSON["artifact_format"] as? String == "app-tar-gzip" &&
+        archiveCoreJSON["artifact_url"] != nil && archiveCoreJSON["package_url"] == nil,
+      "Catalog v2 regained the legacy package contract")
+    let nextCore = LinnetDataChannel.Core(
+      version: catalog.core.version, build: catalog.core.build + 1,
+      revision: String(repeating: "d", count: 40), bytes: catalog.core.bytes + 1,
+      sha256: String(repeating: "e", count: 64),
+      artifactFormat: catalog.core.artifactFormat,
+      artifactURL: catalog.core.artifactURL, releaseURL: catalog.core.releaseURL)
+    let coreOnly = try LinnetDataChannel.verify(catalogData(.init(
+      format: catalog.format, sequence: catalog.sequence, core: nextCore,
+      activationSets: catalog.activationSets)), coreVersion: "1.0.0")
+    require(coreOnly.digest != verified.digest, "full Catalog identity lost Core bytes")
+    require(try LinnetDataChannel.packSnapshotDigest(coreOnly.catalog)
+      == LinnetDataChannel.packSnapshotDigest(catalog), "Core-only change altered immutable pack identity")
+    require(
+      verified.catalog.core.availability(
+        currentVersion: "1.0.0", currentBuild: 7,
+        currentRevision: String(repeating: "a", count: 40))
         == .available,
       "newer Core build was not reported")
     require(
-      verified.catalog.core.availability(currentVersion: "1.0.0", currentBuild: 8)
+      verified.catalog.core.availability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40))
         == .current,
       "current Core build was reported as outdated")
     require(
-      verified.catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 7, edition: .standard,
+      verified.catalog.core.availability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "b", count: 40))
+        == .current,
+      "same-build Core source revision was treated as an upgrade")
+    require(
+      try verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 7,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: []) == .core(verified.catalog.core),
       "Core update did not take priority over data")
     require(
-      verified.catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
-        installedPacks: []) == .languageData,
-      "missing language data was not reported")
+      try verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "b", count: 40), edition: .standard,
+        installedPacks: []) == .languageData([
+          .init(
+            kind: .chinese, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .english, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .lts, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+        ]),
+      "same-build Core revision suppressed the real language-data update")
     require(
-      verified.catalog.updateAvailability(
-        currentVersion: "1.0.0", currentBuild: 8, edition: .standard,
+      try verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
+        installedPacks: []) == .languageData([
+          .init(
+            kind: .chinese, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .english, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+          .init(
+            kind: .lts, installedVersion: nil, installedSequence: nil,
+            availableVersion: "2026.08.10", availableSequence: 5),
+        ]),
+      "missing language-data releases were not identified")
+    let installedStandard = installedPacks(from: catalog.activationSets[0].packs)
+    for edition in [LinnetDataRegistry.Edition.standard, .full] {
+      let packs = installedPacks(from: catalog.activationSet(for: edition)!.packs)
+      for sequences: [UInt64] in [packs.map { $0.sequence + 1 }, packs.enumerated().map { $0.offset == 0 ? 6 : 4 }] {
+        let newerLocal = zip(packs, sequences).map { pack, sequence in
+          LinnetDataRegistry.ActivePack(
+            packID: pack.packID, kind: pack.kind, version: pack.version,
+            sequence: sequence, dataABI: pack.dataABI, contentSHA256: pack.contentSHA256,
+            minCore: pack.minCore, requirements: pack.requirements,
+            relativePath: pack.relativePath, manifestSHA256: pack.manifestSHA256)
+        }
+        require(try catalog.updateAvailability(
+          currentVersion: "1.0.0", currentBuild: 8,
+          currentRevision: String(repeating: "a", count: 40),
+          edition: edition, installedPacks: newerLocal) == .localDataAhead,
+          "local-ahead or mixed new/old activation set must be explicitly identified")
+      }
+    }
+    let staleEnglish = LinnetDataRegistry.ActivePack(
+      packID: installedStandard[1].packID, kind: installedStandard[1].kind,
+      version: "2026.08.09", sequence: 4, dataABI: installedStandard[1].dataABI,
+      contentSHA256: String(repeating: "c", count: 64),
+      minCore: installedStandard[1].minCore, requirements: [],
+      relativePath: installedStandard[1].relativePath,
+      manifestSHA256: installedStandard[1].manifestSHA256)
+    let conflictingEnglish = LinnetDataRegistry.ActivePack(
+      packID: staleEnglish.packID, kind: .english,
+      version: staleEnglish.version, sequence: 5, dataABI: staleEnglish.dataABI,
+      contentSHA256: staleEnglish.contentSHA256, minCore: staleEnglish.minCore, requirements: [],
+      relativePath: staleEnglish.relativePath, manifestSHA256: staleEnglish.manifestSHA256)
+    do {
+      _ = try catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
+        installedPacks: [installedStandard[0], conflictingEnglish, installedStandard[2]])
+      LinnetTestFailure.fail("same-sequence different content was accepted as current or an update")
+    } catch LinnetDataChannel.Failure.conflictingPack(.english) { }
+    let repairSet = catalog.activationSet(for: .standard)!
+    let conflicted = [installedStandard[0], conflictingEnglish, installedStandard[2]]
+    if case .available(let repaired) = repairSet.updateSelection(
+      installedPacks: conflicted, allowCompleteRepair: true) {
+      require(repaired.map(\.kind) == [.english], "repair must only replace conflicting packs")
+    } else { LinnetTestFailure.fail("explicit repair rejected conflicting metadata") }
+    let newer = LinnetDataRegistry.ActivePack(
+      packID: conflictingEnglish.packID, kind: .english,
+      version: conflictingEnglish.version, sequence: 99, dataABI: conflictingEnglish.dataABI,
+      contentSHA256: conflictingEnglish.contentSHA256, minCore: conflictingEnglish.minCore,
+      requirements: [], relativePath: conflictingEnglish.relativePath,
+      manifestSHA256: conflictingEnglish.manifestSHA256)
+    if case .localAhead = repairSet.updateSelection(
+      installedPacks: [installedStandard[0], newer, installedStandard[2]], allowCompleteRepair: true) {
+    } else { LinnetTestFailure.fail("explicit repair allowed pack downgrade") }
+    require(
+      try verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
+        installedPacks: [installedStandard[0], staleEnglish, installedStandard[2]])
+        == .languageData([
+          .init(
+            kind: .english,
+            installedVersion: "2026.08.09", installedSequence: 4,
+            availableVersion: "2026.08.10", availableSequence: 5),
+        ]),
+      "an outdated language-data release did not report both versions")
+    require(
+      try verified.catalog.updateAvailability(
+        currentVersion: "1.0.0", currentBuild: 8,
+        currentRevision: String(repeating: "a", count: 40), edition: .standard,
         installedPacks: installedPacks(from: catalog.activationSets[0].packs)) == .current,
       "an exact installation was reported as outdated")
 
@@ -130,21 +264,21 @@ struct LinnetDataChannelTests {
       LinnetTestFailure.fail("old Core was accepted")
     } catch {}
 
-    let file = FileManager.default.temporaryDirectory.appending(
+    let file = LinnetTestScratch.directory.appending(
       path: "LinnetDataChannelTests-\(UUID().uuidString).linnetpack")
     defer { try? FileManager.default.removeItem(at: file) }
     try Data("four".utf8).write(to: file)
     let artifact = catalog.activationSets[0].packs[0]
-    try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+    try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
     try Data("evil".utf8).write(to: file)
     do {
-      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
       LinnetTestFailure.fail("same-size artifact tampering was accepted")
     } catch {}
     try FileManager.default.removeItem(at: file)
     try Data("short".utf8).write(to: file)
     do {
-      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
       LinnetTestFailure.fail("wrong artifact size was accepted")
     } catch {}
     try FileManager.default.removeItem(at: file)
@@ -155,10 +289,77 @@ struct LinnetDataChannelTests {
     try FileManager.default.createSymbolicLink(
       atPath: file.path, withDestinationPath: target.path)
     do {
-      try LinnetDataChannel.verifyDownloadedArtifact(artifact, at: file)
+      try LinnetDataChannel.verifyDownloadedArtifact(bytes: artifact.bytes, sha256: artifact.containerSHA256, at: file)
       LinnetTestFailure.fail("artifact verifier followed a destination symlink")
     } catch {}
     print("LinnetDataChannelTests: PASS")
+  }
+
+  private static func differentialCatalogContract(_ catalog: LinnetDataChannel.Catalog) throws {
+    var document = try JSONSerialization.jsonObject(with: catalogData(catalog)) as! [String: Any]
+    let base = String(repeating: "c", count: 64)
+    var sets = document["activation_sets"] as! [[String: Any]]
+    for index in sets.indices {
+      var packs = sets[index]["packs"] as! [[String: Any]]
+      for packIndex in packs.indices {
+        let kind = LinnetPackContract.Kind(rawValue: packs[packIndex]["kind"] as! String)!
+        let name = kind.releaseAssetName.replacingOccurrences(of: ".linnetpack", with: "-from-\(base).linnetdelta")
+        packs[packIndex]["deltas"] = [[
+          "base_content_sha256": base, "bytes": 128,
+          "sha256": String(repeating: "d", count: 64),
+          "url": "https://github.com/Ares-X/Linnet/releases/download/data-5/\(name)"
+        ]]
+      }
+      sets[index]["packs"] = packs
+    }
+    document["activation_sets"] = sets
+    let data = try JSONSerialization.data(withJSONObject: document)
+    let verified = try LinnetDataChannel.verifyPublished(data)
+    let canonical = try LinnetDataChannel.canonicalCatalogData(verified.catalog)
+    let roundTrip = try JSONSerialization.jsonObject(with: canonical) as! [String: Any]
+    let roundTripSets = roundTrip["activation_sets"] as! [[String: Any]]
+    let firstPack = (roundTripSets[0]["packs"] as! [[String: Any]])[0]
+    require(firstPack["deltas"] != nil, "authenticated Catalog discarded its differential artifact identity")
+    require(try LinnetDataChannel.packSnapshotDigest(verified.catalog) == LinnetDataChannel.packSnapshotDigest(catalog),
+      "delta transport metadata changed immutable pack identity")
+    let artifact = verified.catalog.activationSets[0].packs[0]
+    let current = installedPacks(from: [artifact])[0]
+    let previous = LinnetDataRegistry.ActivePack(
+      packID: current.packID, kind: current.kind, version: "2026.08.09", sequence: 4,
+      dataABI: current.dataABI, contentSHA256: base, minCore: current.minCore,
+      requirements: current.requirements, relativePath: current.relativePath,
+      manifestSHA256: current.manifestSHA256)
+    require(artifact.transfer(from: nil) == .complete, "first installation needs its baseline")
+    require(artifact.transfer(from: current) == .current(current), "unchanged pack must not download")
+    require(artifact.transfer(from: previous) == .delta(artifact.deltas![0], base: previous),
+      "normal update must select the exact base-bound delta")
+    var noDelta = artifact
+    noDelta.deltas = nil
+    require(noDelta.transfer(from: previous) == .requiresCompleteRepair, "missing delta silently authorized a full download")
+    require(noDelta.transfer(from: previous, allowCompleteRepair: true) == .complete,
+      "explicit repair was not accepted")
+    require(noDelta.transfer(from: current, allowCompleteRepair: true) == .current(current),
+      "repair must still reuse unchanged packs")
+    let invalidFields: [(String, Any)] = [
+      ("base_content_sha256", artifact.contentSHA256),
+      ("base_content_sha256", "invalid"), ("bytes", 0), ("sha256", "invalid"),
+      ("url", "https://example.com/update.linnetdelta"),
+      ("url", artifact.deltas![0].url.absoluteString + "?alternate=1")
+    ]
+    for (field, value) in invalidFields {
+      var invalid = document
+      var invalidSets = invalid["activation_sets"] as! [[String: Any]]
+      var invalidPacks = invalidSets[0]["packs"] as! [[String: Any]]
+      var invalidDeltas = invalidPacks[0]["deltas"] as! [[String: Any]]
+      invalidDeltas[0][field] = value
+      invalidPacks[0]["deltas"] = invalidDeltas
+      invalidSets[0]["packs"] = invalidPacks
+      invalid["activation_sets"] = invalidSets
+      do {
+        _ = try LinnetDataChannel.verifyPublished(JSONSerialization.data(withJSONObject: invalid))
+        LinnetTestFailure.fail("invalid differential Catalog \(field) was accepted")
+      } catch LinnetDataChannel.Failure.invalidCatalog { }
+    }
   }
 
   private static func catalogData(_ catalog: LinnetDataChannel.Catalog) throws -> Data {
@@ -186,11 +387,12 @@ struct LinnetDataChannelTests {
             of: "data-5", with: "data-\(sequence)") + "/\(name)")!)
     }
     return .init(
-      format: LinnetDataChannel.format, sequence: sequence, core: .init(
+      format: LinnetDataChannel.legacyFormat, sequence: sequence, core: .init(
         version: "1.0.0", build: 8,
         revision: String(repeating: "a", count: 40),
         bytes: 16, sha256: String(repeating: "d", count: 64),
-        packageURL: URL(
+        artifactFormat: .installerPackage,
+        artifactURL: URL(
           string:
             "https://github.com/Ares-X/Linnet/releases/download/core-v1.0.0/Linnet-1.0.0-arm64-Core-community-beta.pkg")!,
         releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v1.0.0")!),
@@ -218,7 +420,7 @@ struct LinnetDataChannelTests {
     artifacts.map { artifact in
       .init(
         packID: artifact.kind.packID,
-        kind: LinnetDataRegistry.PackKind(rawValue: artifact.kind.rawValue)!,
+        kind: artifact.kind,
         version: artifact.version, sequence: artifact.sequence,
         dataABI: artifact.dataABI, contentSHA256: artifact.contentSHA256,
         minCore: artifact.minCore, requirements: [],
@@ -257,7 +459,7 @@ struct LinnetDataChannelTests {
       containerSHA256: "04efaf080f5a3e74e1c29d1ca6a48569382cbbcd324e8d59d2b83ef21c039f00")
   }
 
-  private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {
-    guard condition() else { LinnetTestFailure.fail(message) }
+  private static func require(_ condition: Bool, _ message: String) {
+    guard condition else { LinnetTestFailure.fail(message) }
   }
 }

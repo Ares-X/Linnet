@@ -15,15 +15,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-sdk="$(xcrun --sdk macosx --show-sdk-path)"
-tool="${fixture}/linnet-pack"
-xcrun swiftc -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetPackContract.swift \
-  sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
-  tools/LinnetDataCatalogBuilder.swift \
-  tools/LinnetPackTool.swift \
-  -o "${tool}"
+tool="${repo_root}/build/linnet-pack"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
 
 release="${fixture}/release"
 mkdir "${release}"
@@ -84,6 +77,31 @@ ruby -rjson -rdigest -e '
     abort unless artifact.fetch("container_sha256") == Digest::SHA256.file(path).hexdigest
   end
 ' "${fixture}/catalog.json" "${release}"
+
+core_archive="${release}/Linnet-0.1.0-arm64-Core.linnetcore"
+printf 'Core App archive fixture\n' >"${core_archive}"
+archive_catalog="${release}/Linnet-Data-Channel-v2.json"
+"${tool}" build-catalog --sequence 7 --core-version 0.1.0 --output "${archive_catalog}" \
+  --core-build 9 --core-revision bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  --core-archive "${core_archive}" \
+  --chinese-pack "${release}/Linnet-Chinese.linnetpack" \
+  --english-pack "${release}/Linnet-English.linnetpack" \
+  --lts-pack "${release}/Linnet-LTS.linnetpack" \
+  --extended-pack "${release}/Linnet-Extended.linnetpack"
+"${tool}" inspect-catalog --catalog "${archive_catalog}" --core-version 0.1.0 \
+  >"${fixture}/catalog-v2.json"
+ruby -rjson -rdigest -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  core = document.fetch("core")
+  archive = ARGV.fetch(1)
+  abort unless document.fetch("format") == 2 && core.fetch("build") == 9
+  abort unless core.fetch("artifact_format") == "app-tar-gzip"
+  abort unless core.fetch("artifact_url") ==
+    "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core.linnetcore"
+  abort if core.key?("package_url")
+  abort unless core.fetch("bytes") == File.size(archive)
+  abort unless core.fetch("sha256") == Digest::SHA256.file(archive).hexdigest
+' "${fixture}/catalog-v2.json" "${core_archive}"
 
 chmod u+w "${release}" "${release}/Linnet-English.linnetpack"
 printf X | dd of="${release}/Linnet-English.linnetpack" bs=1 seek=0 conv=notrunc status=none

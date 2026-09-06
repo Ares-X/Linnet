@@ -3,13 +3,7 @@ import Foundation
 /// Pure projections applied once when InputMethodKit activates a text client.
 /// Runtime state remains owned by Rime and the active controller.
 enum LinnetInputActivationPolicy {
-  struct CapsLockBaseline: Equatable {
-    let asciiMode: Bool?
-    let ownsAsciiMode: Bool
-  }
-
   private static let appleKeyboardPrefix = "com.apple.keylayout."
-  static let capsLockOwnershipProperty = "_linnet_caps_lock_ascii_mode"
 
   static func keyboardLayoutName(configured: String?) -> String? {
     guard let configured, !configured.isEmpty, configured != "last" else {
@@ -22,18 +16,6 @@ enum LinnetInputActivationPolicy {
       return configured
     }
     return "\(appleKeyboardPrefix)\(configured)"
-  }
-
-  static func capsLockBaseline(
-    capsLockActive: Bool,
-    previouslyOwnedAsciiMode: Bool
-  ) -> CapsLockBaseline {
-    if capsLockActive {
-      return CapsLockBaseline(asciiMode: true, ownsAsciiMode: true)
-    }
-    return CapsLockBaseline(
-      asciiMode: previouslyOwnedAsciiMode ? false : nil,
-      ownsAsciiMode: false)
   }
 
   static func shouldCommitCompositionForClick(

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+user_home="${HOME:-}"
+app_path="${user_home}/Library/Input Methods/Linnet.app"
+executable="${app_path}/Contents/MacOS/Linnet"
+script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+lifecycle="${script_root}/lifecycle-postinstall"
+mode_file="${script_root}/install-mode"
+identity_metadata="${script_root}/candidate-app-identity.json"
+registration_inspector="${script_root}/input-source-registration-inspector"
+
+[[ "${user_home}" == /* &&
+  -f "${lifecycle}" && ! -L "${lifecycle}" && -x "${lifecycle}" &&
+  -f "${mode_file}" && ! -L "${mode_file}" &&
+  -f "${identity_metadata}" && ! -L "${identity_metadata}" &&
+  -f "${registration_inspector}" && ! -L "${registration_inspector}" &&
+  -x "${registration_inspector}" ]] || {
+  echo "Linnet Complete postinstall: lifecycle boundary is unavailable" >&2
+  exit 1
+}
+IFS= read -r install_mode <"${mode_file}"
+[[ "${install_mode}" == complete ]] || {
+  echo "Linnet Complete postinstall: package installation mode is invalid" >&2
+  exit 1
+}
+
+first_app_creation=false
+if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
+  first_app_creation=true
+fi
+
+/bin/bash "${lifecycle}"
+[[ "${first_app_creation}" == true ]] || exit 0
+
+[[ -f "${executable}" && ! -L "${executable}" && -x "${executable}" ]] || {
+  echo "Linnet Complete postinstall: installed input source is unavailable" >&2
+  exit 1
+}
+candidate_bundle_identifier="$(/usr/bin/plutil -extract bundle_identifier raw -o - \
+  "${identity_metadata}")" || {
+  echo "Linnet Complete postinstall: candidate bundle identity is unavailable" >&2
+  exit 1
+}
+[[ "${candidate_bundle_identifier}" == io.github.ares-x.inputmethod.Linnet ]] || {
+  echo "Linnet Complete postinstall: candidate bundle identity is invalid" >&2
+  exit 1
+}
+
+# This is the sole standard TIS mutation in every installable artifact. It is
+# present only in Linnet Complete and runs only after the first App creation.
+"${executable}" --request-first-install-authorization
+registration_state="$("${registration_inspector}" \
+  "${candidate_bundle_identifier}")" || {
+  echo "Linnet Complete postinstall: input-source registration observation is unavailable" >&2
+  exit 1
+}
+case "${registration_state}" in
+  registered:enablement-required:path-unknown|\
+registered:enabled-observation:selectable:path-unknown|\
+registered:selected-observation:selectable:path-unknown) ;;
+  *)
+    echo "Linnet Complete postinstall: first install did not retain one safe registered input source" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

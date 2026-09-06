@@ -20,12 +20,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if rg -Fq -- '-quiet $(BUILD_SETTINGS) build' "${project_root}/Makefile"; then
+if rg -n -- 'scripts/build-linnet-app.*-quiet|-quiet.*\$\(BUILD_SETTINGS\)' \
+    "${project_root}/Makefile"; then
   echo 'The App build still hides xcodebuild progress.' >&2
   exit 1
 fi
-rg -Fq -- '-showBuildTimingSummary $(BUILD_SETTINGS) build' \
-  "${project_root}/Makefile" || {
+rg -Fq -- '"-showBuildTimingSummary"' \
+  "${project_root}/scripts/build-linnet-app" &&
+  rg -Fq -- '$(BUILD_SETTINGS) LINNET_BUNDLE_IDENTIFIER=' \
+    "${project_root}/Makefile" || {
   echo 'The App build lost its visible timing summary.' >&2
   exit 1
 }
@@ -117,11 +120,31 @@ ruby -e '
     verifier.scan(/^  trap cleanup_verification EXIT$/).size == 1 &&
       !verifier.include?("RETURN") &&
       !verifier.include?("trap -")
+  verification_bundle = signer[/^require_verification_bundle\(\) \{\n(?<body>.*?)(?=^\}\n)/m, :body]
+  abort "frozen candidate verification has no exact bundle-name owner" unless
+    verification_bundle &&
+      verification_bundle.include?("Linnet.app|Linnet.candidate|Linnet.payload") &&
+      verification_bundle.include?("Settings.app|Settings.candidate")
+  abort "product verification does not consume the frozen candidate boundary" unless
+    verifier.include?(%q{require_verification_bundle "${host_app}" host}) &&
+      verifier.include?(%q{require_verification_bundle "${standalone_settings_app}" settings})
+  signer_owner = signer[/^sign_product\(\) \{\n(?<body>.*?)(?=^\}\n)/m, :body]
+  abort "signing and verification no longer share the frozen bundle-name owner" unless
+    signer_owner &&
+      signer_owner.include?(%q{require_verification_bundle "${host_app}" host}) &&
+      signer_owner.include?(%q{require_verification_bundle "${standalone_settings_app}" settings})
 ' "${provisioner}" "${signer}"
 
 [[ "$(rg -Fc '$(call remove-linnet-local-residue,$${app_path},$${settings_app_path},$${embedded_settings_app_path})' \
-  "${project_root}/Makefile")" == 2 ]] || {
-  echo 'Development and the community finalizer do not share the residue owner.' >&2
+  "${project_root}/Makefile")" == 1 ]] || {
+  echo 'The Xcode product residue owner is not unique.' >&2
+  exit 1
+}
+rg -Fq 'fail_stage("local Host retained release metadata")' \
+  "${project_root}/scripts/stage-linnet-candidate" &&
+  rg -Fq 'fail_stage("local bundle retained a code signature:' \
+    "${project_root}/scripts/stage-linnet-candidate" || {
+  echo 'Candidate staging no longer rejects local release/signing residue.' >&2
   exit 1
 }
 rg -Fq 'release_metadata_root="$${app_path}/Contents/Resources/LinnetRelease";' \

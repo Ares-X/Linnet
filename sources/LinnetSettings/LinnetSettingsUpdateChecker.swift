@@ -1,72 +1,448 @@
 import AppKit
 import Foundation
+import os
 
-/// Settings-only owner for the quiet, bounded update check. It consumes the
-/// same verified Catalog used by language-data mutation and never installs a
-/// Core package or touches the input-method runtime.
+private let linnetUpdateLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet.Settings",
+  category: "Update"
+)
+
+protocol LinnetCoreDownloading: Sendable {
+  func download(
+    _ core: LinnetDataChannel.Core,
+    source: LinnetSettingsDownloadSource,
+    progress: @escaping @Sendable (Double) -> Void
+  ) async throws -> URL
+}
+
+/// Downloads the Catalog-owned Core artifact through Settings' existing byte
+/// transfer boundary, then verifies the exact Catalog size and SHA-256 before
+/// exposing the file to the user.
+struct LinnetCoreDownloader: LinnetCoreDownloading {
+  private let downloadsDirectory: URL?
+
+  init(downloadsDirectory: URL? = nil) {
+    self.downloadsDirectory = downloadsDirectory
+  }
+
+  func download(
+    _ core: LinnetDataChannel.Core,
+    source: LinnetSettingsDownloadSource,
+    progress: @escaping @Sendable (Double) -> Void
+  ) async throws -> URL {
+    let root = try resolvedDownloadsDirectory()
+    let directory = root.appending(
+      path: "\(core.sha256)-\(UUID().uuidString)",
+      directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+    let destination = directory.appending(
+      path: core.artifactURL.lastPathComponent,
+      directoryHint: .notDirectory
+    )
+    let transport = LinnetSettingsDownloadTransport(source: source)
+    try await transport.downloadArtifact(
+      from: core.artifactURL,
+      expectedBytes: core.bytes,
+      to: destination,
+      progress: progress
+    )
+    try LinnetDataChannel.verifyDownloadedArtifact(
+      bytes: core.bytes, sha256: core.sha256, at: destination)
+    return destination
+  }
+
+  private func resolvedDownloadsDirectory() throws -> URL {
+    if let downloadsDirectory { return downloadsDirectory }
+    guard let downloads = FileManager.default.urls(
+      for: .downloadsDirectory,
+      in: .userDomainMask
+    ).first else { throw Failure.missingDownloadsDirectory }
+    return downloads.appending(path: "Linnet Core Updates", directoryHint: .isDirectory)
+  }
+
+  private enum Failure: Error {
+    case missingDownloadsDirectory
+  }
+}
+
+/// Settings owns update visibility and the user-requested Core activation
+/// orchestration. The running Host remains the sole exit-safety authority.
 @MainActor
 final class LinnetSettingsUpdateChecker: ObservableObject {
+  enum CheckFailure: Equatable {
+    case network, conflictingPack, invalidCatalog, unavailable
+
+    init(_ error: Error) {
+      if let error = error as? LinnetDataChannel.Failure {
+        switch error {
+        case .conflictingPack: self = .conflictingPack
+        case .invalidCatalog: self = .invalidCatalog
+        default: self = .unavailable
+        }
+      } else if let error = error as? URLError,
+        [.notConnectedToInternet, .timedOut, .networkConnectionLost,
+         .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(error.code) {
+        self = .network
+      } else {
+        self = .unavailable
+      }
+    }
+
+    var message: String {
+      switch self {
+      case .network:
+        "Could not connect to the update service. Check your network or proxy settings and try again."
+      case .conflictingPack:
+        "Installed language-pack metadata differs from this channel for the same version. Your data is unchanged. Use Repair Language Update below to download the channel's packs."
+      case .invalidCatalog:
+        "The update catalog is invalid. Your installation is unchanged. Try again later; if this persists, contact the maintainer."
+      case .unavailable:
+        "Could not complete the update check. Try again later; if this persists, contact the maintainer."
+      }
+    }
+  }
+
+  enum UpdateChannel: String, CaseIterable, Identifiable, Sendable {
+    case stable
+    case preview
+
+    static let defaultsKey = "Linnet.Settings.UpdateChannel.v1"
+
+    var id: String { rawValue }
+
+    var catalogURL: URL {
+      switch self {
+      case .stable:
+        LinnetSettingsDownloadSource.canonicalCatalogURL
+      case .preview:
+        URL(
+          string:
+            "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/Linnet-Data-Channel.json"
+        )!
+      }
+    }
+
+    static func load(from defaults: UserDefaults = .standard) -> Self {
+      guard let rawValue = defaults.string(forKey: defaultsKey),
+        let channel = Self(rawValue: rawValue)
+      else { return .stable }
+      return channel
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+      defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+  }
+
+  enum RuntimeVersionState: Equatable {
+    case checking(installed: LinnetSettingsContract.ProductIdentity?)
+    case current(LinnetSettingsContract.ProductIdentity)
+    case pending(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )
+    case applying(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )
+    case blocked(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity,
+      issue: LinnetSettingsContract.CoreActivationBlocker
+    )
+    case applied(LinnetSettingsContract.ProductIdentity)
+    case unsupported(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )
+    case failed(
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )
+    case unavailable(installed: LinnetSettingsContract.ProductIdentity?)
+
+    static func resolved(
+      installed: LinnetSettingsContract.ProductIdentity?,
+      health: LinnetSettingsContract.RuntimeHealth?
+    ) -> Self {
+      guard let installed else { return .unavailable(installed: nil) }
+      guard let health else { return .unavailable(installed: installed) }
+      guard let running = health.productIdentity else {
+        return .unavailable(installed: installed)
+      }
+      return installed == running
+        ? .current(running)
+        : .pending(installed: installed, running: running)
+    }
+
+    var activationIdentities: (
+      installed: LinnetSettingsContract.ProductIdentity,
+      running: LinnetSettingsContract.ProductIdentity
+    )? {
+      switch self {
+      case .pending(let installed, let running),
+        .blocked(let installed, let running, _),
+        .failed(let installed, let running):
+        (installed, running)
+      default:
+        nil
+      }
+    }
+  }
+
+  enum CoreDownloadState: Equatable {
+    case idle
+    case downloading(core: LinnetDataChannel.Core, progress: Double)
+    case installerPackage(core: LinnetDataChannel.Core, file: URL)
+    case ready(core: LinnetDataChannel.Core, update: LinnetPreparedCoreUpdate)
+    case applying(core: LinnetDataChannel.Core, update: LinnetPreparedCoreUpdate)
+    case blocked(
+      core: LinnetDataChannel.Core,
+      update: LinnetPreparedCoreUpdate,
+      issue: LinnetSettingsContract.CoreActivationBlocker)
+    case applied(LinnetSettingsContract.ProductIdentity)
+    case failed(core: LinnetDataChannel.Core)
+    case recoveryRequired(core: LinnetDataChannel.Core)
+
+    var core: LinnetDataChannel.Core? {
+      switch self {
+      case .idle, .applied:
+        nil
+      case .downloading(let core, _), .installerPackage(let core, _),
+        .ready(let core, _), .applying(let core, _),
+        .blocked(let core, _, _), .failed(let core), .recoveryRequired(let core):
+        core
+      }
+    }
+  }
+
   @Published private(set) var availability: LinnetDataChannel.UpdateAvailability?
   @Published private(set) var active = false
-  @Published private(set) var failed = false
+  @Published private(set) var failure: CheckFailure?
+  @Published private(set) var installedIdentity: LinnetSettingsContract.ProductIdentity?
+  @Published private(set) var runtimeVersionState: RuntimeVersionState =
+    .checking(installed: nil)
+  @Published private(set) var updateChannel: UpdateChannel
+  @Published private(set) var coreDownloadState: CoreDownloadState = .idle
 
-  private let currentVersion: String
-  private let currentBuild: UInt64
-  private let service: LinnetDataChannel.Service
+  var activationInProgress: Bool {
+    if case .applying = runtimeVersionState { return true }
+    if case .applying = coreDownloadState { return true }
+    return false
+  }
+
+  var coreDownloadInProgress: Bool {
+    if case .downloading = coreDownloadState { return true }
+    return false
+  }
+
+  private let identityBundle: Bundle
+  private let hostBundleURL: URL?
+  private let hostBundleIdentifier: String?
+  private let transactionRequester: LinnetSettingsTransactionRequesting
+  private let updateDefaults: UserDefaults
+  private let coreDownloader: any LinnetCoreDownloading
+  private let coreInstaller: any LinnetCoreUpdateInstalling
+  private let revealCorePackage: (URL) -> Void
   private var edition: LinnetDataRegistry.Edition?
   private var installedPacks: [LinnetDataRegistry.ActivePack]
   private var task: Task<Void, Never>?
+  private var runtimeTask: Task<Void, Never>?
+  private var coreDownloadTask: Task<Void, Never>?
   private var cycle: UInt64 = 0
+  private var runtimeCycle: UInt64 = 0
+  private var coreDownloadCycle: UInt64 = 0
 
   init(
-    currentVersion: String,
-    currentBuild: UInt64,
-    service: LinnetDataChannel.Service,
     edition: LinnetDataRegistry.Edition?,
-    installedPacks: [LinnetDataRegistry.ActivePack]
+    installedPacks: [LinnetDataRegistry.ActivePack],
+    bundle: Bundle = .main,
+    transactionRequester: LinnetSettingsTransactionRequesting? = nil,
+    updateDefaults: UserDefaults = .standard,
+    coreDownloader: any LinnetCoreDownloading = LinnetCoreDownloader(),
+    coreInstaller: any LinnetCoreUpdateInstalling = LinnetCoreUpdateInstaller(),
+    revealCorePackage: @escaping (URL) -> Void = {
+      NSWorkspace.shared.activateFileViewerSelecting([$0])
+    }
   ) {
-    self.currentVersion = currentVersion
-    self.currentBuild = currentBuild
-    self.service = service
+    identityBundle = bundle
+    installedIdentity = nil
     self.edition = edition
     self.installedPacks = installedPacks
-    check()
+    let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
+    hostBundleURL = host?.bundleURL
+    hostBundleIdentifier = host?.bundleIdentifier
+    self.updateDefaults = updateDefaults
+    self.coreDownloader = coreDownloader
+    self.coreInstaller = coreInstaller
+    self.revealCorePackage = revealCorePackage
+    updateChannel = UpdateChannel.load(from: updateDefaults)
+    self.transactionRequester = transactionRequester
+      ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
+    refreshInstalledIdentity()
+    runtimeVersionState = .checking(installed: installedIdentity)
+    if let hostBundleURL {
+      let installer = self.coreInstaller
+      Task { await installer.removeStaleUpdates(beside: hostBundleURL) }
+    }
   }
 
   func check() {
     startCheck(replacingCurrent: false)
+    refreshRuntime()
+  }
+
+  func setUpdateChannel(_ channel: UpdateChannel) {
+    guard channel != updateChannel, !activationInProgress else { return }
+    task?.cancel()
+    cycle &+= 1
+    active = false
+    failure = nil
+    availability = nil
+    resetCoreDownload()
+    updateChannel = channel
+    channel.save(to: updateDefaults)
+    startCheck(replacingCurrent: true)
+  }
+
+  func refreshRuntime() {
+    guard !activationInProgress else { return }
+    refreshInstalledIdentity()
+    runtimeTask?.cancel()
+    runtimeCycle &+= 1
+    let activeCycle = runtimeCycle
+    runtimeVersionState = .checking(installed: installedIdentity)
+    runtimeTask = Task { [weak self] in
+      guard let self else { return }
+      do {
+        let reply = try await request(.diagnose, timeout: 3)
+        guard !Task.isCancelled else { return }
+        finishRuntime(reply.health, cycle: activeCycle)
+      } catch is CancellationError {
+        return
+      } catch {
+        finishRuntimeUnavailable(cycle: activeCycle)
+      }
+    }
+  }
+}
+
+extension LinnetSettingsUpdateChecker {
+  func activateInstalledCore() {
+    refreshInstalledIdentity()
+    guard let identities = runtimeVersionState.activationIdentities,
+      installedIdentity == identities.installed,
+      hostBundleURL != nil,
+      hostBundleIdentifier != nil
+    else { return }
+    runtimeTask?.cancel()
+    runtimeCycle &+= 1
+    let activeCycle = runtimeCycle
+    runtimeVersionState = .applying(
+      installed: identities.installed,
+      running: identities.running
+    )
+    runtimeTask = Task { [weak self] in
+      guard let self else { return }
+      var hostAcceptedActivation = false
+      do {
+        let reply = try await request(.activateCore, timeout: 4)
+        guard !Task.isCancelled else { return }
+        if let issue = coreActivationIssue(for: reply.code) {
+          finishRuntimeTransition(
+            .blocked(
+              installed: identities.installed,
+              running: identities.running,
+              issue: issue
+            ),
+            cycle: activeCycle
+          )
+          return
+        }
+        guard reply.status == .terminating,
+          reply.code == .coreActivationAccepted
+        else {
+          finishRuntimeTransition(
+            .unsupported(installed: identities.installed, running: identities.running),
+            cycle: activeCycle
+          )
+          return
+        }
+        hostAcceptedActivation = true
+        try await awaitHostExit()
+        try await launchCanonicalHost()
+        let health = try await awaitInstalledHost(identity: identities.installed)
+        finishRuntimeApplied(health, cycle: activeCycle)
+      } catch is CancellationError {
+        return
+      } catch {
+        if hostAcceptedActivation {
+          finishRuntimeTransition(
+            .failed(installed: identities.installed, running: identities.running),
+            cycle: activeCycle
+          )
+        } else {
+          finishRuntimeTransition(
+            .unsupported(installed: identities.installed, running: identities.running),
+            cycle: activeCycle
+          )
+        }
+      }
+    }
   }
 
   private func startCheck(replacingCurrent: Bool) {
-    guard service == .published, replacingCurrent || !active else { return }
+    guard !activationInProgress, replacingCurrent || !active else { return }
+    refreshInstalledIdentity()
     task?.cancel()
     cycle &+= 1
     let activeCycle = cycle
     active = true
-    failed = false
+    failure = nil
     availability = nil
-    let currentVersion = currentVersion
-    let currentBuild = currentBuild
+    guard let installedIdentity else {
+      active = false
+      task = nil
+      return
+    }
+    let currentVersion = installedIdentity.version
+    let currentBuild = installedIdentity.build
+    let currentRevision = installedIdentity.revision
     let edition = edition
     let installedPacks = installedPacks
+    let catalogURL = updateChannel.catalogURL
     task = Task.detached { [weak self] in
       do {
         let transport = LinnetSettingsDownloadTransport(source: .direct)
-        let data = try await transport.downloadCatalog(
-          at: LinnetSettingsDownloadSource.canonicalCatalogURL)
+        let data = try await transport.downloadCatalog(at: catalogURL)
         try Task.checkCancellation()
         let catalog = try LinnetDataChannel.verifyPublished(data).catalog
-        let result = catalog.updateAvailability(
+        let result = try catalog.updateAvailability(
           currentVersion: currentVersion, currentBuild: currentBuild,
+          currentRevision: currentRevision,
           edition: edition, installedPacks: installedPacks)
         await self?.finish(result, cycle: activeCycle)
       } catch is CancellationError {
         await self?.finishCancellation(cycle: activeCycle)
       } catch {
-        print("Update check failed: \(error.localizedDescription)")
-        await self?.finishFailure(cycle: activeCycle)
+        linnetUpdateLogger.error(
+          "Update check failed: \(error.localizedDescription, privacy: .private)"
+        )
+        await self?.finishFailure(CheckFailure(error), cycle: activeCycle)
       }
     }
+  }
+
+  @discardableResult
+  private func refreshInstalledIdentity()
+    -> LinnetSettingsContract.ProductIdentity? {
+    let identity = LinnetSettingsContract.productIdentity(startingAt: identityBundle)
+    installedIdentity = identity
+    return identity
   }
 
   func refreshInstalledData(
@@ -78,9 +454,238 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     startCheck(replacingCurrent: true)
   }
 
-  func openCoreUpdate() {
-    guard case .core(let core) = availability else { return }
-    NSWorkspace.shared.open(core.releaseURL)
+  func downloadCoreUpdate(_ core: LinnetDataChannel.Core, source: LinnetSettingsDownloadSource) {
+    if case .downloading(let downloadingCore, _) = coreDownloadState,
+      downloadingCore == core {
+      return
+    }
+    coreDownloadTask?.cancel()
+    coreDownloadCycle &+= 1
+    let activeCycle = coreDownloadCycle
+    coreDownloadState = .downloading(core: core, progress: 0)
+    coreDownloadTask = Task { [weak self] in
+      guard let self else { return }
+      do {
+        let file = try await coreDownloader.download(core, source: source) { [weak self] progress in
+          Task { @MainActor [weak self] in
+            self?.recordCoreDownloadProgress(
+              progress, core: core, cycle: activeCycle)
+          }
+        }
+        guard !Task.isCancelled, activeCycle == coreDownloadCycle else { return }
+        if core.artifactFormat == .installerPackage {
+          coreDownloadState = .installerPackage(core: core, file: file)
+        } else {
+          guard let hostBundleURL else { throw ActivationFailure.missingInstalledHost }
+          let update = try await coreInstaller.prepare(
+            core, artifact: file, installedApp: hostBundleURL)
+          guard !Task.isCancelled, activeCycle == coreDownloadCycle else {
+            await coreInstaller.discard(update)
+            return
+          }
+          coreDownloadState = .ready(core: core, update: update)
+        }
+        coreDownloadTask = nil
+      } catch is CancellationError {
+        guard activeCycle == coreDownloadCycle else { return }
+        coreDownloadState = .idle
+        coreDownloadTask = nil
+      } catch {
+        guard activeCycle == coreDownloadCycle else { return }
+        coreDownloadState = .failed(core: core)
+        coreDownloadTask = nil
+      }
+    }
+  }
+
+  func cancelCoreDownload() {
+    resetCoreDownload()
+  }
+
+  func showDownloadedCoreUpdate() {
+    guard case .installerPackage(_, let file) = coreDownloadState else { return }
+    revealCorePackage(file)
+  }
+
+  func applyDownloadedCoreUpdate() {
+    let core: LinnetDataChannel.Core
+    let update: LinnetPreparedCoreUpdate
+    switch coreDownloadState {
+    case .ready(let readyCore, let readyUpdate),
+      .blocked(let readyCore, let readyUpdate, _):
+      core = readyCore
+      update = readyUpdate
+    default:
+      return
+    }
+    guard refreshInstalledIdentity() == update.baseIdentity,
+      runtimeVersionState == .current(update.baseIdentity)
+    else {
+      coreDownloadState = .failed(core: core)
+      Task { await coreInstaller.discard(update) }
+      return
+    }
+    runtimeTask?.cancel()
+    runtimeCycle &+= 1
+    let activeRuntimeCycle = runtimeCycle
+    coreDownloadState = .applying(core: core, update: update)
+    runtimeTask = Task { [weak self] in
+      guard let self else { return }
+      var exchanged = false
+      do {
+        let reply = try await request(.activateCore, timeout: 4)
+        guard !Task.isCancelled else { return }
+        if let issue = coreActivationIssue(for: reply.code) {
+          coreDownloadState = .blocked(core: core, update: update, issue: issue)
+          runtimeTask = nil
+          return
+        }
+        guard reply.status == .terminating,
+          reply.code == .coreActivationAccepted
+        else { throw ActivationFailure.hostRejectedActivation }
+        try await awaitHostExit()
+        try await coreInstaller.exchange(update)
+        exchanged = true
+        try await launchCanonicalHost()
+        let target = LinnetSettingsContract.ProductIdentity(
+          version: core.version, build: core.build, revision: core.revision)
+        let health = try await awaitInstalledHost(identity: target)
+        guard activeRuntimeCycle == runtimeCycle,
+          health.productIdentity == target
+        else { throw CancellationError() }
+        await coreInstaller.discard(update)
+        coreDownloadState = .applied(target)
+        runtimeVersionState = .applied(target)
+        runtimeTask = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+          NSApp.terminate(nil)
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        if exchanged {
+          do {
+            try await stopCanonicalHostForRollback()
+            try await coreInstaller.exchange(update)
+            try await launchCanonicalHost()
+            _ = try await awaitInstalledHost(identity: update.baseIdentity)
+            await coreInstaller.discard(update)
+            coreDownloadState = .failed(core: core)
+          } catch {
+            coreDownloadState = .recoveryRequired(core: core)
+          }
+        } else {
+          coreDownloadState = .failed(core: core)
+          await coreInstaller.discard(update)
+        }
+        runtimeTask = nil
+        refreshRuntime()
+      }
+    }
+  }
+
+  private func recordCoreDownloadProgress(
+    _ progress: Double,
+    core: LinnetDataChannel.Core,
+    cycle activeCycle: UInt64
+  ) {
+    guard activeCycle == coreDownloadCycle,
+      case .downloading(let downloadingCore, _) = coreDownloadState,
+      downloadingCore == core
+    else { return }
+    coreDownloadState = .downloading(
+      core: core,
+      progress: min(1, max(0, progress))
+    )
+  }
+
+  private func resetCoreDownload() {
+    let prepared: LinnetPreparedCoreUpdate? = switch coreDownloadState {
+    case .ready(_, let update), .blocked(_, let update, _): update
+    default: nil
+    }
+    coreDownloadTask?.cancel()
+    coreDownloadTask = nil
+    coreDownloadCycle &+= 1
+    coreDownloadState = .idle
+    if let prepared { Task { await coreInstaller.discard(prepared) } }
+  }
+
+  private func request(
+    _ command: LinnetSettingsContract.DataCommand,
+    timeout: TimeInterval
+  ) async throws -> LinnetSettingsContract.RuntimeReply {
+    try await transactionRequester.request(
+      .init(
+        transactionID: UUID(),
+        command: command,
+        candidate: nil,
+        requesterPID: getpid(),
+        deadline: Date().addingTimeInterval(timeout)
+      ),
+      timeout: timeout,
+      onProgress: { _ in }
+    )
+  }
+
+  private func awaitHostExit() async throws {
+    guard let hostBundleIdentifier else { throw ActivationFailure.missingInstalledHost }
+    for _ in 0..<50 {
+      try Task.checkCancellation()
+      let running = NSRunningApplication.runningApplications(
+        withBundleIdentifier: hostBundleIdentifier)
+      if running.isEmpty { return }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    throw ActivationFailure.hostDidNotExit
+  }
+
+  private func stopCanonicalHostForRollback() async throws {
+    guard let hostBundleIdentifier else { throw ActivationFailure.missingInstalledHost }
+    for application in NSRunningApplication.runningApplications(
+      withBundleIdentifier: hostBundleIdentifier)
+    where !application.terminate() {
+      throw ActivationFailure.hostDidNotExit
+    }
+    try await awaitHostExit()
+  }
+
+  private func launchCanonicalHost() async throws {
+    guard let hostBundleURL else { throw ActivationFailure.missingInstalledHost }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = false
+    configuration.addsToRecentItems = false
+    configuration.allowsRunningApplicationSubstitution = false
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      NSWorkspace.shared.openApplication(
+        at: hostBundleURL,
+        configuration: configuration
+      ) { application, error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else if application == nil {
+          continuation.resume(throwing: ActivationFailure.hostDidNotLaunch)
+        } else {
+          continuation.resume(returning: ())
+        }
+      }
+    }
+  }
+
+  private func awaitInstalledHost(
+    identity: LinnetSettingsContract.ProductIdentity
+  ) async throws -> LinnetSettingsContract.RuntimeHealth {
+    for _ in 0..<80 {
+      try Task.checkCancellation()
+      if let reply = try? await request(.diagnose, timeout: 1),
+        let health = reply.health,
+        health.productIdentity == identity,
+        health.state == .running, health.phase == .running {
+        return health
+      }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    throw ActivationFailure.hostDidNotLaunch
   }
 
   private func finish(
@@ -88,9 +693,16 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     cycle activeCycle: UInt64
   ) {
     guard activeCycle == cycle else { return }
+    if case .core(let core) = result {
+      if let representedCore = coreDownloadState.core, representedCore != core {
+        resetCoreDownload()
+      }
+    } else {
+      resetCoreDownload()
+    }
     availability = result
     active = false
-    failed = false
+    failure = nil
     task = nil
   }
 
@@ -100,11 +712,75 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     task = nil
   }
 
-  private func finishFailure(cycle activeCycle: UInt64) {
+  private func finishFailure(_ reason: CheckFailure, cycle activeCycle: UInt64) {
     guard activeCycle == cycle else { return }
     availability = nil
     active = false
-    failed = true
+    failure = reason
     task = nil
+  }
+
+  private func finishRuntime(
+    _ health: LinnetSettingsContract.RuntimeHealth?,
+    cycle activeCycle: UInt64
+  ) {
+    guard activeCycle == runtimeCycle else { return }
+    runtimeTask = nil
+    runtimeVersionState = .resolved(installed: installedIdentity, health: health)
+  }
+
+  private func finishRuntimeUnavailable(cycle activeCycle: UInt64) {
+    guard activeCycle == runtimeCycle else { return }
+    runtimeVersionState = .unavailable(installed: installedIdentity)
+    runtimeTask = nil
+  }
+
+  private func coreActivationIssue(
+    for code: LinnetSettingsContract.RuntimeReplyCode
+  ) -> LinnetSettingsContract.CoreActivationBlocker? {
+    // The legacy blockers below are consumed before Host acceptance,
+    // so they cannot enter process observation, Host exit, launch, or success.
+    // SettingsContract owns their removal condition; published 0.1.10 still
+    // emits the legacy unknown-client code for unavailable TIS state.
+    switch code {
+    case .coreActivationInputSourceActive: .inputSourceActive
+    case .coreActivationInputSourceUnavailable: .inputSourceUnavailable
+    case .coreActivationCompositionActive: .compositionActive
+    case .coreActivationDataTransactionActive: .dataTransactionActive
+    case .coreActivationApplicationsRunning: .applicationsStillRunning
+    case .coreActivationUnknownClient: .unknownClient
+    case .coreActivationRequesterUnavailable: .requesterUnavailable
+    default: nil
+    }
+  }
+
+  @discardableResult
+  private func finishRuntimeTransition(
+    _ state: RuntimeVersionState,
+    cycle activeCycle: UInt64
+  ) -> Bool {
+    guard activeCycle == runtimeCycle else { return false }
+    runtimeVersionState = state
+    runtimeTask = nil
+    return true
+  }
+
+  private func finishRuntimeApplied(
+    _ health: LinnetSettingsContract.RuntimeHealth,
+    cycle activeCycle: UInt64
+  ) {
+    guard let identity = health.productIdentity,
+      finishRuntimeTransition(.applied(identity), cycle: activeCycle)
+    else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+      NSApp.terminate(nil)
+    }
+  }
+
+  private enum ActivationFailure: Error {
+    case missingInstalledHost
+    case hostRejectedActivation
+    case hostDidNotExit
+    case hostDidNotLaunch
   }
 }

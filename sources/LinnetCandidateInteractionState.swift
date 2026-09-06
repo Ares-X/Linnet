@@ -56,12 +56,12 @@ struct LinnetCandidateInteractionState<Hit: Equatable> {
     pointerHit = hit
   }
 
-  mutating func beginPress(_ hit: Hit) {
+  mutating func beginPress(_ hit: Hit?) {
     pointerHit = hit
     pressedHit = hit
   }
 
-  mutating func finishPress(_ hit: Hit) -> Hit? {
+  mutating func finishPress(_ hit: Hit?) -> Hit? {
     defer {
       pointerHit = hit
       pressedHit = nil
@@ -168,8 +168,7 @@ struct LinnetCandidateInteractionState<Hit: Equatable> {
 }
 
 /// Owns only the transient pointer layer. The engine-selected index remains
-/// on SquirrelView and its accessibility projection; this layer never feeds
-/// candidate state back into Rime.
+/// on SquirrelView; this layer never feeds candidate state back into Rime.
 final class LinnetCandidatePointerPresentation: CAShapeLayer {
   static let feedbackLayerName = "linnetCandidatePointerFeedback"
 
@@ -236,7 +235,7 @@ final class LinnetCandidatePointerPresentation: CAShapeLayer {
 
 extension SquirrelView {
   /// Presents direct pointer feedback without changing the Rime-owned
-  /// candidate highlight or its accessibility selection.
+  /// candidate highlight.
   func updateCandidatePointerFeedback(
     hit: CandidateHit?,
     isPressed: Bool
@@ -250,9 +249,6 @@ extension SquirrelView {
     case .control(let action):
       candidateIndex = nil
       controlAction = action
-    case .some(.none):
-      candidateIndex = nil
-      controlAction = nil
     case nil:
       candidateIndex = nil
       controlAction = nil

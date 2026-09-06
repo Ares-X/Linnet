@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Canonical byte identity for the exact channel-routed community release set.
+
+set -euo pipefail
+
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+unset BASH_ENV ENV CDPATH
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+release_dir="${1:-}"
+version="${2:-}"
+catalog_sequence="${3:-}"
+
+fail_identity() {
+  echo "release_candidate_identity: $*" >&2
+  exit 1
+}
+
+[[ "$#" -eq 3 ]] ||
+  fail_identity "usage: RELEASE_DIRECTORY VERSION CATALOG_SEQUENCE"
+[[ "${release_dir}" == /* && -d "${release_dir}" && ! -L "${release_dir}" ]] ||
+  fail_identity "release directory is unsafe"
+[[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]] ||
+  fail_identity "product version is invalid"
+[[ "${catalog_sequence}" =~ ^[1-9][0-9]*$ ]] ||
+  fail_identity "Catalog sequence is invalid"
+
+expected="$("${project_root}/package/release_asset_manifest" \
+  candidate "${version}" "${catalog_sequence}")"
+actual="$(find "${release_dir}" -mindepth 1 -maxdepth 1 -type f ! -type l \
+  -exec basename {} \; | LC_ALL=C sort)"
+[[ "${actual}" == "${expected}" &&
+  "$(find "${release_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == \
+  "$(printf '%s\n' "${expected}" | wc -l | tr -d ' ')" ]] ||
+  fail_identity "candidate channel inventory is not exact"
+
+manifest=""
+while IFS= read -r name; do
+  [[ -n "${name}" ]] || continue
+  path="${release_dir}/${name}"
+  [[ -f "${path}" && ! -L "${path}" ]] ||
+    fail_identity "candidate asset is missing or unsafe: ${name}"
+  digest="$(shasum -a 256 "${path}" | awk '{print $1}')"
+  manifest+="${name}"$'\t'"sha256:${digest}"$'\n'
+done <<<"${expected}"
+
+printf '%s' "${manifest}" | shasum -a 256 | awk '{print "sha256:" $1}'

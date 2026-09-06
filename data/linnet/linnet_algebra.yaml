@@ -41,6 +41,7 @@ full_pinyin:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -73,6 +74,7 @@ full_pinyin:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 ziranma:
     - xform/^([a-z]+)$/$1④/
@@ -104,6 +106,7 @@ ziranma:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -166,6 +169,7 @@ ziranma:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 flypy:
     - xform/^([a-z]+)$/$1④/
@@ -197,6 +201,7 @@ flypy:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -259,6 +264,7 @@ flypy:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 sogou:
     - xform/^([a-z]+)$/$1④/
@@ -290,6 +296,7 @@ sogou:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -353,6 +360,7 @@ sogou:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 mspy:
     - xform/^([a-z]+)$/$1④/
@@ -384,6 +392,7 @@ mspy:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -448,6 +457,7 @@ mspy:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 abc:
     - xform/^([a-z]+)$/$1④/
@@ -479,6 +489,7 @@ abc:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -539,6 +550,7 @@ abc:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 ziguang:
     - xform/^([a-z]+)$/$1④/
@@ -570,6 +582,7 @@ ziguang:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -632,6 +645,7 @@ ziguang:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
 
 jiajia:
     - xform/^([a-z]+)$/$1④/
@@ -663,6 +677,7 @@ jiajia:
     - xform/ń([a-z]*)$/n$1②/
     - xform/ň([a-z]*)$/n$1③/
     - xform/ǹ([a-z]*)$/n$1④/
+    - xform/m̄([a-z]*)$/m$1①/
     - xform/ḿ([a-z]*)$/m$1②/
     - xform/m̀([a-z]*)$/m$1④/
     - xlit/①②③④/7890
@@ -725,3 +740,4 @@ jiajia:
     - derive/([qtypdjlxbnm])ing$/$1ign/
     - derive/([rtysdghklzcn])ong$/$1nog/
     - derive/^([jqxy])v/$1u/
+    - xlit/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/

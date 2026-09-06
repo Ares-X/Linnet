@@ -9,26 +9,6 @@ enum LinnetSettingsAppearancePreview {
     case chinese, english
   }
 
-  struct DisclosureState: Equatable {
-    private var expandedLanguages: Set<PreviewLanguage> = []
-
-    func isExpanded(_ language: PreviewLanguage) -> Bool {
-      expandedLanguages.contains(language)
-    }
-
-    mutating func toggle(_ language: PreviewLanguage) {
-      if expandedLanguages.contains(language) {
-        expandedLanguages.remove(language)
-      } else {
-        expandedLanguages.insert(language)
-      }
-    }
-
-    mutating func reset() {
-      expandedLanguages.removeAll()
-    }
-  }
-
   typealias SelectionStyle = LinnetCandidatePresentation.CandidateSelectionStyle
 
   enum Failure: LocalizedError, Equatable {
@@ -41,7 +21,7 @@ enum LinnetSettingsAppearancePreview {
     }
   }
 
-  struct RimeColor: Equatable {
+  struct ColorComponents: Equatable {
     let red: UInt8
     let green: UInt8
     let blue: UInt8
@@ -75,12 +55,12 @@ enum LinnetSettingsAppearancePreview {
   }
 
   struct Palette: Equatable {
-    let background: RimeColor
-    let border: RimeColor
-    let primary: RimeColor
-    let secondary: RimeColor
-    let selectedBackground: RimeColor
-    let selectedPrimary: RimeColor
+    let background: ColorComponents
+    let border: ColorComponents
+    let primary: ColorComponents
+    let secondary: ColorComponents
+    let selectedBackground: ColorComponents
+    let selectedPrimary: ColorComponents
   }
 
   struct Catalog {
@@ -100,10 +80,6 @@ enum LinnetSettingsAppearancePreview {
     }
 
     let schemes: [String: Scheme]
-
-    var linnetSchemeIDs: Set<String> {
-      Set(schemes.keys)
-    }
 
     init(contents: String) throws {
       var parsed: [String: Scheme] = [:]
@@ -218,13 +194,16 @@ enum LinnetSettingsAppearancePreview {
       )
     }
 
-    private static func color(_ key: String, _ fields: [String: String]) throws -> RimeColor {
+    private static func color(
+      _ key: String,
+      _ fields: [String: String]
+    ) throws -> ColorComponents {
       guard let raw = fields[key]?.lowercased().replacingOccurrences(of: "0x", with: ""),
         let value = UInt32(raw, radix: 16)
       else {
         throw Failure.malformedThemeData
       }
-      return RimeColor(value)
+      return ColorComponents(value)
     }
 
     private static func metric(_ key: String, _ fields: [String: String]) throws -> Double {
@@ -247,7 +226,6 @@ enum LinnetSettingsAppearancePreview {
   }
 
   struct Presentation: Equatable {
-    let schemeID: String
     let palette: Palette
     let selectionStyle: SelectionStyle
     let cornerRadius: Double
@@ -258,6 +236,9 @@ enum LinnetSettingsAppearancePreview {
     let englishCandidateLayout: LinnetSettingsDocument.CandidateLayout
     let candidateBrowsingMode: LinnetSettingsDocument.CandidateBrowsingMode
     let pageSize: Int
+    let expandedHorizontalCount: Int
+    let expandedHorizontalRows: Int
+    let expandedVerticalCount: Int
     let fontPreset: LinnetSettingsDocument.FontPreset
     let candidateFontPoint: Double
     let labelFontPoint: Double
@@ -265,7 +246,8 @@ enum LinnetSettingsAppearancePreview {
     let isDark: Bool
 
     func detailGeometry(
-      for language: PreviewLanguage
+      for language: PreviewLanguage,
+      expanded: Bool
     ) -> LinnetCandidatePresentation.CandidateDetailGeometry {
       let layout = language == .chinese
         ? chineseCandidateLayout : englishCandidateLayout
@@ -274,7 +256,8 @@ enum LinnetSettingsAppearancePreview {
       case .vertical: false
       }
       return LinnetCandidatePresentation.candidateDetailGeometry(
-        forLinearLayout: linear)
+        forLinearLayout: linear || expanded,
+        candidateFontPoint: CGFloat(candidateFontPoint))
     }
   }
 
@@ -293,7 +276,6 @@ enum LinnetSettingsAppearancePreview {
     case .dark: isDark = true
     }
     return .success(Presentation(
-      schemeID: scheme.identifier,
       palette: scheme.palette,
       selectionStyle: scheme.selectionStyle,
       cornerRadius: scheme.cornerRadius,
@@ -304,6 +286,9 @@ enum LinnetSettingsAppearancePreview {
       englishCandidateLayout: appearance.englishCandidateLayout,
       candidateBrowsingMode: appearance.candidateBrowsingMode,
       pageSize: appearance.pageSize,
+      expandedHorizontalCount: appearance.expandedHorizontalCount,
+      expandedHorizontalRows: appearance.expandedHorizontalRows,
+      expandedVerticalCount: appearance.expandedVerticalCount,
       fontPreset: appearance.fontPreset,
       candidateFontPoint: LinnetSettingsDocument.Appearance.clampFontPoint(appearance.fontPoint),
       labelFontPoint: LinnetSettingsDocument.Appearance.labelFontPoint(for: appearance.fontPoint),
@@ -350,178 +335,6 @@ private struct LinnetSettingsCandidateMaterial: NSViewRepresentable {
   }
 }
 
-extension LinnetSettingsDocument.ThemeFamily {
-  fileprivate var settingsTitle: LocalizedStringKey {
-    switch self {
-    case .paperLedger: "Xuan"
-    case .moonJade: "Moon"
-    case .sidecarSlate: "Slate"
-    case .clayTiles: "Clay"
-    case .mistJade: "Mist"
-    case .nativeGlass: "Glass"
-    case .inkCinnabar: "Ink"
-    }
-  }
-}
-
-/// The single Settings entry point for selecting a theme family. Every card
-/// projects its paired Light and Dark schemes from the bundled Catalog; the
-/// native Settings chrome never inherits a candidate-window palette.
-struct LinnetSettingsThemeFamilyPicker: View {
-  @Binding var selection: LinnetSettingsDocument.ThemeFamily
-  @Binding var mode: LinnetSettingsDocument.ThemeMode
-  private let columns = [GridItem(.adaptive(minimum: 124, maximum: 176), spacing: 10)]
-  var body: some View {
-    GroupBox("Theme") {
-      VStack(alignment: .leading, spacing: 10) {
-        Text("Each theme includes paired Light and Dark appearances.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        switch LinnetSettingsAppearancePreview.Catalog.bundled {
-        case .success(let catalog)
-        where LinnetSettingsDocument.ThemeFamily.allCases.allSatisfy({
-          catalog.pair(for: $0) != nil
-        }):
-          themeGrid(catalog)
-        case .success, .failure:
-          Label(
-            "Preview unavailable. The bundled theme data is missing or invalid.",
-            systemImage: "exclamationmark.triangle"
-          )
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .accessibilityLabel(Text("Local candidate appearance preview unavailable"))
-        }
-
-        Divider()
-
-        Picker("Appearance mode", selection: $mode) {
-          Text("System").tag(LinnetSettingsDocument.ThemeMode.system)
-          Text("Light").tag(LinnetSettingsDocument.ThemeMode.light)
-          Text("Dark").tag(LinnetSettingsDocument.ThemeMode.dark)
-        }
-        .pickerStyle(.segmented)
-        Text(
-          "System follows the active text window when macOS exposes its appearance; otherwise it follows the macOS appearance."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      }
-      .padding(8)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  @ViewBuilder
-  private func themeGrid(
-    _ catalog: LinnetSettingsAppearancePreview.Catalog
-  ) -> some View {
-    LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-      ForEach(LinnetSettingsDocument.ThemeFamily.allCases, id: \.self) { family in
-        if let pair = catalog.pair(for: family) {
-          let selected = selection == family
-          Button {
-            selection = family
-          } label: {
-            themeCard(family: family, pair: pair, selected: selected)
-          }
-          .buttonStyle(.borderless)
-          .accessibilityElement(children: .ignore)
-          .accessibilityLabel(Text(family.settingsTitle))
-          .accessibilityValue(selected ? Text("Selected") : Text("Not selected"))
-          .accessibilityHint(Text("Choose this candidate-window theme."))
-          .accessibilityAddTraits(selected ? .isSelected : [])
-        }
-      }
-    }
-  }
-
-  private func themeCard(
-    family: LinnetSettingsDocument.ThemeFamily,
-    pair: LinnetSettingsAppearancePreview.Catalog.ThemePair,
-    selected: Bool
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 7) {
-      HStack(spacing: 0) {
-        themeHalf(pair.light, isDark: false)
-        themeHalf(pair.dark, isDark: true)
-      }
-      .frame(height: 54)
-      .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-          .stroke(Color(nsColor: NSColor.separatorColor), lineWidth: 0.5)
-      }
-
-      HStack(spacing: 5) {
-        Text(family.settingsTitle)
-          .font(.callout.weight(.medium))
-          .foregroundStyle(.primary)
-        Spacer(minLength: 2)
-        if selected {
-          Image(systemName: "checkmark.circle.fill")
-            .foregroundStyle(.tint)
-            .accessibilityHidden(true)
-        }
-      }
-    }
-    .padding(7)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .fill(Color(nsColor: NSColor.controlBackgroundColor))
-    }
-    .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .stroke(
-          selected ? Color.accentColor : Color(nsColor: NSColor.separatorColor),
-          lineWidth: selected ? 2 : 1
-        )
-    }
-    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-  }
-
-  private func themeHalf(
-    _ scheme: LinnetSettingsAppearancePreview.Catalog.Scheme,
-    isDark: Bool
-  ) -> some View {
-    ZStack(alignment: .topTrailing) {
-      LinnetSettingsThemeSurface(
-        palette: scheme.palette,
-        isTranslucent: scheme.isTranslucent,
-        isDark: isDark
-      )
-      Capsule()
-        .fill(scheme.palette.selectedPrimary.color)
-        .frame(width: 24, height: 5)
-        .padding(6)
-        .background {
-          if scheme.selectionStyle == .tile {
-            RoundedRectangle(
-              cornerRadius: scheme.highlightedCornerRadius,
-              style: .continuous
-            )
-            .fill(scheme.palette.selectedBackground.color)
-          }
-        }
-        .overlay(alignment: .bottom) {
-          if scheme.selectionStyle == .underline {
-            Rectangle().fill(scheme.palette.selectedBackground.color).frame(height: 2)
-          }
-        }
-        .overlay(alignment: .leading) {
-          if scheme.selectionStyle == .bar {
-            RoundedRectangle(cornerRadius: 1)
-              .fill(scheme.palette.selectedBackground.color).frame(width: 2)
-          }
-        }
-        .accessibilityHidden(true)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-  }
-}
-
 private struct LinnetCandidateDetailSurfaceLayout: Layout {
   let geometry: LinnetCandidatePresentation.CandidateDetailGeometry
 
@@ -530,7 +343,7 @@ private struct LinnetCandidateDetailSurfaceLayout: Layout {
     subviews: Subviews,
     cache: inout ()
   ) -> CGSize {
-    frames(subviews: subviews).size
+    frames(subviews: subviews)?.size ?? .zero
   }
 
   func placeSubviews(
@@ -539,8 +352,7 @@ private struct LinnetCandidateDetailSurfaceLayout: Layout {
     subviews: Subviews,
     cache: inout ()
   ) {
-    precondition(subviews.count == 3, "candidate detail layout requires three roles")
-    let frames = frames(subviews: subviews)
+    guard let frames = frames(subviews: subviews) else { return }
     place(subviews[0], in: frames.candidate, relativeTo: bounds)
     if let divider = frames.divider {
       place(subviews[1], in: divider, relativeTo: bounds)
@@ -555,11 +367,16 @@ private struct LinnetCandidateDetailSurfaceLayout: Layout {
 
   private func frames(
     subviews: Subviews
-  ) -> LinnetCandidatePresentation.CandidateDetailFrames {
-    precondition(subviews.count == 3, "candidate detail layout requires three roles")
+  ) -> LinnetCandidatePresentation.CandidateDetailFrames? {
+    // A transient SwiftUI tree mismatch is a rendering failure, not a process invariant.
+    guard subviews.count == 3 else { return nil }
+    let candidateProposal = ProposedViewSize(
+      width: geometry.candidateColumnMaximumWidth, height: nil)
+    let detailProposal = ProposedViewSize(
+      width: geometry.detailColumnMaximumWidth, height: nil)
     return geometry.frames(
-      candidateSize: subviews[0].sizeThatFits(.unspecified),
-      detailSize: subviews[2].sizeThatFits(.unspecified),
+      candidateSize: subviews[0].sizeThatFits(candidateProposal),
+      detailSize: subviews[2].sizeThatFits(detailProposal),
       dividerSize: subviews[1].sizeThatFits(.unspecified))
   }
 
@@ -579,8 +396,6 @@ struct LinnetSettingsAppearancePreviewView: View {
   let appearance: LinnetSettingsDocument.Appearance
 
   @Environment(\.colorScheme) private var systemColorScheme
-  @State private var disclosureState = LinnetSettingsAppearancePreview.DisclosureState()
-
   private var preview: Result<LinnetSettingsAppearancePreview.Presentation, LinnetSettingsAppearancePreview.Failure> {
     switch LinnetSettingsAppearancePreview.Catalog.bundled {
     case .success(let catalog):
@@ -616,17 +431,15 @@ struct LinnetSettingsAppearancePreviewView: View {
       }
     }
     .accessibilityElement(children: .contain)
-    .accessibilityLabel(Text("Local candidate appearance preview"))
-    .accessibilityValue(accessibilityValue)
-    .id(appearance.candidateBrowsingMode)
-    .task(id: appearance.candidateBrowsingMode) {
-      disclosureState.reset()
-    }
+    .accessibilityLabel(accessibilityLabel)
   }
 
-  private var accessibilityValue: Text {
+  private var accessibilityLabel: Text {
     switch preview {
-    case .success: Text("Current candidate preview")
+    case .success:
+      Text(
+        appearance.candidateBrowsingMode == .expandable
+          ? "Expanded candidate preview" : "Scrolling-only candidate preview")
     case .failure: Text("Preview unavailable")
     }
   }
@@ -635,35 +448,24 @@ struct LinnetSettingsAppearancePreviewView: View {
     _ preview: LinnetSettingsAppearancePreview.Presentation,
     language: LinnetSettingsAppearancePreview.PreviewLanguage
   ) -> some View {
-    let expanded = preview.candidateBrowsingMode == .expandable &&
-      disclosureState.isExpanded(language)
-    let detailGeometry = preview.detailGeometry(for: language)
+    let expanded = preview.candidateBrowsingMode == .expandable
+    let detailGeometry = preview.detailGeometry(
+      for: language,
+      expanded: expanded)
     return VStack(alignment: .leading, spacing: LinnetCandidatePresentation.candidateRowSpacing) {
-      HStack {
-        previewLanguageLabel(language)
-          .font(.caption.weight(.medium))
-          .foregroundStyle(preview.palette.secondary.color)
-        Spacer()
-        if preview.candidateBrowsingMode == .expandable {
-          Button {
-            disclosureState.toggle(language)
-          } label: {
-            Image(systemName: expanded ? "chevron.up" : "chevron.down")
-          }
-          .buttonStyle(.plain)
-          .help(expanded ? "Show fewer candidates" : "Show more candidates")
-          .accessibilityLabel(
-            Text(expanded ? "Show fewer candidates" : "Show more candidates"))
-        }
-      }
+      previewLanguageLabel(language)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(preview.palette.secondary.color)
       ScrollView(.horizontal, showsIndicators: false) {
         LinnetCandidateDetailSurfaceLayout(geometry: detailGeometry) {
           candidateList(preview, language: language, expanded: expanded)
             .fixedSize(horizontal: true, vertical: false)
           candidateDetailDivider(preview, geometry: detailGeometry)
             .fixedSize(horizontal: true, vertical: false)
-          candidateDetail(preview, language: language)
-            .fixedSize(horizontal: true, vertical: false)
+          candidateDetail(
+            preview,
+            language: language,
+            maximumWidth: detailGeometry.detailColumnMaximumWidth)
         }
         .fixedSize(horizontal: true, vertical: true)
       }
@@ -687,9 +489,11 @@ struct LinnetSettingsAppearancePreviewView: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
+}
 
+private extension LinnetSettingsAppearancePreviewView {
   @ViewBuilder
-  private func candidateList(
+  func candidateList(
     _ preview: LinnetSettingsAppearancePreview.Presentation,
     language: LinnetSettingsAppearancePreview.PreviewLanguage,
     expanded: Bool
@@ -701,46 +505,81 @@ struct LinnetSettingsAppearancePreviewView: View {
       ? min(
         availableValues.count,
         LinnetCandidatePresentation.expandedCandidateRange(
-          page: 0, pageSize: preview.pageSize)?.upperBound ?? preview.pageSize)
+          anchorPage: 0,
+          currentPage: 0,
+          pageSize: preview.pageSize)?.upperBound ?? preview.pageSize)
       : min(availableValues.count, preview.pageSize)
     let values = Array(availableValues.prefix(requestedCount))
     let flow: LinnetCandidatePresentation.CandidateFlow =
       layout == .horizontal ? .horizontal : .vertical
     let rows = LinnetCandidatePresentation.visualRows(
       candidateCount: values.count,
-      pageSize: preview.pageSize,
-      flow: flow,
-      expanded: expanded)
-    let labelFont = LinnetCandidatePresentation.platformFont(
+      flow: flow)
+    let labelFont = expanded ? NSFont.monospacedDigitSystemFont(
+      ofSize: CGFloat(preview.labelFontPoint), weight: .regular) : LinnetCandidatePresentation.platformFont(
       fontNames: preview.fontPreset.fontFamilies,
       size: CGFloat(preview.labelFontPoint))
     let candidateFont = LinnetCandidatePresentation.platformFont(
       fontNames: preview.fontPreset.fontFamilies,
       size: CGFloat(preview.candidateFontPoint))
+    let fonts = (label: labelFont, candidate: candidateFont)
     let inlineSpacing = LinnetCandidatePresentation.inlineCandidateSeparatorWidth(
       font: candidateFont)
-    VStack(
-      alignment: .leading,
-      spacing: LinnetCandidatePresentation.candidateRowSpacing
-    ) {
-      ForEach(Array(rows.enumerated()), id: \.offset) { row in
-        HStack(spacing: inlineSpacing) {
-          ForEach(row.element, id: \.self) { index in
-            candidate(
-              index < preview.pageSize ? String(index + 1) : "",
-              values[index],
-              selected: index == 0,
-              preview,
-              labelFont: labelFont,
-              candidateFont: candidateFont)
+    if expanded {
+      let columns = layout == .horizontal ? preview.expandedHorizontalCount : preview.expandedVerticalCount
+      let maximumRows = layout == .horizontal ? preview.expandedHorizontalRows : 3
+      let widths = values.map {
+        LinnetSettingsAppearancePreview.candidateLine(
+          "7", $0, selected: false, preview, fonts: fonts).size().width.rounded(.up)
+      }
+      let layout = LinnetCandidatePresentation.expandedGrid(
+        widths: widths, columns: columns, spacing: inlineSpacing,
+        maximumWidth: CGFloat(columns) * candidateFont.pointSize * 6,
+        visibleRows: 0..<maximumRows)
+      Grid(
+        alignment: .leading,
+        horizontalSpacing: inlineSpacing,
+        verticalSpacing: LinnetCandidatePresentation.candidateRowSpacing
+      ) {
+        ForEach(0..<min(maximumRows, (layout.placements.last?.row ?? 0) + 1), id: \.self) { row in
+          GridRow {
+            ForEach(layout.placements.filter { $0.row == row }, id: \.item) { cell in
+              LinnetSettingsAppearancePreview.candidate(
+                row == 0 ? String(cell.item + 1) : "",
+                values[cell.item],
+                selected: cell.item == 0,
+                preview,
+                fonts: fonts)
+                .padding(.leading, row == 0 ? 0 : ("7" as NSString).size(withAttributes: [.font: labelFont]).width)
+                .frame(width: layout.columnWidths[cell.column], alignment: .leading)
+            }
           }
         }
       }
+      .fixedSize(horizontal: true, vertical: false)
+    } else {
+      VStack(
+        alignment: .leading,
+        spacing: LinnetCandidatePresentation.candidateRowSpacing
+      ) {
+        ForEach(Array(rows.enumerated()), id: \.offset) { row in
+          HStack(spacing: inlineSpacing) {
+            ForEach(row.element, id: \.self) { index in
+              LinnetSettingsAppearancePreview.candidate(
+                index < preview.pageSize ? String(index + 1) : "",
+                values[index],
+                selected: index == 0,
+                preview,
+                fonts: fonts)
+            }
+          }
+        }
+      }
+      .fixedSize(horizontal: true, vertical: false)
     }
-    .fixedSize(horizontal: true, vertical: false)
   }
 
-  private func previewCandidateValues(
+  func previewCandidateValues(
     _ language: LinnetSettingsAppearancePreview.PreviewLanguage
   ) -> [String] {
     switch language {
@@ -758,30 +597,59 @@ struct LinnetSettingsAppearancePreviewView: View {
       ]
     }
   }
+}
 
-  private func candidate(
+extension LinnetSettingsAppearancePreview {
+  // Theme cards and the full preview share candidate typography and selection.
+  static func candidate(
     _ label: String,
     _ value: String,
     selected: Bool,
     _ preview: LinnetSettingsAppearancePreview.Presentation,
-    labelFont: NSFont,
-    candidateFont: NSFont
+    fonts: (label: NSFont, candidate: NSFont)
   ) -> some View {
+    let line = candidateLine(
+      label, value, selected: selected, preview, fonts: fonts)
+    let selectionInsets = LinnetCandidatePresentation.candidateSelectionInsets(
+      style: preview.selectionStyle,
+      candidateFont: fonts.candidate)
+    return candidateCell(
+      selected: selected,
+      preview: preview,
+      selectionInsets: selectionInsets
+    ) {
+      Text(AttributedString(line))
+    }
+    .fixedSize(horizontal: true, vertical: false)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text("Candidate"))
+    .accessibilityValue(Text(verbatim: value))
+    .accessibilityHint(Text(label))
+    .accessibilityAddTraits(selected ? .isSelected : .isStaticText)
+  }
+
+  static func candidateLine(
+    _ label: String,
+    _ value: String,
+    selected: Bool,
+    _ preview: LinnetSettingsAppearancePreview.Presentation,
+    fonts: (label: NSFont, candidate: NSFont)
+  ) -> NSAttributedString {
     let candidateColor = selected
       ? preview.palette.selectedPrimary.nsColor : preview.palette.primary.nsColor
     let labelColor = selected && preview.selectionStyle == .tile
       ? preview.palette.selectedPrimary.nsColor : preview.palette.secondary.nsColor
     let candidateAttributes: [NSAttributedString.Key: Any] = [
-      .font: candidateFont,
+      .font: fonts.candidate,
       .foregroundColor: candidateColor,
       .baselineOffset: 0
     ]
     let labelAttributes: [NSAttributedString.Key: Any] = [
-      .font: labelFont,
+      .font: fonts.label,
       .foregroundColor: labelColor,
       .baselineOffset: LinnetCandidatePresentation.secondaryBaselineOffset(
-        primaryFont: candidateFont,
-        secondaryFont: labelFont,
+        primaryFont: fonts.candidate,
+        secondaryFont: fonts.label,
         baseOffset: 0,
         verticalText: false,
         placement: .inline)
@@ -794,40 +662,35 @@ struct LinnetSettingsAppearancePreviewView: View {
       candidateAttributes: candidateAttributes,
       labelAttributes: labelAttributes,
       commentAttributes: labelAttributes)
-    let selectionInsets = LinnetCandidatePresentation.candidateSelectionInsets(
-      style: preview.selectionStyle,
-      candidateFont: candidateFont)
-    return candidateCell(
-      selected: selected,
-      preview: preview,
-      selectionInsets: selectionInsets
-    ) {
-      Text(AttributedString(line.attributedString))
-    }
-    .fixedSize(horizontal: true, vertical: false)
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(Text("Candidate"))
-    .accessibilityValue(Text(verbatim: value))
-    .accessibilityHint(Text(label))
-    .accessibilityAddTraits(selected ? .isSelected : .isStaticText)
+    return line.attributedString
   }
+}
 
+private extension LinnetSettingsAppearancePreviewView {
   @ViewBuilder
-  private func candidateDetail(
+  func candidateDetail(
     _ preview: LinnetSettingsAppearancePreview.Presentation,
-    language: LinnetSettingsAppearancePreview.PreviewLanguage
+    language: LinnetSettingsAppearancePreview.PreviewLanguage,
+    maximumWidth: CGFloat?
   ) -> some View {
     let rawDetail = switch language {
     case .chinese: "［shu ru］"
     case .english: "/ˈɪntəfeɪs/ · n. 接口"
     }
     let detail = LinnetCandidatePresentation.selectedDetailText(rawDetail)
-    Text(AttributedString(candidateDetailLine(preview, text: detail)))
-    .fixedSize(horizontal: true, vertical: false)
-    .accessibilityElement(children: .combine)
+    if let maximumWidth {
+      Text(AttributedString(candidateDetailLine(preview, text: detail)))
+        .frame(maxWidth: maximumWidth, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    } else {
+      Text(AttributedString(candidateDetailLine(preview, text: detail)))
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .combine)
+    }
   }
 
-  private func candidateDetailDivider(
+  func candidateDetailDivider(
     _ preview: LinnetSettingsAppearancePreview.Presentation,
     geometry: LinnetCandidatePresentation.CandidateDetailGeometry
   ) -> some View {
@@ -835,7 +698,7 @@ struct LinnetSettingsAppearancePreviewView: View {
       .accessibilityHidden(true)
   }
 
-  private func candidateDetailLine(
+  func candidateDetailLine(
     _ preview: LinnetSettingsAppearancePreview.Presentation,
     text: String
   ) -> NSAttributedString {
@@ -844,7 +707,7 @@ struct LinnetSettingsAppearancePreviewView: View {
       size: CGFloat(preview.detailFontPoint))
     let detailAttributes: [NSAttributedString.Key: Any] = [
       .font: detailFont,
-      .foregroundColor: preview.palette.secondary.nsColor,
+      .foregroundColor: preview.palette.primary.nsColor,
       .baselineOffset: LinnetCandidatePresentation.secondaryBaselineOffset(
         primaryFont: detailFont,
         secondaryFont: detailFont,
@@ -862,8 +725,10 @@ struct LinnetSettingsAppearancePreviewView: View {
       commentAttributes: detailAttributes)
     return line.attributedString
   }
+}
 
-  private func candidateCell<Content: View>(
+extension LinnetSettingsAppearancePreview {
+  private static func candidateCell<Content: View>(
     selected: Bool,
     preview: LinnetSettingsAppearancePreview.Presentation,
     selectionInsets: NSEdgeInsets,
@@ -907,9 +772,11 @@ struct LinnetSettingsAppearancePreviewView: View {
         }
       }
   }
+}
 
+private extension LinnetSettingsAppearancePreviewView {
   @ViewBuilder
-  private func previewLanguageLabel(
+  func previewLanguageLabel(
     _ language: LinnetSettingsAppearancePreview.PreviewLanguage
   ) -> some View {
     switch language {

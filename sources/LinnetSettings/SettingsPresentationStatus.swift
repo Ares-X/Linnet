@@ -4,6 +4,7 @@ enum SettingsOperationKind: Equatable {
   case apply
   case legacy
   case portableExport
+  case cloudBackup
   case portableImport
   case restore
   case removeBackup
@@ -30,10 +31,13 @@ enum SettingsPresentationFailure: Equatable {
   case timedOut
   case hostBusy
   case deploymentFailed
+  case incrementalBackupFailed
   case appearanceRecoveryFailed
   case configurationRecoveryFailed
   case staleHostState
   case hostRejected
+  case cloudSyncUnavailable
+  case cloudSyncFailed
   case unknown
 }
 
@@ -57,13 +61,6 @@ enum SettingsPresentationPackState: Equatable {
   case busy
   case unavailable
   case storageFailed
-}
-
-enum SettingsRuntimeReachability: Equatable {
-  case running
-  case paused
-  case degraded
-  case unreachable
 }
 
 enum SettingsPresentationSeverity: Equatable {
@@ -114,8 +111,11 @@ enum SettingsPresentationStatus: Equatable {
   case portableExported(productName: String)
   case portableImported
   case cloudSyncEnabled
-  case cloudSyncRequested
-  case cloudBackupUploaded
+  case cloudSyncCompleted
+  case cloudSyncDeferred
+  case cloudBackupUploaded(Date)
+  case cloudBackupUnchanged(Date)
+  case cloudBackupRepairRequired
   case cloudSyncDisabled
   case backupRestored
   case backupRecordRemoved
@@ -157,9 +157,6 @@ enum SettingsPresentationStatus: Equatable {
     )
   }
 
-  // This is a flat exhaustive enum-to-copy table; its branches do not share
-  // mutable state or form a decision tree worth decomposing into fallbacks.
-  // swiftlint:disable:next cyclomatic_complexity
   func text(locale: Locale) -> String {
     let chinese = locale.usesSimplifiedChineseSettingsCopy
     let pair: (english: String, chinese: String)
@@ -198,10 +195,24 @@ enum SettingsPresentationStatus: Equatable {
       pair = ("Selected portable categories were replaced; other data was preserved.", "已替换所选迁移数据类别，其他数据保持不变。")
     case .cloudSyncEnabled:
       pair = ("iCloud Drive learning synchronization enabled.", "已启用 iCloud Drive 学习词同步。")
-    case .cloudSyncRequested:
-      pair = ("Learning synchronization requested.", "已请求同步学习词。")
-    case .cloudBackupUploaded:
-      pair = ("Full recovery backup uploaded.", "已上传完整恢复备份。")
+    case .cloudSyncCompleted:
+      pair = ("Learning synchronization completed.", "学习词同步已完成。")
+    case .cloudSyncDeferred:
+      pair = (
+        "Some learning data is still pending. Your local learning is kept; retry later.",
+        "部分学习数据仍待同步。本机学习记录已保留，可稍后重试。")
+    case .cloudBackupUploaded(let verifiedAt):
+      pair = (
+        "Incremental recovery backup verified at \(verifiedAt.formatted()).",
+        "增量恢复备份已于 \(verifiedAt.formatted()) 校验完成。")
+    case .cloudBackupUnchanged(let verifiedAt):
+      pair = (
+        "Recovery data is unchanged; the verified backup is from \(verifiedAt.formatted()).",
+        "恢复数据没有变化；已校验备份时间为 \(verifiedAt.formatted())。")
+    case .cloudBackupRepairRequired:
+      pair = (
+        "The incremental recovery chain is unavailable. Confirm full repair to create a new baseline.",
+        "增量恢复链不可用。请确认完整修复以创建新基线。")
     case .cloudSyncDisabled:
       pair = (
         "iCloud Drive learning synchronization disabled. No data was deleted.",
@@ -281,6 +292,7 @@ enum SettingsPresentationStatus: Equatable {
   private var severity: SettingsPresentationSeverity {
     switch self {
     case .ready,
+      .cloudSyncDeferred,
       .operationCancelled,
       .pack(_, .cancelled),
       .runtime(.paused):
@@ -291,8 +303,9 @@ enum SettingsPresentationStatus: Equatable {
       .portableExported,
       .portableImported,
       .cloudSyncEnabled,
-      .cloudSyncRequested,
+      .cloudSyncCompleted,
       .cloudBackupUploaded,
+      .cloudBackupUnchanged,
       .cloudSyncDisabled,
       .backupRestored,
       .backupRecordRemoved,
@@ -307,6 +320,7 @@ enum SettingsPresentationStatus: Equatable {
       .success
     case .operationProgress,
       .cancellingOperation,
+      .cloudBackupRepairRequired,
       .publishingAppearance,
       .appearanceStaleRetry,
       .pack(_, .downloading),
@@ -402,6 +416,11 @@ private func failureText(_ failure: SettingsPresentationFailure) -> SettingsLoca
   case .timedOut: ("The input method did not reply in time.", "输入法未在规定时间内响应。")
   case .hostBusy: ("The input method is busy with another settings operation.", "输入法正在处理另一项设置操作。")
   case .deploymentFailed: ("The input method could not deploy the new configuration.", "输入法无法部署新配置。")
+  case .incrementalBackupFailed:
+    (
+      "The incremental backup could not be created. Existing settings and learning data were left unchanged.",
+      "无法创建增量备份；现有设置和学习数据均未更改。"
+    )
   case .appearanceRecoveryFailed:
     (
       "The previous candidate appearance could not be restored. Reopen Settings after the input method is available.",
@@ -414,12 +433,16 @@ private func failureText(_ failure: SettingsPresentationFailure) -> SettingsLoca
     )
   case .staleHostState: ("Language data changed before activation. Refresh and try again.", "语言数据在激活前已发生变化，请刷新后重试。")
   case .hostRejected: ("The input method rejected the operation.", "输入法拒绝了此操作。")
+  case .cloudSyncUnavailable:
+    ("The iCloud learning sync folder is unavailable. Check iCloud Drive and retry.",
+      "无法访问 iCloud 学习同步文件夹，请检查 iCloud Drive 后重试。")
+  case .cloudSyncFailed:
+    ("Learning synchronization could not finish. Your local learning is kept; retry later.",
+      "学习词同步未能完成。本机学习记录已保留，可稍后重试。")
   case .unknown: ("The operation failed.", "操作失败。")
   }
 }
 
-// This flat state-to-copy table is the canonical pack-status vocabulary.
-// swiftlint:disable:next cyclomatic_complexity
 private func packText(
   pack: SettingsPresentationPack,
   state: SettingsPresentationPackState
@@ -467,6 +490,7 @@ private func operationName(_ kind: SettingsOperationKind) -> SettingsLocalizedPa
   case .apply: ("Apply settings", "应用设置")
   case .legacy: ("Import existing data", "导入现有数据")
   case .portableExport: ("Export portable data", "导出迁移数据")
+  case .cloudBackup: ("Back up recovery data", "备份恢复数据")
   case .portableImport: ("Import portable data", "导入迁移数据")
   case .restore: ("Restore backup", "恢复备份")
   case .removeBackup: ("Remove backup record", "移除备份记录")

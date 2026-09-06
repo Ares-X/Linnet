@@ -30,7 +30,8 @@ private extension SettingsPresentationSeverity {
 }
 
 struct SettingsRootView: View {
-  @StateObject private var model = SettingsModel()
+  @ObservedObject var model: SettingsModel
+  let applicationDelegate: SettingsApplicationDelegate
   @AppStorage(SettingsInterfaceLanguage.defaultsKey)
   private var interfaceLanguageRawValue = SettingsInterfaceLanguage.system.rawValue
   @State private var pendingClear: Set<SettingsDataCoordinator.LearningDomain>?
@@ -44,25 +45,57 @@ struct SettingsRootView: View {
     VStack(spacing: 0) {
       conflictNotice
       tabs
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       Divider()
       footer
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
     }
     .task {
+      await model.prepareInitialState()
       model.refreshBackups()
       model.refreshLegacyImportCandidate()
       if model.diagnostics == nil { model.refreshDiagnostics() }
     }
     .confirmationDialog(
-      "Upload a full recovery backup?",
+      "Upload a recovery backup?",
       isPresented: $pendingCloudBackupUpload,
       titleVisibility: .visible
     ) {
-      Button("Upload and Replace", role: .destructive) { model.uploadCloudBackupArchive() }
+      Button("Upload Recovery Backup") { model.uploadCloudBackupArchive() }
       Button("Cancel", role: .cancel) {}
     } message: {
       Text(
-        "This replaces iCloud Drive/Linnet/Linnet-Full-Backup.linnet-data. Local data is not changed."
+        "Back up personal dictionaries and learned words to iCloud Drive. Only changed content is uploaded; local data is not changed."
       )
+    }
+    .confirmationDialog(
+      "Repair cloud recovery backup?",
+      isPresented: $model.cloudRecoveryRepairConfirmationRequired,
+      titleVisibility: .visible
+    ) {
+      Button("Create Full Repair Backup", role: .destructive) {
+        model.uploadCloudBackupArchive(repair: true)
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "The existing incremental recovery chain cannot be verified. This creates a new complete baseline; previous cloud objects are left unchanged."
+      )
+    }
+    .confirmationDialog(
+      "Repair language data with complete packs?",
+      isPresented: presented($model.languageDataRepairTarget),
+      titleVisibility: .visible
+    ) {
+      Button("Download Complete Changed Packs") {
+        if let target = model.languageDataRepairTarget {
+          model.downloadLanguageData(target, allowCompleteRepair: true)
+        }
+      }
+      Button("Cancel", role: .cancel) { model.languageDataRepairTarget = nil }
+    } message: {
+      Text("Download complete copies of changed or conflicting packs from the selected channel. Unchanged packs, learned words, and personal settings are kept. Your current data stays active until the replacement is ready.")
     }
     .confirmationDialog(
       "Import existing Rime / Hallelujah data?",
@@ -141,8 +174,10 @@ struct SettingsRootView: View {
       Text(verbatim: SettingsBackupRemovalCopy.message(locale: interfaceLanguage.locale))
     }
     .background(SettingsWindowCloseGuard(model: model, locale: interfaceLanguage.locale))
-    .onAppear { registerApplicationDelegate() }
-    .onChange(of: interfaceLanguageRawValue) { _ in registerApplicationDelegate() }
+    .onAppear { applicationDelegate.interfaceLocale = interfaceLanguage.locale }
+    .onChange(of: interfaceLanguageRawValue) { _ in
+      applicationDelegate.interfaceLocale = interfaceLanguage.locale
+    }
     .environment(\.locale, interfaceLanguage.locale)
   }
 
@@ -168,22 +203,16 @@ struct SettingsRootView: View {
   }
 
   private var tabs: some View {
-    TabView {
+    TabView(selection: $model.selectedTab) {
       AppearanceTabView(model: model)
         .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
+        .tag(0)
       InputTabView(model: model)
         .tabItem { Label("Input", systemImage: "keyboard") }
+        .tag(1)
       DictionaryTabView(model: model)
         .tabItem { Label("Dictionary", systemImage: "text.book.closed") }
-      EnglishTabView(model: model)
-        .tabItem {
-          Label {
-            Text("English")
-          } icon: {
-            LinnetSettingsPageMarkView(mark: .latinABC, context: .tab)
-              .font(.system(size: 10, weight: .bold))
-          }
-        }
+        .tag(2)
       DataTabView(
         model: model,
         updateChecker: model.updateChecker,
@@ -194,18 +223,15 @@ struct SettingsRootView: View {
         pendingBackupRemoval: $pendingBackupRemoval,
         pendingLegacyImport: $pendingLegacyImport
       )
-      .tabItem { Label("Data", systemImage: "internaldrive") }
+      .tabItem {
+        Label("Data & Updates", systemImage: "arrow.triangle.2.circlepath")
+      }
+      .tag(3)
     }
   }
 
   private var interfaceLanguage: SettingsInterfaceLanguage {
     SettingsInterfaceLanguage(rawValue: interfaceLanguageRawValue) ?? .system
-  }
-
-  private func registerApplicationDelegate() {
-    guard let delegate = NSApp.delegate as? SettingsApplicationDelegate else { return }
-    delegate.model = model
-    delegate.interfaceLocale = interfaceLanguage.locale
   }
 
   private func presented<Value>(_ value: Binding<Value?>) -> Binding<Bool> {
@@ -263,6 +289,7 @@ struct SettingsRootView: View {
         Label("Language", systemImage: "globe")
       }
       .pickerStyle(.menu)
+      .accessibilityIdentifier("settings.interfaceLanguage")
       .fixedSize()
       Button("Apply Changes") { model.applyConfiguration() }
         .buttonStyle(.borderedProminent)

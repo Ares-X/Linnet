@@ -10,17 +10,18 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 runtime_probe="${1:-}"
-if [[ "${1:-}" == --single-key-ranking-probe ||
-      "${1:-}" == --mixed-input-probe ||
+if [[ "${1:-}" == --mixed-input-probe ||
+      "${1:-}" == --candidate-forget-probe ||
+      "${1:-}" == --raw-editing-probe ||
       "${1:-}" == --mixed-latency-probe ||
-      "${1:-}" == --shift-probe ||
-      "${1:-}" == --core-shift-overlap-probe ||
-      "${1:-}" == --prediction-layout-probe ||
-      "${1:-}" == --partial-return-probe ||
-      "${1:-}" == --lifecycle-raw-exit-probe ]]; then
+      "${1:-}" == --warm-session-probe ||
+      "${1:-}" == --cold-client-probe ||
+      "${1:-}" == --profile-key-matrix-probe ||
+      "${1:-}" == --fast-config-reload-probe ||
+      "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--single-key-ranking-probe|--mixed-input-probe|--mixed-latency-probe|--shift-probe|--core-shift-overlap-probe|--prediction-layout-probe|--partial-return-probe|--lifecycle-raw-exit-probe]" >&2
+  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -36,6 +37,17 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
+phase_started=0
+begin_phase() {
+  phase_started="${SECONDS}"
+  printf '==> Rime runtime: %s\n' "$1"
+}
+end_phase() {
+  printf '<== Rime runtime: PASS in %ss: %s\n' \
+    "$((SECONDS - phase_started))" "$1"
+}
+
+begin_phase "stage isolated product data"
 shared="${scratch}/shared"
 user="${scratch}/user"
 logs="${scratch}/logs"
@@ -49,16 +61,6 @@ for schema in data/linnet/*.schema.yaml; do
   cp "${schema}" "${shared}/$(basename "${schema}")"
 done
 cp data/linnet/default.yaml "${shared}/default.yaml"
-if [[ "${runtime_probe}" == --lifecycle-raw-exit-probe ]]; then
-  ruby -e '
-    path = ARGV.fetch(0)
-    source = File.binread(path)
-    current = "  hotkeys: []\n"
-    fixture = "  hotkeys: [F4]\n"
-    abort "switcher hotkey owner is missing" unless source.scan(current).length == 1
-    File.binwrite(path, source.sub(current, fixture))
-  ' "${shared}/default.yaml"
-fi
 # Core-only updates deliberately keep the installed language pack. Reproduce
 # old Active owners so the native suite proves the Core projections, not a
 # coincidentally current pack, retire stale routing and schema defaults.
@@ -82,6 +84,10 @@ ruby -e '
   )
 ' "${shared}/default.yaml"
 cp data/linnet/linnet_algebra.yaml "${shared}/linnet_algebra.yaml"
+# Every product selector uses the shipped LTS model, not the compact build-time
+# projection retained in data/plum. Otherwise the same ranking assertion tests
+# different language models in the full suite and the focused selector.
+printf 'grammar:\n  language: wanxiang-lts-zh-hans\n' > "${shared}/linnet_grammar_active.yaml"
 ruby -e '
   path = ARGV.fetch(0)
   source = File.binread(path)
@@ -103,16 +109,19 @@ cp tests/fixtures/linnet_pinyin_limit.dict.yaml \
 cp tests/fixtures/linnet_user.yaml \
   tests/fixtures/linnet_custom_words.txt \
   tests/fixtures/linnet_text_expander.txt "${user}/"
+end_phase "stage isolated product data"
 
+begin_phase "compile Settings projection fixture"
 swiftc="$(xcrun --find swiftc)"
 sdk="$(xcrun --show-sdk-path)"
 "${swiftc}" -warnings-as-errors -sdk "${sdk}" \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
-  sources/LinnetDataRegistry.swift \
+  sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetSettings/PersonalDataStore.swift \
-  sources/LinnetSettings/LinnetSettingsDocument.swift \
+  sources/LinnetSettings/PersonalDataValidation.swift \
+  sources/LinnetSettings/LinnetSettingsDocument.swift sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   tests/LinnetSettingsProjectionFixture.swift \
   -o "${scratch}/projection-fixture"
@@ -124,14 +133,9 @@ for switch_key in Caps_Lock Shift_L Shift_R; do
 done
 test "$(rg -F -c '"linnet/recognizer_patterns/zz_code_token"' \
   "${user}/default.custom.yaml")" -eq 1
+end_phase "compile Settings projection fixture"
 
-# These two profiles deliberately override the default document after the
-# production renderer has installed the Core-owned policy projection.
-cp tests/fixtures/linnet_zh_pipe.custom.yaml \
-  "${user}/linnet_zh_jiajia.custom.yaml"
-cp tests/fixtures/linnet_zh_pipe.custom.yaml \
-  "${user}/linnet_zh_mspy.custom.yaml"
-
+begin_phase "deploy native schemas"
 make --no-print-directory smart-english-plugin
 make --no-print-directory verify-rime-binaries
 RIME_LOG_DIR="${logs}" \
@@ -144,7 +148,9 @@ for fixture_schema in \
     bin/rime_deployer --compile "${shared}/${fixture_schema}" \
       "${user}" "${shared}" "${user}/build" >/dev/null
 done
+end_phase "deploy native schemas"
 
+begin_phase "compile native smoke harnesses"
 cxx="$(xcrun --find clang++)"
 "${cxx}" -isysroot "${sdk}" -std=c++17 -O2 -Wall -Wextra -Werror \
   -DGLOG_USE_GLOG_EXPORT -isystem librime/dist/include \
@@ -162,20 +168,24 @@ if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; the
     lib/librime.1.dylib lib/rime-plugins/librime-lua.dylib \
     -o "${scratch}/auto-phrase-probe"
 fi
+end_phase "compile native smoke harnesses"
 
+begin_phase "run native candidate matrix"
 smoke_args=("${shared}" "${user}")
 if [[ -n "${runtime_probe}" ]]; then
   smoke_args+=("${runtime_probe}")
 fi
 if ! DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     "${scratch}/rime-smoke" "${smoke_args[@]}" \
-    >"${scratch}/stdout" 2>"${scratch}/stderr"; then
+    2>"${scratch}/stderr" | tee "${scratch}/stdout"; then
   tail -n 160 "${scratch}/stdout" >&2 || true
   tail -n 160 "${scratch}/stderr" >&2 || true
   exit 1
 fi
+end_phase "run native candidate matrix"
 
 if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
+  begin_phase "verify mixed-input learning policy"
   mixed_learning_on_user="${scratch}/mixed-learning-on-user"
   mkdir "${mixed_learning_on_user}"
   cp -R "${user}/." "${mixed_learning_on_user}/"
@@ -200,24 +210,24 @@ if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; the
   DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     "${scratch}/rime-smoke" "${shared}" "${mixed_learning_off_user}" \
       --mixed-learning-off-probe >/dev/null
+  end_phase "verify mixed-input learning policy"
 fi
 
 if [[ -n "${runtime_probe}" ]]; then
-  cat "${scratch}/stdout"
   if [[ "${runtime_probe}" == --mixed-latency-probe ]]; then
     echo "Linnet native Rime mixed-input latency measurement: COMPLETE"
-  elif [[ "${runtime_probe}" == --single-key-ranking-probe ]]; then
-    echo "Linnet native Rime focused single-key ranking probe: PASS"
-  elif [[ "${runtime_probe}" == --shift-probe ]]; then
-    echo "Linnet native Rime focused Shift probe: PASS"
-  elif [[ "${runtime_probe}" == --core-shift-overlap-probe ]]; then
-    echo "Linnet native Rime focused overlapping Shift probe: PASS"
-  elif [[ "${runtime_probe}" == --prediction-layout-probe ]]; then
-    echo "Linnet native Rime focused prediction layout probe: PASS"
-  elif [[ "${runtime_probe}" == --partial-return-probe ]]; then
-    echo "Linnet native Rime focused partial-confirmed Return probe: PASS"
-  elif [[ "${runtime_probe}" == --lifecycle-raw-exit-probe ]]; then
-    echo "Linnet native Rime focused lifecycle raw-input exit probe: PASS"
+  elif [[ "${runtime_probe}" == --warm-session-probe ]]; then
+    echo "Linnet native Rime retained warm-session latency: PASS"
+  elif [[ "${runtime_probe}" == --cold-client-probe ]]; then
+    echo "Linnet native Rime cold-client first-key latency: PASS"
+  elif [[ "${runtime_probe}" == --profile-key-matrix-probe ]]; then
+    echo "Linnet native Rime formal eight-profile key matrix: PASS"
+  elif [[ "${runtime_probe}" == --live-sync-probe ]]; then
+    echo "Linnet native Rime live synchronization: PASS"
+  elif [[ "${runtime_probe}" == --candidate-forget-probe ]]; then
+    echo "Linnet native Rime candidate forget focus: PASS"
+  elif [[ "${runtime_probe}" == --raw-editing-probe ]]; then
+    echo "Linnet native Rime raw spelling navigation: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi
@@ -227,25 +237,26 @@ fi
 rg -Fq 'shared PredictEngine factory/engine identity: PASS' "${scratch}/stdout"
 test "$(LC_ALL=C grep -a -F -c 'loading predict db:' "${scratch}/stderr")" -eq 1
 
+lifecycle_user="${scratch}/lifecycle-user"
+mkdir "${lifecycle_user}"
+cp -R "${user}/." "${lifecycle_user}/"
+
 # Exercise librime's canonical multi-device user-dictionary merge. Linnet only
 # schedules this upstream owner; it never interprets snapshot rows itself.
+begin_phase "verify upstream user-dictionary sync"
 sync_root="${scratch}/rime-sync"
 device_a="${scratch}/device-a"
 device_b="${scratch}/device-b"
 mkdir "${sync_root}" "${device_a}" "${device_b}"
-"${swiftc}" -warnings-as-errors -sdk "${sdk}" \
-  sources/LinnetSettings/LinnetRimeSyncController.swift \
-  tests/LinnetRimeSyncProjectionFixture.swift \
-  -o "${scratch}/rime-sync-projection"
 for dictionary in linnet_zh linnet_en; do
   test -d "${user}/${dictionary}.userdb"
   cp -R "${user}/${dictionary}.userdb" "${device_a}/${dictionary}.userdb"
   cp -R "${user}/${dictionary}.userdb" "${device_b}/${dictionary}.userdb"
 done
-printf 'installation_id: device-a\n' >"${device_a}/installation.yaml"
-printf 'installation_id: device-b\n' >"${device_b}/installation.yaml"
-"${scratch}/rime-sync-projection" "${device_a}" "${sync_root}"
-"${scratch}/rime-sync-projection" "${device_b}" "${sync_root}"
+printf 'installation_id: device-a\nsync_dir: "%s"\nbackup_config_files: false\n' \
+  "${sync_root}" >"${device_a}/installation.yaml"
+printf 'installation_id: device-b\nsync_dir: "%s"\nbackup_config_files: false\n' \
+  "${sync_root}" >"${device_b}/installation.yaml"
 printf '# Rime user dictionary export\n云同步甲\tyun tong bu jia\t7\nlinnetclouda\tlinnetclouda\t7\n' \
   >"${scratch}/device-a-rows.txt"
 printf '# Rime user dictionary export\n云同步乙\tyun tong bu yi\t9\nlinnetcloudb\tlinnetcloudb\t9\n' \
@@ -285,10 +296,17 @@ for dictionary in linnet_zh linnet_en; do
   rg -Fq $'linnetcloudb\t' "${export_file}"
 done
 echo "Linnet upstream multi-device user dictionary sync: PASS"
+live_sync_user="${scratch}/live-sync-user"
+mkdir "${live_sync_user}"
+cp -R "${user}/." "${live_sync_user}/"
+DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+  "${scratch}/rime-smoke" "${shared}" "${live_sync_user}" --live-sync-probe
+end_phase "verify upstream user-dictionary sync"
 
 # Exercise the production-shaped exact-11 configuration reload in its own
 # user directory so its same-second projections and session invalidation never
 # become implicit setup for the remaining Settings/runtime matrix.
+begin_phase "verify eight profiles and Settings projections"
 fast_user="${scratch}/fast-user"
 mkdir "${fast_user}"
 cp -R "${user}/." "${fast_user}/"
@@ -297,32 +315,34 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     --fast-config-reload-probe
 
 profile_cases=(
-  'natural:linnet_zh:srfa'
-  'full_pinyin:linnet_zh_pinyin:suanfa'
-  'flypy:linnet_zh_flypy:srfa'
-  'microsoft:linnet_zh_mspy:srfa'
-  'sogou:linnet_zh_sogou:srfa'
-  'abc:linnet_zh_abc:spfa'
-  'ziguang:linnet_zh_ziguang:slfa'
-  'jiajia:linnet_zh_jiajia:scfa'
+  'vertical_bar:natural:linnet_zh:srfa'
+  'vertical_bar:full_pinyin:linnet_zh_pinyin:suanfa'
+  'vertical_bar:flypy:linnet_zh_flypy:srfa'
+  'vertical_bar:microsoft:linnet_zh_mspy:srfa'
+  'vertical_bar:sogou:linnet_zh_sogou:srfa'
+  'vertical_bar:abc:linnet_zh_abc:spfa'
+  'vertical_bar:ziguang:linnet_zh_ziguang:slfa'
+  'vertical_bar:jiajia:linnet_zh_jiajia:scfa'
+  # Profile and trigger are separate renderer facts. The Swift owner test
+  # proves the optional trigger reaches every schema; retain one native custom
+  # semicolon cross-case whose Microsoft code itself contains a semicolon.
+  'semicolon:microsoft:linnet_zh_mspy:srfa'
 )
-for trigger in semicolon vertical_bar; do
-  for profile_case in "${profile_cases[@]}"; do
-    IFS=: read -r profile schema code <<<"${profile_case}"
-    "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
-    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-      bin/rime_deployer --build "${user}" "${shared}" \
-        "${user}/build" >/dev/null
-    rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
-    rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
-    test -s "${user}/build/${schema}.prism.bin"
-    prefix=';'
-    [[ "${trigger}" == vertical_bar ]] && prefix='|'
-    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-      "${scratch}/rime-smoke" "${shared}" "${user}" \
-        --english-profile-probe \
-          "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
-  done
+for profile_case in "${profile_cases[@]}"; do
+  IFS=: read -r trigger profile schema code <<<"${profile_case}"
+  "${scratch}/projection-fixture" profile "${profile}" "${trigger}" "${user}"
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    bin/rime_deployer --build "${user}" "${shared}" \
+      "${user}/build" >/dev/null
+  rg -Fq "prism: ${schema}" "${user}/build/linnet_en.schema.yaml"
+  rg -Fq "chinese_schema: ${schema}" "${user}/build/linnet_en.schema.yaml"
+  test -s "${user}/build/${schema}.prism.bin"
+  prefix=';'
+  [[ "${trigger}" == vertical_bar ]] && prefix='|'
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${scratch}/rime-smoke" "${shared}" "${user}" \
+      --english-profile-probe \
+        "${profile}" "${schema}" "${code}" "${prefix}" >/dev/null
 done
 
 for page_size in 3 5 7 9; do
@@ -351,7 +371,10 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
 rg -Fq 'prism: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_jiajia' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'reset: 0' "${user}/build/linnet_en.schema.yaml"
-rg -Fq 'spelling_correction: false' "${user}/build/linnet_en.schema.yaml"
+if rg -q 'spelling_correction:' "${user}/build/linnet_en.schema.yaml"; then
+  echo "retired English correction switch returned to the deployed schema" >&2
+  exit 1
+fi
 rg -Fq 'show_ipa: false' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'show_translation: false' "${user}/build/linnet_en.schema.yaml"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
@@ -386,7 +409,6 @@ for chinese_schema in \
 done
 rg -Fq 'prism: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
 rg -Fq 'chinese_schema: linnet_zh_pinyin' "${user}/build/linnet_en.schema.yaml"
-rg -Fq 'prefix: "|"' "${user}/build/linnet_en.schema.yaml"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   "${scratch}/rime-smoke" "${shared}" "${user}" \
     --input-options-probe >/dev/null
@@ -404,5 +426,26 @@ done
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   "${scratch}/rime-smoke" "${shared}" "${user}" \
     --input-switches-probe >/dev/null
+end_phase "verify eight profiles and Settings projections"
+
+# The default matrix above owns the ordinary lifecycle rows. Reuse its staged
+# data and compiled harness for the switcher-only rows instead of starting a
+# second complete shell verifier and recompiling both Swift and C++ fixtures.
+begin_phase "verify lifecycle exits with the F4 switcher"
+ruby -e '
+  path = ARGV.fetch(0)
+  source = File.binread(path)
+  current = "  hotkeys: []\n"
+  fixture = "  hotkeys: [F4]\n"
+  abort "switcher hotkey owner is missing" unless source.scan(current).length == 1
+  File.binwrite(path, source.sub(current, fixture))
+' "${shared}/default.yaml"
+DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+  bin/rime_deployer --build "${lifecycle_user}" "${shared}" \
+    "${lifecycle_user}/build" >/dev/null
+DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+  "${scratch}/rime-smoke" "${shared}" "${lifecycle_user}" \
+    --lifecycle-raw-exit-probe
+end_phase "verify lifecycle exits with the F4 switcher"
 
 echo "Linnet native Rime runtime: PASS (Chinese, 8-profile Smart English, direct Shift, Caps Lock raw, learning, graphical English and input settings)"

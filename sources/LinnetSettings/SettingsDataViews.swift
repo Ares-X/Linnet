@@ -8,61 +8,87 @@ import SwiftUI
 
 extension DataTabView {
   var cloudSyncSection: some View {
-    GroupBox("iCloud Drive sync") {
-      VStack(alignment: .leading, spacing: 10) {
-        Toggle(
-          "Sync learned words with iCloud Drive",
-          isOn: Binding(
-            get: { model.cloudSyncEnabled },
-            set: { model.setCloudSyncEnabled($0) })
-        )
-        .disabled(model.operationActive)
+    VStack(alignment: .leading, spacing: 10) {
+      Toggle(
+        "Sync learned words with iCloud Drive",
+        isOn: Binding(
+          get: { model.cloudSyncEnabled },
+          set: { enabled in Task { await model.setCloudSyncEnabled(enabled) } })
+      )
+      .disabled(model.operationActive || model.cloudSyncPreparing)
 
-        if let location = model.cloudSyncLocation {
-          LabeledContent("Location") {
-            Text(verbatim: location.displayName)
-          }
-        } else if model.cloudSyncEnabled {
-          Text("iCloud Drive is unavailable. Check iCloud Drive in System Settings.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        } else {
-          Text("Linnet always uses iCloud Drive/Linnet; no folder selection is required.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+      if model.cloudSyncPreparing {
+        ProgressView()
+          .controlSize(.small)
+          .accessibilityLabel("Sync learned words with iCloud Drive")
+      } else if let location = model.cloudSyncLocation {
+        LabeledContent("Location") {
+          Text(verbatim: location.displayName)
         }
-
-        Text(
-          // Keep the complete localization key intact for String Catalog lookup.
-          // swiftlint:disable:next line_length
-          "Rime incrementally merges learned Chinese and English words between your Macs. Linnet checks at most once per hour while it is running; the next activation catches up. It does not read or merge the user dictionary format itself."
-        )
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-
-        HStack {
-          Button("Sync Learning Now") { model.synchronizeLearningNow() }
-            .disabled(model.cloudSyncLocation == nil || model.operationActive)
-          Button("Upload Full Backup…") { pendingCloudBackupUpload = true }
-            .disabled(model.cloudSyncLocation == nil || model.operationActive)
-          Button("Review Full Backup…") {
-            Task {
-              pendingPortableImport = await model.inspectCloudBackupArchive()
-            }
-          }
-          .disabled(
-            model.cloudSyncLocation == nil || !model.configuration.canPersist
-              || model.operationActive || model.portableInspectionActive)
-        }
-        Text(
-          "The full backup also includes personal words, disabled words, and Text Expander data. It is a manual recovery archive, not a second learning-sync engine."
-        )
-        .font(.caption2)
-        .foregroundStyle(.secondary)
+      } else if model.cloudSyncEnabled {
+        Text("iCloud Drive is unavailable. Check iCloud Drive in System Settings.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      } else {
+        Text("Linnet always uses iCloud Drive/Linnet; no folder selection is required.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
-      .padding(8)
+
+      Text(
+        "Learned Chinese and English words sync between your Macs while Linnet is running. Use Sync Learning Now to check without waiting for the next automatic sync."
+      )
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+
+      if model.cloudSyncEnabled {
+        LabeledContent("Last successful learning sync on this Mac") {
+          if let date = model.cloudSyncStatus?.lastSuccess {
+            Text(date, format: .dateTime.year().month().day().hour().minute())
+          } else {
+            Text("No successful sync recorded")
+          }
+        }
+        if let status = model.cloudSyncStatus {
+          switch status.result {
+          case .learningSyncCompleted:
+            Text("This Mac has finished merging and exporting learning data. iCloud may still be transferring it to your other Macs.")
+              .font(.caption).foregroundStyle(.secondary)
+          case .learningSyncDeferred:
+            Text("Some learning data is still pending because a dictionary is inactive or changing. Your local learning is kept; keep using Linnet and retry later.")
+              .font(.caption).foregroundStyle(.orange)
+          case .learningSyncUnavailable:
+            Text("The last sync could not access iCloud Drive. Check iCloud Drive in System Settings, then retry.")
+              .font(.caption).foregroundStyle(.orange)
+          case .learningSyncFailed:
+            Text("The last learning sync failed. Your local learning is kept; use Sync Learning Now to retry.")
+              .font(.caption).foregroundStyle(.orange)
+          default:
+            EmptyView()
+          }
+        }
+      }
+
+      HStack {
+        Button("Sync Learning Now") { model.synchronizeLearningNow() }
+          .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
+        Button("Upload Recovery Backup…") { pendingCloudBackupUpload = true }
+          .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
+        Button("Review Recovery Backup…") {
+          Task {
+            pendingPortableImport = await model.inspectCloudBackupArchive()
+          }
+        }
+        .disabled(
+          model.cloudSyncLocation == nil || !model.configuration.canPersist
+            || model.operationActive || model.portableInspectionActive || model.cloudSyncPreparing)
+      }
+      Text(
+        "Recovery backups are uploaded manually. They also include custom words, disabled words, and Text Expander entries; enabling learning sync does not upload them automatically."
+      )
+      .font(.caption2)
+      .foregroundStyle(.secondary)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   var versionSection: some View {
@@ -70,10 +96,19 @@ extension DataTabView {
       VStack(alignment: .leading, spacing: 8) {
         LabeledContent("Application") { Text(verbatim: model.productName) }
         LabeledContent("Version") {
-          Text(verbatim: "\(model.appVersion) (\(model.appBuild))")
+          if let installed = updateChecker.installedIdentity {
+            Text(verbatim: productIdentityDescription(installed))
+          } else {
+            Text("Unavailable").foregroundStyle(.secondary)
+          }
+        }
+        if updateChecker.installedIdentity == nil {
+          LabeledContent("Core status") { Text("Installation needs repair") }
+          Text("Run the Complete installer to restore the installed Core identity.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         LabeledContent("Language data") { Text(languageDataEditionLabel) }
-        updateCheckRow
         if model.installedPacks.isEmpty {
           LabeledContent("Data status") { Text("Installation needs repair") }
           Text("Reinstall Linnet to restore the required local language data.")
@@ -81,13 +116,16 @@ extension DataTabView {
         } else {
           ForEach(orderedInstalledPacks, id: \.kind.rawValue) { pack in
             LabeledContent(packLabel(pack.kind)) {
-              HStack(spacing: 4) {
-                Text(verbatim: pack.version)
-                Text("revision")
-                Text(verbatim: String(pack.sequence))
-              }
+              Text(verbatim: packReleaseDescription(
+                version: pack.version,
+                sequence: pack.sequence))
             }
           }
+          Text(
+            "Data release is the pack's increasing content sequence, not a Git revision. The version identifies the corresponding published content."
+          )
+          .font(.caption2)
+          .foregroundStyle(.secondary)
         }
       }
       .padding(8)
@@ -95,16 +133,260 @@ extension DataTabView {
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
+  var coreUpdateSection: some View {
+    GroupBox("Core update") {
+      VStack(alignment: .leading, spacing: 10) {
+        runtimeVersionRow
+        updateChannelPicker
+        updateCheckRow
+        Divider()
+        HStack(alignment: .center, spacing: 10) {
+          Text(coreActivationActionHint)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Spacer()
+          Button(coreActivationButtonTitle) { confirmCoreActivation() }
+            .disabled(
+              updateChecker.runtimeVersionState.activationIdentities == nil ||
+                model.pendingChanges || model.operationActive)
+            .accessibilityHint(
+              "Switch away from Linnet before applying an installed Core update.")
+        }
+      }
+      .padding(8)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityIdentifier("settings.data.coreUpdate")
+  }
+
+  @ViewBuilder var runtimeVersionRow: some View {
+    switch updateChecker.runtimeVersionState {
+    case .checking(let installed):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("Checking the running Core…", systemImage: "arrow.triangle.2.circlepath")
+          .foregroundStyle(.secondary)
+        coreIdentityRows(installed: installed, running: nil)
+      }
+    case .current(let identity):
+      VStack(alignment: .leading, spacing: 4) {
+        coreIdentityRows(installed: identity, running: identity)
+      }
+    case .pending(let installed, let running):
+      VStack(alignment: .leading, spacing: 4) {
+        Label(pendingCoreTitle(installed: installed, running: running),
+          systemImage: "checkmark.circle")
+          .foregroundStyle(.orange)
+        coreIdentityRows(installed: installed, running: running)
+        Text(pendingCoreDetail(installed: installed, running: running))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
+    case .applying(let installed, let running):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("Applying installed Core…", systemImage: "arrow.triangle.2.circlepath")
+          .foregroundStyle(.secondary)
+        coreIdentityRows(installed: installed, running: running)
+        Text("Keep another input source selected until Settings closes.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    case .blocked(let installed, let running, let issue):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("The installed Core is waiting", systemImage: "exclamationmark.triangle")
+          .foregroundStyle(.orange)
+        coreIdentityRows(installed: installed, running: running)
+        Text(coreActivationInstruction(issue))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
+    case .applied(let identity):
+      VStack(alignment: .leading, spacing: 2) {
+        Label("Installed Core is now running", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+        coreIdentityRows(installed: identity, running: identity)
+        Text("Settings will close so its own connection can reopen cleanly.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    case .unsupported(let installed, let running):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("This running Core cannot apply the update safely", systemImage: "info.circle")
+          .foregroundStyle(.orange)
+        coreIdentityRows(installed: installed, running: running)
+        Text(
+          "Keep using the current Core. After the next normal macOS login or restart, future Core updates can use Apply Now without another logout."
+        )
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
+    case .failed(let installed, let running):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("The installed Core was not activated", systemImage: "xmark.circle")
+          .foregroundStyle(.red)
+        coreIdentityRows(installed: installed, running: running)
+        Text("Core activation could not be verified. Check the runtime before trying again.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
+    case .unavailable(let installed):
+      VStack(alignment: .leading, spacing: 4) {
+        Label("Running Core identity is unavailable.", systemImage: "exclamationmark.circle")
+        coreIdentityRows(installed: installed, running: nil)
+        Group {
+          if installed == nil {
+            Text("Run the Complete installer to repair Linnet before checking for updates.")
+          } else {
+            Text(
+              "Updates do not stop the current Core or its app connections. The installed Core will run after the next macOS login or restart."
+            )
+          }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        Button("Check Runtime Again") { updateChecker.refreshRuntime() }
+      }
+    }
+  }
+
+  func productIdentityDescription(
+    _ identity: LinnetSettingsContract.ProductIdentity
+  ) -> String {
+    "\(identity.version) (\(identity.build))"
+  }
+
+  @ViewBuilder func coreIdentityRows(
+    installed: LinnetSettingsContract.ProductIdentity?,
+    running: LinnetSettingsContract.ProductIdentity?
+  ) -> some View {
+    LabeledContent("Running") {
+      if let running {
+        Text(verbatim: productIdentityDescription(running))
+      } else {
+        Text("Unavailable").foregroundStyle(.secondary)
+      }
+    }
+    .accessibilityIdentifier("settings.data.core.running")
+    LabeledContent("Installed") {
+      if let installed {
+        Text(verbatim: productIdentityDescription(installed))
+      } else {
+        Text("Unavailable").foregroundStyle(.secondary)
+      }
+    }
+    .accessibilityIdentifier("settings.data.core.installed")
+    coreRevisionDetails(running: running, installed: installed)
+  }
+
+  @ViewBuilder func coreRevisionDetails(
+    running: LinnetSettingsContract.ProductIdentity?,
+    installed: LinnetSettingsContract.ProductIdentity?
+  ) -> some View {
+    DisclosureGroup("Advanced version details") {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Source revision")
+          .font(.caption.weight(.medium))
+        if let running {
+          LabeledContent("Running") {
+            Text(verbatim: running.revision)
+              .font(.caption.monospaced())
+              .textSelection(.enabled)
+          }
+        }
+        if let installed {
+          LabeledContent("Installed") {
+            Text(verbatim: installed.revision)
+              .font(.caption.monospaced())
+              .textSelection(.enabled)
+          }
+        }
+      }
+      .padding(.top, 4)
+    }
+    .font(.caption)
+  }
+
+  var coreActivationButtonTitle: LocalizedStringKey {
+    switch updateChecker.runtimeVersionState {
+    case .blocked, .failed: "Try Apply Again…"
+    default: "Apply Installed Update…"
+    }
+  }
+
+  var coreActivationActionHint: LocalizedStringKey {
+    switch updateChecker.runtimeVersionState {
+    case .pending, .blocked, .failed:
+      "Switch away from Linnet before applying the installed Core update."
+    case .unsupported:
+      "Installed Core will run after the next normal login or restart."
+    case .applying:
+      "The installed Core update is being applied."
+    default:
+      "No installed Core update is waiting to be applied."
+    }
+  }
+
+  func coreActivationInstruction(
+    _ issue: LinnetSettingsContract.CoreActivationBlocker
+  ) -> LocalizedStringKey {
+    switch issue {
+    case .inputSourceActive:
+      "Use the macOS input menu to select another input source, then try again."
+    case .inputSourceUnavailable:
+      "The selected input source could not be read. Select another input source in the macOS input menu, then try again."
+    case .compositionActive:
+      "Finish or cancel the current composition, then try again."
+    case .dataTransactionActive:
+      "Wait for the current data operation to finish, then try again."
+    case .applicationsStillRunning:
+      "This older running Core cannot replace itself in this session. The installed update remains ready for the next normal login."
+    case .unknownClient:
+      "This older running Core cannot verify its inactive clients. The installed update remains ready for the next normal login."
+    case .requesterUnavailable:
+      "Settings could not establish the one safe activation requester. Reopen Settings and try again."
+    }
+  }
+
+  func confirmCoreActivation() {
+    guard !model.pendingChanges, !model.operationActive else { return }
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = String(localized: "Apply the installed Core now?")
+    alert.informativeText = String(localized:
+      "First use the macOS input menu to select another input source.")
+      + " "
+      + String(localized:
+        "Your apps stay open. Settings closes after the new Core is verified.")
+    let apply = alert.addButton(withTitle: String(localized: "Apply Now"))
+    apply.keyEquivalent = "\r"
+    let cancel = alert.addButton(withTitle: String(localized: "Cancel"))
+    cancel.keyEquivalent = "\u{1b}"
+    let completion: (NSApplication.ModalResponse) -> Void = { response in
+      guard response == .alertFirstButtonReturn else { return }
+      updateChecker.activateInstalledCore()
+    }
+    if let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible) {
+      alert.beginSheetModal(for: window, completionHandler: completion)
+    } else {
+      completion(alert.runModal())
+    }
+  }
+
   @ViewBuilder var updateCheckRow: some View {
     Divider()
     HStack(alignment: .center, spacing: 10) {
       updateCheckLabel
       Spacer()
-      if case .core = updateChecker.availability {
-        Button("View Core Update") { updateChecker.openCoreUpdate() }
+      if case .core(let core) = updateChecker.availability {
+        coreDownloadControls(core)
       }
       Button("Check Again") { updateChecker.check() }
-        .disabled(updateChecker.active)
+        .disabled(
+          updateChecker.active || updateChecker.activationInProgress
+            || updateChecker.coreDownloadInProgress)
     }
   }
 
@@ -112,30 +394,66 @@ extension DataTabView {
     if updateChecker.active {
       Label("Checking for updates…", systemImage: "arrow.triangle.2.circlepath")
         .foregroundStyle(.secondary)
-    } else if updateChecker.failed {
-      Label("Update check failed. Try again when you are online.", systemImage: "wifi.exclamationmark")
+    } else if let failure = updateChecker.failure {
+      Label(LocalizedStringKey(failure.message),
+            systemImage: failure == .network ? "wifi.exclamationmark" : "exclamationmark.triangle")
         .foregroundStyle(.orange)
     } else {
       switch updateChecker.availability {
       case .some(.current):
         Label("Linnet and language data are up to date.", systemImage: "checkmark.circle.fill")
           .foregroundStyle(.green)
+      case .some(.localDataAhead):
+        Label("Installed language data is newer than this update channel. No downgrade will be downloaded.",
+              systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.secondary)
       case .some(.core(let core)):
         VStack(alignment: .leading, spacing: 2) {
-          Label("Core update available", systemImage: "arrow.down.circle.fill")
-            .foregroundStyle(.orange)
-          Text(verbatim: core.version)
-            .font(.caption.monospacedDigit())
-          Text("The Core update does not require another logout. macOS may ask you to approve the unsigned package.")
+          Label(coreDownloadStatusTitle(core), systemImage: coreDownloadStatusImage(core))
+            .foregroundStyle(coreDownloadStatusColor(core))
+          LabeledContent("Current") {
+            if let installed = updateChecker.installedIdentity {
+              Text(verbatim: productIdentityDescription(installed))
+            } else {
+              Text("Unavailable").foregroundStyle(.secondary)
+            }
+          }
+          .font(.caption.monospacedDigit())
+          LabeledContent("Available") {
+            Text(verbatim: "\(core.version) (\(core.build))")
+          }
+          .font(.caption.monospacedDigit())
+          Text(coreDownloadStatusDetail(core))
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
-      case .some(.languageData):
-        Label("A language-data update is available below. No logout is required.", systemImage: "arrow.down.circle.fill")
+      case .some(.languageData(let updates)):
+        VStack(alignment: .leading, spacing: 4) {
+          Label(
+            "Language-data updates are available. No logout is required.",
+            systemImage: "arrow.down.circle.fill"
+          )
           .foregroundStyle(Color.accentColor)
+          ForEach(updates, id: \.kind.rawValue) { update in
+            VStack(alignment: .leading, spacing: 1) {
+              Text(packLabel(update.kind)).font(.caption.weight(.medium))
+              Text(verbatim: updateDescription(update))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
       case nil:
-        Label("Update status is not available yet.", systemImage: "info.circle")
-          .foregroundStyle(.secondary)
+        if updateChecker.installedIdentity == nil {
+          Label(
+            "Update status is unavailable until the installation is repaired.",
+            systemImage: "exclamationmark.circle"
+          )
+          .foregroundStyle(.orange)
+        } else {
+          Label("Update status is not available yet.", systemImage: "info.circle")
+            .foregroundStyle(.secondary)
+        }
       }
     }
   }
@@ -149,20 +467,34 @@ extension DataTabView {
   }
 
   var orderedInstalledPacks: [LinnetDataRegistry.ActivePack] {
-    let order: [LinnetDataRegistry.PackKind] = [.chinese, .english, .lts, .extended]
+    let order: [LinnetPackContract.Kind] = [.chinese, .english, .lts, .extended]
     return model.installedPacks.sorted {
       (order.firstIndex(of: $0.kind) ?? order.count)
         < (order.firstIndex(of: $1.kind) ?? order.count)
     }
   }
 
-  func packLabel(_ kind: LinnetDataRegistry.PackKind) -> LocalizedStringKey {
+  func packLabel(_ kind: LinnetPackContract.Kind) -> LocalizedStringKey {
     switch kind {
     case .chinese: "Chinese data"
     case .english: "English data"
     case .lts: "Chinese grammar model"
     case .extended: "Long-tail data"
     }
+  }
+  func updateDescription(_ update: LinnetDataChannel.LanguageDataUpdate) -> String {
+    let installed = if let version = update.installedVersion,
+      let sequence = update.installedSequence {
+      packReleaseDescription(version: version, sequence: sequence)
+    } else {
+      String(localized: "Not installed")
+    }
+    return "\(String(localized: "Current")): \(installed) → "
+      + "\(String(localized: "Available")): \(update.availableVersion) · "
+      + "\(String(localized: "Data release")) \(update.availableSequence)"
+  }
+  func packReleaseDescription(version: String, sequence: UInt64) -> String {
+    "\(version) · \(String(localized: "Data release")) \(sequence)"
   }
 
   var grammarModelSection: some View {
@@ -216,6 +548,7 @@ extension DataTabView {
         Text("Custom Mirror…").tag(LinnetSettingsDownloadSource.Mode.customMirror)
       }
       .pickerStyle(.menu)
+      .accessibilityIdentifier("settings.data.downloadSource")
       .disabled(model.downloadSourceEditorDisabled)
 
       if model.downloadSourceMode == .publicMirror {
@@ -281,7 +614,7 @@ extension DataTabView {
       .font(.caption)
       .foregroundStyle(.secondary)
       Text(
-        "The selected source is used only for future language-data downloads. Linnet never switches or falls back to another source automatically."
+        "The selected source applies to future Core and language-data downloads. Update checks still use GitHub directly. Linnet never switches sources automatically."
       )
       .font(.caption)
       .foregroundStyle(.secondary)
@@ -304,15 +637,10 @@ extension DataTabView {
 
   var languageDataUpdateDescription: LocalizedStringKey? {
     guard !model.languageDataUpdatesAvailable else { return nil }
-    if model.dataChannelService == .published && !model.downloadSourceConfigured {
+    if !model.downloadSourceConfigured {
       return "Choose and save a valid download source before checking for updates."
     }
-    return switch model.dataChannelService {
-    case .unpublished:
-      "Online language-data updates are not available for this version yet."
-    case .published:
-      "Repair the installation before managing language data."
-    }
+    return "Repair the installation before managing language data."
   }
 
   var legacyDataDescription: LocalizedStringKey {
@@ -326,13 +654,18 @@ extension DataTabView {
   }
 
   var backupSection: some View {
-    GroupBox("Automatic backups") {
+    GroupBox("Recovery history") {
       VStack(alignment: .leading, spacing: 8) {
+        Text("These recovery points are created before data-changing transactions; they are not automatic full backups.")
+          .font(.caption).foregroundStyle(.secondary)
+        Text("Full backup archives are created only when you choose a backup or export button.")
+          .font(.caption2).foregroundStyle(.secondary)
         Picker("Retention", selection: $model.backupRetentionPolicy) {
           ForEach(LinnetSettingsContract.BackupRetentionPolicy.allCases, id: \.self) {
             Text(backupRetentionName($0)).tag($0)
           }
         }
+        .accessibilityIdentifier("settings.data.retention")
         .disabled(model.operationActive)
         .onChange(of: model.backupRetentionPolicy) { _ in
           model.saveBackupRetentionPolicy()
@@ -410,88 +743,35 @@ extension DataTabView {
   }
 
   var diagnosticsSection: some View {
-    GroupBox("Diagnostics") {
-      VStack(alignment: .leading, spacing: 10) {
-        if let diagnostics = model.diagnostics {
-          Text(runtimeStatus(diagnostics.reachability).text(locale: locale))
-            .font(.callout.weight(.medium))
-          Text(diagnostics.redactedReport)
-            .font(.system(.caption, design: .monospaced))
-            .textSelection(.enabled)
-        } else {
-          Text("Diagnostics have not been collected.").foregroundStyle(.secondary)
-        }
-        HStack {
-          Button("Refresh") { model.refreshDiagnostics() }
-            .disabled(model.operationActive)
-          Button("Copy Report") { model.copyDiagnostics() }
-            .disabled(model.diagnostics == nil)
-          Button("Save…") { model.saveDiagnostics(locale: locale) }
-            .disabled(model.diagnostics == nil)
-          Spacer()
-          Text(
-            "Reports contain counts and versions, never words, learning rows, identity, or paths."
-          )
-          .font(.caption).foregroundStyle(.secondary)
-        }
-      }.padding(8)
+    VStack(alignment: .leading, spacing: 10) {
+      if let diagnostics = model.diagnostics {
+        Text(SettingsPresentationStatus.runtime(diagnostics.reachability).text(locale: locale))
+          .font(.callout.weight(.medium))
+        Text(diagnostics.redactedReport)
+          .font(.system(.caption, design: .monospaced))
+          .textSelection(.enabled)
+      } else {
+        Text("Diagnostics have not been collected.").foregroundStyle(.secondary)
+      }
+      HStack {
+        Button("Refresh") { model.refreshDiagnostics() }
+          .disabled(model.operationActive)
+        Button("Copy Report") { model.copyDiagnostics() }
+          .disabled(model.diagnostics == nil)
+        Button("Save…") { model.saveDiagnostics(locale: locale) }
+          .disabled(model.diagnostics == nil)
+        Spacer()
+        Text(
+          "Reports contain counts and versions, never words, learning rows, identity, or paths."
+        )
+        .font(.caption).foregroundStyle(.secondary)
+      }
     }
   }
 
-  func runtimeStatus(
-    _ reachability: SettingsDataCoordinator.Diagnostics.Reachability
-  ) -> SettingsPresentationStatus {
-    switch reachability {
-    case .running: .runtime(.running)
-    case .paused: .runtime(.paused)
-    case .degraded: .runtime(.degraded)
-    case .unreachable: .runtime(.unreachable)
-    }
-  }
 }
 
-// MARK: - Shared helpers
-
-func sectionHeader(
-  _ title: LocalizedStringKey,
-  help: LocalizedStringKey,
-  add: @escaping () -> Void
-) -> some View {
-  HStack {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(title).font(.callout.weight(.medium))
-      Text(help).font(.caption).foregroundStyle(.secondary)
-    }
-    Spacer()
-    Button(action: add) { Image(systemName: "plus") }
-      .accessibilityLabel(Text("Add") + Text(" ") + Text(title))
-      .help(Text("Add") + Text(" ") + Text(title))
-  }
-}
-
-func removeButton(
-  _ label: LocalizedStringKey,
-  action: @escaping () -> Void
-) -> some View {
-  Button(role: .destructive, action: action) { Image(systemName: "minus.circle") }
-    .buttonStyle(.borderless)
-    .accessibilityLabel(Text(label))
-    .help(Text(label))
-}
-
-func categoryName(_ category: LinnetBackupStore.Category) -> LocalizedStringKey {
-  switch category {
-  case .customWords: "Custom words"
-  case .disabledWords: "Disabled words"
-  case .textExpander: "Text Expander"
-  case .chineseLearning: "Chinese learning"
-  case .englishLearning: "English learning"
-  }
-}
-
-private func backupTitle(
-  _ state: LinnetBackupStore.BackupState
-) -> SettingsPresentationStatus {
+private func backupTitle(_ state: LinnetBackupStore.BackupState) -> SettingsPresentationStatus {
   switch state {
   case .verified(let manifest): .backupVerified(backupOperation(manifest.operation))
   case .incomplete: .backupIncomplete
@@ -499,9 +779,7 @@ private func backupTitle(
   }
 }
 
-private func backupOperation(
-  _ operation: LinnetBackupStore.BackupOperation
-) -> SettingsOperationKind {
+private func backupOperation(_ operation: LinnetBackupStore.BackupOperation) -> SettingsOperationKind {
   switch operation {
   case .applyPersonalData: .apply
   case .importLegacy: .legacy
@@ -511,9 +789,7 @@ private func backupOperation(
   }
 }
 
-private func backupRetentionName(
-  _ policy: LinnetSettingsContract.BackupRetentionPolicy
-) -> LocalizedStringKey {
+private func backupRetentionName(_ policy: LinnetSettingsContract.BackupRetentionPolicy) -> LocalizedStringKey {
   switch policy {
   case .keepLatest10: "Keep latest 10 verified backups"
   case .keepLatest30: "Keep latest 30 verified backups"

@@ -8,21 +8,14 @@
 import AppKit
 
 final class SquirrelPanel: NSPanel {
-  struct Publication: Equatable {
+  struct Publication {
     let generation: UInt64
-    let activationToken: LinnetInputActivationRegistry.Token
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-      lhs.generation == rhs.generation &&
-        lhs.activationToken == rhs.activationToken
-    }
+    let controllerID: ObjectIdentifier
   }
 
   let view: SquirrelView
   let back: NSVisualEffectView
-  let candidateAccessibility: LinnetCandidateAccessibility
   private(set) weak var inputController: SquirrelInputController?
-  var activationToken: LinnetInputActivationRegistry.Token?
   var panelPublicationGeneration: UInt64 = 0
   var publication: Publication?
 
@@ -50,13 +43,15 @@ final class SquirrelPanel: NSPanel {
   var candidateSnapshot: SquirrelInputController.CandidateSnapshot?
   var index: Int = 0
   var candidateInteraction = LinnetCandidateInteractionState<SquirrelView.CandidateHit>()
-  private(set) var candidateExpansionRequested = false
+  private(set) var candidateExpansionAnchorPage: Int?
+  var candidateExpansionRequested: Bool {
+    candidateExpansionAnchorPage != nil
+  }
 
   init(position: NSRect) {
     self.position = position
     self.view = SquirrelView(frame: position)
     self.back = NSVisualEffectView()
-    self.candidateAccessibility = LinnetCandidateAccessibility()
     super.init(contentRect: position, styleMask: .nonactivatingPanel, backing: .buffered, defer: true)
     // CGShieldingWindowLevel is the level of the shielding window that sits
     // in front of a full-screen Space; at the *same* level the panel's
@@ -78,8 +73,10 @@ final class SquirrelPanel: NSPanel {
     contentView.addSubview(back)
     contentView.addSubview(view)
     contentView.addSubview(view.textView)
+    contentView.addSubview(view.candidateGridView)
+    contentView.addSubview(view.detailDividerView)
+    contentView.addSubview(view.detailTextView)
     self.contentView = contentView
-    candidateAccessibility.install(parent: view, rawTextView: view.textView)
   }
 
   var linear: Bool {
@@ -99,6 +96,11 @@ final class SquirrelPanel: NSPanel {
     switch event.type {
     case .leftMouseDown: beginCandidatePress(event)
     case .leftMouseUp: finishCandidatePress(event)
+    case .rightMouseDown:
+      if let menu = candidateContextMenu(at: mousePosition(for: event)) {
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+        return
+      }
     case .leftMouseDragged, .mouseEntered, .mouseMoved: moveCandidatePointer(event)
     case .mouseExited:
       candidateInteraction.leavePointer()
@@ -110,49 +112,36 @@ final class SquirrelPanel: NSPanel {
     super.sendEvent(event)
   }
 
-  func bind(
-    controller: SquirrelInputController,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard controller.inputActivationIsCurrent(activationToken) else { return }
-    if inputController === controller, self.activationToken == activationToken {
-      return
-    }
+  func bind(controller: SquirrelInputController) {
+    if inputController === controller { return }
     inputController = nil
-    self.activationToken = nil
     lastUsablePosition = nil
     statusMessage = ""
     hide()
-    guard inputController == nil, self.activationToken == nil,
-      controller.inputActivationIsCurrent(activationToken)
-    else { return }
+    guard inputController == nil else { return }
     inputController = controller
-    self.activationToken = activationToken
   }
 
-  func unbind(
-    controller: SquirrelInputController,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard inputController === controller, self.activationToken == activationToken else {
-      return
-    }
+  func unbind(controller: SquirrelInputController) {
+    guard inputController === controller else { return }
     inputController = nil
-    self.activationToken = nil
     lastUsablePosition = nil
     statusMessage = ""
     hide()
-    guard inputController == nil, self.activationToken == nil else { return }
+    guard inputController == nil else { return }
     updateAppearance(client: nil)
   }
 
-  func hide(
-    controller: SquirrelInputController,
-    activationToken: LinnetInputActivationRegistry.Token
-  ) {
-    guard inputController === controller, self.activationToken == activationToken else {
-      return
-    }
+  func hide(controller: SquirrelInputController) {
+    guard inputController === controller else { return }
+    hide()
+  }
+
+  /// An empty Rime refresh has no candidate geometry to publish. Keep an
+  /// active mode-transition timer visible; otherwise dismiss the panel.
+  func handlePassiveEmptyUpdate(controller: SquirrelInputController) {
+    guard inputController === controller, statusTimer == nil
+    else { return }
     hide()
   }
 
@@ -163,15 +152,14 @@ final class SquirrelPanel: NSPanel {
     statusTimer?.invalidate()
     statusTimer = nil
     statusMessage = ""
-    candidateExpansionRequested = false
+    candidateExpansionAnchorPage = nil
     candidateSnapshot = nil
+    view.candidateGridView.clear()
     candidateInteraction.advancePublication()
     publishCandidatePointerFeedback()
     maxHeight = 0
     guard panelPublicationGeneration == hiddenGeneration else { return }
     orderOut(nil)
-    guard panelPublicationGeneration == hiddenGeneration else { return }
-    candidateAccessibility.clear(parent: view)
   }
 
   /// Rebuilds the visible candidate window from the last accepted Rime
@@ -184,7 +172,7 @@ final class SquirrelPanel: NSPanel {
       let candidateSnapshot,
       !candidateSnapshot.items.isEmpty || !preedit.isEmpty
     else { return }
-    updateAppearance(client: inputController?.client() as? NSObjectProtocol)
+    updateAppearance(client: inputController?.activeClient as? NSObjectProtocol)
     guard publicationIsCurrent(publication) else { return }
     _ = update(
       preedit: preedit,
@@ -193,7 +181,7 @@ final class SquirrelPanel: NSPanel {
       candidates: candidateSnapshot,
       highlighted: index,
       update: false,
-      activationToken: publication.activationToken
+      controller: inputController
     )
   }
 
@@ -205,27 +193,34 @@ final class SquirrelPanel: NSPanel {
     else { return false }
     switch action {
     case .pageUp:
-      return inputController.page(
-        up: true, activationToken: publication.activationToken)
+      return inputController.page(up: true)
     case .pageDown:
-      return inputController.page(
-        up: false, activationToken: publication.activationToken)
+      return inputController.page(up: false)
     case .expand:
       guard view.currentTheme.candidateExpansionAllowed,
         candidateSnapshot?.canExpand == true,
-        !candidateExpansionRequested
+        candidateExpansionAnchorPage == nil,
+        let currentPage = candidateSnapshot?.currentPage
       else { return false }
-      candidateExpansionRequested = true
-      inputController.refreshCandidatePresentation(
-        activationToken: publication.activationToken)
+      candidateExpansionAnchorPage = currentPage
+      inputController.refreshCandidatePresentation()
       return true
     case .collapse:
-      guard candidateExpansionRequested else { return false }
-      candidateExpansionRequested = false
-      inputController.refreshCandidatePresentation(
-        activationToken: publication.activationToken)
+      guard candidateExpansionAnchorPage != nil else { return false }
+      candidateExpansionAnchorPage = nil
+      inputController.refreshCandidatePresentation()
       return true
     }
+  }
+
+  /// The Rime interaction processor has already accepted a printable paging
+  /// key. Reuse the disclosure state without reclassifying the physical key.
+  func requestCandidateExpansionForKeyboardPaging() {
+    guard view.currentTheme.candidateExpansionAllowed,
+      candidateExpansionAnchorPage == nil,
+      let currentPage = candidateSnapshot?.currentPage
+    else { return }
+    candidateExpansionAnchorPage = currentPage
   }
 }
 
@@ -239,11 +234,12 @@ extension SquirrelPanel {
     candidates: SquirrelInputController.CandidateSnapshot,
     highlighted index: Int,
     update: Bool,
-    activationToken: LinnetInputActivationRegistry.Token
+    controller: SquirrelInputController?
   ) -> Bool {
+    guard let controller, inputController === controller else { return false }
     let currentPublication: Publication
     if update {
-      guard let begun = beginPublication(activationToken: activationToken) else {
+      guard let begun = beginPublication(controller: controller) else {
         return false
       }
       currentPublication = begun
@@ -253,11 +249,12 @@ extension SquirrelPanel {
       (self.preedit, self.selRange) = (preedit, selRange)
       self.caretPos = caretPos
       candidateSnapshot = candidates
-      candidateExpansionRequested = candidates.isExpanded
+      candidateExpansionAnchorPage = candidates.isExpanded
+        ? candidates.items.first?.page : nil
       self.index = index
     } else {
       guard let publication,
-        publication.activationToken == activationToken,
+        publication.controllerID == ObjectIdentifier(controller),
         publicationIsCurrent(publication)
       else { return false }
       currentPublication = publication
@@ -295,7 +292,7 @@ extension SquirrelPanel {
       text.append(line)
 
       text.addAttribute(.paragraphStyle, value: theme.preeditParagraphStyle, range: NSRange(location: 0, length: text.length))
-      if !candidates.items.isEmpty {
+      if !candidates.items.isEmpty, !candidates.isExpanded {
         text.append(NSAttributedString(string: "\n", attributes: theme.preeditAttrs))
       }
     } else {
@@ -306,10 +303,15 @@ extension SquirrelPanel {
     let usesInlineComments = LinnetCandidatePresentation.usesInlineComments(
       candidateFormat: theme.candidateFormat)
     let detailGeometry = LinnetCandidatePresentation.candidateDetailGeometry(
-      forLinearLayout: linear)
+      forLinearLayout: linear || candidates.isExpanded || vertical,
+      candidateFontPoint: theme.font.pointSize)
     let selectedDetail = usesInlineComments
-      ? nil : selectedDetail(theme: theme, candidates: candidates.items, highlighted: index)
-    var detailRange = NSRange.empty
+      ? nil : selectedDetail(
+        theme: theme,
+        candidates: candidates.items,
+        highlighted: index,
+        reservesExpandedDetail: candidates.isExpanded)
+    let detailRange = NSRange.empty
 
     // candidates
     var candidateRanges = [NSRange](
@@ -317,86 +319,82 @@ extension SquirrelPanel {
     let flow: LinnetCandidatePresentation.CandidateFlow = linear ? .horizontal : .vertical
     let visualRows = LinnetCandidatePresentation.visualRows(
       candidateCount: candidates.items.count,
-      pageSize: candidates.pageSize,
-      flow: flow,
-      expanded: candidates.isExpanded
+      flow: flow
     )
-    let usesGridLayout = candidates.isExpanded
-    let usesInlineLayout = linear || usesGridLayout
+    let usesExpandedGrid = candidates.isExpanded
+    let usesInlineLayout = linear
     let inlineSeparator = NSAttributedString(
       string: LinnetCandidatePresentation.inlineCandidateSeparator,
       attributes: theme.attrs)
-    view.separatorWidth = usesInlineLayout
+    view.separatorWidth = usesInlineLayout || usesExpandedGrid
       ? inlineSeparator.boundingRect(with: .zero).width : 0
-    var isFirstCandidate = true
-    for row in visualRows {
-      for (column, itemIndex) in row.enumerated() {
-        let item = candidates.items[itemIndex]
-        let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
-        let labelAttrs = itemIndex == index ? theme.labelHighlightedAttrs : theme.labelAttrs
-        let commentAttrs = itemIndex == index ? theme.commentHighlightedAttrs : theme.commentAttrs
-        let label = theme.candidateFormat.contains(/\[label\]/)
-          ? item.selectionLabel ?? "" : ""
-        let displayedComment = usesInlineComments
-          ? item.comment : ""
-        let candidateLine = LinnetCandidatePresentation.candidateLine(
-          candidateFormat: theme.candidateFormat,
-          label: label,
-          candidate: item.text,
-          comment: displayedComment,
-          candidateAttributes: attrs,
-          labelAttributes: labelAttrs,
-          commentAttributes: commentAttrs)
-        let line = NSMutableAttributedString(
-          attributedString: candidateLine.attributedString)
-
-        if !isFirstCandidate {
-          let separator = column == 0
-            ? "\n" : LinnetCandidatePresentation.inlineCandidateSeparator
-          text.append(NSAttributedString(string: separator, attributes: attrs))
-        }
-
-        let paragraphStyleCandidate = NSMutableParagraphStyle()
-        paragraphStyleCandidate.setParagraphStyle(
-          isFirstCandidate ? theme.firstParagraphStyle : theme.paragraphStyle)
-        if usesInlineLayout {
-          paragraphStyleCandidate.paragraphSpacingBefore -= detailGeometry.spacing
-          paragraphStyleCandidate.lineSpacing = detailGeometry.spacing
-        }
-        if !usesInlineLayout, candidateLine.labelPrefix.length > 0 {
-          paragraphStyleCandidate.headIndent = candidateLine.labelPrefix.boundingRect(
-            with: .zero, options: [.usesLineFragmentOrigin]).width
-        }
-        line.addAttribute(
-          .paragraphStyle,
-          value: paragraphStyleCandidate,
-          range: NSRange(location: 0, length: line.length))
-
-        candidateRanges[itemIndex] = NSRange(location: text.length, length: line.length)
-        text.append(line)
-        isFirstCandidate = false
+    let candidateLines = candidates.items.enumerated().map { itemIndex, item in
+      let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
+      var labelAttrs = itemIndex == index ? theme.labelHighlightedAttrs : theme.labelAttrs
+      if usesExpandedGrid {
+        let font = (labelAttrs[.font] as? NSFont) ?? theme.font
+        labelAttrs[.font] = NSFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .regular)
       }
+      let commentAttrs = itemIndex == index ? theme.commentHighlightedAttrs : theme.commentAttrs
+      let label = theme.candidateFormat.contains(/\[label\]/)
+        ? (usesExpandedGrid ? "7" : item.selectionLabel ?? "") : ""
+      let displayedComment = usesInlineComments
+        ? LinnetCandidatePresentation.candidateComment(item.comment).displayText : ""
+      return LinnetCandidatePresentation.candidateLine(
+        candidateFormat: theme.candidateFormat,
+        label: label,
+        candidate: item.text,
+        comment: displayedComment,
+        candidateAttributes: attrs,
+        labelAttributes: labelAttrs,
+        commentAttributes: commentAttrs)
     }
+    if usesExpandedGrid {
+      view.candidateGridView.publish(
+        columns: linear ? theme.expandedHorizontalCount : theme.expandedVerticalCount,
+        maximumRows: linear ? theme.expandedHorizontalRows : 3,
+        lines: candidateLines,
+        highlighted: index,
+        verticalText: vertical,
+        columnSpacing: view.separatorWidth,
+        rowSpacing: theme.linespace)
+    } else {
+      view.candidateGridView.clear()
+      var isFirstCandidate = true
+      for row in visualRows {
+        for (column, itemIndex) in row.enumerated() {
+          let attrs = itemIndex == index ? theme.highlightedAttrs : theme.attrs
+          let candidateLine = candidateLines[itemIndex]
+          let line = NSMutableAttributedString(
+            attributedString: candidateLine.attributedString)
 
-    if let selectedDetail {
-      switch detailGeometry.placement {
-      case .footer:
-        text.append(NSAttributedString(
-          string: detailGeometry.textSeparator,
-          attributes: theme.detailAttrs))
-        detailRange = NSRange(location: text.length, length: selectedDetail.length)
-        text.append(selectedDetail)
-      case .sidecar:
-        if let sidecarRow = visualRows.first(where: { $0.contains(index) }),
-          let rowStartIndex = sidecarRow.first,
-          let anchorIndex = sidecarRow.last {
-          detailRange = attachSidecar(
-            selectedDetail, to: text, candidateRanges: &candidateRanges,
-            layout: SidecarLayout(
-              rowStartIndex: rowStartIndex,
-              anchorIndex: anchorIndex,
-              detailGeometry: detailGeometry,
-              theme: theme))
+          let paragraphStyleCandidate = NSMutableParagraphStyle()
+          paragraphStyleCandidate.setParagraphStyle(
+            isFirstCandidate ? theme.firstParagraphStyle : theme.paragraphStyle)
+          if usesInlineLayout {
+            paragraphStyleCandidate.paragraphSpacingBefore -= detailGeometry.spacing
+            paragraphStyleCandidate.lineSpacing = detailGeometry.spacing
+          }
+          if !isFirstCandidate {
+            let separator = column == 0
+              ? "\n" : LinnetCandidatePresentation.inlineCandidateSeparator
+            var separatorAttributes = attrs
+            separatorAttributes[.paragraphStyle] = paragraphStyleCandidate
+            text.append(NSAttributedString(
+              string: separator, attributes: separatorAttributes))
+          }
+          if !usesInlineLayout, candidateLine.labelPrefix.length > 0 {
+            paragraphStyleCandidate.headIndent = candidateLine.labelPrefix.boundingRect(
+              with: .zero, options: [.usesLineFragmentOrigin]).width
+          }
+          line.addAttribute(
+            .paragraphStyle,
+            value: paragraphStyleCandidate,
+            range: NSRange(location: 0, length: line.length))
+
+          candidateRanges[itemIndex] = NSRange(location: text.length, length: line.length)
+          text.append(line)
+          isFirstCandidate = false
         }
       }
     }
@@ -404,8 +402,10 @@ extension SquirrelPanel {
     // text done!
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.textContentStorage?.attributedString = text
+    view.publishSidecarDetail(selectedDetail)
     guard publicationIsCurrent(currentPublication) else { return false }
     view.textView.setLayoutOrientation(vertical ? .vertical : .horizontal)
+    view.detailTextView.setLayoutOrientation(vertical ? .vertical : .horizontal)
     guard publicationIsCurrent(currentPublication) else { return false }
     let controlMode: LinnetCandidatePresentation.CandidateControlMode =
       theme.candidateExpansionAllowed && (candidates.canExpand || candidates.isExpanded)
@@ -417,48 +417,19 @@ extension SquirrelPanel {
       candidateRanges: candidateRanges, detailRange: detailRange,
       hilightedIndex: index, preeditRange: preeditRange,
       highlightedPreeditRange: highlightedPreeditRange,
-      controlMode: controlMode,
-      usesGridLayout: usesGridLayout)
+      controlMode: controlMode)
     guard publicationIsCurrent(currentPublication) else { return false }
     guard show(publication: currentPublication) else { return false }
     view.displayIfNeeded()
-    guard publicationIsCurrent(currentPublication), let inputController else {
-      return false
-    }
-    let publishedController = inputController
-    let publishedToken = currentPublication.activationToken
-    let publishedGeneration = currentPublication
-    candidateAccessibility.publish(
-      parent: view,
-      geometry: view.candidateAccessibilityGeometry(),
-      candidates: candidates.items,
-      highlightedIndex: index,
-      controlMode: controlMode,
-      shouldAnnounce: update,
-      selectCandidate: { [weak self, weak publishedController] absoluteIndex in
-        guard let self, let publishedController else { return false }
-        guard publicationIsCurrent(publishedGeneration) else { return false }
-        return publishedController.selectCandidate(
-          absoluteIndex: absoluteIndex,
-          activationToken: publishedToken)
-      },
-      performControl: { [weak self] action in
-        guard let self else { return false }
-        guard publicationIsCurrent(publishedGeneration) else { return false }
-        return performControl(action)
-      }
-    )
     return publicationIsCurrent(currentPublication)
   }
 
   func updateStatus(
     long longMessage: String,
     short shortMessage: String,
-    activationToken: LinnetInputActivationRegistry.Token
+    controller: SquirrelInputController
   ) {
-    guard self.activationToken == activationToken,
-      inputController?.inputActivationIsCurrent(activationToken) == true
-    else { return }
+    guard inputController === controller else { return }
     let theme = view.currentTheme
     switch theme.statusMessageType {
     case .mix:

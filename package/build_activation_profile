@@ -44,9 +44,7 @@ for index in "${!pack_roots[@]}"; do
 done
 
 active_root="${payload_root}/Runtime/Active"
-state_root="${payload_root}/State"
-profile_root="${payload_root}/Profiles/Active"
-mkdir -p "${active_root}/build" "${state_root}" "${profile_root}"
+mkdir -p "${active_root}/build"
 
 active_entries=$'\n'
 claim_active_entry() {
@@ -104,13 +102,8 @@ grammar_language="wanxiang-lts-zh-hans"
 printf '%s\n' \
   'grammar:' \
   "  language: ${grammar_language}" \
-  >"${profile_root}/linnet_grammar_active.yaml"
-printf '%s\n' \
-  '{"format":"io.github.ares-x.linnet.language-profile.v1","profile_id":"Active"}' \
-  >"${profile_root}/.linnet-language-profile.json"
+  >"${active_root}/linnet_grammar_active.yaml"
 claim_active_entry "linnet_grammar_active.yaml"
-/bin/cp -X "${profile_root}/linnet_grammar_active.yaml" \
-  "${active_root}/linnet_grammar_active.yaml"
 selector_target="../../Data/Packs/extended/${extended_pack##*/}/linnet_zh_full.dict.yaml"
 claim_active_entry "linnet_zh.dict.yaml"
 ln -s "${selector_target}" "${active_root}/linnet_zh.dict.yaml"
@@ -123,4 +116,3 @@ ln -s "${selector_target}" "${active_root}/linnet_zh.dict.yaml"
   --extended-pack "${extended_pack}"
 
 [[ -s "${active_root}/activation.json" ]] || fail "active state was not created"
-ln -s "../Runtime/Active/activation.json" "${state_root}/active.json"

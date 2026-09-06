@@ -51,9 +51,8 @@ verify_dictionary_root() {
 
 plum_root="${project_root}/data/plum"
 opencc_root="${project_root}/data/opencc"
-squirrel_config="${project_root}/data/squirrel.yaml"
 [[ -d "${plum_root}" && ! -L "${plum_root}" && -d "${opencc_root}" && \
-  ! -L "${opencc_root}" && -f "${squirrel_config}" && ! -L "${squirrel_config}" ]] ||
+  ! -L "${opencc_root}" ]] ||
   fail "staged language data is incomplete or unsafe"
 [[ ! -e "${plum_root}/lua" && ! -L "${plum_root}/lua" ]] ||
   fail "Lua is Core-owned and must not enter staged language data"
@@ -65,7 +64,7 @@ extended="${output_root}/extended"
 mkdir -p "${chinese}/build" "${chinese}/dicts" "${english}/build" \
   "${lts}" "${extended}/dicts"
 
-for name in linnet_en.dict.yaml linnet.smart.db \
+for name in linnet_en.dict.yaml linnet_english_entities.dict.yaml linnet.smart.db \
     linnet.english-data-manifest.json linnet_en.schema.yaml; do
   [[ -f "${plum_root}/${name}" && ! -L "${plum_root}/${name}" ]] ||
     fail "missing English pack input: ${name}"
@@ -81,8 +80,9 @@ done < <(find "${plum_root}/build" -mindepth 1 -maxdepth 1 -type f \
 while IFS= read -r -d '' entry; do
   name="${entry##*/}"
   case "${name}" in
-    build|wanxiang-lts-zh-hans.gram|zh-hans-t-essay-bgw.gram|linnet_grammar_active.yaml|\
-      linnet_en.dict.yaml|linnet.smart.db|linnet.english-data-manifest.json|linnet_en.schema.yaml|\
+    build|squirrel.yaml|wanxiang-lts-zh-hans.gram|zh-hans-t-essay-bgw.gram|linnet_grammar_active.yaml|\
+      linnet_en.dict.yaml|linnet_english_entities.dict.yaml|linnet.smart.db|\
+      linnet.english-data-manifest.json|linnet_en.schema.yaml|\
       linnet_zh.dict.yaml|dicts)
       continue
       ;;
@@ -93,7 +93,7 @@ standard_root="${project_root}/data/linnet/linnet_zh.dict.yaml"
 [[ -f "${standard_root}" && ! -L "${standard_root}" ]] ||
   fail "missing Standard Chinese dictionary root"
 cp -X "${standard_root}" "${chinese}/linnet_zh.dict.yaml"
-for name in zi jichu lianxiang cuoyin duoyin shici diming; do
+for name in zi jichu lianxiang cuoyin duoyin shici diming ext; do
   source="${plum_root}/dicts/${name}.dict.yaml"
   [[ -f "${source}" && ! -L "${source}" ]] ||
     fail "missing direct Core dictionary source: ${name}"
@@ -103,9 +103,8 @@ while IFS= read -r -d '' artifact; do
   cp -X "${artifact}" "${chinese}/build/"
 done < <(find "${plum_root}/build" -mindepth 1 -maxdepth 1 -type f \
   ! -name 'linnet_en*.bin' -print0 | LC_ALL=C sort -z)
-cp -X "${squirrel_config}" "${chinese}/squirrel.yaml"
 COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${opencc_root}" "${chinese}/opencc"
-for name in default.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml squirrel.yaml opencc; do
+for name in default.yaml linnet_zh.schema.yaml linnet_zh.dict.yaml opencc; do
   [[ -e "${chinese}/${name}" && ! -L "${chinese}/${name}" ]] ||
     fail "missing Chinese pack input: ${name}"
 done
@@ -126,15 +125,18 @@ done
 
 # Standard and Complete select different explicit roots. Do not infer either
 # edition from data/plum: that source-build view is intentionally Complete.
-verify_dictionary_root "${chinese}/linnet_zh.dict.yaml" "${chinese}" -- \
-  linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
-  dicts/duoyin dicts/shici dicts/diming
+verify_dictionary_root "${chinese}/linnet_zh.dict.yaml" \
+  "${chinese}" "${english}" -- \
+  linnet_reviewed linnet_english_entities \
+  dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
+  dicts/duoyin dicts/shici dicts/diming dicts/ext
 verify_dictionary_root "${extended}/linnet_zh_full.dict.yaml" \
-  "${chinese}" "${extended}" -- \
-  linnet_reviewed dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
+  "${chinese}" "${english}" "${extended}" -- \
+  linnet_reviewed linnet_english_entities \
+  dicts/zi dicts/jichu dicts/lianxiang dicts/cuoyin \
   dicts/duoyin dicts/shici dicts/diming dicts/yixue dicts/huaxue \
   dicts/yaopin dicts/mingren dicts/yiren dicts/wuzhong dicts/renming \
-  dicts/taifeng dicts/fangyan
+  dicts/taifeng dicts/fangyan dicts/ext
 
 if find "${output_root}" \( -type f -o -type l \) \
     \( -name '*.dSYM' -o -name '*.o' -o -name '*.a' -o \

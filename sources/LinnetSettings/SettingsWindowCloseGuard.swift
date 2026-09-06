@@ -61,7 +61,6 @@ final class SettingsWindowCloseCoordinator: NSObject, NSWindowDelegate {
   private weak var window: NSWindow?
   private weak var forwardedDelegate: (any NSWindowDelegate)?
   private var promptActive = false
-  private var allowCloseOnce = false
 
   func attach(to candidate: NSWindow) {
     guard window !== candidate || candidate.delegate !== self else { return }
@@ -83,14 +82,9 @@ final class SettingsWindowCloseCoordinator: NSObject, NSWindowDelegate {
     window = nil
     forwardedDelegate = nil
     promptActive = false
-    allowCloseOnce = false
   }
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {
-    if allowCloseOnce {
-      allowCloseOnce = false
-      return forwardedDelegate?.windowShouldClose?(sender) ?? true
-    }
     guard let model else {
       return forwardedDelegate?.windowShouldClose?(sender) ?? true
     }
@@ -113,20 +107,25 @@ final class SettingsWindowCloseCoordinator: NSObject, NSWindowDelegate {
       switch choice {
       case .apply:
         model.applyConfiguration { [weak self, weak sender] accepted in
-          guard accepted, let self, let sender else { return }
-          self.allowCloseOnce = true
-          sender.performClose(nil)
+          self?.completeApply(accepted: accepted, for: sender)
         }
       case .discard:
         model.discardPendingChanges()
         self.updateDocumentEditedState()
-        self.allowCloseOnce = true
-        sender?.performClose(nil)
+        sender?.close()
       case .cancel:
         break
       }
     }
     return false
+  }
+
+  /// Owns the terminal close transition after the asynchronous Apply result.
+  /// Rejected applies leave both the draft and its window untouched.
+  func completeApply(accepted: Bool, for sender: NSWindow?) {
+    guard accepted, let sender else { return }
+    updateDocumentEditedState()
+    sender.close()
   }
 
   override func responds(to selector: Selector!) -> Bool {

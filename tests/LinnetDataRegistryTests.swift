@@ -141,6 +141,9 @@ struct LinnetDataRegistryTests {
       LinnetTestFailure.fail("fixture signing owner: \(error)")
     }
     run("valid snapshot", fixtureSigning, validSnapshotUsesOneCanonicalRoot)
+    run("administrative State before installation", fixtureSigning, administrativeStateDoesNotImplyInstalledRuntime)
+    run("legacy receipt Core-only migration", fixtureSigning, legacyReceiptAllowsCoreOnlyEditionUpdate)
+    run("runtime log directory", fixtureSigning, runtimeLogDirectoryIsRegistryOwned)
     run("descriptor-canonical temporary root", fixtureSigning,
       descriptorCanonicalTemporaryRootSupportsAtomicSwap)
     run("canonical root symlink", fixtureSigning, canonicalRootSymlinkFailsClosed)
@@ -163,6 +166,7 @@ struct LinnetDataRegistryTests {
     run("same sequence idempotence", fixtureSigning, sameContentSameSequenceIsIdempotent)
     run("exhaustive installed inventory", fixtureSigning, undeclaredPackEntryFailsClosed)
     run("incompatible replacement", fixtureSigning, incompatibleReplacementFailsClosed)
+    run("pack downgrade before download", fixtureSigning, oldPacksCannotStartDownload)
     run("cross-kind CAS", fixtureSigning, crossKindCandidatesCarryCASAndCleanOwnedPaths)
     run("full activation", fixtureSigning, replacementBuildsOneFullActivation)
     run("durable transaction pack protection", fixtureSigning, durableTransactionProtectsPlannedPacks)
@@ -170,6 +174,7 @@ struct LinnetDataRegistryTests {
     run("failed prepare cleanup owner", fixtureSigning, failedPreparationRetainsTransactionCleanupOwner)
     run("prepared crash recovery", fixtureSigning, preparedDataChannelCrashRestoresPreviousActive)
     run("committed receipt recovery", fixtureSigning, dataChannelReceiptFollowsPublication)
+    run("explicit conflicting pack repair", fixtureSigning, explicitRepairPreservesActiveAndPersonalData)
     run("generation retention", fixtureSigning, threeGenerationsRetainCurrentAndOneRollback)
     run("scoped reconciliation", fixtureSigning, reconciliationIsScopedAndIdempotent)
     run("bounded transaction root GC", fixtureSigning, oversizedTransactionRootDeletesNothing)
@@ -217,10 +222,44 @@ struct LinnetDataRegistryTests {
     }
   }
 
+  private static func administrativeStateDoesNotImplyInstalledRuntime(
+    _ fixtureSigning: FixtureSigningOwner
+  ) throws {
+    let support = LinnetTestScratch.directory.appending(path: "preinstall-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: support) }
+    try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+    let registry = try LinnetDataRegistry(
+      productName: "Linnet", coreVersion: "1.0.0", applicationSupportDirectory: support)
+    let state = registry.rootDirectory.appending(path: "State")
+    try FileManager.default.createDirectory(at: state, withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700])
+    try Data().write(to: state.appending(path: "settings-mutation.lock"))
+    let installed = try LinnetDataRegistry.inspectInstalledRuntime(
+      productName: "Linnet", coreVersion: "1.0.0", applicationSupportDirectory: support)
+    require(installed == .missing, "Settings administrative State is not a language baseline")
+    for name in ["Data", "Runtime"] {
+      let partial = registry.rootDirectory.appending(path: name)
+      try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o700])
+      do {
+        _ = try LinnetDataRegistry.inspectInstalledRuntime(
+          productName: "Linnet", coreVersion: "1.0.0", applicationSupportDirectory: support)
+        LinnetTestFailure.fail("partial \(name) installation was accepted as missing")
+      } catch is LinnetDataRegistry.Failure { }
+      try FileManager.default.removeItem(at: partial)
+    }
+  }
+
   private static func threeGenerationsRetainCurrentAndOneRollback(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
     try withFixture(fixtureSigning) { registry in
+      let initial = try registry.runtimeSnapshot().state.packs.first { $0.kind == .lts }!
+      let initialRoot = registry.rootDirectory.appending(path: initial.relativePath)
+      try registry.makeImmutable(initialRoot)
+      let attributes = try FileManager.default.attributesOfItem(atPath: initialRoot.path)
+      require((attributes[.posixPermissions] as? NSNumber)?.uint16Value == 0o555,
+        "GC fixture did not reproduce production immutable directories")
       let second = try replacementPack(
         .lts, version: "2026.08.2", sequence: 2, registry: registry,
         fixtureSigning: fixtureSigning)
@@ -491,6 +530,31 @@ struct LinnetDataRegistryTests {
     }
   }
 
+  private static func runtimeLogDirectoryIsRegistryOwned(
+    _ fixtureSigning: FixtureSigningOwner
+  ) throws {
+    try withFixture(fixtureSigning) { registry in
+      let expected = registry.rootDirectory.appending(
+        path: "Runtime/Logs", directoryHint: .isDirectory)
+      let logs = try registry.prepareRuntimeLogDirectory()
+      require(samePath(logs, expected), "runtime logs escaped the Registry root")
+
+      try FileManager.default.removeItem(at: logs)
+      let outside = registry.rootDirectory.appending(
+        path: "outside-runtime-logs", directoryHint: .isDirectory)
+      try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: false)
+      let sentinel = outside.appending(path: "sentinel")
+      try Data("outside\n".utf8).write(to: sentinel)
+      try FileManager.default.createSymbolicLink(at: logs, withDestinationURL: outside)
+      requireFailure(.unsafePath(logs.path)) {
+        _ = try registry.prepareRuntimeLogDirectory()
+      }
+      require(
+        (try? String(contentsOf: sentinel, encoding: .utf8)) == "outside\n",
+        "runtime log validation touched a symlink target")
+    }
+  }
+
   private static func canonicalRootSymlinkFailsClosed(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
@@ -517,7 +581,7 @@ struct LinnetDataRegistryTests {
   private static func descriptorCanonicalTemporaryRootSupportsAtomicSwap(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
-    let support = FileManager.default.temporaryDirectory.appending(
+    let support = LinnetTestScratch.directory.appending(
       path: "LinnetDescriptorRoot-\(UUID().uuidString)", directoryHint: .isDirectory)
     defer { try? FileManager.default.removeItem(at: support) }
     let registry = try LinnetDataRegistry(
@@ -828,6 +892,59 @@ struct LinnetDataRegistryTests {
     }
   }
 
+  private static func explicitRepairPreservesActiveAndPersonalData(
+    _ fixtureSigning: FixtureSigningOwner
+  ) throws {
+    try withFixture(fixtureSigning) { registry in
+      let snapshot = try registry.runtimeSnapshot()
+      let original = snapshot.state.packs.first { $0.kind == .english }!
+      let originalRoot = registry.rootDirectory.appending(path: original.relativePath)
+      let oldManifest = try Data(contentsOf: originalRoot.appending(path: "manifest.json"))
+      var object = try JSONSerialization.jsonObject(with: oldManifest) as! [String: Any]
+      object["min_core"] = "0.9.0"
+      let manifest = try JSONDecoder().decode(
+        LinnetPackContract.Manifest.self, from: JSONSerialization.data(withJSONObject: object))
+      let manifestData = try LinnetPackContract.canonicalManifestData(manifest)
+      let replacement = LinnetDataRegistry.activePack(
+        from: manifest, manifestSHA256: LinnetPackContract.sha256(manifestData), separateRepairCopy: true)
+      let files = try Dictionary(uniqueKeysWithValues: manifest.files.map {
+        ($0.path, try Data(contentsOf: originalRoot.appending(path: $0.path)))
+      })
+      try writeFixturePack(
+        .init(pack: replacement, manifestData: manifestData, files: files),
+        to: registry.rootDirectory.appending(path: replacement.relativePath))
+      try FileManager.default.createDirectory(at: registry.userDataDirectory, withIntermediateDirectories: true)
+      let personal = registry.userDataDirectory.appending(path: "learning-fixture.txt")
+      let personalData = Data("user words remain unchanged".utf8)
+      try personalData.write(to: personal)
+      var target = snapshot.state.packs.filter { $0.kind != .english }
+      target.append(replacement)
+      let verified = LinnetDataChannel.Verified(
+        catalog: dataChannelCatalog(for: target, sequence: 1), digest: String(repeating: "c", count: 64))
+      requireFailure(.invalidActiveState) {
+        _ = try registry.beginDataChannelUpdate(accepting: verified, edition: .standard)
+      }
+      let update = try registry.beginDataChannelUpdate(
+        accepting: verified, edition: .standard, allowCompleteRepair: true)
+      let prepared = try registry.prepareDataChannelUpdate(update, target: target)
+      let beforeActivation = try registry.runtimeSnapshot()
+      require(beforeActivation.state.packs == snapshot.state.packs,
+        "preparation changed active packs")
+      try exchangeDirectories(registry.activeSharedDataDirectory, prepared.directory)
+      try registry.commitDataChannelUpdate(transactionID: prepared.transactionID)
+      let repaired = try registry.runtimeSnapshot()
+      require(repaired.state.packs.contains(replacement), "repair was not activated")
+      require(repaired.state.rollbackPacks == [original], "repair lost original rollback pack")
+      let retainedPersonal = try Data(contentsOf: personal)
+      let retainedManifest = try Data(contentsOf: originalRoot.appending(path: "manifest.json"))
+      require(retainedPersonal == personalData, "repair changed learning data")
+      require(retainedManifest == oldManifest,
+        "repair overwrote original manifest")
+      let repeated = try registry.beginDataChannelUpdate(accepting: verified, edition: .standard)
+      try registry.cancelDataChannelUpdate(transactionID: repeated.transactionID)
+    }
+  }
+
   private static func dataChannelReceiptFollowsPublication(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
@@ -837,6 +954,7 @@ struct LinnetDataRegistryTests {
       let acceptedDigest = String(repeating: "a", count: 64)
       let verified = LinnetDataChannel.Verified(
         catalog: catalog, digest: acceptedDigest)
+      let expectedReceipt = try registry.receiptForCatalog(verified)
       let update = try registry.beginDataChannelUpdate(accepting: verified, edition: .standard)
       let activation = try registry.prepareDataChannelUpdate(update, target: active)
       let transactionDirectory = registry.transactionsDirectory.appending(
@@ -861,13 +979,12 @@ struct LinnetDataRegistryTests {
       let healthy = try registry.runtimeSnapshot()
       require(healthy.state.publication == .committed, "commit publication")
       require(healthy.state.acceptedCatalog?.sequence == 9, "committed catalog receipt")
-      require(healthy.state.acceptedCatalog?.digest == acceptedDigest,
-        "committed catalog digest")
+      require(healthy.state.acceptedCatalog == expectedReceipt,
+        "committed pack snapshot receipt")
       require(healthy.state.rollbackPacks.isEmpty, "unchanged activation created rollback packs")
       require(FileManager.default.fileExists(atPath: marker.path),
         "cleanup failure removed its transaction owner")
-      let stateDirectory = registry.rootDirectory.appending(
-        path: "State", directoryHint: .isDirectory)
+      let stateDirectory = registry.activeSharedDataDirectory
       require(!FileManager.default.fileExists(
         atPath: stateDirectory.appending(path: "data-channel.json").path),
         "receipt side file returned")
@@ -886,8 +1003,16 @@ struct LinnetDataRegistryTests {
         try FileManager.default.contentsOfDirectory(atPath: registry.transactionsDirectory.path))
       let downloadsBeforeDivergence = Set(
         try FileManager.default.contentsOfDirectory(atPath: registry.downloadsDirectory.path))
+      let artifact = catalog.activationSets[0].packs[0]
+      let changed = LinnetDataChannel.Artifact(
+        kind: artifact.kind, version: artifact.version, sequence: artifact.sequence,
+        dataABI: artifact.dataABI, minCore: artifact.minCore, contentSHA256: artifact.contentSHA256,
+        bytes: artifact.bytes + 1, containerSHA256: artifact.containerSHA256, url: artifact.url)
       let divergent = LinnetDataChannel.Verified(
-        catalog: catalog, digest: String(repeating: "b", count: 64))
+        catalog: .init(
+          format: catalog.format, sequence: catalog.sequence, core: catalog.core,
+          activationSets: [.init(edition: .standard, packs: [changed] + catalog.activationSets[0].packs.dropFirst())]),
+        digest: String(repeating: "b", count: 64))
       requireFailure(.staleDataChannel) {
         _ = try registry.beginDataChannelUpdate(accepting: divergent, edition: .standard)
       }
@@ -908,11 +1033,212 @@ struct LinnetDataRegistryTests {
       requireFailure(.staleDataChannel) {
         _ = try registry.beginDataChannelUpdate(accepting: replay, edition: .standard)
       }
+      requireFailure(.staleDataChannel) {
+        _ = try registry.beginDataChannelUpdate(
+          accepting: replay, edition: .standard, allowCompleteRepair: true)
+      }
       _ = chflags(downloadBlocker.path, 0)
       _ = try registry.runtimeSnapshot()
       require(!FileManager.default.fileExists(atPath: transactionDirectory.path),
         "committed transaction was not reconciled")
     }
+  }
+
+  private static func legacyReceiptAllowsCoreOnlyEditionUpdate(
+    _ fixtureSigning: FixtureSigningOwner
+  ) throws {
+    try withFixture(fixtureSigning) { registry in
+      let installed = try registry.runtimeSnapshot().state
+      let version = "2026.08.1"
+      let extended = try fixturePack(
+        .extended, version: version, sequence: 1,
+        files: Dictionary(uniqueKeysWithValues: fixtureFileNames(.extended).map {
+          ($0, Data(version.utf8))
+        }), fixtureSigning: fixtureSigning)
+      let full = installed.packs + [extended.pack]
+      let oldCatalog = try publishedDataChannelCatalog(for: full, build: 1)
+      let nextCatalog = try publishedDataChannelCatalog(for: full, build: 2)
+      require(oldCatalog.catalog.activationSets == nextCatalog.catalog.activationSets,
+        "Core-only fixture changed pack identity")
+      require(oldCatalog.digest != nextCatalog.digest, "Core-only fixture must change Catalog bytes")
+      let legacy = LinnetDataRegistry.DataChannelReceipt(
+        format: "io.github.ares-x.linnet.data-channel-receipt.v1",
+        sequence: oldCatalog.catalog.sequence, digest: oldCatalog.digest)
+      let stateURL = registry.activeSharedDataDirectory.appending(path: "activation.json")
+      try writeState(.init(
+        format: installed.format, edition: installed.edition, generation: installed.generation,
+        activeView: installed.activeView, packs: installed.packs, acceptedCatalog: legacy), to: stateURL)
+      let before = try Data(contentsOf: stateURL)
+
+      let installedIdentityChanges: [(String, Any)] = [
+        ("version", "2026.08.2"), ("sequence", 2), ("data_abi", 2),
+        ("min_core", "0.9.0"), ("content_sha256", String(repeating: "c", count: 64))
+      ]
+      for (field, value) in installedIdentityChanges {
+        let altered = try changingPublishedArtifact(nextCatalog, field: field, value: value)
+        requireFailure(.staleDataChannel) {
+          _ = try registry.beginDataChannelUpdate(accepting: altered, edition: .standard)
+        }
+      }
+
+      let cancelled = try registry.beginDataChannelUpdate(accepting: nextCatalog, edition: .standard)
+      let afterBegin = try Data(contentsOf: stateURL)
+      require(afterBegin == before, "begin eagerly replaced the legacy receipt")
+      try registry.cancelDataChannelUpdate(transactionID: cancelled.transactionID)
+      let afterCancel = try Data(contentsOf: stateURL)
+      require(afterCancel == before, "cancellation migrated the legacy receipt")
+
+      for receipt in [legacy, try registry.receiptForCatalog(nextCatalog)] {
+        let interrupted = try registry.beginDataChannelUpdate(accepting: nextCatalog, edition: .standard)
+        try replaceTransactionReceipt(interrupted, in: registry, with: receipt)
+        let prepared = try registry.prepareDataChannelUpdate(interrupted, target: installed.packs)
+        try exchangeDirectories(registry.activeSharedDataDirectory, prepared.directory)
+        let tentative = try registry.tentativeRuntimeSnapshot().state
+        require(tentative.acceptedCatalog == receipt && tentative.publication == .prepared,
+          "old/current transaction lost its tentative receipt")
+        let recovered = try registry.recoverPreparedLanguageActivation()
+        require(recovered, "interrupted receipt migration was not recovered")
+        let afterRecovery = try Data(contentsOf: stateURL)
+        require(afterRecovery == before, "crash recovery migrated the committed legacy receipt")
+      }
+
+      let update = try registry.beginDataChannelUpdate(accepting: nextCatalog, edition: .full)
+      requireFailure(.invalidActiveState) {
+        _ = try registry.prepareDataChannelUpdate(update, target: full)
+      }
+      let afterFailure = try Data(contentsOf: stateURL)
+      require(afterFailure == before, "failed prepare migrated the legacy receipt")
+      try writeFixturePack(extended, to: registry.rootDirectory.appending(path: extended.pack.relativePath))
+      let activation = try registry.prepareDataChannelUpdate(update, target: full)
+      let afterPrepare = try Data(contentsOf: stateURL)
+      require(afterPrepare == before, "prepared candidate migrated committed Active")
+      try exchangeDirectories(registry.activeSharedDataDirectory, activation.directory)
+      try registry.commitDataChannelUpdate(transactionID: activation.transactionID)
+      let committed = try registry.runtimeSnapshot().state
+      require(committed.edition == .full && committed.packs == full, "Extended activation did not commit")
+      require(committed.acceptedCatalog?.format == legacy.format,
+        "successful activation changed the shipped receipt format")
+      require(committed.acceptedCatalog?.digest == nextCatalog.digest,
+        "successful activation changed the whole-Catalog digest meaning")
+      require(committed.acceptedCatalog?.packSnapshotDigest != nil,
+        "successful activation did not persist the new pack snapshot")
+      let legacyDecoded = try JSONDecoder().decode(
+        LegacyDataChannelReceipt.self, from: JSONEncoder().encode(committed.acceptedCatalog!))
+      require(legacyDecoded.format == legacy.format && legacyDecoded.digest == nextCatalog.digest,
+        "published Core receipt decoding or digest meaning regressed")
+      let nextCore = try publishedDataChannelCatalog(for: full, build: 3)
+      let repeated = try registry.beginDataChannelUpdate(accepting: nextCore, edition: .full)
+      try registry.cancelDataChannelUpdate(transactionID: repeated.transactionID)
+      let afterRepeated = try registry.runtimeSnapshot().state.acceptedCatalog
+      require(afterRepeated == committed.acceptedCatalog,
+        "Core-only change replaced the accepted pack snapshot")
+
+      let snapshotChanges = installedIdentityChanges + [
+        ("bytes", 2), ("container_sha256", String(repeating: "c", count: 64)),
+        ("url", "https://GITHUB.COM/Ares-X/Linnet/releases/download/data-9/Linnet-English.linnetpack")
+      ]
+      for (field, value) in snapshotChanges {
+        let altered = try changingPublishedArtifact(nextCore, field: field, value: value)
+        requireFailure(.staleDataChannel) {
+          _ = try registry.beginDataChannelUpdate(accepting: altered, edition: .full)
+        }
+      }
+      let oldTransaction = try registry.beginDataChannelUpdate(accepting: nextCore, edition: .full)
+      try replaceTransactionReceipt(oldTransaction, in: registry, with: legacy)
+      requireFailure(.staleDataChannel) {
+        _ = try registry.prepareDataChannelUpdate(oldTransaction, target: full)
+      }
+      try registry.cancelDataChannelUpdate(transactionID: oldTransaction.transactionID)
+      try legacyHostRoundTrip(registry, full: full, catalog: nextCore)
+    }
+  }
+
+  // Exact receipt fields from public v0.1.10 (56cb640). Its synthesized decoder
+  // ignores new optional keys; the full original Registry is also exercised by
+  // the isolated published-source probe when supplied by the focused runner.
+  private struct LegacyDataChannelReceipt: Codable {
+    let format: String
+    let sequence: UInt64
+    let digest: String
+  }
+
+  private static func legacyHostRoundTrip(
+    _ registry: LinnetDataRegistry, full: [LinnetDataRegistry.ActivePack],
+    catalog: LinnetDataChannel.Verified
+  ) throws {
+    guard let executable = ProcessInfo.processInfo.environment["LINNET_LEGACY_REGISTRY_PROBE"] else {
+      print("Original v0.1.10 Registry process: NOT_EXERCISED (no isolated probe)")
+      return
+    }
+    let update = try registry.beginDataChannelUpdate(accepting: catalog, edition: .full)
+    let prepared = try registry.prepareDataChannelUpdate(update, target: full)
+    try exchangeDirectories(registry.activeSharedDataDirectory, prepared.directory)
+    let legacy = Process()
+    legacy.executableURL = URL(fileURLWithPath: executable)
+    legacy.arguments = [registry.rootDirectory.deletingLastPathComponent().path, update.transactionID.uuidString]
+    try legacy.run()
+    legacy.waitUntilExit()
+    require(legacy.terminationStatus == 0, "public Core could not commit the new Settings candidate")
+    let snapshot = try registry.runtimeSnapshot().state
+    require(snapshot.publication == .committed && snapshot.packs == full,
+      "public Core did not commit the selected packs")
+    require(snapshot.acceptedCatalog?.digest == catalog.digest
+      && snapshot.acceptedCatalog?.packSnapshotDigest == nil,
+      "old Host dropping an unknown optional field was misreported as a completed migration")
+    let nextCore = try publishedDataChannelCatalog(for: full, build: catalog.catalog.core.build + 1)
+    let resumed = try registry.beginDataChannelUpdate(accepting: nextCore, edition: .full)
+    let candidate = try registry.prepareDataChannelUpdate(resumed, target: full)
+    try exchangeDirectories(registry.activeSharedDataDirectory, candidate.directory)
+    try registry.commitDataChannelUpdate(transactionID: candidate.transactionID)
+    let migrated = try registry.runtimeSnapshot().state
+    require(migrated.acceptedCatalog?.packSnapshotDigest != nil,
+      "new Host failed to complete migration after an old Host commit")
+  }
+
+  private static func replaceTransactionReceipt(
+    _ update: LinnetDataRegistry.DataChannelUpdateTransaction,
+    in registry: LinnetDataRegistry, with receipt: LinnetDataRegistry.DataChannelReceipt
+  ) throws {
+    let marker = registry.transactionsDirectory.appending(path: update.transactionID.uuidString)
+      .appending(path: LinnetDataRegistry.languageTransactionMarkerName)
+    var record = try JSONSerialization.jsonObject(with: Data(contentsOf: marker)) as! [String: Any]
+    record["catalog"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt))
+    try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]).write(to: marker, options: .atomic)
+  }
+
+  private static func changingPublishedArtifact(
+    _ verified: LinnetDataChannel.Verified, field: String, value: Any
+  ) throws -> LinnetDataChannel.Verified {
+    var document = try JSONSerialization.jsonObject(
+      with: LinnetDataChannel.canonicalCatalogData(verified.catalog)) as! [String: Any]
+    var sets = document["activation_sets"] as! [[String: Any]]
+    var packs = sets[0]["packs"] as! [[String: Any]]
+    packs[1][field] = value
+    sets[0]["packs"] = packs
+    document["activation_sets"] = sets
+    return try LinnetDataChannel.verify(
+      JSONSerialization.data(withJSONObject: document), coreVersion: "1.0.0")
+  }
+
+  private static func publishedDataChannelCatalog(
+    for full: [LinnetDataRegistry.ActivePack], build: UInt64
+  ) throws -> LinnetDataChannel.Verified {
+    let standard = full.filter { $0.kind != .extended }
+    let catalog = LinnetDataChannel.Catalog(
+      format: LinnetDataChannel.legacyFormat, sequence: 9,
+      core: .init(
+        version: "1.0.0", build: build, revision: String(repeating: "a", count: 40),
+        bytes: 1, sha256: String(repeating: "b", count: 64),
+        artifactFormat: .installerPackage,
+        artifactURL: URL(string:
+          "https://github.com/Ares-X/Linnet/releases/download/core-v1.0.0/Linnet-1.0.0-arm64-Core-community-beta.pkg")!,
+        releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v1.0.0")!),
+      activationSets: [
+        dataChannelCatalog(for: standard, sequence: 9).activationSets[0],
+        dataChannelCatalog(for: full, sequence: 9).activationSets[0]
+      ])
+    return try LinnetDataChannel.verify(
+      LinnetDataChannel.canonicalCatalogData(catalog), coreVersion: "1.0.0")
   }
 
   private static func personalScratchGCIsTypedAndScoped(
@@ -1148,6 +1474,33 @@ struct LinnetDataRegistryTests {
     }
   }
 
+  private static func oldPacksCannotStartDownload(_ fixtureSigning: FixtureSigningOwner) throws {
+    try withFixture(fixtureSigning) { registry in
+      let previous = try fixturePacks(fixtureSigning)
+      let replacement = try replacementPack(
+        .english, version: "2026.08.2", registry: registry, fixtureSigning: fixtureSigning)
+      try publish(replacement, registry: registry)
+      let snapshot = try registry.runtimeSnapshot()
+      let transactions = try FileManager.default.contentsOfDirectory(atPath: registry.transactionsDirectory.path)
+      let downloads = try FileManager.default.contentsOfDirectory(atPath: registry.downloadsDirectory.path)
+      let newerCatalogWithOldPacks = LinnetDataChannel.Verified(
+        catalog: dataChannelCatalog(for: previous, sequence: 20),
+        digest: String(repeating: "a", count: 64))
+      requireFailure(.staleDataChannel) {
+        _ = try registry.beginDataChannelUpdate(accepting: newerCatalogWithOldPacks, edition: .standard)
+      }
+      let after = try registry.runtimeSnapshot()
+      let remainingTransactions = try FileManager.default.contentsOfDirectory(atPath: registry.transactionsDirectory.path)
+      let remainingDownloads = try FileManager.default.contentsOfDirectory(atPath: registry.downloadsDirectory.path)
+      require(after.activeRevision == snapshot.activeRevision,
+              "old catalog changed Active")
+      require(remainingTransactions == transactions,
+              "old pack created a transaction before rejection")
+      require(remainingDownloads == downloads,
+              "old pack created a download directory before rejection")
+    }
+  }
+
   private static func incompatibleReplacementFailsClosed(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
@@ -1198,7 +1551,7 @@ struct LinnetDataRegistryTests {
         relativePath: "Data/Packs/chinese/1-conflict",
         manifestSHA256: String(repeating: "8", count: 64)), at: 0)
       let verified = LinnetDataChannel.Verified(
-        catalog: dataChannelCatalog(for: target, sequence: 2),
+        catalog: dataChannelCatalog(for: try fixturePacks(fixtureSigning), sequence: 2),
         digest: String(repeating: "7", count: 64))
       let update = try registry.beginDataChannelUpdate(
         accepting: verified, edition: .standard)
@@ -1263,7 +1616,7 @@ struct LinnetDataRegistryTests {
   }
 
   private static func replacementPack(
-    _ kind: LinnetDataRegistry.PackKind,
+    _ kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64 = 2,
     registry: LinnetDataRegistry,
@@ -1314,7 +1667,7 @@ struct LinnetDataRegistryTests {
     _ fixtureSigning: FixtureSigningOwner,
     _ body: (LinnetDataRegistry) throws -> Void
   ) throws {
-    let base = FileManager.default.temporaryDirectory.appending(
+    let base = LinnetTestScratch.directory.appending(
       path: "LinnetDataRegistryTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )
@@ -1330,7 +1683,7 @@ struct LinnetDataRegistryTests {
       at: active.appending(path: "build", directoryHint: .isDirectory),
       withIntermediateDirectories: true
     )
-    let fixtures = try [LinnetDataRegistry.PackKind.chinese, .english, .lts].map { kind in
+    let fixtures = try [LinnetPackContract.Kind.chinese, .english, .lts].map { kind in
       try fixturePack(
         kind, version: "2026.08.1", sequence: 1,
         files: Dictionary(uniqueKeysWithValues: fixtureFileNames(kind).map {
@@ -1401,7 +1754,7 @@ struct LinnetDataRegistryTests {
   private static func fixturePacks(
     _ fixtureSigning: FixtureSigningOwner
   ) throws -> [LinnetDataRegistry.ActivePack] {
-    try [LinnetDataRegistry.PackKind.chinese, .english, .lts].map { kind in
+    try [LinnetPackContract.Kind.chinese, .english, .lts].map { kind in
       try fixturePack(
         kind, version: "2026.08.1", sequence: 1,
         files: Dictionary(uniqueKeysWithValues: fixtureFileNames(kind).map {
@@ -1411,10 +1764,10 @@ struct LinnetDataRegistryTests {
     }
   }
 
-  private static func fixtureFileNames(_ kind: LinnetDataRegistry.PackKind) -> [String] {
+  private static func fixtureFileNames(_ kind: LinnetPackContract.Kind) -> [String] {
     switch kind {
     case .chinese:
-      ["default.yaml", "linnet_zh.dict.yaml", "linnet_zh.schema.yaml", "squirrel.yaml"]
+      ["default.yaml", "linnet_zh.dict.yaml", "linnet_zh.schema.yaml"]
     case .english:
       ["linnet_en.schema.yaml"]
     case .lts:
@@ -1425,7 +1778,7 @@ struct LinnetDataRegistryTests {
   }
 
   private static func fixturePack(
-    _ kind: LinnetDataRegistry.PackKind,
+    _ kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64,
     files: [String: Data],
@@ -1448,8 +1801,8 @@ struct LinnetDataRegistryTests {
     let manifest = LinnetPackContract.Manifest(
       format: LinnetPackContract.manifestFormat,
       product: LinnetPackContract.productIdentifier,
-      packID: LinnetPackContract.Kind(rawValue: kind.rawValue)!.packID,
-      kind: LinnetPackContract.Kind(rawValue: kind.rawValue)!,
+      packID: kind.packID,
+      kind: kind,
       version: version,
       sequence: sequence,
       dataABI: 1,
@@ -1466,9 +1819,7 @@ struct LinnetDataRegistryTests {
       dataABI: 1,
       contentSHA256: contentSHA256,
       minCore: manifest.minCore,
-      requirements: requirements.map {
-        .init(kind: LinnetDataRegistry.PackKind(rawValue: $0.kind.rawValue)!, dataABI: $0.dataABI)
-      },
+      requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
       manifestSHA256: LinnetPackContract.sha256(manifestData))
     return .init(pack: pack, manifestData: manifestData, files: files)
@@ -1491,20 +1842,21 @@ struct LinnetDataRegistryTests {
   ) -> LinnetDataChannel.Catalog {
     let artifacts = packs.map { pack in
       LinnetDataChannel.Artifact(
-        kind: LinnetPackContract.Kind(rawValue: pack.kind.rawValue)!,
+        kind: pack.kind,
         version: pack.version, sequence: pack.sequence, dataABI: pack.dataABI,
         minCore: pack.minCore, contentSHA256: pack.contentSHA256, bytes: 1,
         containerSHA256: String(repeating: "b", count: 64),
-        url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-\(sequence)/\(LinnetPackContract.Kind(rawValue: pack.kind.rawValue)!.releaseAssetName)")!)
+        url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-\(sequence)/\(pack.kind.releaseAssetName)")!)
     }
     let edition: LinnetDataRegistry.Edition = packs.contains { $0.kind == .extended }
       ? .full : .standard
     return .init(
-      format: LinnetDataChannel.format, sequence: sequence,
+      format: LinnetDataChannel.legacyFormat, sequence: sequence,
       core: .init(
         version: "0.1.0", build: 1, revision: String(repeating: "a", count: 40),
         bytes: 1, sha256: String(repeating: "b", count: 64),
-        packageURL: URL(
+        artifactFormat: .installerPackage,
+        artifactURL: URL(
           string:
             "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg")!,
         releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.0")!),

@@ -82,12 +82,6 @@ enum LinnetPackContract {
   struct VerifiedPack: Sendable {
     let manifest: Manifest
     let manifestData: Data
-    let manifestSHA256: String
-  }
-
-  struct EncodedPayload: Equatable, Sendable {
-    let unpackedBytes: UInt64
-    let unpackedSHA256: String
   }
 
   enum Failure: LocalizedError, Equatable {
@@ -174,160 +168,25 @@ enum LinnetPackContract {
       expectedBytes: manifest.files.reduce(0) { $0 + $1.bytes },
       expectedSHA256: manifest.contentSHA256)
     for entry in manifest.files {
-      var remaining = entry.bytes
-      var fileHasher = SHA256()
-      var output: FileHandle?
-      if let destination {
-        let fileURL = destination.appending(path: entry.path, directoryHint: .notDirectory)
-        try prepareParentDirectories(for: fileURL, beneath: destination)
-        let descriptor = open(fileURL.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-        guard descriptor >= 0 else { throw Failure.unsafePath(entry.path) }
-        output = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-      }
-      do {
-        while remaining > 0 {
-          let count = Int(min(remaining, 1_048_576))
-          let chunk = try payload.read(maximumBytes: count)
-          guard !chunk.isEmpty else { throw Failure.invalidPayload("unpacked size") }
-          fileHasher.update(data: chunk)
-          try output?.write(contentsOf: chunk)
-          remaining -= UInt64(chunk.count)
-        }
-        try output?.synchronize()
-        try output?.close()
-      } catch {
-        try? output?.close()
-        throw error
-      }
-      guard hex(fileHasher.finalize()) == entry.sha256 else {
-        throw Failure.invalidPayload("hash \(entry.path)")
-      }
-      if let destination {
-        try FileManager.default.setAttributes(
-          [.posixPermissions: 0o444],
-          ofItemAtPath: destination.appending(path: entry.path).path
-        )
-      }
+      try verifyPayloadFile(entry, payload: payload, destination: destination)
     }
     try payload.finish()
     return VerifiedPack(
       manifest: manifest,
-      manifestData: manifestData,
-      manifestSHA256: sha256(manifestData)
+      manifestData: manifestData
     )
   }
 
-  /// Encodes one concatenated payload into the v2 container's zlib stream.
-  /// The returned digest confirms that the stream came from the manifest's
-  /// exhaustive uncompressed file inventory.
-  static func compressZlib(source: URL, to output: URL) throws -> EncodedPayload {
-    let descriptor = open(output.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-    guard descriptor >= 0 else { throw Failure.invalidContainer }
-    let destination = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-    let input = try FileHandle(forReadingFrom: source)
-    let inputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 1_048_576)
-    let outputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 1_048_576)
-    defer {
-      inputBuffer.deallocate()
-      outputBuffer.deallocate()
-      try? input.close()
-      try? destination.close()
-    }
-    var stream = z_stream()
-    guard deflateInit_(
-      &stream, Z_DEFAULT_COMPRESSION, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK
-    else { throw Failure.invalidPayload("zlib initialization") }
-    defer { deflateEnd(&stream) }
-
-    var sourceEnded = false
-    var unpackedBytes: UInt64 = 0
-    var unpackedHasher = SHA256()
-    while true {
-      if stream.avail_in == 0 && !sourceEnded {
-        let chunk = try input.read(upToCount: 1_048_576) ?? Data()
-        if chunk.isEmpty {
-          sourceEnded = true
-        } else {
-          chunk.copyBytes(to: inputBuffer, count: chunk.count)
-          stream.next_in = inputBuffer
-          stream.avail_in = UInt32(chunk.count)
-          unpackedHasher.update(data: chunk)
-          unpackedBytes += UInt64(chunk.count)
-          guard unpackedBytes <= UInt64(maximumPayloadBytes) else {
-            throw Failure.invalidPayload("unpacked size")
-          }
-        }
-      }
-      stream.next_out = outputBuffer
-      stream.avail_out = 1_048_576
-      let status = deflate(&stream, sourceEnded ? Z_FINISH : Z_NO_FLUSH)
-      guard status == Z_OK || status == Z_STREAM_END else {
-        throw Failure.invalidPayload("zlib encoding")
-      }
-      let produced = 1_048_576 - Int(stream.avail_out)
-      if produced > 0 {
-        let chunk = Data(bytes: outputBuffer, count: produced)
-        try destination.write(contentsOf: chunk)
-      }
-      if status == Z_STREAM_END {
-        guard sourceEnded, stream.avail_in == 0 else {
-          throw Failure.invalidPayload("zlib encoding input")
-        }
-        break
-      }
-      guard produced > 0 || stream.avail_in > 0 || !sourceEnded else {
-        throw Failure.invalidPayload("zlib encoding stalled")
-      }
-    }
-    try destination.synchronize()
-    return EncodedPayload(
-      unpackedBytes: unpackedBytes,
-      unpackedSHA256: hex(unpackedHasher.finalize()))
-  }
-
-  static func writeContainer(
-    manifestData: Data,
-    payload: URL,
-    to output: URL
-  ) throws {
-    guard !manifestData.isEmpty, manifestData.count <= maximumManifestBytes else {
-      throw Failure.invalidContainer
-    }
-    let descriptor = open(output.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
-    guard descriptor >= 0 else { throw Failure.invalidContainer }
-    let destination = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-    let source = try FileHandle(forReadingFrom: payload)
-    defer {
-      try? source.close()
-      try? destination.close()
-    }
-    try destination.write(contentsOf: magic)
-    try destination.write(contentsOf: Data(bigEndianBytes(containerVersion)))
-    try destination.write(contentsOf: Data(bigEndianBytes(UInt32(manifestData.count))))
-    try destination.write(contentsOf: manifestData)
-    while let chunk = try source.read(upToCount: 1_048_576), !chunk.isEmpty {
-      try destination.write(contentsOf: chunk)
-    }
-    try destination.synchronize()
-  }
 }
 
 extension LinnetPackContract {
   static func validate(_ manifest: Manifest, coreVersion: String) throws {
-    try validateIdentity(manifest)
-    try validateFiles(manifest)
-    try validateRequirements(manifest)
-    guard let required = SemanticVersion(manifest.minCore),
-      let actual = SemanticVersion(coreVersion)
-    else {
-      throw Failure.invalidManifest("core version")
-    }
-    guard actual >= required else {
-      throw Failure.incompatibleCore(required: manifest.minCore, actual: coreVersion)
-    }
+    try validateIdentity(manifest, coreVersion: coreVersion)
+    try validateFiles(manifest.files, kind: manifest.kind)
+    try validateRequirements(manifest.requires, for: manifest)
   }
 
-  private static func validateIdentity(_ manifest: Manifest) throws {
+  static func validateIdentity(_ manifest: Manifest, coreVersion: String) throws {
     guard manifest.format == manifestFormat else { throw Failure.invalidManifest("format") }
     guard manifest.product == productIdentifier else { throw Failure.invalidManifest("product") }
     guard manifest.packID == manifest.kind.packID else { throw Failure.invalidManifest("pack_id") }
@@ -340,14 +199,22 @@ extension LinnetPackContract {
     guard !manifest.files.isEmpty, manifest.files.count <= maximumFiles else {
       throw Failure.invalidManifest("file count")
     }
+    guard let required = SemanticVersion(manifest.minCore),
+      let actual = SemanticVersion(coreVersion)
+    else {
+      throw Failure.invalidManifest("core version")
+    }
+    guard actual >= required else {
+      throw Failure.incompatibleCore(required: manifest.minCore, actual: coreVersion)
+    }
   }
 
-  private static func validateFiles(_ manifest: Manifest) throws {
+  static func validateFiles(_ files: [FileEntry], kind: Kind) throws {
     var total: UInt64 = 0
     var portablePaths = Set<String>()
     var previous: String?
-    for entry in manifest.files {
-      try validatePath(entry.path, kind: manifest.kind)
+    for entry in files {
+      try validatePath(entry.path, kind: kind)
       guard entry.bytes <= UInt64(maximumFileBytes), isSHA256(entry.sha256) else {
         throw Failure.invalidManifest("file \(entry.path)")
       }
@@ -368,15 +235,15 @@ extension LinnetPackContract {
     }
   }
 
-  private static func validateRequirements(_ manifest: Manifest) throws {
-    let requirements = manifest.requires.sorted { $0.kind.rawValue < $1.kind.rawValue }
-    guard requirements == manifest.requires,
+  static func validateRequirements(_ requirements: [Requirement], for manifest: Manifest) throws {
+    let sorted = requirements.sorted { $0.kind.rawValue < $1.kind.rawValue }
+    guard sorted == requirements,
       Set(requirements.map(\.kind)).count == requirements.count,
       requirements.allSatisfy({ $0.dataABI > 0 && $0.kind != manifest.kind })
     else {
       throw Failure.invalidManifest("requirements")
     }
-    if manifest.kind == .lts || manifest.kind == .extended {
+    if [.lts, .extended].contains(manifest.kind) {
       guard requirements == [.init(kind: .chinese, dataABI: manifest.dataABI)] else {
         throw Failure.invalidManifest("Chinese data requirement")
       }
@@ -384,6 +251,47 @@ extension LinnetPackContract {
       guard requirements.isEmpty else {
         throw Failure.invalidManifest("unsupported requirement")
       }
+    }
+  }
+
+  fileprivate static func verifyPayloadFile(
+    _ entry: FileEntry,
+    payload: ZlibPayloadReader,
+    destination: URL?
+  ) throws {
+    var remaining = entry.bytes
+    var fileHasher = SHA256()
+    var output: FileHandle?
+    if let destination {
+      let fileURL = destination.appending(path: entry.path, directoryHint: .notDirectory)
+      try prepareParentDirectories(for: fileURL, beneath: destination)
+      let descriptor = open(fileURL.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+      guard descriptor >= 0 else { throw Failure.unsafePath(entry.path) }
+      output = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    }
+    do {
+      while remaining > 0 {
+        let count = Int(min(remaining, 1_048_576))
+        let chunk = try payload.read(maximumBytes: count)
+        guard !chunk.isEmpty else { throw Failure.invalidPayload("unpacked size") }
+        fileHasher.update(data: chunk)
+        try output?.write(contentsOf: chunk)
+        remaining -= UInt64(chunk.count)
+      }
+      try output?.synchronize()
+      try output?.close()
+    } catch {
+      try? output?.close()
+      throw error
+    }
+    guard hex(fileHasher.finalize()) == entry.sha256 else {
+      throw Failure.invalidPayload("hash \(entry.path)")
+    }
+    if let destination {
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o444],
+        ofItemAtPath: destination.appending(path: entry.path).path
+      )
     }
   }
 
@@ -422,6 +330,7 @@ extension LinnetPackContract {
     case .english:
       return path == "linnet.smart.db"
         || path == "linnet.english-data-manifest.json"
+        || path == "linnet_english_entities.dict.yaml"
         || path.hasPrefix("linnet_en.")
         || path.hasPrefix("build/linnet_en.")
     case .chinese:
@@ -434,7 +343,7 @@ extension LinnetPackContract {
         "dicts/zi.dict.yaml", "dicts/jichu.dict.yaml",
         "dicts/lianxiang.dict.yaml", "dicts/cuoyin.dict.yaml",
         "dicts/duoyin.dict.yaml", "dicts/shici.dict.yaml",
-        "dicts/diming.dict.yaml"
+        "dicts/diming.dict.yaml", "dicts/ext.dict.yaml"
       ]
       return names.contains(path) || dictionaries.contains(path)
         || ["linnet_zh", "radical_pinyin"].contains(where: path.hasPrefix)
@@ -584,12 +493,6 @@ extension LinnetPackContract {
   fileprivate static func uint32(_ data: Data) throws -> UInt32 {
     guard data.count == 4 else { throw Failure.invalidContainer }
     return data.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
-  }
-
-  fileprivate static func bigEndianBytes<T: FixedWidthInteger>(_ value: T) -> [UInt8] {
-    (0..<MemoryLayout<T>.size).reversed().map { shift in
-      UInt8(truncatingIfNeeded: value >> T(shift * 8))
-    }
   }
 
   static func sha256(_ data: Data) -> String { hex(SHA256.hash(data: data)) }

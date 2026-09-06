@@ -4,18 +4,19 @@ import Foundation
 @main
 struct LinnetBackupStoreTests {
   static func main() {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "LinnetBackupStoreTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )
     defer { try? FileManager.default.removeItem(at: root) }
     do {
       try makeDirectory(root)
+      try testUnchangedWriters(root: root)
+      try testCloneIsolation(root: root)
       try testPortableCodec()
+      try testCloudRecoveryArchive(root: root.appending(path: "cloud-recovery", directoryHint: .isDirectory))
       try testBackupHistory(root: root)
-      try testLegacyV2Compatibility(
-        root: root.appending(path: "legacy-v2", directoryHint: .isDirectory)
-      )
+      try testLegacyV3Compatibility(root: root.appending(path: "legacy-v3", directoryHint: .isDirectory))
       try testSymlinkAndVersionGuards(root: root)
       try testRetention(root: root.appending(path: "retention", directoryHint: .isDirectory))
       try testHistoryLimit(root: root.appending(path: "history-limit", directoryHint: .isDirectory))
@@ -32,6 +33,213 @@ struct LinnetBackupStoreTests {
       print("LinnetBackupStoreTests: PASS")
     } catch {
       fail("unexpected error: \(error)")
+    }
+  }
+
+  private static func testUnchangedWriters(root: URL) throws {
+    let directory = root.appending(path: "unchanged", directoryHint: .isDirectory)
+    try makeDirectory(directory)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try LinnetPersonalDataStore.writePersonalFiles(.empty, to: directory)
+    try LinnetPersonalDataStore.writeRuntimeSettings(.empty, to: directory)
+    try LinnetSettingsDocumentStore.write(.default, to: directory)
+    let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+    let before = files.map { file -> ino_t in
+      var info = stat()
+      guard lstat(file.path, &info) == 0 else { fail("unchanged-writer fixture is unavailable") }
+      return info.st_ino
+    }
+    try LinnetPersonalDataStore.writePersonalFiles(.empty, to: directory)
+    try LinnetPersonalDataStore.writeRuntimeSettings(.empty, to: directory)
+    try LinnetSettingsDocumentStore.write(.default, to: directory)
+    for (file, inode) in zip(files, before) {
+      var info = stat()
+      guard lstat(file.path, &info) == 0, info.st_ino == inode else {
+        fail("unchanged writer replaced \(file.lastPathComponent), breaking its COW sharing")
+      }
+    }
+  }
+
+  private static func testCloneIsolation(root: URL) throws {
+    let source = root.appending(path: "clone-source", directoryHint: .isDirectory)
+    let older = root.appending(path: "clone-older", directoryHint: .isDirectory)
+    let newer = root.appending(path: "clone-newer", directoryHint: .isDirectory)
+    let restored = root.appending(path: "clone-restored", directoryHint: .isDirectory)
+    let database = source.appending(path: "linnet_en.userdb", directoryHint: .isDirectory)
+    for directory in [source, older, newer, restored, database] { try makeDirectory(directory) }
+    defer {
+      for directory in [source, older, newer, restored] { try? FileManager.default.removeItem(at: directory) }
+    }
+    let bytes = Data(repeating: 0xa7, count: 4 * 1024 * 1024)
+    let original = database.appending(path: "000007.ldb")
+    try bytes.write(to: original)
+    let recovery = database.appending(path: "lost", directoryHint: .isDirectory)
+    try makeDirectory(recovery)
+    try Data("retired LevelDB recovery bytes".utf8).write(
+      to: recovery.appending(path: "000006.log"))
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: LinnetBackupStore.learningDirectories, from: source, to: older)
+    guard !FileManager.default.fileExists(
+      atPath: older.appending(path: "linnet_en.userdb/lost").path
+    ) else { fail("LevelDB recovery quarantine leaked into the active learning snapshot") }
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: LinnetBackupStore.learningDirectories, from: source, to: newer)
+    let retained = newer.appending(path: "linnet_en.userdb/000007.ldb")
+    var originalInfo = stat()
+    var cloneInfo = stat()
+    guard lstat(original.path, &originalInfo) == 0, lstat(retained.path, &cloneInfo) == 0,
+      originalInfo.st_ino != cloneInfo.st_ino,
+      originalInfo.st_size == cloneInfo.st_size
+    else { fail("local snapshot shares a mutable inode or lost bytes") }
+    let writer = try FileHandle(forWritingTo: original)
+    try writer.seek(toOffset: 64)
+    try writer.write(contentsOf: Data([0x19]))
+    try writer.close()
+    try FileManager.default.removeItem(at: older)
+    try LinnetBackupStore.cloneUserDictionaries(
+      named: LinnetBackupStore.learningDirectories, from: newer, to: restored)
+    guard try Data(contentsOf: retained) == bytes,
+      try Data(contentsOf: restored.appending(path: "linnet_en.userdb/000007.ldb")) == bytes,
+      try Data(contentsOf: original) != bytes
+    else { fail("snapshot isolation or independent restore depended on a previous backup") }
+    let symlink = database.appending(path: "unsafe.ldb")
+    try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: original)
+    expectFailure(.unsafeArtifact("unsafe.ldb")) {
+      try LinnetBackupStore.cloneUserDictionaries(
+        named: LinnetBackupStore.learningDirectories, from: source, to: restored)
+    }
+    try FileManager.default.removeItem(at: symlink)
+    let foreign = database.appending(path: "foreign", directoryHint: .isDirectory)
+    try makeDirectory(foreign)
+    expectFailure(.unsafeArtifact("foreign")) {
+      try LinnetBackupStore.cloneUserDictionaries(
+        named: LinnetBackupStore.learningDirectories, from: source, to: restored)
+    }
+    try FileManager.default.removeItem(at: foreign)
+    try FileManager.default.removeItem(at: recovery)
+    try FileManager.default.createSymbolicLink(
+      at: recovery,
+      withDestinationURL: original
+    )
+    expectFailure(.unsafeArtifact("lost")) {
+      try LinnetBackupStore.cloneUserDictionaries(
+        named: LinnetBackupStore.learningDirectories, from: source, to: restored)
+    }
+  }
+
+  private static func testCloudRecoveryArchive(root: URL) throws {
+    let fileManager = FileManager.default
+    try makeDirectory(root)
+    defer { try? fileManager.removeItem(at: root) }
+    let first = try LinnetBackupStore.encodePortable(
+      personalData: .init(
+        customWords: [.init(value: "one", code: "one")], disabledWords: [], expansions: []),
+      learning: [:], categories: [.customWords],
+      createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+      appVersion: "1.0.0", dataVersion: "2026.08.31")
+    let baseline = try LinnetCloudRecoveryArchive.publish(portable: first, in: root, repair: false)
+    guard baseline.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
+      fail("first cloud recovery did not create its base")
+    }
+    let publishedRoot = LinnetCloudRecoveryArchive.root(in: root)
+    let publishedBases = try fileManager.contentsOfDirectory(
+      at: publishedRoot.appending(path: "bases"), includingPropertiesForKeys: nil)
+    guard let publishedBase = publishedBases.first else {
+      fail("first cloud recovery did not publish a base directory")
+    }
+    let publishedPayload = publishedBase.appending(path: "payload.linnet-data")
+    try fileManager.setAttributes(
+      [.posixPermissions: 0o700], ofItemAtPath: publishedBase.path)
+    try fileManager.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: publishedPayload.path)
+    let fileProviderWorkspace = root.appending(
+      path: "file-provider-inspect", directoryHint: .isDirectory)
+    try makeDirectory(fileProviderWorkspace)
+    guard let fileProviderMaterialized = try LinnetCloudRecoveryArchive.materializeLatest(
+      in: root, workspace: fileProviderWorkspace),
+      try Data(contentsOf: fileProviderMaterialized) == first
+    else {
+      fail("FileProvider permission normalization invalidated cloud recovery")
+    }
+    let sameContentLater = try LinnetBackupStore.encodePortable(
+      personalData: .init(
+        customWords: [.init(value: "one", code: "one")], disabledWords: [], expansions: []),
+      learning: [:], categories: [.customWords],
+      createdAt: Date(timeIntervalSince1970: 1_800_000_000),
+      appVersion: "1.0.0", dataVersion: "2026.08.31")
+    let unchanged = try LinnetCloudRecoveryArchive.publish(
+      portable: sameContentLater, in: root, repair: false)
+    guard unchanged.kind == LinnetCloudRecoveryArchive.Outcome.Kind.unchanged,
+      unchanged.verifiedAt == baseline.verifiedAt else {
+      fail("portable createdAt defeated cloud recovery no-op")
+    }
+    let changed = try LinnetBackupStore.encodePortable(
+      personalData: .init(
+        customWords: [.init(value: "two", code: "two")], disabledWords: [], expansions: []),
+      learning: [:], categories: [.customWords],
+      createdAt: Date(timeIntervalSince1970: 1_800_000_001),
+      appVersion: "1.0.0", dataVersion: "2026.08.31")
+    let update = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: false)
+    guard update.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
+      fail("cloud recovery did not publish a delta")
+    }
+    let bases = try fileManager.contentsOfDirectory(
+      at: LinnetCloudRecoveryArchive.root(in: root).appending(path: "bases"),
+      includingPropertiesForKeys: nil)
+    guard bases.count == 1 else { fail("ordinary cloud update wrote another full base") }
+    let deltaFiles = try fileManager.contentsOfDirectory(
+      at: LinnetCloudRecoveryArchive.root(in: root).appending(path: "deltas"),
+      includingPropertiesForKeys: nil)
+    guard let delta = deltaFiles.first else { fail("cloud recovery did not publish a delta object") }
+    let direct = root.appending(path: "direct-delta", directoryHint: .isDirectory)
+    try LinnetDirectoryDelta.apply(base: bases[0], delta: delta, output: direct)
+    guard try Data(contentsOf: direct.appending(path: "payload.linnet-data")) == changed else {
+      fail("published delta did not reconstruct the staged portable payload")
+    }
+    let inspect = root.appending(path: "inspect", directoryHint: .isDirectory)
+    try makeDirectory(inspect)
+    let materialized = try LinnetCloudRecoveryArchive.materializeLatest(in: root, workspace: inspect)
+    guard let materialized else { fail("cloud recovery chain did not materialize") }
+    let reconstructed = try Data(contentsOf: materialized)
+    guard reconstructed == changed else {
+      let words = try LinnetBackupStore.decodePortable(reconstructed).personal
+        .flatMap(\.rows).map(\.value).joined(separator: ",")
+      fail("cloud recovery chain chose \(words), not the updated recovery payload")
+    }
+    let cloudRoot = LinnetCloudRecoveryArchive.root(in: root)
+    let deltas = try fileManager.contentsOfDirectory(
+      at: cloudRoot.appending(path: "deltas"), includingPropertiesForKeys: nil)
+    for delta in deltas { try fileManager.removeItem(at: delta) }
+    let fallbackWorkspace = root.appending(path: "fallback", directoryHint: .isDirectory)
+    try makeDirectory(fallbackWorkspace)
+    let fallback = try LinnetCloudRecoveryArchive.materializeLatest(
+      in: root, workspace: fallbackWorkspace)
+    guard let fallback, try Data(contentsOf: fallback) == first else {
+      fail("a broken latest chain blocked a valid older recovery head")
+    }
+    try fileManager.removeItem(at: cloudRoot.appending(path: "heads"))
+    do {
+      _ = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: false)
+      fail("orphaned cloud objects silently wrote a full base")
+    } catch LinnetCloudRecoveryArchive.Failure.needsConfirmedRepair { }
+    let repaired = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: true)
+    guard repaired.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
+      fail("confirmed cloud repair did not publish a base")
+    }
+    // A still-readable chain can also require a new baseline when it cannot
+    // accept another delta. Explicit confirmation must not be ignored merely
+    // because the old head is valid or its content is unchanged.
+    let confirmed = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: true)
+    guard confirmed.kind == .uploaded else {
+      fail("confirmed renewal of a valid recovery baseline was treated as a no-op")
+    }
+    let heads = try fileManager.contentsOfDirectory(
+      at: cloudRoot.appending(path: "heads"), includingPropertiesForKeys: nil)
+      .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    guard let head = heads.first,
+      let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: head)) as? [String: Any],
+      let deltas = metadata["deltas"] as? [Any], deltas.isEmpty else {
+      fail("confirmed recovery renewal did not start a fresh baseline")
     }
   }
 
@@ -87,26 +295,20 @@ struct LinnetBackupStoreTests {
       disabledWords: ["keep-disabled"],
       expansions: [.init(value: "Keep expansion", trigger: "x;keep")]
     )
-    let currentLearning = [
-      "linnet_zh": "# current\n中文\tzhong wen\t2\n",
-      "linnet_en": "# current\nold\told\t2\n",
-    ]
     let replacement = try LinnetBackupStore.replacement(
       currentPersonalData: currentPersonal,
-      currentLearning: currentLearning,
       archive: archive
     )
     guard replacement.personalData.customWords.map(\.value) == ["Linnet"],
-      replacement.personalData.disabledWords == ["keep-disabled"],
+      replacement.personalData.disabledWords.map(\.value) == ["keep-disabled"],
       replacement.personalData.expansions.map(\.trigger) == ["x;keep"],
-      replacement.learning["linnet_zh"] == currentLearning["linnet_zh"],
+      replacement.learning["linnet_zh"] == nil,
       replacement.learning["linnet_en"] == learning["linnet_en"]
     else {
-      fail("portable replacement did not preserve unselected categories")
+      fail("portable replacement did not leave unselected categories untouched")
     }
     let second = try LinnetBackupStore.replacement(
       currentPersonalData: replacement.personalData,
-      currentLearning: replacement.learning,
       archive: archive
     )
     guard
@@ -127,12 +329,11 @@ struct LinnetBackupStoreTests {
     )
     let cleared = try LinnetBackupStore.replacement(
       currentPersonalData: currentPersonal,
-      currentLearning: currentLearning,
       archive: LinnetBackupStore.decodePortable(clearedData)
     )
     guard cleared.personalData.expansions.isEmpty,
       cleared.personalData.customWords.map(\.value) == ["Old"],
-      cleared.personalData.disabledWords == ["keep-disabled"]
+      cleared.personalData.disabledWords.map(\.value) == ["keep-disabled"]
     else {
       fail("an explicitly selected empty category did not replace current data")
     }
@@ -232,7 +433,7 @@ struct LinnetBackupStoreTests {
       {"formatVersion":1,"createdAt":"2023-11-14T22:13:20Z","appVersion":"1.0.0","dataVersion":"fixture","categories":["customWords"],"personal":[{"category":"customWords","rowCount":\(rowCount),"sha256":"\(String(repeating: "0", count: 64))","rows":[\(rows)]}],"learning":[]}
       """.utf8
     )
-    expectFailure(.documentTooLarge) {
+    expectFailure(.artifactTooLarge("customWords")) {
       _ = try LinnetBackupStore.decodePortable(structuralFlood)
     }
   }
@@ -250,10 +451,11 @@ struct LinnetBackupStoreTests {
       operation: .applyPersonalData,
       createdAt: Date(timeIntervalSince1970: 200)
     )
-    guard manifest.formatVersion == 3,
+    guard manifest.formatVersion == 4,
+      manifest.artifacts.contains(where: { $0.path == "user-dictionaries/linnet_en.userdb/000001.ldb" && $0.rowCount == nil }),
       try LinnetBackupStore.verifyBackup(at: verified) == manifest
     else {
-      fail("a newly written manifest-v3 backup did not verify")
+      fail("a newly written native manifest-v4 backup did not verify")
     }
     expectFailure(.backupAlreadyComplete) {
       _ = try commit(
@@ -322,110 +524,6 @@ struct LinnetBackupStoreTests {
     }
   }
 
-  private static func testLegacyV2Compatibility(root: URL) throws {
-    try makeDirectory(root)
-    let fixture = try makeLegacyV2Backup(root: root)
-
-    let history = try LinnetBackupStore.listBackups(in: root)
-    guard history.count == 1,
-      history[0].state == .verified(fixture.manifest),
-      try LinnetBackupStore.verifyBackup(at: fixture.backup) == fixture.manifest
-    else {
-      fail("a frozen legal v2 backup did not survive list and verification")
-    }
-
-    let restored = root.appending(path: "restored", directoryHint: .isDirectory)
-    try makeDirectory(restored)
-    try LinnetBackupStore.copyStable(
-      from: fixture.backup.appending(path: "stable", directoryHint: .isDirectory),
-      to: restored
-    )
-    let restoredPersonal = try LinnetPersonalDataStore.load(from: restored)
-    let restoredDocument = try LinnetSettingsDocumentStore.load(from: restored)
-    let restoredRuntime = try String(
-      contentsOf: restored.appending(path: LinnetPersonalDataStore.userSettingsFile),
-      encoding: .utf8
-    )
-    guard restoredPersonal.customWords.map(\.value) == ["Legacy Cloud"],
-      restoredPersonal.disabledWords == ["legacy-disabled"],
-      restoredPersonal.expansions.map(\.trigger) == ["x;legacy"],
-      restoredDocument.english.sentenceCapitalization,
-      restoredDocument.english.tabBehavior == .pass,
-      restoredRuntime.hasPrefix("patch:\n"),
-      !FileManager.default.fileExists(
-        atPath: restored.appending(path: LinnetPersonalDataStore.legacyUserSettingsFile).path
-      )
-    else {
-      fail("v2 restore did not normalize exactly once into the current canonical files")
-    }
-
-    let rewrittenID = UUID()
-    let rewrittenTransaction = root.appending(
-      path: rewrittenID.uuidString, directoryHint: .isDirectory)
-    let rewrittenBackup = rewrittenTransaction.appending(
-      path: "backup", directoryHint: .isDirectory)
-    let rewrittenStable = rewrittenBackup.appending(
-      path: "stable", directoryHint: .isDirectory)
-    let rewrittenLearning = rewrittenBackup.appending(
-      path: "user-dictionaries", directoryHint: .isDirectory)
-    for directory in [rewrittenTransaction, rewrittenBackup, rewrittenStable, rewrittenLearning] {
-      try makeDirectory(directory)
-    }
-    _ = try LinnetBackupStore.snapshotStable(from: restored, to: rewrittenStable)
-    let rewritten = try commit(
-      rewrittenBackup,
-      transactionID: rewrittenID,
-      operation: .restore,
-      createdAt: Date(timeIntervalSince1970: 301)
-    )
-    guard rewritten.formatVersion == 3,
-      rewritten.artifacts.contains(where: {
-        $0.path == "stable/\(LinnetPersonalDataStore.userSettingsFile)"
-      }),
-      !rewritten.artifacts.contains(where: {
-        $0.path == "stable/\(LinnetPersonalDataStore.legacyUserSettingsFile)"
-      })
-    else {
-      fail("a restored v2 backup was not rewritten solely as v3")
-    }
-
-    let mislabeled = LinnetBackupStore.BackupManifest(
-      formatVersion: 2,
-      complete: rewritten.complete,
-      backupID: rewritten.backupID,
-      transactionID: rewritten.transactionID,
-      operation: rewritten.operation,
-      createdAt: rewritten.createdAt,
-      appVersion: rewritten.appVersion,
-      dataVersion: rewritten.dataVersion,
-      personalRevision: rewritten.personalRevision,
-      artifacts: rewritten.artifacts
-    )
-    try encode(mislabeled).write(
-      to: rewrittenBackup.appending(path: "manifest.json"), options: .atomic)
-    expectFailure(.incompleteBackup) {
-      _ = try LinnetBackupStore.verifyBackup(at: rewrittenBackup)
-    }
-
-    let damaged = LinnetBackupStore.BackupManifest(
-      formatVersion: fixture.manifest.formatVersion,
-      complete: fixture.manifest.complete,
-      backupID: fixture.manifest.backupID,
-      transactionID: fixture.manifest.transactionID,
-      operation: fixture.manifest.operation,
-      createdAt: fixture.manifest.createdAt,
-      appVersion: fixture.manifest.appVersion,
-      dataVersion: fixture.manifest.dataVersion,
-      personalRevision: String(repeating: "0", count: 64),
-      artifacts: fixture.manifest.artifacts
-    )
-    try encode(damaged).write(
-      to: fixture.backup.appending(path: "manifest.json"), options: .atomic)
-    expectFailure(.invalidHash("personal revision")) {
-      _ = try LinnetBackupStore.verifyBackup(at: fixture.backup)
-    }
-  }
-
   private static func testSymlinkAndVersionGuards(root: URL) throws {
     let symlinkTransaction = UUID()
     let symlinkBackup = try makeBackup(
@@ -466,24 +564,26 @@ struct LinnetBackupStoreTests {
       operation: .importPortable,
       createdAt: .now
     )
-    let unsupported = LinnetBackupStore.BackupManifest(
-      formatVersion: 99,
-      complete: manifest.complete,
-      backupID: manifest.backupID,
-      transactionID: manifest.transactionID,
-      operation: manifest.operation,
-      createdAt: manifest.createdAt,
-      appVersion: manifest.appVersion,
-      dataVersion: manifest.dataVersion,
-      personalRevision: manifest.personalRevision,
-      artifacts: manifest.artifacts
-    )
-    try encode(unsupported).write(
-      to: versionBackup.appending(path: "manifest.json"),
-      options: .atomic
-    )
-    expectFailure(.unsupportedVersion(99)) {
-      _ = try LinnetBackupStore.verifyBackup(at: versionBackup)
+    for unsupportedVersion in [2, 99] {
+      let unsupported = LinnetBackupStore.BackupManifest(
+        formatVersion: unsupportedVersion,
+        complete: manifest.complete,
+        backupID: manifest.backupID,
+        transactionID: manifest.transactionID,
+        operation: manifest.operation,
+        createdAt: manifest.createdAt,
+        appVersion: manifest.appVersion,
+        dataVersion: manifest.dataVersion,
+        personalRevision: manifest.personalRevision,
+        artifacts: manifest.artifacts
+      )
+      try encode(unsupported).write(
+        to: versionBackup.appending(path: "manifest.json"),
+        options: .atomic
+      )
+      expectFailure(.unsupportedVersion(unsupportedVersion)) {
+        _ = try LinnetBackupStore.verifyBackup(at: versionBackup)
+      }
     }
   }
 
@@ -729,7 +829,7 @@ struct LinnetBackupStoreTests {
       appVersion: "1.0.0",
       dataVersion: "2026.08.06",
       transactionsRoot: recoverable,
-      maximumCount: 100,
+      maximumVerifiedBackups: 100,
       protectedTransactionIDs: [current, verified[0]]
     ))
     let recovered = try LinnetBackupStore.listBackups(in: recoverable)
@@ -768,7 +868,7 @@ struct LinnetBackupStoreTests {
         appVersion: "1.0.0",
         dataVersion: "2026.08.06",
         transactionsRoot: exhausted,
-        maximumCount: 100,
+        maximumVerifiedBackups: 100,
         protectedTransactionIDs: [rejected]
       ))
     }
@@ -942,7 +1042,8 @@ struct LinnetBackupStoreTests {
   private static func makeBackup(
     root: URL,
     transactionID: UUID,
-    customValue: String
+    customValue: String,
+    legacyTable: Bool = false
   ) throws -> URL {
     let transaction = root.appending(
       path: transactionID.uuidString,
@@ -968,70 +1069,40 @@ struct LinnetBackupStoreTests {
       atomically: true,
       encoding: .utf8
     )
-    try "# Rime user dictionary export\nhello\thello\t3\n".write(
-      to: learning.appending(path: "linnet_en.txt"),
-      atomically: true,
-      encoding: .utf8
-    )
+    if legacyTable {
+      try "# Rime user dictionary export\nhello\thello\t3\n".write(
+        to: learning.appending(path: "linnet_en.txt"), atomically: true, encoding: .utf8)
+    } else {
+      let database = learning.appending(path: "linnet_en.userdb", directoryHint: .isDirectory)
+      try makeDirectory(database)
+      try Data([0, 0x91, 0xff, 0x0a]).write(to: database.appending(path: "000001.ldb"))
+    }
     return backup
   }
 
-  /// Frozen bytes and digest values produced by the v2 codec at bda21963.
-  /// This fixture never executes an old binary or touches live user data.
-  private static func makeLegacyV2Backup(root: URL) throws -> (
-    backup: URL, manifest: LinnetBackupStore.BackupManifest
-  ) {
+  private static func testLegacyV3Compatibility(root: URL) throws {
+    try makeDirectory(root)
     let transactionID = UUID()
-    let transaction = root.appending(
-      path: transactionID.uuidString, directoryHint: .isDirectory)
-    let backup = transaction.appending(path: "backup", directoryHint: .isDirectory)
+    let backup = try makeBackup(root: root, transactionID: transactionID, customValue: "Legacy V3", legacyTable: true)
     let stable = backup.appending(path: "stable", directoryHint: .isDirectory)
-    let learning = backup.appending(
-      path: "user-dictionaries", directoryHint: .isDirectory)
-    for directory in [transaction, backup, stable, learning] { try makeDirectory(directory) }
-
-    let files: [(name: String, contents: String, sha256: String)] = [
-      (
-        "linnet_custom_words.txt",
-        "# Rime table\n# coding: utf-8\n#@/db_name\tlinnet_custom_words.txt\n#@/db_type\ttabledb\n#\nLegacy Cloud\tlegacy\n",
-        "f94e48b117b3739c706ebcc4c1d3322e6620d2c5f3ffb37445bd720ad5002f3d"
-      ),
-      (
-        "linnet_text_expander.txt",
-        "# Rime table\n# coding: utf-8\n#@/db_name\tlinnet_text_expander.txt\n#@/db_type\ttabledb\n#\nLegacy expansion\tx;legacy\n",
-        "3bec19871ee3dd10b8a25dc7c0236b77aae307dea00f83a0ac68bb848bdae2de"
-      ),
-      (
-        "linnet_user.yaml",
-        "# Linnet user-managed settings\n# encoding: utf-8\n\ndisabled_words:\n  - \"legacy-disabled\"\nsentence_capitalization: true\ntab_behavior: pass\n",
-        "2e1674b6563e3bc56f3e297b348aa095bac288de214efd2f10b9eba382d86b93"
-      ),
-    ]
-    for file in files {
-      try file.contents.write(
-        to: stable.appending(path: file.name), atomically: true, encoding: .utf8)
-    }
     let manifest = LinnetBackupStore.BackupManifest(
-      formatVersion: 2,
-      complete: true,
-      backupID: UUID(),
-      transactionID: transactionID,
-      operation: .applyPersonalData,
-      createdAt: Date(timeIntervalSince1970: 300),
-      appVersion: "1.0.0",
-      dataVersion: "2026.08.06",
-      personalRevision: "0420c8a4302ec4150da23ba08f21ca6f735774dd87d060d8d1543d04591a3954",
-      artifacts: files.map {
-        .init(
-          path: "stable/\($0.name)",
-          byteCount: $0.contents.utf8.count,
-          rowCount: nil,
-          sha256: $0.sha256
-        )
-      }
-    )
-    try encode(manifest).write(to: backup.appending(path: "manifest.json"), options: .atomic)
-    return (backup, manifest)
+      formatVersion: LinnetBackupStore.tableBackupFormatVersion,
+      complete: true, backupID: UUID(), transactionID: transactionID,
+      operation: .applyPersonalData, createdAt: Date(timeIntervalSince1970: 301),
+      appVersion: "0.1.10", dataVersion: "fixture-v3",
+      personalRevision: try LinnetPersonalDataStore.snapshot(from: stable).revision,
+      artifacts: try LinnetBackupStore.collectBackupArtifacts(
+        backup, formatVersion: LinnetBackupStore.tableBackupFormatVersion))
+    try encode(manifest).write(to: backup.appending(path: "manifest.json"))
+    guard try LinnetBackupStore.verifyBackup(at: backup) == manifest,
+      manifest.artifacts.contains(where: { $0.path == "user-dictionaries/linnet_en.txt" && $0.rowCount == 1 })
+    else { fail("a shipped v3 table backup cannot be verified") }
+    let candidate = root.appending(path: "candidate", directoryHint: .isDirectory)
+    try makeDirectory(candidate)
+    try LinnetBackupStore.copyStable(from: stable, to: candidate)
+    guard try LinnetPersonalDataStore.snapshot(from: candidate).revision == manifest.personalRevision else {
+      fail("v3 stable restore changed the personal data")
+    }
   }
 
   @discardableResult
@@ -1052,7 +1123,7 @@ struct LinnetBackupStoreTests {
       appVersion: "1.0.0",
       dataVersion: "2026.08.06",
       transactionsRoot: backup.deletingLastPathComponent().deletingLastPathComponent(),
-      maximumCount: keepingMostRecent,
+      maximumVerifiedBackups: keepingMostRecent,
       protectedTransactionIDs: preserving.union([transactionID])
     ))
   }

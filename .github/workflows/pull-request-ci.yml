@@ -2,16 +2,21 @@ name: Linnet pull request CI
 on: [pull_request]
 permissions:
   contents: read
+
+concurrency:
+  group: linnet-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout last commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-          # Keep source submodules on their lock-owning build paths.
           submodules: false
 
       - name: Restore locked build cache
@@ -19,11 +24,13 @@ jobs:
         with:
           save: false
 
-      - name: Install build tools
+      - name: Install declared build tools
         run: scripts/install_ci_build_tools.sh quality
 
-      - name: Lint
-        run: scripts/run_swiftlint.sh
+      - name: Check source and publication contracts
+        run: |
+          scripts/run_swiftlint.sh
+          tests/verify_publication_owner.sh
 
       - name: Check language-data release identity changes
         env:
@@ -34,21 +41,28 @@ jobs:
             package/data_release_metadata check-source-change
           previous="$(mktemp)"
           trap 'rm -f "${previous}"' EXIT
-          if git show "${BASE_SHA}:config/linnet-data-releases.json" >"${previous}" 2>/dev/null; then
+          if git show "${BASE_SHA}:config/linnet-data-releases.json" \
+              >"${previous}" 2>/dev/null; then
             package/data_release_metadata check-monotonic \
               "${previous}" config/linnet-data-releases.json
           fi
 
-      - name: Hydrate locked Windows frontend for root lock verification
+      - name: Hydrate locked Windows frontend
         run: scripts/stage-windows-build-inputs hydrate
 
-      - name: Build and verify Linnet
-        run: ./action-build.sh release && tests/verify_development.sh
+      - name: Hydrate locked inputs
+        run: ./action-install.sh
 
-      - name: Stage shared Windows build inputs
+      - name: Build the unsigned product
+        run: make --no-print-directory release
+
+      - name: Check unused production code
+        run: scripts/run_periphery.sh
+
+      - name: Stage shared Windows inputs
         run: scripts/stage-windows-build-inputs
 
-      - name: Upload root-owned Windows build inputs
+      - name: Upload shared Windows inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: linnet-windows-inputs-${{ github.sha }}
@@ -58,11 +72,9 @@ jobs:
             data/plum
             data/opencc
             build/windows-inputs/linnet_embedded_lua.h
+            build/windows-inputs/linnet_windows_defaults.yaml
             build/windows-inputs/weasel.yaml
             build/windows-inputs/preview
-
-      - name: Check Unused Code
-        run: scripts/run_periphery.sh
 
   windows:
     needs: build

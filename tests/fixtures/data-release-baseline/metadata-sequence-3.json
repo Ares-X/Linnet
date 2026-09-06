@@ -1,5 +1,6 @@
 {
   "catalog_sequence": 3,
+  "core_artifact_format": "installer-package",
   "format": "io.github.ares-x.linnet.data-releases.v1",
   "packs": {
     "chinese": {

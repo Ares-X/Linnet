@@ -32,13 +32,13 @@ inline constexpr char kSpacingProperty[] = "linnet/spacing_v1";
 inline constexpr char kSentenceBoundaryProperty[] =
     "linnet/sentence_boundary_v1";
 inline constexpr char kSmartEnglishSchema[] = "linnet_en";
+inline constexpr char kDefinitionCommentPrefix = '\x1d';
 inline constexpr std::size_t kContextLimit = 4;
 inline constexpr std::size_t kBigramLimit = 128;
 inline constexpr std::size_t kCandidateLimit = 64;
 inline constexpr char kCorrectionCandidateType[] = "linnet_correction";
 inline constexpr char kForcedRawCandidateType[] = "linnet_forced_raw";
 inline constexpr char kMixedCandidateType[] = "linnet_mixed";
-inline constexpr double kMixedEntityAmbiguityLogMargin = -0.6931471805599453;
 inline constexpr std::uint16_t kCountLimit = 255;
 
 enum class CaseStyle { kUnchanged, kCapitalized, kUppercase };
@@ -48,7 +48,6 @@ struct InteractionOptions {
   bool sentence_capitalization = false;
   bool show_ipa = true;
   bool show_translation = true;
-  bool spelling_correction = true;
   bool learning_enabled = true;
   bool space_adds_trailing_space = true;
   TabBehavior tab_behavior = TabBehavior::kSmartComplete;
@@ -62,8 +61,6 @@ struct InteractionOptions {
     config->GetBool("linnet_english_interaction/show_ipa", &result.show_ipa);
     config->GetBool("linnet_english_interaction/show_translation",
                     &result.show_translation);
-    config->GetBool("linnet_english_interaction/spelling_correction",
-                    &result.spelling_correction);
     config->GetBool("linnet_english_interaction/learning_enabled",
                     &result.learning_enabled);
     config->GetBool("linnet_english_interaction/space_adds_trailing_space",

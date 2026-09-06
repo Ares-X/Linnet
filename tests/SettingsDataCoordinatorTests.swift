@@ -1,6 +1,12 @@
 import CryptoKit
 import Darwin
 import Foundation
+
+private let fixtureRuntimeIdentity = LinnetSettingsContract.ProductIdentity(
+  version: "0.1.0",
+  build: 1,
+  revision: String(repeating: "a", count: 40)
+)
 import SQLite3
 
 private struct SettingsOwnedFileSnapshot: Equatable {
@@ -23,6 +29,11 @@ private struct RequestTimeoutObservation: Sendable {
   let timeout: TimeInterval
   let deadline: Date
   let observedAt: Date
+}
+
+private enum DiagnoseHealthFixture: Sendable {
+  case status(LinnetSettingsContract.RuntimeStatus)
+  case unavailable
 }
 
 private struct PersonalFileIdentity: Equatable {
@@ -101,6 +112,7 @@ private final class RequestOrderHarness: @unchecked Sendable {
   private var requestCount = 0
   private var requestTimeouts: [RequestTimeoutObservation] = []
   private var timeoutNextCommand: LinnetSettingsContract.DataCommand?
+  private var nextDiagnoseHealth: DiagnoseHealthFixture?
   private var events: [String] = []
   private var pauseTerminalContinuation: CheckedContinuation<Void, Never>?
   private var pauseTerminalReleased = false
@@ -204,6 +216,19 @@ private final class RequestOrderHarness: @unchecked Sendable {
     defer { lock.unlock() }
     defer { nextReloadFailure = nil }
     return nextReloadFailure
+  }
+
+  func armDiagnoseHealth(_ fixture: DiagnoseHealthFixture) {
+    lock.lock()
+    nextDiagnoseHealth = fixture
+    lock.unlock()
+  }
+
+  func takeDiagnoseHealth() -> DiagnoseHealthFixture? {
+    lock.lock()
+    defer { lock.unlock() }
+    defer { nextDiagnoseHealth = nil }
+    return nextDiagnoseHealth
   }
 
   func takeDelayedPause() -> Bool {
@@ -462,7 +487,7 @@ struct SettingsDataCoordinatorTests {
 
   static func main() async {
     let fileManager = FileManager.default
-    let fixtureRoot = FileManager.default.temporaryDirectory.appending(
+    let fixtureRoot = LinnetTestScratch.directory.appending(
       path: "LinnetDataCoordinatorTests-\(UUID().uuidString)",
       directoryHint: .isDirectory)
     let productName = "Linnet Data Test \(UUID().uuidString)"
@@ -485,7 +510,13 @@ struct SettingsDataCoordinatorTests {
     do {
       let settings = try makeBundleFixture(at: fixtureRoot, productName: productName)
       try makeDirectory(fixtureRoot)
+      try verifyCoreThemeDeployment(in: fixtureRoot)
       try makeRegistryFixture(registry)
+      do {
+        _ = try registry.runtimeSnapshot()
+      } catch {
+        fail("data registry runtime fixture is invalid: \(error)")
+      }
       try makeDirectory(live)
       try "# fixture\n".write(
         to: live.appending(path: "user.yaml"),
@@ -539,6 +570,24 @@ struct SettingsDataCoordinatorTests {
           throw LinnetSettingsTransactionIPC.Failure.timedOut
         }
         switch request.command {
+        case .activateCore:
+          fail("the data coordinator unexpectedly requested Core activation")
+        case .reloadLearningSync:
+          return .init(
+            transactionID: request.transactionID,
+            status: .running,
+            code: .learningSyncConfigurationReloaded,
+            detail: "fixture reloaded learning sync",
+            health: nil
+          )
+        case .synchronizeLearning:
+          return .init(
+            transactionID: request.transactionID,
+            status: .running,
+            code: .learningSyncCompleted,
+            detail: "fixture completed learning sync",
+            health: nil
+          )
         case .pause:
           if let status = requestOrder.takePauseStatus() {
             return reply(status, "fixture forced pause terminal", request: request)
@@ -625,21 +674,20 @@ struct SettingsDataCoordinatorTests {
             health: settingsHealth(activeRevision: activeRevision)
           )
         case .diagnose:
-          return reply(
-            .running,
-            "fixture running",
-            request: request,
-            health: .init(
-              state: .running,
-              phase: .running,
-              rimeVersion: "fixture",
-              smartEnglishAvailable: true,
-              octagramAvailable: true,
-              availableSchemaCount: 9,
-              requiredSchemaCount: 9,
-              activeSettingsRevision: try? LinnetSettingsDocumentStore.snapshot(from: live).revision
+          switch requestOrder.takeDiagnoseHealth() ?? .status(.running) {
+          case .status(let status):
+            return reply(
+              status,
+              "fixture runtime status",
+              request: request,
+              health: diagnosticHealth(
+                status: status,
+                activeRevision: try? LinnetSettingsDocumentStore.snapshot(from: live).revision
+              )
             )
-          )
+          case .unavailable:
+            return reply(.failed, "fixture runtime unavailable", request: request)
+          }
         }
       }
 
@@ -649,6 +697,34 @@ struct SettingsDataCoordinatorTests {
         dataRegistry: registry,
         transactionRequester: transactionRequester
       )
+      let requestsBeforeLearningSync = requestOrder.currentRequestCount()
+      try await coordinator.reloadLearningSyncConfiguration()
+      guard try await coordinator.synchronizeLearningNow() else {
+        fail("completed learning synchronization was reported as deferred")
+      }
+      guard requestOrder.currentRequestCount() == requestsBeforeLearningSync + 2 else {
+        fail("learning synchronization did not use the typed Host IPC boundary")
+      }
+      for code: LinnetSettingsContract.RuntimeReplyCode in [
+        .learningSyncDeferred, .learningSyncUnavailable, .learningSyncFailed, .transactionBusy
+      ] {
+        let syncCoordinator = SettingsDataCoordinator(
+          bundle: settings, timeout: 10, dataRegistry: registry,
+          transactionRequester: FixtureTransactionRequester { request, _, _ in
+            .init(transactionID: request.transactionID, status: .running,
+              code: code, detail: "fixture synchronization result", health: nil)
+          })
+        do {
+          let completed = try await syncCoordinator.synchronizeLearningNow()
+          guard code == .learningSyncDeferred, !completed else {
+            fail("an unsuccessful learning sync was reported as completed")
+          }
+        } catch SettingsDataCoordinator.Failure.requestFailed(let actual) {
+          guard code != .learningSyncDeferred, actual == code else {
+            fail("deferred learning sync was rejected or its failure identity changed")
+          }
+        }
+      }
       let oversizedHallelujah = fixtureRoot.appending(path: "oversized-substitutions.sqlite3")
       try makeSubstitutionDatabase(at: oversizedHallelujah)
       let oversizedHallelujahHandle = try FileHandle(forWritingTo: oversizedHallelujah)
@@ -883,7 +959,7 @@ struct SettingsDataCoordinatorTests {
       let beforeRejectedSnapshot = try LinnetPersonalDataStore.snapshot(from: live)
       let beforeRejectedDocumentSnapshot = try LinnetSettingsDocumentStore.snapshot(from: live)
       var beforeRejectedPersonal = beforeRejectedSnapshot.data
-      beforeRejectedPersonal.disabledWords.append("force-full-backup")
+      beforeRejectedPersonal.disabledWords.append(.init(value: "force-full-backup"))
       var beforeRejectedDocument = beforeRejectedDocumentSnapshot.document
       beforeRejectedDocument.appearance.pageSize =
         beforeRejectedDocument.appearance.pageSize == 7 ? 5 : 7
@@ -956,6 +1032,16 @@ struct SettingsDataCoordinatorTests {
         sourceHash: sourceHash,
         fixtureRoot: fixtureRoot
       )
+      var originalLearning: [String: [String: String]] = [:]
+      for schema in RimeUserDataBridge.learningSchemas.sorted() {
+        try seedRawDictionary(schema, directory: live, fixtureRoot: fixtureRoot)
+        let state = try rawDictionaryState(schema, directory: live)
+        guard state["#@/tick"] == "1000",
+          state.values.contains(where: { $0.hasPrefix("c=-3 ") }),
+          state.values.contains(where: { $0.contains("d=4.25 ") })
+        else { fail("ENVIRONMENT_INVALID: native dictionary fixture lost its raw learning state") }
+        originalLearning[schema] = state
+      }
 
       let replacementPersonal = LinnetPersonalData(
         customWords: [.init(value: "Cloud Team", code: "cloud team")],
@@ -984,14 +1070,19 @@ struct SettingsDataCoordinatorTests {
         }
       }
 
+      let applyPhases = PhaseHarness()
       let applyResult = try await coordinator.run(
         .applyConfiguration(
           personal: replacementPersonal,
           document: replacementDocument,
           basePersonalRevision: legacyResult.personalSnapshot.revision,
           baseDocumentRevision: replacementDocumentRevision
-        )
+        ),
+        progress: { update in applyPhases.record(update.phase) }
       )
+      for (schema, expected) in originalLearning {
+        try verifyRawDictionary(schema, expected: expected, directory: live, operation: "personal apply")
+      }
       guard case .submittedDraft(let appliedDocument) = applyResult.documentEffect,
         appliedDocument == (try LinnetSettingsDocumentStore.snapshot(from: live))
       else { fail("apply did not project its committed settings document") }
@@ -1005,7 +1096,7 @@ struct SettingsDataCoordinatorTests {
         encoding: .utf8
       )
       guard applied.customWords.map(\.value) == ["Cloud Team"],
-        applied.disabledWords == ["forbiddenword"],
+        applied.disabledWords.map(\.value) == ["forbiddenword"],
         applied.expansions.map(\.trigger) == ["x;brb"],
         !appliedRuntimeSettings.contains("sentence_capitalization"),
         !appliedRuntimeSettings.contains("tab_behavior"),
@@ -1015,22 +1106,24 @@ struct SettingsDataCoordinatorTests {
           "\"linnet_english_interaction/tab_behavior\": \"navigate\""),
         requestOrder.currentReloadCount() == 0,
         try exportContains(
+          "linnet_custom_words", row: "Cloud Team\tcloud team",
+          directory: live, fixtureRoot: fixtureRoot
+        ),
+        try exportContains(
+          "linnet_text_expander", row: "be right back\tx;brb",
+          directory: live, fixtureRoot: fixtureRoot
+        ),
+        try exportContains(
           "linnet_zh", row: "你好\tni hao", directory: live, fixtureRoot: fixtureRoot
         ),
         try exportContains(
           "linnet_en", row: "hello\thello", directory: live, fixtureRoot: fixtureRoot
-        )
+        ),
+        applyPhases.snapshot()
+          == [.preflight, .pausing, .snapshotting, .staging, .activating, .completed]
       else {
-        fail("personal apply did not preserve substitutions and zh/en learning")
+        fail("personal apply redeployed schemas or did not preserve substitutions and learning")
       }
-      let appliedRuntime = try registry.runtimeSnapshot()
-      try verifySelectedChineseProfile(
-        .jiajia,
-        user: live,
-        shared: appliedRuntime.sharedDataDirectory,
-        product: productName
-      )
-
       let backupsBeforeConfiguration = try LinnetBackupStore.listBackups(
         in: registry.backupsDirectory).count
       let requestsBeforeConfiguration = requestOrder.currentRequestCount()
@@ -1099,12 +1192,12 @@ struct SettingsDataCoordinatorTests {
         configuredChinese.contains("\"switches/@2/reset\": 1"),
         configuredChinese.contains("\"linnet_english_interaction/sentence_capitalization\": false"),
         configuredChinese.contains("\"linnet_english_interaction/tab_behavior\": \"pass\""),
-        configuredChinese.contains("\"linnet_pinyin/prefix\": \"|\""),
+        !configuredChinese.contains("linnet_pinyin/prefix"),
         configuredEnglishSchema.contains(
           "\"linnet_english_interaction/sentence_capitalization\": false"),
         configuredEnglishSchema.contains(
           "\"linnet_english_interaction/tab_behavior\": \"pass\""),
-        configuredEnglishSchema.contains("\"linnet_pinyin/prefix\": \"|\""),
+        !configuredEnglishSchema.contains("linnet_pinyin/prefix"),
         !FileManager.default.fileExists(
           atPath: live.appending(path: LinnetPersonalDataStore.legacyUserSettingsFile).path)
       else {
@@ -1592,13 +1685,12 @@ struct SettingsDataCoordinatorTests {
       }
 
       let portableURL = fixtureRoot.appending(path: "complete.linnet-data")
-      let exportResult = try await coordinator.run(
+      _ = try await coordinator.run(
         .exportPortable(
           categories: Set(LinnetBackupStore.Category.allCases), destination: portableURL)
       )
       let exported = try LinnetBackupStore.decodePortable(Data(contentsOf: portableURL))
-      guard exportResult.backupDirectory == nil,
-        Set(exported.categories) == Set(LinnetBackupStore.Category.allCases),
+      guard Set(exported.categories) == Set(LinnetBackupStore.Category.allCases),
         Set(exported.learning.map(\.schema)) == RimeUserDataBridge.learningSchemas
       else {
         fail("portable export did not contain the requested canonical categories")
@@ -1616,6 +1708,21 @@ struct SettingsDataCoordinatorTests {
         !diagnostics.redactedReport.contains(NSUserName())
       else {
         fail("runtime diagnostics were incomplete or disclosed personal data")
+      }
+      let reachabilityCases: [
+        (fixture: DiagnoseHealthFixture, expected: SettingsRuntimeReachability)
+      ] = [
+        (.status(.paused), .paused),
+        (.status(.degraded), .degraded),
+        (.status(.failed), .unreachable),
+        (.unavailable, .unreachable),
+      ]
+      for row in reachabilityCases {
+        requestOrder.armDiagnoseHealth(row.fixture)
+        let result = try await coordinator.run(.diagnose)
+        guard result.diagnostics?.reachability == row.expected else {
+          fail("runtime diagnostics classified a fixture into the wrong reachability state")
+        }
       }
 
       let portableReplacement = LinnetPersonalData(
@@ -1650,16 +1757,27 @@ struct SettingsDataCoordinatorTests {
         portableCandidate.appVersion == "0.1.0",
         portableCandidate.dataVersion == "fixture"
       else { fail("portable inspection summary did not come from the validated archive") }
+      let cloudRecovery = fixtureRoot.appending(path: "cloud-recovery", directoryHint: .isDirectory)
+      try fileManager.createDirectory(at: cloudRecovery, withIntermediateDirectories: false)
+      _ = try LinnetCloudRecoveryArchive.publish(
+        portable: portableData, in: cloudRecovery, repair: false)
+      let cloudCandidate = try await coordinator.inspectCloudRecovery(in: cloudRecovery)
+      guard cloudCandidate?.archive == portableCandidate.archive else {
+        fail("cloud recovery inspection did not use the validated portable archive")
+      }
       verifyOperationContracts(
         legacyCandidate: legacyCandidate,
         portableCandidate: portableCandidate,
         fixtureRoot: fixtureRoot
       )
       try fileManager.removeItem(at: replacementURL)
+      let unselectedEnglish = try rawDictionaryState("linnet_en", directory: live)
       let firstImport = try await coordinator.run(
         .importPortable(portableCandidate, baseRevision: applyResult.personalSnapshot.revision)
       )
       try verifyPortableReplacement(live: live, fixtureRoot: fixtureRoot)
+      try verifyRawDictionary(
+        "linnet_en", expected: unselectedEnglish, directory: live, operation: "partial portable import")
       let secondImport = try await coordinator.run(
         .importPortable(portableCandidate, baseRevision: firstImport.personalSnapshot.revision)
       )
@@ -1667,8 +1785,13 @@ struct SettingsDataCoordinatorTests {
         fail("repeated portable replacement was not idempotent")
       }
       try verifyPortableReplacement(live: live, fixtureRoot: fixtureRoot)
+      try verifyRawDictionary(
+        "linnet_en", expected: unselectedEnglish, directory: live, operation: "repeated partial import")
 
+      let beforeClearChinese = try rawDictionaryState("linnet_zh", directory: live)
       let clearChinese = try await coordinator.run(.clearLearning([.chinese]))
+      try verifyRawDictionary(
+        "linnet_en", expected: unselectedEnglish, directory: live, operation: "clear Chinese")
       guard let clearBackup = clearChinese.backupDirectory,
         try !exportContains(
           "linnet_zh", row: "你好\tni hao", directory: live, fixtureRoot: fixtureRoot
@@ -1687,6 +1810,10 @@ struct SettingsDataCoordinatorTests {
         options: .atomic
       )
       let restored = try await coordinator.run(.restoreBackup(clearBackup))
+      try verifyRawDictionary(
+        "linnet_zh", expected: beforeClearChinese, directory: live, operation: "restore Chinese")
+      try verifyRawDictionary(
+        "linnet_en", expected: unselectedEnglish, directory: live, operation: "restore English")
       guard
         try exportContains(
           "linnet_zh", row: "你好\tni hao", directory: live, fixtureRoot: fixtureRoot
@@ -1715,6 +1842,9 @@ struct SettingsDataCoordinatorTests {
       else {
         fail("clear both did not preserve personal data")
       }
+
+      try await verifyShippedV3BackupRestore(
+        coordinator: coordinator, live: live, fixtureRoot: fixtureRoot)
 
       // Two independent Settings actors can prepare different pack kinds from
       // the same live revision. Only the first may publish; the second must be
@@ -1778,6 +1908,7 @@ struct SettingsDataCoordinatorTests {
 
       let rolledBackEnglishPack = try makeLanguagePack(
         .english, version: "settings-english-v2", sequence: 2, registry: registry)
+      print("Coordinator scenario: rolled-back English activation")
       let rolledBackEnglish = try activationReplacing(
         rolledBackEnglishPack, registry: registry)
       requestOrder.armLanguageStatus(.rolledBack)
@@ -1976,7 +2107,7 @@ struct SettingsDataCoordinatorTests {
         "linnet_en", row: "hello\thello", directory: live, fixtureRoot: fixtureRoot
       )
     else {
-      fail("legacy import, v2 backup, input separation, or exact learning allowlist failed")
+      fail("legacy import backup, input separation, or exact learning allowlist failed")
     }
   }
 
@@ -1991,7 +2122,7 @@ struct SettingsDataCoordinatorTests {
       encoding: .utf8
     )
     guard personal.customWords.map(\.value) == ["Portable Word"],
-      personal.disabledWords == ["forbiddenword"],
+      personal.disabledWords.map(\.value) == ["forbiddenword"],
       personal.expansions.map(\.trigger) == ["x;brb"],
       !runtimeSettings.contains("sentence_capitalization"),
       !runtimeSettings.contains("tab_behavior"),
@@ -2015,17 +2146,32 @@ struct SettingsDataCoordinatorTests {
     registry: LinnetDataRegistry
   ) throws -> LinnetDataRegistry.ActivationCandidate {
     let activeData = try Data(contentsOf: registry.activeSharedDataDirectory.appending(path: "activation.json"))
-    var target = try JSONDecoder().decode(LinnetDataRegistry.ActiveState.self, from: activeData).packs
+    let active = try JSONDecoder().decode(LinnetDataRegistry.ActiveState.self, from: activeData)
+    var target = active.packs
     target.removeAll { $0.kind == replacement.kind }
     target.append(replacement)
-    let sequence = target.map(\.sequence).max() ?? 1
+    // Catalog publication advances independently from each pack's sequence.
+    let sequence = (active.acceptedCatalog?.sequence ?? 0) + 1
+    let document = dataChannelCatalog(for: target, sequence: sequence)
     let catalog = LinnetDataChannel.Verified(
-      catalog: dataChannelCatalog(for: target, sequence: sequence),
-      digest: String(repeating: String(format: "%x", sequence % 16), count: 64))
+      catalog: document,
+      digest: LinnetPackContract.sha256(try LinnetDataChannel.canonicalCatalogData(document)))
+    let receipt = try registry.receiptForCatalog(catalog)
+    print("Language fixture \(replacement.kind.rawValue) \(replacement.version), pack \(replacement.sequence): "
+      + "Catalog \(active.acceptedCatalog?.sequence ?? 0) -> \(sequence); "
+      + "snapshot \(active.acceptedCatalog?.packSnapshotDigest ?? "none") -> \(receipt.packSnapshotDigest ?? "none")")
     let edition: LinnetDataRegistry.Edition = target.contains { $0.kind == .extended }
       ? .full : .standard
-    let update = try registry.beginDataChannelUpdate(accepting: catalog, edition: edition)
-    return try registry.prepareDataChannelUpdate(update, target: target)
+    var phase = "begin"
+    do {
+      let update = try registry.beginDataChannelUpdate(accepting: catalog, edition: edition)
+      phase = "prepare"
+      return try registry.prepareDataChannelUpdate(update, target: target)
+    } catch {
+      print("Language fixture failed at \(phase): \(replacement.kind.rawValue) "
+        + "\(replacement.version), pack sequence \(replacement.sequence), catalog sequence \(sequence): \(error)")
+      throw error
+    }
   }
 
   private static func dataChannelCatalog(
@@ -2033,7 +2179,7 @@ struct SettingsDataCoordinatorTests {
   ) -> LinnetDataChannel.Catalog {
     let artifacts = packs.map { pack in
       LinnetDataChannel.Artifact(
-        kind: LinnetPackContract.Kind(rawValue: pack.kind.rawValue)!,
+        kind: pack.kind,
         version: pack.version,
         sequence: pack.sequence,
         dataABI: pack.dataABI,
@@ -2047,12 +2193,13 @@ struct SettingsDataCoordinatorTests {
     let edition: LinnetDataRegistry.Edition = packs.contains { $0.kind == .extended }
       ? .full : .standard
     return .init(
-      format: LinnetDataChannel.format,
+      format: LinnetDataChannel.legacyFormat,
       sequence: sequence,
       core: .init(
         version: "0.1.0", build: 1, revision: String(repeating: "a", count: 40),
         bytes: 1, sha256: String(repeating: "b", count: 64),
-        packageURL: URL(
+        artifactFormat: .installerPackage,
+        artifactURL: URL(
           string:
             "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.0/Linnet-0.1.0-arm64-Core-community-beta.pkg")!,
         releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.0")!),
@@ -2060,7 +2207,7 @@ struct SettingsDataCoordinatorTests {
   }
 
   private static func makeLanguagePack(
-    _ kind: LinnetDataRegistry.PackKind,
+    _ kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64,
     registry: LinnetDataRegistry
@@ -2080,7 +2227,7 @@ struct SettingsDataCoordinatorTests {
   }
 
   private static func writeLanguagePackManifest(
-    kind: LinnetDataRegistry.PackKind,
+    kind: LinnetPackContract.Kind,
     version: String,
     sequence: UInt64,
     directory: URL,
@@ -2103,8 +2250,8 @@ struct SettingsDataCoordinatorTests {
     let manifest = LinnetPackContract.Manifest(
       format: LinnetPackContract.manifestFormat,
       product: LinnetPackContract.productIdentifier,
-      packID: LinnetPackContract.Kind(rawValue: kind.rawValue)!.packID,
-      kind: LinnetPackContract.Kind(rawValue: kind.rawValue)!,
+      packID: kind.packID,
+      kind: kind,
       version: version,
       sequence: sequence,
       dataABI: 1,
@@ -2122,9 +2269,7 @@ struct SettingsDataCoordinatorTests {
       dataABI: 1,
       contentSHA256: contentSHA256,
       minCore: manifest.minCore,
-      requirements: requirements.map {
-        .init(kind: LinnetDataRegistry.PackKind(rawValue: $0.kind.rawValue)!, dataABI: $0.dataABI)
-      },
+      requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
       manifestSHA256: LinnetPackContract.sha256(manifestData))
   }
@@ -2235,6 +2380,7 @@ struct SettingsDataCoordinatorTests {
       if relative == "linnet_grammar_active.yaml" || extendedOnly.contains(relative) { continue }
       let isEnglish = relative == "linnet.smart.db"
         || relative == "linnet.english-data-manifest.json"
+        || relative == "linnet_english_entities.dict.yaml"
         || relative.hasPrefix("linnet_en.")
         || relative.hasPrefix("build/linnet_en.")
       let destinationRoot = isEnglish ? englishPack : chinesePack
@@ -2285,67 +2431,64 @@ struct SettingsDataCoordinatorTests {
       to: active.appending(path: "activation.json"), options: .atomic)
   }
 
-  private static func verifySelectedChineseProfile(
-    _ expected: LinnetSettingsContract.ChineseProfile,
-    user: URL,
-    shared: URL,
-    product: String
-  ) throws {
+  private static func verifyCoreThemeDeployment(in root: URL) throws {
+    let shared = root.appending(path: "theme-shared")
+    let user = root.appending(path: "theme-user")
+    let staging = root.appending(path: "theme-build")
+    for directory in [shared, user, staging] { try makeDirectory(directory) }
+    let source = root.appending(path: "core-theme.yaml")
+    let bundled = try String(contentsOfFile: "data/squirrel.yaml", encoding: .utf8)
+    try "config_version: '1.1'\nstyle:\n  font_point: 99\n".write(
+      to: shared.appending(path: "squirrel.yaml"), atomically: true, encoding: .utf8)
+    var document = LinnetSettingsDocument.default
+    document.appearance.fontPoint = 32
+    document.appearance.themeFamily = .sidecarSlate
+    try LinnetSettingsProjectionRenderer.reconcile(document: document, to: user)
     let api = rime_get_api_stdbool().pointee
-    let prebuilt = shared.appending(path: "build").path
-    let staging = user.appending(path: "build").path
-    shared.path.withCString { sharedPath in
-      prebuilt.withCString { prebuiltPath in
+    for (index, accent) in ["0x995725", "0x123456"].enumerated() {
+      if index == 1 {
+        // New packs omit UI; the next Core must also replace a same-version
+        // theme without waiting for a timestamp tick or touching dictionaries.
+        try FileManager.default.removeItem(at: shared.appending(path: "squirrel.yaml"))
+      }
+      try bundled.replacingOccurrences(of: "0x995725", with: accent).write(
+        to: source, atomically: true, encoding: .utf8)
+      try LinnetSettingsProjectionRenderer.reconcileCoreConfiguration(
+        source: source, to: user, stagingDirectory: staging)
+      shared.path.withCString { sharedPath in
         user.path.withCString { userPath in
-          staging.withCString { stagingPath in
-            product.withCString { productPath in
-              "".withCString { logPath in
-                var traits = RimeTraits()
-                traits.data_size = Int32(
-                  MemoryLayout<RimeTraits>.size - MemoryLayout<Int32>.size)
-                traits.shared_data_dir = sharedPath
-                traits.prebuilt_data_dir = prebuiltPath
-                traits.user_data_dir = userPath
-                traits.staging_dir = stagingPath
-                traits.distribution_name = productPath
-                traits.app_name = productPath
-                traits.min_log_level = 2
-                traits.log_dir = logPath
-                api.setup(&traits)
-              }
-            }
+          staging.path.withCString { stagingPath in
+            var traits = RimeTraits()
+            traits.data_size = Int32(MemoryLayout<RimeTraits>.size - MemoryLayout<Int32>.size)
+            traits.shared_data_dir = sharedPath
+            traits.user_data_dir = userPath
+            traits.staging_dir = stagingPath
+            traits.prebuilt_data_dir = stagingPath
+            traits.min_log_level = 3
+            api.setup(&traits)
           }
         }
       }
+      api.initialize(nil)
+      do {
+        defer { api.finalize() }
+        if api.start_maintenance(false) { api.join_maintenance_thread() }
+        guard api.deploy_config_file("squirrel.yaml", "config_version") else {
+          fail("Core theme could not be deployed by Rime")
+        }
+        var config = RimeConfig()
+        guard api.config_open("squirrel", &config) else { fail("Core theme could not be opened") }
+        defer { _ = api.config_close(&config) }
+        var font = 0.0
+        guard api.config_get_double(&config, "style/font_point", &font), font == 32,
+          let selected = api.config_get_cstring(&config, "style/color_scheme"),
+          String(cString: selected) == "linnet_sidecar_light",
+          let color = api.config_get_cstring(&config, "preset_color_schemes/linnet_sidecar_light/hilited_candidate_back_color"),
+          String(cString: color) == accent
+        else { fail("Rime retained pack/old-Core theme or lost the user's appearance choices") }
+      }
     }
-    api.initialize(nil)
-    defer { api.finalize() }
-
-    var config = RimeConfig()
-    guard api.user_config_open("user", &config) else {
-      fail("the applied Rime user configuration could not be opened")
-    }
-    let staleSchemaID = LinnetSettingsContract.ChineseProfile.natural.schemaID
-    let wroteStale = staleSchemaID.withCString {
-      api.config_set_string(&config, "var/previously_selected_schema", $0)
-    }
-    let closed = api.config_close(&config)
-    guard wroteStale, closed, staleSchemaID != expected.schemaID else {
-      fail("could not establish a stale user.yaml schema selection")
-    }
-
-    let session = api.create_session()
-    guard session != 0 else {
-      fail("a fresh session could not be created after full Apply")
-    }
-    defer { _ = api.destroy_session(session) }
-    var active = [CChar](repeating: 0, count: Int(PATH_MAX))
-    let readActive = active.withUnsafeMutableBufferPointer { buffer in
-      api.get_current_schema(session, buffer.baseAddress, buffer.count)
-    }
-    guard readActive, String(cString: active) == expected.schemaID else {
-      fail("a stale user.yaml value overrode the document-selected Chinese profile")
-    }
+    print("Core theme deployment: PASS (legacy pack, theme-free pack, same-version Core update, preserved choices)")
   }
 
   private static func makeBundleFixture(at root: URL, productName: String) throws -> Bundle {
@@ -2459,6 +2602,97 @@ struct SettingsDataCoordinatorTests {
     try runDictionaryTool(["--import", name, source.path], directory: directory)
   }
 
+  private static func verifyShippedV3BackupRestore(
+    coordinator: SettingsDataCoordinator, live: URL, fixtureRoot: URL
+  ) async throws {
+    let transactionID = UUID()
+    let backup = fixtureRoot.appending(
+      path: "legacy-backups/\(transactionID.uuidString)/backup", directoryHint: .isDirectory)
+    let stable = backup.appending(path: "stable", directoryHint: .isDirectory)
+    let learning = backup.appending(path: "user-dictionaries", directoryHint: .isDirectory)
+    try makeDirectory(stable)
+    try makeDirectory(learning)
+    _ = try LinnetBackupStore.snapshotStable(from: live, to: stable)
+    for (schema, row) in ["linnet_zh": "你好\tni hao\t19", "linnet_en": "hello\thello\t11"] {
+      try "# Rime user dictionary export\n\(row)\n".write(
+        to: learning.appending(path: "\(schema).txt"), atomically: true, encoding: .utf8)
+    }
+    let manifest = LinnetBackupStore.BackupManifest(
+      formatVersion: LinnetBackupStore.tableBackupFormatVersion,
+      complete: true, backupID: UUID(), transactionID: transactionID,
+      operation: .applyPersonalData, createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+      appVersion: "0.1.10", dataVersion: "legacy-fixture",
+      personalRevision: try LinnetBackupStore.backupPersonalRevision(at: stable),
+      artifacts: try LinnetBackupStore.collectBackupArtifacts(
+        backup, formatVersion: LinnetBackupStore.tableBackupFormatVersion))
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    try encoder.encode(manifest).write(to: backup.appending(path: "manifest.json"))
+    let result = try await coordinator.run(.restoreBackup(backup))
+    guard try LinnetBackupStore.verifyBackup(at: backup) == manifest,
+      result.personalSnapshot.data.customWords.map(\.value)
+        == (try LinnetPersonalDataStore.load(from: stable)).customWords.map(\.value),
+      try exportContains(
+        "linnet_zh", row: "你好\tni hao", directory: live, fixtureRoot: fixtureRoot),
+      try exportContains(
+        "linnet_en", row: "hello\thello", directory: live, fixtureRoot: fixtureRoot)
+    else { fail("shipped v3 backup restore lost stable/learning data or rewrote its source") }
+    print("Legacy backup v3 native restore: PASS")
+  }
+
+  // The native backup codec preserves the database clock and complete c/d/t
+  // values, including deletions. A portable table export is not this oracle.
+  private static func seedRawDictionary(
+    _ name: String, directory: URL, fixtureRoot: URL
+  ) throws {
+    let rows = name == "linnet_zh"
+      ? "ni hao \t你好\tc=11 d=4.25 t=1000\nzhong guo \t中国\tc=-3 d=1.5 t=1000\n"
+      : "hello \thello\tc=11 d=4.25 t=1000\nremoved \tremoved\tc=-3 d=1.5 t=1000\n"
+    let source = fixtureRoot.appending(path: "raw-\(name).userdb.txt")
+    try "# Rime user dictionary\n#@/db_name\t\(name)\n#@/db_type\tuserdb\n#@/tick\t1000\n\(rows)"
+      .write(to: source, atomically: true, encoding: .utf8)
+    try runDictionaryTool(["--restore", source.path], directory: directory)
+  }
+
+  private static func rawDictionaryState(
+    _ name: String, directory: URL
+  ) throws -> [String: String] {
+    let installation = directory.appending(path: "installation.yaml")
+    guard !(try String(contentsOf: installation, encoding: .utf8)).contains("sync_dir:") else {
+      throw TestFailure.fixture
+    }
+    try runDictionaryTool(["--backup", name], directory: directory)
+    let sync = directory.appending(path: "sync", directoryHint: .isDirectory)
+    guard let files = FileManager.default.enumerator(at: sync, includingPropertiesForKeys: nil)
+    else { throw TestFailure.fixture }
+    let matches = files.compactMap { $0 as? URL }.filter {
+      $0.lastPathComponent == "\(name).userdb.txt"
+    }
+    guard matches.count == 1 else { throw TestFailure.fixture }
+    let contents = try String(contentsOf: matches[0], encoding: .utf8)
+    var state: [String: String] = [:]
+    for line in contents.split(separator: "\n") where !line.hasPrefix("#") || line.hasPrefix("#@") {
+      let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+      guard fields.count >= 2 else { throw TestFailure.fixture }
+      let key = fields.dropLast().joined(separator: "\t")
+      guard state.updateValue(String(fields.last!), forKey: key) == nil else { throw TestFailure.fixture }
+    }
+    return state
+  }
+
+  private static func verifyRawDictionary(
+    _ name: String, expected: [String: String], directory: URL, operation: String
+  ) throws {
+    let actual = try rawDictionaryState(name, directory: directory)
+    guard actual == expected else {
+      let changed = Set(expected.keys).union(actual.keys).sorted().filter { expected[$0] != actual[$0] }
+      for key in changed {
+        print("RAW_LEARNING \(name) \(key): \(expected[key] ?? "<absent>") -> \(actual[key] ?? "<absent>")")
+      }
+      fail("\(operation) changed the complete native learning state of \(name)")
+    }
+  }
+
   private static func exportContains(
     _ name: String,
     row: String,
@@ -2569,14 +2803,29 @@ struct SettingsDataCoordinatorTests {
   private static func settingsHealth(
     activeRevision: String
   ) -> LinnetSettingsContract.RuntimeHealth {
-    .init(
-      state: .running,
-      phase: .running,
+    diagnosticHealth(status: .running, activeRevision: activeRevision)
+  }
+
+  private static func diagnosticHealth(
+    status: LinnetSettingsContract.RuntimeStatus,
+    activeRevision: String?
+  ) -> LinnetSettingsContract.RuntimeHealth {
+    let phase: LinnetSettingsContract.RuntimePhase
+    switch status {
+    case .running, .degraded: phase = .running
+    case .paused: phase = .paused
+    default: phase = .recovering
+    }
+    return .init(
+      productIdentity: fixtureRuntimeIdentity,
+      state: status,
+      phase: phase,
       rimeVersion: "fixture",
       smartEnglishAvailable: true,
       octagramAvailable: true,
       availableSchemaCount: 9,
       requiredSchemaCount: 9,
+      activeTransactionID: nil,
       activeSettingsRevision: activeRevision
     )
   }
@@ -2595,6 +2844,7 @@ struct SettingsDataCoordinatorTests {
     } else {
       switch status {
       case .running, .degraded: code = .diagnosticsReady
+      case .terminating: code = .coreActivationAccepted
       case .paused: code = .runtimePaused
       case .activated: code = .activationVerified
       case .cancelled: code = .runtimeResumed

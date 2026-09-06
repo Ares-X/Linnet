@@ -1,5 +1,5 @@
 diff --git a/src/rime/context.cc b/src/rime/context.cc
-index ec840a3..fb2633b 100644
+index ec840a3..c83c0d2 100644
 --- a/src/rime/context.cc
 +++ b/src/rime/context.cc
 @@ -25,6 +25,29 @@ bool Context::Commit() {
@@ -32,6 +32,55 @@ index ec840a3..fb2633b 100644
  string Context::GetCommitText() const {
    if (get_option("dumb"))
      return string();
+@@ -148,15 +171,39 @@
+   return true;
+ }
+ 
+-bool Context::DeleteCandidate(size_t index) {
+-  if (composition_.empty())
+-    return false;
+-  Segment& seg(composition_.back());
+-  seg.selected_index = index;
+-  DLOG(INFO) << "Deleting candidate: " << seg.GetSelectedCandidate()->text();
+-  delete_notifier_(this);
+-  return true;  // CAVEAT: this doesn't mean anything is deleted for sure
+-}
++bool Context::DeleteCandidate(size_t index) {
++  if (composition_.empty())
++    return false;
++  Segment& seg(composition_.back());
++  auto previous = seg.GetSelectedCandidate();
++  const size_t previous_index = seg.selected_index;
++  const size_t prepared = seg.menu ? seg.menu->candidate_count() : 0;
++  auto target = seg.menu ? seg.menu->GetCandidateAt(index) : nullptr;
++  if (!target)
++    return false;
++  seg.selected_index = index;
++  DLOG(INFO) << "Deleting candidate: " << target->text();
++  delete_notifier_(this);
++  // A pointer action on another candidate must not move keyboard focus.
++  // Refind the original text in the already-browsed window after reordering.
++  // Deleting the current selection retains Rime's normal successor behavior.
++  if (index != previous_index && previous && !composition_.empty()) {
++    auto menu = composition_.back().menu;
++    if (menu) {
++      const size_t count = menu->Prepare(prepared);
++      for (size_t next = 0; next < count; ++next) {
++        auto candidate = menu->GetCandidateAt(next);
++        if (candidate && candidate->text() == previous->text() &&
++            candidate->start() == previous->start() &&
++            candidate->end() == previous->end()) {
++          Highlight(next);
++          break;
++        }
++      }
++    }
++  }
++  return true;  // CAVEAT: this doesn't mean anything is deleted for sure
++}
+ 
+ bool Context::DeleteCurrentSelection() {
+   if (composition_.empty())
 diff --git a/src/rime/context.h b/src/rime/context.h
 index d526130..55605cf 100644
 --- a/src/rime/context.h
@@ -44,21 +93,194 @@ index d526130..55605cf 100644
    string GetCommitText() const;
    string GetScriptText() const;
    Preedit GetPreedit() const;
+diff --git a/src/rime/dict/dictionary.cc b/src/rime/dict/dictionary.cc
+index 58f21a3..76e9e91 100644
+--- a/src/rime/dict/dictionary.cc
++++ b/src/rime/dict/dictionary.cc
+@@ -66,18 +66,42 @@ struct Chunk {
+   bool is_predictive_match() const { return matching_code_size < code.size(); }
+ };
+ 
++an<DictEntry> MakeEntry(const Chunk& chunk, size_t cursor) {
++  const auto& table_entry = chunk.entries[cursor];
++  auto entry = New<DictEntry>();
++  entry->code = chunk.code;
++  entry->text = chunk.table->GetEntryText(table_entry);
++  const double kS = 18.420680743952367;  // log(1e8)
++  entry->weight = table_entry.weight - kS + chunk.credibility;
++  entry->quality_len = chunk.quality_len;
++  if (!chunk.remaining_code.empty()) {
++    entry->comment = "~" + chunk.remaining_code;
++    entry->remaining_code_length = chunk.remaining_code.length();
++  }
++  if (chunk.is_predictive_match()) {
++    entry->matching_code_size = chunk.matching_code_size;
++  }
++  return entry;
++}
++
+ struct QueryResult {
+   vector<Chunk> chunks;
++  bool completion_by_weight = false;
+ };
+ 
+-bool compare_chunk_by_head_element(const Chunk& a, const Chunk& b) {
++bool compare_chunk_by_head_element(const Chunk& a, const Chunk& b,
++                                   bool completion_by_weight) {
+   if (!a.entries || a.cursor >= a.size)
+     return false;
+   if (!b.entries || b.cursor >= b.size)
+     return true;
+   if (a.is_exact_match() != b.is_exact_match())
+     return a.is_exact_match() > b.is_exact_match();
+-  if (a.remaining_code.length() != b.remaining_code.length())
++  // Exact words retain priority; completion length is not word frequency.
++  if (a.remaining_code.empty() != b.remaining_code.empty())
++    return a.remaining_code.empty();
++  if (!completion_by_weight &&
++      a.remaining_code.length() != b.remaining_code.length())
+     return a.remaining_code.length() < b.remaining_code.length();
+   return a.credibility + a.entries[a.cursor].weight >
+          b.credibility + b.entries[b.cursor].weight;  // by weight desc
+@@ -134,10 +158,44 @@ void DictEntryIterator::AddChunk(dictionary::Chunk&& chunk) {
+ 
+ void DictEntryIterator::Sort() {
+   auto& chunks = query_result_->chunks;
++  if (query_result_->completion_by_weight) {
++    // The suffix is already sorted. Only the consumed chunk's new head can
++    // move; reinsertion avoids rescanning every completion for every candidate.
++    auto first = chunks.begin() + chunk_index_;
++    auto position = std::upper_bound(
++        first + 1, chunks.end(), *first, [](const auto& a, const auto& b) {
++          return dictionary::compare_chunk_by_head_element(a, b, true);
++        });
++    std::rotate(first, first + 1, position);
++    return;
++  }
+   // partial-sort remaining chunks, move best match to chunk_index_
+   std::partial_sort(chunks.begin() + chunk_index_,
+                     chunks.begin() + chunk_index_ + 1, chunks.end(),
+-                    dictionary::compare_chunk_by_head_element);
++                    [this](const auto& a, const auto& b) {
++                      return dictionary::compare_chunk_by_head_element(
++                          a, b, query_result_->completion_by_weight);
++                    });
++}
++
++void DictEntryIterator::SortByWeight(size_t input_length) {
++  query_result_->completion_by_weight = true;
++  entry_.reset();
++  auto& chunks = query_result_->chunks;
++  for (auto& chunk : chunks) {
++    // A shortened derived spelling (LIB -> libc) is still a completion, even
++    // when the Prism key itself matches the complete input. Preserve the
++    // original syllable identity used by TableTranslation and user learning.
++    if (chunk.remaining_code.empty() && chunk.code.size() == 1) {
++      const auto spelling = chunk.table->GetSyllableById(chunk.code.front());
++      if (spelling.size() > input_length)
++        chunk.remaining_code = spelling.substr(input_length);
++    }
++  }
++  std::sort(chunks.begin() + chunk_index_, chunks.end(),
++            [](const auto& a, const auto& b) {
++              return dictionary::compare_chunk_by_head_element(a, b, true);
++            });
+ }
+ 
+ void DictEntryIterator::AddFilter(DictEntryFilter filter) {
+@@ -154,26 +212,26 @@ an<DictEntry> DictEntryIterator::Peek() {
+   if (!entry_ && !exhausted()) {
+     // get next entry from current chunk
+     const auto& chunk = query_result_->chunks[chunk_index_];
+-    const auto& e = chunk.entries[chunk.cursor];
+     DLOG(INFO) << "creating temporary dict entry '"
+-               << chunk.table->GetEntryText(e) << "'.";
+-    entry_ = New<DictEntry>();
+-    entry_->code = chunk.code;
+-    entry_->text = chunk.table->GetEntryText(e);
+-    const double kS = 18.420680743952367;  // log(1e8)
+-    entry_->weight = e.weight - kS + chunk.credibility;
+-    entry_->quality_len = chunk.quality_len;
+-    if (!chunk.remaining_code.empty()) {
+-      entry_->comment = "~" + chunk.remaining_code;
+-      entry_->remaining_code_length = chunk.remaining_code.length();
+-    }
+-    if (chunk.is_predictive_match()) {
+-      entry_->matching_code_size = chunk.matching_code_size;
+-    }
++               << chunk.table->GetEntryText(chunk.entries[chunk.cursor])
++               << "'.";
++    entry_ = dictionary::MakeEntry(chunk, chunk.cursor);
+   }
+   return entry_;
+ }
+ 
++an<DictEntry> DictEntryIterator::FindRemainingEntry(const string& text) const {
++  for (size_t chunk_index = chunk_index_;
++       chunk_index < query_result_->chunks.size(); ++chunk_index) {
++    const auto& chunk = query_result_->chunks[chunk_index];
++    for (size_t cursor = chunk.cursor; cursor < chunk.size; ++cursor) {
++      auto entry = dictionary::MakeEntry(chunk, cursor);
++      if (entry->text == text && (!filter_ || filter_(entry))) return entry;
++    }
++  }
++  return nullptr;
++}
++
+ bool DictEntryIterator::FindNextEntry() {
+   if (exhausted()) {
+     return false;
+@@ -300,7 +358,8 @@ size_t Dictionary::LookupWords(DictEntryIterator* result,
+                                const string& str_code,
+                                bool predictive,
+                                size_t expand_search_limit,
+-                               const hash_set<string>* blacklist) {
++                               const hash_set<string>* blacklist,
++                               size_t expand_search_start) {
+   DLOG(INFO) << "lookup: " << str_code;
+   if (!loaded())
+     return 0;
+@@ -315,7 +374,9 @@ size_t Dictionary::LookupWords(DictEntryIterator* result,
+   }
+   DLOG(INFO) << "found " << keys.size() << " matching keys thru the prism.";
+   size_t code_length(str_code.length());
+-  for (auto& match : keys) {
++  for (size_t key_index = expand_search_start; key_index < keys.size();
++       ++key_index) {
++    const auto& match = keys[key_index];
+     SpellingAccessor accessor(prism_->QuerySpelling(match.value));
+     while (!accessor.exhausted()) {
+       SyllableId syllable_id = accessor.syllable_id();
+diff --git a/src/rime/dict/dictionary.h b/src/rime/dict/dictionary.h
+index f1127e5..b0ee8a5 100644
+--- a/src/rime/dict/dictionary.h
++++ b/src/rime/dict/dictionary.h
+@@ -34,8 +34,10 @@ class RIME_DLL DictEntryIterator : public DictEntryFilterBinder {
+ 
+   void AddChunk(dictionary::Chunk&& chunk);
+   void Sort();
++  void SortByWeight(size_t input_length);
+   void AddFilter(DictEntryFilter filter) override;
+   an<DictEntry> Peek();
++  an<DictEntry> FindRemainingEntry(const string& text) const;
+   bool Next();
+   bool Skip(size_t num_entries);
+   bool exhausted() const;
+@@ -84,7 +86,8 @@ class Dictionary : public Class<Dictionary, const Ticket&> {
+                               const string& str_code,
+                               bool predictive,
+                               size_t limit = 0,
+-                              const hash_set<string>* blacklist = nullptr);
++                              const hash_set<string>* blacklist = nullptr,
++                              size_t expand_search_start = 0);
+   // translate syllable id sequence to string code
+   RIME_DLL bool Decode(const Code& code, vector<string>* result);
+ 
 diff --git a/src/rime/gear/ascii_composer.cc b/src/rime/gear/ascii_composer.cc
-index e49dc38..2a8ece6 100644
+index e49dc38..aa04631 100644
 --- a/src/rime/gear/ascii_composer.cc
 +++ b/src/rime/gear/ascii_composer.cc
-@@ -15,6 +15,9 @@
- 
- namespace rime {
- 
-+constexpr char kCapsLockAsciiModeProperty[] =
-+    "_linnet_caps_lock_ascii_mode";
-+
- static struct AsciiModeSwitchStyleDefinition {
-   const char* repr;
-   AsciiModeSwitchStyle style;
-@@ -51,18 +54,23 @@ static void load_bindings(const an<ConfigMap>& src,
+@@ -51,18 +51,23 @@ static void load_bindings(const an<ConfigMap>& src,
  
  AsciiComposer::AsciiComposer(const Ticket& ticket) : Processor(ticket) {
    LoadConfig(ticket.schema);
@@ -84,7 +306,7 @@ index e49dc38..2a8ece6 100644
      return kNoop;
    }
    if (caps_lock_switch_style_ != kAsciiModeSwitchNoop) {
-@@ -73,7 +81,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+@@ -73,7 +78,7 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
    int ch = key_event.keycode();
    if (ch == XK_Eisu_toggle) {  // Alphanumeric toggle
      if (!key_event.release()) {
@@ -93,7 +315,7 @@ index e49dc38..2a8ece6 100644
        ToggleAsciiModeWithKey(ch);
        return kAccepted;
      } else {
-@@ -86,40 +94,38 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
+@@ -86,40 +91,38 @@ ProcessResult AsciiComposer::ProcessKeyEvent(const KeyEvent& key_event) {
    bool is_super = (ch == XK_Super_L || ch == XK_Super_R);
    if (is_shift || is_ctrl || is_alt || is_super) {
      if (key_event.release()) {
@@ -156,13 +378,12 @@ index e49dc38..2a8ece6 100644
    // possible key binding: Control+x, Shift+space
    if (key_event.ctrl() || key_event.alt() || key_event.super() ||
        (key_event.shift() && ch == XK_space)) {
-@@ -144,23 +150,15 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
+@@ -144,18 +147,7 @@ ProcessResult AsciiComposer::ProcessCapsLock(const KeyEvent& key_event) {
    int ch = key_event.keycode();
    if (ch == XK_Caps_Lock) {
      if (!key_event.release()) {
 -      shift_key_pressed_ = ctrl_key_pressed_ = alt_key_pressed_ =
 -          super_key_pressed_ = false;
-+      ResetModifierState();
 -      // temporarily disable good-old (uppercase) Caps Lock as mode switch key
 -      // in case the user switched to ascii mode with other keys, eg. with Shift
 -      if (good_old_caps_lock_ && !toggle_with_caps_) {
@@ -173,29 +394,19 @@ index e49dc38..2a8ece6 100644
 -        }
 -      }
 -      toggle_with_caps_ = !key_event.caps();
++      ResetModifierState();
        // NOTE: for Linux, Caps Lock modifier is clear when we are about to
        // turn it on; for Windows it is the opposite:
        // Caps Lock modifier has been set before we process VK_CAPITAL.
-       // here we assume IBus' behavior and invert caps with ! operation.
--      SwitchAsciiMode(!key_event.caps(), caps_lock_switch_style_);
-+      const bool caps_lock_active = !key_event.caps();
-+      SwitchAsciiMode(caps_lock_active, caps_lock_switch_style_);
-+      engine_->context()->set_property(
-+          kCapsLockAsciiModeProperty, caps_lock_active ? "1" : "");
-       // When good_old_caps_lock is enabled, allow the key event to pass
-       // through the input method to toggle the Caps Lock state.
-       return good_old_caps_lock_ ? kRejected : kAccepted;
-@@ -236,7 +234,8 @@ bool AsciiComposer::ToggleAsciiModeWithKey(int key_code) {
+@@ -236,7 +228,6 @@ bool AsciiComposer::ToggleAsciiModeWithKey(int key_code) {
      return false;
    }
    SwitchAsciiMode(new_mode, style);
 -  toggle_with_caps_ = (key_code == XK_Caps_Lock);
-+  if (key_code != XK_Caps_Lock)
-+    ctx->set_property(kCapsLockAsciiModeProperty, "");
    return true;
  }
  
-@@ -255,10 +254,13 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+@@ -255,10 +246,13 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
              [this](Context* ctx) { OnContextUpdate(ctx); });
        }
      } else if (style == kAsciiModeSwitchCommitText) {
@@ -212,7 +423,7 @@ index e49dc38..2a8ece6 100644
      } else if (style == kAsciiModeSwitchClear || style == kAsciiModeSet ||
                 style == kAsciiModeUnset) {
        ctx->Clear();
-@@ -268,6 +270,12 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
+@@ -268,6 +262,12 @@ void AsciiComposer::SwitchAsciiMode(bool ascii_mode,
    ctx->set_option("ascii_mode", ascii_mode);
  }
  
@@ -237,7 +448,7 @@ index 756771f..15f1145 100644
  #include <rime/common.h>
  #include <rime/component.h>
  #include <rime/processor.h>
-@@ -42,6 +43,7 @@ class AsciiComposer : public Processor {
+@@ -42,20 +43,21 @@ class AsciiComposer : public Processor {
    bool ToggleAsciiModeWithKey(int key_code);
    void SwitchAsciiMode(bool ascii_mode, AsciiModeSwitchStyle style);
    void OnContextUpdate(Context* ctx);
@@ -245,7 +456,7 @@ index 756771f..15f1145 100644
  
    // config options
    AsciiModeSwitchKeyBindings bindings_;
-@@ -49,13 +51,13 @@ class AsciiComposer : public Processor {
+   AsciiModeSwitchStyle caps_lock_switch_style_ = kAsciiModeSwitchNoop;
    bool good_old_caps_lock_ = false;
    // state
 -  bool toggle_with_caps_ = false;
@@ -292,6 +503,225 @@ index 37b3dda..0e57a97 100644
    return true;
  }
  
+diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
+index 963dd79..696c14c 100644
+--- a/src/rime/gear/poet.cc
++++ b/src/rime/gear/poet.cc
+@@ -27,6 +27,7 @@ struct Line {
+   size_t end_pos;
+   double weight;
+   size_t text_hash;  // for dedup
++  size_t preserved_entry_count;
+ 
+   static const Line kEmpty;
+ 
+@@ -69,7 +70,7 @@ struct Line {
+   }
+ };
+ 
+-const Line Line::kEmpty{nullptr, nullptr, 0, 0.0, 0};
++const Line Line::kEmpty{nullptr, nullptr, 0, 0.0, 0, 0};
+ 
+ inline static Grammar* create_grammar(Config* config) {
+   if (auto* grammar = Grammar::Require("grammar")) {
+@@ -217,7 +218,7 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
+           double weight = candidate.weight +
+                           Grammar::Evaluate(context, entry->text, entry->weight,
+                                             is_rear, grammar_.get());
+-          Line new_line{&candidate, entry.get(), end_pos, weight};
++          Line new_line{&candidate, entry.get(), end_pos, weight, 0, 0};
+           Line& best = Strategy::BestLineToUpdate(target_state, new_line);
+           if (best.empty() || compare_(best, new_line)) {
+             DLOG(INFO) << "updated line ending at " << end_pos
+@@ -259,12 +260,17 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+                                         size_t total_length,
+                                         const string& preceding_text,
+                                         size_t max_sentences,
+-                                        double cutoff_threshold) {
++                                        double cutoff_threshold,
++                                        EntryPredicate preserve_entry,
++                                        PreservedEntryMode preserved_entry_mode) {
+   size_t beam_width =
+       max_sentences * 3;  // allow more possibilities during search
+-  using State = std::list<Line>;
++  struct State {
++    std::list<Line> ordinary;
++    std::list<Line> preserved;
++  };
+   map<int, State> states;
+-  states[0].push_back(Line::kEmpty);
++  states[0].ordinary.push_back(Line::kEmpty);
+   for (const auto& sv : graph) {
+     size_t start_pos = sv.first;
+     if (states.find(start_pos) == states.end())
+@@ -279,7 +285,7 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+       bool is_rear = end_pos == total_length;
+       auto& target_state = states[end_pos];
+ 
+-      for (const auto& source_line : source_state) {
++      const auto extend = [&](const Line& source_line) {
+         for (const auto& entry : entries) {
+           const string& context =
+               source_line.empty() ? preceding_text : source_line.context();
+@@ -290,15 +296,29 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+           for (char c : entry->text) {
+             new_hash = new_hash * 31 + c;
+           }
+-          Line new_line{&source_line, entry.get(), end_pos, weight, new_hash};
++          const size_t preserved_entry_count =
++              source_line.preserved_entry_count +
++              (preserve_entry && preserve_entry(*entry) ? 1 : 0);
++          Line new_line{&source_line, entry.get(), end_pos, weight, new_hash,
++                        preserved_entry_count};
++
++          if (preserved_entry_count > 0) {
++            if (preserved_entry_count == 1 &&
++                (target_state.preserved.empty() ||
++                 target_state.preserved.front().weight < new_line.weight)) {
++              target_state.preserved.clear();
++              target_state.preserved.push_back(new_line);
++            }
++            continue;
++          }
+ 
+           // dedup by text hash
+           auto dup = std::find_if(
+-              target_state.begin(), target_state.end(),
++              target_state.ordinary.begin(), target_state.ordinary.end(),
+               [&](const Line& l) { return l.text_hash == new_line.text_hash; });
+-          if (dup != target_state.end()) {
++          if (dup != target_state.ordinary.end()) {
+             if (new_line.weight > dup->weight) {
+-              target_state.erase(dup);
++              target_state.ordinary.erase(dup);
+             } else {
+               continue;
+             }
+@@ -306,47 +326,71 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
+ 
+           // insert in descending order of weight
+           auto it = std::find_if(
+-              target_state.begin(), target_state.end(),
++              target_state.ordinary.begin(), target_state.ordinary.end(),
+               [&](const Line& l) { return l.weight < new_line.weight; });
+-          target_state.insert(it, new_line);
+-          if (target_state.size() > beam_width)
+-            target_state.pop_back();
++          target_state.ordinary.insert(it, new_line);
++          if (target_state.ordinary.size() > beam_width)
++            target_state.ordinary.pop_back();
+         }
++      };
++      for (const auto& source_line : source_state.ordinary) {
++        extend(source_line);
++      }
++      for (const auto& source_line : source_state.preserved) {
++        extend(source_line);
+       }
+     }
+   }
+ 
+   auto found = states.find(total_length);
+-  if (found == states.end() || found->second.empty())
++  if (found == states.end() ||
++      (found->second.ordinary.empty() && found->second.preserved.empty()))
+     return {};
+ 
+   deque<an<Sentence>> results;
+-  double last_weight;
+-  double acceleration = 1.0 - 1.0 / (double)max_sentences;
+-  auto iter = found->second.begin();
+-  for (size_t i = 0; iter != found->second.end() && i < max_sentences;
+-       ++i, ++iter) {
+-    const auto& candidate = *iter;
+-    double cur_weight = candidate.weight;
+-    if (i > 0) {
+-      // idea: if the current sentence is, on average, not too rare when
+-      // compared to last sentence, we should consider it too
+-      if (fabs(cur_weight - last_weight) / fabs(last_weight) >
+-          cutoff_threshold) {
+-        break;
++  if (preserved_entry_mode != PreservedEntryMode::kOnly) {
++    double last_weight;
++    double acceleration = 1.0 - 1.0 / (double)max_sentences;
++    auto iter = found->second.ordinary.begin();
++    for (size_t i = 0;
++         iter != found->second.ordinary.end() && i < max_sentences;
++         ++i, ++iter) {
++      const auto& candidate = *iter;
++      double cur_weight = candidate.weight;
++      if (i > 0) {
++        // idea: if the current sentence is, on average, not too rare when
++        // compared to last sentence, we should consider it too
++        if (fabs(cur_weight - last_weight) / fabs(last_weight) >
++            cutoff_threshold) {
++          break;
++        }
++        // but don't deviate too far from the first weight by accelerating
++        // the cutoff threshold. cutoff_threshold becomes
++        // ~0.36*cutoff_threshold after N candidates are added.
++        cutoff_threshold *= acceleration;
+       }
+-      // but don't deviate too far from the first weight by accelerating
+-      // the cutoff threshold. cutoff_threshold becomes
+-      // ~0.36*cutoff_threshold after N candidates are added.
+-      cutoff_threshold *= acceleration;
++      last_weight = cur_weight;
++      auto sentence = New<Sentence>(language_);
++      for (const auto* c : candidate.components()) {
++        if (!c->entry)
++          continue;
++        sentence->Extend(*c->entry, c->end_pos, c->weight);
++      }
++      results.emplace_back(sentence);
+     }
+-    last_weight = cur_weight;
++  }
++  if (preserve_entry &&
++      preserved_entry_mode != PreservedEntryMode::kNone &&
++      !found->second.preserved.empty()) {
++    const auto& preserved = found->second.preserved.front();
+     auto sentence = New<Sentence>(language_);
+-    for (const auto* c : candidate.components()) {
++    for (const auto* c : preserved.components()) {
+       if (!c->entry)
+         continue;
+       sentence->Extend(*c->entry, c->end_pos, c->weight);
+     }
++    if (results.size() == max_sentences)
++      results.pop_back();
+     results.emplace_back(sentence);
+   }
+   return results;
+diff --git a/src/rime/gear/poet.h b/src/rime/gear/poet.h
+index 1bd82ca..6749166 100644
+--- a/src/rime/gear/poet.h
++++ b/src/rime/gear/poet.h
+@@ -27,6 +27,12 @@ class Poet {
+  public:
+   // Line "less", used to compare composed line of the same input range.
+   using Compare = function<bool(const Line&, const Line&)>;
++  using EntryPredicate = function<bool(const DictEntry&)>;
++  enum class PreservedEntryMode {
++    kNone,
++    kInclude,
++    kOnly,
++  };
+ 
+   static bool CompareWeight(const Line& one, const Line& other);
+   static bool LeftAssociateCompare(const Line& one, const Line& other);
+@@ -43,7 +49,10 @@ class Poet {
+                                     size_t total_length,
+                                     const string& preceding_text,
+                                     size_t count,
+-                                    double cutoff_threshold);
++                                    double cutoff_threshold,
++                                    EntryPredicate preserve_entry = {},
++                                    PreservedEntryMode preserved_entry_mode =
++                                        PreservedEntryMode::kNone);
+ 
+   template <class TranslatorT>
+   an<Translation> ContextualWeighted(an<Translation> translation,
 diff --git a/src/rime/gear/punctuator.cc b/src/rime/gear/punctuator.cc
 index 0c20b92..71d992a 100644
 --- a/src/rime/gear/punctuator.cc
@@ -322,8 +752,474 @@ index 0c20b92..71d992a 100644
  }
  
  inline static bool ends_with_digit(const string& text) {
+diff --git a/src/rime/gear/recognizer.cc b/src/rime/gear/recognizer.cc
+--- a/src/rime/gear/recognizer.cc
++++ b/src/rime/gear/recognizer.cc
+@@ -6,5 +6,6 @@
+ //
+ #include <rime/common.h>
++#include <rime/candidate.h>
+ #include <rime/composition.h>
+ #include <rime/config.h>
+ #include <rime/context.h>
+@@ -97,5 +98,11 @@ ProcessResult Recognizer::ProcessKeyEvent(const KeyEvent& key_event) {
+     // pattern matching against the input string plus the incoming character
+     Context* ctx = engine_->context();
++    // An explicit mixed sentence has already resolved the code-token
++    // ambiguity. Its selection and punctuation keys belong to the ordinary
++    // input processors, not to extending a regex-matched identifier.
++    const auto selected = ctx->GetSelectedCandidate();
++    if (selected && selected->type() == "linnet_mixed")
++      return kNoop;
+     string input = ctx->input();
+     input += ch;
+     auto match = patterns_.GetMatch(input, ctx->composition());
+diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translator.cc
+index aef6217..ebce6e7 100644
+--- a/src/rime/gear/script_translator.cc
++++ b/src/rime/gear/script_translator.cc
+@@ -7,6 +7,7 @@
+ // 2011-07-10 GONG Chen <chen.sst@gmail.com>
+ //
+ #include <algorithm>
++#include <limits>
+ #include <stack>
+ #include <cmath>
+ #include <boost/algorithm/string/join.hpp>
+@@ -75,6 +76,10 @@ static bool syllabify_dfs(SyllabifyTask* task,
+ 
+ }  // anonymous namespace
+ 
++using EntityConstraints = map<size_t, map<size_t, set<string>>>;
++constexpr SyllableId kExplicitEntitySyllable =
++    std::numeric_limits<SyllableId>::max();
++
+ class ScriptSyllabifier : public PhraseSyllabifier {
+  public:
+   ScriptSyllabifier(ScriptTranslator* translator,
+@@ -84,6 +89,7 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+       : translator_(translator),
+         input_(input),
+         start_(start),
++        corrector_(corrector),
+         syllabifier_(translator->delimiters(),
+                      translator->enable_completion(),
+                      translator->strict_spelling()) {
+@@ -97,15 +103,26 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+   string GetPreeditString(const Phrase& cand) const;
+   string GetOriginalSpelling(const Phrase& cand) const;
+   bool IsCorrection(const Code& code, size_t code_length) const;
++  SpellingType SpellingTypeAt(size_t end_pos) const {
++    const auto vertex = syllable_graph_.vertices.find(end_pos);
++    return vertex == syllable_graph_.vertices.end()
++               ? kInvalidSpelling
++               : vertex->second;
++  }
+ 
+   const SyllableGraph& syllable_graph() const { return syllable_graph_; }
++  const EntityConstraints& explicit_entity_constraints() const {
++    return explicit_entity_constraints_;
++  }
+ 
+  protected:
+   ScriptTranslator* translator_;
+   string input_;
+   size_t start_;
++  Corrector* corrector_;
+   Syllabifier syllabifier_;
+   SyllableGraph syllable_graph_;
++  EntityConstraints explicit_entity_constraints_;
+ };
+ 
+ class ScriptTranslation : public Translation {
+@@ -137,14 +154,18 @@ class ScriptTranslation : public Translation {
+   bool CheckEmpty();
+   bool IsNormalSpelling() const;
+   bool PrepareCandidate();
++  std::optional<double> FindSystemLexicalWeight(
++      const string& text, size_t code_length) const;
+   template <class QueryResult>
+   void EnrollEntries(map<int, DictEntryList>& entries_by_end_pos,
+                      const an<QueryResult>& query_result);
+   WordGraph PrepareForMakingSentence(Dictionary* dict,
+-                                     UserDictionary* user_dict);
++                                     UserDictionary* user_dict,
++                                     set<const DictEntry*>* preserved = nullptr);
+   an<Sentence> MakeSentence(Dictionary* dict, UserDictionary* user_dict);
+   deque<an<Sentence>> MakeSentences(Dictionary* dict,
+-                                    UserDictionary* user_dict);
++                                    UserDictionary* user_dict,
++                                    Poet::PreservedEntryMode mode);
+ 
+   ScriptTranslator* translator_;
+   Poet* poet_;
+@@ -155,6 +176,7 @@ class ScriptTranslation : public Translation {
+   an<DictEntryCollector> phrase_;
+   an<UserDictEntryCollector> user_phrase_;
+   deque<an<Sentence>> sentences_;
++  EntityConstraints entity_constraints_;
+ 
+   an<Phrase> candidate_ = nullptr;
+   size_t candidate_index_ = 0;
+@@ -190,6 +212,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
+     config->GetBool(name_space_ + "/always_show_comments",
+                     &always_show_comments_);
+     config->GetBool(name_space_ + "/enable_correction", &enable_correction_);
++    config->GetBool(name_space_ + "/sentence_with_uppercase_syllable",
++                    &sentence_with_uppercase_syllable_);
+     if (!config->GetBool(name_space_ + "/enable_word_completion",
+                          &enable_word_completion_)) {
+       enable_word_completion_ = enable_completion_;
+@@ -219,10 +243,16 @@ an<Translation> ScriptTranslator::Query(const string& input,
+       user_dict_ && user_dict_->loaded() && !IsUserDictDisabledFor(input);
+ 
+   size_t end_of_input = engine_->context()->input().length();
++  string sentence_input = input;
++  if (sentence_with_uppercase_syllable_ &&
++      segment.start + input.size() <= end_of_input) {
++    sentence_input =
++        engine_->context()->input().substr(segment.start, input.size());
++  }
+   // the translator should survive translations it creates
+   auto result = New<ScriptTranslation>(
+-      this, corrector_.get(), poet_.get(), input, segment.start, end_of_input,
+-      max_sentences_, sentence_cutoff_threshold_);
++      this, corrector_.get(), poet_.get(), sentence_input, segment.start,
++      end_of_input, max_sentences_, sentence_cutoff_threshold_);
+   if (!result || !result->Evaluate(
+                      dict_.get(), enable_user_dict ? user_dict_.get() : NULL)) {
+     return nullptr;
+@@ -365,8 +395,98 @@ Spans ScriptSyllabifier::Syllabify(const Phrase* phrase) {
+ }
+ 
+ size_t ScriptSyllabifier::BuildSyllableGraph(Prism& prism) {
+-  return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
+-                                                 &syllable_graph_);
++  const auto uppercase_start =
++      std::find_if(input_.begin(), input_.end(), [](unsigned char byte) {
++        return byte >= 'A' && byte <= 'Z';
++      });
++  if (uppercase_start == input_.end()) {
++    return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
++                                                   &syllable_graph_);
++  }
++  const auto uppercase_end =
++      std::find_if(uppercase_start, input_.end(), [](unsigned char byte) {
++        return byte < 'A' || byte > 'Z';
++      });
++  const size_t entity_start =
++      static_cast<size_t>(uppercase_start - input_.begin());
++  const size_t entity_end =
++      static_cast<size_t>(uppercase_end - input_.begin());
++  if ((entity_start == 0 && entity_end == input_.size()) ||
++      entity_end - entity_start < 2 || entity_end - entity_start > 6 ||
++      std::any_of(uppercase_end, input_.end(), [](unsigned char byte) {
++        return byte >= 'A' && byte <= 'Z';
++      })) {
++    return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
++                                                   &syllable_graph_);
++  }
++
++  const auto build_part = [&](const string& part, SyllableGraph* graph) {
++    if (part.empty()) return size_t(0);
++    // A code-shaped input needs complete Chinese spelling on either side,
++    // not a sentence invented from abbreviated or corrected Latin letters.
++    // Ordinary Chinese still uses the translator's normal spelling policy.
++    Syllabifier syllabifier(translator_->delimiters(), false, true);
++    const auto consumed = static_cast<size_t>(
++        syllabifier.BuildSyllableGraph(part, prism, graph));
++    return consumed == part.size() &&
++                   graph->vertices.at(consumed) == kNormalSpelling
++               ? consumed : size_t(0);
++  };
++  SyllableGraph prefix;
++  SyllableGraph suffix;
++  const string prefix_input = input_.substr(0, entity_start);
++  const string suffix_input = input_.substr(entity_end);
++  const size_t prefix_consumed = build_part(prefix_input, &prefix);
++  const size_t suffix_consumed = build_part(suffix_input, &suffix);
++  if (prefix_consumed != prefix_input.size() ||
++      suffix_consumed != suffix_input.size()) {
++    return (size_t)syllabifier_.BuildSyllableGraph(input_, prism,
++                                                   &syllable_graph_);
++  }
++
++  syllable_graph_ = std::move(prefix);
++  EdgeProperties entity_properties;
++  entity_properties.type = kNormalSpelling;
++  entity_properties.end_pos = entity_end;
++  syllable_graph_.edges[entity_start][entity_end].insert(
++      {kExplicitEntitySyllable, entity_properties});
++  syllable_graph_.vertices[entity_start] = kNormalSpelling;
++  syllable_graph_.vertices[entity_end] = kNormalSpelling;
++  for (const auto& vertex : suffix.vertices) {
++    syllable_graph_.vertices[entity_end + vertex.first] = vertex.second;
++  }
++  for (const auto& start : suffix.edges) {
++    for (const auto& end : start.second) {
++      auto& rebased = syllable_graph_.edges[entity_end + start.first]
++                                           [entity_end + end.first];
++      for (const auto& spelling : end.second) {
++        EdgeProperties properties = spelling.second;
++        properties.end_pos += entity_end;
++        set<size_t> ambiguous_sources;
++        for (const size_t source : properties.ambiguous_source_positions) {
++          ambiguous_sources.insert(entity_end + source);
++        }
++        properties.ambiguous_source_positions = std::move(ambiguous_sources);
++        rebased.insert({spelling.first, std::move(properties)});
++      }
++    }
++  }
++  syllable_graph_.indices.clear();
++  for (const auto& start : syllable_graph_.edges) {
++    auto& index = syllable_graph_.indices[start.first];
++    for (const auto& end : boost::adaptors::reverse(start.second)) {
++      for (const auto& spelling : end.second) {
++        if (spelling.first != kExplicitEntitySyllable) {
++          index[spelling.first].push_back(&spelling.second);
++        }
++      }
++    }
++  }
++  syllable_graph_.input_length = input_.size();
++  syllable_graph_.interpreted_length = input_.size();
++  explicit_entity_constraints_[entity_start][entity_end].insert(
++      input_.substr(entity_start, entity_end - entity_start));
++  return input_.size();
+ }
+ 
+ bool ScriptSyllabifier::IsCorrection(const Code& code,
+@@ -448,11 +564,14 @@ static bool has_exact_match_phrase(Ptr ptr, Iter iter, size_t consumed) {
+          iter->second.Peek()->IsExactMatch();
+ }
+ 
+ // ScriptTranslation implementation
+ 
+ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+   size_t consumed = syllabifier_->BuildSyllableGraph(*dict->prism());
+   const auto& syllable_graph = syllabifier_->syllable_graph();
++  if (translator_->sentence_with_uppercase_syllable()) {
++    entity_constraints_ = syllabifier_->explicit_entity_constraints();
++  }
+   bool predict_word = translator_->enable_word_completion() &&
+                       start_ + consumed == end_of_input_;
+ 
+@@ -465,7 +584,7 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+         user_dict->Lookup(syllable_graph, 0, kUnlimitedDepth,
+                           predict_word ? kNumSyllablesToPredictWord : 0);
+   }
+-  if (!phrase_ && !user_phrase_)
++  if (!phrase_ && !user_phrase_ && entity_constraints_.empty())
+     return false;
+ 
+   if (phrase_)
+@@ -492,12 +611,18 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+              << ", has_reliable_phrase: " << has_reliable_phrase
+              << ", has_reliable_user_phrase: " << has_reliable_user_phrase
+              << ", has_at_least_two_syllables: " << has_at_least_two_syllables;
+-  // make sentences when there is no exact-matching phrase candidate
+-  if (has_at_least_two_syllables && !has_reliable_phrase &&
+-      !has_reliable_user_phrase) {
+-    if (max_sentences_ > 1)
+-      sentences_ = MakeSentences(dict, user_dict);
+-    else if (max_sentences_) {
++  const bool has_reliable_match =
++      has_reliable_phrase || has_reliable_user_phrase;
++  if (has_at_least_two_syllables && has_reliable_match &&
++      !entity_constraints_.empty() && max_sentences_) {
++    sentences_ = MakeSentences(dict, user_dict,
++                               Poet::PreservedEntryMode::kOnly);
++  } else if (has_at_least_two_syllables && !has_reliable_match) {
++    if (max_sentences_ > 1 ||
++        (max_sentences_ && !entity_constraints_.empty())) {
++      sentences_ = MakeSentences(dict, user_dict,
++                                 Poet::PreservedEntryMode::kInclude);
++    } else if (max_sentences_) {
+       auto sentence = MakeSentence(dict, user_dict);
+       if (sentence)
+         sentences_ = {sentence};
+@@ -588,6 +713,15 @@ inline static bool prefer_user_phrase(
+          (user_phrase_weight == sys_phrase_weight && compare_on_tie());
+ }
+ 
++std::optional<double> ScriptTranslation::FindSystemLexicalWeight(
++    const string& text, size_t code_length) const {
++  if (!phrase_) return std::nullopt;
++  const auto group = phrase_->find(code_length);
++  if (group == phrase_->end()) return std::nullopt;
++  const auto entry = group->second.FindRemainingEntry(text);
++  return entry ? std::optional<double>(entry->weight) : std::nullopt;
++}
++
+ bool ScriptTranslation::PrepareCandidate() {
+ iter_incremented:
+   if (exhausted()) {
+@@ -642,7 +776,10 @@ iter_incremented:
+     candidate_ =
+         New<Phrase>(translator_->language(),
+                     entry->IsPredictiveMatch() ? "completion" : "user_phrase",
+-                    start_, start_ + user_phrase_code_length, entry);
++                    start_, start_ + user_phrase_code_length, entry,
++                    syllabifier_->SpellingTypeAt(user_phrase_code_length),
++                    FindSystemLexicalWeight(entry->text,
++                                            user_phrase_code_length));
+     candidate_->set_quality(std::exp(entry->weight) +
+                             translator_->initial_quality() +
+                             (entry->quality_len / full_code_length));
+@@ -660,7 +797,9 @@ iter_incremented:
+     candidate_ =
+         New<Phrase>(translator_->language(),
+                     entry->IsPredictiveMatch() ? "completion" : "phrase",
+-                    start_, start_ + phrase_code_length, entry);
++                    start_, start_ + phrase_code_length, entry,
++                    syllabifier_->SpellingTypeAt(phrase_code_length),
++                    entry->weight);
+     candidate_->set_quality(std::exp(entry->weight) +
+                             translator_->initial_quality() +
+                             (entry->quality_len / full_code_length));
+@@ -675,6 +814,7 @@ bool ScriptTranslation::CheckEmpty() {
+ bool ScriptTranslation::CheckEmpty() {
+-  set_exhausted((!phrase_ || phrase_iter_ == phrase_->rend()) &&
++  set_exhausted(sentences_.empty() &&
++                (!phrase_ || phrase_iter_ == phrase_->rend()) &&
+                 (!user_phrase_ || user_phrase_iter_ == user_phrase_->rend()));
+   return exhausted();
+ }
+ 
+@@ -697,7 +845,8 @@ void ScriptTranslation::EnrollEntries(
+ 
+ WordGraph ScriptTranslation::PrepareForMakingSentence(
+     Dictionary* dict,
+-    UserDictionary* user_dict) {
++    UserDictionary* user_dict,
++    set<const DictEntry*>* preserved) {
+   const int kMaxSyllablesForUserPhraseQuery = 5;
+   const auto& syllable_graph = syllabifier_->syllable_graph();
+   WordGraph graph;
+@@ -709,21 +858,44 @@ WordGraph ScriptTranslation::PrepareForMakingSentence(
+                                       kMaxSyllablesForUserPhraseQuery));
+     }
+     // merge lookup results
+-    EnrollEntries(same_start_pos, dict->Lookup(syllable_graph, x.first,
+-                                               &translator_->blacklist()));
++    EnrollEntries(same_start_pos, dict->Lookup(syllable_graph, x.first,
++                                               &translator_->blacklist()));
++    const auto start_constraints = entity_constraints_.find(x.first);
++    if (start_constraints == entity_constraints_.end())
++      continue;
++    for (const auto& end_constraints : start_constraints->second) {
++      auto& homophones = same_start_pos[end_constraints.first];
++      for (const auto& text : end_constraints.second) {
++        auto entry = New<DictEntry>();
++        entry->text = text;
++        entry->code.push_back(kExplicitEntitySyllable);
++        homophones.push_back(entry);
++        if (preserved) preserved->insert(entry.get());
++      }
++    }
+   }
+   return graph;
+ }
+ 
+ deque<an<Sentence>> ScriptTranslation::MakeSentences(
+     Dictionary* dict,
+-    UserDictionary* user_dict) {
++    UserDictionary* user_dict,
++    Poet::PreservedEntryMode mode) {
+   const auto& syllable_graph = syllabifier_->syllable_graph();
+-  WordGraph graph = PrepareForMakingSentence(dict, user_dict);
++  set<const DictEntry*> preserved_entries;
++  WordGraph graph =
++      PrepareForMakingSentence(dict, user_dict, &preserved_entries);
++  Poet::EntryPredicate preserve_entity;
++  if (!preserved_entries.empty()) {
++    preserve_entity = [preserved_entries](const DictEntry& entry) {
++      return preserved_entries.count(&entry) != 0;
++    };
++  }
+   auto sentences =
+       poet_->MakeSentences(graph, syllable_graph.interpreted_length,
+                            translator_->GetPrecedingText(start_),
+-                           max_sentences_, sentence_cutoff_threshold_);
++                           max_sentences_, sentence_cutoff_threshold_,
++                           preserve_entity, mode);
+   for (auto& sentence : sentences) {
+     sentence->Offset(start_);
+     sentence->set_syllabifier(syllabifier_);
+diff --git a/src/rime/gear/script_translator.h b/src/rime/gear/script_translator.h
+index e5b60a7..361b608 100644
+--- a/src/rime/gear/script_translator.h
++++ b/src/rime/gear/script_translator.h
+@@ -50,6 +50,9 @@ class ScriptTranslator : public Translator,
+   int spelling_hints() const { return spelling_hints_; }
+   bool always_show_comments() const { return always_show_comments_; }
+   bool enable_word_completion() const { return enable_word_completion_; }
++  bool sentence_with_uppercase_syllable() const {
++    return sentence_with_uppercase_syllable_;
++  }
+   int max_word_length() const { return max_word_length_; }
+   int core_word_length() const;
+ 
+@@ -61,6 +64,7 @@ class ScriptTranslator : public Translator,
+   bool always_show_comments_ = false;
+   bool enable_correction_ = false;
+   bool enable_word_completion_ = false;
++  bool sentence_with_uppercase_syllable_ = false;
+   the<Corrector> corrector_;
+   the<Poet> poet_;
+   vector<an<Phrase>> queue_;
+diff --git a/src/rime/gear/translator_commons.h b/src/rime/gear/translator_commons.h
+index 6217e5a..8d51190 100644
+--- a/src/rime/gear/translator_commons.h
++++ b/src/rime/gear/translator_commons.h
+@@ -7,6 +7,7 @@
+ #ifndef RIME_TRANSLATOR_COMMONS_H_
+ #define RIME_TRANSLATOR_COMMONS_H_
+ 
++#include <optional>
+ #include <boost/regex.hpp>
+ #include <rime/common.h>
+ #include <rime/config.h>
+@@ -66,8 +67,14 @@ class Phrase : public Candidate {
+          const string& type,
+          size_t start,
+          size_t end,
+-         const an<DictEntry>& entry)
+-      : Candidate(type, start, end), language_(language), entry_(entry) {}
++         const an<DictEntry>& entry,
++         SpellingType spelling_type = kInvalidSpelling,
++         std::optional<double> system_lexical_weight = std::nullopt)
++      : Candidate(type, start, end),
++        language_(language),
++        entry_(entry),
++        spelling_type_(spelling_type),
++        system_lexical_weight_(std::move(system_lexical_weight)) {}
+   const string& text() const { return entry_->text; }
+   string comment() const { return entry_->comment; }
+   string preedit() const { return entry_->preedit; }
+@@ -77,6 +84,10 @@ class Phrase : public Candidate {
+     syllabifier_ = syllabifier;
+   }
+   double weight() const { return entry_->weight; }
++  SpellingType spelling_type() const { return spelling_type_; }
++  const std::optional<double>& system_lexical_weight() const {
++    return system_lexical_weight_;
++  }
+   void set_weight(double weight) { entry_->weight = weight; }
+   Code& code() const { return entry_->code; }
+   const DictEntry& entry() const { return *entry_; }
+@@ -107,6 +118,8 @@ class Phrase : public Candidate {
+   const Language* language_;
+   an<DictEntry> entry_;
+   an<PhraseSyllabifier> syllabifier_;
++  const SpellingType spelling_type_;
++  const std::optional<double> system_lexical_weight_;
+ };
+ 
+ //
 diff --git a/src/rime/service.cc b/src/rime/service.cc
-index d30f991..1c35a54 100644
+index d30f991..2ffbc48 100644
 --- a/src/rime/service.cc
 +++ b/src/rime/service.cc
 @@ -9,6 +9,7 @@
@@ -395,7 +1291,7 @@ index d30f991..1c35a54 100644
        ++count;
      } else {
 diff --git a/src/rime/service.h b/src/rime/service.h
-index a69ae74..7c7d1e1 100644
+index a69ae74..af51517 100644
 --- a/src/rime/service.h
 +++ b/src/rime/service.h
 @@ -37,8 +37,10 @@ class Session {
@@ -409,7 +1305,7 @@ index a69ae74..7c7d1e1 100644
  
    Context* context() const;
    Schema* schema() const;
-@@ -46,6 +47,7 @@ class Session {
+@@ -46,6 +48,7 @@ class Session {
    const string& commit_text() const { return commit_text_; }
  
   private:
@@ -418,25 +1314,60 @@ index a69ae74..7c7d1e1 100644
  
    the<Engine> engine_;
 diff --git a/src/rime_api.h b/src/rime_api.h
-index 2fccde0..4d69a23 100644
+index 2fccde0..2fce13b 100644
 --- a/src/rime_api.h
 +++ b/src/rime_api.h
-@@ -505,6 +505,10 @@ typedef struct RIME_FLAVORED(rime_api_t) {
+@@ -505,6 +505,13 @@ typedef struct RIME_FLAVORED(rime_api_t) {
                                                size_t index);
  
    Bool (*change_page)(RimeSessionId session_id, Bool backward);
-+
 +  // End an external client lifecycle by preserving the exact raw input.
 +  // Return True if this call committed raw input.
 +  Bool (*commit_raw_input)(RimeSessionId session_id);
++  // Linnet: append-only ABI; nullptr cancels. 1=pending, 0=done,
++  // 2=deferred (inactive/changing dictionary), 3=background I/O waiting,
++  // -1=failed.
++  int (*sync_user_data_step)(const char* sync_directory);
  } RIME_FLAVORED(RimeApi);
  
  //! API entry
 diff --git a/src/rime_api_impl.h b/src/rime_api_impl.h
-index 30f4514..4d2f797 100644
+index 30f4514..9368c75 100644
 --- a/src/rime_api_impl.h
 +++ b/src/rime_api_impl.h
-@@ -184,6 +184,13 @@ RIME_DEPRECATED Bool RimeCommitComposition(RimeSessionId session_id) {
+@@ -9,6 +9,7 @@
+ #include <rime/context.h>
+ #include <rime/deployer.h>
+ #include <rime/key_event.h>
++#include <rime/lever/user_dict_manager.h>
+ #include <rime/menu.h>
+ #include <rime/module.h>
+ #include <rime/registry.h>
+@@ -56,6 +57,7 @@ RIME_DEPRECATED void RimeInitialize(RimeTraits* traits) {
+ }
+ 
+ RIME_DEPRECATED void RimeFinalize() {
++  UserDictManager::CancelAndWaitForIncrementalSynchronization();
+   Service::instance().deployer().JoinMaintenanceThread();
+   Service::instance().StopService();
+   Registry::instance().Clear();
+@@ -63,6 +65,7 @@ RIME_DEPRECATED void RimeFinalize() {
+ }
+ 
+ RIME_DEPRECATED Bool RimeStartMaintenance(Bool full_check) {
++  UserDictManager::CancelAndWaitForIncrementalSynchronization();
+   LoadModules(kDeployerModules);
+   Deployer& deployer(Service::instance().deployer());
+   deployer.RunTask("clean_old_log_files");
+@@ -136,6 +139,7 @@ RIME_DEPRECATED Bool RimeDeployConfigFile(const char* file_name,
+ }
+ 
+ RIME_DEPRECATED Bool RimeSyncUserData() {
++  UserDictManager::CancelAndWaitForIncrementalSynchronization();
+   Service::instance().CleanupAllSessions();
+   Deployer& deployer(Service::instance().deployer());
+   deployer.ScheduleTask("installation_update");
+@@ -184,6 +188,13 @@ RIME_DEPRECATED Bool RimeCommitComposition(RimeSessionId session_id) {
    return Bool(session->CommitComposition());
  }
  
@@ -450,11 +1381,1389 @@ index 30f4514..4d2f797 100644
  RIME_DEPRECATED void RimeClearComposition(RimeSessionId session_id) {
    an<Session> session(Service::instance().GetSession(session_id));
    if (!session)
-@@ -1232,6 +1239,7 @@ RIME_API RIME_FLAVORED(RimeApi) * RIME_FLAVORED(rime_get_api)() {
+@@ -1232,6 +1243,8 @@ RIME_API RIME_FLAVORED(RimeApi) * RIME_FLAVORED(rime_get_api)() {
      s_api.highlight_candidate_on_current_page =
          &RimeHighlightCandidateOnCurrentPage;
      s_api.change_page = &RimeChangePage;
++    s_api.sync_user_data_step = &UserDictManager::SynchronizeIncrementally;
 +    s_api.commit_raw_input = &RimeCommitRawInput;
    }
    return &s_api;
  }
+diff --git a/src/rime/dict/user_dictionary.h b/src/rime/dict/user_dictionary.h
+index 5ebeac0..db984de 100644
+--- a/src/rime/dict/user_dictionary.h
++++ b/src/rime/dict/user_dictionary.h
+@@ -111,6 +111,7 @@ class UserDictionaryComponent : public UserDictionary::Component {
+   UserDictionaryComponent();
+   UserDictionary* Create(const Ticket& ticket);
+   UserDictionary* Create(const string& dict_name, const string& db_class);
++  an<Db> FindDb(const string& dict_name);
+ 
+  private:
+   hash_map<string, weak<Db>> db_pool_;
+diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
+index 2944c2d..1a5486a 100644
+--- a/src/rime/dict/user_dictionary.cc
++++ b/src/rime/dict/user_dictionary.cc
+@@ -360,6 +360,7 @@ size_t UserDictionary::LookupWords(UserDictEntryIterator* result,
+                                    bool predictive,
+                                    size_t limit,
+                                    string* resume_key) {
++  FetchTickCount();
+   TickCount present_tick = tick_ + 1;
+   size_t len = input.length();
+   size_t start = result->cache_size();
+@@ -425,6 +426,9 @@ bool UserDictionary::UpdateEntry(const DictEntry& entry, int commits) {
+ bool UserDictionary::UpdateEntry(const DictEntry& entry,
+                                  int commits,
+                                  const string& new_entry_prefix) {
++  auto transaction = As<Transactional>(db_);
++  if (!transaction || !transaction->in_transaction())
++    FetchTickCount();
+   string code_str(entry.custom_code);
+   if (code_str.empty() && !TranslateCodeToString(entry.code, &code_str))
+     return false;
+@@ -488,6 +492,7 @@ bool UserDictionary::NewTransaction() {
+   if (!db)
+     return false;
+   CommitPendingTransaction();
++  FetchTickCount();
+   transaction_time_ = time(NULL);
+   return db->BeginTransaction();
+ }
+@@ -585,6 +590,12 @@ UserDictionary* UserDictionaryComponent::Create(const string& dict_name,
+   return new UserDictionary(dict_name, db);
+ }
+ 
++an<Db> UserDictionaryComponent::FindDb(const string& dict_name) {
++  const auto found = db_pool_.find(dict_name);
++  auto db = found == db_pool_.end() ? nullptr : found->second.lock();
++  return db && db->loaded() ? db : nullptr;
++}
++
+ UserDictionary* UserDictionaryComponent::Create(const Ticket& ticket) {
+   if (!ticket.schema)
+     return NULL;
+diff --git a/src/rime/dict/user_db.h b/src/rime/dict/user_db.h
+index 6740e99..3b9f6ba 100644
+--- a/src/rime/dict/user_db.h
++++ b/src/rime/dict/user_db.h
+@@ -64,7 +64,7 @@ class UserDbHelper {
+   RIME_DLL bool UpdateUserInfo();
+   RIME_DLL static bool IsUniformFormat(const path& file_path);
+   RIME_DLL bool UniformBackup(const path& snapshot_file);
+-  RIME_DLL bool UniformRestore(const path& snapshot_file);
++  RIME_DLL bool UniformRestore(const path& snapshot_file, bool strict = false);
+ 
+   bool IsUserDb();
+   string GetDbName();
+@@ -111,19 +111,24 @@ class UserDbComponent : public UserDb::Component, protected DbComponentBase {
+ class UserDbMerger : public Sink {
+  public:
+   explicit UserDbMerger(Db* db);
++  static TickCount ReadTick(Db* db, TickCount missing_tick = 1);
++  // One merge rule for both stored and not-yet-materialized records.
++  static string MergeValue(const string& local, const string& remote,
++                           TickCount local_tick, TickCount remote_tick,
++                           TickCount output_tick);
+   virtual ~UserDbMerger();
+ 
+   virtual bool MetaPut(const string& key, const string& value);
+   virtual bool Put(const string& key, const string& value);
+ 
+-  void CloseMerge();
++  bool CloseMerge();
+ 
+  protected:
+   Db* db_;
+   TickCount our_tick_;
+   TickCount their_tick_;
+   TickCount max_tick_;
+-  int merged_entries_;
++  int merged_entries_ = 0;
+ };
+ 
+ class UserDbImporter : public Sink {
+diff --git a/src/rime/dict/user_db.cc b/src/rime/dict/user_db.cc
+index e8f6788..b4123b9 100644
+--- a/src/rime/dict/user_db.cc
++++ b/src/rime/dict/user_db.cc
+@@ -126,10 +126,11 @@ bool UserDbHelper::UniformBackup(const path& snapshot_file) {
+   return true;
+ }
+ 
+-bool UserDbHelper::UniformRestore(const path& snapshot_file) {
++bool UserDbHelper::UniformRestore(const path& snapshot_file, bool strict) {
+   LOG(INFO) << "restoring userdb '" << db_->name() << "' from "
+             << snapshot_file;
+   TsvReader reader(snapshot_file, plain_userdb_format.parser);
++  reader.strict = strict;
+   DbSink sink(db_);
+   try {
+     reader >> sink;
+@@ -169,7 +170,7 @@ string UserDbHelper::GetRimeVersion() {
+   return version;
+ }
+ 
+-static TickCount get_tick_count(Db* db) {
++TickCount UserDbMerger::ReadTick(Db* db, TickCount missing_tick) {
+   string tick;
+   if (db && db->MetaFetch("/tick", &tick)) {
+     try {
+@@ -177,11 +178,11 @@ static TickCount get_tick_count(Db* db) {
+     } catch (...) {
+     }
+   }
+-  return 1;
++  return missing_tick;
+ }
+ 
+ UserDbMerger::UserDbMerger(Db* db) : db_(db) {
+-  our_tick_ = get_tick_count(db);
++  our_tick_ = ReadTick(db);
+   their_tick_ = 0;
+   max_tick_ = our_tick_;
+ }
+@@ -194,49 +195,64 @@ bool UserDbMerger::MetaPut(const string& key, const string& value) {
+   if (key == "/tick") {
+     try {
+       their_tick_ = std::stoul(value);
+-      max_tick_ = (std::max)(our_tick_, their_tick_);
++      max_tick_ = (std::max)(max_tick_, their_tick_);
+     } catch (...) {
+     }
+   }
+   return true;
+ }
+ 
+-bool UserDbMerger::Put(const string& key, const string& value) {
+-  if (!db_)
+-    return false;
++string UserDbMerger::MergeValue(const string& our_value, const string& value,
++                               TickCount our_tick, TickCount their_tick,
++                               TickCount output_tick) {
+   UserDbValue v(value);
+-  if (v.tick < their_tick_) {
+-    v.dee = algo::formula_d(0, (double)their_tick_, v.dee, (double)v.tick);
++  if (v.tick < their_tick) {
++    v.dee = algo::formula_d(0, (double)their_tick, v.dee, (double)v.tick);
+   }
+   UserDbValue o;
+-  string our_value;
+-  if (db_->Fetch(key, &our_value)) {
++  if (!our_value.empty()) {
++    // The same record at the same database clock is already merged. Eagerly
++    // materializing its decay only rounds the value and rewrites an unchanged
++    // snapshot; lookup applies that same decay without modifying the record.
++    if (their_tick == our_tick && value == our_value)
++      return our_value;
+     o.Unpack(our_value);
+   }
+-  if (o.tick < our_tick_) {
+-    o.dee = algo::formula_d(0, (double)our_tick_, o.dee, (double)o.tick);
++  if (o.tick < our_tick) {
++    o.dee = algo::formula_d(0, (double)our_tick, o.dee, (double)o.tick);
+   }
+   if (std::abs(o.commits) < std::abs(v.commits))
+     o.commits = v.commits;
+   o.dee = (std::max)(o.dee, v.dee);
+-  o.tick = max_tick_;
+-  return db_->Update(key, o.Pack()) && ++merged_entries_;
++  o.tick = output_tick;
++  return o.Pack();
+ }
+ 
+-void UserDbMerger::CloseMerge() {
++bool UserDbMerger::Put(const string& key, const string& value) {
++  if (!db_) return false;
++  string our_value;
++  db_->Fetch(key, &our_value);
++  const auto merged = MergeValue(our_value, value, our_tick_, their_tick_, max_tick_);
++  return merged == our_value || (db_->Update(key, merged) && ++merged_entries_);
++}
++
++bool UserDbMerger::CloseMerge() {
+   if (!db_ || !merged_entries_)
+-    return;
++    return true;
+   Deployer& deployer(Service::instance().deployer());
++  const auto merged_entries = merged_entries_;
++  merged_entries_ = 0;
+   try {
+-    db_->MetaUpdate("/tick", std::to_string(max_tick_));
+-    db_->MetaUpdate("/user_id", deployer.user_id);
++    if (!db_->MetaUpdate("/tick", std::to_string(max_tick_)) ||
++        !db_->MetaUpdate("/user_id", deployer.user_id))
++      return false;
+   } catch (...) {
+     LOG(ERROR) << "failed to update tick count.";
+-    return;
++    return false;
+   }
+-  LOG(INFO) << "total " << merged_entries_
++  LOG(INFO) << "total " << merged_entries
+             << " entries merged, tick = " << max_tick_;
+-  merged_entries_ = 0;
++  return true;
+ }
+ 
+ UserDbImporter::UserDbImporter(Db* db) : db_(db) {}
+diff --git a/src/rime/dict/tsv.h b/src/rime/dict/tsv.h
+index 9efabf9..8c8910e 100644
+--- a/src/rime/dict/tsv.h
++++ b/src/rime/dict/tsv.h
+@@ -27,6 +27,7 @@ class TsvReader {
+       : file_path_(file_path), parser_(parser) {}
+   // return number of records read
+   int operator()(Sink* sink);
++  bool strict = false;
+ 
+  protected:
+   path file_path_;
+diff --git a/src/rime/dict/tsv.cc b/src/rime/dict/tsv.cc
+index e859ab0..d81e3e6 100644
+--- a/src/rime/dict/tsv.cc
++++ b/src/rime/dict/tsv.cc
+@@ -17,6 +17,8 @@ int TsvReader::operator()(Sink* sink) {
+     return 0;
+   LOG(INFO) << "reading tsv file: " << file_path_;
+   std::ifstream fin(file_path_.c_str());
++  if (!fin.is_open()) throw std::ios_base::failure("cannot open TSV input");
++  fin.exceptions(std::ios::badbit);
+   string line, key, value;
+   Tsv row;
+   int line_no = 0;
+@@ -34,6 +36,7 @@ int TsvReader::operator()(Sink* sink) {
+         line.erase(0, 2);
+         boost::algorithm::split(row, line, boost::algorithm::is_any_of("\t"));
+         if (row.size() != 2 || !sink->MetaPut(row[0], row[1])) {
++          if (strict) throw std::runtime_error("invalid TSV metadata");
+           LOG(WARNING) << "invalid metadata at line " << line_no
+                        << " in file: " << file_path_ << ".";
+         }
+@@ -46,6 +49,7 @@ int TsvReader::operator()(Sink* sink) {
+     // read a tsv entry
+     boost::algorithm::split(row, line, boost::algorithm::is_any_of("\t"));
+     if (!parser_(row, &key, &value) || !sink->Put(key, value)) {
++      if (strict) throw std::runtime_error("invalid TSV entry");
+       LOG(WARNING) << "invalid entry at line " << line_no
+                    << " in file: " << file_path_ << ".";
+       continue;
+@@ -61,6 +65,7 @@ int TsvWriter::operator()(Source* source) {
+     return 0;
+   LOG(INFO) << "writing tsv file: " << file_path_;
+   std::ofstream fout(file_path_.c_str());
++  fout.exceptions(std::ios::badbit | std::ios::failbit);
+   if (!file_description.empty()) {
+     fout << "# " << file_description << std::endl;
+   }
+diff --git a/src/rime/lever/user_dict_manager.h b/src/rime/lever/user_dict_manager.h
+index 3cefa8f..843f943 100644
+--- a/src/rime/lever/user_dict_manager.h
++++ b/src/rime/lever/user_dict_manager.h
+@@ -36,6 +36,13 @@ class RIME_DLL UserDictManager {
+   bool Synchronize(const string& dict_name);
+   bool SynchronizeAll();
+ 
++  // Main-thread cooperative learning sync. 1=pending, 0=done,
++  // 2=deferred (inactive/changing dictionary), -1=failed.
++  // nullptr cancels uncommitted work without waiting for cloud I/O.
++  static int SynchronizeIncrementally(const char* sync_directory);
++  // Runtime mutation and shutdown boundaries cancel and join the worker.
++  static void CancelAndWaitForIncrementalSynchronization();
++
+  protected:
+   Deployer* deployer_;
+   path path_;
+diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_manager.cc
+index e0331e4..d2ea2cf 100644
+--- a/src/rime/lever/user_dict_manager.cc
++++ b/src/rime/lever/user_dict_manager.cc
+@@ -224,3 +224,324 @@ bool UserDictManager::SynchronizeAll() {
+ }
+ 
+ }  // namespace rime
++
++// Copyright RIME Developers. Distributed under the BSD License.
++// Linnet's online scheduling boundary. Parsing and merging remain Rime-owned.
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <filesystem>
++#include <mutex>
++#include <thread>
++#include <rime/deployer.h>
++#include <rime/dict/text_db.h>
++#include <rime/dict/level_db.h>
++#include <rime/dict/user_dictionary.h>
++#include <rime/lever/user_dict_manager.h>
++#include <rime/service.h>
++
++namespace rime {
++namespace {
++namespace fs = std::filesystem;
++using Clock = std::chrono::steady_clock;
++
++// An isolated upstream-format snapshot, never a second live database.
++class SyncSnapshot : public UserDbWrapper<TextDb> {
++ public:
++  explicit SyncSnapshot(const string& name) : UserDbWrapper<TextDb>({}, name) {
++    loaded_ = true;
++  }
++  ~SyncSnapshot() { loaded_ = modified_ = false; }
++  bool Update(const string& key, const string& value) override {
++    UserDbValue entry;
++    return entry.Unpack(value) && TextDb::Update(key, value);
++  }
++  bool Equals(const SyncSnapshot& other) const {
++    return metadata_ == other.metadata_ && data_ == other.data_;
++  }
++};
++
++struct SyncIO {
++  enum class Work { waiting, publish, cancel };
++  path directory;
++  path user_directory;
++  string user_id;
++  vector<string> names;
++  vector<an<SyncSnapshot>> incoming;
++  vector<an<SyncSnapshot>> outgoing;
++  std::mutex mutex;
++  std::condition_variable ready;
++  std::thread worker;
++  Work work = Work::waiting;
++  // 0=snapshots ready, 1=I/O pending, 2=worker finished, -1=failed.
++  std::atomic<int> result{1};
++  // 0=active, 1=publication committed, 2=cancelled. Cancellation cannot
++  // retract a rename that has already won this commit point.
++  std::atomic<int> publication{0};
++  void Request(Work next) {
++    { std::lock_guard<std::mutex> lock(mutex); work = next; }
++    ready.notify_one();
++  }
++  void Join() {
++    if (worker.joinable()) worker.join();
++  }
++  ~SyncIO() { Join(); }
++  void ReleaseSnapshots() { incoming.clear(); outgoing.clear(); names.clear(); }
++};
++
++an<SyncSnapshot> ReadSnapshot(const path& file, const string& name) {
++  if (!fs::is_regular_file(fs::symlink_status(file)) ||
++      fs::file_size(file) > 16 * 1024 * 1024)
++    throw std::runtime_error("invalid or oversized learning snapshot");
++  auto snapshot = New<SyncSnapshot>(name);
++  UserDbHelper helper(snapshot);
++  if (!helper.UniformRestore(file, true) || !helper.IsUserDb() ||
++      helper.GetDbName() != name)
++    throw std::runtime_error("invalid learning snapshot identity");
++  return snapshot;
++}
++
++void ReadCloud(SyncIO& io) {
++  if (!fs::is_directory(io.directory))
++    throw std::runtime_error("learning sync directory is unavailable");
++  for (const auto& entry : fs::directory_iterator(io.user_directory)) {
++    const auto name = entry.path().filename().u8string();
++    if (entry.is_directory() && !entry.is_symlink() &&
++        name.size() > 7 && name.substr(name.size() - 7) == ".userdb")
++      io.names.push_back(name.substr(0, name.size() - 7));
++  }
++  size_t bytes = 0;
++  for (const auto& peer : fs::directory_iterator(io.directory)) {
++    if (!peer.is_directory() || peer.is_symlink()) continue;
++    for (const auto& name : io.names) {
++      if (io.publication == 2) return;
++      const auto file = peer.path() / (name + UserDb::snapshot_extension());
++      if (!fs::exists(file)) continue;
++      bytes += fs::file_size(file);
++      if (bytes > 32 * 1024 * 1024)
++        throw std::runtime_error("learning sync window exceeds 32 MiB");
++      io.incoming.push_back(ReadSnapshot(file, name));
++    }
++  }
++}
++
++void WriteCloud(SyncIO& io) {
++  const auto directory = io.directory / io.user_id;
++  if (io.publication == 2) return;
++  fs::create_directories(directory);
++  for (const auto& snapshot : io.outgoing) {
++    if (io.publication == 2) return;
++    const auto target = directory / (snapshot->name() + UserDb::snapshot_extension());
++    if (fs::exists(target) && snapshot->Equals(*ReadSnapshot(target, snapshot->name())))
++      continue;  // No changed learning: no cloud-file rewrite.
++    const auto temporary = directory / ("." + snapshot->name() + ".pending");
++    try {
++      if (!snapshot->Backup(temporary))
++        throw std::runtime_error("learning snapshot write failed");
++      // Publication must satisfy the exact reader contract, including the
++      // serialized-size bound. A failure never replaces the last readable file.
++      ReadSnapshot(temporary, snapshot->name());
++      int expected = 0;
++      if (!io.publication.compare_exchange_strong(expected, 1)) {
++        fs::remove(temporary);
++        return;
++      }
++      fs::rename(temporary, target);
++      expected = 1;
++      io.publication.compare_exchange_strong(expected, 0);
++    } catch (...) {
++      std::error_code ignored;
++      fs::remove(temporary, ignored);
++      throw;
++    }
++  }
++}
++
++void StartIO(const an<SyncIO>& io) {
++  try {
++    io->worker = std::thread([state = io.get()] {
++    int result = 2;
++    try {
++      ReadCloud(*state);
++      state->result.store(0, std::memory_order_release);
++      std::unique_lock<std::mutex> lock(state->mutex);
++      state->ready.wait(lock, [&] { return state->work != SyncIO::Work::waiting; });
++      const bool publish = state->work == SyncIO::Work::publish;
++      lock.unlock();
++      if (publish) WriteCloud(*state);
++    } catch (const std::exception& error) {
++      LOG(ERROR) << "learning sync: " << error.what();
++      result = -1;
++    }
++    state->ReleaseSnapshots();
++    state->result.store(result, std::memory_order_release);
++    });
++  } catch (...) {
++    io->result.store(-1, std::memory_order_release);
++    throw;
++  }
++}
++
++struct LiveSync {
++  an<SyncIO> io;
++  size_t imported = 0;
++  size_t exported = 0;
++  the<DbSource> source;  // Only a worker-owned in-memory incoming snapshot.
++  bool source_complete = false;
++  an<SyncSnapshot> snapshot;
++  weak<Db> snapshot_owner;
++  uint64_t snapshot_revision = 0;
++  an<DbAccessor> records;
++  bool writing = false;
++  bool deferred = false;
++  size_t exported_bytes = 0;
++
++  int Step() {
++    const int result = io->result.load(std::memory_order_acquire);
++    if (result == -1) return result;
++    if (result == 1) return 3;
++    if (writing) return result == 2 ? (deferred ? 2 : 0) : 3;
++    const auto deadline = Clock::now() + std::chrono::milliseconds(1);
++    auto* component = dynamic_cast<UserDictionaryComponent*>(
++        UserDictionary::Require("user_dictionary"));
++    if (!component) return -1;
++    string key, value;
++    if (imported < io->incoming.size()) {
++      const auto& incoming = io->incoming[imported];
++      auto database = component->FindDb(incoming->name());
++      if (!database) {
++        deferred = true; source.reset(); ++imported;
++        return 1;
++      }
++      auto* level = dynamic_cast<LevelDb*>(database.get());
++      if (!level) {
++        // A same-name Settings mirror may use the .userdb suffix while the
++        // live Host database is a read-only StableDb. It is not learning data.
++        source.reset(); ++imported;
++        return 1;
++      }
++      if (level->in_transaction()) return 1;  // Preserve local undo.
++      if (!source && level->merge_phase() != UserDbMergePhase::none)
++        return level->DrainUserDbMerge(deadline) ? 1 : -1;
++      if (!level->BeginTransaction()) return -1;
++      BOOST_SCOPE_EXIT(level) {
++        if (level->in_transaction()) level->AbortTransaction();
++      } BOOST_SCOPE_EXIT_END
++      if (!source) {
++        if (!level->StartUserDbMerge(UserDbMerger::ReadTick(incoming.get(), 0)) ||
++            !level->CommitTransaction()) return -1;
++        source = std::make_unique<DbSource>(incoming.get());
++        source_complete = false;
++        return 1;
++      }
++      if (source_complete) {
++        if (!level->ActivateUserDbMerge() || !level->CommitTransaction()) return -1;
++        source.reset(); ++imported;
++        return 1;
++      }
++      for (size_t count = 0; count < 64; ++count) {
++        if (!source->Get(&key, &value)) { source_complete = true; break; }
++        if (!level->StageUserDbMerge(key, value)) return -1;
++        if (Clock::now() >= deadline) break;
++      }
++      return level->CommitTransaction() ? 1 : -1;
++    }
++    if (exported < io->names.size()) {
++      const auto& name = io->names[exported];
++      auto database = component->FindDb(name);
++      auto* level = database ? dynamic_cast<LevelDb*>(database.get()) : nullptr;
++      if (database && !level) {
++        // Only live LevelDb dictionaries own Rime learning. Custom words and
++        // Text Expander can have writable Settings mirrors with this suffix.
++        records.reset(); ++exported;
++        return 1;
++      }
++      if (level && level->merge_phase() != UserDbMergePhase::none) {
++        if (level->in_transaction()) return 1;
++        return level->DrainUserDbMerge(deadline) ? 1 : -1;
++      }
++      if (!database || (snapshot && (snapshot_owner.lock() != database ||
++                                    snapshot_revision != level->write_revision()))) {
++        deferred = true;
++        snapshot.reset();
++        records.reset(); ++exported;
++        return 1;
++      }
++      if (!snapshot) {
++        if (level->in_transaction()) return 1;
++        snapshot = New<SyncSnapshot>(name);
++        snapshot_owner = database;
++        snapshot_revision = level->write_revision();
++        DbSource metadata(database.get());
++        while (metadata.MetaGet(&key, &value)) snapshot->MetaUpdate(key, value);
++        snapshot->MetaUpdate("/user_id", io->user_id);
++        records = database->QueryAll();
++      }
++      if (!records) return -1;
++      for (size_t count = 0; count < 64; ++count) {
++        if (!records->GetNextRecord(&key, &value)) {
++          io->outgoing.push_back(std::move(snapshot));
++          records.reset(); ++exported;
++          break;
++        }
++        if (!snapshot->Update(key, value)) return -1;
++        exported_bytes += key.size() + value.size();
++        if (exported_bytes > 32 * 1024 * 1024) return -1;
++        if (Clock::now() >= deadline) break;
++      }
++      return 1;
++    }
++    writing = true;
++    io->result.store(1, std::memory_order_release);
++    io->Request(SyncIO::Work::publish);
++    return 1;
++  }
++};
++
++the<LiveSync> live_sync;
++// The next cycle cannot overtake an already-committed old publication.
++an<SyncIO> outstanding_io;
++}  // namespace
++
++int UserDictManager::SynchronizeIncrementally(const char* sync_directory) {
++  if (!sync_directory) {
++    if (outstanding_io) outstanding_io->publication.exchange(2);
++    live_sync.reset();
++    if (outstanding_io) outstanding_io->Request(SyncIO::Work::cancel);
++    return 0;
++  }
++  try {
++    if (!live_sync) {
++      if (outstanding_io) {
++        const int pending = outstanding_io->result.load(std::memory_order_acquire);
++        if (pending == 0 || pending == 1) return 3;
++      }
++      auto io = New<SyncIO>();
++      const auto& deployer = Service::instance().deployer();
++      io->directory = path(sync_directory);
++      io->user_directory = deployer.user_data_dir;
++      io->user_id = deployer.user_id;
++      if (io->user_id.empty() || path(io->user_id).filename() != path(io->user_id) ||
++          io->user_id == "." || io->user_id == "..") return -1;
++      live_sync = std::make_unique<LiveSync>();
++      live_sync->io = outstanding_io = io;
++      StartIO(io);
++      return 3;
++    }
++    const int result = live_sync->Step();
++    if (result != 1 && result != 3) SynchronizeIncrementally(nullptr);
++    return result;
++  } catch (const std::exception& error) {
++    LOG(ERROR) << "learning sync: " << error.what();
++    SynchronizeIncrementally(nullptr);
++    return -1;
++  }
++}
++
++void UserDictManager::CancelAndWaitForIncrementalSynchronization() {
++  SynchronizeIncrementally(nullptr);
++  if (!outstanding_io) return;
++  outstanding_io->Join();
++  outstanding_io.reset();
++}
++}  // namespace rime
+diff --git a/src/rime/dict/level_db.h b/src/rime/dict/level_db.h
+index 578ed05..0d75c68 100644
+--- a/src/rime/dict/level_db.h
++++ b/src/rime/dict/level_db.h
+@@ -7,19 +7,25 @@
+ #ifndef RIME_LEVEL_DB_H_
+ #define RIME_LEVEL_DB_H_
+ 
++#include <cstdint>
++#include <chrono>
+ #include <rime/dict/db.h>
+ 
+ namespace rime {
+ 
+ struct LevelDbCursor;
+ struct LevelDbWrapper;
++struct UserDbMergeState;
+ 
+ class LevelDb;
++enum class UserDbMergePhase { none, staging, active };
+ 
+ class LevelDbAccessor : public DbAccessor {
+  public:
+   LevelDbAccessor();
+-  LevelDbAccessor(LevelDbCursor* cursor, const string& prefix);
++  LevelDbAccessor(LevelDbCursor* cursor, const string& prefix,
++                  LevelDbCursor* pending = nullptr,
++                  uint64_t local_tick = 0, uint64_t remote_tick = 0);
+   virtual ~LevelDbAccessor();
+ 
+   bool Reset() override;
+@@ -28,7 +34,12 @@ class LevelDbAccessor : public DbAccessor {
+   bool exhausted() override;
+ 
+  private:
++  bool HasBase();
++  bool HasPending();
+   the<LevelDbCursor> cursor_;
++  the<LevelDbCursor> pending_;
++  uint64_t local_tick_ = 0;
++  uint64_t remote_tick_ = 0;
+   bool is_metadata_query_ = false;
+ };
+ 
+@@ -66,11 +77,25 @@ class LevelDb : public Db, public Recoverable, public Transactional {
+   bool AbortTransaction() override;
+   bool CommitTransaction() override;
+ 
++  // Process-local snapshot validity, including deletions and metadata writes.
++  // Unlike the userdb learning clock this advances on every durable mutation.
++  uint64_t write_revision() const { return write_revision_; }
++
++  // A single recoverable userdb merge. Stage/activation participate in the
++  // caller's transaction; draining owns one bounded transaction of its own.
++  UserDbMergePhase merge_phase() const;
++  bool StartUserDbMerge(uint64_t remote_tick);
++  bool StageUserDbMerge(const string& key, const string& value);
++  bool ActivateUserDbMerge();
++  bool DrainUserDbMerge(std::chrono::steady_clock::time_point deadline);
++
+  private:
+   void Initialize();
++  bool StoreUserDbMergeState(const UserDbMergeState& state);
+ 
+   the<LevelDbWrapper> db_;
+   string db_type_;
++  uint64_t write_revision_ = 0;
+ };
+ 
+ }  // namespace rime
+diff --git a/src/rime/dict/level_db.cc b/src/rime/dict/level_db.cc
+index 9a2eb3d..385d080 100644
+--- a/src/rime/dict/level_db.cc
++++ b/src/rime/dict/level_db.cc
+@@ -7,6 +7,10 @@
+ 
+ #include <leveldb/db.h>
+ #include <leveldb/write_batch.h>
++#include <iomanip>
++#include <optional>
++#include <sstream>
++#include <boost/scope_exit.hpp>
+ #include <rime/common.h>
+ #include <rime/service.h>
+ #include <rime/dict/level_db.h>
+@@ -15,11 +19,22 @@
+ namespace rime {
+ 
+ static const char* kMetaCharacter = "\x01";
++// Neither metadata exports (\x01) nor ordinary records (>= space) include redo.
++static const string kMergeHeader = "\x02";
++static const string kMergeRecords = "\x02/";
++
++struct UserDbMergeState {
++  UserDbMergePhase phase = UserDbMergePhase::none;
++  uint64_t local_tick = 0;
++  uint64_t remote_tick = 0;
++  string cursor;
++};
+ 
+ struct LevelDbCursor {
+   leveldb::Iterator* iterator = nullptr;
++  const string floor;
+ 
+-  LevelDbCursor(leveldb::DB* db) {
++  LevelDbCursor(leveldb::DB* db, const string& lower_bound) : floor(lower_bound) {
+     leveldb::ReadOptions options;
+     options.fill_cache = false;
+     iterator = db->NewIterator(options);
+@@ -37,7 +52,7 @@ struct LevelDbCursor {
+     if (!iterator) {
+       return false;
+     }
+-    iterator->Seek(key);
++    iterator->Seek((std::max)(key, floor));
+     return true;
+   }
+ 
+@@ -50,11 +65,33 @@ struct LevelDbCursor {
+ struct LevelDbWrapper {
+   leveldb::DB* ptr = nullptr;
+   leveldb::WriteBatch batch;
++  UserDbMergeState merge;
++  std::optional<UserDbMergeState> next_merge;
+ 
+   leveldb::Status Open(const path& file_path, bool readonly) {
+     leveldb::Options options;
+     options.create_if_missing = !readonly;
+-    return leveldb::DB::Open(options, file_path.string(), &ptr);
++    auto status = leveldb::DB::Open(options, file_path.string(), &ptr);
++    if (!status.ok()) return status;
++    string value;
++    status = ptr->Get(leveldb::ReadOptions(), kMergeHeader, &value);
++    if (status.IsNotFound()) return leveldb::Status::OK();
++    if (!status.ok()) return status;
++    std::istringstream fields(value);
++    string phase, extra;
++    if (fields >> phase >> merge.remote_tick) {
++      if (phase == "staging" && (fields >> std::quoted(merge.cursor)) &&
++          !(fields >> extra)) {
++        merge.phase = UserDbMergePhase::staging;
++        return leveldb::Status::OK();
++      }
++      if (phase == "active" &&
++          (fields >> merge.local_tick >> std::quoted(merge.cursor)) && !(fields >> extra)) {
++        merge.phase = UserDbMergePhase::active;
++        return leveldb::Status::OK();
++      }
++    }
++    return leveldb::Status::Corruption("invalid userdb merge transaction");
+   }
+ 
+   void Release() {
+@@ -62,7 +99,9 @@ struct LevelDbWrapper {
+     ptr = nullptr;
+   }
+ 
+-  LevelDbCursor* CreateCursor() { return new LevelDbCursor(ptr); }
++  LevelDbCursor* CreateCursor(const string& floor = "") {
++    return new LevelDbCursor(ptr, floor);
++  }
+ 
+   bool Fetch(const string& key, string* value) {
+     auto status = ptr->Get(leveldb::ReadOptions(), key, value);
+@@ -70,27 +109,44 @@ struct LevelDbWrapper {
+   }
+ 
+   bool Update(const string& key, const string& value, bool write_batch) {
++    const bool consume = merge.phase == UserDbMergePhase::active && key >= " ";
+     if (write_batch) {
+       batch.Put(key, value);
++      if (consume) batch.Delete(kMergeRecords + key);
+       return true;
+     }
++    if (consume) {
++      leveldb::WriteBatch update;
++      update.Put(key, value);
++      update.Delete(kMergeRecords + key);
++      return ptr->Write(leveldb::WriteOptions(), &update).ok();
++    }
+     auto status = ptr->Put(leveldb::WriteOptions(), key, value);
+     return status.ok();
+   }
+ 
+   bool Erase(const string& key, bool write_batch) {
++    const bool consume = merge.phase == UserDbMergePhase::active && key >= " ";
+     if (write_batch) {
+       batch.Delete(key);
++      if (consume) batch.Delete(kMergeRecords + key);
+       return true;
+     }
++    if (consume) {
++      leveldb::WriteBatch update;
++      update.Delete(key);
++      update.Delete(kMergeRecords + key);
++      return ptr->Write(leveldb::WriteOptions(), &update).ok();
++    }
+     auto status = ptr->Delete(leveldb::WriteOptions(), key);
+     return status.ok();
+   }
+ 
+-  void ClearBatch() { batch.Clear(); }
++  void ClearBatch() { batch.Clear(); next_merge.reset(); }
+ 
+   bool CommitBatch() {
+     auto status = ptr->Write(leveldb::WriteOptions(), &batch);
++    if (status.ok() && next_merge) merge = *next_merge;
+     return status.ok();
+   }
+ };
+@@ -99,28 +155,58 @@ struct LevelDbWrapper {
+ 
+ LevelDbAccessor::LevelDbAccessor() {}
+ 
+-LevelDbAccessor::LevelDbAccessor(LevelDbCursor* cursor, const string& prefix)
++LevelDbAccessor::LevelDbAccessor(LevelDbCursor* cursor, const string& prefix,
++                               LevelDbCursor* pending,
++                               uint64_t local_tick, uint64_t remote_tick)
+     : DbAccessor(prefix),
+       cursor_(cursor),
++      pending_(pending),
++      local_tick_(local_tick),
++      remote_tick_(remote_tick),
+       is_metadata_query_(prefix == kMetaCharacter) {
+   Reset();
+ }
+ 
+ LevelDbAccessor::~LevelDbAccessor() {
+-  cursor_->Release();
++  if (cursor_) cursor_->Release();
++  if (pending_) pending_->Release();
+ }
+ 
+ bool LevelDbAccessor::Reset() {
+-  return cursor_->Jump(prefix_);
++  return Jump(prefix_);
+ }
+ 
+ bool LevelDbAccessor::Jump(const string& key) {
+-  return cursor_->Jump(key);
++  return cursor_->Jump(key) && (!pending_ || pending_->Jump(kMergeRecords + key));
++}
++
++bool LevelDbAccessor::HasBase() {
++  return cursor_ && cursor_->IsValid() && MatchesPrefix(cursor_->GetKey());
++}
++
++bool LevelDbAccessor::HasPending() {
++  if (!pending_ || !pending_->IsValid()) return false;
++  const auto key = pending_->GetKey();
++  return key.compare(0, kMergeRecords.size(), kMergeRecords) == 0 &&
++         MatchesPrefix(key.substr(kMergeRecords.size()));
+ }
+ 
+ bool LevelDbAccessor::GetNextRecord(string* key, string* value) {
+-  if (!cursor_->IsValid() || !key || !value)
++  if (!key || !value)
+     return false;
++  const bool base = HasBase(), pending = HasPending();
++  if (!base && !pending) return false;
++  const string pending_key = pending ? pending_->GetKey().substr(kMergeRecords.size()) : "";
++  if (pending && (!base || pending_key <= cursor_->GetKey())) {
++    const bool same = base && pending_key == cursor_->GetKey();
++    *key = pending_key;
++    *value = UserDbMerger::MergeValue(same ? cursor_->GetValue() : "",
++        pending_->GetValue(), local_tick_, remote_tick_,
++        (std::max)(local_tick_, remote_tick_));
++    pending_->Next();
++    if (same) cursor_->Next();
++    return true;
++  }
+   *key = cursor_->GetKey();
+   if (!MatchesPrefix(*key)) {
+     return false;
+@@ -134,7 +220,7 @@ bool LevelDbAccessor::GetNextRecord(string* key, string* value) {
+ }
+ 
+ bool LevelDbAccessor::exhausted() {
+-  return !cursor_->IsValid() || !MatchesPrefix(cursor_->GetKey());
++  return !HasBase() && !HasPending();
+ }
+ 
+ // LevelDb members
+@@ -167,27 +253,47 @@ an<DbAccessor> LevelDb::QueryAll() {
+ an<DbAccessor> LevelDb::Query(const string& key) {
+   if (!loaded())
+     return nullptr;
+-  return New<LevelDbAccessor>(db_->CreateCursor(), key);
++  const bool merged = db_->merge.phase == UserDbMergePhase::active &&
++                      (key.empty() || key >= " ");
++  const auto floor = kMergeRecords + db_->merge.cursor;
++  const bool journal = key.compare(0, kMergeRecords.size(), kMergeRecords) == 0;
++  return New<LevelDbAccessor>(db_->CreateCursor(journal ? floor : ""), key,
++      merged ? db_->CreateCursor(floor) : nullptr,
++      db_->merge.local_tick, db_->merge.remote_tick);
+ }
+ 
+ bool LevelDb::Fetch(const string& key, string* value) {
+   if (!value || !loaded())
+     return false;
+-  return db_->Fetch(key, value);
++  const bool found = db_->Fetch(key, value);
++  string remote;
++  if (db_->merge.phase == UserDbMergePhase::active && key >= " " &&
++      key >= db_->merge.cursor &&
++      db_->Fetch(kMergeRecords + key, &remote)) {
++    *value = UserDbMerger::MergeValue(found ? *value : "", remote,
++        db_->merge.local_tick, db_->merge.remote_tick,
++        (std::max)(db_->merge.local_tick, db_->merge.remote_tick));
++    return true;
++  }
++  return found;
+ }
+ 
+ bool LevelDb::Update(const string& key, const string& value) {
+   if (!loaded() || readonly())
+     return false;
+   DLOG(INFO) << "update db entry: " << key << " => " << value;
+-  return db_->Update(key, value, in_transaction());
++  const bool success = db_->Update(key, value, in_transaction());
++  if (success && !in_transaction()) ++write_revision_;
++  return success;
+ }
+ 
+ bool LevelDb::Erase(const string& key) {
+   if (!loaded() || readonly())
+     return false;
+   DLOG(INFO) << "erase db entry: " << key;
+-  return db_->Erase(key, in_transaction());
++  const bool success = db_->Erase(key, in_transaction());
++  if (success && !in_transaction()) ++write_revision_;
++  return success;
+ }
+ 
+ bool LevelDb::Backup(const path& snapshot_file) {
+@@ -256,6 +362,7 @@ bool LevelDb::Open() {
+       }
+     }
+   } else {
++    db_->Release();
+     LOG(ERROR) << "Error opening db '" << name() << "': " << status.ToString();
+   }
+   return loaded_;
+@@ -270,6 +377,7 @@ bool LevelDb::OpenReadOnly() {
+   loaded_ = status.ok();
+ 
+   if (!loaded_) {
++    db_->Release();
+     LOG(ERROR) << "Error opening db '" << name() << "' read-only.";
+   }
+   return loaded_;
+@@ -281,6 +389,8 @@ bool LevelDb::Close() {
+ 
+   db_->Release();
+ 
++  ++write_revision_;
++
+   LOG(INFO) << "closed db '" << name() << "'.";
+   loaded_ = false;
+   readonly_ = false;
+@@ -320,11 +430,81 @@ bool LevelDb::CommitTransaction() {
+   if (!loaded() || !in_transaction())
+     return false;
+   bool ok = db_->CommitBatch();
++  if (ok) ++write_revision_;
+   db_->ClearBatch();
+   in_transaction_ = false;
+   return ok;
+ }
+ 
++UserDbMergePhase LevelDb::merge_phase() const {
++  return loaded() ? db_->merge.phase : UserDbMergePhase::none;
++}
++
++bool LevelDb::StartUserDbMerge(uint64_t remote_tick) {
++  if (!in_transaction() || merge_phase() != UserDbMergePhase::none) return false;
++  return StoreUserDbMergeState({UserDbMergePhase::staging, 0, remote_tick, ""});
++}
++
++bool LevelDb::StoreUserDbMergeState(const UserDbMergeState& state) {
++  if (!in_transaction()) return false;
++  if (state.phase == UserDbMergePhase::none) {
++    if (!Erase(kMergeHeader)) return false;
++  } else {
++    std::ostringstream header;
++    header << (state.phase == UserDbMergePhase::staging ? "staging " : "active ")
++           << state.remote_tick << ' ';
++    if (state.phase == UserDbMergePhase::active) header << state.local_tick << ' ';
++    header << std::quoted(state.cursor);
++    if (!Update(kMergeHeader, header.str())) return false;
++  }
++  db_->next_merge = state;
++  return true;
++}
++
++bool LevelDb::StageUserDbMerge(const string& key, const string& value) {
++  return in_transaction() && merge_phase() == UserDbMergePhase::staging &&
++         key >= " " && Update(kMergeRecords + key, value);
++}
++
++bool LevelDb::ActivateUserDbMerge() {
++  if (!in_transaction() || merge_phase() != UserDbMergePhase::staging) return false;
++  auto records = Query(kMergeRecords);
++  if (!records) return false;
++  string first, value;
++  if (!records->GetNextRecord(&first, &value)) return StoreUserDbMergeState({});
++  const auto local_tick = UserDbMerger::ReadTick(this);
++  const auto remote_tick = db_->merge.remote_tick;
++  if (!MetaUpdate("/tick", std::to_string((std::max)(local_tick, remote_tick))) ||
++      !MetaUpdate("/user_id", Service::instance().deployer().user_id)) return false;
++  return StoreUserDbMergeState({UserDbMergePhase::active, local_tick, remote_tick,
++                               first.substr(kMergeRecords.size())});
++}
++
++bool LevelDb::DrainUserDbMerge(std::chrono::steady_clock::time_point deadline) {
++  if (in_transaction() || merge_phase() == UserDbMergePhase::none ||
++      !BeginTransaction()) return false;
++  BOOST_SCOPE_EXIT(this_) {
++    if (this_->in_transaction()) this_->AbortTransaction();
++  } BOOST_SCOPE_EXIT_END
++  auto records = Query(kMergeRecords);
++  if (!records) return false;
++  auto next = db_->merge;
++  string key, value;
++  for (size_t count = 0; count < 64; ++count) {
++    if (!records->GetNextRecord(&key, &value)) break;
++    // A strict lower bound skips every obsolete version of the last consumed
++    // key. Reads and drain share this durable range, not a tombstone scan.
++    next.cursor = key.substr(kMergeRecords.size()) + '\0';
++    if (merge_phase() == UserDbMergePhase::active) {
++      key.erase(0, kMergeRecords.size());
++      if (!Fetch(key, &value) || !Update(key, value)) return false;
++    } else if (!Erase(key)) return false;  // Unactivated staging has no effect.
++    if (std::chrono::steady_clock::now() >= deadline) break;
++  }
++  if (records->exhausted()) next = {};
++  return StoreUserDbMergeState(next) && CommitTransaction();
++}
++
+ template <>
+ RIME_DLL string UserDbComponent<LevelDb>::extension() const {
+   return ".userdb";
+diff --git a/src/rime/gear/table_translator.cc b/src/rime/gear/table_translator.cc
+index 67bc229..e8e6c0f 100644
+--- a/src/rime/gear/table_translator.cc
++++ b/src/rime/gear/table_translator.cc
+@@ -117,6 +117,7 @@ bool TableTranslation::PreferUserPhrase() {
+ class LazyTableTranslation : public TableTranslation {
+  public:
+   static const size_t kInitialSearchLimit = 10;
++  static const size_t kInitialWeightedSearchLimit = 1000;
+   static const size_t kExpandingFactor = 10;
+ 
+   LazyTableTranslation(TableTranslator* translator,
+@@ -133,6 +134,8 @@ class LazyTableTranslation : public TableTranslation {
+   Dictionary* dict_;
+   const hash_set<string>* blacklist_;
+   UserDictionary* user_dict_;
++  const bool completion_by_weight_;
++  size_t search_start_ = 0;
+   size_t limit_;
+   size_t user_dict_limit_;
+   string user_dict_key_;
+@@ -153,7 +156,10 @@ LazyTableTranslation::LazyTableTranslation(TableTranslator* translator,
+       dict_(translator->dict()),
+       blacklist_(&translator->blacklist()),
+       user_dict_(enable_user_dict ? translator->user_dict() : NULL),
+-      limit_(kInitialSearchLimit),
++      completion_by_weight_(translator->completion_by_weight() &&
++                            input.size() >= 2),
++      limit_(completion_by_weight_ ? kInitialWeightedSearchLimit
++                                   : kInitialSearchLimit),
+       user_dict_limit_(kInitialSearchLimit) {
+   FetchUserPhrases(translator) || FetchMoreUserPhrases();
+   FetchMoreTableEntries();
+@@ -189,6 +195,20 @@ bool LazyTableTranslation::FetchMoreUserPhrases() {
+ bool LazyTableTranslation::FetchMoreTableEntries() {
+   if (!dict_ || limit_ == 0)
+     return false;
++  if (completion_by_weight_) {
++    // Bound typing work; later pages retain every remaining Prism key.
++    // ExpandSearch has a stable breadth-first prefix. Skip keys, not ranked
++    // entries: sorting a larger batch and skipping its first entries would
++    // silently lose newly recalled high-frequency words.
++    DictEntryIterator more;
++    const size_t found = dict_->LookupWords(
++        &more, input_, true, limit_, blacklist_, search_start_);
++    search_start_ = found;
++    limit_ = found < limit_ ? 0 : limit_ * kExpandingFactor;
++    more.SortByWeight(input_.size());
++    iter_ = std::move(more);
++    return true;
++  }
+   size_t previous_entry_count = iter_.entry_count();
+   DLOG(INFO) << "fetching more table entries: limit = " << limit_
+              << ", count = " << previous_entry_count;
+@@ -213,6 +233,8 @@ TableTranslator::TableTranslator(const Ticket& ticket)
+   if (!engine_)
+     return;
+   if (Config* config = engine_->schema()->config()) {
++    config->GetBool(name_space_ + "/completion_by_weight",
++                    &completion_by_weight_);
+     config->GetBool(name_space_ + "/enable_charset_filter",
+                     &enable_charset_filter_);
+     config->GetBool(name_space_ + "/enable_sentence", &enable_sentence_);
+diff --git a/src/rime/gear/table_translator.h b/src/rime/gear/table_translator.h
+index 7057ed4..c00d10e 100644
+--- a/src/rime/gear/table_translator.h
++++ b/src/rime/gear/table_translator.h
+@@ -36,8 +36,10 @@ class TableTranslator : public Translator,
+                                bool include_prefix_phrases = false);
+   string GetPrecedingText(size_t start) const;
+   UnityTableEncoder* encoder() const { return encoder_.get(); }
++  bool completion_by_weight() const { return completion_by_weight_; }
+ 
+  protected:
++  bool completion_by_weight_ = false;
+   bool enable_charset_filter_ = false;
+   bool enable_encoder_ = false;
+   bool enable_sentence_ = true;
+diff --git a/src/rime/algo/syllabifier.cc b/src/rime/algo/syllabifier.cc
+index b7ed6b79..11d0efc5 100644
+--- a/src/rime/algo/syllabifier.cc
++++ b/src/rime/algo/syllabifier.cc
+@@ -7,6 +7,7 @@
+ //
+ #include <algorithm>
+ #include <queue>
++#include <string_view>
+ #include <boost/range/adaptor/reversed.hpp>
+ #include <rime/algo/syllabifier.h>
+ #include <rime/dict/corrector.h>
+@@ -65,14 +66,16 @@ int Syllabifier::BuildSyllableGraph(const string& input,
+     // see where we can go by advancing a syllable
+     vector<Prism::Match> matches;
+     set<SyllableId> exact_match_syllables;
+-    auto current_input = input.substr(begin_pos);
++    std::string_view current_input(input.data() + begin_pos,
++                                   input.length() - begin_pos);
+     prism.CommonPrefixSearch(current_input, &matches);
+     if (corrector_) {
+       for (auto& m : matches) {
+         exact_match_syllables.insert(m.value);
+       }
+       Corrections corrections;
+-      corrector_->ToleranceSearch(prism, current_input, &corrections, 5);
++      corrector_->ToleranceSearch(prism, string{current_input}, &corrections,
++                                  5);
+       for (const auto& m : corrections) {
+         for (auto accessor = prism.QuerySpelling(m.first);
+              !accessor.exhausted(); accessor.Next()) {
+@@ -304,4 +307,4 @@ void Syllabifier::EnableCorrection(Corrector* corrector) {
+   corrector_ = corrector;
+ }
+ 
+-}  // namespace rime
++}  // namespace rime
+\ No newline at end of file
+diff --git a/src/rime/dict/prism.cc b/src/rime/dict/prism.cc
+index 6ea7d264..17d2e588 100644
+--- a/src/rime/dict/prism.cc
++++ b/src/rime/dict/prism.cc
+@@ -16,8 +16,11 @@ namespace rime {
+ namespace {
+ 
+ struct node_t {
+-  string key;
++  node_t(size_t node_pos, size_t key_length)
++      : node_pos(node_pos), key_length(key_length) {}
++
+   size_t node_pos;
++  size_t key_length;
+ };
+ 
+ // 在 SpellingDescriptor::type 的高位記錄 is_correction, 避開符號位
+@@ -269,17 +272,16 @@ bool Prism::GetValue(const string& key, int* value) const {
+ 
+ // Given a key, search all the keys in the tree that share
+ // a common prefix with that key.
+-void Prism::CommonPrefixSearch(const string& key, vector<Match>* result) {
++void Prism::CommonPrefixSearch(std::string_view key, vector<Match>* result) {
+   if (!result || key.empty())
+     return;
+-  size_t len = key.length();
+-  result->resize(len);
+-  size_t num_results =
+-      trie_->commonPrefixSearch(key.c_str(), &result->front(), len, len);
++  result->resize(key.length());
++  size_t num_results = trie_->commonPrefixSearch(key.data(), &result->front(),
++                                                 key.length(), key.length());
+   result->resize(num_results);
+ }
+ 
+-void Prism::ExpandSearch(const string& key,
++void Prism::ExpandSearch(std::string_view key,
+                          vector<Match>* result,
+                          size_t limit) {
+   if (!result)
+@@ -288,7 +290,8 @@ void Prism::ExpandSearch(const string& key,
+   size_t count = 0;
+   size_t node_pos = 0;
+   size_t key_pos = 0;
+-  int ret = trie_->traverse(key.c_str(), node_pos, key_pos);
++  const char* search_key = key.empty() ? "" : key.data();
++  int ret = trie_->traverse(search_key, node_pos, key_pos, key.length());
+   // key is not a valid path
+   if (ret == -2)
+     return;
+@@ -297,25 +300,23 @@ void Prism::ExpandSearch(const string& key,
+     if (limit && ++count >= limit)
+       return;
+   }
++  const char* alphabet =
++      (format_ > 1.0 - DBL_EPSILON) ? metadata_->alphabet : kDefaultAlphabet;
+   std::queue<node_t> q;
+-  q.push({key, node_pos});
++  q.emplace(node_pos, key_pos);
+   while (!q.empty()) {
+-    node_t node = q.front();
++    const node_t node = q.front();
+     q.pop();
+-    const char* c =
+-        (format_ > 1.0 - DBL_EPSILON) ? metadata_->alphabet : kDefaultAlphabet;
+-    for (; *c; ++c) {
+-      string k = node.key + *c;
+-      size_t k_pos = node.key.length();
+-      size_t n_pos = node.node_pos;
+-      ret = trie_->traverse(k.c_str(), n_pos, k_pos);
+-      if (ret <= -2) {
+-        // ignore
+-      } else if (ret == -1) {
+-        q.push({k, n_pos});
+-      } else {
+-        q.push({k, n_pos});
+-        result->push_back(Match{ret, k_pos});
++    for (const char* c = alphabet; *c; ++c) {
++      size_t next_node_pos = node.node_pos;
++      size_t next_key_pos = 0;
++      ret = trie_->traverse(c, next_node_pos, next_key_pos, 1);
++      if (ret <= -2)
++        continue;
++      const size_t matched_length = node.key_length + next_key_pos;
++      q.emplace(next_node_pos, matched_length);
++      if (ret >= 0) {
++        result->push_back(Match{ret, matched_length});
+         if (limit && ++count >= limit)
+           return;
+       }
+diff --git a/src/rime/dict/prism.h b/src/rime/dict/prism.h
+index 84e064a0..b0fbfb29 100644
+--- a/src/rime/dict/prism.h
++++ b/src/rime/dict/prism.h
+@@ -9,6 +9,7 @@
+ #ifndef RIME_PRISM_H_
+ #define RIME_PRISM_H_
+ 
++#include <string_view>
+ #include <darts.h>
+ #include <rime/common.h>
+ #include <rime/algo/spelling.h>
+@@ -79,8 +80,8 @@ class Prism : public MappedFile {
+ 
+   RIME_DLL bool HasKey(const string& key);
+   RIME_DLL bool GetValue(const string& key, int* value) const;
+-  RIME_DLL void CommonPrefixSearch(const string& key, vector<Match>* result);
+-  RIME_DLL void ExpandSearch(const string& key,
++  RIME_DLL void CommonPrefixSearch(std::string_view key, vector<Match>* result);
++  RIME_DLL void ExpandSearch(std::string_view key,
+                              vector<Match>* result,
+                              size_t limit);
+   SpellingAccessor QuerySpelling(SyllableId spelling_id);
+@@ -100,4 +101,4 @@ class Prism : public MappedFile {
+ 
+ }  // namespace rime
+ 
+-#endif  // RIME_PRISM_H_
++#endif  // RIME_PRISM_H_
+\ No newline at end of file
+diff --git a/test/prism_test.cc b/test/prism_test.cc
+index 9803a30f..04bccd39 100644
+--- a/test/prism_test.cc
++++ b/test/prism_test.cc
+@@ -5,6 +5,7 @@
+ // 2011-05-17 Zou xu <zouivex@gmail.com>
+ //
+ #include <algorithm>
++#include <string_view>
+ #include <gtest/gtest.h>
+ #include <rime/dict/prism.h>
+ 
+@@ -17,7 +18,6 @@ class RimePrismTest : public ::testing::Test {
+   virtual void SetUp() {
+     prism_.reset(new Prism(path{"prism_test.bin"}));
+     prism_->Remove();
+-
+     set<string> keyset;
+     keyset.insert("google");   // 4
+     keyset.insert("good");     // 2
+@@ -38,7 +38,6 @@ class RimePrismTest : public ::testing::Test {
+ 
+ TEST_F(RimePrismTest, SaveAndLoad) {
+   EXPECT_TRUE(prism_->Save());
+-
+   Prism test(prism_->file_path());
+   EXPECT_TRUE(test.Load());
+ 
+@@ -57,7 +56,6 @@ TEST_F(RimePrismTest, GetValue) {
+   int value = -1;
+   EXPECT_TRUE(prism_->GetValue("adobe", &value));
+   EXPECT_EQ(value, 0);
+-
+   value = -1;
+   EXPECT_TRUE(prism_->GetValue("baidu", &value));
+   EXPECT_EQ(value, 1);
+@@ -74,7 +72,6 @@ TEST_F(RimePrismTest, CommonPrefixMatch) {
+   EXPECT_EQ(result[1].value, 3);   // goodbye
+   EXPECT_EQ(result[1].length, 7);  // goodbye
+ }
+-
+ TEST_F(RimePrismTest, ExpandSearch) {
+   vector<Prism::Match> result;
+ 
+@@ -88,3 +85,39 @@ TEST_F(RimePrismTest, ExpandSearch) {
+   EXPECT_EQ(result[2].value, 3);   // goodbye
+   EXPECT_EQ(result[2].length, 7);  // goodbye
+ }
++TEST_F(RimePrismTest, ExpandSearchLimit) {
++  vector<Prism::Match> result;
++  prism_->ExpandSearch("goo", &result, 2);
++  // result is good and google.
++
++  ASSERT_EQ(result.size(), 2);
++  EXPECT_EQ(result[0].value, 2);
++  EXPECT_EQ(result[0].length, 4);
++  EXPECT_EQ(result[1].value, 4);
++  EXPECT_EQ(result[1].length, 6);
++}
++
++TEST_F(RimePrismTest, CommonPrefixSearchWithLength) {
++  const string input("xxgoodbye");
++  vector<Prism::Match> result;
++
++  prism_->CommonPrefixSearch(std::string_view(input).substr(2, 4), &result);
++  ASSERT_EQ(result.size(), 1);
++  EXPECT_EQ(result[0].value, 2);
++  EXPECT_EQ(result[0].length, 4);
++}
++
++TEST_F(RimePrismTest, ExpandSearchWithLength) {
++  const string input("xxgoodbye");
++  vector<Prism::Match> result;
++
++  prism_->ExpandSearch(std::string_view(input).substr(2, 3), &result, 10);
++
++  ASSERT_EQ(result.size(), 3);
++  EXPECT_EQ(result[0].value, 2);
++  EXPECT_EQ(result[0].length, 4);
++  EXPECT_EQ(result[1].value, 4);
++  EXPECT_EQ(result[1].length, 6);
++  EXPECT_EQ(result[2].value, 3);
++  EXPECT_EQ(result[2].length, 7);
++}

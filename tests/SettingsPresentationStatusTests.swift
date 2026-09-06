@@ -18,16 +18,27 @@ struct SettingsPresentationStatusTests {
       chinese
     )
     expect(
-      .cloudSyncRequested,
-      en: "Learning synchronization requested.",
-      zh: "已请求同步学习词。",
+      .cloudSyncCompleted,
+      en: "Learning synchronization completed.",
+      zh: "学习词同步已完成。",
       english,
       chinese
     )
+    guard SettingsPresentationStatus.cloudSyncDeferred.presentation(locale: chinese).severity
+      == .informational else { fail("deferred learning sync was presented as an error or success") }
+    for status: SettingsPresentationStatus in [
+      .cloudSyncDeferred, .operationFailed(.cloudSyncUnavailable), .operationFailed(.cloudSyncFailed)
+    ] {
+      for locale in [english, chinese] {
+        guard !status.text(locale: locale).isEmpty,
+          status.text(locale: locale) != SettingsPresentationStatus.operationFailed(.hostRejected).text(locale: locale)
+        else { fail("a learning sync result lost its specific explanation") }
+      }
+    }
     expect(
-      .cloudBackupUploaded,
-      en: "Full recovery backup uploaded.",
-      zh: "已上传完整恢复备份。",
+      .cloudBackupUploaded(Date(timeIntervalSince1970: 0)),
+      en: "Incremental recovery backup verified at \(Date(timeIntervalSince1970: 0).formatted()).",
+      zh: "增量恢复备份已于 \(Date(timeIntervalSince1970: 0).formatted()) 校验完成。",
       english,
       chinese
     )
@@ -130,6 +141,13 @@ struct SettingsPresentationStatusTests {
       chinese
     )
     expect(
+      .operationFailed(.incrementalBackupFailed),
+      en: "The incremental backup could not be created. Existing settings and learning data were left unchanged.",
+      zh: "无法创建增量备份；现有设置和学习数据均未更改。",
+      english,
+      chinese
+    )
+    expect(
       .operationFailed(.configurationRecoveryFailed),
       en: "The previous input configuration could not be restored. Reopen Settings after the input method is available.",
       zh: "无法恢复先前的输入配置。请在输入法可用后重新打开设置。",
@@ -228,6 +246,48 @@ struct SettingsPresentationStatusTests {
       accessibilityLabel: "Warning: The input runtime is unreachable. Enable and select Linnet, then refresh.",
       locale: english
     )
+    expect(
+      .runtime(.running),
+      en: "Runtime: running",
+      zh: "运行时：正常",
+      english,
+      chinese
+    )
+    expectPresentation(
+      .runtime(.running),
+      severity: .success,
+      systemImage: "checkmark.circle",
+      accessibilityLabel: "Success: Runtime: running",
+      locale: english
+    )
+    expect(
+      .runtime(.paused),
+      en: "Runtime: paused",
+      zh: "运行时：已暂停",
+      english,
+      chinese
+    )
+    expectPresentation(
+      .runtime(.paused),
+      severity: .informational,
+      systemImage: "info.circle",
+      accessibilityLabel: "Status: Runtime: paused",
+      locale: english
+    )
+    expect(
+      .runtime(.degraded),
+      en: "Runtime: degraded",
+      zh: "运行时：降级",
+      english,
+      chinese
+    )
+    expectPresentation(
+      .runtime(.degraded),
+      severity: .warning,
+      systemImage: "exclamationmark.triangle",
+      accessibilityLabel: "Warning: Runtime: degraded",
+      locale: english
+    )
     expectPresentation(
       .runtime(.unreachable),
       severity: .warning,
@@ -249,8 +309,6 @@ struct SettingsPresentationStatusTests {
       accessibilityLabel: "Error: Language data update failed integrity verification.",
       locale: english
     )
-    expectFooterConsumesTypedPresentation()
-
     expectPanel(
       .portableExport,
       productName: "Linnet",
@@ -363,26 +421,6 @@ struct SettingsPresentationStatusTests {
     else {
       fail("typed presentation does not own status semantics: \(status), \(presentation)")
     }
-  }
-
-  private static func expectFooterConsumesTypedPresentation() {
-    let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-      .deletingLastPathComponent()
-    let sourceURL = repository.appending(path: "sources/LinnetSettings/SettingsRootView.swift")
-    guard let source = try? String(contentsOf: sourceURL, encoding: .utf8),
-      let start = source.range(of: "  private var footer: some View {"),
-      let end = source.range(of: "\n  }\n}", range: start.upperBound..<source.endIndex)
-    else { fail("Settings footer source could not be inspected") }
-    let footer = source[start.lowerBound..<end.upperBound]
-    guard footer.contains("model.displayedStatus.presentation("),
-      footer.contains("presentation.systemImage"),
-      footer.contains("presentation.text"),
-      footer.contains("presentation.accessibilityLabel"),
-      footer.contains("presentation.severity.footerColor"),
-      !footer.contains("Image(systemName: \"info.circle\")"),
-      !footer.contains("Text(model.displayedStatus.text"),
-      !footer.contains(".foregroundStyle(.secondary)")
-    else { fail("Settings footer still owns fixed status presentation") }
   }
 
   private static func fail(_ message: String) -> Never {

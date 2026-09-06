@@ -17,8 +17,11 @@ not fork Rime behavior or maintain a second language-data build.
 Weasel's nested librime, plum recipes, default schemas, updater and optional
 schema downloader are not product authorities. Windows consumes the exact
 `data/plum` and `data/opencc` projection made by `scripts/stage-linnet-data` on
-macOS CI. The only Windows-specific YAML is `weasel.yaml`, which owns candidate
-window presentation and application integration, not input behavior.
+macOS CI. Shared input defaults are exported by the existing Settings projection
+renderer at build time and included through Rime's native `__patch` mechanism,
+before user customization. Windows does not duplicate those policies or ship a
+Swift runtime. `weasel.yaml` owns candidate window presentation and application
+integration, not input behavior.
 
 The projection assigns Linnet its own TSF/profile/language-bar GUIDs, registry
 root, IPC pipe/window, deployer mutexes, `LinnetServer.exe` process name,
@@ -38,7 +41,8 @@ Weasel/librime commits, projected configuration digest and updater state.
 English glosses are not a Windows-side dictionary or online translation
 service. `linnet.smart.db` remains the sole metadata owner and Smart English
 projects its `m/ipa/` and `m/zh/` records into standard Rime candidate comments.
-Weasel renders that existing comment field.
+Weasel renders that existing comment field, removing only the leading metadata
+marker used by the macOS frontend; IPA and Chinese definitions remain visible.
 
 The Windows presentation is generated from all seven Linnet theme families in
 `data/squirrel.yaml`, producing fourteen light/dark schemes and seven
@@ -52,11 +56,15 @@ management, synchronization and deployment entrypoints. Its optional
 package-mutating schema downloader is removed completely because root Linnet
 data is package-owned. The SwiftUI/AppKit
 Linnet Settings application is not shipped on Windows. Input defaults still
-come from the shared schemas, rather than a second Windows settings model.
+come from the shared schemas and projection renderer, rather than a second
+Windows settings model. This includes current mixed Chinese/English input,
+uppercase intent, code-shaped raw input and the reviewed English and Chinese
+supplemental dictionaries.
 
 ## Build
 
-Normal pull-request and branch CI performs the full build. Locally, first run
+Pull-request CI and manually dispatched clean-build CI perform the full build.
+Locally, first run
 the existing macOS preparation to create the canonical data and embedded Lua
 header:
 
@@ -65,7 +73,7 @@ header:
 scripts/stage-windows-build-inputs
 ```
 
-Transfer `data/plum`, `data/opencc`, the repository, and the generated header
+Transfer `data/plum`, `data/opencc`, the repository, and `build/windows-inputs`
 to Windows. In a Visual Studio 2022 developer environment:
 
 ```powershell
@@ -74,6 +82,7 @@ git -C librime submodule update --init --recursive --depth 1
 platforms/windows/prepare.ps1 `
   -DataRoot C:\path\to\shared-data `
   -EmbeddedLuaHeader C:\path\to\linnet_embedded_lua.h `
+  -InputDefaults C:\path\to\linnet_windows_defaults.yaml `
   -WeaselConfig C:\path\to\weasel.yaml `
   -ThemePreviewRoot C:\path\to\preview
 platforms/windows/build.ps1 -BoostRoot C:\path\to\boost_1_89_0
@@ -98,8 +107,8 @@ and uninstall.
 An unrun or failing Windows preflight is a UAT `NO-GO`; manual testing starts
 only from an uploaded candidate that passed this gate.
 
-Tag and branch builds retain the verified Windows installer only as a private,
-expiring Actions artifact for real-machine UAT. It is deliberately absent from
+These CI builds retain the verified Windows installer only as an expiring
+Actions artifact for real-machine UAT. It is deliberately absent from
 the public release manifest and no publication job downloads it. Passing CI,
 adding a signature, or manually renaming that artifact does not authorize a
 Windows GitHub Release.
@@ -112,7 +121,7 @@ has zero Windows Release paths; the existing publisher remains macOS-only.
 
 ## Acceptance status
 
-- Local/macOS: lock, overlay, owner/subtraction and source-structure checks.
+- Local/macOS: locked patch application, theme generation and data integrity.
 - Local/macOS shared runtime: real librime sessions for Chinese profiles, Smart
   English IPA/glosses, prediction, correction, reverse lookup and learning.
 - Windows CI: Visual Studio x64/Win32 runtime plus ARM/ARM64/ARM64X TSF

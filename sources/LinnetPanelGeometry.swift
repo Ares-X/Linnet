@@ -162,7 +162,7 @@ enum LinnetPanelGeometry {
     )
   }
 
-  /// One logical layout owns the visual centers and the mouse/AX cells. The
+  /// One logical layout owns the visual centers and mouse hit cells. The
   /// caller reserves `stripWidth` by `axisExtent` before asking for a layout.
   static func pagingLayout(
     configuration: PagingConfiguration,

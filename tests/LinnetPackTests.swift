@@ -11,9 +11,12 @@ struct LinnetPackTests {
   }
 
   private static func run() throws {
+    try directoryDeltaRoundTrip()
+    try differentialPackStagesThroughRegistry()
     try validCatalogSelectedPackStagesThroughRegistry()
     try sameVersionNewSequenceUsesDistinctIdentityPath()
     try installedSameVersionStagesIdempotently()
+    try conflictingPackRepairPreservesOriginal()
     try undeclaredInstalledFileFailsClosed()
     try declaredParentSymlinkFailsClosed()
     try corruptInstalledSameIdentityFailsClosed()
@@ -23,10 +26,108 @@ struct LinnetPackTests {
     try payloadHashAndTrailingBytesFailClosed()
     try corruptAndTruncatedZlibFailClosed()
     try compressionFixtureIsActuallyCompressed()
+    try englishEntityDictionaryIsOwnedByEnglishPack()
+    try chinesePackRejectsEnglishEntityDictionary()
     try minimumCoreFailsClosed()
     try extendedPackRequiresMatchingChineseABI()
     try unsupportedRequirementFailsClosed()
     print("LinnetPackTests: PASS")
+  }
+
+  private static func englishEntityDictionaryIsOwnedByEnglishPack() throws {
+    try withFixture { registry in
+      let package = registry.downloadsDirectory.appending(
+        path: "english-entities.linnetpack")
+      _ = try makePack(
+        package, path: "linnet_english_entities.dict.yaml",
+        payload: Data("AI\tAI\t1\n".utf8))
+      let active = try registry.verifyAndStagePack(
+        package: package, artifact: try catalogArtifact(package), transfer: .complete)
+      require(
+        FileManager.default.fileExists(
+          atPath: registry.rootDirectory
+            .appending(path: active.relativePath)
+            .appending(path: "linnet_english_entities.dict.yaml").path),
+        "English entity dictionary ownership")
+    }
+  }
+
+  private static func differentialPackStagesThroughRegistry() throws {
+    try withFixture { registry in
+      try withFixture { builder in
+        let firstPackage = registry.downloadsDirectory.appending(path: "base.linnetpack")
+        let nextPackage = builder.downloadsDirectory.appending(path: "target.linnetpack")
+        _ = try makePack(firstPackage, kind: .chinese, path: "dicts/jichu.dict.yaml",
+                         payload: Data(repeating: 97, count: 131_072))
+        var changed = Data(repeating: 97, count: 131_072)
+        changed[1024] = 98
+        _ = try makePack(nextPackage, kind: .chinese, path: "dicts/jichu.dict.yaml",
+                         payload: changed, sequence: 2)
+        let base = try registry.verifyAndStagePack(
+          package: firstPackage, artifact: catalogArtifact(firstPackage), transfer: .complete)
+        var artifact = try catalogArtifact(nextPackage)
+        let target = try builder.verifyAndStagePack(package: nextPackage, artifact: artifact, transfer: .complete)
+        let baseRoot = registry.rootDirectory.appending(path: base.relativePath)
+        let targetRoot = builder.rootDirectory.appending(path: target.relativePath)
+        let deltaFile = registry.downloadsDirectory.appending(path: "update.linnetdelta")
+        // PKG extraction produces writable directories; an installed pack is
+        // read-only. That difference must not change language-content identity.
+        let nested = baseRoot.appending(path: "dicts")
+        require(chmod(nested.path, 0o755) == 0, "fixture directory mode")
+        try LinnetDirectoryDelta.build(base: baseRoot, target: targetRoot, output: deltaFile)
+        require(chmod(nested.path, 0o555) == 0, "installed directory mode")
+        let before = try LinnetDirectoryDelta.digest(baseRoot)
+        let bytes = try Data(contentsOf: deltaFile)
+        let delta = LinnetDataChannel.Delta(
+          baseContentSHA256: base.contentSHA256, bytes: UInt64(bytes.count), sha256: LinnetPackContract.sha256(bytes),
+          url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-5/update.linnetdelta")!)
+        artifact.deltas = [delta]
+        requireRegistryFailure(.invalidActiveState) {
+          _ = try registry.verifyAndStagePack(package: deltaFile, artifact: artifact, transfer: .requiresCompleteRepair)
+        }
+        let corrupt = registry.downloadsDirectory.appending(path: "corrupt.linnetdelta")
+        var corruptBytes = bytes
+        corruptBytes[corruptBytes.count - 1] ^= 1
+        try corruptBytes.write(to: corrupt)
+        do {
+          _ = try registry.verifyAndStagePack(package: corrupt, artifact: artifact, transfer: artifact.transfer(from: base))
+          LinnetTestFailure.fail("corrupt differential transfer was accepted")
+        } catch LinnetDataChannel.Failure.invalidArtifact { }
+        require(!FileManager.default.fileExists(atPath: registry.rootDirectory.appending(path: target.relativePath).path),
+          "failed delta published a target pack")
+        let baseFile = baseRoot.appending(path: "dicts/jichu.dict.yaml")
+        require(chmod(baseFile.path, 0o644) == 0, "fixture file mode")
+        try changed.write(to: baseFile)
+        do {
+          _ = try registry.verifyAndStagePack(package: deltaFile, artifact: artifact, transfer: artifact.transfer(from: base))
+          LinnetTestFailure.fail("corrupt baseline content was accepted")
+        } catch LinnetDataRegistry.Failure.invalidActiveState { }
+        try Data(repeating: 97, count: 131_072).write(to: baseFile)
+        require(chmod(baseFile.path, 0o444) == 0, "restore fixture file mode")
+        let staged = try registry.verifyAndStagePack(
+          package: deltaFile, artifact: artifact, transfer: artifact.transfer(from: base))
+        require(artifact.matches(staged), "reconstructed pack did not satisfy the canonical target")
+        require(try LinnetDirectoryDelta.digest(baseRoot) == before, "delta mutated the installed base")
+        let repeated = try registry.verifyAndStagePack(
+          package: deltaFile, artifact: artifact, transfer: artifact.transfer(from: base))
+        require(repeated == staged, "verified target was not reused idempotently")
+      }
+    }
+  }
+
+  private static func chinesePackRejectsEnglishEntityDictionary() throws {
+    try withFixture { registry in
+      let package = registry.downloadsDirectory.appending(
+        path: "chinese-cannot-own-english-entities.linnetpack")
+      _ = try makePack(
+        package, kind: .chinese,
+        path: "linnet_english_entities.dict.yaml",
+        payload: Data("AI\tAI\t1\n".utf8))
+      requirePackFailure(.unsafePath("linnet_english_entities.dict.yaml")) {
+        _ = try LinnetPackContract.verify(
+          package: package, coreVersion: "1.0.0")
+      }
+    }
   }
 
   private static func sameVersionNewSequenceUsesDistinctIdentityPath() throws {
@@ -38,8 +139,8 @@ struct LinnetPackTests {
       _ = try makePack(
         secondPackage, payload: Data("second".utf8), sequence: 2)
 
-      let first = try registry.verifyAndStagePack(package: firstPackage, artifact: try catalogArtifact(firstPackage))
-      let second = try registry.verifyAndStagePack(package: secondPackage, artifact: try catalogArtifact(secondPackage))
+      let first = try registry.verifyAndStagePack(package: firstPackage, artifact: try catalogArtifact(firstPackage), transfer: .complete)
+      let second = try registry.verifyAndStagePack(package: secondPackage, artifact: try catalogArtifact(secondPackage), transfer: .complete)
 
       require(first.version == second.version, "same public version")
       require(first.sequence < second.sequence, "forward sequence")
@@ -59,7 +160,7 @@ struct LinnetPackTests {
     try withFixture { registry in
       let package = registry.downloadsDirectory.appending(path: "corrupt-installed.linnetpack")
       _ = try makePack(package, payload: Data("trusted".utf8))
-      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       let installed = registry.rootDirectory.appending(path: active.relativePath)
       let installedFile = installed.appending(path: "linnet_en.dict.yaml")
       try FileManager.default.setAttributes(
@@ -69,7 +170,7 @@ struct LinnetPackTests {
       try Data("corrupt".utf8).write(to: installedFile)
 
       requireRegistryFailure(.invalidActiveState) {
-        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       }
     }
   }
@@ -78,7 +179,7 @@ struct LinnetPackTests {
     try withFixture { registry in
       let package = registry.downloadsDirectory.appending(path: "undeclared-installed.linnetpack")
       _ = try makePack(package, payload: Data("trusted".utf8))
-      let first = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+      let first = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       let installed = registry.rootDirectory.appending(path: first.relativePath)
       try FileManager.default.setAttributes(
         [.posixPermissions: 0o700], ofItemAtPath: installed.path)
@@ -90,7 +191,7 @@ struct LinnetPackTests {
         [.posixPermissions: 0o555], ofItemAtPath: installed.path)
 
       requireRegistryFailure(.invalidActiveState) {
-        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       }
     }
   }
@@ -101,7 +202,7 @@ struct LinnetPackTests {
       _ = try makePack(
         package, path: "build/linnet_en.dict.yaml",
         payload: Data("trusted".utf8))
-      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       let installed = registry.rootDirectory.appending(path: active.relativePath)
       let declaredParent = installed.appending(path: "build", directoryHint: .isDirectory)
       let replacement = installed.appending(
@@ -113,7 +214,7 @@ struct LinnetPackTests {
         atPath: declaredParent.path, withDestinationPath: replacement.path)
 
       requireRegistryFailure(.invalidActiveState) {
-        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       }
     }
   }
@@ -122,7 +223,7 @@ struct LinnetPackTests {
     try withFixture { registry in
       let package = registry.downloadsDirectory.appending(path: "oversized-installed.linnetpack")
       _ = try makePack(package, payload: Data("trusted".utf8))
-      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       let installed = registry.rootDirectory.appending(path: active.relativePath)
       let manifest = installed.appending(path: "manifest.json")
       try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installed.path)
@@ -131,7 +232,7 @@ struct LinnetPackTests {
       try handle.truncate(atOffset: 1_048_577)
       try handle.close()
       requireRegistryFailure(.invalidActiveState) {
-        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       }
     }
   }
@@ -141,8 +242,44 @@ struct LinnetPackTests {
       let package = registry.downloadsDirectory.appending(path: "core-owner.linnetpack")
       _ = try makePack(package, payload: Data("hello".utf8))
       requirePackFailure(.invalidManifest("core version authority")) {
-        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       }
+    }
+  }
+
+  private static func conflictingPackRepairPreservesOriginal() throws {
+    try withFixture { registry in
+      let original = registry.downloadsDirectory.appending(path: "original.linnetpack")
+      let replacement = registry.downloadsDirectory.appending(path: "replacement.linnetpack")
+      // Same payload and release number, different compatibility metadata:
+      // this is the private/public catalog conflict seen during VM acceptance.
+      _ = try makePack(original, payload: Data("words".utf8), minCore: "1.0.0")
+      _ = try makePack(replacement, payload: Data("words".utf8), minCore: "0.9.0")
+      let first = try registry.verifyAndStagePack(
+        package: original, artifact: catalogArtifact(original), transfer: .complete)
+      let artifact = try catalogArtifact(replacement)
+      requireRegistryFailure(.invalidActiveState) {
+        _ = try registry.verifyAndStagePack(package: replacement, artifact: artifact, transfer: .complete)
+      }
+      let repaired = try registry.verifyAndStagePack(
+        package: replacement, artifact: artifact, transfer: .complete, allowCompleteRepair: true)
+      require(first.relativePath != repaired.relativePath, "repair overwrote live pack")
+      require(try registry.verifiedInstalledPack(at: registry.rootDirectory.appending(
+        path: first.relativePath, directoryHint: .isDirectory)) == first,
+        "repair changed original pack")
+      _ = try registry.verifiedInstalledManifest(for: repaired)
+      let repeated = try registry.verifyAndStagePack(
+        package: replacement, artifact: artifact, transfer: .complete, allowCompleteRepair: true)
+      require(repeated == repaired, "repeated repair created a second copy")
+      var remaining = 100
+      let pending = try registry.supersededPackCleanups(
+        active: [first], rollback: [], pending: [LinnetDataRegistry.packPath(artifact)],
+        now: Date(), remaining: &remaining)
+      require(pending.isEmpty, "cleanup removed a downloading repair")
+      remaining = 100
+      let unused = try registry.supersededPackCleanups(
+        active: [first], rollback: [], pending: [], now: Date(), remaining: &remaining)
+      require(unused.map(\.relativePath) == [repaired.relativePath], "cancelled repair was not collectable")
     }
   }
 
@@ -150,8 +287,8 @@ struct LinnetPackTests {
     try withFixture { registry in
       let package = registry.downloadsDirectory.appending(path: "same-release.linnetpack")
       _ = try makePack(package, payload: Data("hello".utf8))
-      let first = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
-      let second = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+      let first = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
+      let second = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       require(second == first, "installed identity is idempotent")
       require(
         FileManager.default.fileExists(
@@ -165,7 +302,7 @@ struct LinnetPackTests {
     try withFixture { registry in
       let package = registry.downloadsDirectory.appending(path: "english.linnetpack")
       _ = try makePack(package, payload: Data("hello".utf8))
-      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+      let active = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       require(active.kind == .english, "kind")
       require(active.version == "2026.08.1", "version")
       let installed = registry.rootDirectory.appending(path: active.relativePath)
@@ -184,7 +321,7 @@ struct LinnetPackTests {
       _ = try makePack(
         package, path: "../linnet_en.dict.yaml", payload: Data("hello".utf8))
       requirePackFailure(.unsafePath("../linnet_en.dict.yaml")) {
-        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package))
+        _ = try registry.verifyAndStagePack(package: package, artifact: try catalogArtifact(package), transfer: .complete)
       }
     }
   }
@@ -320,7 +457,7 @@ struct LinnetPackTests {
   private static func withFixture(
     _ body: (LinnetDataRegistry) throws -> Void
   ) throws {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "LinnetPackTests-\(UUID().uuidString)", directoryHint: .isDirectory)
     defer { try? FileManager.default.removeItem(at: root) }
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -363,7 +500,7 @@ struct LinnetPackTests {
     requires: [LinnetPackContract.Requirement] = [],
     trailing: Data = Data(),
     internalTrailing: Data = Data()
-  ) throws -> LinnetPackContract.EncodedPayload {
+  ) throws -> LinnetPackEncoder.EncodedPayload {
     let rawPayload = package.deletingLastPathComponent().appending(
       path: ".raw-payload-\(UUID().uuidString)")
     let storedPayload = package.deletingLastPathComponent().appending(
@@ -373,7 +510,7 @@ struct LinnetPackTests {
       try? FileManager.default.removeItem(at: storedPayload)
     }
     try payload.write(to: rawPayload)
-    let encoded = try LinnetPackContract.compressZlib(source: rawPayload, to: storedPayload)
+    let encoded = try LinnetPackEncoder.compressZlib(source: rawPayload, to: storedPayload)
     if !internalTrailing.isEmpty {
       let handle = try FileHandle(forWritingTo: storedPayload)
       try handle.seekToEnd()
@@ -403,7 +540,7 @@ struct LinnetPackTests {
       try handle.write(contentsOf: trailing)
       try handle.close()
     }
-    try LinnetPackContract.writeContainer(
+    try LinnetPackEncoder.writeContainer(
       manifestData: manifestData, payload: storedPayload, to: package)
     return encoded
   }

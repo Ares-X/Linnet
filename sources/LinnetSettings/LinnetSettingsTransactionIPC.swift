@@ -10,11 +10,11 @@ protocol LinnetSettingsTransactionRequesting: AnyObject {
 }
 
 /// The one authoritative Settings <-> Host transaction boundary. Both ends
-/// authenticate the connected Unix-domain peer using kernel-owned UID/PID facts
-/// and the exact counterpart executable path before any JSON is decoded. A
-/// connection carries exactly one request and its replies; the socket pathname
-/// is discovery data, never a credential. Product code signing belongs to the
-/// candidate/release boundary, not this same-user local transport.
+/// authenticate the connected Unix-domain peer inside the product's same-user
+/// trust domain using kernel-owned UID/PID facts before any JSON is decoded.
+/// The owner-only endpoint remains stable while Core updates atomically replace
+/// the app bundle; executable paths are deliberately not runtime identity
+/// because a still-running InputMethodKit Host can outlive its old pathname.
 enum LinnetSettingsTransactionIPC {
   enum Failure: Error, Equatable {
     case unavailable
@@ -26,111 +26,96 @@ enum LinnetSettingsTransactionIPC {
   typealias Handler = (LinnetSettingsContract.DataRequest, @escaping Reply) -> Void
 
   final class Host: @unchecked Sendable {
-    private let identity: Identity
+    private let endpointURL: URL
     private let handler: Handler
     private let queue = DispatchQueue(label: "io.github.ares-x.linnet.settings-ipc")
-    private let lock = NSLock()
-    private var listener: Int32 = -1
+    private let transactionQueue = DispatchQueue(
+      label: "io.github.ares-x.linnet.settings-ipc.transaction",
+      qos: .userInitiated)
     private var listenerIdentity: (dev_t, ino_t)?
     private var source: DispatchSourceRead?
-    private var channels: [Int32: Channel] = [:]
 
     convenience init(startingAt bundle: Bundle = .main, handler: @escaping Handler) throws {
-      self.init(identity: try liveIdentity(startingAt: bundle, peer: .settings), handler: handler)
+      self.init(endpointURL: try liveEndpoint(startingAt: bundle), handler: handler)
     }
 
-    init(
-      endpointURL: URL,
-      peerExecutableURL: URL,
-      handler: @escaping Handler
-    ) throws {
-      identity = try fixedIdentity(
-        endpointURL: endpointURL, peerExecutableURL: peerExecutableURL)
-      self.handler = handler
-    }
-
-    private init(identity: Identity, handler: @escaping Handler) {
-      self.identity = identity
+    private init(endpointURL: URL, handler: @escaping Handler) {
+      self.endpointURL = endpointURL
       self.handler = handler
     }
 
     func start() throws {
-      lock.lock()
-      guard listener < 0 else {
-        lock.unlock()
-        return
-      }
-      lock.unlock()
+      guard source == nil else { return }
       try LinnetSettingsTransactionIPC.prepareEndpointParent(
-        identity.endpointURL.deletingLastPathComponent())
-      try LinnetSettingsTransactionIPC.removeStaleSocket(at: identity.endpointURL)
-      let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
-      guard fileDescriptor >= 0 else { throw Failure.unavailable }
+        endpointURL.deletingLastPathComponent())
+      try LinnetSettingsTransactionIPC.removeStaleSocket(at: endpointURL)
+      let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+      guard fd >= 0 else { throw Failure.unavailable }
+      var boundIdentity: (dev_t, ino_t)?
       do {
-        try withSocketAddress(identity.endpointURL.path) { address, length in
-          guard Darwin.bind(fileDescriptor, address, length) == 0,
-            chmod(identity.endpointURL.path, S_IRUSR | S_IWUSR) == 0,
-            listen(fileDescriptor, 8) == 0
-          else { throw Failure.unavailable }
+        try withSocketAddress(endpointURL.path) { address, length in
+          guard Darwin.bind(fd, address, length) == 0 else { throw Failure.unavailable }
         }
         var info = stat()
-        guard lstat(identity.endpointURL.path, &info) == 0,
+        guard lstat(endpointURL.path, &info) == 0,
           (info.st_mode & S_IFMT) == S_IFSOCK,
           info.st_uid == geteuid()
         else { throw Failure.unavailable }
-        let source = DispatchSource.makeReadSource(fileDescriptor: fileDescriptor, queue: queue)
-        source.setEventHandler { [weak self] in self?.acceptPendingConnections() }
-        source.setCancelHandler { Darwin.close(fileDescriptor) }
-        lock.lock()
-        listener = fileDescriptor
+        boundIdentity = (info.st_dev, info.st_ino)
+        guard chmod(endpointURL.path, S_IRUSR | S_IWUSR) == 0,
+          listen(fd, 8) == 0
+        else { throw Failure.unavailable }
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        source.setEventHandler { [weak self] in self?.acceptConnection(from: fd) }
+        source.setCancelHandler { Darwin.close(fd) }
         listenerIdentity = (info.st_dev, info.st_ino)
         self.source = source
-        lock.unlock()
         source.resume()
       } catch {
-        Darwin.close(fileDescriptor)
-        try? FileManager.default.removeItem(at: identity.endpointURL)
+        Darwin.close(fd)
+        if let boundIdentity {
+          var current = stat()
+          if lstat(endpointURL.path, &current) == 0,
+            current.st_dev == boundIdentity.0, current.st_ino == boundIdentity.1 {
+            try? FileManager.default.removeItem(at: endpointURL)
+          }
+        }
         throw error
       }
     }
 
     func stop() {
-      lock.lock()
       let source = self.source
       self.source = nil
-      listener = -1
       let socketIdentity = listenerIdentity
       listenerIdentity = nil
-      let channels = Array(self.channels.values)
-      self.channels.removeAll()
-      lock.unlock()
       source?.cancel()
-      channels.forEach { $0.close() }
       guard let socketIdentity else { return }
       var info = stat()
-      if lstat(identity.endpointURL.path, &info) == 0,
+      if lstat(endpointURL.path, &info) == 0,
         info.st_dev == socketIdentity.0, info.st_ino == socketIdentity.1 {
-        try? FileManager.default.removeItem(at: identity.endpointURL)
+        try? FileManager.default.removeItem(at: endpointURL)
       }
     }
 
     deinit { stop() }
 
-    private func acceptPendingConnections() {
-      let fileDescriptor = accept(listener, nil, nil)
-      guard fileDescriptor >= 0 else { return }
-      let channel = Channel(fileDescriptor: fileDescriptor) { [weak self] descriptor in
-        self?.removeChannel(descriptor)
+    private func acceptConnection(from listener: Int32) {
+      let fd = accept(listener, nil, nil)
+      guard fd >= 0 else { return }
+      let channel = Channel(fd: fd)
+      transactionQueue.async { [weak self] in
+        guard let self else {
+          channel.close()
+          return
+        }
+        self.receiveRequest(on: channel)
       }
-      lock.lock()
-      channels[fileDescriptor] = channel
-      lock.unlock()
-      queue.async { [weak self, channel] in self?.receiveRequest(on: channel) }
     }
 
     private func receiveRequest(on channel: Channel) {
-      guard let pid = peerPID(channel.fileDescriptor),
-        authenticate(fileDescriptor: channel.fileDescriptor, pid: pid, as: identity),
+      guard let pid = peerPID(channel.fd),
+        peerIsSameUser(channel.fd), pid != getpid(),
         let payload = try? channel.readFrame(deadline: Date().addingTimeInterval(3)),
         let request = try? decode(LinnetSettingsContract.DataRequest.self, from: payload),
         LinnetSettingsContract.validDataRequest(request),
@@ -139,7 +124,7 @@ enum LinnetSettingsTransactionIPC {
         channel.close()
         return
       }
-      handler(request) { reply in
+      let sendReply: Reply = { reply in
         guard reply.transactionID == request.transactionID,
           LinnetSettingsContract.validRuntimeReply(reply),
           let payload = try? encode(reply)
@@ -150,31 +135,28 @@ enum LinnetSettingsTransactionIPC {
             channel.close()
             return
           }
-          if terminal(reply.status, for: request.command) { channel.close() }
+          if reply.status != .verifying { channel.close() }
         }
       }
-    }
-
-    private func removeChannel(_ fileDescriptor: Int32) {
-      lock.lock()
-      channels.removeValue(forKey: fileDescriptor)
-      lock.unlock()
+      guard request.command != .pause
+        || request.nativeLearningDataVersion == LinnetSettingsContract.nativeLearningDataVersion
+      else {
+        sendReply(.init(
+          transactionID: request.transactionID,
+          status: .rejected,
+          code: .requesterUnavailable,
+          detail: "The requested native learning-data view is unavailable.",
+          health: nil))
+        return
+      }
+      handler(request, sendReply)
     }
   }
 
   final class Client: LinnetSettingsTransactionRequesting, @unchecked Sendable {
-    private enum IdentitySource { case live(Bundle), fixed(Identity) }
-    private let identitySource: IdentitySource
+    private let bundle: Bundle
 
-    init(startingAt bundle: Bundle = .main) { identitySource = .live(bundle) }
-
-    init(
-      endpointURL: URL,
-      peerExecutableURL: URL
-    ) throws {
-      identitySource = .fixed(try fixedIdentity(
-        endpointURL: endpointURL, peerExecutableURL: peerExecutableURL))
-    }
+    init(startingAt bundle: Bundle = .main) { self.bundle = bundle }
 
     func request(
       _ request: LinnetSettingsContract.DataRequest,
@@ -184,55 +166,39 @@ enum LinnetSettingsTransactionIPC {
       guard LinnetSettingsContract.validDataRequest(request), timeout > 0 else {
         throw Failure.invalidMessage
       }
-      let identity: Identity
-      switch identitySource {
-      case .live(let bundle): identity = try liveIdentity(startingAt: bundle, peer: .host)
-      case .fixed(let fixed): identity = fixed
-      }
-      return try await withCheckedThrowingContinuation { continuation in
-        DispatchQueue.global(qos: .userInitiated).async {
-          do {
-            continuation.resume(returning: try Self.perform(
-              request, timeout: timeout, identity: identity, progress: onProgress))
-          } catch {
-            continuation.resume(throwing: error)
-          }
-        }
-      }
+      let endpointURL = try liveEndpoint(startingAt: bundle)
+      return try await Task.detached(priority: .userInitiated) {
+        try Self.perform(
+          request, timeout: timeout, endpointURL: endpointURL, progress: onProgress)
+      }.value
     }
 
     private static func perform(
       _ request: LinnetSettingsContract.DataRequest,
       timeout: TimeInterval,
-      identity: Identity,
+      endpointURL: URL,
       progress: @Sendable (LinnetSettingsContract.RuntimeReply) -> Void
     ) throws -> LinnetSettingsContract.RuntimeReply {
-      let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
-      guard fileDescriptor >= 0 else { throw Failure.unavailable }
-      let channel = Channel(fileDescriptor: fileDescriptor)
+      let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+      guard fd >= 0 else { throw Failure.unavailable }
+      let channel = Channel(fd: fd)
       defer { channel.close() }
       let deadline = Date().addingTimeInterval(timeout)
-      try withSocketAddress(identity.endpointURL.path) { address, length in
+      try withSocketAddress(endpointURL.path) { address, length in
         try connectUnixSocket(
-          fileDescriptor: fileDescriptor,
-          address: address,
-          length: length,
-          deadline: deadline)
+          fd: fd, address: address, length: length, deadline: deadline)
       }
-      guard let pid = peerPID(fileDescriptor),
-        authenticate(fileDescriptor: fileDescriptor, pid: pid, as: identity)
-      else {
+      guard peerIsSameUser(fd) else {
         throw Failure.unavailable
       }
       try channel.writeFrame(try encode(request), deadline: deadline)
       while true {
         let payload = try channel.readFrame(deadline: deadline)
-        guard let reply = try? decode(
-          LinnetSettingsContract.RuntimeReply.self, from: payload),
+        guard let reply = try? decode(LinnetSettingsContract.RuntimeReply.self, from: payload),
           reply.transactionID == request.transactionID,
           LinnetSettingsContract.validRuntimeReply(reply)
-        else { continue }
-        guard terminal(reply.status, for: request.command) else {
+        else { throw Failure.invalidMessage }
+        guard reply.status != .verifying else {
           progress(reply)
           continue
         }
@@ -243,22 +209,13 @@ enum LinnetSettingsTransactionIPC {
 }
 
 extension LinnetSettingsTransactionIPC {
-  private enum Peer { case host, settings }
-  private struct Identity: @unchecked Sendable {
-    let endpointURL: URL
-    let peerExecutableURL: URL
-  }
-
   private final class Channel: @unchecked Sendable {
-    let fileDescriptor: Int32
-    private let onClose: ((Int32) -> Void)?
-    private let lock = NSLock()
+    let fd: Int32
     private var closed = false
 
-    init(fileDescriptor: Int32, onClose: ((Int32) -> Void)? = nil) {
-      self.fileDescriptor = fileDescriptor
-      self.onClose = onClose
-    }
+    init(fd: Int32) { self.fd = fd }
+
+    deinit { close() }
 
     func readFrame(deadline: Date) throws -> Data {
       let header = try read(count: 4, deadline: deadline)
@@ -272,41 +229,26 @@ extension LinnetSettingsTransactionIPC {
         throw Failure.invalidMessage
       }
       var length = UInt32(payload.count).bigEndian
-      let header = withUnsafeBytes(of: &length) { Data($0) }
-      lock.lock()
-      defer { lock.unlock() }
       guard !closed else { throw Failure.unavailable }
-      try write(header, deadline: deadline)
-      try write(payload, deadline: deadline)
+      var frame = withUnsafeBytes(of: &length) { Data($0) }
+      frame.append(payload)
+      try write(frame, deadline: deadline)
     }
 
     func close() {
-      lock.lock()
-      guard !closed else {
-        lock.unlock()
-        return
-      }
+      guard !closed else { return }
       closed = true
-      Darwin.shutdown(fileDescriptor, SHUT_RDWR)
-      Darwin.close(fileDescriptor)
-      lock.unlock()
-      onClose?(fileDescriptor)
+      Darwin.shutdown(fd, SHUT_RDWR)
+      Darwin.close(fd)
     }
 
     private func read(count: Int, deadline: Date) throws -> Data {
       var data = Data(count: count)
       var offset = 0
       while offset < count {
-        let remaining = deadline.timeIntervalSinceNow
-        guard remaining > 0 else { throw Failure.timedOut }
-        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
-        let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
-        if result == 0 { continue }
-        guard result > 0, descriptor.revents & Int16(POLLIN) != 0 else {
-          throw Failure.unavailable
-        }
+        try wait(for: Int16(POLLIN), until: deadline)
         let readCount = data.withUnsafeMutableBytes { buffer in
-          Darwin.read(fileDescriptor, buffer.baseAddress!.advanced(by: offset), count - offset)
+          Darwin.read(fd, buffer.baseAddress!.advanced(by: offset), count - offset)
         }
         if readCount < 0, errno == EINTR { continue }
         guard readCount > 0 else { throw Failure.unavailable }
@@ -318,17 +260,10 @@ extension LinnetSettingsTransactionIPC {
     private func write(_ data: Data, deadline: Date) throws {
       var offset = 0
       while offset < data.count {
-        let remaining = deadline.timeIntervalSinceNow
-        guard remaining > 0 else { throw Failure.timedOut }
-        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
-        let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
-        if result == 0 { continue }
-        guard result > 0, descriptor.revents & Int16(POLLOUT) != 0 else {
-          throw Failure.unavailable
-        }
+        try wait(for: Int16(POLLOUT), until: deadline)
         let written = data.withUnsafeBytes { buffer in
           send(
-            fileDescriptor, buffer.baseAddress!.advanced(by: offset), data.count - offset,
+            fd, buffer.baseAddress!.advanced(by: offset), data.count - offset,
             MSG_DONTWAIT | MSG_NOSIGNAL)
         }
         if written < 0, errno == EINTR { continue }
@@ -336,88 +271,71 @@ extension LinnetSettingsTransactionIPC {
         offset += written
       }
     }
-  }
 
-  private static func liveIdentity(startingAt bundle: Bundle, peer: Peer) throws -> Identity {
-    guard let host = LinnetSettingsContract.hostBundle(startingAt: bundle),
-      let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
-    else { throw Failure.unavailable }
-    let bundleURL = peer == .host
-      ? host.bundleURL
-      : host.bundleURL.appending(
-        path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
-    guard let executable = Bundle(url: bundleURL)?.executableURL else {
-      throw Failure.unavailable
+    private func wait(for event: Int16, until deadline: Date) throws {
+      while true {
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 0 else { throw Failure.timedOut }
+        var descriptor = pollfd(fd: fd, events: event, revents: 0)
+        let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
+        if result == 0 || (result < 0 && errno == EINTR) { continue }
+        guard result > 0, descriptor.revents & event != 0 else {
+          throw Failure.unavailable
+        }
+        return
+      }
     }
-    return try fixedIdentity(
-      endpointURL: registry.rootDirectory.appending(
-        path: "State/settings-transaction.sock", directoryHint: .notDirectory),
-      peerExecutableURL: executable)
   }
 
-  private static func fixedIdentity(
-    endpointURL: URL,
-    peerExecutableURL: URL
-  ) throws -> Identity {
-    let endpoint = endpointURL.standardizedFileURL
-    let executable = peerExecutableURL.resolvingSymlinksInPath()
-    var isDirectory = ObjCBool(false)
-    guard endpointURL.isFileURL, endpoint.path.hasPrefix("/"),
-      peerExecutableURL.isFileURL, executable.path.hasPrefix("/"),
-      FileManager.default.fileExists(atPath: executable.path, isDirectory: &isDirectory),
-      !isDirectory.boolValue, FileManager.default.isExecutableFile(atPath: executable.path)
+  private static func liveEndpoint(startingAt bundle: Bundle) throws -> URL {
+    guard let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
     else { throw Failure.unavailable }
-    return .init(
-      endpointURL: endpoint,
-      peerExecutableURL: executable)
+    let endpointURL = registry.rootDirectory.appending(
+      path: "State/settings-transaction.sock", directoryHint: .notDirectory)
+    let endpoint = endpointURL.standardizedFileURL
+    guard endpointURL.isFileURL, endpoint.path.hasPrefix("/")
+    else { throw Failure.unavailable }
+    return endpoint
   }
 
-  private static func authenticate(
-    fileDescriptor: Int32, pid: pid_t, as identity: Identity
-  ) -> Bool {
+  private static func peerIsSameUser(_ descriptor: Int32) -> Bool {
     var uid: uid_t = 0
     var gid: gid_t = 0
-    guard getpeereid(fileDescriptor, &uid, &gid) == 0, uid == geteuid(), pid != getpid() else {
-      return false
-    }
-    var path = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
-    guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
-    return URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath()
-      == identity.peerExecutableURL
+    return getpeereid(descriptor, &uid, &gid) == 0 && uid == geteuid()
   }
 
   private static func connectUnixSocket(
-    fileDescriptor: Int32,
+    fd: Int32,
     address: UnsafePointer<sockaddr>,
     length: socklen_t,
     deadline: Date
   ) throws {
-    let flags = fcntl(fileDescriptor, F_GETFL)
-    guard flags >= 0, fcntl(fileDescriptor, F_SETFL, flags | O_NONBLOCK) == 0 else {
+    let flags = fcntl(fd, F_GETFL)
+    guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
       throw Failure.unavailable
     }
-    defer { _ = fcntl(fileDescriptor, F_SETFL, flags) }
-    if Darwin.connect(fileDescriptor, address, length) == 0 { return }
+    defer { _ = fcntl(fd, F_SETFL, flags) }
+    if Darwin.connect(fd, address, length) == 0 { return }
     guard errno == EINPROGRESS else { throw Failure.unavailable }
     while true {
       let remaining = deadline.timeIntervalSinceNow
       guard remaining > 0 else { throw Failure.timedOut }
-      var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
+      var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
       let result = poll(&descriptor, 1, Int32(min(remaining * 1_000, 30_000)))
       if result == 0 { continue }
       guard result > 0 else { throw Failure.unavailable }
       var error: Int32 = 0
       var size = socklen_t(MemoryLayout<Int32>.size)
-      guard getsockopt(fileDescriptor, SOL_SOCKET, SO_ERROR, &error, &size) == 0, error == 0
+      guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0, error == 0
       else { throw Failure.unavailable }
       return
     }
   }
 
-  private static func peerPID(_ fileDescriptor: Int32) -> pid_t? {
+  private static func peerPID(_ fd: Int32) -> pid_t? {
     var pid: pid_t = 0
     var size = socklen_t(MemoryLayout<pid_t>.size)
-    guard getsockopt(fileDescriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0, pid > 0
+    guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0, pid > 0
     else { return nil }
     return pid
   }
@@ -440,6 +358,20 @@ extension LinnetSettingsTransactionIPC {
       return
     }
     guard (info.st_mode & S_IFMT) == S_IFSOCK, info.st_uid == geteuid()
+    else { throw Failure.unavailable }
+    let staleIdentity = (info.st_dev, info.st_ino)
+    let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard probe >= 0 else { throw Failure.unavailable }
+    defer { Darwin.close(probe) }
+    let connectionError = try withSocketAddress(url.path) { address, length in
+      if Darwin.connect(probe, address, length) == 0 { return Int32(0) }
+      return errno
+    }
+    // A successful connection proves a live owner. Any result other than a
+    // refused connection is ambiguous and therefore also fails closed.
+    guard connectionError == ECONNREFUSED else { throw Failure.unavailable }
+    guard lstat(url.path, &info) == 0,
+      info.st_dev == staleIdentity.0, info.st_ino == staleIdentity.1
     else { throw Failure.unavailable }
     try FileManager.default.removeItem(at: url)
   }
@@ -470,27 +402,11 @@ extension LinnetSettingsTransactionIPC {
   }
 
   private static func encode<T: Encodable>(_ value: T) throws -> Data {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    return try encoder.encode(value)
+    try JSONEncoder().encode(value)
   }
 
   private static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
     try JSONDecoder().decode(type, from: data)
   }
 
-  private static func terminal(
-    _ status: LinnetSettingsContract.RuntimeStatus,
-    for command: LinnetSettingsContract.DataCommand
-  ) -> Bool {
-    switch command {
-    case .pause: return [.paused, .cancelled, .rejected, .failed].contains(status)
-    case .cancel: return [.cancelled, .rejected, .failed].contains(status)
-    case .activate, .activateLanguage:
-      return [.activated, .rolledBack, .rejected, .failed].contains(status)
-    case .refresh, .reloadConfiguration:
-      return [.activated, .rejected, .failed].contains(status)
-    case .diagnose: return [.running, .paused, .degraded, .failed].contains(status)
-    }
-  }
 }

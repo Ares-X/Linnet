@@ -91,6 +91,31 @@ enum LinnetSettingsProjectionRenderer {
     return changed
   }
 
+  /// Core owns the base UI configuration; Rime still applies the document's
+  /// squirrel.custom.yaml with its normal compiler. Installed legacy packs may
+  /// retain their immutable copy, but it is not the presentation source.
+  static func reconcileCoreConfiguration(
+    source: URL, to directory: URL, stagingDirectory: URL
+  ) throws {
+    try requireDirectory(directory)
+    try requireDirectory(stagingDirectory)
+    let name = "squirrel.yaml"
+    guard let data = try existingData(at: source, name: name), !data.isEmpty else {
+      throw Failure.unsafeFile(name)
+    }
+    let destination = directory.appending(path: name)
+    guard try existingData(at: destination, name: name) != data else { return }
+    // Rime's compiled-config freshness is second-resolution mtime based. A
+    // changed Core must also invalidate this one rebuildable output when two
+    // candidates are installed within the same second, or config_version stays
+    // unchanged. Never invalidate dictionaries or user learning data.
+    let compiled = stagingDirectory.appending(path: name)
+    if try existingData(at: compiled, name: name) != nil {
+      try FileManager.default.removeItem(at: compiled)
+    }
+    try data.write(to: destination, options: .atomic)
+  }
+
   enum Failure: LocalizedError, Equatable, Sendable {
     case unsafeFile(String)
 
@@ -100,7 +125,9 @@ enum LinnetSettingsProjectionRenderer {
       }
     }
   }
+}
 
+private extension LinnetSettingsProjectionRenderer {
   private static func requireDirectory(_ directory: URL) throws {
     var info = stat()
     guard lstat(directory.path, &info) == 0,
@@ -166,6 +193,15 @@ enum LinnetSettingsProjectionRenderer {
     if appearance.candidateBrowsingMode == .scrollingOnly {
       entries.append(("style/linnet_candidate_expansion_allowed", "false"))
     }
+    if appearance.expandedHorizontalCount != LinnetSettingsContract.horizontalExpandedGridRange.upperBound {
+      entries.append(("style/linnet_expanded_horizontal_count", String(appearance.expandedHorizontalCount)))
+    }
+    if appearance.expandedHorizontalRows != LinnetSettingsContract.horizontalExpandedGridRange.lowerBound {
+      entries.append(("style/linnet_expanded_horizontal_rows", String(appearance.expandedHorizontalRows)))
+    }
+    if appearance.expandedVerticalCount != LinnetSettingsContract.expandedCandidateCountRange.lowerBound {
+      entries.append(("style/linnet_expanded_vertical_count", String(appearance.expandedVerticalCount)))
+    }
     guard !entries.isEmpty else { return nil }
     return renderPatch(entries)
   }
@@ -192,7 +228,14 @@ enum LinnetSettingsProjectionRenderer {
     // owner for policies that must override an older Active pack immediately.
     var entries = [
       ("ascii_composer/switch_key/Caps_Lock", "commit_code"), ("ascii_composer/switch_key/Shift_L", "commit_code"), ("ascii_composer/switch_key/Shift_R", "commit_code"),
-      ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern))
+      ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern)),
+      ("punctuator/half_shape/,", "{ commit: \"，\" }"),
+      ("punctuator/half_shape/.", "{ commit: \"。\" }"),
+      ("punctuator/half_shape/:", "{ commit: \"：\" }"),
+      ("punctuator/half_shape/;", "{ commit: \"；\" }"),
+      ("punctuator/half_shape/'", "{ pair: [\"‘\", \"’\"] }"),
+      ("punctuator/half_shape/[", "{ commit: \"【\" }"),
+      ("punctuator/half_shape/]", "{ commit: \"】\" }")
     ]
     if pageSize != LinnetSettingsDocument.Appearance.defaultPageSize {
       entries.append(("menu/page_size", String(pageSize)))
@@ -249,7 +292,7 @@ enum LinnetSettingsProjectionRenderer {
     _ trigger: LinnetSettingsDocument.PinyinReverseTrigger,
     to entries: inout [(String, String)]
   ) {
-    guard trigger != .semicolon else { return }
+    guard trigger != .verticalBar else { return }
     entries.append((
       "recognizer/patterns/linnet_pinyin",
       quoted(trigger.recognizerPattern)
@@ -268,17 +311,16 @@ enum LinnetSettingsProjectionRenderer {
       defaultLayout: .horizontal,
       to: &entries
     )
-    appendPinyinReverseTrigger(input.pinyinReverseTrigger, to: &entries)
-    entries.append(("linnet_pinyin/prism", quoted(input.chineseProfile.schemaID)))
+    entries.append((
+      "linnet_pinyin/prism",
+      quoted(input.chineseProfile.schemaID)
+    ))
     entries.append((
       "linnet_mode_switch/chinese_schema", quoted(input.chineseProfile.schemaID)
     ))
     appendEnglishMetadataOptions(english, to: &entries)
     if !english.predictionEnabled {
       entries.append(("switches/@\(englishPredictionSwitchIndex)/reset", "0"))
-    }
-    if !english.spellingCorrection {
-      entries.append(("linnet_english_interaction/spelling_correction", "false"))
     }
     appendEnglishLearningOptions(english, includeUserDictionary: true, to: &entries)
     guard !entries.isEmpty else { return nil }

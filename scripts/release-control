@@ -1,0 +1,310 @@
+#!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Local source acceptance is a maintainer statement bound to one Git tree.
+# The candidate Action builds and verifies release bytes; installed-product
+# acceptance then authorizes their publication. Local code never uploads bytes.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+repository="Ares-X/Linnet"
+command_name="${1:-}"
+release_dir="${2:-}"
+source_receipt="${repo_root}/build/linnet-source-verification.json"
+
+fail() {
+  echo "release-control: $*" >&2
+  exit 1
+}
+
+usage() {
+  echo "usage: scripts/release-control authorize ABSOLUTE_RELEASE_DIRECTORY" >&2
+  echo "usage: scripts/release-control preview ABSOLUTE_RELEASE_DIRECTORY" >&2
+  echo "       scripts/release-control {verify-local|verify-settings-ui|candidate}" >&2
+  echo "       scripts/release-control candidate-preview REASON" >&2
+  echo "       scripts/release-control verify-source CANDIDATE_REF COMMIT [--release]" >&2
+  exit 64
+}
+case "${command_name}" in
+  verify-local|verify-settings-ui|candidate) [[ "$#" -eq 1 ]] || usage ;;
+  candidate-preview) [[ "$#" -eq 2 && -n "$2" ]] || usage ;;
+  verify-source) [[ "$#" -eq 3 || ( "$#" -eq 4 && "$4" == --release ) ]] || usage ;;
+  authorize|preview) [[ "$#" -eq 2 ]] || usage ;;
+  *) usage ;;
+esac
+
+# A separate index collects the working bytes, including pending additions and
+# deletions, without changing the developer's staged changes. Git owns the hash,
+# modes and gitlinks; generated dependencies remain action-install's boundary.
+source_tree() (
+  set -e
+  [[ ! -L "${repo_root}/build" ]] || fail "build directory is a symlink"
+  mkdir -p "${repo_root}/build"
+  snapshot_dir="$(mktemp -d "${repo_root}/build/source-index.XXXXXX")"
+  trap 'find "${snapshot_dir}" -depth -delete' EXIT
+  export GIT_INDEX_FILE="${snapshot_dir}/index"
+  git -C "${repo_root}" read-tree HEAD
+  git -C "${repo_root}" submodule foreach --quiet --recursive \
+    'unset GIT_INDEX_FILE; test -z "$(git status --porcelain=v1 --untracked-files=all)"' ||
+    fail "a dependency checkout has unverified local changes"
+  git -C "${repo_root}" add --all -- .
+  git -C "${repo_root}" write-tree
+)
+
+# One decoder is used by both the local candidate request and the Action.
+# This records trusted-maintainer acceptance, not independent cloud execution.
+verify_receipt() {
+  ruby -rjson -e '
+    receipt = JSON.parse(STDIN.read)
+    if receipt["format"] == 3
+      # Record actual checks and omissions, never an unrun full-suite PASS.
+      # Installed acceptance still precedes byte-bound publication approval.
+      abort "invalid scoped source acceptance" unless receipt.keys.sort ==
+        %w[checks format not_exercised scope source_tree] &&
+        receipt["source_tree"] == ARGV.fetch(0) &&
+        receipt["source_tree"].match?(/\A[0-9a-f]{40}\z/) &&
+        receipt["scope"].is_a?(String) && !receipt["scope"].strip.empty? &&
+        receipt["checks"].is_a?(Array) && !receipt["checks"].empty? &&
+        receipt["checks"].all? { |check|
+          check.is_a?(Hash) && check.keys.sort == %w[command evidence result] &&
+          check["result"] == "PASS" && %w[command evidence].all? { |key|
+            check[key].is_a?(String) && !check[key].strip.empty?
+          }
+        } && receipt["not_exercised"].is_a?(Array) &&
+        receipt["not_exercised"].all? { |value| value.is_a?(String) && !value.strip.empty? }
+      puts "PASS (scoped maintainer review; see recorded omissions)"
+      exit
+    end
+    if receipt["format"] == 2
+      abort "preview-only acceptance cannot authorize a stable release" unless ARGV.fetch(1) == "candidate"
+      abort "invalid preview acceptance" unless receipt.keys.sort ==
+        %w[format preview_only profiles reason source_tree] && receipt["preview_only"] == true &&
+        receipt["source_tree"] == ARGV.fetch(0) && receipt["source_tree"].match?(/\A[0-9a-f]{40}\z/) &&
+        receipt["reason"].is_a?(String) && !receipt["reason"].strip.empty? &&
+        receipt["profiles"].keys.sort == %w[app lint periphery rime settings_ui swift] &&
+        receipt["profiles"].values.all? { |value| value == "NOT_EXERCISED" }
+      puts "NOT_EXERCISED (explicit preview-only request)"
+      exit
+    end
+    abort "invalid source receipt" unless receipt.keys.sort ==
+      %w[format profiles source_tree toolchain verified_at] && receipt.fetch("format") == 1 &&
+      receipt.fetch("source_tree") == ARGV.fetch(0) &&
+      receipt.fetch("source_tree").match?(/\A[0-9a-f]{40}\z/)
+    profiles = receipt.fetch("profiles")
+    abort "incomplete source acceptance" unless profiles.keys.sort ==
+      %w[app lint periphery rime settings_ui swift] &&
+      profiles.reject { |key, _| key == "settings_ui" }.values.all? { |value| value == "PASS" }
+    abort "invalid Settings UI result" unless
+      %w[PASS NOT_EXERCISED].include?(profiles.fetch("settings_ui"))
+    abort "Settings UI acceptance is pending; run verify-settings-ui on a dedicated desktop" unless
+      ARGV.fetch(1) == "partial" || profiles.fetch("settings_ui") == "PASS"
+    tools = receipt.fetch("toolchain")
+    abort "missing toolchain evidence" unless tools.keys.sort == %w[macos swift xcode] &&
+      tools.values.all? { |value| value.is_a?(String) && !value.empty? } &&
+      receipt.fetch("verified_at").is_a?(String) && !receipt["verified_at"].empty?
+    puts profiles.fetch("settings_ui")
+  ' "$1" "${2:-complete}"
+}
+
+verify_source_tag() {
+  local reference="$1" expected_revision="$2" tag_object tree
+  [[ "${expected_revision}" =~ ^[0-9a-f]{40}$ &&
+    "${reference}" =~ ^refs/tags/linnet-candidate/v[0-9]+\.[0-9]+\.[0-9]+-${expected_revision}$ ]] ||
+    fail "invalid source verification request"
+  [[ "$(git -C "${repo_root}" rev-parse --verify HEAD^{commit})" == "${expected_revision}" ]] ||
+    fail "source verification checkout differs from the requested commit"
+  # cat-file tag rejects the retired lightweight candidate path.
+  tag_object="$(git -C "${repo_root}" cat-file tag "${reference}")" ||
+    fail "candidate requires an annotated source-verification tag"
+  [[ "${tag_object}" == "object ${expected_revision}"$'\n'"type commit"$'\n'* &&
+    "$(git -C "${repo_root}" rev-parse --verify "${reference}^{commit}")" == "${expected_revision}" ]] ||
+    fail "candidate tag does not name the exact commit"
+  tree="$(git -C "${repo_root}" rev-parse --verify "${expected_revision}^{tree}")"
+  printf '%s\n' "${tag_object#*$'\n\n'}" | verify_receipt "${tree}" "${3:-candidate}"
+}
+
+if [[ "${command_name}" == verify-source ]]; then
+  if [[ "${4:-}" == --release ]]; then
+    verify_source_tag "$2" "$3" complete
+  else
+    verify_source_tag "$2" "$3"
+  fi
+  exit
+fi
+
+if [[ "${command_name}" == verify-settings-ui ]]; then
+  cd "${repo_root}"
+  before_tree="$(source_tree)"
+  [[ -f "${source_receipt}" && ! -L "${source_receipt}" ]] ||
+    fail "run verify-local for this source tree first"
+  verify_receipt "${before_tree}" partial <"${source_receipt}" >/dev/null
+  # Invalidate earlier UI acceptance before taking over the test desktop.
+  # An interrupted or failed run must never leave an old PASS behind.
+  ruby -rjson -e '
+    receipt = JSON.parse(File.read(ARGV.fetch(0)))
+    receipt.fetch("profiles")["settings_ui"] = "NOT_EXERCISED"
+    File.write(ARGV.fetch(0), JSON.pretty_generate(receipt) + "\n")
+  ' "${source_receipt}"
+  echo "Settings UI automation controls the current desktop. Use a dedicated test session."
+  tests/verify_visible_settings_fixture.sh --ui-test
+  [[ "$(source_tree)" == "${before_tree}" ]] ||
+    fail "source changed during Settings UI verification; no UI acceptance was issued"
+  ruby -rjson -rtime -e '
+    receipt = JSON.parse(File.read(ARGV.fetch(0)))
+    receipt.fetch("profiles")["settings_ui"] = "PASS"
+    receipt["verified_at"] = Time.now.utc.iso8601
+    File.write(ARGV.fetch(0), JSON.pretty_generate(receipt) + "\n")
+  ' "${source_receipt}"
+  verify_receipt "${before_tree}" <"${source_receipt}" >/dev/null
+  echo "Settings UI source acceptance: ${before_tree}"
+  exit
+fi
+
+if [[ "${command_name}" == verify-local ]]; then
+  cd "${repo_root}"
+  before_tree="$(source_tree)"
+  [[ ! -L "${source_receipt}" ]] || fail "source receipt is a symlink"
+  rm -f -- "${source_receipt}"
+  xcode_version="$(xcodebuild -version)"
+  swift_version="$(xcrun swiftc --version)"
+  macos_version="$(sw_vers -buildVersion)"
+  ./action-build.sh release
+  scripts/run_swiftlint.sh
+  tests/verify_publication_owner.sh
+  tests/verify_development.sh all
+  scripts/run_periphery.sh
+  settings_ui=NOT_EXERCISED
+  [[ "$(source_tree)" == "${before_tree}" ]] ||
+    fail "source changed during local verification; no receipt was issued"
+  receipt_stage="$(mktemp "${source_receipt}.XXXXXX")"
+  trap 'rm -f -- "${receipt_stage}"' EXIT
+  ruby -rjson -rtime -e '
+    puts JSON.pretty_generate({
+      format: 1, source_tree: ARGV.fetch(0), verified_at: Time.now.utc.iso8601,
+      profiles: { app: "PASS", swift: "PASS", rime: "PASS", lint: "PASS",
+                  periphery: "PASS", settings_ui: ARGV.fetch(1) },
+      toolchain: { xcode: ARGV.fetch(2), swift: ARGV.fetch(3), macos: ARGV.fetch(4) }
+    })
+  ' "${before_tree}" "${settings_ui}" "${xcode_version}" \
+    "${swift_version}" "${macos_version}" >"${receipt_stage}"
+  verify_receipt "${before_tree}" partial <"${receipt_stage}" >/dev/null
+  mv "${receipt_stage}" "${source_receipt}"
+  echo "Local source acceptance: ${before_tree}; Settings UI: ${settings_ui}"
+  echo "Candidate acceptance remains pending until verify-settings-ui passes on a dedicated desktop."
+  exit
+fi
+
+if [[ "${command_name}" == authorize || "${command_name}" == preview ]]; then
+[[ "${release_dir}" == /* && -d "${release_dir}" && ! -L "${release_dir}" ]] ||
+  fail "release directory is unsafe"
+release_dir="$(cd "${release_dir}" && pwd -P)"
+fi
+
+for required_command in git ruby; do
+  command -v "${required_command}" >/dev/null 2>&1 ||
+    fail "${required_command} is unavailable"
+done
+[[ "$(git -C "${repo_root}" remote get-url origin)" == \
+  git@github.com:Ares-X/Linnet.git ]] || fail "origin is not Ares-X/Linnet over SSH"
+[[ -z "$(git -C "${repo_root}" status --porcelain=v1 --untracked-files=all)" ]] ||
+  fail "publication requires a clean checkout"
+
+revision="$(git -C "${repo_root}" rev-parse --verify HEAD^{commit})"
+[[ "${revision}" =~ ^[0-9a-f]{40}$ ]] || fail "candidate revision is invalid"
+remote_main="$(git -C "${repo_root}" ls-remote --exit-code origin refs/heads/main)" ||
+  fail "remote main is unavailable"
+[[ "${remote_main}" == "${revision}"$'\t'refs/heads/main ]] ||
+  fail "candidate must be the exact remote main revision"
+
+version="$(sed -n \
+  's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+  "${repo_root}/config/LinnetProduct.xcconfig")"
+[[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail "product version is invalid"
+
+if [[ "${command_name}" == authorize ]]; then
+  verify_source_tag "refs/tags/linnet-candidate/v${version}-${revision}" "${revision}" complete >/dev/null
+fi
+
+if [[ "${command_name}" == candidate || "${command_name}" == candidate-preview ]]; then
+  tree="$(git -C "${repo_root}" rev-parse --verify HEAD^{tree})"
+  if [[ "${command_name}" == candidate-preview ]]; then
+    [[ ! -L "${source_receipt}" ]] || fail "source receipt is a symlink"
+    mkdir -p "${repo_root}/build"
+    ruby -rjson -e '
+      puts JSON.pretty_generate({format: 2, source_tree: ARGV.fetch(0), preview_only: true,
+        reason: ARGV.fetch(1), profiles: %w[app lint periphery rime settings_ui swift]
+          .to_h { |profile| [profile, "NOT_EXERCISED"] }})
+    ' "${tree}" "$2" >"${source_receipt}"
+  fi
+  [[ -f "${source_receipt}" && ! -L "${source_receipt}" ]] ||
+    fail "run verify-local before requesting a candidate"
+  verify_receipt "${tree}" candidate <"${source_receipt}" >/dev/null
+  candidate_ref="refs/tags/linnet-candidate/v${version}-${revision}"
+  if ! git -C "${repo_root}" show-ref --verify --quiet "${candidate_ref}"; then
+    git -C "${repo_root}" -c tag.gpgSign=false tag --annotate \
+      "${candidate_ref#refs/tags/}" "${revision}" --file "${source_receipt}"
+  fi
+  verify_source_tag "${candidate_ref}" "${revision}" >/dev/null
+  candidate_object="$(git -C "${repo_root}" rev-parse --verify "${candidate_ref}")"
+  existing="$(git -C "${repo_root}" ls-remote origin "${candidate_ref}")" ||
+    fail "candidate request lookup failed"
+  if [[ -z "${existing}" ]]; then
+    git -C "${repo_root}" push origin "${candidate_ref}:${candidate_ref}"
+  elif [[ "${existing}" != "${candidate_object}"$'\t'"${candidate_ref}" ]]; then
+    fail "candidate request already names another tag object"
+  fi
+  echo "Action candidate requested for source tree ${tree} at ${revision}"
+  exit
+fi
+
+for required_command in gh make; do
+  command -v "${required_command}" >/dev/null 2>&1 ||
+    fail "${required_command} is unavailable"
+done
+catalog_sequence="$("${repo_root}/package/data_release_metadata" \
+  get-catalog-sequence "${repo_root}/config/linnet-data-releases.json")"
+
+release_tool="${repo_root}/build/linnet-pack"
+make -C "${repo_root}" --no-print-directory linnet-pack-tool
+[[ -x "${release_tool}" && ! -L "${release_tool}" ]] ||
+  fail "verified pack CLI was not produced"
+
+LINNET_RELEASE_TOOL="${release_tool}" \
+  "${repo_root}/package/verify_publication_artifacts" \
+    "${release_dir}" "${version}" "${revision}"
+candidate_identity="$("${repo_root}/package/release_candidate_identity" \
+  "${release_dir}" "${version}" "${catalog_sequence}")"
+[[ "${candidate_identity}" =~ ^sha256:([0-9a-f]{64})$ ]] ||
+  fail "candidate archive identity is invalid"
+candidate_digest="${BASH_REMATCH[1]}"
+if [[ "${command_name}" == preview ]]; then
+  authorization_tag="linnet-preview/v${version}-${revision}-h${candidate_digest}"
+else
+  authorization_tag="linnet-publication/v${version}-${revision}-h${candidate_digest}"
+fi
+authorization_ref="refs/tags/${authorization_tag}"
+
+gh auth status --hostname github.com >/dev/null
+# Authorization never uploads or repairs bytes after acceptance. It
+# proves that all three Action-staged drafts still contain the accepted
+# manifest-owned set, then creates an immutable Preview or stable publication
+# tag consumed by release-ci.yml.
+for channel in core data public; do
+  GITHUB_REPOSITORY="${repository}" \
+    "${repo_root}/package/stage_github_release" verify \
+      "${channel}" "${release_dir}" "${version}" "${catalog_sequence}" \
+      "${revision}"
+done
+
+existing="$(git -C "${repo_root}" ls-remote origin "${authorization_ref}")" ||
+  fail "publication authorization lookup failed"
+if [[ -z "${existing}" ]]; then
+  git -C "${repo_root}" push origin "${revision}:${authorization_ref}"
+elif [[ "${existing}" != "${revision}"$'\t'"${authorization_ref}" ]]; then
+  fail "publication authorization already names another revision"
+fi
+
+echo "Linnet ${version} GitHub Action ${command_name} authorized from ${candidate_identity}"

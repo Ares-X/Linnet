@@ -1,21 +1,27 @@
 //
 //  SettingsMain.swift
 //  Native, offline settings surface embedded in the input-method bundle.
-//  The window is a five-tab surface: Appearance, Input, Dictionary, English,
-//  Data.
+//  The window has four tabs: Appearance, Input, Dictionary, and Data & Updates.
+//  Smart English belongs to the Input tab.
 //  Theme, typeface, and size are published immediately. Candidate count,
 //  layouts, input, English, and personal-data changes remain explicit Apply
 //  Changes operations.
 //
 
 import AppKit
-import Darwin
+import Combine
+import os
 import SwiftUI
 import UniformTypeIdentifiers
 
+private let settingsModelLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet.Settings",
+  category: "Model"
+)
+
 @MainActor
 final class SettingsModel: ObservableObject {
-  static let cloudBackupName = "Linnet-Full-Backup.\(LinnetBackupStore.portableExtension)"
+  @Published var selectedTab = 0
   @Published var backupRetentionPolicy: LinnetSettingsContract.BackupRetentionPolicy
   @Published var configuration: SettingsConfigurationSession {
     didSet {
@@ -29,7 +35,7 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var activeOperation: SettingsActiveOperation?
   @Published private(set) var backupHistory: SettingsBackupHistoryState
   @Published private(set) var legacyImportState: SettingsLegacyImportState
-  @Published private(set) var personalValidation: LinnetPersonalDataStore.Validation
+  @Published private(set) var personalValidation: LinnetPersonalDataValidation
   @Published private(set) var personalValidationPending = false
   @Published private(set) var portableInspectionActive = false
   @Published private(set) var diagnostics: SettingsDataCoordinator.Diagnostics?
@@ -45,12 +51,13 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var appearancePublishActive = false
   @Published private(set) var cloudSyncEnabled = false
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
+  @Published private(set) var cloudSyncPreparing = false
+  @Published var cloudSyncStatus: LinnetSettingsContract.CloudSyncStatus?
+  @Published var cloudRecoveryRepairConfirmationRequired = false
+  @Published var languageDataRepairTarget: SettingsLanguageDataUpdateTarget?
 
   let productName: String
-  let appVersion: String
-  let appBuild: UInt64
-  let dataServicesAvailable: Bool
-  let dataChannelService: LinnetDataChannel.Service
+  @Published private(set) var dataServicesAvailable: Bool
   let updateChecker: LinnetSettingsUpdateChecker
 
   let coordinator: SettingsDataCoordinator
@@ -65,30 +72,23 @@ final class SettingsModel: ObservableObject {
   private var appearancePublishTask: Task<Void, Never>?
   private var backupRefreshTask: Task<Void, Never>?
   private var legacyInspectionTask: Task<Void, Never>?
+  private var updateObservation: AnyCancellable?
   private let personalValidationExecutor = SettingsPersonalValidationExecutor()
   private var pendingAppearance: LinnetSettingsDocument.Appearance?
+  private var initialStatePrepared = false
 
   init(bundle: Bundle = .main) {
     let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
     productName =
       host?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
       ?? "Input Method"
-    appVersion =
-      (host?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
-      ?? (host?.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
-      ?? "development"
-    appBuild = UInt64(host?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
     let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle)
     dataRegistry = registry
-    let runtimeSnapshot = registry.flatMap { try? $0.runtimeSnapshot() }
-    installedPacks = runtimeSnapshot?.state.packs ?? []
-    dataEdition = runtimeSnapshot?.state.edition
-    dataServicesAvailable = runtimeSnapshot != nil
-    dataChannelService = LinnetDataChannel.service
+    installedPacks = []
+    dataEdition = nil
+    dataServicesAvailable = false
     updateChecker = LinnetSettingsUpdateChecker(
-      currentVersion: appVersion, currentBuild: appBuild,
-      service: dataChannelService, edition: runtimeSnapshot?.state.edition,
-      installedPacks: runtimeSnapshot?.state.packs ?? [])
+      edition: nil, installedPacks: [], bundle: bundle)
     let downloadPreference = LinnetSettingsDownloadSource.load()
     downloadSourceMode = downloadPreference.mode
     downloadMirrorPrefix = downloadPreference.mirrorPrefix
@@ -109,7 +109,9 @@ final class SettingsModel: ObservableObject {
         )
     } catch {
       personalSnapshot = nil
-      print("Personal settings could not be loaded: \(error.localizedDescription)")
+      settingsModelLogger.error(
+        "Personal settings could not be loaded: \(error.localizedDescription, privacy: .private)"
+      )
     }
     hallelujahDatabase = FileManager.default.urls(
       for: .applicationSupportDirectory,
@@ -127,30 +129,56 @@ final class SettingsModel: ObservableObject {
         ?? LinnetSettingsDocumentStore.defaultSnapshot()
     } catch {
       loadedDocument = nil
-      print("Settings document could not be loaded: \(error.localizedDescription)")
+      settingsModelLogger.error(
+        "Settings document could not be loaded: \(error.localizedDescription, privacy: .private)"
+      )
     }
     let initialConfiguration = SettingsConfigurationSession(
       document: loadedDocument,
       personal: personalSnapshot,
-      servicesAvailable: dataServicesAvailable
+      servicesAvailable: false
     )
     configuration = initialConfiguration
     personalValidation = .valid(initialConfiguration.personalDraft)
-    legacyImportState = dataServicesAvailable ? .checking : .unavailable
+    legacyImportState = .unavailable
     cloudSyncEnabled = LinnetSettingsContract.cloudSyncEnabled(startingAt: bundle)
-    if cloudSyncEnabled {
-      do {
-        cloudSyncLocation = try LinnetCloudSyncLocation.productLocation()
-      } catch {
-        print("The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription)")
-      }
-    }
-    detectGrammarModel()
+    cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus(startingAt: bundle)
     schedulePersonalValidation()
+    updateObservation = updateChecker.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
   }
 }
 
 extension SettingsModel {
+  func prepareInitialState() async {
+    guard !initialStatePrepared else { return }
+    initialStatePrepared = true
+    updateChecker.refreshRuntime()
+    let registry = dataRegistry
+    let snapshot = await Task.detached(priority: .userInitiated) {
+      registry.flatMap { try? $0.runtimeSnapshot() }
+    }.value
+    dataServicesAvailable = snapshot != nil
+    installedPacks = snapshot?.state.packs ?? []
+    dataEdition = snapshot?.state.edition
+    configuration.setServicesAvailable(dataServicesAvailable)
+    legacyImportState = dataServicesAvailable ? .checking : .unavailable
+    detectGrammarModel()
+    updateChecker.refreshInstalledData(edition: dataEdition, packs: installedPacks)
+    if cloudSyncEnabled, cloudSyncLocation == nil, !cloudSyncPreparing {
+      cloudSyncPreparing = true
+      defer { cloudSyncPreparing = false }
+      do {
+        cloudSyncLocation = try await coordinator.prepareCloudSyncLocation()
+      } catch {
+        settingsModelLogger.error(
+          "The Linnet iCloud Drive folder is unavailable: \(error.localizedDescription, privacy: .private)"
+        )
+      }
+    }
+  }
+
   private func schedulePersonalValidation() {
     let draft = configuration.personalDraft
     personalValidationPending = true
@@ -239,7 +267,9 @@ extension SettingsModel {
       } catch {
         guard !Task.isCancelled else { return }
         legacyImportState = .failed
-        logDiagnostic(error, context: "Legacy import inspection failed")
+        settingsModelLogger.error(
+          "Legacy import inspection failed: \(error.localizedDescription, privacy: .private)"
+        )
       }
       legacyInspectionTask = nil
     }
@@ -277,22 +307,26 @@ extension SettingsModel {
     ) { _ in .portableExported(productName: self.productName) }
   }
 
-  func setCloudSyncEnabled(_ enabled: Bool) {
-    guard !operationActive else { return }
+  func setCloudSyncEnabled(_ enabled: Bool) async {
+    guard !operationActive, !cloudSyncPreparing else { return }
+    cloudSyncPreparing = true
+    defer { cloudSyncPreparing = false }
     if enabled {
       do {
-        let location = try LinnetCloudSyncLocation.productLocation()
-        _ = try location.prepareLearningDirectory()
+        let location = try await coordinator.prepareCloudSyncLocation()
+        guard !Task.isCancelled else { return }
         guard LinnetSettingsContract.setCloudSyncEnabled(true) else {
           status = .operationFailed(.unavailable)
           return
         }
         cloudSyncEnabled = true
         cloudSyncLocation = location
-        notifyCloudSyncConfigurationChanged()
+        try await coordinator.reloadLearningSyncConfiguration()
         status = .cloudSyncEnabled
       } catch {
-        logDiagnostic(error, context: "Linnet iCloud Drive folder is unavailable")
+        settingsModelLogger.error(
+          "Linnet iCloud Drive folder is unavailable: \(error.localizedDescription, privacy: .private)"
+        )
         status = .operationFailed(.unavailable)
       }
     } else {
@@ -302,47 +336,83 @@ extension SettingsModel {
       }
       cloudSyncEnabled = false
       cloudSyncLocation = nil
-      notifyCloudSyncConfigurationChanged()
+      do {
+        try await coordinator.reloadLearningSyncConfiguration()
+      } catch {
+        settingsModelLogger.error(
+          "Learning sync configuration reload failed: \(error.localizedDescription, privacy: .private)"
+        )
+        status = .operationFailed(presentationFailure(error))
+        return
+      }
       status = .cloudSyncDisabled
     }
   }
 
   func synchronizeLearningNow() {
-    guard cloudSyncLocation != nil, !operationActive else { return }
-    DistributedNotificationCenter.default().postNotificationName(
-      LinnetSettingsContract.cloudSyncNowRequested,
-      object: nil,
-      userInfo: nil,
-      deliverImmediately: true)
-    status = .cloudSyncRequested
+    guard cloudSyncLocation != nil, !operationActive, !cloudSyncPreparing else { return }
+    cloudSyncPreparing = true
+    Task { [weak self] in
+      guard let self else { return }
+      defer {
+        self.cloudSyncPreparing = false
+        self.cloudSyncStatus = LinnetSettingsContract.cloudSyncStatus()
+      }
+      do {
+        let completed = try await self.coordinator.synchronizeLearningNow()
+        self.status = completed ? .cloudSyncCompleted : .cloudSyncDeferred
+      } catch {
+        settingsModelLogger.error(
+          "Immediate learning sync request failed: \(error.localizedDescription, privacy: .private)"
+        )
+        self.status = .operationFailed(self.presentationFailure(error))
+      }
+    }
   }
-
-  func uploadCloudBackupArchive() {
-    guard let destination = cloudBackupArchive, !operationActive else { return }
+  func uploadCloudBackupArchive(repair: Bool = false) {
+    guard let cloudFolder = cloudSyncLocation?.folder, !operationActive else { return }
     run(
-      .portableExport,
-      operation: .exportPortable(
+      .cloudBackup,
+      operation: .exportCloudRecovery(
         categories: Set(LinnetBackupStore.Category.allCases),
-        destination: destination
+        cloudFolder: cloudFolder,
+        repair: repair
       )
-    ) { _ in .cloudBackupUploaded }
+    ) { outcome in
+      guard let recovery = outcome.cloudRecovery else { return .operationFailed(.unknown) }
+      return switch recovery.kind {
+      case .uploaded: .cloudBackupUploaded(recovery.verifiedAt)
+      case .unchanged: .cloudBackupUnchanged(recovery.verifiedAt)
+      }
+    }
   }
 
-  func inspectCloudBackupArchive(
-  ) async -> SettingsDataCoordinator.PortableImportCandidate? {
-    guard let source = cloudBackupArchive, cloudBackupArchiveAvailable else {
+  func inspectCloudBackupArchive() async -> SettingsDataCoordinator.PortableImportCandidate? {
+    guard configuration.canPersist, !operationActive, !portableInspectionActive,
+      let cloudFolder = cloudSyncLocation?.folder
+    else {
       status = .operationFailed(.unavailable)
       return nil
     }
-    return await inspectPortableImport(source)
-  }
-
-  private func notifyCloudSyncConfigurationChanged() {
-    DistributedNotificationCenter.default().postNotificationName(
-      LinnetSettingsContract.cloudSyncConfigurationDidChange,
-      object: nil,
-      userInfo: nil,
-      deliverImmediately: true)
+    portableInspectionActive = true
+    status = .operationProgress(.portableImport, .preflight)
+    defer { portableInspectionActive = false }
+    do {
+      guard let candidate = try await coordinator.inspectCloudRecovery(in: cloudFolder) else {
+        status = .operationFailed(.unavailable)
+        return nil
+      }
+      status = .ready
+      return candidate
+    } catch SettingsDataCoordinator.Failure.cancelled {
+      status = .operationCancelled; return nil
+    } catch {
+      settingsModelLogger.error(
+        "Cloud recovery inspection failed: \(error.localizedDescription, privacy: .private)"
+      )
+      status = .operationFailed(presentationFailure(error))
+      return nil
+    }
   }
 
   func inspectPortableImport(
@@ -357,10 +427,11 @@ extension SettingsModel {
       status = .ready
       return candidate
     } catch SettingsDataCoordinator.Failure.cancelled {
-      status = .operationCancelled
-      return nil
+      status = .operationCancelled; return nil
     } catch {
-      logDiagnostic(error, context: "Portable import inspection failed")
+      settingsModelLogger.error(
+        "Portable import inspection failed: \(error.localizedDescription, privacy: .private)"
+      )
       status = .operationFailed(presentationFailure(error))
       return nil
     }
@@ -409,17 +480,13 @@ extension SettingsModel {
   }
 
   func clearLearning(_ domains: Set<SettingsDataCoordinator.LearningDomain>) {
-    run(.clearLearning, operation: .clearLearning(domains)) { _ in
-      .learningCleared
-    }
+    run(.clearLearning, operation: .clearLearning(domains)) { _ in .learningCleared }
   }
 
   func refreshDiagnostics() {
     run(.diagnostics, operation: .diagnose) { [weak self] outcome in
       self?.diagnostics = outcome.diagnostics
-      return outcome.diagnostics?.reachability == .unreachable
-        ? .diagnosticsUnreachable
-        : .diagnosticsRefreshed
+      return outcome.diagnostics?.reachability == .unreachable ? .diagnosticsUnreachable : .diagnosticsRefreshed
     }
   }
 
@@ -489,8 +556,13 @@ extension SettingsModel {
       presentStaleOperation()
     } catch SettingsDataCoordinator.Failure.cancelled {
       status = .operationCancelled
+    } catch SettingsDataCoordinator.Failure.cloudRecoveryRepairRequired {
+      cloudRecoveryRepairConfirmationRequired = true
+      status = .cloudBackupRepairRequired
     } catch {
-      logDiagnostic(error, context: "Settings operation failed")
+      settingsModelLogger.error(
+        "Settings operation failed: \(error.localizedDescription, privacy: .private)"
+      )
       status = kind == .removeBackup
         ? .backupRecordRemovalFailed
         : .operationFailed(presentationFailure(error))
@@ -566,7 +638,9 @@ extension SettingsModel {
             over: baseline.appearance)
         }
       } catch {
-        logDiagnostic(error, context: "Candidate appearance publish failed")
+        settingsModelLogger.error(
+          "Candidate appearance publish failed: \(error.localizedDescription, privacy: .private)"
+        )
         status = .appearanceFailed(presentationFailure(error))
       }
       appearancePublishActive = false
@@ -651,82 +725,6 @@ extension SettingsModel {
       ? .conflict : .accepted
   }
 
-  private func acceptPersonalEffect(
-    _ outcome: SettingsDataCoordinator.Outcome,
-    ticket: SettingsConfigurationSession.PersonalTicket?
-  ) -> SettingsOutcomeAcceptance {
-    switch outcome.personalEffect {
-    case .observed:
-      return configuration.observePersonal(outcome.personalSnapshot) == .conflict
-        ? .conflict : .accepted
-    case .submittedDraft:
-      guard let ticket else { return .rejected }
-      return personalCommitAcceptance(
-        outcome.personalSnapshot, kind: .submittedDraft, ticket: ticket)
-    case .externalReplacement:
-      guard let ticket else { return .rejected }
-      return personalCommitAcceptance(
-        outcome.personalSnapshot, kind: .externalReplacement, ticket: ticket)
-    }
-  }
-
-  private func personalCommitAcceptance(
-    _ snapshot: LinnetPersonalDataStore.Snapshot,
-    kind: SettingsConfigurationSession.PersonalCommitKind,
-    ticket: SettingsConfigurationSession.PersonalTicket
-  ) -> SettingsOutcomeAcceptance {
-    switch configuration.acceptPersonalCommit(snapshot, kind: kind, ticket: ticket) {
-    case .conflict: .conflict
-    case .rejectedStaleTicket: .rejected
-    case .accepted, .pendingEditsPreserved: .accepted
-    }
-  }
-
-  private func acceptDocumentEffect(
-    _ outcome: SettingsDataCoordinator.Outcome,
-    ticket: SettingsConfigurationSession.DocumentTicket?
-  ) -> SettingsOutcomeAcceptance {
-    switch outcome.documentEffect {
-    case .observed:
-      return .accepted
-    case .submittedDraft(let snapshot), .externalReplacement(let snapshot):
-      guard let ticket else { return .rejected }
-      let kind: SettingsConfigurationSession.DocumentCommitKind
-      if case .externalReplacement = outcome.documentEffect {
-        kind = .externalReplacement
-      } else {
-        kind = .submittedDraft
-      }
-      switch configuration.acceptDocumentCommit(
-        snapshot, kind: kind, ticket: ticket
-      ) {
-      case .conflict: return .conflict
-      case .rejectedStaleTicket: return .rejected
-      case .accepted, .pendingEditsPreserved: return .accepted
-      }
-    case .submittedAppearance:
-      return .rejected
-    }
-  }
-
-  func observeCurrentConfiguration() -> SettingsConfigurationSession.ObservationResult? {
-    guard let userDirectory else { return nil }
-    do {
-      let personalSnapshot = try LinnetPersonalDataStore.snapshot(from: userDirectory)
-      let documentSnapshot = try LinnetSettingsDocumentStore.snapshot(from: userDirectory)
-      let personal = configuration.observePersonal(personalSnapshot)
-      let document = configuration.observeDocument(documentSnapshot)
-      if personal == .conflict || document == .conflict { return .conflict }
-      if personal == .reloaded || document == .reloaded { return .reloaded }
-      if personal == .unchanged && document == .unchanged { return .unchanged }
-      return .ignored
-    } catch {
-      configuration.markSourceUnreadable()
-      logDiagnostic(error, context: "Personal data could not be reloaded")
-      return nil
-    }
-  }
-
   private func recoverConfiguration(
     using personal: LinnetPersonalDataStore.Snapshot
   ) -> Bool {
@@ -745,7 +743,9 @@ extension SettingsModel {
       return configuration.readiness == .ready
     } catch {
       configuration.markSourceUnreadable()
-      logDiagnostic(error, context: "Restored settings could not be loaded")
+      settingsModelLogger.error(
+        "Restored settings could not be loaded: \(error.localizedDescription, privacy: .private)"
+      )
       return false
     }
   }
@@ -769,7 +769,7 @@ extension SettingsModel {
         // Preserve the last verified view. An unreadable or over-limit history
         // is unavailable, never authoritative evidence that no backups exist.
         backupHistory.failLoading()
-        print("Backups could not be read within the bounded history contract.")
+        settingsModelLogger.error("Backups could not be read within the bounded history contract.")
       }
       backupRefreshTask = nil
     }

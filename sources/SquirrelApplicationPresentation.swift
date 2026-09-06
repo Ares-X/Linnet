@@ -1,72 +1,30 @@
 import AppKit
 import InputMethodKit
+import os
 import UserNotifications
+
+private let linnetPresentationLogger = Logger(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet",
+  category: "Presentation"
+)
 
 extension SquirrelApplicationDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    print("\(SquirrelApp.productName) is quitting.")
     return .terminateNow
   }
+
+  func workspaceWillPowerOff(_: Notification) {
+    shutdownRime()
+  }
+
+  func rimeVersion() -> String {
+    guard let value = rimeAPI.get_version() else { return "unknown" }
+    return String(cString: value)
+  }
+
 }
 
 extension SquirrelApplicationDelegate {
-  func beginInputActivation(
-    controller: SquirrelInputController,
-    client: IMKTextInput
-  ) -> LinnetInputActivationRegistry.Token? {
-    if SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier {
-      inputActivationRegistry.sourceDidTurnOn()
-    }
-    return inputActivationRegistry.begin(controller: controller, client: client) { [weak self] closed in
-      self?.retireClosedInputActivation(closed)
-    }
-  }
-
-  @discardableResult
-  func finishInputActivation(
-    controller: SquirrelInputController,
-    client: IMKTextInput
-  ) -> Bool {
-    guard let closed = inputActivationRegistry.closeNative(
-      controller: controller, client: client)
-    else { return false }
-    retireClosedInputActivation(closed)
-    return true
-  }
-
-  @discardableResult
-  func finishInputActivation(
-    token: LinnetInputActivationRegistry.Token?
-  ) -> Bool {
-    guard let token, let closed = inputActivationRegistry.close(token) else {
-      return false
-    }
-    retireClosedInputActivation(closed)
-    return true
-  }
-
-  @discardableResult
-  func finishInputSourceActivations() -> Bool {
-    inputActivationRegistry.sourceDidTurnOff { [weak self] closed in
-      self?.retireClosedInputActivation(closed)
-    }
-  }
-
-  @discardableResult
-  func terminateInputActivations() -> Bool {
-    inputActivationRegistry.terminate { [weak self] closed in
-      self?.retireClosedInputActivation(closed)
-    }
-  }
-
-  private func retireClosedInputActivation(
-    _ closed: LinnetInputActivationRegistry.ClosedActivation
-  ) {
-    (closed.controller as? SquirrelInputController)?.activationDidClose(
-      closed.token,
-      client: closed.client as? IMKTextInput)
-  }
-
   func showStatusMessage(
     msgTextLong: String?,
     msgTextShort: String?,
@@ -74,45 +32,33 @@ extension SquirrelApplicationDelegate {
   ) {
     guard canAcceptRimeInput,
       !(msgTextLong ?? "").isEmpty || !(msgTextShort ?? "").isEmpty,
-      let activationToken = inputActivationRegistry.currentToken,
-      let controller = inputActivationRegistry.currentController(
-        as: SquirrelInputController.self),
-      controller.currentSessionLease(
-        matching: session,
-        activationToken: activationToken) != nil
+      let controller = panel?.inputController,
+      controller.currentSessionLease(matching: session) != nil
     else { return }
     panel?.updateStatus(
       long: msgTextLong ?? "",
       short: msgTextShort ?? "",
-      activationToken: activationToken)
+      controller: controller)
   }
 
   func updateStatusIcon(session: RimeSessionId) {
     guard canAcceptRimeInput,
-      let activationToken = inputActivationRegistry.currentToken,
-      let controller = inputActivationRegistry.currentController(
-        as: SquirrelInputController.self),
-      let sessionLease = controller.currentSessionLease(
-        matching: session,
-        activationToken: activationToken)
+      let controller = panel?.inputController,
+      let sessionLease = controller.currentSessionLease(matching: session)
     else { return }
     let asciiMode = rimeAPI.get_option(sessionLease.identifier, "ascii_mode")
     let schemaLabel = rimeAPI.get_state_label_abbreviated(
       sessionLease.identifier, "ascii_mode", asciiMode, true).asString
     DispatchQueue.main.async { [weak self, weak controller] in
       guard let self, let controller,
-        controller.ownsCurrentSession(
-          sessionLease, activationToken: activationToken)
+        panel?.inputController === controller,
+        controller.ownsCurrentSession(sessionLease)
       else { return }
       applyStatusIcon(asciiMode: asciiMode, schemaLabel: schemaLabel)
     }
   }
 
-  func inputSourceDidActivate(
-    activationToken: LinnetInputActivationRegistry.Token,
-    session: RimeSessionId
-  ) {
-    guard inputActivationRegistry.isCurrent(activationToken) else { return }
+  func inputSourceDidActivate(session: RimeSessionId) {
     updateStatusIcon(session: session)
     setStatusItemVisibility(inputSourceIsActive: true)
   }
@@ -128,6 +74,7 @@ extension SquirrelApplicationDelegate {
 
   private func setupStatusItem() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    item.isVisible = false
     if let button = item.button {
       button.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
       button.toolTip = SquirrelApp.productName
@@ -154,9 +101,23 @@ extension SquirrelApplicationDelegate {
   }
 
   private func updateStatusItemVisibility() {
-    setStatusItemVisibility(
-      inputSourceIsActive:
-        SquirrelInstaller.currentInputSourceID() == SquirrelApp.bundleIdentifier)
+    updateStatusItemVisibility(
+      for: LinnetInputSourceSelection.classify(
+        currentIdentifier: LinnetInputSourceRegistration.currentInputSourceID(),
+        linnetIdentifier: SquirrelApp.bundleIdentifier))
+  }
+
+  private func updateStatusItemVisibility(
+    for selectedSource: LinnetInputSourceSelection
+  ) {
+    switch selectedSource {
+    case .linnet:
+      setStatusItemVisibility(inputSourceIsActive: true)
+    case .other:
+      setStatusItemVisibility(inputSourceIsActive: false)
+    case .unknown:
+      break
+    }
   }
 
   private func setStatusItemVisibility(inputSourceIsActive: Bool) {
@@ -164,17 +125,28 @@ extension SquirrelApplicationDelegate {
   }
 
   @objc func inputSourceChanged(_: Notification) {
-    guard let currentInputSourceID = SquirrelInstaller.currentInputSourceID() else { return }
-    let inputSourceIsActive =
-      currentInputSourceID == SquirrelApp.bundleIdentifier
-    setStatusItemVisibility(inputSourceIsActive: inputSourceIsActive)
-    if inputSourceIsActive {
-      inputActivationRegistry.sourceDidTurnOn()
-      return
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      let selectedSource = LinnetInputSourceSelection.classify(
+        currentIdentifier: LinnetInputSourceRegistration.currentInputSourceID(),
+        linnetIdentifier: SquirrelApp.bundleIdentifier)
+      updateStatusItemVisibility(for: selectedSource)
+      finalizeStrandedComposition(selectedSource: selectedSource)
     }
-    // macOS may omit deactivateServer when another process selects an input
-    // source through TIS. The process-wide owner closes the exact activation.
-    finishInputSourceActivations()
+  }
+
+  // macOS may omit deactivateServer when another process selects an input
+  // source through TIS. Defer until the native transition settles, then close
+  // only the token that was active before the switch. Native activateServer
+  // remains the sole authority for admitting the returned input source.
+  private func finalizeStrandedComposition(
+    selectedSource: LinnetInputSourceSelection
+  ) {
+    guard selectedSource == .other else { return }
+    guard let inputController = panel?.inputController,
+      let activeClient = inputController.activeClient
+    else { return }
+    inputController.deactivateServer(activeClient)
   }
 
   // MARK: input menu
@@ -201,6 +173,10 @@ extension SquirrelApplicationDelegate {
   }
 
   @objc func openSettings() {
+    presentSettings(customWord: nil)
+  }
+
+  func presentSettings(customWord: String?) {
     let settingsURL = Bundle.main.bundleURL
       .appending(path: "Contents/Applications/Settings.app", directoryHint: .isDirectory)
     guard FileManager.default.fileExists(atPath: settingsURL.path) else {
@@ -208,14 +184,24 @@ extension SquirrelApplicationDelegate {
       return
     }
     let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = true
-    NSWorkspace.shared.openApplication(
-      at: settingsURL,
-      configuration: configuration
-    ) { _, error in
-      if error != nil {
+    configuration.addsToRecentItems = false
+    configuration.allowsRunningApplicationSubstitution = false
+    // Settings owns activation and key-window ordering after launch or reopen.
+    // Suppress LaunchServices' default activation so there is only one owner.
+    configuration.activates = false
+    let completion: @Sendable (NSRunningApplication?, Error?) -> Void = { _, error in
+      guard error == nil else {
         Self.showMessage(msgText: "Settings could not be opened.")
+        return
       }
+    }
+    if let customWord, let url = LinnetSettingsContract.customWordURL(value: customWord) {
+      NSWorkspace.shared.open(
+        [url], withApplicationAt: settingsURL, configuration: configuration,
+        completionHandler: completion)
+    } else {
+      NSWorkspace.shared.openApplication(
+        at: settingsURL, configuration: configuration, completionHandler: completion)
     }
   }
 
@@ -223,7 +209,9 @@ extension SquirrelApplicationDelegate {
     let center = UNUserNotificationCenter.current()
     center.requestAuthorization(options: [.alert, .provisional]) { _, error in
       if let error = error {
-        print("User notification authorization error: \(error.localizedDescription)")
+        linnetPresentationLogger.error(
+          "Notification authorization failed: \(error.localizedDescription, privacy: .private)"
+        )
       }
     }
     center.getNotificationSettings { settings in
@@ -239,7 +227,9 @@ extension SquirrelApplicationDelegate {
           identifier: Self.notificationIdentifier, content: content, trigger: nil)
         center.add(request) { error in
           if let error = error {
-            print("User notification request error: \(error.localizedDescription)")
+            linnetPresentationLogger.error(
+              "Notification request failed: \(error.localizedDescription, privacy: .private)"
+            )
           }
         }
       }
@@ -266,6 +256,23 @@ func notificationHandler(
 
   let messageType = messageTypeC.map { String(cString: $0) }
   let messageValue = messageValueC.map { String(cString: $0) }
+  DispatchQueue.main.async { [weak delegate] in
+    guard let delegate else { return }
+    handleRimeNotification(
+      delegate: delegate,
+      sessionId: sessionId,
+      messageType: messageType,
+      messageValue: messageValue)
+  }
+}
+
+@MainActor
+private func handleRimeNotification(
+  delegate: SquirrelApplicationDelegate,
+  sessionId: RimeSessionId,
+  messageType: String?,
+  messageValue: String?
+) {
   if messageType == "deploy" {
     switch messageValue {
     case "start":

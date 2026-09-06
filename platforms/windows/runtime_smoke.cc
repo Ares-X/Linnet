@@ -141,6 +141,42 @@ void ExpectPrediction(RimeApi* api, RimeSessionId session) {
   }
 }
 
+std::string TakeCommit(RimeApi* api, RimeSessionId session) {
+  RimeCommit commit = {};
+  RIME_STRUCT_INIT(RimeCommit, commit);
+  if (!api->get_commit(session, &commit)) Fail("expected committed text");
+  const std::string text = commit.text ? commit.text : "";
+  api->free_commit(&commit);
+  return text;
+}
+
+void ExpectMixedAndRawInput(RimeApi* api, RimeSessionId session) {
+  for (const char* entity : {"WAF", "QZX"}) {
+    Enter(api, session, "nihao");
+    api->process_key(session, 0xffe1, 1);  // Shift_L down
+    for (const char* key = entity; *key; ++key) {
+      api->process_key(session, *key, 1);
+    }
+    api->process_key(session, 0xffe1, 1 << 30);  // Shift_L up
+    api->simulate_key_sequence(session, "nihao");
+    const std::string expected = "你好" + std::string(entity) + "你好";
+    const auto candidates = Candidates(api, session);
+    const auto& candidate = Find(candidates, expected);
+    const auto index = &candidate - candidates.data();
+    if (index >= 9 || !api->process_key(session, '1' + static_cast<int>(index), 0) ||
+        TakeCommit(api, session) != expected) {
+      Fail("mixed sentence cannot be selected and committed: " + expected);
+    }
+  }
+  for (const char* input : {"https://api.example.com", "URLSession", "v0.1.19"}) {
+    Enter(api, session, input);
+    api->process_key(session, 0xff0d, 0);  // Return
+    if (TakeCommit(api, session) != input) {
+      Fail("code-shaped input changed on commit: " + std::string(input));
+    }
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -153,7 +189,7 @@ int main(int argc, char** argv) {
     Fail("librime API is unavailable");
   }
 
-  const std::string staging_dir = std::string(argv[2]) + "\\build";
+  const std::string staging_dir = std::string(argv[2]) + "/build";
   RimeTraits traits = {};
   RIME_STRUCT_INIT(RimeTraits, traits);
   traits.shared_data_dir = argv[1];
@@ -193,6 +229,9 @@ int main(int argc, char** argv) {
   ExpectCandidate(api, pinyin, "ceshi", "测试");
   api->set_option(pinyin, "emoji", True);
   ExpectCandidateContaining(api, pinyin, "nihao", "👋");
+  api->set_option(pinyin, "emoji", False);
+  ExpectCandidate(api, pinyin, "xierwanasi", "希尔瓦娜斯");
+  ExpectMixedAndRawInput(api, pinyin);
   api->destroy_session(pinyin);
 
   const RimeSessionId reverse = CreateSession(api, "linnet_zh");

@@ -40,8 +40,9 @@ release metadata, not this unversioned guide.
 Linnet uses selected, pinned inputs from:
 
 - [rime-ice](https://github.com/iDvel/rime-ice) for selected English, radical,
-  symbol, emoji/OpenCC and Lua inputs—not its Chinese candidate dictionaries or
-  runtime schemas;
+  symbol, emoji/OpenCC and Lua inputs, plus `cn_dicts/ext.dict.yaml` as the one
+  Chinese supplement projected into Linnet's Wanxiang-owned dictionary graph;
+  rime-ice runtime schemas and its other Chinese dictionaries are not used;
 - [HallelujahIM](https://github.com/dongyuwei/hallelujahIM) for Smart English
   frequency, pronunciation and definition inputs;
 - [Rime Wanxiang](https://github.com/amzxyz/rime-wanxiang) for the Chinese

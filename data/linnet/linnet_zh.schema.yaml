@@ -1,9 +1,11 @@
 # Linnet Chinese mode — self-owned schema
 # encoding: utf-8
 #
-# Linnet owns this pipeline. Wanxiang is the sole Chinese candidate-dictionary
-# source. Selected rime-ice English, radical, symbol, emoji/OpenCC and embedded
-# Lua assets support the product; rime-ice Chinese dictionaries are not inputs.
+# Linnet owns this pipeline. Wanxiang is the core Chinese candidate dictionary;
+# Linnet's reviewed ledger and the verified build-time rime-ice ext projection
+# add low-weight coverage inside the same compiled graph. Selected rime-ice
+# English, radical, symbol, emoji/OpenCC and embedded Lua assets also support
+# the product; there is no rime-ice runtime translator or merge owner.
 #
 # Canonical core: Wanxiang Base/LTS (CC BY 4.0, amzxyz/rime-wanxiang)
 # Supporting assets: rime-ice (GPL-3.0-only, iDvel/rime-ice)
@@ -62,6 +64,8 @@ recognizer:
 # ── Key binder ──────────────────────────────────────────────────────────────
 key_binder:
   search: "`"
+  bindings:
+    __include: default.yaml:/key_binder/bindings
 
 # ── Punctuator ──────────────────────────────────────────────────────────────
 punctuator:
@@ -147,9 +151,9 @@ engine:
     - lua_translator@*uuid
     - table_translator@linnet_custom_words
     - table_translator@linnet_english_words
-    # The native translator owns explicit ;pinyin lookup and one bounded
-    # modeless Chinese-English sentence graph. Whole-word English rows remain
-    # owned by the standard table above.
+    # The native translator owns explicit |pinyin lookup, typo correction and
+    # prediction. Mixed Chinese-English sentences remain in the one stock
+    # ScriptTranslator graph above; whole-word English rows stay in the table.
     - linnet_english_translator
     - table_translator@linnet_text_expander
     - table_translator@radical_lookup
@@ -162,8 +166,6 @@ engine:
     - linnet_disabled_filter@linnet_disabled_filter
     - linnet_english_filter
     - lua_filter@*auto_phrase
-    # auto_phrase 必须位于 corrector 之前：它依赖 translator 的 ［全拼］
-    # 注释缓存编码，而 corrector 会清空非纠错候选的注释。
     - lua_filter@*corrector
     - reverse_lookup_filter@radical_reverse_lookup
     - lua_filter@*pin_cand_filter
@@ -189,6 +191,8 @@ translator:
   contextual_suggestions: false
   # Match rime-ice's mature mixed-input ordering: Chinese 1.2, English 1.1.
   initial_quality: 1.2
+  max_sentences: 3
+  sentence_with_uppercase_syllable: true
   max_homophones: 8
   max_homographs: 7
   # 原生按段学词 + 相邻段拼接（与万象 LTS 相同的学习策略）：

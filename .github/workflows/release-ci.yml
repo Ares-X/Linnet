@@ -1,85 +1,172 @@
-name: Linnet community release
+name: Linnet release
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'linnet-candidate/v*-*'
+      - 'linnet-data-seed/v*-*-*'
+      - 'linnet-preview/v*-*-h*'
+      - 'linnet-publication/v*-*-h*'
 
 permissions:
   contents: read
 
-concurrency:
-  group: linnet-release-publication
-  cancel-in-progress: false
-
 jobs:
   build-candidate:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' &&
+      github.event.created == true &&
+      github.event.deleted == false &&
+      github.repository == 'Ares-X/Linnet' &&
+      (startsWith(github.ref, 'refs/tags/linnet-candidate/') ||
+       startsWith(github.ref, 'refs/tags/linnet-data-seed/'))
+    concurrency:
+      group: linnet-release-candidate
+      cancel-in-progress: true
     environment: community-signing
     permissions:
-      actions: read
-      contents: read
+      contents: write
     runs-on: macos-latest
-    outputs:
-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
-      version: ${{ steps.identity.outputs.version }}
-      catalog_sequence: ${{ steps.identity.outputs.catalog_sequence }}
     steps:
-      - name: Checkout exact protected-main source
+      - name: Checkout the exact candidate request
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
           submodules: false
 
-      - name: Validate protected main and exact CI before secrets
+      - name: Validate exact candidate intent
+        id: request
         env:
           GH_TOKEN: ${{ github.token }}
+          CANDIDATE_REF: ${{ github.ref }}
+          CANDIDATE_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "${GITHUB_EVENT_NAME}" = workflow_dispatch
-          test "${GITHUB_REF}" = refs/heads/main
+          test "${GITHUB_EVENT_NAME}" = push
+          test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
+          [[ "${CANDIDATE_REVISION}" =~ ^[0-9a-f]{40}$ ]]
+          CANDIDATE_REVISION="$(git rev-parse --verify "${CANDIDATE_REVISION}^{commit}")"
+          candidate_pattern='^refs/tags/linnet-candidate/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})$'
+          seed_pattern='^refs/tags/linnet-data-seed/v([0-9]+\.[0-9]+\.[0-9]+)-([1-9][0-9]*)-([0-9a-f]{40})$'
+          requested_sequence=""
+          if [[ "${CANDIDATE_REF}" =~ ${candidate_pattern} ]]; then
+            request_mode=candidate
+            version="${BASH_REMATCH[1]}"
+            test "${BASH_REMATCH[2]}" = "${CANDIDATE_REVISION}"
+          elif [[ "${CANDIDATE_REF}" =~ ${seed_pattern} ]]; then
+            request_mode=data-seed
+            version="${BASH_REMATCH[1]}"
+            requested_sequence="${BASH_REMATCH[2]}"
+            test "${BASH_REMATCH[3]}" = "${CANDIDATE_REVISION}"
+          else
+            exit 2
+          fi
           test -z "$(git status --porcelain)"
-          test "$(git rev-parse --verify HEAD^{commit})" = "${GITHUB_SHA}"
-          remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" \
-            --jq '.object.sha')"
-          test "${remote_main}" = "${GITHUB_SHA}"
-          main_ci_runs="${RUNNER_TEMP}/linnet-main-ci-runs.json"
-          gh api --method GET \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/commit-ci.yml/runs" \
-            -f head_sha="${GITHUB_SHA}" -f branch=main -f event=push \
-            -F per_page=100 >"${main_ci_runs}"
-          ruby -rjson -e '
-            document = JSON.parse(File.binread(ARGV.fetch(0)))
-            revision = ARGV.fetch(1)
-            accepted = document.fetch("workflow_runs").any? do |run|
-              run.fetch("name") == "Linnet commit CI" &&
-                run.fetch("path") == ".github/workflows/commit-ci.yml" &&
-                run.fetch("head_sha") == revision &&
-                run.fetch("head_branch") == "main" &&
-                run.fetch("event") == "push" &&
-                run.fetch("status") == "completed" &&
-                run.fetch("conclusion") == "success"
-            end
-            abort unless accepted
-          ' "${main_ci_runs}" "${GITHUB_SHA}"
-          rm -f -- "${main_ci_runs}"
+          test "$(git rev-parse --verify HEAD^{commit})" = \
+            "${CANDIDATE_REVISION}"
+
+          tag="${CANDIDATE_REF#refs/tags/}"
+          tag_record="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')"
+          if [[ "${request_mode}" == candidate ]]; then
+            test "${tag_record}" = $'tag\t'"$(git rev-parse --verify "${CANDIDATE_REF}")"
+            scripts/release-control verify-source \
+              "${CANDIDATE_REF}" "${CANDIDATE_REVISION}" >/dev/null
+            remote_main="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            test "${remote_main}" = "${CANDIDATE_REVISION}"
+          else
+            test "${tag_record}" = $'commit\t'"${CANDIDATE_REVISION}"
+          fi
+
           product_version="$(sed -n \
             's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
-            config/LinnetProduct.xcconfig | LC_ALL=C sort -u)"
+            config/LinnetProduct.xcconfig)"
+          test "${product_version}" = "${version}"
+          package/release_version_changes "${version}" >/dev/null
           package/data_release_metadata validate config/linnet-data-releases.json
           package/data_release_metadata check-core \
-            config/linnet-data-releases.json "${product_version}"
-          ruby scripts/upstream-sync report
+            config/linnet-data-releases.json "${version}"
+          ruby scripts/upstream-sync verify
+          catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
+            config/linnet-data-releases.json)"
+          if [[ "${request_mode}" == data-seed ]]; then
+            test "${requested_sequence}" = "${catalog_sequence}"
+          fi
+          {
+            echo "mode=${request_mode}"
+            echo "version=${version}"
+            echo "revision=${CANDIDATE_REVISION}"
+            echo "catalog_sequence=${catalog_sequence}"
+          } >>"${GITHUB_OUTPUT}"
 
-      - name: Restore locked build cache
+      - name: Restore locked build cache once
         uses: ./.github/actions/restore-locked-build-cache
         with:
-          save: true
+          save: false
 
-      - name: Install declared build tools
-        run: scripts/install_ci_build_tools.sh release
+      - name: Install declared build tools once
+        env:
+          REQUEST_MODE: ${{ steps.request.outputs.mode }}
+        run: |
+          if [[ "${REQUEST_MODE}" == data-seed ]]; then
+            scripts/install_ci_build_tools.sh quality
+          else
+            scripts/install_ci_build_tools.sh release
+          fi
+
+      - name: Bootstrap an exact future LTS data seed
+        if: steps.request.outputs.mode == 'data-seed'
+        run: |
+          set -euo pipefail
+          model_name="$(plutil -extract sources.rime_lmdg_grammar.asset raw \
+            -o - upstreams.lock.json)"
+          [[ "${model_name}" =~ ^[A-Za-z0-9._-]+$ ]]
+          target="${GITHUB_WORKSPACE}/data/chinese/grammar/${model_name}"
+          [[ ! -e "${target}" ||
+             ( -f "${target}" && ! -L "${target}" ) ]]
+          seed_root="$(mktemp -d "${RUNNER_TEMP}/linnet-data-seed.XXXXXX")"
+          cleanup_seed() {
+            [[ "${seed_root}" == "${RUNNER_TEMP}/linnet-data-seed."* ]] &&
+              find "${seed_root}" -depth -delete 2>/dev/null || true
+          }
+          trap cleanup_seed EXIT INT TERM HUP
+          scripts/fetch-locked-release-asset upstreams.lock.json \
+            rime_lmdg_grammar "${seed_root}/${model_name}"
+          scripts/verify-linnet-grammar-model \
+            "${seed_root}/${model_name}" >/dev/null
+          install -d -m 0755 "$(dirname "${target}")"
+          install -m 0600 "${seed_root}/${model_name}" "${target}"
 
       - name: Prepare locked dependencies and generated data
         run: ./action-install.sh
+
+      - name: Verify history-sensitive publication metadata
+        run: |
+          set -euo pipefail
+          # Behavioral suites run locally, not again in the packaging job.
+          if git cat-file -e 'HEAD^' 2>/dev/null; then
+            changed="$(mktemp)"
+            previous="$(mktemp)"
+            trap 'rm -f "${changed}" "${previous}"' EXIT
+            git diff --name-only 'HEAD^' HEAD >"${changed}"
+            package/data_release_metadata check-source-change <"${changed}"
+            if git show 'HEAD^:config/linnet-data-releases.json' \
+                >"${previous}" 2>/dev/null; then
+              package/data_release_metadata check-monotonic \
+                "${previous}" config/linnet-data-releases.json
+            fi
+          fi
+
+      - name: Verify the independently built data seed
+        if: steps.request.outputs.mode == 'data-seed'
+        run: |
+          scripts/run_swiftlint.sh
+          tests/verify_publication_owner.sh
+          tests/verify_development.sh rime
 
       - name: Import the pinned community signing identity
         env:
@@ -123,76 +210,60 @@ jobs:
             echo "LINNET_CODE_SIGN_PASSWORD_FILE=${password_file}"
           } >>"${GITHUB_ENV}"
 
-      - name: Build and sign the candidate exactly once
+      - name: Build, sign and verify the candidate once
         env:
-          LINNET_CANDIDATE_REVISION: ${{ github.sha }}
+          LINNET_CANDIDATE_REVISION: ${{ steps.request.outputs.revision }}
           ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
         run: |
           set -euo pipefail
           test ! -e "${RUNNER_TEMP}/linnet-candidate"
           mkdir -p "${ARCHIVE_OUTPUT_DIR}"
           make --no-print-directory archive
+          LINNET_RELEASE_TOOL="${GITHUB_WORKSPACE}/build/linnet-pack" \
+            package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
+              "${{ steps.request.outputs.version }}" \
+              "${LINNET_CANDIDATE_REVISION}"
 
-      - name: Verify and bind the exact candidate bytes
-        id: identity
+      - name: Stage exact GitHub Release bytes
         env:
-          LINNET_CANDIDATE_REVISION: ${{ github.sha }}
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-          LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_MODE: ${{ steps.request.outputs.mode }}
+          REQUEST_TAG: ${{ github.ref_name }}
+          RELEASE_DIR: ${{ runner.temp }}/linnet-candidate/release
+          VERSION: ${{ steps.request.outputs.version }}
+          CATALOG_SEQUENCE: ${{ steps.request.outputs.catalog_sequence }}
+          CANDIDATE_REVISION: ${{ steps.request.outputs.revision }}
         run: |
           set -euo pipefail
-          xcrun swiftc -warnings-as-errors \
-            sources/LinnetPackContract.swift \
-            sources/LinnetDataChannel.swift \
-            sources/LinnetDataRegistry.swift \
-            tools/LinnetDataCatalogBuilder.swift \
-            tools/LinnetPackTool.swift -o "${LINNET_RELEASE_TOOL}"
-          version="$(sed -n \
-            's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
-            config/LinnetProduct.xcconfig)"
-          package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${LINNET_CANDIDATE_REVISION}"
-          catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
-            config/linnet-data-releases.json)"
-          {
-            echo "version=${version}"
-            echo "catalog_sequence=${catalog_sequence}"
-            echo "artifact_name=linnet-${version}-${LINNET_CANDIDATE_REVISION}"
-          } >>"${GITHUB_OUTPUT}"
-
-      - name: Upload the immutable installation candidate
-        id: upload
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
-        with:
-          name: ${{ steps.identity.outputs.artifact_name }}
-          path: ${{ runner.temp }}/linnet-candidate/release
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 0
-          overwrite: false
-          include-hidden-files: false
-
-      - name: Record the immutable installation candidate identity
-        env:
-          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
-          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-        run: |
-          {
-            echo "### Linnet installation candidate"
-            echo
-            echo "- Source: \`${GITHUB_SHA}\`"
-            echo "- Artifact ID: \`${ARTIFACT_ID}\`"
-            echo "- Artifact digest: \`${ARTIFACT_DIGEST}\`"
-            echo "- Download: ${ARTIFACT_URL}"
-            echo
-            echo '```text'
-            find "${ARCHIVE_OUTPUT_DIR}" -mindepth 1 -maxdepth 1 -type f \
-              -exec shasum -a 256 {} \; | LC_ALL=C sort
-            echo '```'
-          } >>"${GITHUB_STEP_SUMMARY}"
-
+          identity="$(package/release_candidate_identity \
+            "${RELEASE_DIR}" "${VERSION}" "${CATALOG_SEQUENCE}")"
+          if [[ "${REQUEST_MODE}" == data-seed ]]; then
+            package/stage_github_release stage data \
+              "${RELEASE_DIR}" "${VERSION}" "${CATALOG_SEQUENCE}" \
+              "${CANDIDATE_REVISION}"
+            package/publish_github_release data-seed "${VERSION}" \
+              "${CATALOG_SEQUENCE}" "${CANDIDATE_REVISION}" "${REQUEST_TAG}"
+            {
+              echo "### Linnet Action-built LTS data seed"
+              echo
+              echo "- Source: ${CANDIDATE_REVISION}"
+              echo "- Manifest build identity: ${identity}"
+              echo "- Published boundary: data prerelease only; Catalog unchanged"
+            } >>"${GITHUB_STEP_SUMMARY}"
+          else
+            for channel in core data public; do
+              package/stage_github_release stage "${channel}" \
+                "${RELEASE_DIR}" "${VERSION}" "${CATALOG_SEQUENCE}" \
+                "${CANDIDATE_REVISION}"
+            done
+            {
+              echo "### Linnet Action-built installation candidate"
+              echo
+              echo "- Source: ${CANDIDATE_REVISION}"
+              echo "- Manifest identity: ${identity}"
+              echo "- Transport: draft Core, data and public GitHub Releases"
+            } >>"${GITHUB_STEP_SUMMARY}"
+          fi
       - name: Remove the temporary signing secrets
         if: always()
         run: |
@@ -221,15 +292,22 @@ jobs:
           fi
           exit "${cleanup_status}"
 
-  stage-update-channels:
-    needs: build-candidate
-    environment: community-publication
+  publish:
+    if: >-
+      github.event_name == 'push' &&
+      github.event.created == true &&
+      github.event.deleted == false &&
+      github.repository == 'Ares-X/Linnet' &&
+      (startsWith(github.ref, 'refs/tags/linnet-preview/') ||
+       startsWith(github.ref, 'refs/tags/linnet-publication/'))
+    concurrency:
+      group: linnet-release-publication
+      cancel-in-progress: false
     permissions:
-      actions: read
       contents: write
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout the candidate source
+      - name: Checkout the authorized publisher source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -237,85 +315,45 @@ jobs:
           persist-credentials: false
           submodules: false
 
-      - name: Download the immutable installation candidate by artifact ID
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53  # v6.0.0
-        with:
-          artifact-ids: ${{ needs.build-candidate.outputs.artifact_id }}
-          path: ${{ runner.temp }}/linnet-candidate/release
-
-      - name: Verify the downloaded candidate bytes
-        env:
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-          LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
-        run: |
-          xcrun swiftc -warnings-as-errors \
-            sources/LinnetPackContract.swift \
-            sources/LinnetDataChannel.swift \
-            sources/LinnetDataRegistry.swift \
-            tools/LinnetDataCatalogBuilder.swift \
-            tools/LinnetPackTool.swift -o "${LINNET_RELEASE_TOOL}"
-          package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
-            "${{ needs.build-candidate.outputs.version }}" "${GITHUB_SHA}"
-
-      - name: Publish the staged update channels
+      - name: Verify authorization and publish staged Releases
         env:
           GH_TOKEN: ${{ github.token }}
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-          LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
+          AUTHORIZATION_TAG: ${{ github.ref_name }}
+          CANDIDATE_REVISION: ${{ github.sha }}
         run: |
-          version="${{ needs.build-candidate.outputs.version }}"
-          catalog_sequence="${{ needs.build-candidate.outputs.catalog_sequence }}"
-          package/publish_github_release core "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
-          package/publish_github_release data "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
-          package/publish_github_release catalog "${ARCHIVE_OUTPUT_DIR}" \
-            "${version}" "${catalog_sequence}" "${GITHUB_SHA}"
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = push
+          test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse --verify HEAD^{commit})" = \
+            "${CANDIDATE_REVISION}"
 
-  publish-stable:
-    needs:
-      - build-candidate
-      - stage-update-channels
-    permissions:
-      actions: read
-      contents: write
-    runs-on: macos-latest
-    steps:
-      - name: Checkout the approved candidate source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-          submodules: false
+          preview_pattern='^linnet-preview/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h[0-9a-f]{64}$'
+          publication_pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h[0-9a-f]{64}$'
+          if [[ "${AUTHORIZATION_TAG}" =~ ${preview_pattern} ]]; then
+            publication_mode=preview
+          elif [[ "${AUTHORIZATION_TAG}" =~ ${publication_pattern} ]]; then
+            publication_mode=publish
+          else
+            exit 2
+          fi
+          version="${BASH_REMATCH[1]}"
+          test "${BASH_REMATCH[2]}" = "${CANDIDATE_REVISION}"
+          product_version="$(sed -n \
+            's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
+            config/LinnetProduct.xcconfig)"
+          test "${product_version}" = "${version}"
+          package/data_release_metadata validate config/linnet-data-releases.json
+          package/data_release_metadata check-core \
+            config/linnet-data-releases.json "${version}"
+          catalog_sequence="$(package/data_release_metadata get-catalog-sequence \
+            config/linnet-data-releases.json)"
 
-      - name: Download the approved immutable candidate by artifact ID
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53  # v6.0.0
-        with:
-          artifact-ids: ${{ needs.build-candidate.outputs.artifact_id }}
-          path: ${{ runner.temp }}/linnet-candidate/release
-
-      - name: Verify the approved candidate bytes
-        env:
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-          LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
-        run: |
-          xcrun swiftc -warnings-as-errors \
-            sources/LinnetPackContract.swift \
-            sources/LinnetDataChannel.swift \
-            sources/LinnetDataRegistry.swift \
-            tools/LinnetDataCatalogBuilder.swift \
-            tools/LinnetPackTool.swift -o "${LINNET_RELEASE_TOOL}"
-          package/verify_publication_artifacts "${ARCHIVE_OUTPUT_DIR}" \
-            "${{ needs.build-candidate.outputs.version }}" "${GITHUB_SHA}"
-
-      - name: Publish the approved stable installer
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARCHIVE_OUTPUT_DIR: ${{ runner.temp }}/linnet-candidate/release
-          LINNET_RELEASE_TOOL: ${{ runner.temp }}/linnet-pack
-        run: |
-          package/publish_github_release public "${ARCHIVE_OUTPUT_DIR}" \
-            "${{ needs.build-candidate.outputs.version }}" \
-            "${{ needs.build-candidate.outputs.catalog_sequence }}" \
-            "${GITHUB_SHA}"
+          if [[ "${publication_mode}" == publish ]]; then
+            scripts/release-control verify-source \
+              "refs/tags/linnet-candidate/v${version}-${CANDIDATE_REVISION}" \
+              "${CANDIDATE_REVISION}" --release >/dev/null
+          fi
+          package/publish_github_release "${publication_mode}" "${version}" \
+            "${catalog_sequence}" "${CANDIDATE_REVISION}" \
+            "${AUTHORIZATION_TAG}"

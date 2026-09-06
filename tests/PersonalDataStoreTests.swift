@@ -4,7 +4,7 @@ import Foundation
 @main
 struct PersonalDataStoreTests {
   static func main() {
-    let directory = FileManager.default.temporaryDirectory.appending(
+    let directory = LinnetTestScratch.directory.appending(
       path: "LinnetPersonalDataStoreTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )
@@ -20,7 +20,7 @@ struct PersonalDataStoreTests {
       try LinnetPersonalDataStore.writeRuntimeSettings(source, to: directory)
       let loaded = try LinnetPersonalDataStore.load(from: directory)
       guard loaded.customWords.map({ "\($0.value)\t\($0.code)" }) == ["Linnet\trime duo"],
-        loaded.disabledWords == ["cloud", "forbidden word"],
+        loaded.disabledWords.map(\.value) == ["cloud", "forbidden word"],
         loaded.expansions.map({ "\($0.value)\t\($0.trigger)" }) == ["Best regards,\tx;br"]
       else {
         fail("personal data did not round-trip through canonical files")
@@ -83,20 +83,9 @@ struct PersonalDataStoreTests {
           atomically: true,
           encoding: .utf8
         )
-      guard try LinnetPersonalDataStore.load(from: legacyDirectory).disabledWords
+      guard try LinnetPersonalDataStore.load(from: legacyDirectory).disabledWords.map(\.value)
         == ["legacy-disabled"]
       else { fail("legacy user settings were not explicitly adopted") }
-      expectFailure(.invalidFile("backup-v2 personal files")) {
-        _ = try LinnetPersonalDataStore.legacyV2Snapshot(from: legacyDirectory)
-      }
-      try LinnetPersonalDataStore.writePersonalFiles(.empty, to: legacyDirectory)
-      let legacyV2 = try LinnetPersonalDataStore.legacyV2Snapshot(from: legacyDirectory)
-      guard legacyV2.data.disabledWords == ["legacy-disabled"],
-        legacyV2.sentenceCapitalization,
-        legacyV2.tabBehavior == "pass",
-        legacyV2.revision
-          == "ea751fce69bf049f1b2deffda1a2b9fc00d0660eba510674d4d16d581a6e6563"
-      else { fail("the frozen v2 decoder diverged from the bda21963 revision codec") }
       try LinnetPersonalDataStore.writeRuntimeSettings(.empty, to: legacyDirectory)
       guard !FileManager.default.fileExists(
         atPath: legacyDirectory.appending(path: LinnetPersonalDataStore.legacyUserSettingsFile).path
@@ -158,9 +147,11 @@ struct PersonalDataStoreTests {
           expansions: []
         )
       )
+      let invalidDisabledWord = LinnetPersonalData.DisabledWord(value: "bad\0word")
       expectIssue(
-        .init(location: .disabledWord(0), reason: .invalid),
-        in: .init(customWords: [], disabledWords: ["bad\0word"], expansions: [])
+        .init(location: .disabledWord(invalidDisabledWord.identifier), reason: .invalid),
+        in: .init(
+          customWords: [], disabledWordRows: [invalidDisabledWord], expansions: [])
       )
       let duplicateCustom = LinnetPersonalData.CustomWord(value: "Other", code: "rime duo")
       expectIssue(
@@ -247,10 +238,19 @@ struct PersonalDataStoreTests {
           ]
         ))
       guard blankRows.customWords.map({ "\($0.value)\t\($0.code)" }) == ["Linnet\trime duo"],
-        blankRows.disabledWords == ["cloud"],
+        blankRows.disabledWords.map(\.value) == ["cloud"],
         blankRows.expansions.map({ "\($0.value)\t\($0.trigger)" }) == ["Best regards,\tx;br"]
       else {
         fail("blank rows were not dropped during normalization")
+      }
+      let stableDisabledWord = LinnetPersonalData.DisabledWord(value: " Cloud ")
+      let stableDisabledDraft = LinnetPersonalData(
+        customWords: [], disabledWordRows: [stableDisabledWord], expansions: [])
+      let stableDisabledResult = try LinnetPersonalDataStore.normalized(stableDisabledDraft)
+      guard stableDisabledResult.disabledWords == [
+        .init(identifier: stableDisabledWord.identifier, value: "cloud")
+      ] else {
+        fail("disabled-word normalization replaced the editable row identity")
       }
       let validationDraft = LinnetPersonalData(
         customWords: [.init(value: "Linnet", code: " RIME DUO "), .init(value: "", code: "")],
@@ -316,11 +316,12 @@ struct PersonalDataStoreTests {
   }
 
   private static func expectIssue(
-    _ expected: LinnetPersonalDataStore.Validation.Issue,
+    _ expected: LinnetPersonalDataValidation.Issue,
     in data: LinnetPersonalData
   ) {
     let validation = LinnetPersonalDataStore.validate(data)
-    guard !validation.isValid, validation.firstIssue == expected
+    guard !validation.isValid,
+      validation.firstIssue == expected
     else { fail("typed validation did not return the expected first issue") }
     expectFailure(.invalidData(expected)) {
       _ = try LinnetPersonalDataStore.normalized(data)

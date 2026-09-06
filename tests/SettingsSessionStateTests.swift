@@ -40,7 +40,7 @@ struct SettingsSessionStateTests {
   }
 
   private static func testDocumentStoreRevisions() {
-    let root = FileManager.default.temporaryDirectory.appending(
+    let root = LinnetTestScratch.directory.appending(
       path: "linnet-document-revision-\(UUID().uuidString)", directoryHint: .isDirectory)
     do {
       try FileManager.default.createDirectory(
@@ -229,12 +229,23 @@ struct SettingsSessionStateTests {
       personalFailure.personalBaselineRevision == nil
     else { fail("an unreadable source exposed an editable fallback") }
 
-    let unavailable = SettingsConfigurationSession(
+    var unavailable = SettingsConfigurationSession(
       document: documentSnapshot(.default), personal: baseline, servicesAvailable: false)
     guard unavailable.readiness == .servicesUnavailable,
       !unavailable.canEdit, !unavailable.canPersist,
       unavailable.personalBaselineRevision == "r1"
     else { fail("unavailable data services exposed writable configuration") }
+
+    unavailable.documentDraft.input.traditionalChinese = true
+    unavailable.personalDraft.customWords.append(.init(value: "保留", code: "baoliu"))
+    let pendingDocument = unavailable.documentDraft
+    let pendingPersonal = unavailable.personalDraft
+    unavailable.setServicesAvailable(true)
+    guard unavailable.readiness == .ready,
+      unavailable.canEdit, unavailable.canPersist,
+      unavailable.documentDraft == pendingDocument,
+      unavailable.personalDraft == pendingPersonal
+    else { fail("asynchronous service readiness discarded Settings drafts") }
   }
 
   private static func testObservedSnapshots() {
@@ -376,24 +387,27 @@ struct SettingsSessionStateTests {
     func draft(_ value: String) -> LinnetPersonalData {
       .init(customWords: [.init(value: value, code: value.lowercased())], disabledWords: [], expansions: [])
     }
-    func record(_ validation: LinnetPersonalDataStore.Validation) {
-      guard case .valid(let data) = validation else { return }
-      completed.append(data.customWords.first?.value ?? "")
-    }
     executor.submit(draft("First")) { validation in
-      record(validation)
+      completed.append(validatedCustomWord(validation))
     }
     await waitUntil { recorder.started > 0 }
     executor.submit(draft("Second")) { validation in
-      record(validation)
+      completed.append(validatedCustomWord(validation))
     }
     executor.submit(draft("Latest")) { validation in
-      record(validation)
+      completed.append(validatedCustomWord(validation))
     }
     await waitUntil { completed.count == 1 }
     guard completed == ["Latest"], recorder.maximumActive == 1,
       recorder.cancelledWorkObserved
     else { fail("personal validation was not latest-only and serial") }
+  }
+
+  private static func validatedCustomWord(
+    _ validation: LinnetPersonalDataValidation
+  ) -> String {
+    guard case .valid(let data) = validation else { return "" }
+    return data.customWords.first?.value ?? ""
   }
 
   @MainActor

@@ -8,15 +8,25 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 app_path="${1:-}"
 output_dir="${2:-}"
 source_epoch="${SOURCE_DATE_EPOCH:-1704067200}"
-core_receipt="io.github.ares-x.inputmethod.Linnet.core.pkg"
-chinese_receipt="io.github.ares-x.inputmethod.Linnet.data.chinese.pkg"
-english_receipt="io.github.ares-x.inputmethod.Linnet.data.english.pkg"
-lts_receipt="io.github.ares-x.inputmethod.Linnet.data.lts.pkg"
-extended_receipt="io.github.ares-x.inputmethod.Linnet.data.extended.pkg"
-profile_receipt="io.github.ares-x.inputmethod.Linnet.profile.pkg"
+# Reusing a legacy payload receipt for scripts/staging lets PackageKit obsolete
+# live files before postinstall. Each receipt owns one stable transport layout.
+core_receipt="io.github.ares-x.inputmethod.Linnet.update.core.pkg"
+complete_core_receipt="io.github.ares-x.inputmethod.Linnet.complete.core.pkg"
+chinese_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.chinese.pkg"
+english_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.english.pkg"
+lts_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.lts.pkg"
+extended_receipt="io.github.ares-x.inputmethod.Linnet.complete.data.extended.pkg"
+profile_receipt="io.github.ares-x.inputmethod.Linnet.complete.profile.pkg"
 core_install_location="/Library/Input Methods"
+complete_staging_name=".linnet-complete"
 support_install_location="/Library/Application Support/Linnet"
+complete_staging_location="${support_install_location}/${complete_staging_name}"
+complete_app_staging_location="${complete_staging_location}/App"
+complete_transport_name="Linnet.payload"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
+release_tool="${LINNET_RELEASE_TOOL:-}"
+registration_inspector="${project_root}/build/input-source-registration-inspector"
+runtime_inspector="${project_root}/build/linnet-runtime-inspector"
 unset LINNET_RELEASE_TOOL
 
 fail_package() {
@@ -27,11 +37,12 @@ fail_package() {
 [[ "$#" -eq 2 ]] || fail_package "usage: APP OUTPUT_DIRECTORY"
 [[ "${app_path}" == /* && -d "${app_path}" && ! -L "${app_path}" ]] ||
   fail_package "APP must be an absolute, non-symlink App bundle"
-[[ "${app_path##*/}" == "Linnet.app" ]] || fail_package "unexpected App name"
+[[ "${app_path##*/}" == "Linnet.candidate" ]] ||
+  fail_package "unexpected frozen candidate name"
 [[ "${source_epoch}" =~ ^[0-9]+$ ]] || fail_package "invalid SOURCE_DATE_EPOCH"
 
-for required_tool in awk bash chmod cmp codesign cp date ditto find git grep mkdir mktemp mv \
-    pkgbuild plutil productbuild readlink ruby sed sort stat touch unlink xcrun; do
+for required_tool in awk bash chmod cmp codesign cp date ditto find git grep lipo mkdir mktemp mv \
+    pkgbuild plutil productbuild readlink ruby sed sort stat touch unlink; do
   command -v "${required_tool}" >/dev/null 2>&1 ||
     fail_package "required release tool is unavailable: ${required_tool}"
 done
@@ -48,6 +59,19 @@ build="$(plutil -extract CFBundleVersion raw -o - "${info_path}")"
 [[ "${build}" =~ ^(0|[1-9][0-9]*)$ ]] || fail_package "invalid product build"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
   fail_package "LINNET_CANDIDATE_REVISION must name the exact candidate Git OID"
+[[ "${release_tool}" == /* && -f "${release_tool}" && ! -L "${release_tool}" &&
+   -x "${release_tool}" ]] ||
+  fail_package "LINNET_RELEASE_TOOL must name the canonical precompiled pack CLI"
+[[ -f "${registration_inspector}" && ! -L "${registration_inspector}" &&
+   -x "${registration_inspector}" ]] ||
+  fail_package "input-source registration inspector is unavailable"
+[[ "$(lipo -archs "${registration_inspector}")" == arm64 ]] ||
+  fail_package "input-source registration inspector is not thin arm64"
+[[ -f "${runtime_inspector}" && ! -L "${runtime_inspector}" &&
+   -x "${runtime_inspector}" ]] ||
+  fail_package "installed-runtime inspector is unavailable"
+[[ "$(lipo -archs "${runtime_inspector}")" == arm64 ]] ||
+  fail_package "installed-runtime inspector is not thin arm64"
 actual_revision="$(git -C "${project_root}" rev-parse --verify HEAD^{commit})"
 [[ "${actual_revision}" == "${candidate_revision}" ]] ||
   fail_package "candidate revision differs from the candidate checkout"
@@ -85,11 +109,9 @@ output_dir="$(cd "${output_dir}" && pwd -P)"
 release_prefix="Linnet-${version}-arm64"
 core_package_name="${release_prefix}-Core-community-beta.pkg"
 package_name="Linnet.pkg"
-uninstaller_name="Linnet-${version}-Uninstall.command"
 outputs=(
   "${core_package_name}"
   "${package_name}"
-  "${uninstaller_name}"
 )
 for output in "${outputs[@]}"; do
   [[ ! -e "${output_dir}/${output}" ]] ||
@@ -105,13 +127,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-pack_tool="${work_root}/linnet-pack"
-xcrun swiftc -warnings-as-errors \
-  "${project_root}/sources/LinnetPackContract.swift" \
-  "${project_root}/sources/LinnetDataChannel.swift" \
-  "${project_root}/sources/LinnetDataRegistry.swift" \
-  "${project_root}/tools/LinnetDataCatalogBuilder.swift" \
-  "${project_root}/tools/LinnetPackTool.swift" -o "${pack_tool}"
+pack_tool="${release_tool}"
 
 core_payload="${work_root}/payload-core"
 chinese_payload="${work_root}/payload-chinese"
@@ -133,16 +149,21 @@ prepare_core_scripts() {
   cp -X "${project_root}/package/installer-scripts/candidate-app-identity.sh" \
     "${destination}/candidate-app-identity.sh"
   cp -X "${candidate_app_identity}" "${destination}/candidate-app-identity.json"
+  cp -X "${registration_inspector}" \
+    "${destination}/input-source-registration-inspector"
+  cp -X "${runtime_inspector}" "${destination}/linnet-runtime-inspector"
+  cp -X "${pack_tool}" "${destination}/linnet-pack"
   if [[ "${install_mode}" == core-update ]]; then
     cp -X "${project_root}/package/installer-scripts/postinstall" "${destination}/postinstall"
-    cp -X "${project_root}/package/installer-scripts/quit-applications-clean.jxa" \
-      "${destination}/quit-applications-clean.jxa"
+    COPYFILE_DISABLE=1 ditto --norsrc --noextattr "${core_app}" \
+      "${destination}/Linnet.payload"
     chmod 755 "${destination}/postinstall"
-    chmod 644 "${destination}/quit-applications-clean.jxa"
   fi
   printf '%s\n' "${version}" >"${destination}/candidate-core-version"
   printf '%s\n' "${install_mode}" >"${destination}/install-mode"
-  chmod 755 "${destination}/preinstall" "${destination}/candidate-app-identity.sh"
+  chmod 755 "${destination}/preinstall" "${destination}/candidate-app-identity.sh" \
+    "${destination}/input-source-registration-inspector" \
+    "${destination}/linnet-runtime-inspector" "${destination}/linnet-pack"
   chmod 644 "${destination}/candidate-app-identity.json" \
     "${destination}/candidate-core-version" "${destination}/install-mode"
 }
@@ -184,6 +205,14 @@ chmod 0755 "${core_app}/Contents/SharedSupport"
 core_code_identity="$(verify_candidate_app "${core_app}")"
 [[ "${source_code_identity}" == "${core_code_identity}" ]] ||
   fail_package "copied App code identity differs from its candidate source"
+candidate_tree_sha256="$("${pack_tool}" tree-digest --root "${core_app}")" ||
+  fail_package "candidate App tree identity cannot be projected"
+candidate_leaf_sha1="$(plutil -extract certificate_sha1 raw -o - \
+  "${project_root}/config/linnet-community-signing.json")" ||
+  fail_package "candidate signing requirement cannot be projected"
+[[ "${candidate_tree_sha256}" =~ ^[0-9a-f]{64}$ &&
+  "${candidate_leaf_sha1}" =~ ^[0-9A-F]{40}$ ]] ||
+  fail_package "candidate App target identity is invalid"
 release_metadata_root="${app_path}/Contents/Resources/LinnetRelease"
 ruby -rjson -e '
   identity = JSON.parse(ARGV.fetch(0))
@@ -201,13 +230,16 @@ ruby -rjson -e '
     identity.fetch("format") == 4 &&
     identity.fetch("profile") == "community-cms" &&
     identity.fetch("leaf_certificate_sha256").match?(/\A[0-9a-f]{64}\z/)
-  document["format"] = 3
+  document["format"] = 4
   document["profile"] = "community-cms"
   document["leaf_certificate_sha256"] =
     identity.fetch("leaf_certificate_sha256")
-  File.binwrite(ARGV.fetch(5), JSON.generate(document) + "\n")
+  document["leaf_certificate_sha1"] = ARGV.fetch(5)
+  document["app_tree_sha256"] = ARGV.fetch(6)
+  File.binwrite(ARGV.fetch(7), JSON.generate(document) + "\n")
 ' "${source_code_identity}" "${candidate_revision}" "${bundle_id}" \
-  "${version}" "${build}" "${work_root}/candidate-app-identity.json" ||
+  "${version}" "${build}" "${candidate_leaf_sha1}" "${candidate_tree_sha256}" \
+  "${work_root}/candidate-app-identity.json" ||
   fail_package "candidate identity projection is invalid"
 candidate_app_identity="${work_root}/candidate-app-identity.json"
 [[ -d "${release_metadata_root}" && ! -L "${release_metadata_root}" ]] ||
@@ -215,16 +247,29 @@ candidate_app_identity="${work_root}/candidate-app-identity.json"
 
 prepare_core_scripts core-update "${core_update_scripts}"
 prepare_core_scripts complete "${complete_core_scripts}"
-cp -X "${project_root}/package/installer-scripts/postinstall" \
+cp -X "${project_root}/package/installer-scripts/complete-postinstall" \
   "${complete_profile_scripts}/postinstall"
+cp -X "${project_root}/package/installer-scripts/postinstall" \
+  "${complete_profile_scripts}/lifecycle-postinstall"
 cp -X "${project_root}/package/installer-scripts/candidate-app-identity.sh" \
   "${complete_profile_scripts}/candidate-app-identity.sh"
 cp -X "${candidate_app_identity}" \
   "${complete_profile_scripts}/candidate-app-identity.json"
+cp -X "${runtime_inspector}" \
+  "${complete_profile_scripts}/linnet-runtime-inspector"
+cp -X "${registration_inspector}" \
+  "${complete_profile_scripts}/input-source-registration-inspector"
+cp -X "${pack_tool}" "${complete_profile_scripts}/linnet-pack"
+printf '%s\n' "${version}" >"${complete_profile_scripts}/candidate-core-version"
 printf 'complete\n' >"${complete_profile_scripts}/install-mode"
 chmod 755 "${complete_profile_scripts}/postinstall" \
-  "${complete_profile_scripts}/candidate-app-identity.sh"
+  "${complete_profile_scripts}/lifecycle-postinstall" \
+  "${complete_profile_scripts}/candidate-app-identity.sh" \
+  "${complete_profile_scripts}/linnet-runtime-inspector" \
+  "${complete_profile_scripts}/input-source-registration-inspector" \
+  "${complete_profile_scripts}/linnet-pack"
 chmod 644 "${complete_profile_scripts}/candidate-app-identity.json" \
+  "${complete_profile_scripts}/candidate-core-version" \
   "${complete_profile_scripts}/install-mode"
 
 pack_sources="${work_root}/pack-sources"
@@ -299,26 +344,25 @@ extended_component="${work_root}/Linnet-Extended.component.pkg"
 profile_component="${work_root}/Linnet-Profile.component.pkg"
 
 pkgbuild --info "${project_root}/package/PackageInfo" --compression latest \
-  --min-os-version 13.0 --root "${core_payload}" \
-  --component-plist "${project_root}/package/Linnet-component.plist" \
+  --min-os-version 13.0 --nopayload \
   --identifier "${core_receipt}" --version "${version}" \
   --install-location "${core_install_location}" --scripts "${core_update_scripts}" \
   "${core_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${chinese_payload}" \
   --identifier "${chinese_receipt}" --version "${chinese_sequence}" \
-  --install-location "${support_install_location}" "${chinese_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${chinese_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${english_payload}" \
   --identifier "${english_receipt}" --version "${english_sequence}" \
-  --install-location "${support_install_location}" "${english_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${english_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${lts_payload}" \
   --identifier "${lts_receipt}" --version "${lts_sequence}" \
-  --install-location "${support_install_location}" "${lts_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${lts_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${extended_payload}" \
   --identifier "${extended_receipt}" --version "${extended_sequence}" \
-  --install-location "${support_install_location}" "${extended_component}" >/dev/null
+  --install-location "${complete_staging_location}" "${extended_component}" >/dev/null
 pkgbuild --compression latest --min-os-version 13.0 --root "${profile_payload}" \
   --identifier "${profile_receipt}" \
-  --version "${profile_receipt_version}" --install-location "${support_install_location}" \
+  --version "${profile_receipt_version}" --install-location "${complete_staging_location}" \
   --scripts "${complete_profile_scripts}" \
   "${profile_component}" >/dev/null
 
@@ -375,17 +419,21 @@ core_candidate="${work_root}/${core_package_name}"
 package_candidate="${work_root}/${package_name}"
 productbuild --distribution "${core_distribution}" --resources "${metadata_root}" \
   --package-path "${work_root}" "${core_candidate}" >/dev/null
-# Both products retain the same Core receipt, version and payload. Only the
-# component-local install intent differs: the public Core artifact is an update,
-# while Complete may cross the empty-home first-install boundary. Rebuild the
-# same component filename after the Core product has captured its strict copy;
-# this keeps both Distribution contracts single-path and unambiguous.
+# Complete transports the App and every language payload to one hidden
+# transaction root. The App transport deliberately has no .app suffix and no
+# Installer bundle mapping: PackageKit and LaunchServices must never observe a
+# second production input-source identity. Profile postinstall is the sole
+# publication owner.
+# Core reconstructs its exact target from the explicit published baseline.
 unlink "${core_component}"
+complete_transport_app="${core_payload}/${complete_transport_name}"
+mv "${core_app}" "${complete_transport_app}"
+core_app="${complete_transport_app}"
 pkgbuild --info "${project_root}/package/PackageInfo" --compression latest \
   --min-os-version 13.0 --root "${core_payload}" \
-  --component-plist "${project_root}/package/Linnet-component.plist" \
-  --identifier "${core_receipt}" --version "${version}" \
-  --install-location "${core_install_location}" --scripts "${complete_core_scripts}" \
+  --component-plist "${project_root}/package/Opaque-component.plist" \
+  --identifier "${complete_core_receipt}" --version "${version}" \
+  --install-location "${complete_app_staging_location}" --scripts "${complete_core_scripts}" \
   "${core_component}" >/dev/null
 productbuild --distribution "${distribution}" --resources "${metadata_root}" \
   --package-path "${work_root}" "${package_candidate}" >/dev/null
@@ -400,9 +448,5 @@ for candidate in "${core_candidate}" "${package_candidate}"; do
   name="${candidate##*/}"
   mv "${candidate}" "${output_dir}/${name}"
 done
-cp "${project_root}/package/uninstall-linnet" "${work_root}/${uninstaller_name}"
-chmod 755 "${work_root}/${uninstaller_name}"
-mv "${work_root}/${uninstaller_name}" "${output_dir}/${uninstaller_name}"
-
 echo "Linnet current-user Core and complete PKGs: PASS"
 printf '%s\n' "${core_package_name}" "${package_name}"
