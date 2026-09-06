@@ -89,23 +89,6 @@ done < <("${project_root}/package/release_asset_manifest" \
 [[ -s "${expected}" ]] || fail_stage "release channel is empty"
 LC_ALL=C sort -o "${expected}" "${expected}"
 
-append_version_changes() {
-  ruby - "${project_root}/CHANGELOG.md" "${version}" <<'RUBY'
-path, version = ARGV
-lines = File.readlines(path, chomp: false)
-prefix = "## #{version} — "
-starts = lines.each_index.select { |index| lines.fetch(index).start_with?(prefix) }
-abort "CHANGELOG must contain exactly one #{version} section" unless starts.size == 1
-first = starts.fetch(0) + 1
-last = (first...lines.size).find { |index| lines.fetch(index).start_with?("## ") } || lines.size
-body = lines[first...last].join.strip
-abort "CHANGELOG #{version} section is empty" if body.empty?
-abort "CHANGELOG #{version} section needs a category heading" unless body.match?(/^### /)
-abort "CHANGELOG #{version} section needs a user-visible change" unless body.match?(/^- /)
-puts body
-RUBY
-}
-
 case "${channel}" in
   public)
     digest="$(awk -F '\t' '$1 == "Linnet.pkg" { sub(/^sha256:/, "", $2); print $2 }' \
@@ -113,7 +96,7 @@ case "${channel}" in
     {
       echo "## 本版本更新"
       echo
-      append_version_changes
+      "${project_root}/package/release_version_changes" "${version}"
       echo
       echo "## 下载与升级"
       echo
@@ -121,20 +104,19 @@ case "${channel}" in
       echo
       echo "SHA-256：\`${digest}\`"
       echo
-      echo "已完成首次安装和一次注销的用户，请使用同仓库的"
-      echo "[Core 更新包](https://github.com/${repository}/releases/tag/core-v${version})；"
-      echo "Core 更新不会再次要求注销。"
+      echo "已安装 0.1.15 或更新版本的用户，可在设置的“数据与更新”中下载并应用核心更新，无需运行 Installer 或再次注销。"
     } >"${notes}"
     ;;
   core)
     {
       echo "## 本版本更新"
       echo
-      append_version_changes
+      "${project_root}/package/release_version_changes" "${version}"
       echo
       echo "## Core 更新"
       echo
       echo "仅用于已经完成首次安装和一次注销的 Linnet 用户。"
+      echo "请在设置的“数据与更新”中下载并应用更新，无需手动打开这里的核心文件。"
       echo "Core 更新保留语言包和个人数据，不要求再次注销。"
       echo
       echo "SHA-256："

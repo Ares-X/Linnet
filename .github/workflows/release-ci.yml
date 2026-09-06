@@ -86,6 +86,7 @@ jobs:
             's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
             config/LinnetProduct.xcconfig)"
           test "${product_version}" = "${version}"
+          package/release_version_changes "${version}" >/dev/null
           package/data_release_metadata validate config/linnet-data-releases.json
           package/data_release_metadata check-core \
             config/linnet-data-releases.json "${version}"
