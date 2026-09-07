@@ -51,23 +51,6 @@ extension SettingsModel {
     }
   }
 
-  func presentationPhase(
-    _ phase: SettingsDataCoordinator.Phase
-  ) -> SettingsOperationPhase? {
-    switch phase {
-    case .preflight: .preflight
-    case .pausing: .pausing
-    case .snapshotting: .snapshotting
-    case .staging: .staging
-    case .deploying: .deploying
-    case .activating: .activating
-    case .verifying: .verifying
-    case .cancelling: .cancelling
-    case .resuming: .resuming
-    case .completed, .cancelled, .failed: nil
-    }
-  }
-
   func presentationFailure(_ error: Error) -> SettingsPresentationFailure {
     if error is LinnetBackupStore.Failure { return .incrementalBackupFailed }
     guard let failure = error as? SettingsDataCoordinator.Failure else { return .unknown }
@@ -106,7 +89,7 @@ extension SettingsModel {
 
   func personalCommitAcceptance(
     _ snapshot: LinnetPersonalDataStore.Snapshot,
-    kind: SettingsConfigurationSession.PersonalCommitKind,
+    kind: SettingsConfigurationSession.CommitKind,
     ticket: SettingsConfigurationSession.PersonalTicket
   ) -> SettingsOutcomeAcceptance {
     switch configuration.acceptPersonalCommit(snapshot, kind: kind, ticket: ticket) {
@@ -125,7 +108,7 @@ extension SettingsModel {
       return .accepted
     case .submittedDraft(let snapshot), .externalReplacement(let snapshot):
       guard let ticket else { return .rejected }
-      let kind: SettingsConfigurationSession.DocumentCommitKind
+      let kind: SettingsConfigurationSession.CommitKind
       if case .externalReplacement = outcome.documentEffect {
         kind = .externalReplacement
       } else {

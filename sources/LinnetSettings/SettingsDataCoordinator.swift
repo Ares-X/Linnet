@@ -3,28 +3,13 @@ import Foundation
 /// The single Settings-side owner for personal data, learning data, legacy import,
 /// portable archives, backup creation and restore candidate preparation.
 actor SettingsDataCoordinator {
-  enum Phase: String, CaseIterable, Equatable, Sendable {
-    case preflight
-    case pausing
-    case snapshotting
-    case staging
-    case deploying
-    case activating
-    case verifying
-    case cancelling
-    case resuming
-    case completed
-    case cancelled
-    case failed
-  }
-
   enum CancellationCapability: Equatable, Sendable {
     case available
     case unavailable
   }
 
   struct OperationProgress: Equatable, Sendable {
-    let phase: Phase
+    let phase: SettingsOperationPhase
     let cancellation: CancellationCapability
   }
 
@@ -374,7 +359,7 @@ extension SettingsDataCoordinator {
     _ operation: DataOperation,
     progress: @escaping @Sendable (OperationProgress) -> Void = { _ in }
   ) async throws -> Outcome {
-    let phaseProgress: @Sendable (Phase) -> Void = { phase in
+    let phaseProgress: @Sendable (SettingsOperationPhase) -> Void = { phase in
       progress(Self.operationProgress(for: operation, phase: phase))
     }
     let personalEffect = Self.personalEffect(for: operation)
@@ -427,20 +412,10 @@ extension SettingsDataCoordinator {
         )
       case .apply(
         _, let document, let basePersonalRevision,
-        let baseDocumentRevision, .appearanceOnly):
-        outcome = try await applyAppearance(
+        let baseDocumentRevision, let scope) where scope != .full:
+        outcome = try await applyDocument(
           document: document,
-          basePersonalRevision: basePersonalRevision,
-          baseDocumentRevision: baseDocumentRevision,
-          environment: environment,
-          personalEffect: personalEffect,
-          progress: phaseProgress
-        )
-      case .apply(
-        _, let document, let basePersonalRevision,
-        let baseDocumentRevision, .configurationOnly):
-        outcome = try await applyConfiguration(
-          document: document,
+          scope: scope,
           basePersonalRevision: basePersonalRevision,
           baseDocumentRevision: baseDocumentRevision,
           environment: environment,
@@ -483,7 +458,7 @@ extension SettingsDataCoordinator {
 
   static func operationProgress(
     for operation: DataOperation,
-    phase: Phase
+    phase: SettingsOperationPhase
   ) -> OperationProgress {
     let cancellation: CancellationCapability
     switch (operation, phase) {
@@ -519,7 +494,7 @@ extension SettingsDataCoordinator {
 
   func activateLanguage(
     _ activation: LinnetDataRegistry.ActivationCandidate,
-    progress: @escaping @Sendable (Phase) -> Void = { _ in }
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void = { _ in }
   ) async throws {
     let registry = registryOverride ?? LinnetSettingsContract.dataRegistry(startingAt: bundle)
     guard let registry else { throw Failure.unavailable }

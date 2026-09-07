@@ -12,18 +12,6 @@ enum SettingsOperationKind: Equatable {
   case diagnostics
 }
 
-enum SettingsOperationPhase: Equatable {
-  case preflight
-  case pausing
-  case snapshotting
-  case staging
-  case deploying
-  case activating
-  case verifying
-  case cancelling
-  case resuming
-}
-
 enum SettingsPresentationFailure: Equatable {
   case unavailable
   case invalidOperation
@@ -510,6 +498,9 @@ private func phaseName(_ phase: SettingsOperationPhase) -> SettingsLocalizedPair
   case .verifying: ("verifying", "校验")
   case .cancelling: ("cancelling", "取消")
   case .resuming: ("resuming input runtime", "恢复输入法运行时")
+  case .completed: ("completed", "已完成")
+  case .cancelled: ("cancelled", "已取消")
+  case .failed: ("failed", "失败")
   }
 }
 

@@ -203,12 +203,12 @@ final class SquirrelPanel: NSPanel {
         let currentPage = candidateSnapshot?.currentPage
       else { return false }
       candidateExpansionAnchorPage = currentPage
-      inputController.refreshCandidatePresentation()
+      inputController.rimeUpdate()
       return true
     case .collapse:
       guard candidateExpansionAnchorPage != nil else { return false }
       candidateExpansionAnchorPage = nil
-      inputController.refreshCandidatePresentation()
+      inputController.rimeUpdate()
       return true
     }
   }

@@ -689,16 +689,19 @@ extension SettingsModel {
     for kind: SettingsOperationKind
   ) {
     guard activeOperation?.kind == kind else { return }
-    guard let presentationPhase = presentationPhase(update.phase) else { return }
+    switch update.phase {
+    case .completed, .cancelled, .failed: return
+    default: break
+    }
     let cancellationRequested = activeOperation?.cancellationRequested ?? false
     activeOperation = .init(
       kind: kind,
-      phase: presentationPhase,
+      phase: update.phase,
       cancellationAvailable: update.cancellation == .available,
       cancellationRequested: cancellationRequested
     )
     if !cancellationRequested {
-      status = .operationProgress(kind, presentationPhase)
+      status = .operationProgress(kind, update.phase)
     }
   }
 
