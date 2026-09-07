@@ -7,7 +7,6 @@ import Foundation
 /// Host is the sole owner that exchanges one with the live document.
 enum LinnetSettingsDocumentStore {
   static let fileName = "linnet_settings.json"
-  static let maximumDocumentBytes = 1024 * 1024
   private static let chineseProfileSchemaVersion = 8
   private static let rimeUserConfigFile = "user.yaml"
 
@@ -19,14 +18,12 @@ enum LinnetSettingsDocumentStore {
   enum Failure: LocalizedError, Equatable, Sendable {
     case unsafePath(String)
     case malformedDocument
-    case documentTooLarge
     case newerSchemaVersion(Int)
 
     var errorDescription: String? {
       switch self {
       case .unsafePath(let path): "Unsafe settings document path: \(path)"
       case .malformedDocument: "The settings document could not be read."
-      case .documentTooLarge: "The settings document is too large."
       case .newerSchemaVersion(let version):
         "The settings document was created by a newer version (schema \(version))."
       }
@@ -41,7 +38,7 @@ enum LinnetSettingsDocumentStore {
     let url = directory.appending(path: fileName)
     let stored: StoredDocumentBytes?
     do {
-      stored = try boundedDataIfPresent(url)
+      stored = try dataIfPresent(url)
     } catch let failure as Failure {
       throw failure
     } catch {
@@ -84,7 +81,7 @@ enum LinnetSettingsDocumentStore {
     try requireDirectory(directory)
     let data = try encoded(document)
     let file = directory.appending(path: fileName)
-    if try boundedDataIfPresent(file)?.data == data { return }
+    if try dataIfPresent(file)?.data == data { return }
     do {
       try data.write(to: file, options: .atomic)
     } catch {
@@ -113,8 +110,8 @@ enum LinnetSettingsDocumentStore {
     else { throw Failure.unsafePath(fileName) }
     let candidate = candidateDirectory.appending(path: fileName)
     let live = liveDirectory.appending(path: fileName)
-    let candidatePresent = try boundedDataIfPresent(candidate) != nil
-    let livePresent = try boundedDataIfPresent(live) != nil
+    let candidatePresent = try dataIfPresent(candidate) != nil
+    let livePresent = try dataIfPresent(live) != nil
     guard candidatePresent || livePresent else { return }
 
     let result: Int32
@@ -160,7 +157,6 @@ enum LinnetSettingsDocumentStore {
     } catch {
       throw Failure.malformedDocument
     }
-    guard data.count <= maximumDocumentBytes else { throw Failure.documentTooLarge }
     return data
   }
 
@@ -209,7 +205,7 @@ enum LinnetSettingsDocumentStore {
     from directory: URL
   ) -> LinnetSettingsContract.ChineseProfile? {
     let url = directory.appending(path: rimeUserConfigFile)
-    guard let stored = try? boundedDataIfPresent(url),
+    guard let stored = try? dataIfPresent(url),
       let contents = String(data: stored.data, encoding: .utf8)
     else {
       return nil
@@ -275,7 +271,7 @@ enum LinnetSettingsDocumentStore {
     let revision: String
   }
 
-  private static func boundedDataIfPresent(_ url: URL) throws -> StoredDocumentBytes? {
+  private static func dataIfPresent(_ url: URL) throws -> StoredDocumentBytes? {
     let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
     if descriptor < 0 && errno == ENOENT { return nil }
     guard descriptor >= 0 else { throw Failure.unsafePath(url.lastPathComponent) }
@@ -288,18 +284,12 @@ enum LinnetSettingsDocumentStore {
     else {
       throw Failure.unsafePath(url.lastPathComponent)
     }
-    guard info.st_size >= 0, info.st_size <= maximumDocumentBytes else {
-      throw Failure.documentTooLarge
-    }
     var data = Data()
     var hasher = revisionHasher(presence: "present")
     data.reserveCapacity(Int(info.st_size))
     while true {
       let chunk = try handle.read(upToCount: 64 * 1024) ?? Data()
       if chunk.isEmpty { break }
-      guard data.count <= maximumDocumentBytes - chunk.count else {
-        throw Failure.documentTooLarge
-      }
       data.append(chunk)
       hasher.update(data: chunk)
     }

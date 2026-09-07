@@ -19,13 +19,9 @@ struct LinnetBackupStoreTests {
       try testLegacyV3Compatibility(root: root.appending(path: "legacy-v3", directoryHint: .isDirectory))
       try testSymlinkAndVersionGuards(root: root)
       try testRetention(root: root.appending(path: "retention", directoryHint: .isDirectory))
-      try testHistoryLimit(root: root.appending(path: "history-limit", directoryHint: .isDirectory))
-      try testAggregateLimit(root: root.appending(path: "aggregate-limit", directoryHint: .isDirectory))
-      try testBoundedRegularFileReader(
+      try testLargeHistory(root: root.appending(path: "history-limit", directoryHint: .isDirectory))
+      try testRegularFileReader(
         root: root.appending(path: "bounded-reader", directoryHint: .isDirectory)
-      )
-      try testCommitHistoryCapacity(
-        root: root.appending(path: "commit-capacity", directoryHint: .isDirectory)
       )
       try testManualHistoryRecovery(
         root: root.appending(path: "manual-recovery", directoryHint: .isDirectory)
@@ -405,36 +401,13 @@ struct LinnetBackupStoreTests {
     expectFailure(.invalidCategory("unknown")) {
       _ = try LinnetBackupStore.decodePortable(try encode(wrongSchema))
     }
-    expectFailure(.artifactTooLarge("linnet_en")) {
-      _ = try LinnetBackupStore.encodePortable(
-        personalData: .empty,
-        learning: [
-          "linnet_en": String(
-            repeating: "a",
-            count: LinnetBackupStore.maximumLearningBytes + 1
-          )
-        ],
-        categories: [.englishLearning],
-        createdAt: timestamp,
-        appVersion: "1.0.0",
-        dataVersion: "2026.08.06"
-      )
-    }
-    expectFailure(.documentTooLarge) {
-      _ = try LinnetBackupStore.decodePortable(
-        Data(count: LinnetBackupStore.maximumPortableBytes + 1)
-      )
-    }
-    let row = #"{"value":"a","key":"a"}"#
-    let rowCount = LinnetPersonalDataStore.maximumRows + 1
-    let rows = String(repeating: "\(row),", count: rowCount - 1) + row
-    let structuralFlood = Data(
-      """
-      {"formatVersion":1,"createdAt":"2023-11-14T22:13:20Z","appVersion":"1.0.0","dataVersion":"fixture","categories":["customWords"],"personal":[{"category":"customWords","rowCount":\(rowCount),"sha256":"\(String(repeating: "0", count: 64))","rows":[\(rows)]}],"learning":[]}
-      """.utf8
-    )
-    expectFailure(.artifactTooLarge("customWords")) {
-      _ = try LinnetBackupStore.decodePortable(structuralFlood)
+    let longLearning = String(repeating: "a", count: 17 * 1024 * 1024) + "\tcode\tc=1\n"
+    let largeArchive = try LinnetBackupStore.encodePortable(
+      personalData: .empty, learning: ["linnet_en": longLearning],
+      categories: [.englishLearning], createdAt: timestamp,
+      appVersion: "1.0.0", dataVersion: "fixture")
+    guard try LinnetBackupStore.decodePortable(largeArchive).learning.first?.contents == longLearning else {
+      fail("valid learning data still hits the former backup quota")
     }
   }
 
@@ -695,65 +668,32 @@ struct LinnetBackupStoreTests {
     }
   }
 
-  private static func testHistoryLimit(root: URL) throws {
+  private static func testLargeHistory(root: URL) throws {
     try makeDirectory(root)
-    for _ in 0...LinnetBackupStore.maximumHistoryEntries {
+    for _ in 0...128 {
       try makeDirectory(
         root.appending(path: UUID().uuidString, directoryHint: .isDirectory)
       )
     }
-    expectFailure(.historyTooLarge) {
-      _ = try LinnetBackupStore.listBackups(in: root)
+    guard try LinnetBackupStore.listBackups(in: root).count == 129 else {
+      fail("backup listing still stops at the old history limit")
     }
   }
 
-  private static func testAggregateLimit(root: URL) throws {
-    try makeDirectory(root)
-    let transactionID = UUID()
-    let backup = try makeBackup(
-      root: root,
-      transactionID: transactionID,
-      customValue: "Aggregate"
-    )
-    let stable = backup.appending(path: "stable", directoryHint: .isDirectory)
-    for index in 0..<13 {
-      let file = stable.appending(path: "aggregate-\(index).custom.yaml")
-      FileManager.default.createFile(atPath: file.path, contents: nil)
-      let handle = try FileHandle(forWritingTo: file)
-      try handle.truncate(atOffset: UInt64(LinnetBackupStore.maximumStableArtifactBytes))
-      try handle.close()
-    }
-    expectFailure(.artifactTooLarge("backup total")) {
-      _ = try commit(
-        backup,
-        transactionID: transactionID,
-        operation: .applyPersonalData,
-        createdAt: .now
-      )
-    }
-    guard !FileManager.default.fileExists(
-      atPath: root.appending(path: transactionID.uuidString).path
-    ) else { fail("an aggregate-limit failure leaked its current transaction") }
-  }
-
-  private static func testBoundedRegularFileReader(root: URL) throws {
+  private static func testRegularFileReader(root: URL) throws {
     try makeDirectory(root)
     let regular = root.appending(path: "regular.data")
     let payload = Data(repeating: 0x5a, count: 2 * 1024 * 1024 + 17)
     try payload.write(to: regular)
-    guard try LinnetBackupStore.readBoundedRegularFile(regular, limit: payload.count) == payload else {
+    guard try LinnetBackupStore.readRegularFile(regular) == payload else {
       fail("the bounded regular-file reader changed legal bytes")
     }
 
     let symlink = root.appending(path: "symlink.data")
     try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: regular)
     expectFailure(.unsafeArtifact(symlink.lastPathComponent)) {
-      _ = try LinnetBackupStore.readBoundedRegularFile(symlink, limit: payload.count)
+      _ = try LinnetBackupStore.readRegularFile(symlink)
     }
-    expectFailure(.artifactTooLarge(regular.lastPathComponent)) {
-      _ = try LinnetBackupStore.readBoundedRegularFile(regular, limit: payload.count - 1)
-    }
-
     try expectConcurrentSizeMutationRejected(
       file: root.appending(path: "grow.data"), grow: true)
     try expectConcurrentSizeMutationRejected(
@@ -784,7 +724,7 @@ struct LinnetBackupStoreTests {
     started.wait()
     var rejected = false
     do {
-      _ = try LinnetBackupStore.readBoundedRegularFile(file, limit: initialBytes + 1)
+      _ = try LinnetBackupStore.readRegularFile(file)
     } catch is LinnetBackupStore.Failure {
       rejected = true
     }
@@ -792,109 +732,6 @@ struct LinnetBackupStoreTests {
     guard rejected else {
       fail("a file that \(grow ? "grew" : "shrank") during a bounded read was accepted")
     }
-  }
-
-  private static func testCommitHistoryCapacity(root: URL) throws {
-    let recoverable = root.appending(path: "recoverable", directoryHint: .isDirectory)
-    try makeDirectory(recoverable)
-    var verified: [UUID] = []
-    for index in 0..<100 {
-      let transactionID = UUID()
-      verified.append(transactionID)
-      let backup = try makeBackup(
-        root: recoverable,
-        transactionID: transactionID,
-        customValue: "Verified \(index)"
-      )
-      _ = try commit(
-        backup,
-        transactionID: transactionID,
-        operation: .applyPersonalData,
-        createdAt: Date(timeIntervalSince1970: TimeInterval(index + 1))
-      )
-    }
-    for _ in 0..<28 {
-      try makeDirectory(recoverable.appending(path: UUID().uuidString, directoryHint: .isDirectory))
-    }
-    let current = UUID()
-    let currentBackup = try makeBackup(
-      root: recoverable, transactionID: current, customValue: "Current"
-    )
-    _ = try LinnetBackupStore.commitBackup(.init(
-      backupDirectory: currentBackup,
-      backupID: UUID(),
-      transactionID: current,
-      operation: .restore,
-      createdAt: Date(timeIntervalSince1970: 1_000),
-      appVersion: "1.0.0",
-      dataVersion: "2026.08.06",
-      transactionsRoot: recoverable,
-      maximumVerifiedBackups: 100,
-      protectedTransactionIDs: [current, verified[0]]
-    ))
-    let recovered = try LinnetBackupStore.listBackups(in: recoverable)
-    guard recovered.count == LinnetBackupStore.maximumHistoryEntries,
-      recovered.filter({ isVerified($0.state) }).count == 100,
-      recovered.contains(where: { $0.transactionID == current && isVerified($0.state) }),
-      recovered.contains(where: { $0.transactionID == verified[0] && isVerified($0.state) }),
-      !FileManager.default.fileExists(
-        atPath: recoverable.appending(path: verified[1].uuidString).path)
-    else {
-      fail("latest-100 could not make progress with 28 preserved invalid records")
-    }
-
-    let exhausted = root.appending(path: "exhausted", directoryHint: .isDirectory)
-    try makeDirectory(exhausted)
-    let sentinelID = UUID()
-    let sentinel = exhausted.appending(path: sentinelID.uuidString, directoryHint: .isDirectory)
-    try makeDirectory(sentinel)
-    let sentinelFile = sentinel.appending(path: "keep.txt")
-    try Data("keep".utf8).write(to: sentinelFile)
-    for _ in 1..<LinnetBackupStore.maximumHistoryEntries {
-      try makeDirectory(exhausted.appending(path: UUID().uuidString, directoryHint: .isDirectory))
-    }
-    let oldNames = try Set(FileManager.default.contentsOfDirectory(atPath: exhausted.path))
-    let rejected = UUID()
-    let rejectedBackup = try makeBackup(
-      root: exhausted, transactionID: rejected, customValue: "Rejected"
-    )
-    expectFailure(.historyTooLarge) {
-      _ = try LinnetBackupStore.commitBackup(.init(
-        backupDirectory: rejectedBackup,
-        backupID: UUID(),
-        transactionID: rejected,
-        operation: .applyPersonalData,
-        createdAt: .now,
-        appVersion: "1.0.0",
-        dataVersion: "2026.08.06",
-        transactionsRoot: exhausted,
-        maximumVerifiedBackups: 100,
-        protectedTransactionIDs: [rejected]
-      ))
-    }
-    guard try Set(FileManager.default.contentsOfDirectory(atPath: exhausted.path)) == oldNames,
-      try Data(contentsOf: sentinelFile) == Data("keep".utf8)
-    else {
-      fail("an exhausted invalid history changed pre-existing bytes or members")
-    }
-
-    guard let removable = try LinnetBackupStore.listBackups(in: exhausted).first(where: {
-      $0.transactionID == sentinelID
-    }) else { fail("the exhausted-history recovery record was not listed") }
-    try LinnetBackupStore.removeNonverifiedBackup(removable, in: exhausted, preserving: [])
-    let recoveredID = UUID()
-    let recoveredBackup = try makeBackup(
-      root: exhausted, transactionID: recoveredID, customValue: "Recovered"
-    )
-    _ = try commit(
-      recoveredBackup,
-      transactionID: recoveredID,
-      operation: .applyPersonalData,
-      createdAt: .now
-    )
-    guard try LinnetBackupStore.listBackups(in: exhausted).count
-      == LinnetBackupStore.maximumHistoryEntries
-    else { fail("manual recovery did not unblock the next automatic backup") }
   }
 
   private static func testManualHistoryRecovery(root: URL) throws {

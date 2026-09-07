@@ -153,12 +153,12 @@ struct LinnetDataRegistryTests {
     run("exact Active projection", fixtureSigning, undeclaredActiveEntryFailsClosed)
     run("legacy active schema", fixtureSigning, legacyActiveSchemaFailsClosed)
     run("missing state", fixtureSigning, missingStateFailsClosed)
-    run("bounded active metadata", fixtureSigning, oversizedActiveMetadataFailsClosed)
+    run("large active metadata", fixtureSigning, largeActiveMetadataLoads)
     run("symlink active metadata", fixtureSigning, symlinkActiveMetadataFailsClosed)
     run("growing active metadata", fixtureSigning, growingActiveMetadataFailsClosed)
     run("shrinking active metadata", fixtureSigning, shrinkingActiveMetadataFailsClosed)
     run("swapped active metadata", fixtureSigning, swappedActiveMetadataFailsClosed)
-    run("bounded owned markers", fixtureSigning, unsafeOwnedMarkersArePreserved)
+    run("invalid owned markers", fixtureSigning, unsafeOwnedMarkersArePreserved)
     run("growing retirement marker", fixtureSigning, growingRetirementMarkerIsPreserved)
     run("escaping active entry", fixtureSigning, escapingActiveEntryFailsClosed)
     run("grammar state", fixtureSigning, inconsistentGrammarStateFailsClosed)
@@ -177,9 +177,9 @@ struct LinnetDataRegistryTests {
     run("explicit conflicting pack repair", fixtureSigning, explicitRepairPreservesActiveAndPersonalData)
     run("generation retention", fixtureSigning, threeGenerationsRetainCurrentAndOneRollback)
     run("scoped reconciliation", fixtureSigning, reconciliationIsScopedAndIdempotent)
-    run("bounded transaction root GC", fixtureSigning, oversizedTransactionRootDeletesNothing)
-    run("bounded transaction target GC", fixtureSigning, oversizedTransactionTargetDeletesNothing)
-    run("bounded pack root GC", fixtureSigning, oversizedPackRootDeletesNothing)
+    run("large transaction root GC", fixtureSigning, largeTransactionRootAllowsCleanup)
+    run("large transaction target GC", fixtureSigning, largeTransactionTargetAllowsCleanup)
+    run("large pack root GC", fixtureSigning, largePackRootAllowsCleanup)
     run("personal scratch GC", fixtureSigning, personalScratchGCIsTypedAndScoped)
     run("concurrent reconciliation", fixtureSigning, concurrentReconciliationNeverBlocksSnapshot)
     run("best-effort superseded cleanup", fixtureSigning, supersededCleanupContinuesAfterEntryFailure)
@@ -379,7 +379,7 @@ struct LinnetDataRegistryTests {
     }
   }
 
-  private static func oversizedTransactionRootDeletesNothing(
+  private static func largeTransactionRootAllowsCleanup(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
     try withFixture(fixtureSigning) { registry in
@@ -398,16 +398,16 @@ struct LinnetDataRegistryTests {
 
       let snapshot = try registry.runtimeSnapshot()
       require(snapshot.state.generation == 1, "GC limit blocked healthy Active")
-      require(FileManager.default.fileExists(
+      require(!FileManager.default.fileExists(
         atPath: registry.transactionsDirectory.appending(path: expired.uuidString).path),
-        "oversized transaction root deleted an owned entry")
-      require(FileManager.default.fileExists(
+        "large transaction root blocked scratch cleanup")
+      require(!FileManager.default.fileExists(
         atPath: registry.rootDirectory.appending(path: removable.relativePath).path),
-        "oversized transaction root allowed a later pack deletion")
+        "large transaction root blocked pack cleanup")
     }
   }
 
-  private static func oversizedTransactionTargetDeletesNothing(
+  private static func largeTransactionTargetAllowsCleanup(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
     try withFixture(fixtureSigning) { registry in
@@ -427,15 +427,15 @@ struct LinnetDataRegistryTests {
 
       let snapshot = try registry.runtimeSnapshot()
       require(snapshot.state.generation == 1, "target limit blocked healthy Active")
-      require(FileManager.default.fileExists(atPath: expiredDirectory.path),
-        "oversized transaction target was deleted")
-      require(FileManager.default.fileExists(
+      require(!FileManager.default.fileExists(atPath: expiredDirectory.path),
+        "large transaction target blocked cleanup")
+      require(!FileManager.default.fileExists(
         atPath: registry.rootDirectory.appending(path: removable.relativePath).path),
-        "oversized transaction target allowed a later pack deletion")
+        "large transaction target blocked pack cleanup")
     }
   }
 
-  private static func oversizedPackRootDeletesNothing(
+  private static func largePackRootAllowsCleanup(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
     try withFixture(fixtureSigning) { registry in
@@ -455,12 +455,12 @@ struct LinnetDataRegistryTests {
 
       let snapshot = try registry.runtimeSnapshot()
       require(snapshot.state.generation == 1, "pack limit blocked healthy Active")
-      require(FileManager.default.fileExists(
+      require(!FileManager.default.fileExists(
         atPath: registry.transactionsDirectory.appending(path: expired.uuidString).path),
-        "oversized pack root allowed an earlier transaction deletion")
-      require(FileManager.default.fileExists(
+        "large pack root blocked scratch cleanup")
+      require(!FileManager.default.fileExists(
         atPath: registry.rootDirectory.appending(path: removable.relativePath).path),
-        "oversized pack root deleted a candidate")
+        "large pack root blocked pack cleanup")
     }
   }
 
@@ -680,15 +680,18 @@ struct LinnetDataRegistryTests {
     }
   }
 
-  private static func oversizedActiveMetadataFailsClosed(
+  private static func largeActiveMetadataLoads(
     _ fixtureSigning: FixtureSigningOwner
   ) throws {
     try withFixture(fixtureSigning) { registry in
       let activation = registry.activeSharedDataDirectory.appending(path: "activation.json")
       let handle = try FileHandle(forWritingTo: activation)
-      try handle.truncate(atOffset: 1_048_577)
+      try handle.seekToEnd()
+      try handle.write(contentsOf: Data(repeating: 32, count: 2 * 1024 * 1024))
       try handle.close()
-      requireFailure(.invalidActiveState) { _ = try registry.runtimeSnapshot() }
+      let snapshot = try registry.runtimeSnapshot()
+      require(snapshot.state.generation == 1,
+        "valid large metadata was rejected")
     }
   }
 

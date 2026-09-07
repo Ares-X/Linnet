@@ -50,10 +50,6 @@ LINNET_PACK_TOOL_SOURCES = $(LINNET_DATA_REGISTRY_SOURCES) \
 LINNET_RUNTIME_INSPECTOR = build/linnet-runtime-inspector
 LINNET_RUNTIME_INSPECTOR_SOURCES = $(LINNET_DATA_REGISTRY_SOURCES) \
 	tools/LinnetRuntimeInspector.swift
-INPUT_SOURCE_REGISTRATION_INSPECTOR = build/input-source-registration-inspector
-INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES = \
-	sources/LinnetInputSourceRegistration.swift \
-	tools/LinnetInputSourceRegistrationInspector.swift
 DEPS_CHECK = $(RIME_LIBRARY) $(SMART_ENGLISH_PLUGIN)
 
 CXX ?= $(shell xcrun --find clang++)
@@ -72,8 +68,7 @@ PRIVATE_CXX_FLAGS = "-ffile-prefix-map=$(abspath .)=Linnet/Workspace" \
 	-fdebug-compilation-dir=.
 
 .PHONY: copy-rime-binaries verify-rime-binaries smart-english-plugin \
-	english-data-generator linnet-pack-tool linnet-runtime-inspector \
-	input-source-registration-inspector
+	english-data-generator linnet-pack-tool linnet-runtime-inspector
 
 copy-rime-binaries:
 	@set -e; \
@@ -122,8 +117,6 @@ linnet-pack-tool: $(LINNET_PACK_TOOL)
 
 linnet-runtime-inspector: $(LINNET_RUNTIME_INSPECTOR)
 
-input-source-registration-inspector: $(INPUT_SOURCE_REGISTRATION_INSPECTOR)
-
 $(ENGLISH_DATA_GENERATOR): $(ENGLISH_DATA_GENERATOR_SOURCES)
 	@mkdir -p $(@D)
 	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
@@ -140,13 +133,6 @@ $(LINNET_RUNTIME_INSPECTOR): $(LINNET_RUNTIME_INSPECTOR_SOURCES)
 	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
 		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 \
 		$(LINNET_RUNTIME_INSPECTOR_SOURCES) -o $(LINNET_RUNTIME_INSPECTOR)
-
-$(INPUT_SOURCE_REGISTRATION_INSPECTOR): $(INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES)
-	@mkdir -p $(@D)
-	$(SWIFTC) -parse-as-library -warnings-as-errors -O \
-		-sdk "$(MACOS_SDK)" -target arm64-apple-macosx13.0 -framework Carbon \
-		$(INPUT_SOURCE_REGISTRATION_INSPECTOR_SOURCES) \
-		-o $(INPUT_SOURCE_REGISTRATION_INSPECTOR)
 
 $(SMART_ENGLISH_PLUGIN): Makefile $(SMART_ENGLISH_SOURCES) $(SMART_ENGLISH_HEADERS) \
 		$(SMART_ENGLISH_SDK_HEADERS) \
@@ -298,8 +284,7 @@ community-verified: community
 # wraps the component with visible license, upstream notice and privacy pages.
 # Creation and static expansion do not install, launch or register the App.
 # Runtime acceptance is explicit (community-verified), not a packaging side effect.
-package: community linnet-pack-tool linnet-runtime-inspector \
-	input-source-registration-inspector
+package: community linnet-pack-tool linnet-runtime-inspector
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
 	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_package \

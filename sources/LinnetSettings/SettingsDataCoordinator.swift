@@ -313,9 +313,8 @@ extension SettingsDataCoordinator {
   func inspectPortable(_ source: URL) throws -> PortableImportCandidate {
     guard !Task.isCancelled else { throw Failure.cancelled }
     let archive = try LinnetBackupStore.decodePortable(
-      LinnetBackupStore.readBoundedRegularFile(
-        source, limit: LinnetBackupStore.maximumPortableBytes
-      )
+      LinnetBackupStore.readRegularFile(
+        source)
     )
     guard !Task.isCancelled else { throw Failure.cancelled }
     return PortableImportCandidate(

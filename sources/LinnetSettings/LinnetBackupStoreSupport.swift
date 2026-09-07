@@ -94,7 +94,7 @@ extension LinnetBackupStore {
     let backup = transaction.appending(path: "backup", directoryHint: .isDirectory)
     let manifestURL = backup.appending(path: "manifest.json")
     if FileManager.default.fileExists(atPath: manifestURL.path) {
-      let data = try readBoundedRegularFile(manifestURL, limit: maximumManifestBytes)
+      let data = try readRegularFile(manifestURL)
       let manifest: BackupManifest
       do {
         manifest = try decoder().decode(BackupManifest.self, from: data)
@@ -182,7 +182,6 @@ extension LinnetBackupStore {
       throw Failure.invalidCategory(schema)
     }
     let data = Data(contents.utf8)
-    guard data.count <= maximumLearningBytes else { throw Failure.artifactTooLarge(schema) }
     let rowCount = try validateLearningContents(contents, name: schema)
     return PortableLearningArtifact(
       category: category,
@@ -243,9 +242,6 @@ extension LinnetBackupStore {
         throw Failure.invalidCategory(artifact.schema)
       }
       let data = Data(artifact.contents.utf8)
-      guard data.count <= maximumLearningBytes else {
-        throw Failure.artifactTooLarge(artifact.schema)
-      }
       let rowCount = try validateLearningContents(artifact.contents, name: artifact.schema)
       guard artifact.rowCount == rowCount else {
         throw Failure.invalidRowCount(artifact.schema)
@@ -282,16 +278,7 @@ extension LinnetBackupStore {
   }
 
   static func validateRows(_ rows: [PortableRow], category: Category) throws {
-    guard rows.count <= LinnetPersonalDataStore.maximumRows else {
-      throw Failure.artifactTooLarge(category.rawValue)
-    }
     for row in rows {
-      guard row.value.lengthOfBytes(using: .utf8) <= LinnetPersonalDataStore.maximumFieldBytes,
-        (row.key?.lengthOfBytes(using: .utf8) ?? 0)
-          <= LinnetPersonalDataStore.maximumFieldBytes
-      else {
-        throw Failure.artifactTooLarge(category.rawValue)
-      }
       switch category {
       case .disabledWords:
         guard row.key == nil else { throw Failure.invalidDocument(category.rawValue) }
@@ -319,13 +306,11 @@ extension LinnetBackupStore {
       if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
       let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
       guard (2...3).contains(fields.count),
-        !fields[0].isEmpty, !fields[1].isEmpty,
-        fields.allSatisfy({ $0.utf8.count <= LinnetPersonalDataStore.maximumFieldBytes })
+        !fields[0].isEmpty, !fields[1].isEmpty
       else {
         throw Failure.invalidDocument(name)
       }
       rowCount += 1
-      guard rowCount <= maximumLearningRows else { throw Failure.artifactTooLarge(name) }
     }
     return rowCount
   }
@@ -342,10 +327,7 @@ extension LinnetBackupStore {
     try requireDirectory(learning)
     let stableURLs = try stableArtifactURLs(stable, formatVersion: formatVersion)
     let learningEntries = try immediateChildren(
-      of: learning,
-      maximumCount: learningFiles.count,
-      overflow: .artifactTooLarge("learning file count")
-    )
+      of: learning)
     let learningURLs: [URL]
     if formatVersion == backupFormatVersion {
       learningURLs = try learningEntries.flatMap { database in
@@ -360,21 +342,11 @@ extension LinnetBackupStore {
       }
       learningURLs = learningEntries
     }
-    var aggregateBytes = 0
-    for url in stableURLs + learningURLs {
-      let name = url.lastPathComponent
-      let limit = stableURLs.contains(url) ? stableArtifactLimit(name) : maximumBackupArtifactBytes
-      let byteCount = try regularFileSize(url, limit: limit)
-      guard aggregateBytes <= maximumBackupBytes - byteCount else {
-        throw Failure.artifactTooLarge("backup total")
-      }
-      aggregateBytes += byteCount
-    }
     var artifacts: [BackupArtifact] = []
     for url in stableURLs {
       let name = url.lastPathComponent
       artifacts.append(try backupArtifact(
-        url, path: "stable/\(name)", learning: false, limit: stableArtifactLimit(name)))
+        url, path: "stable/\(name)", learning: false))
     }
     for url in learningURLs {
       let name = String(url.path.dropFirst(learning.path.count + 1))
@@ -382,19 +354,17 @@ extension LinnetBackupStore {
         try backupArtifact(
           url,
           path: "user-dictionaries/\(name)",
-          learning: formatVersion != backupFormatVersion,
-          limit: maximumBackupArtifactBytes
-        ))
+          learning: formatVersion != backupFormatVersion))
     }
     return artifacts.sorted { $0.path < $1.path }
   }
 
-  static func backupArtifact(_ url: URL, path: String, learning: Bool, limit: Int) throws
+  static func backupArtifact(_ url: URL, path: String, learning: Bool) throws
     -> BackupArtifact {
-    let byteCount = try regularFileSize(url, limit: limit)
+    let byteCount = try regularFileSize(url)
     let contents: String?
     if learning {
-      let data = try readBoundedRegularFile(url, limit: maximumBackupArtifactBytes)
+      let data = try readRegularFile(url)
       guard let decoded = String(data: data, encoding: .utf8) else {
         throw Failure.invalidDocument(path)
       }
@@ -413,8 +383,7 @@ extension LinnetBackupStore {
 
   static func databaseFiles(in directory: URL) throws -> [URL] {
     let entries = try immediateChildren(
-      of: directory, maximumCount: maximumLiveDirectoryEntries,
-      overflow: .artifactTooLarge("user database file count"))
+      of: directory)
     var files: [URL] = []
     for entry in entries {
       if entry.lastPathComponent == learningRecoveryQuarantineName {
@@ -426,7 +395,7 @@ extension LinnetBackupStore {
     guard !files.isEmpty else { throw Failure.incompleteBackup }
     for file in files {
       guard safeName(file.lastPathComponent) else { throw Failure.unsafeArtifact(file.lastPathComponent) }
-      _ = try regularFileSize(file, limit: maximumBackupArtifactBytes)
+      _ = try regularFileSize(file)
     }
     return files.sorted { $0.lastPathComponent < $1.lastPathComponent }
   }
@@ -441,13 +410,6 @@ extension LinnetBackupStore {
       || (name.hasSuffix(".custom.yaml") && safeName(name))
   }
 
-  static func stableArtifactLimit(_ name: String) -> Int {
-    if name == LinnetSettingsDocumentStore.fileName {
-      return LinnetSettingsDocumentStore.maximumDocumentBytes
-    }
-    return maximumStableArtifactBytes
-  }
-
   static func stableArtifactURLs(
     _ directory: URL,
     formatVersion: Int?
@@ -460,10 +422,7 @@ extension LinnetBackupStore {
       }
     }
     let files = try immediateChildren(
-      of: directory,
-      maximumCount: maximumStableFiles,
-      overflow: .artifactTooLarge("stable file count")
-    ).sorted { $0.lastPathComponent < $1.lastPathComponent }
+      of: directory).sorted { $0.lastPathComponent < $1.lastPathComponent }
     let names = Set(files.map(\.lastPathComponent))
     let requiredFiles = canonicalPersonalFiles.union([LinnetSettingsDocumentStore.fileName])
     guard requiredFiles.isSubset(of: names) else {
@@ -475,46 +434,12 @@ extension LinnetBackupStore {
         throw Failure.unsafeArtifact(name)
       }
     }
-    let total = try files.reduce(into: 0) { partial, file in
-      let bytes = try regularFileSize(
-        file,
-        limit: stableArtifactLimit(file.lastPathComponent)
-      )
-      guard partial <= maximumBackupBytes - bytes else {
-        throw Failure.artifactTooLarge("backup total")
-      }
-      partial += bytes
-    }
-    guard total <= maximumBackupBytes else { throw Failure.artifactTooLarge("backup total") }
+    for file in files { try requireRegularFile(file) }
     return files
   }
 
-  static func regularBytes(in directory: URL, maximumCount: Int) throws -> Int {
-    let files = try immediateChildren(
-      of: directory,
-      maximumCount: maximumCount,
-      overflow: .artifactTooLarge("stable file count")
-    )
-    var total = 0
-    for file in files {
-      let bytes = try regularFileSize(
-        file,
-        limit: stableArtifactLimit(file.lastPathComponent)
-      )
-      guard total <= maximumBackupBytes - bytes else {
-        throw Failure.artifactTooLarge("backup total")
-      }
-      total += bytes
-    }
-    return total
-  }
-
   static func immediateChildren(
-    of directory: URL,
-    maximumCount: Int,
-    overflow: Failure
-  ) throws -> [URL] {
-    guard maximumCount > 0 else { throw overflow }
+    of directory: URL) throws -> [URL] {
     try requireDirectory(directory)
     guard let enumerator = FileManager.default.enumerator(
       at: directory,
@@ -526,7 +451,6 @@ extension LinnetBackupStore {
     var result: [URL] = []
     while let url = enumerator.nextObject() as? URL {
       result.append(url)
-      guard result.count <= maximumCount else { throw overflow }
     }
     return result
   }
@@ -552,38 +476,30 @@ extension LinnetBackupStore {
     }
   }
 
-  static func regularFileSize(_ url: URL, limit: Int) throws -> Int {
+  static func regularFileSize(_ url: URL) throws -> Int {
     var info = stat()
-    guard limit >= 0,
-      lstat(url.path, &info) == 0,
+    guard lstat(url.path, &info) == 0,
       (info.st_mode & S_IFMT) == S_IFREG,
       info.st_uid == getuid(),
-      info.st_size >= 0,
-      info.st_size <= limit
+      info.st_size >= 0
     else {
-      if info.st_size > limit { throw Failure.artifactTooLarge(url.lastPathComponent) }
       throw Failure.unsafeArtifact(url.lastPathComponent)
     }
     return Int(info.st_size)
   }
 
-  static func cloneBoundedRegularFile(
+  static func cloneRegularFile(
     _ source: URL,
-    to destination: URL,
-    limit: Int
-  ) throws -> Int {
+    to destination: URL) throws -> Int {
     let sourceDescriptor = open(source.path, O_RDONLY | O_NOFOLLOW)
     guard sourceDescriptor >= 0 else { throw Failure.unsafeArtifact(source.lastPathComponent) }
     defer { close(sourceDescriptor) }
     var info = stat()
-    guard limit >= 0,
-      fstat(sourceDescriptor, &info) == 0,
+    guard fstat(sourceDescriptor, &info) == 0,
       (info.st_mode & S_IFMT) == S_IFREG,
       info.st_uid == getuid(),
-      info.st_size >= 0,
-      info.st_size <= limit
+      info.st_size >= 0
     else {
-      if info.st_size > limit { throw Failure.artifactTooLarge(source.lastPathComponent) }
       throw Failure.unsafeArtifact(source.lastPathComponent)
     }
     let parent = destination.deletingLastPathComponent()
@@ -612,7 +528,7 @@ extension LinnetBackupStore {
   /// Reads one current-user regular file through a single no-follow descriptor.
   /// Both byte count and inode metadata must remain identical for the complete
   /// read; a concurrent grow, shrink, replacement or rewrite is never accepted.
-  static func readBoundedRegularFile(_ url: URL, limit: Int) throws -> Data {
+  static func readRegularFile(_ url: URL) throws -> Data {
     let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW)
     guard descriptor >= 0 else {
       if errno == ENOENT { throw Failure.missingArtifact(url.lastPathComponent) }
@@ -621,14 +537,11 @@ extension LinnetBackupStore {
     let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     defer { try? handle.close() }
     var before = stat()
-    guard limit >= 0,
-      fstat(descriptor, &before) == 0,
+    guard fstat(descriptor, &before) == 0,
       (before.st_mode & S_IFMT) == S_IFREG,
       before.st_uid == getuid(),
-      before.st_size >= 0,
-      before.st_size <= limit
+      before.st_size >= 0
     else {
-      if before.st_size > limit { throw Failure.artifactTooLarge(url.lastPathComponent) }
       throw Failure.unsafeArtifact(url.lastPathComponent)
     }
     var result = Data()
@@ -636,9 +549,6 @@ extension LinnetBackupStore {
     while true {
       let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
       if chunk.isEmpty { break }
-      guard result.count <= limit - chunk.count else {
-        throw Failure.artifactTooLarge(url.lastPathComponent)
-      }
       result.append(chunk)
     }
     var after = stat()

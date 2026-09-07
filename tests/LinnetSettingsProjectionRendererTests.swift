@@ -30,7 +30,7 @@ struct LinnetSettingsProjectionRendererTests {
       testLearningPolicyCodec()
       try testLegacyChineseProfileAdoption(in: directory)
       try testNewerDocumentFailsClosed(in: directory)
-      try testOversizedSettingsDocumentFailsClosed(in: directory)
+      try testLargeSettingsDocument(in: directory)
       try testProjectionReconciliationLifecycle(in: directory)
       try testCoreThemeReconciliation(in: directory)
       try testAtomicDocumentExchange(in: directory)
@@ -915,18 +915,13 @@ struct LinnetSettingsProjectionRendererTests {
     try FileManager.default.removeItem(at: rimeUserConfig)
   }
 
-  private static func testOversizedSettingsDocumentFailsClosed(in directory: URL) throws {
+  private static func testLargeSettingsDocument(in directory: URL) throws {
     let document = directory.appending(path: LinnetSettingsDocumentStore.fileName)
-    FileManager.default.createFile(atPath: document.path, contents: nil)
-    let handle = try FileHandle(forWritingTo: document)
-    try handle.truncate(atOffset: UInt64(LinnetSettingsDocumentStore.maximumDocumentBytes + 1))
-    try handle.close()
-    do {
-      _ = try LinnetSettingsDocumentStore.load(from: directory)
-      fail("an oversized settings document was accepted")
-    } catch LinnetSettingsDocumentStore.Failure.documentTooLarge {
-      // Expected: the codec rejects before JSON decoding or default adoption.
-    }
+    try LinnetSettingsDocumentStore.write(.default, to: directory)
+    var bytes = try Data(contentsOf: document)
+    bytes.append(Data(repeating: 0x20, count: 2 * 1024 * 1024))
+    try bytes.write(to: document)
+    _ = try LinnetSettingsDocumentStore.load(from: directory)
     try FileManager.default.removeItem(at: document)
   }
 

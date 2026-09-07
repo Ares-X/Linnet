@@ -6,15 +6,6 @@ import SQLite3
 /// Offline, one-shot migration from Hallelujah's substitution store into the
 /// Linnet `x;` stable table. The input process never links or calls this type.
 enum HallelujahSubstitutionImporter {
-  static let maximumSourceDatabaseBytes = 64 * 1024 * 1024
-  static let maximumSourceSidecarBytes = 64 * 1024 * 1024
-  static let maximumSourceAggregateBytes = 128 * 1024 * 1024
-  static let maximumRows = 50_000
-  static let maximumFieldBytes = 64 * 1024
-  static let maximumCanonicalBytes = 16 * 1024 * 1024
-  static let maximumExistingBytes = 16 * 1024 * 1024
-  static let maximumOutputBytes = 24 * 1024 * 1024
-
   typealias CancellationCheck = () throws -> Void
 
   struct SmokeProbe: Equatable, Sendable {
@@ -28,7 +19,7 @@ enum HallelujahSubstitutionImporter {
   }
 
   /// The sole product of external SQLite parsing. Coordinator carries this
-  /// opaque, bounded value across the Host pause boundary; merge never reopens
+  /// prepared value across the Host pause boundary; merge never reopens
   /// the external database.
   struct PreparedSource: Sendable {
     fileprivate let sourceDatabase: URL
@@ -42,12 +33,6 @@ enum HallelujahSubstitutionImporter {
     case sourceOpen
     case sourceRead
     case unsafeSource(String)
-    case sourceTooLarge(String)
-    case tooManyRows
-    case fieldTooLarge(row: Int)
-    case canonicalTooLarge
-    case existingTooLarge
-    case outputTooLarge
     case deadlineExceeded
     case invalidSchema
     case invalidText(row: Int)
@@ -171,7 +156,7 @@ enum HallelujahSubstitutionImporter {
     for entry in prepared.entries {
       try control.checkpoint()
       if merged[entry.trigger] != nil { continue }
-      guard merged.count < maximumRows else { throw Failure.outputTooLarge }
+
       merged[entry.trigger] = entry
       importedCount += 1
     }
@@ -261,7 +246,6 @@ extension HallelujahSubstitutionImporter {
   ) throws -> [Entry] {
     var entries: [String: Entry] = [:]
     var row = 0
-    var aggregateBytes = 0
     while true {
       let result = sqlite3_step(statement)
       if result == SQLITE_DONE { break }
@@ -269,15 +253,10 @@ extension HallelujahSubstitutionImporter {
         try control.rethrowInterruption(or: .sourceRead)
       }
       row += 1
-      guard row <= maximumRows else { throw Failure.tooManyRows }
+
       try control.checkpoint()
-      let key = try text(statement, column: 0, row: row, maximumBytes: maximumFieldBytes)
-      let value = try text(statement, column: 1, row: row, maximumBytes: maximumFieldBytes)
-      let rowBytes = key.utf8.count + value.utf8.count + 16
-      guard aggregateBytes <= maximumCanonicalBytes - rowBytes else {
-        throw Failure.canonicalTooLarge
-      }
-      aggregateBytes += rowBytes
+      let key = try text(statement, column: 0, row: row)
+      let value = try text(statement, column: 1, row: row)
       guard let trigger = normalizeTrigger(key) else { throw Failure.invalidTrigger(row: row) }
       try validateValue(value, row: row)
       let entry = Entry(trigger: trigger, value: value, weight: nil)
@@ -338,14 +317,9 @@ extension HallelujahSubstitutionImporter {
   private static func text(
     _ statement: OpaquePointer,
     column: Int32,
-    row: Int,
-    maximumBytes: Int
-  ) throws -> String {
+    row: Int) throws -> String {
     guard sqlite3_column_type(statement, column) == SQLITE_TEXT else {
       throw Failure.invalidText(row: row)
-    }
-    guard sqlite3_column_bytes(statement, column) <= maximumBytes else {
-      throw Failure.fieldTooLarge(row: row)
     }
     guard
       let value = rawText(statement, column: column)
@@ -427,13 +401,10 @@ extension HallelujahSubstitutionImporter {
     }
     let data: Data
     do {
-      data = try boundedData(
+      data = try readRegularFile(
         url,
-        maximumBytes: maximumExistingBytes,
         control: control
       )
-    } catch Failure.existingTooLarge {
-      throw Failure.existingTooLarge
     } catch is CancellationError {
       throw CancellationError()
     } catch Failure.deadlineExceeded {
@@ -457,14 +428,11 @@ extension HallelujahSubstitutionImporter {
     while cursor < contents.endIndex {
       try control.checkpoint()
       lineNumber += 1
-      guard lineNumber <= maximumRows + 128 else { throw Failure.tooManyRows }
+
       let newline = contents[cursor...].firstIndex(of: "\n")
       let lineEnd = newline ?? contents.endIndex
       let lineSlice = contents[cursor..<lineEnd]
       cursor = newline.map { contents.index(after: $0) } ?? contents.endIndex
-      guard lineSlice.utf8.count <= maximumFieldBytes * 3 + 2 else {
-        throw Failure.invalidExistingTable(line: lineNumber)
-      }
       let rawLine = String(lineSlice)
       let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
       try parseExistingLine(line, lineNumber: lineNumber, accumulator: &accumulator)
@@ -489,7 +457,6 @@ extension HallelujahSubstitutionImporter {
     }
     let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
     guard [2, 3].contains(fields.count),
-      fields.allSatisfy({ $0.utf8.count <= maximumFieldBytes }),
       !fields[0].isEmpty, fields[1].hasPrefix("x;"),
       let trigger = normalizeTrigger(String(fields[1].dropFirst(2)))
     else {
@@ -499,7 +466,7 @@ extension HallelujahSubstitutionImporter {
     guard accumulator.entries[trigger] == nil else {
       throw Failure.duplicateExistingTrigger(trigger)
     }
-    guard accumulator.entries.count < maximumRows else { throw Failure.tooManyRows }
+
     accumulator.entries[trigger] = Entry(
       trigger: trigger,
       value: fields[0],
@@ -551,9 +518,6 @@ extension HallelujahSubstitutionImporter {
       if let weight = entry.weight { line += "\t" + weight }
       line += "\n"
       let bytes = Data(line.utf8)
-      guard output.count <= maximumOutputBytes - bytes.count else {
-        throw Failure.outputTooLarge
-      }
       output.append(bytes)
     }
     return output
@@ -574,10 +538,8 @@ extension HallelujahSubstitutionImporter {
   }
 
   private static func validateSourceFootprint(_ database: URL) throws {
-    var aggregate = try boundedRegularFileSize(
-      database,
-      maximumBytes: maximumSourceDatabaseBytes
-    )
+    _ = try regularFileSize(
+      database)
     for suffix in ["-wal", "-shm", "-journal"] {
       let sidecar = URL(fileURLWithPath: database.path + suffix)
       var info = stat()
@@ -585,14 +547,8 @@ extension HallelujahSubstitutionImporter {
         if errno == ENOENT { continue }
         throw Failure.unsafeSource(sidecar.lastPathComponent)
       }
-      let bytes = try boundedRegularFileSize(
-        sidecar,
-        maximumBytes: maximumSourceSidecarBytes
-      )
-      guard aggregate <= maximumSourceAggregateBytes - bytes else {
-        throw Failure.sourceTooLarge("SQLite source aggregate")
-      }
-      aggregate += bytes
+      _ = try regularFileSize(
+        sidecar)
     }
   }
 
@@ -604,7 +560,7 @@ extension HallelujahSubstitutionImporter {
     return String(cString: buffer)
   }
 
-  private static func boundedRegularFileSize(_ url: URL, maximumBytes: Int) throws -> Int {
+  private static func regularFileSize(_ url: URL) throws -> Int {
     var info = stat()
     guard lstat(url.path, &info) == 0,
       (info.st_mode & S_IFMT) == S_IFREG,
@@ -613,15 +569,11 @@ extension HallelujahSubstitutionImporter {
     else {
       throw Failure.unsafeSource(url.lastPathComponent)
     }
-    guard info.st_size <= maximumBytes else {
-      throw Failure.sourceTooLarge(url.lastPathComponent)
-    }
     return Int(info.st_size)
   }
 
-  private static func boundedData(
+  private static func readRegularFile(
     _ url: URL,
-    maximumBytes: Int,
     control: OperationControl
   ) throws -> Data {
     let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW)
@@ -636,16 +588,13 @@ extension HallelujahSubstitutionImporter {
     else {
       throw Failure.invalidExistingTable(line: 0)
     }
-    guard info.st_size <= maximumBytes else { throw Failure.existingTooLarge }
+
     var data = Data()
     data.reserveCapacity(Int(info.st_size))
     while true {
       try control.checkpoint()
       let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
       if chunk.isEmpty { break }
-      guard data.count <= maximumBytes - chunk.count else {
-        throw Failure.existingTooLarge
-      }
       data.append(chunk)
     }
     return data

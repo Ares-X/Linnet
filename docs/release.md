@@ -4,13 +4,12 @@ Linnet 的公开发行采用无付费证书的社区模式：PKG 不含 Apple De
 Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动态库和插件
 使用同一张长期固定的自签 CMS 证书与 hardened runtime。固定 leaf 为跨版本
 身份连续提供一致依据，但不等同于 Apple Developer ID 或公证，仍须逐版做真实
-升级验收。用户还须核对
-同一 GitHub Release 的源码标签、文件清单和 SHA-256，并完成首次手动信任。
+升级验收。首次使用需按 macOS 提示手动确认；Release 提供源码标签、文件清单和 SHA-256 供核对。
 
 ## 用户信任边界
 
-用户必须先计算 `Linnet.pkg` 的 SHA-256，并与同一正式 Release 说明中的摘要
-逐字比对，再在 Finder 中按住 Control 点击或右键点击 `Linnet.pkg`，选择“打开”。若仍被 macOS 拦截，可在“系统设置 → 隐私与
+从项目 Release 下载 `Linnet.pkg`，在 Finder 中按住 Control 点击或右键点击，选择“打开”。
+需要确认下载文件时，可将 SHA-256 与同一 Release 的摘要比对。若仍被 macOS 拦截，可在“系统设置 → 隐私与
 安全性”中对该文件选择“仍要打开”。文档和脚本不得要求关闭 Gatekeeper、
 清除 quarantine 属性或修改系统安全策略。
 
@@ -67,36 +66,17 @@ export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release-preflight.XXX
 以及第二个 iCloud 端点。由于 CMS 签名时间会改变字节，本地测试不能替代正式发布前
 对 Action 原始产物的安装验收，也不要求为每轮开发探索先触发 Action。
 
-正式候选只能由 `scripts/release-control candidate` 创建携带本地验收收据的
-annotated `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动；裸标签会被拒绝。
-先运行 `scripts/release-control verify-local`：恢复锁定输入并构建，再串行完成
-strict lint、发布 owner、App/Swift/Rime、Periphery。验证期间不得编辑源码；临时
-Git index 绑定完整源 tree，不改变暂存区。收据只保存在 ignored
-`build/linnet-source-verification.json`；合并提交不同但 tree 完全相同时可复用。
-这是可信维护者的验收声明，不宣称 Action 独立重跑了本地测试。
+使用 `scripts/release-control candidate` 为已提交的 revision 创建候选标签。
+候选申请不要求本地测试收据、干净工作区或精确远端 main；Action 只构建标签指向的
+已提交源码，不包含未提交修改。根据改动运行相关测试并记录实际结果，未运行项目
+明确记为 `NOT_EXERCISED`。`verify-local` 是可选的完整非交互检查；Periphery 可单独
+运行，结果供审阅，不阻止构建或发布。
 
-`verify-local` 不操作桌面，Settings UI 记录为 `NOT_EXERCISED`。随后在具备
-Developer Mode 的专用测试桌面运行 `scripts/release-control verify-settings-ui`，
-为同一 source tree 补充 UI 结果，不重跑非交互检查。UI 未通过时不能申请候选；
-candidate Action 不补跑产品验收。独立应用身份和数据目录不等于隔离桌面，
-不得在维护者日常输入会话中运行此命令或直接运行 XCUITest。
-
-维护者明确要求跳过测试、先发布 Preview 交由用户验收时，可在 clean、精确远端
-`main` 执行 `scripts/release-control candidate-preview "跳过原因"`。它不执行测试，
-为当前 tree 记录 `preview_only` 与 `NOT_EXERCISED`，不伪造通过项；随后仍由同一
-Action 构建、签名并检查发布文件，只允许推进预览频道。此记录不能授权正式发布；
-正式版仍须在已完成验收的源码上使用完整收据申请新候选。
-`archive` 只构建、签名、打包及检查最终文件，不隐式调用候选运行测试；需要这些
-检查时显式运行 `make community-verified`，不要把它当作无需测试的打包命令。
-
-针对已审阅的小范围修复，维护者可在同一 `build/linnet-source-verification.json`
-记录 format 3 的范围验收：绑定 `source_tree`，在 `scope` 说明改动与验收范围，
-`checks` 逐项记录实际执行的 `command`、`result: PASS` 和 `evidence`，
-`not_exercised` 明列未执行或用户明确不要求重复的项目。这不是全量通过收据；
-已通过且实现未再变化的相关检查可复用，说明对应证据即可。使用原有 `candidate`
-命令及唯一 Action 构建产物，正式 `authorize` 前仍须完成精确产物的虚拟机实际输入
-和升级验收。用户要求不重复本机全量 UI 时，不运行本机 XCUITest，也不将其记为 PASS。
-签名、版本、完整性和远端发布资产检查不因范围验收而减少。
+Settings UI 仅在专用测试桌面按需运行 `scripts/release-control verify-settings-ui`。
+它不依赖另一份测试收据，也不是申请候选的前置条件。独立 bundle ID 和数据目录
+不能隔离鼠标、键盘或焦点，不得在维护者日常输入会话中运行 XCUITest。
+`archive` 只构建、签名、打包及检查最终文件；需额外检查时显式运行对应测试。
+正式发布仍需验证受本次变更影响的实际安装与产品行为，不能把未执行的流程记为通过。
 
 同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
 标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
@@ -153,9 +133,8 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
 正式产物的构建、签名、候选暂存和最终公开都由 GitHub Actions 完成；维护者 Mac
 负责源码验收与 Action 原字节安装验收，并在验收后创建不可变授权标签：
 
-1. 运行 `scripts/release-control verify-local`，提交其绑定的相同 source tree，
-   在 clean、精确远端 `main` 运行 `scripts/release-control candidate`；
-2. 等待唯一 macOS candidate job 成功。它复用完整源码收据，只构建、签名一次，并把
+1. 完成与改动相关的验证并提交源码，运行 `scripts/release-control candidate`；
+2. 等待唯一 macOS candidate job 成功。它只构建、签名一次，并把
    manifest 中的全部产物直接放入
    `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
 3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
@@ -237,11 +216,11 @@ Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 c
 
 在线升级须验证无需注销或密码，登录会话、enabled/selected、UserData、输入菜单、
 Settings 和真实输入保留。
-Core 只接受固定 CMS App 以及唯一、精确匹配的 TIS
-source/bundle 身份；旧 ad-hoc App、App 缺失或注册缺失都在 payload 前失败并指向
-Complete。受支持签名 App 的缺失注册由 Complete 修复；重复、冲突、未知 bundle 或
-任何残留身份必须先执行 README 的离线完整卸载命令，不能猜测或覆盖用户状态。发布
-Keychain 密码永远不属于用户安装流程。
+PKG 不以旧 App 的签名、版本或 TIS 注册状态作为安装前提。Complete 可首次安装、
+覆盖重装或修复旧 App；Core 包仍需要现有 App 与兼容的语言运行时。新 App 的签名、
+目标字节、路径和现有数据兼容性在实际写入边界检查。输入源尚未启用时，安装完成后
+提示用户到系统设置添加；不要求预先完整卸载，也不把启用失败报告成安装失败。
+发布 Keychain 密码永远不属于用户安装流程。
 安装脚本也不得调用依赖用户系统信任根的深度验签来判断 App 是否损坏；用户侧只核对
 冻结的 designated requirement、发布 metadata、差分基线和精确目标整树。
 

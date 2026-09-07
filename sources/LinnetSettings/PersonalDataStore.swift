@@ -69,25 +69,18 @@ struct LinnetPersonalData: Equatable, Sendable {
 }
 
 enum LinnetPersonalDataStore {
-  static let maximumRows = 50_000
-  static let maximumFieldBytes = 64 * 1024
-  static let maximumLineBytes = 64 * 1024
-  static let maximumFileBytes = 64 * 1024 * 1024
-
   typealias CancellationCheck = @Sendable () throws -> Void
 
   enum Failure: LocalizedError, Equatable {
     case invalidData(LinnetPersonalDataValidation.Issue)
     case invalidFile(String)
     case unsafeFile(String)
-    case fileTooLarge(String)
 
     var errorDescription: String? {
       switch self {
       case .invalidData: "Personal data failed validation."
       case .invalidFile(let name): "Personal-data file is invalid: \(name)"
       case .unsafeFile(let name): "Personal-data file is not a regular user file: \(name)"
-      case .fileTooLarge(let name): "Personal-data file is too large: \(name)"
       }
     }
   }
@@ -167,9 +160,9 @@ enum LinnetPersonalDataStore {
   private static func publishChangedFile(_ contents: String, to file: URL) throws {
     var info = stat()
     if lstat(file.path, &info) == 0 {
-      let opened = try openBoundedFile(file)
+      let opened = try openRegularFile(file)
       defer { try? opened.handle.close() }
-      let existing = try opened.handle.read(upToCount: maximumFileBytes + 1) ?? Data()
+      let existing = try opened.handle.readToEnd() ?? Data()
       try validateUnchangedFile(
         opened.handle.fileDescriptor, before: opened.info, observedBytes: existing.count, file: file)
       if existing == Data(contents.utf8) { return }
@@ -213,10 +206,6 @@ extension LinnetPersonalDataStore {
       && !value.contains("\0")
   }
 
-  static func fieldIsBounded(_ value: String) -> Bool {
-    value.lengthOfBytes(using: .utf8) <= maximumFieldBytes
-  }
-
   fileprivate static func renderedFiles(
     for data: LinnetPersonalData
   ) throws -> [String: String] {
@@ -240,7 +229,6 @@ extension LinnetPersonalDataStore {
         rows: normalized.expansions.map { ($0.value, $0.trigger) }
       )
     ]
-    try validateRenderedFiles(files)
     return files
   }
 
@@ -249,18 +237,7 @@ extension LinnetPersonalDataStore {
   ) throws -> (name: String, contents: String) {
     let normalized = try normalized(data)
     let contents = try userSettingsYAML(normalized.disabledWords.map(\.value))
-    try validateRenderedFiles([userSettingsFile: contents])
     return (userSettingsFile, contents)
-  }
-
-  fileprivate static func validateRenderedFiles(_ files: [String: String]) throws {
-    for (name, contents) in files {
-      guard contents.lengthOfBytes(using: .utf8) <= maximumFileBytes,
-        linesAreBounded(contents)
-      else {
-        throw Failure.fileTooLarge(name)
-      }
-    }
   }
 
   /// Canonical personal revision bytes. This deliberately is not a runtime
@@ -293,17 +270,16 @@ extension LinnetPersonalDataStore {
   fileprivate static func readTable(_ file: URL) throws -> [TableRow] {
     guard FileManager.default.fileExists(atPath: file.path) else { return [] }
     var rows: [TableRow] = []
-    try forEachBoundedLine(in: file) { line in
+    try forEachLine(in: file) { line in
       if line.hasPrefix("#") || line.trimmingCharacters(in: .whitespaces).isEmpty { return }
       let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
       guard fields.count == 2 else { throw Failure.invalidFile(file.lastPathComponent) }
       let value = String(fields[0])
       let code = String(fields[1])
-      guard validValue(value), validValue(code), fieldIsBounded(value), fieldIsBounded(code)
+      guard validValue(value), validValue(code)
       else {
         throw Failure.invalidFile(file.lastPathComponent)
       }
-      guard rows.count < maximumRows else { throw Failure.fileTooLarge(file.lastPathComponent) }
       rows.append(TableRow(value: value, code: code))
     }
     return rows
@@ -345,7 +321,7 @@ extension LinnetPersonalDataStore {
       )
     }
     var accumulator = LegacySettingsAccumulator()
-    try forEachBoundedLine(in: file) { line in
+    try forEachLine(in: file) { line in
       if line.isEmpty || line.hasPrefix("#") { return }
       try parseLegacySettingsLine(line, accumulator: &accumulator)
     }
@@ -395,16 +371,13 @@ extension LinnetPersonalDataStore {
     else {
       throw Failure.invalidFile(legacyUserSettingsFile)
     }
-    guard fieldIsBounded(value), accumulator.values.count < maximumRows else {
-      throw Failure.fileTooLarge(legacyUserSettingsFile)
-    }
     accumulator.values.append(value)
   }
 
   /// Reads the standard Rime patch emitted by the canonical writer.
   fileprivate static func readUserSettingsPatch(_ file: URL) throws -> [String] {
     var accumulator = UserSettingsPatchAccumulator()
-    try forEachBoundedLine(in: file) { line in
+    try forEachLine(in: file) { line in
       if line.isEmpty || line.hasPrefix("#") { return }
       if line == "patch:" {
         guard !accumulator.sawPatch else { throw Failure.invalidFile(userSettingsFile) }
@@ -455,17 +428,14 @@ extension LinnetPersonalDataStore {
     else {
       throw Failure.invalidFile(userSettingsFile)
     }
-    guard fieldIsBounded(value), accumulator.values.count < maximumRows else {
-      throw Failure.fileTooLarge(userSettingsFile)
-    }
     accumulator.values.append(value)
   }
 
-  fileprivate static func forEachBoundedLine(
+  fileprivate static func forEachLine(
     in file: URL,
     _ body: (String) throws -> Void
   ) throws {
-    let opened = try openBoundedFile(file)
+    let opened = try openRegularFile(file)
     let handle = opened.handle
     defer { try? handle.close() }
     var buffer = Data()
@@ -474,26 +444,20 @@ extension LinnetPersonalDataStore {
     while true {
       let chunk = try handle.read(upToCount: 32 * 1024) ?? Data()
       if chunk.isEmpty { break }
-      guard observedBytes <= maximumFileBytes - chunk.count else {
-        throw Failure.fileTooLarge(file.lastPathComponent)
-      }
       observedBytes += chunk.count
       buffer.append(chunk)
       var lineStart = buffer.startIndex
       while lineStart < buffer.endIndex,
         let newline = buffer[lineStart...].firstIndex(of: 0x0a) {
-        try processBoundedLine(buffer[lineStart..<newline], from: file, body: body)
+        try processLine(buffer[lineStart..<newline], from: file, body: body)
         lineStart = buffer.index(after: newline)
       }
       if lineStart > buffer.startIndex {
         buffer.removeSubrange(buffer.startIndex..<lineStart)
       }
-      guard buffer.count <= maximumLineBytes + 1 else {
-        throw Failure.fileTooLarge(file.lastPathComponent)
-      }
     }
     if !buffer.isEmpty {
-      try processBoundedLine(buffer[buffer.startIndex..<buffer.endIndex], from: file, body: body)
+      try processLine(buffer[buffer.startIndex..<buffer.endIndex], from: file, body: body)
     }
 
     try validateUnchangedFile(
@@ -504,7 +468,7 @@ extension LinnetPersonalDataStore {
     )
   }
 
-  fileprivate static func openBoundedFile(_ file: URL) throws -> (handle: FileHandle, info: stat) {
+  fileprivate static func openRegularFile(_ file: URL) throws -> (handle: FileHandle, info: stat) {
     let descriptor = open(file.path, O_RDONLY | O_NOFOLLOW)
     guard descriptor >= 0 else { throw Failure.unsafeFile(file.lastPathComponent) }
     let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
@@ -515,10 +479,6 @@ extension LinnetPersonalDataStore {
     else {
       try? handle.close()
       throw Failure.unsafeFile(file.lastPathComponent)
-    }
-    guard info.st_size >= 0, info.st_size <= maximumFileBytes else {
-      try? handle.close()
-      throw Failure.fileTooLarge(file.lastPathComponent)
     }
     return (handle, info)
   }
@@ -544,33 +504,17 @@ extension LinnetPersonalDataStore {
     }
   }
 
-  fileprivate static func processBoundedLine(
+  fileprivate static func processLine(
     _ bytes: Data.SubSequence,
     from file: URL,
     body: (String) throws -> Void
   ) throws {
     var lineBytes = bytes
     if lineBytes.last == 0x0d { lineBytes = lineBytes.dropLast() }
-    guard lineBytes.count <= maximumLineBytes else {
-      throw Failure.fileTooLarge(file.lastPathComponent)
-    }
     guard let line = String(data: Data(lineBytes), encoding: .utf8), !line.contains("\0") else {
       throw Failure.invalidFile(file.lastPathComponent)
     }
     try body(line)
-  }
-
-  fileprivate static func linesAreBounded(_ contents: String) -> Bool {
-    var lineBytes = 0
-    for byte in contents.utf8 {
-      if byte == 0x0a {
-        if lineBytes > maximumLineBytes { return false }
-        lineBytes = 0
-      } else {
-        lineBytes += 1
-      }
-    }
-    return lineBytes <= maximumLineBytes
   }
 
   static func table(name: String, rows: [(String, String)]) -> String {

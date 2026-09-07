@@ -23,7 +23,6 @@ enum LinnetSettingsProjectionRenderer {
   static let emojiSwitchIndex = 3
   static let singleCharacterSearchSwitchIndex = 4
   static let englishPredictionSwitchIndex = 1
-  private static let maximumProjectionBytes = 1024 * 1024
   private static let codeTokenRecognizerPattern =
     "^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$"
 
@@ -79,7 +78,6 @@ enum LinnetSettingsProjectionRenderer {
       let url = directory.appending(path: name)
       if let contents = rendered[name] {
         let data = Data(contents.utf8)
-        guard data.count <= maximumProjectionBytes else { throw Failure.unsafeFile(name) }
         if try existingData(at: url, name: name) == data { continue }
         try contents.write(to: url, atomically: true, encoding: .utf8)
         changed.insert(name)
@@ -147,8 +145,7 @@ private extension LinnetSettingsProjectionRenderer {
     guard fstat(descriptor, &info) == 0,
       (info.st_mode & S_IFMT) == S_IFREG,
       info.st_uid == getuid(),
-      info.st_size >= 0,
-      info.st_size <= maximumProjectionBytes
+      info.st_size >= 0
     else { throw Failure.unsafeFile(name) }
     let data = try handle.readToEnd() ?? Data()
     guard data.count == Int(info.st_size) else { throw Failure.unsafeFile(name) }

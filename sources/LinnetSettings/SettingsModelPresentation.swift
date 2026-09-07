@@ -288,9 +288,7 @@ extension SettingsModel {
     let reason = switch issue.reason {
     case .missing: chinese ? "不能为空。" : "is required."
     case .invalid: chinese ? "格式无效。" : "has an invalid format."
-    case .tooLarge: chinese ? "超过安全大小限制。" : "exceeds the safe size limit."
     case .duplicate: chinese ? "与另一行重复。" : "duplicates another row."
-    case .tooMany: chinese ? "超过允许的行数。" : "has too many rows."
     }
     return chinese ? "\(location)\(reason)" : "\(location) \(reason)"
   }
@@ -309,8 +307,6 @@ extension SettingsModel {
       return chinese ? "禁用词第 \(row ?? 0) 行" : "Disabled word row \(row ?? 0)"
     case .expansion(let expansionID, let field):
       return expansionLocation(expansionID: expansionID, field: field, chinese: chinese)
-    case .collection(let collection):
-      return collectionLocation(collection, chinese: chinese)
     }
   }
 
@@ -346,17 +342,6 @@ extension SettingsModel {
     return chinese
       ? "文本展开第 \(row ?? 0) 行的\(fieldName)"
       : "Text Expander row \(row ?? 0) \(fieldName)"
-  }
-
-  private func collectionLocation(
-    _ collection: LinnetPersonalDataValidation.Collection,
-    chinese: Bool
-  ) -> String {
-    switch collection {
-    case .customWords: chinese ? "自定义词" : "Custom words"
-    case .disabledWords: chinese ? "禁用词" : "Disabled words"
-    case .expansions: chinese ? "文本展开" : "Text Expander"
-    }
   }
 
   func legacyImportSummary(

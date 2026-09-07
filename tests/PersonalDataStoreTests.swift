@@ -177,53 +177,14 @@ struct PersonalDataStoreTests {
         .init(location: .expansion(invalidExpansion.id, .trigger), reason: .invalid),
         in: .init(customWords: [], disabledWords: [], expansions: [invalidExpansion])
       )
-      let oversized = directory.appending(path: LinnetPersonalDataStore.customWordsFile)
-      FileManager.default.createFile(atPath: oversized.path, contents: nil)
-      let oversizedHandle = try FileHandle(forWritingTo: oversized)
-      try oversizedHandle.truncate(atOffset: UInt64(LinnetPersonalDataStore.maximumFileBytes + 1))
-      try oversizedHandle.close()
-      expectFailure(.fileTooLarge(LinnetPersonalDataStore.customWordsFile)) {
-        _ = try LinnetPersonalDataStore.load(from: directory)
+      let largeValue = String(repeating: "a", count: 128 * 1024)
+      let large = LinnetPersonalData(
+        customWords: [.init(value: largeValue, code: "large")],
+        disabledWords: [], expansions: [])
+      try LinnetPersonalDataStore.writePersonalFiles(large, to: directory)
+      guard try LinnetPersonalDataStore.load(from: directory).customWords.first?.value == largeValue else {
+        fail("a valid large personal field did not round trip")
       }
-
-      let oversizedField = String(
-        repeating: "a", count: LinnetPersonalDataStore.maximumFieldBytes + 1)
-      let oversizedCustom = LinnetPersonalData.CustomWord(value: oversizedField, code: "large")
-      expectIssue(
-        .init(location: .customWord(oversizedCustom.id, .value), reason: .tooLarge),
-        in: .init(customWords: [oversizedCustom], disabledWords: [], expansions: [])
-      )
-      let tooManyDisabled = Array(
-        repeating: "word", count: LinnetPersonalDataStore.maximumRows + 1)
-      expectIssue(
-        .init(location: .collection(.disabledWords), reason: .tooMany),
-        in: .init(customWords: [], disabledWords: tooManyDisabled, expansions: [])
-      )
-      let legalLargeValue = String(
-        repeating: "a", count: LinnetPersonalDataStore.maximumFieldBytes - 64)
-      let oversizedCustomOutput = (0..<1_030).map {
-        LinnetPersonalData.CustomWord(value: legalLargeValue, code: "word\($0)")
-      }
-      expectIssue(
-        .init(location: .collection(.customWords), reason: .tooLarge),
-        in: .init(customWords: oversizedCustomOutput, disabledWords: [], expansions: [])
-      )
-      let legalLargeTrigger = "x;" + String(
-        repeating: "a", count: LinnetPersonalDataStore.maximumFieldBytes - 70)
-      let oversizedExpansionOutput = (0..<1_030).map {
-        LinnetPersonalData.Expansion(value: "v", trigger: legalLargeTrigger + "\($0)")
-      }
-      expectIssue(
-        .init(location: .collection(.expansions), reason: .tooLarge),
-        in: .init(customWords: [], disabledWords: [], expansions: oversizedExpansionOutput)
-      )
-      let legalLargeDisabled = String(
-        repeating: "b", count: LinnetPersonalDataStore.maximumFieldBytes - 70)
-      let oversizedDisabledOutput = (0..<1_030).map { legalLargeDisabled + "\($0)" }
-      expectIssue(
-        .init(location: .collection(.disabledWords), reason: .tooLarge),
-        in: .init(customWords: [], disabledWords: oversizedDisabledOutput, expansions: [])
-      )
       let blankRows = try LinnetPersonalDataStore.normalized(
         .init(
           customWords: [
@@ -262,7 +223,7 @@ struct PersonalDataStoreTests {
         blankValidation.firstIssue == nil,
         validatedData == (try LinnetPersonalDataStore.normalized(validationDraft))
       else { fail("typed validation diverged from canonical normalization") }
-      try testBoundedStreamingLoad(
+      try testStreamingLoad(
         in: directory.appending(path: "bounded-stream", directoryHint: .isDirectory)
       )
       print("PersonalDataStoreTests: PASS")
@@ -271,27 +232,15 @@ struct PersonalDataStoreTests {
     }
   }
 
-  private static func testBoundedStreamingLoad(in directory: URL) throws {
+  private static func testStreamingLoad(in directory: URL) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let custom = directory.appending(path: LinnetPersonalDataStore.customWordsFile)
-    let tooManyRows = (0...LinnetPersonalDataStore.maximumRows)
+    let tooManyRows = (0...50_000)
       .map { "word\($0)\tcode\($0)" }
       .joined(separator: "\n") + "\n"
     try tooManyRows.write(to: custom, atomically: true, encoding: .utf8)
-    expectFailure(.fileTooLarge(LinnetPersonalDataStore.customWordsFile)) {
-      _ = try LinnetPersonalDataStore.load(from: directory)
-    }
-
-    let maximumLine = String(
-      repeating: "a", count: LinnetPersonalDataStore.maximumFieldBytes - 2
-    ) + "\ta\n"
-    try maximumLine.write(to: custom, atomically: true, encoding: .utf8)
-    guard try LinnetPersonalDataStore.load(from: directory).customWords.count == 1 else {
-      fail("a personal-data line at the byte limit was rejected")
-    }
-    try ("a" + maximumLine).write(to: custom, atomically: true, encoding: .utf8)
-    expectFailure(.fileTooLarge(LinnetPersonalDataStore.customWordsFile)) {
-      _ = try LinnetPersonalDataStore.load(from: directory)
+    guard try LinnetPersonalDataStore.load(from: directory).customWords.count == 50_001 else {
+      fail("the former row quota still blocks personal dictionaries")
     }
 
     let chunkBoundaryComment = "#" + String(repeating: "a", count: 32 * 1024 - 2) + "界"
@@ -305,13 +254,13 @@ struct PersonalDataStoreTests {
     try LinnetPersonalDataStore.writePersonalFiles(.empty, to: directory)
     try LinnetPersonalDataStore.writeRuntimeSettings(.empty, to: directory)
     let settings = directory.appending(path: LinnetPersonalDataStore.userSettingsFile)
-    let disabledRows = (0...LinnetPersonalDataStore.maximumRows)
+    let disabledRows = (0...50_000)
       .map { "    - \"disabled-\($0)\"" }
       .joined(separator: "\n")
     try ("patch:\n  disabled_words:\n" + disabledRows + "\n").write(
       to: settings, atomically: true, encoding: .utf8)
-    expectFailure(.fileTooLarge(LinnetPersonalDataStore.userSettingsFile)) {
-      _ = try LinnetPersonalDataStore.load(from: directory)
+    guard try LinnetPersonalDataStore.load(from: directory).disabledWords.count == 50_001 else {
+      fail("the former row quota still blocks disabled words")
     }
   }
 

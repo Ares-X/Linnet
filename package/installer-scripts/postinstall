@@ -11,7 +11,6 @@ input_methods_root="${library_root}/Input Methods"
 app_path="${input_methods_root}/Linnet.app"
 application_support_root="${library_root}/Application Support"
 support_root="${application_support_root}/Linnet"
-executable="${app_path}/Contents/MacOS/Linnet"
 active_state="${support_root}/Runtime/Active/activation.json"
 script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 mode_file="${script_root}/install-mode"
@@ -19,7 +18,6 @@ identity_helper="${script_root}/candidate-app-identity.sh"
 identity_metadata="${script_root}/candidate-app-identity.json"
 candidate_file="${script_root}/candidate-core-version"
 runtime_inspector="${script_root}/linnet-runtime-inspector"
-registration_inspector="${script_root}/input-source-registration-inspector"
 delta_tool="${script_root}/linnet-pack"
 current_uid="$(/usr/bin/id -u)"
 
@@ -85,19 +83,8 @@ case "${install_mode}" in
     exit 1
     ;;
 esac
-[[ -f "${registration_inspector}" && ! -L "${registration_inspector}" && \
-  -x "${registration_inspector}" && -f "${delta_tool}" && ! -L "${delta_tool}" && \
-  -x "${delta_tool}" ]] || {
-  echo "Linnet postinstall: repair tools are unavailable" >&2
-  exit 1
-}
-candidate_bundle_identifier="$(/usr/bin/plutil -extract bundle_identifier raw -o - \
-  "${identity_metadata}")" || {
-  echo "Linnet postinstall: candidate bundle identity is unavailable" >&2
-  exit 1
-}
-[[ "${candidate_bundle_identifier}" == io.github.ares-x.inputmethod.Linnet ]] || {
-  echo "Linnet postinstall: candidate bundle identity is invalid" >&2
+[[ -f "${delta_tool}" && ! -L "${delta_tool}" && -x "${delta_tool}" ]] || {
+  echo "Linnet postinstall: App exchange tool is unavailable" >&2
   exit 1
 }
 
@@ -116,11 +103,8 @@ for required_directory in "${required_directories[@]}"; do
   }
 done
 require_installed_app() {
-  local directory
-  for directory in "${app_path}" "${app_path}/Contents" "${app_path}/Contents/MacOS"; do
-    secure_owned_path "${directory}" directory || return 1
-  done
-  secure_owned_path "${executable}" file && [[ -x "${executable}" ]]
+  secure_owned_path "${app_path}" directory &&
+    secure_owned_path "${app_path}/Contents" directory
 }
 
 require_live_runtime() {
@@ -194,7 +178,6 @@ if [[ "${install_mode}" == core-update ]]; then
   if "${identity_helper}" installed >/dev/null 2>&1; then
     :
   else
-      "${identity_helper}" existing >/dev/null
       update_root="$(/usr/bin/mktemp -d "${input_methods_root}/.linnet-core.XXXXXX")"
       staged_app="${update_root}/Linnet.app"
       update_base="$("${delta_tool}" tree-digest --root "${app_path}")"
@@ -328,28 +311,7 @@ fi
   exit 1
 }
 
-# This shared lifecycle never mutates TIS. A newly created Complete App may be
-# unregistered until the Complete-only wrapper submits the one standard
-# authorization request after this byte and Runtime transaction succeeds.
-registration_state="$("${registration_inspector}" "${candidate_bundle_identifier}")" || {
-  echo "Linnet postinstall: input-source availability is unavailable" >&2
-  exit 1
-}
-case "${registration_state}" in
-  registered:enablement-required:path-unknown|\
-registered:enabled-observation:selectable:path-unknown|\
-registered:selected-observation:selectable:path-unknown) ;;
-  missing)
-    [[ "${install_mode}" == complete && "${complete_app_action}" == created ]] || {
-      echo "Linnet postinstall: existing-App update lost input-source availability" >&2
-      exit 1
-    }
-    ;;
-  *)
-    echo "Linnet postinstall: existing-App update lost input-source availability" >&2
-    exit 1
-    ;;
-esac
+# Input-source registration is an OS/user preference, not installation integrity.
+# The Complete wrapper requests registration only after first App creation.
 update_accepted=true
-
 exit 0

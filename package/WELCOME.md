@@ -10,7 +10,7 @@ This installer works only in the current user's account. It installs Linnet in
 or install a daemon, launch item, privileged helper, or background updater.
 
 This community package is not signed with an Apple Developer ID and is not
-notarized. Continue only after the package matches its exact Release SHA-256.
+notarized. Download from the project Release; its SHA-256 is available for checking the file.
 README provides direct offline uninstall commands. Open the package from Finder with Control-click or right-click >
 Open; if macOS still blocks it, use System Settings > Privacy & Security > Open
 Anyway. Never disable Gatekeeper or clear quarantine attributes. Stop if the
@@ -95,7 +95,7 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 管理员权限，也不安装守护进程、启动项、特权辅助程序或后台更新器。
 
 本社区安装包没有 Apple Developer ID 签名，也没有经过 Apple 公证。只有在
-安装包与同一正式 Release 说明中的精确 SHA-256 一致时才能继续。在 Finder
+请从项目 Release 下载安装包；如需核对文件，可比对 Release 中的 SHA-256。在 Finder
 中按住 Control 点击或右键点击安装包，选择“打开”；若仍被拦截，请前往
 系统设置 → 隐私与安全性 → 仍要打开。不要关闭 Gatekeeper，也不要清除
 隔离属性。若校验和不一致，或系统报告文件损坏、含恶意软件，请停止安装。

@@ -9,8 +9,6 @@ import Foundation
 enum LinnetCloudRecoveryArchive {
   static let directoryName = "Linnet-Recovery-v1"
   private static let payloadName = "payload.\(LinnetBackupStore.portableExtension)"
-  private static let maximumHeadsToProbe = 32
-  private static let maximumHeadBytes = 128 * 1024
   private static let cloudDownloadTimeout: TimeInterval = 30
 
   enum Failure: LocalizedError {
@@ -191,7 +189,7 @@ private extension LinnetCloudRecoveryArchive {
     guard !candidates.isEmpty else {
       return try hasRecoveryObjects(in: archiveRoot) ? .unusable : .absent
     }
-    for candidate in candidates.prefix(maximumHeadsToProbe) {
+    for candidate in candidates {
       let candidateWorkspace = workspace.appending(
         path: "head-\(UUID().uuidString)", directoryHint: .isDirectory)
       try FileManager.default.createDirectory(at: candidateWorkspace, withIntermediateDirectories: false)
@@ -366,9 +364,6 @@ private extension LinnetCloudRecoveryArchive {
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     encoder.dateEncodingStrategy = .millisecondsSince1970
     let data = try encoder.encode(head)
-    guard data.count <= maximumHeadBytes, head.deltas.count <= 1024 else {
-      throw Failure.needsConfirmedRepair
-    }
     let millis = Int64(head.createdAt.timeIntervalSince1970 * 1000)
     let destination = archiveRoot.appending(
       path: "heads/\(String(format: "%020lld", millis))-\(head.operationID.uuidString).json",
@@ -384,12 +379,11 @@ private extension LinnetCloudRecoveryArchive {
   private static func readHead(_ url: URL) throws -> Head {
     var info = stat()
     guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
-      info.st_size >= 0, info.st_size <= Int64(maximumHeadBytes) else {
+      info.st_size >= 0 else {
       throw Failure.invalid("head size")
     }
     try requireRegular(url)
     let data = try Data(contentsOf: url)
-    guard data.count <= maximumHeadBytes else { throw Failure.invalid("head size") }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .millisecondsSince1970
     let head = try decoder.decode(Head.self, from: data)

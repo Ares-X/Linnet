@@ -451,23 +451,22 @@ extension LinnetDataRegistry {
     activeState: ActiveState,
     now: Date = Date()
   ) throws {
-    var traversalBudget = Self.maximumGarbageCollectionEntries
-    guard let entries = try boundedOwnedDirectoryEntries(
-      at: transactionsDirectory, recursively: false, remaining: &traversalBudget)
+
+    guard let entries = try ownedDirectoryEntries(
+      at: transactionsDirectory, recursively: false)
     else { throw Failure.invalidActiveState }
     let transactionPlan = classifyTransactionCleanups(
       entries, activeState: activeState, now: now)
     let packCleanups = try supersededPackCleanups(
       active: activeState.packs, rollback: activeState.rollbackPacks,
-      pending: transactionPlan.pendingPackPaths, now: now,
-      remaining: &traversalBudget)
+      pending: transactionPlan.pendingPackPaths, now: now)
     let downloadCleanups = transactionPlan.language.map {
       downloadsDirectory.appending(path: $0.transactionID.uuidString, directoryHint: .isDirectory)
     }
     let allCleanupDirectories = transactionPlan.language.map(\.directory) + downloadCleanups
       + transactionPlan.scratch + packCleanups.map(\.directory)
     let preflightedTrees = try preflightCleanupTrees(
-      allCleanupDirectories, remaining: &traversalBudget)
+      allCleanupDirectories)
     let retirementMarkers = try languageRetirementMarkers(
       transactionPlan.language, preflightedTrees: preflightedTrees)
     let cleanupFailures = performLanguageCleanups(
@@ -640,15 +639,13 @@ extension LinnetDataRegistry {
     active: [ActivePack],
     rollback: [ActivePack],
     pending: Set<String>,
-    now: Date,
-    remaining: inout Int
-  ) throws -> [PackCleanup] {
+    now: Date) throws -> [PackCleanup] {
     let retained = Set((active + rollback).map(\.relativePath)).union(pending)
     var cleanups: [PackCleanup] = []
     for kind in [LinnetPackContract.Kind.chinese, .english, .lts, .extended] {
       let root = packsDirectory.appending(path: kind.rawValue, directoryHint: .isDirectory)
-      guard let entries = try boundedOwnedDirectoryEntries(
-        at: root, recursively: false, remaining: &remaining)
+      guard let entries = try ownedDirectoryEntries(
+        at: root, recursively: false)
       else { continue }
       for entry in entries {
         let relative = "Data/Packs/\(kind.rawValue)/\(entry.lastPathComponent)"
@@ -709,13 +706,11 @@ extension LinnetDataRegistry {
     return now.timeIntervalSince(modified) >= Self.orphanSafetyAge
   }
 
-  /// Streams a Registry-owned directory under one reconciliation-wide budget.
+  /// Lists a Registry-owned directory before cleanup.
   /// Callers finish every preflight before they execute the first deletion.
-  func boundedOwnedDirectoryEntries(
+  func ownedDirectoryEntries(
     at directory: URL,
-    recursively: Bool,
-    remaining: inout Int
-  ) throws -> [URL]? {
+    recursively: Bool) throws -> [URL]? {
     try verifyCanonicalRoot()
     var info = stat()
     guard lstat(directory.path, &info) == 0 else {
@@ -741,8 +736,6 @@ extension LinnetDataRegistry {
     else { throw Failure.invalidActiveState }
     var entries: [URL] = []
     for case let entry as URL in enumerator {
-      guard remaining > 0 else { throw Failure.invalidActiveState }
-      remaining -= 1
       entries.append(entry)
       // Foundation does not traverse directory symlinks. Calling
       // skipDescendants() for a non-directory symlink leaks to the next real
@@ -762,11 +755,10 @@ extension LinnetDataRegistry {
   /// was validated. Size and identity must remain stable for the whole read.
   func readOwnedFile(
     _ url: URL,
-    maximumBytes: Int = Self.ownedMetadataMaximumBytes,
     exactBytes: Int? = nil
   ) throws -> Data {
     try verifyCanonicalRoot()
-    guard maximumBytes > 0, exactBytes.map({ $0 >= 0 && $0 <= maximumBytes }) != false else {
+    guard exactBytes.map({ $0 >= 0 }) != false else {
       throw OwnedFileReadFailure.invalid
     }
     let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
@@ -781,7 +773,6 @@ extension LinnetDataRegistry {
       before.st_uid == getuid(),
       (before.st_mode & (S_IWGRP | S_IWOTH)) == 0,
       before.st_size >= 0,
-      UInt64(before.st_size) <= UInt64(maximumBytes),
       exactBytes.map({ before.st_size == off_t($0) }) != false
     else { throw OwnedFileReadFailure.invalid }
 
@@ -790,7 +781,7 @@ extension LinnetDataRegistry {
       contains(URL(fileURLWithPath: String(cString: descriptorPath)))
     else { throw OwnedFileReadFailure.invalid }
 
-    let byteLimit = exactBytes ?? maximumBytes
+    let byteLimit = Int(before.st_size)
     var data = Data()
     data.reserveCapacity(Int(before.st_size))
     var buffer = [UInt8](repeating: 0, count: min(65_536, byteLimit + 1))

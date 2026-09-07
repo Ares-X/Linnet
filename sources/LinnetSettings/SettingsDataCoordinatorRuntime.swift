@@ -315,8 +315,8 @@ extension SettingsDataCoordinator {
       else {
         throw Failure.invalidOperation("learning snapshot schema")
       }
-      let data = try LinnetBackupStore.readBoundedRegularFile(
-        item.file, limit: LinnetBackupStore.maximumLearningBytes)
+      let data = try LinnetBackupStore.readRegularFile(
+        item.file)
       guard let contents = String(data: data, encoding: .utf8) else {
         throw LinnetBackupStore.Failure.invalidDocument(item.file.lastPathComponent)
       }
