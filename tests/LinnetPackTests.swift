@@ -83,7 +83,7 @@ struct LinnetPackTests {
           url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-5/update.linnetdelta")!)
         artifact.deltas = [delta]
         requireRegistryFailure(.invalidActiveState) {
-          _ = try registry.verifyAndStagePack(package: deltaFile, artifact: artifact, transfer: .requiresCompleteRepair)
+          _ = try registry.verifyAndStagePack(package: deltaFile, artifact: artifact, transfer: .current(base))
         }
         let corrupt = registry.downloadsDirectory.appending(path: "corrupt.linnetdelta")
         var corruptBytes = bytes
@@ -140,7 +140,9 @@ struct LinnetPackTests {
         secondPackage, payload: Data("second".utf8), sequence: 2)
 
       let first = try registry.verifyAndStagePack(package: firstPackage, artifact: try catalogArtifact(firstPackage), transfer: .complete)
-      let second = try registry.verifyAndStagePack(package: secondPackage, artifact: try catalogArtifact(secondPackage), transfer: .complete)
+      let artifact = try catalogArtifact(secondPackage)
+      let second = try registry.verifyAndStagePack(
+        package: secondPackage, artifact: artifact, transfer: artifact.transfer(from: first))
 
       require(first.version == second.version, "same public version")
       require(first.sequence < second.sequence, "forward sequence")

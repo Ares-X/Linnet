@@ -197,10 +197,9 @@ snapshot_release_assets
 release_state="$(ruby -rjson -e '
   release = JSON.parse(File.binread(ARGV.fetch(0)))
   abort unless release.fetch("tagName") == ARGV.fetch(1) &&
-    release.fetch("name") == ARGV.fetch(2) &&
-    (ARGV.fetch(4) == "public" || release.fetch("isPrerelease") == (ARGV.fetch(3) == "true"))
+    (ARGV.fetch(3) == "public" || release.fetch("isPrerelease") == (ARGV.fetch(2) == "true"))
   puts release.fetch("isDraft")
-' "${release_json}" "${tag}" "${title}" "${prerelease}" "${channel}")" ||
+' "${release_json}" "${tag}" "${prerelease}" "${channel}")" ||
   fail_stage "${tag} release kind is invalid"
 
 if [[ "${release_state}" == true ]]; then
@@ -224,26 +223,24 @@ if [[ "${release_state}" == true ]]; then
         names = assets.map { |asset| asset.fetch("name") }
         abort unless release.fetch("databaseId").is_a?(Integer) &&
           release.fetch("databaseId").positive? &&
-          release.fetch("name") == ARGV.fetch(2) &&
           names.uniq == names &&
           (names - expected_names).empty? &&
           assets.all? { |asset|
             asset.fetch("digest").match?(/\Asha256:[0-9a-f]{64}\z/) &&
               asset.fetch("size").is_a?(Integer) && asset.fetch("size").positive?
           }
-      ' "${release_json}" "${expected}" "${title}" ||
+      ' "${release_json}" "${expected}" ||
         fail_stage "${tag} older Draft is not exact Linnet-owned state"
       gh release delete "${tag}" --repo "${repository}" --yes
       create_draft
       release_state="$(ruby -rjson -e '
         release = JSON.parse(File.binread(ARGV.fetch(0)))
         abort unless release.fetch("tagName") == ARGV.fetch(1) &&
-          release.fetch("name") == ARGV.fetch(2) &&
-          release.fetch("isPrerelease") == (ARGV.fetch(3) == "true") &&
+          release.fetch("isPrerelease") == (ARGV.fetch(2) == "true") &&
           release.fetch("isDraft") &&
-          release.fetch("targetCommitish") == ARGV.fetch(4)
+          release.fetch("targetCommitish") == ARGV.fetch(3)
         puts true
-      ' "${release_json}" "${tag}" "${title}" "${prerelease}" \
+      ' "${release_json}" "${tag}" "${prerelease}" \
         "${candidate_revision}")" ||
         fail_stage "${tag} replacement Draft identity is invalid"
       snapshot_release_assets

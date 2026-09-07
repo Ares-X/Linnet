@@ -137,7 +137,6 @@ extension SettingsModel {
       return
     }
     languageDataUpdateTarget = target
-    languageDataRepairTarget = nil
     packDownloadProgress = 0
     setLanguageDataUpdateState(target, .downloading)
     let coordinator = coordinator
@@ -168,36 +167,36 @@ extension SettingsModel {
         for artifact in selected.packs {
           try Task.checkCancellation()
           let installed = snapshot.state.packs.first { $0.kind == artifact.kind }
-          let transfer = artifact.transfer(from: installed, allowCompleteRepair: allowCompleteRepair)
-          let url: URL, bytes: UInt64
-          switch transfer {
-          case .current(let pack):
+          var transfer = artifact.transfer(from: installed, allowCompleteRepair: allowCompleteRepair)
+          if case .current(let pack) = transfer {
             targetPacks.append(pack)
             continue
-          case .delta(let delta, _): (url, bytes) = (delta.url, delta.bytes)
-          case .complete: (url, bytes) = (artifact.url, artifact.bytes)
-          case .requiresCompleteRepair: throw LinnetDataChannel.Failure.completeRepairRequired
           }
-          let package = downloadDirectory.appending(
-            path: url.lastPathComponent)
-          do {
-            await self?.setLanguageDataUpdateState(target, .downloading)
-            try await transport.downloadArtifact(from: url, expectedBytes: bytes, to: package)
-            try Task.checkCancellation()
-            await self?.setLanguageDataUpdateState(target, .verifying)
-            let staged = try registry.verifyAndStagePack(
-              package: package, artifact: artifact, transfer: transfer,
-              allowCompleteRepair: allowCompleteRepair)
-            targetPacks.append(staged)
-          } catch {
-            try Task.checkCancellation()
-            switch transfer {
-            case .delta:
+          while true {
+            let url: URL, bytes: UInt64
+            if case .delta(let delta, _) = transfer {
+              (url, bytes) = (delta.url, delta.bytes)
+            } else {
+              (url, bytes) = (artifact.url, artifact.bytes)
+            }
+            let package = downloadDirectory.appending(path: url.lastPathComponent)
+            do {
+              await self?.setLanguageDataUpdateState(target, .downloading)
+              try await transport.downloadArtifact(from: url, expectedBytes: bytes, to: package)
+              try Task.checkCancellation()
+              await self?.setLanguageDataUpdateState(target, .verifying)
+              let staged = try registry.verifyAndStagePack(
+                package: package, artifact: artifact, transfer: transfer,
+                allowCompleteRepair: allowCompleteRepair)
+              targetPacks.append(staged)
+              break
+            } catch {
+              try Task.checkCancellation()
+              guard case .delta = transfer else { throw error }
               linnetLanguageDataLogger.error(
-                "Language-data delta failed: \(error.localizedDescription, privacy: .private)"
+                "Language-data delta failed; downloading complete pack: \(error.localizedDescription, privacy: .private)"
               )
-              throw LinnetDataChannel.Failure.completeRepairRequired
-            default: throw error
+              transfer = .complete
             }
           }
           await self?.setPackDownloadProgress(
@@ -210,8 +209,6 @@ extension SettingsModel {
         try Task.checkCancellation()
         try await coordinator.activateLanguage(activation)
         await self?.finishLanguageDataUpdate(target)
-      } catch LinnetDataChannel.Failure.completeRepairRequired {
-        await self?.finishLanguageDataRepairRequest(target)
       } catch is CancellationError {
         await self?.finishPackDownloadCancellation(target)
       } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
@@ -224,11 +221,6 @@ extension SettingsModel {
           target, failure: Self.packUpdateFailure(for: error))
       }
     }
-  }
-
-  private func finishLanguageDataRepairRequest(_ target: SettingsLanguageDataUpdateTarget) {
-    finishLanguageDataUpdate(target, failure: .verificationFailed)
-    languageDataRepairTarget = target
   }
 
   private func setPackDownloadProgress(_ progress: Double) {

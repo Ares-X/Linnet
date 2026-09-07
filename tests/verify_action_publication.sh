@@ -565,15 +565,16 @@ cp "${data_release}" "${fixture}/exact-data-release.json"
 ruby -rjson -e '
   path = ARGV.fetch(0)
   document = JSON.parse(File.binread(path))
-  document["name"] = "foreign data title"
+  document["name"] = "Language dictionaries — renamed by maintainer"
   File.binwrite(path, JSON.generate(document) + "\n")
 ' "${data_release}"
 : >"${stager_state}/mutations.log"
-if GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null 2>&1; then
-  fail "earlier-revision data Draft with a foreign title was accepted"
-fi
+GITHUB_ACTIONS=true run_stager "${stager_state}" stage data >/dev/null ||
+  fail "renaming a byte-identical data Draft blocked reuse"
+run_stager "${stager_state}" verify data >/dev/null ||
+  fail "renaming a byte-identical data Draft blocked verification"
 [[ ! -s "${stager_state}/mutations.log" ]] ||
-  fail "foreign-title data Draft rejection mutated release state"
+  fail "renamed byte-identical data Draft was mutated"
 
 cp "${fixture}/exact-data-release.json" "${data_release}"
 ruby -rjson -e '

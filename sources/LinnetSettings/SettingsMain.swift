@@ -53,7 +53,6 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
   @Published private(set) var cloudSyncPreparing = false
   @Published var cloudSyncStatus: LinnetSettingsContract.CloudSyncStatus?
-  @Published var languageDataRepairTarget: SettingsLanguageDataUpdateTarget?
 
   let productName: String
   @Published private(set) var dataServicesAvailable: Bool

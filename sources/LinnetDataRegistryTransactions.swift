@@ -212,7 +212,7 @@ extension LinnetDataRegistry {
       }
       try LinnetDataChannel.verifyDownloadedArtifact(
         bytes: delta.bytes, sha256: delta.sha256, at: resolvedPackage)
-    case .current, .requiresCompleteRepair:
+    case .current:
       throw Failure.invalidActiveState
     }
     let kindRoot = packsDirectory.appending(path: artifact.kind.rawValue, directoryHint: .isDirectory)
@@ -247,7 +247,7 @@ extension LinnetDataRegistry {
           package: resolvedPackage, coreVersion: self.coreVersion, extractingTo: partial)
         (manifest, manifestData) = (staged.manifest, staged.manifestData)
         try manifestData.write(to: partial.appending(path: "manifest.json"), options: .withoutOverwriting)
-      case .current, .requiresCompleteRepair:
+      case .current:
         throw Failure.invalidActiveState
       }
       let active = Self.activePack(

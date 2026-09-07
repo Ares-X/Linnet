@@ -325,6 +325,11 @@ acceptance. No new dependency or resident updater was installed.
 
 ### Differential delivery design freeze — 2026-08-31
 
+Historical record: the language-pack confirmation requirement below was removed
+on 2026-09-08. Normal language updates now use complete packs when no matching
+delta is available or a delta fails; manual repair starts directly. Current
+installed data remains active until the replacement is verified and ready.
+
 User decisions confirmed on 2026-08-31, source `c53df52`: in Chinese schemas,
 same-span Chinese candidates precede English spelling corrections; exact English
 matches retain the accepted bilingual ranking. Smart English continues to offer

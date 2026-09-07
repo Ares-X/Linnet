@@ -89,7 +89,7 @@ Settings UI 仅在专用测试桌面按需运行 `scripts/release-control verify
 候选 Action 把 manifest 的原字节直接写入三个 Draft GitHub Releases：Core 2 件、data
 4 个完整词包及对应差分、public 1 件。GitHub Actions artifact 不是发布传输或存储 owner，因此不会再
 上传约 906 MB artifact、随后在另一个 job 下载并解压同一份数据。
-Core 与 public Draft 必须精确绑定当前候选 revision；data Draft 由固定 tag、标题、
+Core 与 public Draft 必须精确绑定当前候选 revision；data Draft 由固定 tag、
 预发布状态及词包、差分的精确文件名、字节数和 SHA-256 拥有。其 target 必须是完整的
 direct commit，但 byte-identical 的不可变 pack 可以跨候选 revision 复用，且不得删除、
 重建或重新上传。
@@ -107,7 +107,7 @@ Core 包只携带差分和安装工具；已有词包下载与其内容匹配的
 传输按差异块生成；本地保留未改变文件的 COW 副本，仅重建发生变化的文件。
 被修改文件使用 rsync 的临时文件替换，不使用 `--inplace`，以保持只读词包权限；
 因此单个被修改文件的临时空间仍按其完整大小计算，不能把网络差分大小当作磁盘峰值。
-失败保留原始安装，只有明确确认 Complete/完整词包修复后才允许全量传输。
+失败保留原始安装。语言数据没有可用差分或差分失败时，自动下载同一 Catalog 中的完整词包；完整包仍须通过原有摘要与内容校验。Core 的 Complete 重装仍由完整安装包执行。
 安装器与 Settings 复用一个数据 mutation lease，不关闭任何应用。
 Core 与已有安装的 Complete 修复必须保留 `Linnet.app` 目录的文件身份，
 只原子交换完整 `Contents`；不能将已注册 App 根目录换到暂存区再删除。

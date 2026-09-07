@@ -660,7 +660,9 @@ struct DataTabView: View {
                 || model.packDownloadActive || model.operationActive)
         }
         downloadSourceControls
-        Button("Repair Language Update…") { model.languageDataRepairTarget = .currentEdition }
+        Button("Repair Language Update") {
+          model.downloadLanguageData(.currentEdition, allowCompleteRepair: true)
+        }
           .disabled(
             !model.languageDataUpdatesAvailable || model.packDownloadActive || model.operationActive)
         Divider()

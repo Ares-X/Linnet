@@ -57,20 +57,6 @@ struct SettingsRootView: View {
       if model.diagnostics == nil { model.refreshDiagnostics() }
     }
     .confirmationDialog(
-      "Repair language data with complete packs?",
-      isPresented: presented($model.languageDataRepairTarget),
-      titleVisibility: .visible
-    ) {
-      Button("Download Complete Changed Packs") {
-        if let target = model.languageDataRepairTarget {
-          model.downloadLanguageData(target, allowCompleteRepair: true)
-        }
-      }
-      Button("Cancel", role: .cancel) { model.languageDataRepairTarget = nil }
-    } message: {
-      Text("Download complete copies of changed or conflicting packs from the selected channel. Unchanged packs, learned words, and personal settings are kept. Your current data stays active until the replacement is ready.")
-    }
-    .confirmationDialog(
       "Import existing Rime / Hallelujah data?",
       isPresented: presented($pendingLegacyImport),
       titleVisibility: .visible
