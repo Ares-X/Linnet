@@ -160,15 +160,16 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
    `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
 3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
    candidate job summary 的 revision 与产物集合摘要，并在本地重新运行最终 verifier；
-4. 先完成候选原字节的首次安装、升级、重装、卸载、功能、性能和 UI 验收。随后运行
+4. 用候选原字节完成受本次变更影响的安装、功能或 UI 验收；按下文选择生命周期测试，
+   不默认重跑全部矩阵。随后运行
    `scripts/release-control preview "$ARCHIVE_OUTPUT_DIR"`；它只创建字节绑定的
    `linnet-preview/*` 标签。Ubuntu publisher 只公开 Core/data 预发布并非强制推进
    `preview-channel`，不推进 `data-channel`、不公开 `v<VERSION>`、不改变 Latest；
-5. 在前一公开版的 Settings 选择 Preview，完成真实在线发现、Core 安装、运行中生效、
-   语言数据和双向 iCloud 同步验收；再用同一目录完成“两轮同 leaf Core 升级”。两轮都须
-   无注销、无 Keychain 密码提示、Host PID 符合激活协议且 `AXHidden=false`，并保留
-   enabled/selected、UserData、输入菜单、Settings 和真实输入；
-6. 全量验收通过后运行
+5. 在受支持公开基线的 Settings 选择 Preview，完成一次真实在线发现、Core 下载和
+   候选原字节的运行中生效。验证无需注销或密码、
+   Host 符合激活协议、个人数据与应用连接保留、菜单和真实输入正常。语言数据或同步
+   有变化时，再验证对应数据更新或双向 iCloud 合并；已验证的同一原字节不重复验收。
+6. 本次变更所需验收通过后运行
    `scripts/release-control authorize "$ARCHIVE_OUTPUT_DIR"`。本地命令只能重新验证
    全部 manifest 文件和三个远端 Release 的 SHA-256/size，并通过 SSH 创建
    `linnet-publication/v<VERSION>-<FULL_REVISION>-h<SET_SHA256>`；它不能构建、
@@ -199,7 +200,7 @@ macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、
 Core 更新只接受已安装的固定 CMS 身份；此前公开的旧 ad-hoc App 必须使用
 Complete 修复，不能进入 Core 的就地更新路径。
 Complete 仍须验证旧 App 的代码完整性和明确身份，在不修改既有 TIS 状态与个人数据的
-前提下替换 App。当前候选仍以步骤 5 的“两轮同 leaf Core 升级”为发布前证据。
+前提下替换 App；仅在变更涉及此路径时补做相应修复验收。
 
 Settings 只读取用户明确选择的 `data-channel` 或 `preview-channel` 指针，不读取
 可变 Release 别名，也不维护第二份 Core 版本清单；默认始终是正式频道，未知保存值
@@ -223,13 +224,20 @@ TextEdit、Teams、Codex 及其他已连接应用始终保持打开；任一安�
 保持运行且 Settings 显示拒绝原因。Settings 不关闭用户应用，也不程序化切换输入源。
 Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 canonical 路径启动并核对
 精确 revision；再单独验证 Host 自然重启后由新 build 提供输入。
-每个精确候选的“两轮同 leaf Core 升级”必须使用同一组 Draft Release 原字节。
-每轮均从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级到候选；第二轮先按
-正常卸载、安装流程重建较低版本基线，再重复相同在线升级。单独记录基线重建所需的
-注销与数据恢复，不将其计入在线升级流程。在线 Core 只接受更高版本，不提供同版本
-重装；同版本 App 修复由 Complete 负责，不能用它替代 Core 升级验收。
-两轮升级均不得注销或索要密码，并须验证登录会话、enabled/selected、UserData、
-输入菜单、Settings 和真实输入。Core 只接受固定 CMS App 以及唯一、精确匹配的 TIS
+每个 Core 候选以一次从受支持公开基线到候选原字节的真实在线升级为正常发布证据。
+本机或专用虚拟机的有效证据均可使用；不因切换测试机器而重跑同一条路径。
+同版本 Complete 修复不能代替有序 Core 升级；Core 仍只接受更高版本。
+
+额外验收由变更决定：安装脚本、签名身份或注册流程变化时测首次安装；卸载、迁移、
+持久化或恢复路径变化时测对应流程；升级事务、失败恢复或跨次状态变化时测有具体
+失败假设的重复升级/故障场景。普通 Settings、候选 UI 或学习同步修复不要求重建
+低版本、重复同一路升级、注销或重启。仅文档修改不构建候选，也不重跑产品测试。
+已通过的检查只有在相关代码/字节变化、发现新失败或仍有明确证据缺口时才重跑。
+未执行的无关项目如实记录 NOT_EXERCISED，不自动阻塞发布。
+
+在线升级须验证无需注销或密码，登录会话、enabled/selected、UserData、输入菜单、
+Settings 和真实输入保留。
+Core 只接受固定 CMS App 以及唯一、精确匹配的 TIS
 source/bundle 身份；旧 ad-hoc App、App 缺失或注册缺失都在 payload 前失败并指向
 Complete。受支持签名 App 的缺失注册由 Complete 修复；重复、冲突、未知 bundle 或
 任何残留身份必须先执行 README 的离线完整卸载命令，不能猜测或覆盖用户状态。发布
