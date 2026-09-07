@@ -77,13 +77,14 @@ extension SettingsDataCoordinator {
 
   /// Document-only apply stages one canonical document. Host owns the atomic
   /// live exchange, projection reconciliation, deployment, and rollback.
-  func applyConfiguration(
+  func applyDocument(
     document: LinnetSettingsDocument,
+    scope: ApplyScope,
     basePersonalRevision: String,
     baseDocumentRevision: String,
     environment: Environment,
     personalEffect: PersonalEffect,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws -> Outcome {
     let transactionID = UUID()
     try requireDirectory(environment.live)
@@ -106,13 +107,22 @@ extension SettingsDataCoordinator {
       try Task.checkCancellation()
       progress(.activating)
       requestAttempted = true
-      try await reloadConfigurationRuntime(
-        transactionID: transactionID,
-        candidate: candidate,
-        expectedSettingsRevision: currentDocument.revision,
-        alternateSettingsRevision: nil,
-        progress: progress
-      )
+      if scope == .appearanceOnly {
+        try await refreshAppearanceRuntime(
+          transactionID: transactionID,
+          candidate: candidate,
+          expectedSettingsRevision: currentDocument.revision,
+          progress: progress
+        )
+      } else {
+        try await reloadConfigurationRuntime(
+          transactionID: transactionID,
+          candidate: candidate,
+          expectedSettingsRevision: currentDocument.revision,
+          alternateSettingsRevision: nil,
+          progress: progress
+        )
+      }
     } catch {
       let operationError = error
       if requestAttempted {
@@ -125,83 +135,17 @@ extension SettingsDataCoordinator {
             progress: progress
           )
         } catch {
-          throw Failure.configurationRestoreFailed
+          throw scope == .appearanceOnly
+            ? Failure.appearanceRestoreFailed : Failure.configurationRestoreFailed
         }
       }
       throw operationError
     }
 
-    let committedDocument = try LinnetSettingsDocumentStore.snapshot(from: environment.live)
-    return Outcome(
-      backupDirectory: nil,
-      personalSnapshot: try LinnetPersonalDataStore.snapshot(from: environment.live),
-      personalEffect: personalEffect,
-      documentEffect: .submittedDraft(committedDocument),
-      importReport: nil,
-      legacyImportedCount: 0,
-      diagnostics: nil
-    )
-  }
-
-  /// Lightweight appearance apply uses the same atomic document publication
-  /// boundary while Host limits deployment to squirrel.yaml.
-  func applyAppearance(
-    document: LinnetSettingsDocument,
-    basePersonalRevision: String,
-    baseDocumentRevision: String,
-    environment: Environment,
-    personalEffect: PersonalEffect,
-    progress: @escaping @Sendable (Phase) -> Void
-  ) async throws -> Outcome {
-    let transactionID = UUID()
-    try requireDirectory(environment.live)
-    let current = try LinnetPersonalDataStore.snapshot(from: environment.live)
-    let currentDocument = try LinnetSettingsDocumentStore.snapshot(from: environment.live)
-    try requireRevision(basePersonalRevision, current: current.revision)
-    try requireRevision(baseDocumentRevision, current: currentDocument.revision)
-    try Task.checkCancellation()
-
-    progress(.staging)
-    let candidate = try stageConfigurationCandidate(
-      transactionID: transactionID,
-      document: document,
-      environment: environment
-    )
-    defer { try? fileManager.removeItem(at: candidate.deletingLastPathComponent()) }
-    let candidateRevision = try LinnetSettingsDocumentStore.snapshot(from: candidate).revision
-    var refreshAttempted = false
-    do {
-      try Task.checkCancellation()
-      progress(.activating)
-      refreshAttempted = true
-      try await refreshAppearanceRuntime(
-        transactionID: transactionID,
-        candidate: candidate,
-        expectedSettingsRevision: currentDocument.revision,
-        progress: progress
-      )
-    } catch {
-      let operationError = error
-      if refreshAttempted {
-        do {
-          try await restoreConfigurationRuntime(
-            document: currentDocument.document,
-            baseRevision: currentDocument.revision,
-            appliedRevision: candidateRevision,
-            environment: environment,
-            progress: progress
-          )
-        } catch {
-          throw Failure.appearanceRestoreFailed
-        }
-      }
-      throw operationError
-    }
     let committedDocument = try LinnetSettingsDocumentStore.snapshot(from: environment.live)
     let documentEffect: DocumentEffect =
-      personalEffect == .submittedDraft
-      ? .submittedDraft(committedDocument)
-      : .submittedAppearance(committedDocument)
+      scope == .appearanceOnly && personalEffect != .submittedDraft
+      ? .submittedAppearance(committedDocument) : .submittedDraft(committedDocument)
     return Outcome(
       backupDirectory: nil,
       personalSnapshot: try LinnetPersonalDataStore.snapshot(from: environment.live),
@@ -234,7 +178,7 @@ extension SettingsDataCoordinator {
     baseRevision: String,
     appliedRevision: String,
     environment: Environment,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws {
     let transactionID = UUID()
     let candidate = try stageConfigurationCandidate(
@@ -258,7 +202,7 @@ extension SettingsDataCoordinator {
     transactionID: UUID,
     candidate: URL,
     expectedSettingsRevision: String,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws {
     let desiredRevision = try LinnetSettingsDocumentStore.snapshot(from: candidate).revision
     let refresh = try await request(
@@ -284,7 +228,7 @@ extension SettingsDataCoordinator {
     candidate: URL,
     expectedSettingsRevision: String,
     alternateSettingsRevision: String?,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws {
     let desiredRevision = try LinnetSettingsDocumentStore.snapshot(from: candidate).revision
     let reload = try await request(
@@ -482,7 +426,7 @@ extension SettingsDataCoordinator {
   func request(
     _ request: LinnetSettingsContract.DataRequest,
     replyTimeout: TimeInterval,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws -> LinnetSettingsContract.RuntimeReply {
     // A cancelled caller still waits for the pause terminal. The operation then
     // sends an ordered cancel and only reports cancellation after Squirrel

@@ -128,6 +128,7 @@ compile_run_selected settings-page-layout -framework SwiftUI \
   sources/LinnetSettings/LinnetSettingsPage.swift \
   tests/LinnetSettingsPageLayoutTests.swift
 compile_run_selected presentation-status \
+  sources/LinnetSettings/SettingsOperationPhase.swift \
   sources/LinnetSettings/SettingsRuntimeReachability.swift \
   sources/LinnetSettings/SettingsPresentationStatus.swift \
   tests/SettingsPresentationStatusTests.swift
@@ -316,6 +317,7 @@ if selected settings-data-coordinator; then
     sources/LinnetSettings/LinnetSettingsMutationLease.swift \
     sources/LinnetSettings/SettingsRuntimeReachability.swift \
     sources/LinnetSettings/LinnetCloudSyncLocation.swift \
+    sources/LinnetSettings/SettingsOperationPhase.swift \
     sources/LinnetSettings/SettingsDataCoordinator.swift sources/LinnetSettings/SettingsDataCoordinatorMutation.swift sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift \
     tests/SettingsDataCoordinatorTests.swift -L lib -lrime.1
   mkdir -p "${scratch}/rime-logs"

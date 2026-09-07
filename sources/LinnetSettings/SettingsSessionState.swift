@@ -3,10 +3,8 @@ import Foundation
 struct SettingsConfigurationSession: Equatable, Sendable {
   enum Readiness: Equatable, Sendable { case ready, sourceUnreadable, servicesUnavailable }
   enum ObservationResult: Equatable, Sendable { case unchanged, reloaded, conflict, ignored }
-  enum DocumentCommitKind: Equatable, Sendable { case submittedDraft, externalReplacement }
-  enum PersonalCommitKind: Equatable, Sendable { case submittedDraft, externalReplacement }
-  enum PersonalCommitResult: Equatable, Sendable { case accepted, pendingEditsPreserved, conflict, rejectedStaleTicket }
-  enum DocumentCommitResult: Equatable, Sendable {
+  enum CommitKind: Equatable, Sendable { case submittedDraft, externalReplacement }
+  enum CommitResult: Equatable, Sendable {
     case accepted, pendingEditsPreserved, conflict, rejectedStaleTicket
   }
   struct DocumentTicket: Equatable, Sendable {
@@ -90,9 +88,9 @@ struct SettingsConfigurationSession: Equatable, Sendable {
   }
   mutating func acceptDocumentCommit(
     _ snapshot: LinnetSettingsDocumentStore.Snapshot,
-    kind: DocumentCommitKind = .submittedDraft,
+    kind: CommitKind = .submittedDraft,
     ticket: DocumentTicket
-  ) -> DocumentCommitResult {
+  ) -> CommitResult {
     guard canEdit, documentBaselineRevision == ticket.baselineRevision else {
       return .rejectedStaleTicket
     }
@@ -155,9 +153,9 @@ struct SettingsConfigurationSession: Equatable, Sendable {
   }
   mutating func acceptPersonalCommit(
     _ snapshot: LinnetPersonalDataStore.Snapshot,
-    kind: PersonalCommitKind,
+    kind: CommitKind,
     ticket: PersonalTicket
-  ) -> PersonalCommitResult {
+  ) -> CommitResult {
     guard canEdit, personalBaseline?.revision == ticket.baselineRevision else {
       return .rejectedStaleTicket
     }

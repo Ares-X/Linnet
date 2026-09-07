@@ -1,5 +1,27 @@
 # Linnet product acceptance
 
+## 0.1.20 Settings implementation simplification
+
+SettingsDataCoordinator owns one document-only apply path for both appearance
+and configuration. The existing ApplyScope selects Host refresh versus reload;
+revision checks, cancellation, rollback and submitted-draft effects are unchanged.
+SettingsOperationPhase is shared directly with presentation; the duplicate enum
+and renaming mapper are removed. Document and personal commits share CommitKind
+and CommitResult, while their typed tickets preserve edits made during an apply.
+Panel disclosure calls the existing rimeUpdate owner directly; its duplicate
+active-client guard and forwarding method are removed.
+
+Authority counts: phase definitions 2 -> 1; document-only apply implementations
+2 -> 1; commit-kind/result definitions 4 -> 2; candidate-refresh forwarding
+methods 1 -> 0. No new fallback, compatibility reader or runtime owner is added.
+The shared phase file replaces the mapping boundary rather than adding a layer.
+
+Focused selectors: `tests/verify_swift_units.sh --only presentation-status,settings-session,settings-data-coordinator`
+and `tests/verify_candidate_window_interaction.sh --behavior`. Installed acceptance
+must exercise appearance refresh, configuration Apply, retained drafts, candidate
+expansion, idle learning sync and the exact Action-built 0.1.20 update. Previous
+candidate evidence does not establish these new bytes as accepted.
+
 ## 2026-09-02 Complete transport input-source identity (candidate)
 
 Exact rejected installed candidate: version `0.1.11`, build `77`, source

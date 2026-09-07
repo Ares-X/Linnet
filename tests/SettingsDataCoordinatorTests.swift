@@ -442,15 +442,15 @@ private final class RequestOrderHarness: @unchecked Sendable {
 
 private final class PhaseHarness: @unchecked Sendable {
   private let lock = NSLock()
-  private var phases: [SettingsDataCoordinator.Phase] = []
+  private var phases: [SettingsOperationPhase] = []
 
-  func record(_ phase: SettingsDataCoordinator.Phase) {
+  func record(_ phase: SettingsOperationPhase) {
     lock.lock()
     phases.append(phase)
     lock.unlock()
   }
 
-  func snapshot() -> [SettingsDataCoordinator.Phase] {
+  func snapshot() -> [SettingsOperationPhase] {
     lock.lock()
     defer { lock.unlock() }
     return phases
@@ -2009,7 +2009,7 @@ struct SettingsDataCoordinatorTests {
     portableCandidate: SettingsDataCoordinator.PortableImportCandidate,
     fixtureRoot: URL
   ) {
-    typealias Phase = SettingsDataCoordinator.Phase
+    typealias Phase = SettingsOperationPhase
     typealias Effect = SettingsDataCoordinator.PersonalEffect
     let removalID = UUID()
     let removal = LinnetBackupStore.BackupRecord(
