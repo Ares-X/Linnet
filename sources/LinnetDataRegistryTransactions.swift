@@ -754,13 +754,9 @@ extension LinnetDataRegistry {
   /// Reads one user-writable Registry control file through the descriptor that
   /// was validated. Size and identity must remain stable for the whole read.
   func readOwnedFile(
-    _ url: URL,
-    exactBytes: Int? = nil
+    _ url: URL
   ) throws -> Data {
     try verifyCanonicalRoot()
-    guard exactBytes.map({ $0 >= 0 }) != false else {
-      throw OwnedFileReadFailure.invalid
-    }
     let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
     guard descriptor >= 0 else {
       throw errno == ENOENT ? OwnedFileReadFailure.missing : OwnedFileReadFailure.invalid
@@ -772,8 +768,7 @@ extension LinnetDataRegistry {
       (before.st_mode & S_IFMT) == S_IFREG,
       before.st_uid == getuid(),
       (before.st_mode & (S_IWGRP | S_IWOTH)) == 0,
-      before.st_size >= 0,
-      exactBytes.map({ before.st_size == off_t($0) }) != false
+      before.st_size >= 0
     else { throw OwnedFileReadFailure.invalid }
 
     var descriptorPath = [CChar](repeating: 0, count: Int(MAXPATHLEN))
@@ -811,8 +806,7 @@ extension LinnetDataRegistry {
       before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
       before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
       before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec,
-      data.count == Int(before.st_size),
-      exactBytes.map({ data.count == $0 }) != false
+      data.count == Int(before.st_size)
     else { throw OwnedFileReadFailure.invalid }
     return data
   }

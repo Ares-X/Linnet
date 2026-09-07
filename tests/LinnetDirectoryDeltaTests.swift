@@ -14,6 +14,13 @@ extension LinnetPackTests {
     for directory in [base, target] {
       try fileManager.createDirectory(at: directory, withIntermediateDirectories: false)
     }
+    let largeTree = root.appending(path: "large-tree")
+    try fileManager.createDirectory(at: largeTree, withIntermediateDirectories: false)
+    for index in 0...32_768 {
+      try Data().write(to: largeTree.appending(path: "file-\(index)"))
+    }
+    _ = try LinnetDirectoryDelta.digest(largeTree)
+    try fileManager.removeItem(at: largeTree)
     let original = Data((0..<(4 * 1024 * 1024)).map { UInt8($0 % 251) })
     var changed = original
     changed.replaceSubrange(32_768..<32_832, with: Data(repeating: 254, count: 64))
@@ -138,6 +145,22 @@ extension LinnetPackTests {
       "opaque Complete payload did not publish its exact contents")
     try LinnetDirectoryDelta.exchangeApp(installed: installed, staged: completePayload,
       baseSHA256: baseDigest, targetSHA256: targetDigest)
+    let emptyApp = root.appending(path: "Empty.app", directoryHint: .isDirectory)
+    try manager.createDirectory(at: emptyApp, withIntermediateDirectories: false)
+    var emptyBefore = stat()
+    precondition(lstat(emptyApp.path, &emptyBefore) == 0)
+    let emptyDigest = try LinnetDirectoryDelta.digest(emptyApp)
+    try LinnetDirectoryDelta.exchangeApp(installed: emptyApp, staged: staged,
+      baseSHA256: emptyDigest, targetSHA256: targetDigest)
+    let repairedDigest = try LinnetDirectoryDelta.digest(emptyApp)
+    precondition(repairedDigest == targetDigest)
+    try LinnetDirectoryDelta.exchangeApp(installed: emptyApp, staged: staged,
+      baseSHA256: emptyDigest, targetSHA256: targetDigest)
+    let emptyAfterDigest = try LinnetDirectoryDelta.digest(emptyApp)
+    var emptyAfter = stat()
+    precondition(lstat(emptyApp.path, &emptyAfter) == 0)
+    precondition(emptyAfterDigest == emptyDigest && emptyBefore.st_ino == emptyAfter.st_ino,
+      "empty App repair did not retain the registered root or roll back exactly")
     let unexpected = installed.appending(path: "outside-Contents")
     try Data("invalid App layout".utf8).write(to: unexpected)
     let invalidDigest = try LinnetDirectoryDelta.digest(installed)

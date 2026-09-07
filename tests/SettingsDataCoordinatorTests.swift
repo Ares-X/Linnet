@@ -1704,7 +1704,7 @@ struct SettingsDataCoordinatorTests {
       let cloudRecovery = fixtureRoot.appending(path: "cloud-recovery", directoryHint: .isDirectory)
       try fileManager.createDirectory(at: cloudRecovery, withIntermediateDirectories: false)
       _ = try LinnetCloudRecoveryArchive.publish(
-        portable: portableData, in: cloudRecovery, repair: false)
+        portable: portableData, in: cloudRecovery)
       let cloudCandidate = try await coordinator.inspectCloudRecovery(in: cloudRecovery)
       guard cloudCandidate?.archive == portableCandidate.archive else {
         fail("cloud recovery inspection did not use the validated portable archive")

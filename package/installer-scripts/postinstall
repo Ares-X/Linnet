@@ -103,8 +103,7 @@ for required_directory in "${required_directories[@]}"; do
   }
 done
 require_installed_app() {
-  secure_owned_path "${app_path}" directory &&
-    secure_owned_path "${app_path}/Contents" directory
+  secure_owned_path "${app_path}" directory
 }
 
 require_live_runtime() {

@@ -45,6 +45,7 @@ cp "${stager}" "${fixture_repo}/package/stage_github_release"
 cp "${publisher}" "${fixture_repo}/package/publish_github_release"
 cp "${manifest}" "${fixture_repo}/package/release_asset_manifest"
 cp "${identity_owner}" "${fixture_repo}/package/release_candidate_identity"
+cp "${repo_root}/package/release_version_changes" "${fixture_repo}/package/"
 cp "${repo_root}/package/data_release_metadata" "${fixture_repo}/package/data_release_metadata"
 cp "${repo_root}/config/linnet-data-releases.json" "${fixture_repo}/config/"
 cp "${repo_root}/config/linnet-update-baselines.json" "${fixture_repo}/config/"
@@ -262,12 +263,14 @@ if command == "release"
     append_line(mutations, "release-delete #{tag}")
   when "edit"
     document = read_release(state, tag)
+    document["isPrerelease"] = false if ARGV.include?("--prerelease=false")
     if ARGV.include?("--draft=false")
       document["isDraft"] = false
       write_release(state, tag, document)
       write_tag(state, tag, revision)
       append_line(mutations, "release-publish #{tag}")
     elsif ARGV.include?("--latest")
+      write_release(state, tag, document)
       append_line(mutations, "release-latest #{tag}")
     else
       fail_fake("unsupported release edit")
@@ -807,6 +810,26 @@ GITHUB_ACTIONS=true run_publisher publish >/dev/null ||
 [[ "$(cat "${publisher_state}/mutations.log")" == \
     "release-latest v${version}" ]] ||
   fail "publication retry copied immutable data assets or recreated Catalog state"
+
+# A published Complete Preview with exact bytes can be promoted directly.
+ruby -rjson -e '
+  path = ARGV.fetch(0)
+  document = JSON.parse(File.binread(path))
+  document["isPrerelease"] = true
+  File.binwrite(path, JSON.generate(document))
+' "${publisher_state}/releases/v${version}.json"
+run_stager "${publisher_state}" verify public >/dev/null ||
+  fail "exact Complete Preview was rejected during authorization"
+: >"${publisher_state}/mutations.log"
+GITHUB_ACTIONS=true run_publisher publish >/dev/null ||
+  fail "exact Complete Preview could not be promoted"
+ruby -rjson -e '
+  document = JSON.parse(File.binread(ARGV.fetch(0)))
+  abort if document.fetch("isDraft") || document.fetch("isPrerelease")
+' "${publisher_state}/releases/v${version}.json" ||
+  fail "Complete promotion left the release marked as Preview"
+[[ "$(cat "${publisher_state}/mutations.log")" == "release-latest v${version}" ]] ||
+  fail "Complete Preview promotion replaced assets or republished Catalog"
 
 seed_catalog() {
   local source="$1" ref="$2"

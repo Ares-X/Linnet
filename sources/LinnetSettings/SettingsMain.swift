@@ -53,7 +53,6 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
   @Published private(set) var cloudSyncPreparing = false
   @Published var cloudSyncStatus: LinnetSettingsContract.CloudSyncStatus?
-  @Published var cloudRecoveryRepairConfirmationRequired = false
   @Published var languageDataRepairTarget: SettingsLanguageDataUpdateTarget?
 
   let productName: String
@@ -369,14 +368,13 @@ extension SettingsModel {
       }
     }
   }
-  func uploadCloudBackupArchive(repair: Bool = false) {
+  func uploadCloudBackupArchive() {
     guard let cloudFolder = cloudSyncLocation?.folder, !operationActive else { return }
     run(
       .cloudBackup,
       operation: .exportCloudRecovery(
         categories: Set(LinnetBackupStore.Category.allCases),
-        cloudFolder: cloudFolder,
-        repair: repair
+        cloudFolder: cloudFolder
       )
     ) { outcome in
       guard let recovery = outcome.cloudRecovery else { return .operationFailed(.unknown) }
@@ -556,9 +554,6 @@ extension SettingsModel {
       presentStaleOperation()
     } catch SettingsDataCoordinator.Failure.cancelled {
       status = .operationCancelled
-    } catch SettingsDataCoordinator.Failure.cloudRecoveryRepairRequired {
-      cloudRecoveryRepairConfirmationRequired = true
-      status = .cloudBackupRepairRequired
     } catch {
       settingsModelLogger.error(
         "Settings operation failed: \(error.localizedDescription, privacy: .private)"

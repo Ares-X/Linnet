@@ -138,6 +138,8 @@ release identity。定时 GitHub workflow 只报告候选更新，不得自动�
 候选按实际改动选择测试。`scripts/release-control verify-local` 可显式运行完整的
 非交互构建、lint、发布 owner 和开发测试；它不生成测试收据，也不是候选申请的前置条件。
 Periphery 可单独运行 `scripts/run_periphery.sh`，作为代码清理建议。
+发布接受项目的 SSH 或 HTTPS remote，授权现有产物不要求本地保留候选标签；
+源码 revision 与产物摘要仍须一致。
 Settings UI 按需在专用测试桌面运行 `scripts/release-control verify-settings-ui`。
 独立 bundle ID、数据目录和 `CFFIXED_USER_HOME` 不隔离鼠标、键盘、焦点或输入源会话；
 不得在维护者正在使用的桌面运行 XCUITest。
@@ -333,7 +335,7 @@ PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机�
 `scripts/release-control preview /absolute/release-directory` 后公开候选 Core/data 和
 候选 Catalog。只有完整验收后显式运行
 `scripts/release-control authorize /absolute/release-directory` 后，本地才会用
-Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
+Git 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
 复核同一批字节并完成发布；本地命令不能上传、编辑 Release 或推进 Catalog。
 
 ## 数据维护

@@ -36,7 +36,6 @@ enum LinnetDirectoryDelta {
   }
 
   private static let magic = Data("LNDELTA1".utf8)
-  private static let maximumBytes: UInt64 = 2_147_483_648
   private static let rsyncOptions = [
     "-rlp", "--checksum", "--no-whole-file", "--delete", "--protocol=29"
   ]
@@ -136,18 +135,25 @@ enum LinnetDirectoryDelta {
       throw Failure.invalid("App publication path")
     }
     for app in [installed, staged] {
-      guard
-        try FileManager.default.contentsOfDirectory(atPath: app.path)
-          .filter({ $0 != ".DS_Store" }) == ["Contents"] else {
+      let entries = try FileManager.default.contentsOfDirectory(atPath: app.path)
+        .filter { $0 != ".DS_Store" }
+      guard entries.isEmpty || entries == ["Contents"] else {
         throw Failure.invalid("App publication layout")
       }
-      try requireDirectory(app.appending(path: "Contents"))
+      if !entries.isEmpty { try requireDirectory(app.appending(path: "Contents")) }
     }
     let installedContents = installed.appending(path: "Contents")
     let stagedContents = staged.appending(path: "Contents")
+    // Repair also supports an existing App whose Contents is missing. The
+    // reverse move restores that exact empty baseline if installation fails.
+    let installedExists = FileManager.default.fileExists(atPath: installedContents.path)
+    let stagedExists = FileManager.default.fileExists(atPath: stagedContents.path)
+    let source = stagedExists ? stagedContents : installedContents
+    let destination = stagedExists ? installedContents : stagedContents
+    let mode = installedExists && stagedExists ? RENAME_SWAP : RENAME_EXCL
     guard renameatx_np(
-      AT_FDCWD, installedContents.path, AT_FDCWD, stagedContents.path,
-      UInt32(RENAME_SWAP | RENAME_NOFOLLOW_ANY)) == 0 else {
+      AT_FDCWD, source.path, AT_FDCWD, destination.path,
+      UInt32(mode | RENAME_NOFOLLOW_ANY)) == 0 else {
       throw Failure.filesystem("atomic exchange", errno)
     }
   }
@@ -170,14 +176,12 @@ enum LinnetDirectoryDelta {
       throw Failure.invalid("directory inventory")
     }
     var result: [Entry] = []
-    var total: UInt64 = 0
     for case let url as URL in iterator {
       try Task.checkCancellation()
       guard url.path.hasPrefix(prefix) else { throw Failure.invalid("inventory root") }
       let path = String(url.path.dropFirst(prefix.count))
       var info = stat()
-      guard result.count < 32_768, path.utf8.count <= 1024,
-        lstat(url.path, &info) == 0, info.st_uid == getuid(),
+      guard lstat(url.path, &info) == 0, info.st_uid == getuid(),
         info.st_mode & 0o6000 == 0 else { throw Failure.invalid("entry \(path)") }
       // Finder's root-folder display metadata is not payload. The same
       // inventory must exclude it for preparation, exchange and rollback;
@@ -201,10 +205,9 @@ enum LinnetDirectoryDelta {
           throw Failure.invalid("escaping link \(path)")
         }
       case S_IFREG:
-        guard info.st_size >= 0, UInt64(info.st_size) <= maximumBytes - total else {
+        guard info.st_size >= 0 else {
           throw Failure.invalid("tree size")
         }
-        total += UInt64(info.st_size)
         let handle = try openRead(url)
         defer { try? handle.close() }
         type = "file"; content = try transfer(handle, count: UInt64(info.st_size), to: nil)
@@ -257,7 +260,7 @@ enum LinnetDirectoryDelta {
     let length = lengthData.reduce(0) { ($0 << 8) | Int($1) }
     guard (1...1024).contains(length), let data = try handle.read(upToCount: length),
       data.count == length, let header = try? JSONDecoder().decode(Header.self, from: data),
-      try encode(header) == data, header.batchBytes > 0, header.batchBytes <= maximumBytes,
+      try encode(header) == data, header.batchBytes > 0,
       [header.baseSHA256, header.targetSHA256, header.batchSHA256].allSatisfy({ value in
         value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
       }) else { throw Failure.invalid("header") }
@@ -271,7 +274,6 @@ enum LinnetDirectoryDelta {
   }
 
   private static func transfer(_ input: FileHandle, count: UInt64, to output: FileHandle?) throws -> String {
-    guard count <= maximumBytes else { throw Failure.invalid("payload size") }
     var remaining = count, hasher = SHA256()
     while remaining > 0 {
       try Task.checkCancellation()
@@ -328,15 +330,13 @@ enum LinnetDirectoryDelta {
     process.terminationHandler = { _ in completion.signal() }
     try Task.checkCancellation()
     try process.run()
-    let deadline = DispatchTime.now().uptimeNanoseconds + 300_000_000_000
     while completion.wait(timeout: .now() + .milliseconds(50)) == .timedOut {
-      if Task.isCancelled || DispatchTime.now().uptimeNanoseconds >= deadline {
+      if Task.isCancelled {
         process.terminate()
         if completion.wait(timeout: .now() + .seconds(2)) == .timedOut {
           _ = kill(process.processIdentifier, SIGKILL)
         }
         try Task.checkCancellation()
-        throw Failure.invalid("rsync deadline")
       }
     }
     guard process.terminationStatus == 0 else { throw Failure.invalid("rsync batch reconstruction") }

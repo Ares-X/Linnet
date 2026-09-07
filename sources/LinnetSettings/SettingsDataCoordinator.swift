@@ -80,8 +80,7 @@ actor SettingsDataCoordinator {
     )
     case exportCloudRecovery(
       categories: Set<LinnetBackupStore.Category>,
-      cloudFolder: URL,
-      repair: Bool
+      cloudFolder: URL
     )
     case importPortable(PortableImportCandidate, baseRevision: String)
     case restoreBackup(URL)
@@ -163,7 +162,6 @@ actor SettingsDataCoordinator {
     case configurationRestoreFailed
     case timedOut
     case cancelled
-    case cloudRecoveryRepairRequired
 
     var errorDescription: String? {
       switch self {
@@ -178,8 +176,6 @@ actor SettingsDataCoordinator {
         "The previous runtime configuration could not be restored consistently."
       case .timedOut: "The input method did not reply in time."
       case .cancelled: "The data operation was cancelled."
-      case .cloudRecoveryRepairRequired:
-        "Cloud recovery needs explicit full-repair confirmation."
       }
     }
   }
@@ -211,7 +207,7 @@ actor SettingsDataCoordinator {
     )
     case export(Set<LinnetBackupStore.Category>, destination: URL)
     case cloudRecovery(
-      Set<LinnetBackupStore.Category>, cloudFolder: URL, repair: Bool)
+      Set<LinnetBackupStore.Category>, cloudFolder: URL)
     case portable(LinnetBackupStore.PortableArchive, baseRevision: String)
     case restore(URL, LinnetBackupStore.BackupManifest)
     case removeBackup(LinnetBackupStore.BackupRecord)
@@ -390,11 +386,10 @@ extension SettingsDataCoordinator {
           personalEffect: personalEffect,
           progress: phaseProgress
         )
-      case .cloudRecovery(let categories, let cloudFolder, let repair):
+      case .cloudRecovery(let categories, let cloudFolder):
         outcome = try await exportCloudRecovery(
           categories: categories,
           cloudFolder: cloudFolder,
-          repair: repair,
           environment: environment,
           personalEffect: personalEffect,
           progress: phaseProgress
@@ -443,9 +438,6 @@ extension SettingsDataCoordinator {
     } catch let failure as HallelujahSubstitutionImporter.Failure {
       phaseProgress(.failed)
       throw Failure.invalidOperation("Hallelujah import failed: \(failure)")
-    } catch LinnetCloudRecoveryArchive.Failure.needsConfirmedRepair {
-      phaseProgress(.failed)
-      throw Failure.cloudRecoveryRepairRequired
     } catch LinnetCloudRecoveryArchive.Failure.cloudItemUnavailable(_) {
       phaseProgress(.failed)
       throw Failure.unavailable

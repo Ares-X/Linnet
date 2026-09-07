@@ -64,7 +64,6 @@ extension SettingsModel {
     case .configurationRestoreFailed: .configurationRecoveryFailed
     case .timedOut: .timedOut
     case .cancelled: .unknown
-    case .cloudRecoveryRepairRequired: .invalidOperation
     }
   }
 

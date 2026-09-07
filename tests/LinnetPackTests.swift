@@ -271,14 +271,12 @@ struct LinnetPackTests {
       let repeated = try registry.verifyAndStagePack(
         package: replacement, artifact: artifact, transfer: .complete, allowCompleteRepair: true)
       require(repeated == repaired, "repeated repair created a second copy")
-      var remaining = 100
       let pending = try registry.supersededPackCleanups(
         active: [first], rollback: [], pending: [LinnetDataRegistry.packPath(artifact)],
-        now: Date(), remaining: &remaining)
+        now: Date())
       require(pending.isEmpty, "cleanup removed a downloading repair")
-      remaining = 100
       let unused = try registry.supersededPackCleanups(
-        active: [first], rollback: [], pending: [], now: Date(), remaining: &remaining)
+        active: [first], rollback: [], pending: [], now: Date())
       require(unused.map(\.relativePath) == [repaired.relativePath], "cancelled repair was not collectable")
     }
   }

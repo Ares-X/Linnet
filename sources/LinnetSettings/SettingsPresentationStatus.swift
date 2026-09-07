@@ -103,7 +103,6 @@ enum SettingsPresentationStatus: Equatable {
   case cloudSyncDeferred
   case cloudBackupUploaded(Date)
   case cloudBackupUnchanged(Date)
-  case cloudBackupRepairRequired
   case cloudSyncDisabled
   case backupRestored
   case backupRecordRemoved
@@ -197,10 +196,6 @@ enum SettingsPresentationStatus: Equatable {
       pair = (
         "Recovery data is unchanged; the verified backup is from \(verifiedAt.formatted()).",
         "恢复数据没有变化；已校验备份时间为 \(verifiedAt.formatted())。")
-    case .cloudBackupRepairRequired:
-      pair = (
-        "The incremental recovery chain is unavailable. Confirm full repair to create a new baseline.",
-        "增量恢复链不可用。请确认完整修复以创建新基线。")
     case .cloudSyncDisabled:
       pair = (
         "iCloud Drive learning synchronization disabled. No data was deleted.",
@@ -308,7 +303,6 @@ enum SettingsPresentationStatus: Equatable {
       .success
     case .operationProgress,
       .cancellingOperation,
-      .cloudBackupRepairRequired,
       .publishingAppearance,
       .appearanceStaleRetry,
       .pack(_, .downloading),

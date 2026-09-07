@@ -49,10 +49,10 @@ extension SettingsDataCoordinator {
       }
       try requireWritableDestination(destination)
       return .export(categories, destination: destination)
-    case .exportCloudRecovery(let categories, let cloudFolder, let repair):
+    case .exportCloudRecovery(let categories, let cloudFolder):
       guard !categories.isEmpty else { throw Failure.invalidOperation("no export category") }
       try requireDirectory(cloudFolder)
-      return .cloudRecovery(categories, cloudFolder: cloudFolder, repair: repair)
+      return .cloudRecovery(categories, cloudFolder: cloudFolder)
     case .importPortable(let candidate, let revision):
       guard !revision.isEmpty else { throw Failure.invalidOperation("empty revision") }
       return .portable(candidate.archive, baseRevision: revision)
@@ -198,7 +198,6 @@ extension SettingsDataCoordinator {
   func exportCloudRecovery(
     categories: Set<LinnetBackupStore.Category>,
     cloudFolder: URL,
-    repair: Bool,
     environment: Environment,
     personalEffect: PersonalEffect,
     progress: @escaping @Sendable (SettingsOperationPhase) -> Void
@@ -216,7 +215,7 @@ extension SettingsDataCoordinator {
       personalEffect: personalEffect,
       progress: progress)
     let recovery = try LinnetCloudRecoveryArchive.publish(
-      portable: Data(contentsOf: portable), in: cloudFolder, repair: repair)
+      portable: Data(contentsOf: portable), in: cloudFolder)
     return .init(
       backupDirectory: snapshot.backupDirectory,
       personalSnapshot: snapshot.personalSnapshot,

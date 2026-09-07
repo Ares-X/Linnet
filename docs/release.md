@@ -150,12 +150,14 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
    有变化时，再验证对应数据更新或双向 iCloud 合并；已验证的同一原字节不重复验收。
 6. 本次变更所需验收通过后运行
    `scripts/release-control authorize "$ARCHIVE_OUTPUT_DIR"`。本地命令只能重新验证
-   全部 manifest 文件和三个远端 Release 的 SHA-256/size，并通过 SSH 创建
+   全部 manifest 文件和三个远端 Release 的 SHA-256/size，并通过 Git 创建
    `linnet-publication/v<VERSION>-<FULL_REVISION>-h<SET_SHA256>`；它不能构建、
    上传、编辑 Release 或推进 Catalog；
 7. 正式授权标签启动同一个 Ubuntu publisher job。它从 GitHub Release metadata 验证完整 manifest
    集合，只下载约 4 KB 的 `Linnet-Data-Channel.json`，然后按
    Core → data → 非强制快进 Catalog → Public / Latest 的顺序发布。大型资产不再下载。
+   若同一份 Complete 已作为预发布公开，按同一源码与资产摘要直接转为稳定版，
+   无需重传资产；正式发布会移除预发布标记。
 
 更新锁定 LTS 模型时，显式
 `linnet-data-seed/v<VERSION>-<SEQUENCE>-<FULL_REVISION>` 标签启动同一个 macOS
@@ -216,7 +218,8 @@ Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 c
 
 在线升级须验证无需注销或密码，登录会话、enabled/selected、UserData、输入菜单、
 Settings 和真实输入保留。
-PKG 不以旧 App 的签名、版本或 TIS 注册状态作为安装前提。Complete 可首次安装、
+PKG 不以旧 App 的签名、版本或 TIS 注册状态作为安装前提。旧 App 缺失 Contents
+时可补入新 Contents，失败则退回原来的空目录状态；App 根目录保持不变。Complete 可首次安装、
 覆盖重装或修复旧 App；Core 包仍需要现有 App 与兼容的语言运行时。新 App 的签名、
 目标字节、路径和现有数据兼容性在实际写入边界检查。输入源尚未启用时，安装完成后
 提示用户到系统设置添加；不要求预先完整卸载，也不把启用失败报告成安装失败。

@@ -72,7 +72,7 @@ extension DataTabView {
       HStack {
         Button("Sync Learning Now") { model.synchronizeLearningNow() }
           .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
-        Button("Upload Recovery Backup…") { pendingCloudBackupUpload = true }
+        Button("Upload Recovery Backup…") { model.uploadCloudBackupArchive() }
           .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
         Button("Review Recovery Backup…") {
           Task {

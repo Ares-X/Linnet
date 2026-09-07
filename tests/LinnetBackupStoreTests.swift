@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -133,7 +134,7 @@ struct LinnetBackupStoreTests {
       learning: [:], categories: [.customWords],
       createdAt: Date(timeIntervalSince1970: 1_700_000_000),
       appVersion: "1.0.0", dataVersion: "2026.08.31")
-    let baseline = try LinnetCloudRecoveryArchive.publish(portable: first, in: root, repair: false)
+    let baseline = try LinnetCloudRecoveryArchive.publish(portable: first, in: root)
     guard baseline.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
       fail("first cloud recovery did not create its base")
     }
@@ -164,7 +165,7 @@ struct LinnetBackupStoreTests {
       createdAt: Date(timeIntervalSince1970: 1_800_000_000),
       appVersion: "1.0.0", dataVersion: "2026.08.31")
     let unchanged = try LinnetCloudRecoveryArchive.publish(
-      portable: sameContentLater, in: root, repair: false)
+      portable: sameContentLater, in: root)
     guard unchanged.kind == LinnetCloudRecoveryArchive.Outcome.Kind.unchanged,
       unchanged.verifiedAt == baseline.verifiedAt else {
       fail("portable createdAt defeated cloud recovery no-op")
@@ -175,7 +176,7 @@ struct LinnetBackupStoreTests {
       learning: [:], categories: [.customWords],
       createdAt: Date(timeIntervalSince1970: 1_800_000_001),
       appVersion: "1.0.0", dataVersion: "2026.08.31")
-    let update = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: false)
+    let update = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root)
     guard update.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
       fail("cloud recovery did not publish a delta")
     }
@@ -187,6 +188,38 @@ struct LinnetBackupStoreTests {
       at: LinnetCloudRecoveryArchive.root(in: root).appending(path: "deltas"),
       includingPropertiesForKeys: nil)
     guard let delta = deltaFiles.first else { fail("cloud recovery did not publish a delta object") }
+    // A valid history must remain readable after the former 1024-delta limit.
+    // Reuse a no-change batch so this checks history traversal, not 1025 writes.
+    let headsDirectory = publishedRoot.appending(path: "heads")
+    let newestHead = try fileManager.contentsOfDirectory(
+      at: headsDirectory, includingPropertiesForKeys: nil)
+      .sorted { $0.lastPathComponent > $1.lastPathComponent }[0]
+    let originalHead = try Data(contentsOf: newestHead)
+    var headDocument = try JSONSerialization.jsonObject(with: originalHead) as! [String: Any]
+    let firstHead = try fileManager.contentsOfDirectory(
+      at: headsDirectory, includingPropertiesForKeys: nil)
+      .sorted { $0.lastPathComponent < $1.lastPathComponent }[0]
+    let firstHeadDocument = try JSONSerialization.jsonObject(
+      with: Data(contentsOf: firstHead)) as! [String: Any]
+    let noChange = root.appending(path: "no-change.linnetdelta")
+    try LinnetDirectoryDelta.build(base: publishedBase, target: publishedBase, output: noChange)
+    let noChangeData = try Data(contentsOf: noChange)
+    let noChangeHash = SHA256.hash(data: noChangeData).map { String(format: "%02x", $0) }.joined()
+    let noChangeName = "no-change.linnetdelta"
+    try fileManager.copyItem(at: noChange, to: publishedRoot.appending(path: "deltas/" + noChangeName))
+    let step: [String: Any] = ["name": noChangeName, "sha256": noChangeHash,
+      "targetDigest": firstHeadDocument["targetDigest"]!]
+    let originalSteps = headDocument["deltas"] as! [[String: Any]]
+    headDocument["deltas"] = Array(repeating: step, count: 1024) + originalSteps
+    try JSONSerialization.data(withJSONObject: headDocument).write(to: newestHead)
+    let longWorkspace = root.appending(path: "long-history")
+    try makeDirectory(longWorkspace)
+    guard let longResult = try LinnetCloudRecoveryArchive.materializeLatest(
+      in: root, workspace: longWorkspace), try Data(contentsOf: longResult) == changed else {
+      fail("valid recovery history beyond 1024 steps was rejected")
+    }
+    try originalHead.write(to: newestHead)
+    try fileManager.removeItem(at: longWorkspace)
     let direct = root.appending(path: "direct-delta", directoryHint: .isDirectory)
     try LinnetDirectoryDelta.apply(base: bases[0], delta: delta, output: direct)
     guard try Data(contentsOf: direct.appending(path: "payload.linnet-data")) == changed else {
@@ -214,20 +247,14 @@ struct LinnetBackupStoreTests {
       fail("a broken latest chain blocked a valid older recovery head")
     }
     try fileManager.removeItem(at: cloudRoot.appending(path: "heads"))
-    do {
-      _ = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: false)
-      fail("orphaned cloud objects silently wrote a full base")
-    } catch LinnetCloudRecoveryArchive.Failure.needsConfirmedRepair { }
-    let repaired = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: true)
-    guard repaired.kind == LinnetCloudRecoveryArchive.Outcome.Kind.uploaded else {
-      fail("confirmed cloud repair did not publish a base")
+    let repaired = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root)
+    guard repaired.kind == .uploaded,
+      fileManager.fileExists(atPath: publishedBase.path) else {
+      fail("unusable history blocked backup creation or removed previous objects")
     }
-    // A still-readable chain can also require a new baseline when it cannot
-    // accept another delta. Explicit confirmation must not be ignored merely
-    // because the old head is valid or its content is unchanged.
-    let confirmed = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root, repair: true)
-    guard confirmed.kind == .uploaded else {
-      fail("confirmed renewal of a valid recovery baseline was treated as a no-op")
+    let unchangedRepair = try LinnetCloudRecoveryArchive.publish(portable: changed, in: root)
+    guard unchangedRepair.kind == .unchanged else {
+      fail("unchanged recovery data created another baseline")
     }
     let heads = try fileManager.contentsOfDirectory(
       at: cloudRoot.appending(path: "heads"), includingPropertiesForKeys: nil)
@@ -235,7 +262,7 @@ struct LinnetBackupStoreTests {
     guard let head = heads.first,
       let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: head)) as? [String: Any],
       let deltas = metadata["deltas"] as? [Any], deltas.isEmpty else {
-      fail("confirmed recovery renewal did not start a fresh baseline")
+      fail("recovery publication did not start a fresh baseline")
     }
   }
 

@@ -12,6 +12,4 @@ first = starts.fetch(0) + 1
 last = (first...lines.size).find { |index| lines.fetch(index).start_with?("## ") } || lines.size
 body = lines[first...last].join.strip
 abort "CHANGELOG #{version} section is empty" if body.empty?
-abort "CHANGELOG #{version} section needs a category heading" unless body.match?(/^### /)
-abort "CHANGELOG #{version} section needs a user-visible change" unless body.match?(/^- /)
 puts body

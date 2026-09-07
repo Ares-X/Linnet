@@ -12,14 +12,11 @@ enum LinnetCloudRecoveryArchive {
   private static let cloudDownloadTimeout: TimeInterval = 30
 
   enum Failure: LocalizedError {
-    case needsConfirmedRepair
     case cloudItemUnavailable(String)
     case invalid(String)
 
     var errorDescription: String? {
       switch self {
-      case .needsConfirmedRepair:
-        "The cloud recovery chain cannot be extended; confirm a new full baseline."
       case .cloudItemUnavailable(let name):
         "The iCloud recovery item is not available locally: \(name)."
       case .invalid(let detail): "Invalid cloud recovery archive: \(detail)."
@@ -68,13 +65,11 @@ enum LinnetCloudRecoveryArchive {
     cloudFolder.appending(path: directoryName, directoryHint: .isDirectory)
   }
 
-  /// Publishes an initial full base only when no cloud history exists. Later
-  /// writes are rsync batches against the latest verified chain. `repair` is
-  /// intentionally a separate, caller-confirmed operation.
+  /// Extends a verified chain, or appends a new full base when none is usable.
+  /// Existing cloud objects are never removed by publication.
   static func publish(
     portable payload: Data,
-    in cloudFolder: URL,
-    repair: Bool
+    in cloudFolder: URL
   ) throws -> Outcome {
     let archive = try LinnetBackupStore.decodePortable(payload)
     let identity = try payloadIdentity(archive)
@@ -93,11 +88,6 @@ enum LinnetCloudRecoveryArchive {
 
     let archiveRoot = root(in: cloudFolder)
     let latest = try latestVerified(in: archiveRoot, workspace: work)
-    if repair {
-      return .init(
-        kind: .uploaded,
-        verifiedAt: try publishBase(target, payloadIdentity: identity, archiveRoot: archiveRoot))
-    }
     switch latest {
     case .verified(let head, let baseline):
       guard head.payloadIdentity != identity else {
@@ -107,12 +97,10 @@ enum LinnetCloudRecoveryArchive {
         from: baseline, to: target, previous: head, payloadIdentity: identity,
         archiveRoot: archiveRoot, workspace: work)
       return .init(kind: .uploaded, verifiedAt: verifiedAt)
-    case .absent:
+    case .absent, .unusable:
       return .init(
         kind: .uploaded,
         verifiedAt: try publishBase(target, payloadIdentity: identity, archiveRoot: archiveRoot))
-    case .unusable:
-      throw Failure.needsConfirmedRepair
     }
   }
 
@@ -229,8 +217,8 @@ private extension LinnetCloudRecoveryArchive {
     workspace: URL,
     downloadDeadline: Date
   ) throws -> URL {
-    guard head.formatVersion == 1, head.deltas.count <= 1024 else {
-      throw Failure.invalid("head version or length")
+    guard head.formatVersion == 1 else {
+      throw Failure.invalid("head version")
     }
     let base = archiveRoot.appending(path: "bases/\(head.baseDigest)", directoryHint: .isDirectory)
     try makeUbiquitousTreeReadable(base, deadline: downloadDeadline)

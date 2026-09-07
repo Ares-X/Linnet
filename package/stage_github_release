@@ -198,9 +198,9 @@ release_state="$(ruby -rjson -e '
   release = JSON.parse(File.binread(ARGV.fetch(0)))
   abort unless release.fetch("tagName") == ARGV.fetch(1) &&
     release.fetch("name") == ARGV.fetch(2) &&
-    release.fetch("isPrerelease") == (ARGV.fetch(3) == "true")
+    (ARGV.fetch(4) == "public" || release.fetch("isPrerelease") == (ARGV.fetch(3) == "true"))
   puts release.fetch("isDraft")
-' "${release_json}" "${tag}" "${title}" "${prerelease}")" ||
+' "${release_json}" "${tag}" "${title}" "${prerelease}" "${channel}")" ||
   fail_stage "${tag} release kind is invalid"
 
 if [[ "${release_state}" == true ]]; then

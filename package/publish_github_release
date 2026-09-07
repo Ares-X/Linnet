@@ -124,7 +124,7 @@ load_and_verify_release() {
     release = JSON.parse(File.binread(ARGV.fetch(0)))
     tag, revision, prerelease, expected_path, output, channel = ARGV.drop(1)
     abort unless release.fetch("tagName") == tag
-    abort unless release.fetch("isPrerelease") == (prerelease == "true")
+    abort unless channel == "public" || release.fetch("isPrerelease") == (prerelease == "true")
     if release.fetch("isDraft")
       target = release.fetch("targetCommitish")
       abort unless target.match?(/\A[0-9a-f]{40}\z/) && target != "0" * 40
@@ -187,10 +187,10 @@ publish_channel() {
     'puts JSON.parse(File.binread(ARGV.fetch(0))).fetch("isDraft")' "${json}")"
   if [[ "${was_draft}" == true ]]; then
     edit_args=(release edit "${tag}" --repo "${repository}" --draft=false)
-    [[ "${channel}" == public ]] && edit_args+=(--latest)
+    [[ "${channel}" == public ]] && edit_args+=(--prerelease=false --latest)
     gh "${edit_args[@]}"
   elif [[ "${channel}" == public ]]; then
-    gh release edit "${tag}" --repo "${repository}" --latest
+    gh release edit "${tag}" --repo "${repository}" --prerelease=false --latest
   fi
   if [[ "${channel}" == data ]]; then
     verify_tag_revision "${tag}" ""
