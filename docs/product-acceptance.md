@@ -720,16 +720,14 @@ direct Core-upgrade source. Public 0.1.7 and older ad-hoc Apps must use Complete
 which verifies the legacy identity and repairs the App while preserving personal
 data and existing TIS state. The package lifecycle matrix proves both that Core
 rejects this edge before mutation and that Complete retains it as a repair path.
-Every exact candidate requires `两轮同 leaf Core 升级` on its immutable bytes.
-Each round upgrades the previous accepted fixed-CMS build (the previous public
-build after the first publication) to the same candidate. Before round two,
-recreate the lower-version baseline through the normal uninstall/install flow;
-record baseline logout and data restoration separately from the online upgrade.
-Online Core accepts only newer versions. Same-version App repair belongs to
-Complete and cannot substitute for Core upgrade acceptance.
-Both upgrades must prove no Installer, password prompt or logout, the
-same login session, retained enabled/selected intent and UserData, and working
-input menu, Settings and real input.
+Choose release acceptance by the changed behavior and boundaries, following
+[release policy](release.md#安装验收). One successful ordered Core upgrade of the
+exact candidate bytes is the normal update evidence; do not recreate a lower
+baseline simply to repeat it. Same-version Complete repair remains a distinct
+path. Repeat lifecycle or failure scenarios only when the affected implementation
+or a concrete unresolved failure requires them. Reuse valid current-byte evidence
+from the development Mac or dedicated VM; keep unrun unrelated rows
+NOT_EXERCISED without making them automatic publication blockers.
 
 ## Evidence levels
 
