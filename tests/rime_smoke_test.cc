@@ -6376,6 +6376,55 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   const auto database = component->GetDb("linnet_zh", "userdb");
   auto* transaction = dynamic_cast<rime::Transactional*>(database.get());
   if (!transaction) Fail("the live dictionary is not transactional");
+
+  // Space commits a real word but keeps its learning reversible. Stopping here
+  // must not require another key or a session restart before cloud sync works.
+  {
+    const auto directory = rime::Service::instance().deployer().user_data_dir / "idle-sync";
+    std::filesystem::create_directories(directory);
+    const auto sync_directory = directory.string();
+    const char* names[] = {"linnet_zh", "linnet_en", nullptr};
+    auto learning_rows = [&] {
+      std::map<std::string, std::string> rows;
+      auto query = database->QueryAll();
+      std::string key, value;
+      while (query && query->GetNextRecord(&key, &value)) rows.emplace(key, value);
+      return rows;
+    };
+    const auto before = learning_rows();
+    Enter(api, chinese, "nihao");
+    api->process_key(chinese, ' ', 0);
+    if (TakeCommit(api, chinese) != "你好" || !transaction->in_transaction())
+      Fail("space commit did not create real reversible learning");
+    for (int index = 0; index < 30; ++index) {
+      const int result = api->sync_user_data_step(sync_directory.c_str(), names);
+      if ((result != 1 && result != 3) || !transaction->in_transaction())
+        Fail("sync ended learning before the undo window expired");
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    int result = 1;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    do {
+      result = api->sync_user_data_step(sync_directory.c_str(), names);
+      if (result != 1 && result != 3) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    } while (std::chrono::steady_clock::now() < deadline);
+    if (result != 0 || transaction->in_transaction() || learning_rows() == before)
+      Fail("idle committed learning did not synchronize without another key: result=" +
+           std::to_string(result) + ", transaction=" +
+           std::to_string(transaction->in_transaction()) + ", changed=" +
+           std::to_string(learning_rows() != before));
+    const auto learned = learning_rows();
+    const auto exported = directory / rime::Service::instance().deployer().user_id /
+                          "linnet_zh.userdb.txt";
+    std::ifstream stream(exported);
+    const std::string contents((std::istreambuf_iterator<char>(stream)), {});
+    for (const auto& row : learned) {
+      if (contents.find(row.first + '\t' + row.second + '\n') == std::string::npos)
+        Fail("idle sync omitted committed learning from its export");
+    }
+    std::cout << "idle learning sync: PASS; undo window preserved and key-free export\n";
+  }
   // A cooperative merge must agree with one uninterrupted upstream merger
   // even when pre-existing, equally weighted rows span several work slices.
   // The reference uses the real implementation, not a copied decay formula.

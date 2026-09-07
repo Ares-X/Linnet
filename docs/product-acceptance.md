@@ -133,7 +133,10 @@ learning merge as input-runtime maintenance; moving only the join off-thread
 would leave input unavailable. This repair replaces that runtime path, not the
 Rime merge rule or the hourly schedule. Cloud I/O must stay off the input thread,
 active database work must yield in bounded slices, and reversible learning must
-not be committed or aborted by synchronization. Live sessions and the input gate
+not be committed or aborted by synchronization within its three-second undo
+window. After that window, an idle committed word must sync without another
+keypress; `tests/verify_rime_runtime.sh --live-sync-probe` exercises both recent
+undo and idle export through real Rime input. Live sessions and the input gate
 must remain unchanged throughout success, failure, cancellation and offline retry.
 
 Scope: the existing pinned librime interaction patch and its digest, the Host's

@@ -1391,18 +1391,28 @@ index 30f4514..9368c75 100644
    return &s_api;
  }
 diff --git a/src/rime/dict/user_dictionary.h b/src/rime/dict/user_dictionary.h
+index 5ebeac0..87ea787 100644
 --- a/src/rime/dict/user_dictionary.h
 +++ b/src/rime/dict/user_dictionary.h
-@@ -6,6 +6,8 @@
- //
+@@ -7,7 +7,8 @@
  #ifndef RIME_USER_DICTIONARY_H_
  #define RIME_USER_DICTIONARY_H_
-+
-+#include <future>
  
- #include <time.h>
+-#include <time.h>
++#include <future>
++
  #include <rime/common.h>
-@@ -111,9 +113,14 @@
+ #include <rime/component.h>
+ #include <rime/dict/user_db.h>
+@@ -103,7 +104,6 @@ class UserDictionary : public Class<UserDictionary, const Ticket&> {
+   hash_map<string, SyllableId> syllabary_;
+   hash_map<SyllableId, string> rev_syllabary_;
+   TickCount tick_ = 0;
+-  time_t transaction_time_ = 0;
+ };
+ 
+ class UserDictionaryComponent : public UserDictionary::Component {
+@@ -111,9 +111,14 @@ class UserDictionaryComponent : public UserDictionary::Component {
    UserDictionaryComponent();
    UserDictionary* Create(const Ticket& ticket);
    UserDictionary* Create(const string& dict_name, const string& db_class);
@@ -1418,9 +1428,10 @@ diff --git a/src/rime/dict/user_dictionary.h b/src/rime/dict/user_dictionary.h
  
  }  // namespace rime
 diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
+index 2944c2d..e5cf44a 100644
 --- a/src/rime/dict/user_dictionary.cc
 +++ b/src/rime/dict/user_dictionary.cc
-@@ -360,6 +360,7 @@
+@@ -360,6 +360,7 @@ size_t UserDictionary::LookupWords(UserDictEntryIterator* result,
                                     bool predictive,
                                     size_t limit,
                                     string* resume_key) {
@@ -1428,7 +1439,7 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
    TickCount present_tick = tick_ + 1;
    size_t len = input.length();
    size_t start = result->cache_size();
-@@ -425,6 +426,9 @@
+@@ -425,6 +426,9 @@ bool UserDictionary::UpdateEntry(const DictEntry& entry, int commits) {
  bool UserDictionary::UpdateEntry(const DictEntry& entry,
                                   int commits,
                                   const string& new_entry_prefix) {
@@ -1438,15 +1449,27 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
    string code_str(entry.custom_code);
    if (code_str.empty() && !TranslateCodeToString(entry.code, &code_str))
      return false;
-@@ -488,6 +492,7 @@
+@@ -488,15 +492,16 @@ bool UserDictionary::NewTransaction() {
    if (!db)
      return false;
    CommitPendingTransaction();
+-  transaction_time_ = time(NULL);
+-  return db->BeginTransaction();
 +  FetchTickCount();
-   transaction_time_ = time(NULL);
-   return db->BeginTransaction();
++  return db->BeginTransaction(Transactional::TransactionClock::now() +
++                              std::chrono::seconds(3));
  }
-@@ -572,17 +577,57 @@
+ 
+ bool UserDictionary::RevertRecentTransaction() {
+   auto db = As<Transactional>(db_);
+   if (!db || !db->in_transaction())
+     return false;
+-  if (time(NULL) - transaction_time_ > 3 /*seconds*/)
++  if (db->transaction_expired())
+     return false;
+   return db->AbortTransaction();
+ }
+@@ -572,17 +577,57 @@ UserDictionaryComponent::UserDictionaryComponent() {}
  
  UserDictionary* UserDictionaryComponent::Create(const string& dict_name,
                                                  const string& db_class) {
@@ -1471,8 +1494,6 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
 -    if (!component) {
 -      LOG(ERROR) << "undefined db class '" << db_class << "'.";
 -      return NULL;
--    }
--    db.reset(component->Create(dict_name));
 +    const auto opening = opening_dbs_.find(dict_name);
 +    if (opening == opening_dbs_.end()) {
 +      db = NewDb(dict_name, db_class);
@@ -1481,7 +1502,8 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
 +      // Other dictionaries and existing input sessions do not wait here.
 +      db = opening->second.get();
 +      opening_dbs_.erase(opening);
-+    }
+     }
+-    db.reset(component->Create(dict_name));
      db_pool_[dict_name] = db;
    }
 -  return new UserDictionary(dict_name, db);
@@ -1743,9 +1765,10 @@ diff --git a/src/rime/lever/user_dict_manager.h b/src/rime/lever/user_dict_manag
    Deployer* deployer_;
    path path_;
 diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_manager.cc
+index e0331e4..cadae67 100644
 --- a/src/rime/lever/user_dict_manager.cc
 +++ b/src/rime/lever/user_dict_manager.cc
-@@ -224,3 +224,309 @@
+@@ -224,3 +224,316 @@ bool UserDictManager::SynchronizeAll() {
  }
  
  }  // namespace rime
@@ -1928,6 +1951,13 @@ diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_mana
 +      ++prepared;
 +      return 1;
 +    }
++    // A committed word remains reversible for three seconds. Idle input must
++    // not leave that expired learning transaction blocking synchronization.
++    for (const auto& item : databases) {
++      auto* transaction = dynamic_cast<Transactional*>(item.second.get());
++      if (transaction->transaction_expired() && !transaction->CommitTransaction())
++        return -1;
++    }
 +    string key, value;
 +    if (imported < io->incoming.size()) {
 +      const auto& incoming = io->incoming[imported];
@@ -2056,7 +2086,7 @@ diff --git a/src/rime/lever/user_dict_manager.cc b/src/rime/lever/user_dict_mana
 +}
 +}  // namespace rime
 diff --git a/src/rime/dict/level_db.h b/src/rime/dict/level_db.h
-index 578ed05..0d75c68 100644
+index 578ed05..821bebf 100644
 --- a/src/rime/dict/level_db.h
 +++ b/src/rime/dict/level_db.h
 @@ -7,19 +7,25 @@
@@ -2099,7 +2129,13 @@ index 578ed05..0d75c68 100644
    bool is_metadata_query_ = false;
  };
  
-@@ -66,11 +77,25 @@ class LevelDb : public Db, public Recoverable, public Transactional {
+@@ -62,15 +73,30 @@ class LevelDb : public Db, public Recoverable, public Transactional {
+   bool Recover() override;
+ 
+   // Transactional
+-  bool BeginTransaction() override;
++  bool BeginTransaction(
++      TransactionClock::time_point deadline = TransactionClock::time_point::max()) override;
    bool AbortTransaction() override;
    bool CommitTransaction() override;
  
@@ -2126,7 +2162,7 @@ index 578ed05..0d75c68 100644
  
  }  // namespace rime
 diff --git a/src/rime/dict/level_db.cc b/src/rime/dict/level_db.cc
-index 9a2eb3d..385d080 100644
+index 9a2eb3d..73090df 100644
 --- a/src/rime/dict/level_db.cc
 +++ b/src/rime/dict/level_db.cc
 @@ -7,6 +7,10 @@
@@ -2415,7 +2451,21 @@ index 9a2eb3d..385d080 100644
    LOG(INFO) << "closed db '" << name() << "'.";
    loaded_ = false;
    readonly_ = false;
-@@ -320,11 +430,81 @@ bool LevelDb::CommitTransaction() {
+@@ -300,11 +410,12 @@ bool LevelDb::MetaUpdate(const string& key, const string& value) {
+   return Update(kMetaCharacter + key, value);
+ }
+ 
+-bool LevelDb::BeginTransaction() {
++bool LevelDb::BeginTransaction(TransactionClock::time_point deadline) {
+   if (!loaded())
+     return false;
+   db_->ClearBatch();
+   in_transaction_ = true;
++  transaction_deadline_ = deadline;
+   return true;
+ }
+ 
+@@ -320,11 +431,81 @@ bool LevelDb::CommitTransaction() {
    if (!loaded() || !in_transaction())
      return false;
    bool ok = db_->CommitBatch();
@@ -2817,3 +2867,39 @@ index 9803a30f..04bccd39 100644
 +  EXPECT_EQ(result[2].value, 3);
 +  EXPECT_EQ(result[2].length, 7);
 +}
+diff --git a/src/rime/dict/db.h b/src/rime/dict/db.h
+index 4d007c8..999ff9a 100644
+--- a/src/rime/dict/db.h
++++ b/src/rime/dict/db.h
+@@ -7,6 +7,7 @@
+ #ifndef RIME_DB_H_
+ #define RIME_DB_H_
+ 
++#include <chrono>
+ #include <rime_api.h>
+ #include <rime/common.h>
+ #include <rime/component.h>
+@@ -76,13 +77,22 @@ class Transactional {
+  public:
+   Transactional() = default;
+   virtual ~Transactional() = default;
+-  virtual bool BeginTransaction() { return false; }
++  using TransactionClock = std::chrono::steady_clock;
++  virtual bool BeginTransaction(
++      TransactionClock::time_point deadline = TransactionClock::time_point::max()) {
++    return false;
++  }
+   virtual bool AbortTransaction() { return false; }
+   virtual bool CommitTransaction() { return false; }
+   bool in_transaction() const { return in_transaction_; }
++  bool transaction_expired() const {
++    return in_transaction_ && TransactionClock::now() > transaction_deadline_;
++  }
+ 
+  protected:
+   bool in_transaction_ = false;
++  TransactionClock::time_point transaction_deadline_ =
++      TransactionClock::time_point::max();
+ };
+ 
+ class Recoverable {
