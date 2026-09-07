@@ -4,6 +4,12 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.21 — 预览版
+
+### 安装
+
+- 修复完整安装包因安装暂存目录已经存在而拒绝首次安装或重装的问题，已有暂存内容不再被误判为必须卸载的旧安装。
+
 ## 0.1.20 — 2026-09-06
 
 ### 学习同步
