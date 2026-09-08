@@ -116,7 +116,6 @@ extension LinnetDataChannel {
     case current(LinnetDataRegistry.ActivePack)
     case delta(Delta, base: LinnetDataRegistry.ActivePack)
     case complete
-    case requiresCompleteRepair
   }
 
   struct Artifact: Codable, Equatable, Sendable {
@@ -148,8 +147,7 @@ extension LinnetDataChannel {
         && contentSHA256 == pack.contentSHA256
     }
 
-    /// Normal updates may reuse or reconstruct; only a first baseline or an
-    /// explicit new repair operation can authorize a complete download.
+    /// Reuse unchanged packs; prefer an exact-base delta when available.
     func transfer(
       from installed: LinnetDataRegistry.ActivePack?, allowCompleteRepair: Bool = false
     ) -> PackTransfer {
@@ -158,7 +156,7 @@ extension LinnetDataChannel {
       if allowCompleteRepair { return .complete }
       guard installed.kind == kind, installed.dataABI == dataABI,
         let delta = deltas?.first(where: { $0.baseContentSHA256 == installed.contentSHA256 })
-      else { return .requiresCompleteRepair }
+      else { return .complete }
       return .delta(delta, base: installed)
     }
   }
@@ -183,14 +181,12 @@ enum LinnetDataChannel {
     case invalidCatalog(String)
     case conflictingPack(LinnetPackContract.Kind)
     case invalidArtifact(String)
-    case completeRepairRequired
 
     var errorDescription: String? {
       switch self {
       case .invalidCatalog(let detail): "Invalid Linnet data catalog: \(detail)."
       case .conflictingPack(let kind): "Conflicting Linnet language-pack metadata: \(kind.rawValue)."
       case .invalidArtifact(let detail): "Invalid Linnet data artifact: \(detail)."
-      case .completeRepairRequired: "A complete language-data repair needs your confirmation."
       }
     }
   }

@@ -39,7 +39,6 @@ struct SettingsRootView: View {
   @State private var pendingRestore: LinnetBackupStore.BackupRecord?
   @State private var pendingBackupRemoval: LinnetBackupStore.BackupRecord?
   @State private var pendingLegacyImport: SettingsDataCoordinator.LegacyImportCandidate?
-  @State private var pendingCloudBackupUpload = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -56,46 +55,6 @@ struct SettingsRootView: View {
       model.refreshBackups()
       model.refreshLegacyImportCandidate()
       if model.diagnostics == nil { model.refreshDiagnostics() }
-    }
-    .confirmationDialog(
-      "Upload a recovery backup?",
-      isPresented: $pendingCloudBackupUpload,
-      titleVisibility: .visible
-    ) {
-      Button("Upload Recovery Backup") { model.uploadCloudBackupArchive() }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text(
-        "Back up personal dictionaries and learned words to iCloud Drive. Only changed content is uploaded; local data is not changed."
-      )
-    }
-    .confirmationDialog(
-      "Repair cloud recovery backup?",
-      isPresented: $model.cloudRecoveryRepairConfirmationRequired,
-      titleVisibility: .visible
-    ) {
-      Button("Create Full Repair Backup", role: .destructive) {
-        model.uploadCloudBackupArchive(repair: true)
-      }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text(
-        "The existing incremental recovery chain cannot be verified. This creates a new complete baseline; previous cloud objects are left unchanged."
-      )
-    }
-    .confirmationDialog(
-      "Repair language data with complete packs?",
-      isPresented: presented($model.languageDataRepairTarget),
-      titleVisibility: .visible
-    ) {
-      Button("Download Complete Changed Packs") {
-        if let target = model.languageDataRepairTarget {
-          model.downloadLanguageData(target, allowCompleteRepair: true)
-        }
-      }
-      Button("Cancel", role: .cancel) { model.languageDataRepairTarget = nil }
-    } message: {
-      Text("Download complete copies of changed or conflicting packs from the selected channel. Unchanged packs, learned words, and personal settings are kept. Your current data stays active until the replacement is ready.")
     }
     .confirmationDialog(
       "Import existing Rime / Hallelujah data?",
@@ -218,7 +177,6 @@ struct SettingsRootView: View {
         updateChecker: model.updateChecker,
         pendingClear: $pendingClear,
         pendingPortableImport: $pendingPortableImport,
-        pendingCloudBackupUpload: $pendingCloudBackupUpload,
         pendingRestore: $pendingRestore,
         pendingBackupRemoval: $pendingBackupRemoval,
         pendingLegacyImport: $pendingLegacyImport

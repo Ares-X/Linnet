@@ -9,19 +9,14 @@ import Foundation
 enum LinnetCloudRecoveryArchive {
   static let directoryName = "Linnet-Recovery-v1"
   private static let payloadName = "payload.\(LinnetBackupStore.portableExtension)"
-  private static let maximumHeadsToProbe = 32
-  private static let maximumHeadBytes = 128 * 1024
   private static let cloudDownloadTimeout: TimeInterval = 30
 
   enum Failure: LocalizedError {
-    case needsConfirmedRepair
     case cloudItemUnavailable(String)
     case invalid(String)
 
     var errorDescription: String? {
       switch self {
-      case .needsConfirmedRepair:
-        "The cloud recovery chain cannot be extended; confirm a new full baseline."
       case .cloudItemUnavailable(let name):
         "The iCloud recovery item is not available locally: \(name)."
       case .invalid(let detail): "Invalid cloud recovery archive: \(detail)."
@@ -70,13 +65,11 @@ enum LinnetCloudRecoveryArchive {
     cloudFolder.appending(path: directoryName, directoryHint: .isDirectory)
   }
 
-  /// Publishes an initial full base only when no cloud history exists. Later
-  /// writes are rsync batches against the latest verified chain. `repair` is
-  /// intentionally a separate, caller-confirmed operation.
+  /// Extends a verified chain, or appends a new full base when none is usable.
+  /// Existing cloud objects are never removed by publication.
   static func publish(
     portable payload: Data,
-    in cloudFolder: URL,
-    repair: Bool
+    in cloudFolder: URL
   ) throws -> Outcome {
     let archive = try LinnetBackupStore.decodePortable(payload)
     let identity = try payloadIdentity(archive)
@@ -95,11 +88,6 @@ enum LinnetCloudRecoveryArchive {
 
     let archiveRoot = root(in: cloudFolder)
     let latest = try latestVerified(in: archiveRoot, workspace: work)
-    if repair {
-      return .init(
-        kind: .uploaded,
-        verifiedAt: try publishBase(target, payloadIdentity: identity, archiveRoot: archiveRoot))
-    }
     switch latest {
     case .verified(let head, let baseline):
       guard head.payloadIdentity != identity else {
@@ -109,12 +97,10 @@ enum LinnetCloudRecoveryArchive {
         from: baseline, to: target, previous: head, payloadIdentity: identity,
         archiveRoot: archiveRoot, workspace: work)
       return .init(kind: .uploaded, verifiedAt: verifiedAt)
-    case .absent:
+    case .absent, .unusable:
       return .init(
         kind: .uploaded,
         verifiedAt: try publishBase(target, payloadIdentity: identity, archiveRoot: archiveRoot))
-    case .unusable:
-      throw Failure.needsConfirmedRepair
     }
   }
 
@@ -191,7 +177,7 @@ private extension LinnetCloudRecoveryArchive {
     guard !candidates.isEmpty else {
       return try hasRecoveryObjects(in: archiveRoot) ? .unusable : .absent
     }
-    for candidate in candidates.prefix(maximumHeadsToProbe) {
+    for candidate in candidates {
       let candidateWorkspace = workspace.appending(
         path: "head-\(UUID().uuidString)", directoryHint: .isDirectory)
       try FileManager.default.createDirectory(at: candidateWorkspace, withIntermediateDirectories: false)
@@ -231,8 +217,8 @@ private extension LinnetCloudRecoveryArchive {
     workspace: URL,
     downloadDeadline: Date
   ) throws -> URL {
-    guard head.formatVersion == 1, head.deltas.count <= 1024 else {
-      throw Failure.invalid("head version or length")
+    guard head.formatVersion == 1 else {
+      throw Failure.invalid("head version")
     }
     let base = archiveRoot.appending(path: "bases/\(head.baseDigest)", directoryHint: .isDirectory)
     try makeUbiquitousTreeReadable(base, deadline: downloadDeadline)
@@ -366,9 +352,6 @@ private extension LinnetCloudRecoveryArchive {
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     encoder.dateEncodingStrategy = .millisecondsSince1970
     let data = try encoder.encode(head)
-    guard data.count <= maximumHeadBytes, head.deltas.count <= 1024 else {
-      throw Failure.needsConfirmedRepair
-    }
     let millis = Int64(head.createdAt.timeIntervalSince1970 * 1000)
     let destination = archiveRoot.appending(
       path: "heads/\(String(format: "%020lld", millis))-\(head.operationID.uuidString).json",
@@ -384,12 +367,11 @@ private extension LinnetCloudRecoveryArchive {
   private static func readHead(_ url: URL) throws -> Head {
     var info = stat()
     guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
-      info.st_size >= 0, info.st_size <= Int64(maximumHeadBytes) else {
+      info.st_size >= 0 else {
       throw Failure.invalid("head size")
     }
     try requireRegular(url)
     let data = try Data(contentsOf: url)
-    guard data.count <= maximumHeadBytes else { throw Failure.invalid("head size") }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .millisecondsSince1970
     let head = try decoder.decode(Head.self, from: data)

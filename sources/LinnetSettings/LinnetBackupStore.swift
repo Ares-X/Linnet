@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Owns bounded backup snapshot/copy, immutable manifests and portable formats.
+/// Owns backup snapshot/copy, immutable manifests and portable formats.
 /// It never mutates the live source directory or initializes librime.
 enum LinnetBackupStore {
   static let portableFormatVersion = 1
@@ -9,18 +9,8 @@ enum LinnetBackupStore {
   static let tableBackupFormatVersion = 3
   static let portableExtension = "linnet-data"
 
-  static let maximumPortableBytes = 64 * 1024 * 1024
-  static let maximumLearningBytes = 16 * 1024 * 1024
-  static let maximumLearningRows = 1_000_000
-  static let maximumManifestBytes = 1024 * 1024
-  static let maximumBackupArtifactBytes = 256 * 1024 * 1024
-  static let maximumStableArtifactBytes = LinnetPersonalDataStore.maximumFileBytes
-  static let maximumBackupBytes = 768 * 1024 * 1024
-  static let maximumStableFiles = 128
-  static let maximumLiveDirectoryEntries = 512
   // Must admit the largest user-selectable verified retention window while
   // still placing a hard bound on corrupt or incomplete directory floods.
-  static let maximumHistoryEntries = 128
 
   enum Category: String, CaseIterable, Codable, Hashable, Sendable {
     case customWords
@@ -47,7 +37,6 @@ enum LinnetBackupStore {
   }
 
   enum Failure: LocalizedError, Equatable, Sendable {
-    case documentTooLarge
     case unsupportedVersion(Int)
     case invalidDocument(String)
     case invalidCategory(String)
@@ -59,11 +48,9 @@ enum LinnetBackupStore {
     case incompleteBackup
     case backupAlreadyComplete
     case invalidRetentionLimit
-    case historyTooLarge
 
     var errorDescription: String? {
       switch self {
-      case .documentTooLarge: "The data document is too large."
       case .unsupportedVersion(let version): "Unsupported data version: \(version)."
       case .invalidDocument(let detail): "Invalid data document: \(detail)."
       case .invalidCategory(let detail): "Invalid data category: \(detail)."
@@ -75,7 +62,6 @@ enum LinnetBackupStore {
       case .incompleteBackup: "The backup is incomplete."
       case .backupAlreadyComplete: "The backup is already complete."
       case .invalidRetentionLimit: "The backup retention limit is invalid."
-      case .historyTooLarge: "The backup history contains too many records."
       }
     }
   }
@@ -216,12 +202,10 @@ enum LinnetBackupStore {
       learning: learningArtifacts
     )
     let data = try encoder().encode(archive)
-    guard data.count <= maximumPortableBytes else { throw Failure.documentTooLarge }
     return data
   }
 
   static func decodePortable(_ data: Data) throws -> PortableArchive {
-    guard data.count <= maximumPortableBytes else { throw Failure.documentTooLarge }
     let archive: PortableArchive
     do {
       archive = try decoder().decode(PortableArchive.self, from: data)
@@ -319,37 +303,27 @@ extension LinnetBackupStore {
   }
 
   static func retentionDeletions(for request: CommitRequest) throws -> [BackupRecord] {
-    guard (1...maximumHistoryEntries).contains(request.maximumVerifiedBackups) else {
+    guard request.maximumVerifiedBackups > 0 else {
       throw Failure.invalidRetentionLimit
     }
     let records = try backupRecords(
-      in: request.transactionsRoot,
-      maximumCount: maximumHistoryEntries + 1
-    )
-    guard records.count <= maximumHistoryEntries + 1,
-      records.contains(where: {
+      in: request.transactionsRoot)
+    guard records.contains(where: {
         $0.transactionID == request.transactionID && $0.state == .incomplete
       })
     else {
-      throw Failure.historyTooLarge
+      throw Failure.incompleteBackup
     }
     let verified = records.filter {
       if case .verified = $0.state { return true }
       return false
     }
-    let deletionCount = max(
-      0,
-      max(
-        records.count - maximumHistoryEntries,
-        verified.count + 1 - request.maximumVerifiedBackups
-      )
-    )
+    let deletionCount = max(0, verified.count + 1 - request.maximumVerifiedBackups)
     let protected = request.protectedTransactionIDs.union([request.transactionID])
     let candidates = verified.reversed().filter { record in
       guard let candidateID = record.transactionID else { return false }
       return !protected.contains(candidateID)
     }
-    guard candidates.count >= deletionCount else { throw Failure.historyTooLarge }
     return Array(candidates.prefix(deletionCount))
   }
 
@@ -440,9 +414,6 @@ extension LinnetBackupStore {
       artifacts: artifacts
     )
     let contents = try encoder(pretty: true).encode(manifest)
-    guard contents.count <= maximumManifestBytes else {
-      throw Failure.artifactTooLarge("manifest.json")
-    }
     return (manifest, contents, manifestURL)
   }
 
@@ -467,7 +438,7 @@ extension LinnetBackupStore {
       throw Failure.incompleteBackup
     }
     try requireRegularFile(manifestURL)
-    let manifestData = try readBoundedRegularFile(manifestURL, limit: maximumManifestBytes)
+    let manifestData = try readRegularFile(manifestURL)
     let manifest: BackupManifest
     do {
       manifest = try decoder().decode(BackupManifest.self, from: manifestData)
@@ -522,19 +493,14 @@ extension LinnetBackupStore {
 
   static func listBackups(in transactionsRoot: URL) throws -> [BackupRecord] {
     guard FileManager.default.fileExists(atPath: transactionsRoot.path) else { return [] }
-    return try backupRecords(in: transactionsRoot, maximumCount: maximumHistoryEntries)
+    return try backupRecords(in: transactionsRoot)
   }
 
   fileprivate static func backupRecords(
-    in transactionsRoot: URL,
-    maximumCount: Int
-  ) throws -> [BackupRecord] {
+    in transactionsRoot: URL) throws -> [BackupRecord] {
     try requireDirectory(transactionsRoot)
     let entries = try immediateChildren(
-      of: transactionsRoot,
-      maximumCount: maximumCount,
-      overflow: .historyTooLarge
-    )
+      of: transactionsRoot)
     return entries.map(backupRecord).sorted {
       let left = $0.createdAt ?? .distantPast
       let right = $1.createdAt ?? .distantPast
@@ -580,7 +546,7 @@ extension LinnetBackupStore {
     -> LinnetPersonalDataStore.Snapshot {
     try requireDirectory(live)
     try requireDirectory(backup)
-    guard try immediateChildren(of: backup, maximumCount: 1, overflow: .unsafeArtifact("stable"))
+    guard try immediateChildren(of: backup)
       .isEmpty
     else {
       throw Failure.unsafeArtifact("stable")
@@ -593,11 +559,9 @@ extension LinnetBackupStore {
     }
     for source in canonicalURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
     where FileManager.default.fileExists(atPath: source.path) {
-      _ = try cloneBoundedRegularFile(
+      _ = try cloneRegularFile(
         source,
-        to: backup.appending(path: source.lastPathComponent),
-        limit: stableArtifactLimit(source.lastPathComponent)
-      )
+        to: backup.appending(path: source.lastPathComponent))
     }
     if !canonicalComplete {
       try LinnetPersonalDataStore.writeBackupNormalization(
@@ -607,69 +571,48 @@ extension LinnetBackupStore {
     }
     let liveDocument = live.appending(path: LinnetSettingsDocumentStore.fileName)
     if FileManager.default.fileExists(atPath: liveDocument.path) {
-      _ = try cloneBoundedRegularFile(
+      _ = try cloneRegularFile(
         liveDocument,
-        to: backup.appending(path: LinnetSettingsDocumentStore.fileName),
-        limit: LinnetSettingsDocumentStore.maximumDocumentBytes
-      )
+        to: backup.appending(path: LinnetSettingsDocumentStore.fileName))
     } else {
       try LinnetSettingsDocumentStore.write(
         LinnetSettingsDocumentStore.adoptLegacy(from: live),
         to: backup
       )
     }
-    var copiedBytes = try regularBytes(in: backup, maximumCount: maximumStableFiles)
 
     let candidates = try immediateChildren(
-      of: live,
-      maximumCount: maximumLiveDirectoryEntries,
-      overflow: .unsafeArtifact("live directory entry limit")
-    ).filter { url in
+      of: live).filter { url in
       let name = url.lastPathComponent
       guard !canonicalPersonalFiles.contains(name),
         name != LinnetSettingsDocumentStore.fileName
       else { return false }
       return stableFiles.contains(name) || name.hasSuffix(".custom.yaml")
     }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-    guard candidates.count + canonicalPersonalFiles.count + 1 <= maximumStableFiles else {
-      throw Failure.artifactTooLarge("stable file count")
-    }
     for source in candidates {
       let name = source.lastPathComponent
       guard stableSourceNameIsAllowed(name) else { throw Failure.unsafeArtifact(name) }
-      let remaining = maximumBackupBytes - copiedBytes
-      let copied = try cloneBoundedRegularFile(
+      _ = try cloneRegularFile(
         source,
-        to: backup.appending(path: name),
-        limit: min(stableArtifactLimit(name), remaining)
-      )
-      copiedBytes += copied
+        to: backup.appending(path: name))
     }
     return snapshot
   }
 
-  /// Copies an already bounded and verified stable directory into an empty
+  /// Copies an already verified stable directory into an empty
   /// candidate. Restore and staging callers cannot bypass the same contract.
   static func copyStable(from source: URL, to destination: URL) throws {
     try requireDirectory(source)
     try requireDirectory(destination)
     guard try immediateChildren(
-      of: destination,
-      maximumCount: 1,
-      overflow: .unsafeArtifact("candidate")
-    ).isEmpty else {
+      of: destination).isEmpty else {
       throw Failure.unsafeArtifact("candidate")
     }
     let stable = try stableArtifactURLs(source, formatVersion: nil)
-    var copiedBytes = 0
     for file in stable {
-      let remaining = maximumBackupBytes - copiedBytes
-      let copied = try cloneBoundedRegularFile(
+      _ = try cloneRegularFile(
         file,
-        to: destination.appending(path: file.lastPathComponent),
-        limit: min(stableArtifactLimit(file.lastPathComponent), remaining)
-      )
-      copiedBytes += copied
+        to: destination.appending(path: file.lastPathComponent))
     }
   }
 
@@ -682,7 +625,6 @@ extension LinnetBackupStore {
   ) throws {
     try requireDirectory(source)
     try requireDirectory(destination)
-    var copiedBytes = 0
     for name in dictionaries.sorted() {
       guard name.hasSuffix(".userdb"), safeName(name) else {
         throw Failure.unsafeArtifact(name)
@@ -697,9 +639,8 @@ extension LinnetBackupStore {
       let target = destination.appending(path: name, directoryHint: .isDirectory)
       try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
       for file in files {
-        copiedBytes += try cloneBoundedRegularFile(
-          file, to: target.appending(path: file.lastPathComponent),
-          limit: min(maximumBackupArtifactBytes, maximumBackupBytes - copiedBytes))
+        _ = try cloneRegularFile(
+          file, to: target.appending(path: file.lastPathComponent))
       }
     }
   }

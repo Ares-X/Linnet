@@ -81,6 +81,7 @@ if [[ "${run_app}" -eq 1 ]]; then
 
   bash -n action-build.sh action-install.sh package/installer-scripts/postinstall \
     package/installer-scripts/complete-postinstall
+  tests/verify_installer_preflight.sh
   tests/verify_runtime_footprint.sh
   tests/verify_visible_settings_fixture.sh --verify local
   tests/verify_release_metadata.sh

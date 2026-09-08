@@ -585,7 +585,6 @@ struct DataTabView: View {
   @ObservedObject var updateChecker: LinnetSettingsUpdateChecker
   @Binding var pendingClear: Set<SettingsDataCoordinator.LearningDomain>?
   @Binding var pendingPortableImport: SettingsDataCoordinator.PortableImportCandidate?
-  @Binding var pendingCloudBackupUpload: Bool
   @Binding var pendingRestore: LinnetBackupStore.BackupRecord?
   @Binding var pendingBackupRemoval: LinnetBackupStore.BackupRecord?
   @Binding var pendingLegacyImport: SettingsDataCoordinator.LegacyImportCandidate?
@@ -661,7 +660,9 @@ struct DataTabView: View {
                 || model.packDownloadActive || model.operationActive)
         }
         downloadSourceControls
-        Button("Repair Language Update…") { model.languageDataRepairTarget = .currentEdition }
+        Button("Repair Language Update") {
+          model.downloadLanguageData(.currentEdition, allowCompleteRepair: true)
+        }
           .disabled(
             !model.languageDataUpdatesAvailable || model.packDownloadActive || model.operationActive)
         Divider()

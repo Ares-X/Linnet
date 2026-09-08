@@ -353,7 +353,6 @@ extension RimeUserDataBridge {
     }
     defer { closedir(directory) }
 
-    var entryCount = 0
     var entries: [DirectoryEntryIdentity] = []
     errno = 0
     while let entry = readdir(directory) {
@@ -363,10 +362,6 @@ extension RimeUserDataBridge {
         }
       }
       if name == "." || name == ".." { continue }
-      entryCount += 1
-      guard entryCount <= LinnetBackupStore.maximumLiveDirectoryEntries else {
-        throw Failure.unsafeDirectory(directoryURL.path)
-      }
       var info = stat()
       let status = name.withCString {
         fstatat(descriptor, $0, &info, AT_SYMLINK_NOFOLLOW)
@@ -413,12 +408,9 @@ extension RimeUserDataBridge {
     defer { levers.user_dict_iterator_destroy(&iterator) }
 
     var available = Set<String>()
-    var observedCount = 0
     while let pointer = levers.next_user_dict(&iterator) {
-      observedCount += 1
       let name = String(cString: pointer)
-      guard observedCount <= LinnetBackupStore.maximumLiveDirectoryEntries,
-        !name.isEmpty,
+      guard !name.isEmpty,
         name.utf8.count <= Int(NAME_MAX),
         available.insert(name).inserted
       else { throw Failure.unsafeDirectory(directory.path) }

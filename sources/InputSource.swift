@@ -34,18 +34,9 @@ final class SquirrelInstaller {
   /// promoted to durable authorization evidence.
   func requestFirstInstallAuthorization() throws {
     let identifier = SquirrelApp.bundleIdentifier
-    var inspection = LinnetInputSourceRegistration.inspect(identifier: identifier)
-    switch inspection.state {
-    case .missing:
-      let status = TISRegisterInputSource(SquirrelApp.appDir as CFURL)
-      guard status == noErr else { throw Failure.registrationFailed(status) }
-      inspection = LinnetInputSourceRegistration.inspect(identifier: identifier)
-    case .enablementRequired, .enabledObservation, .selectedObservation:
-      break
-    case .duplicate, .conflictingIdentity, .conflictingKind,
-      .unavailableCapabilities, .unknownAvailability, .unknownBundleIdentifier:
-      throw Failure.registrationStateRejected(inspection.state.wireValue)
-    }
+    let status = TISRegisterInputSource(SquirrelApp.appDir as CFURL)
+    guard status == noErr else { throw Failure.registrationFailed(status) }
+    let inspection = LinnetInputSourceRegistration.inspect(identifier: identifier)
     guard let inputSource = inspection.inputSource else {
       throw Failure.registrationStateRejected(inspection.state.wireValue)
     }

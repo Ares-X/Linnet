@@ -729,27 +729,16 @@ struct SettingsDataCoordinatorTests {
       try makeSubstitutionDatabase(at: oversizedHallelujah)
       let oversizedHallelujahHandle = try FileHandle(forWritingTo: oversizedHallelujah)
       try oversizedHallelujahHandle.truncate(
-        atOffset: UInt64(HallelujahSubstitutionImporter.maximumSourceDatabaseBytes + 1)
+        atOffset: UInt64(64 * 1024 * 1024 + 1)
       )
       try oversizedHallelujahHandle.close()
       let preflightLiveSentinel = try Data(contentsOf: live.appending(path: "user.yaml"))
       let requestsBeforeRejectedPreflight = requestOrder.currentRequestCount()
-      do {
-        _ = try await coordinator.inspectLegacy(
-          hallelujahDatabase: oversizedHallelujah,
-          legacyUserDirectory: nil
-        )
-        fail("an oversized Hallelujah database passed preflight")
-      } catch SettingsDataCoordinator.Failure.invalidOperation(let detail) {
-        guard detail.contains("Hallelujah") else {
-          fail("oversized Hallelujah preflight produced the wrong failure: \(detail)")
-        }
-      }
-      guard requestOrder.currentRequestCount() == requestsBeforeRejectedPreflight else {
-        fail("failed Hallelujah preflight paused the Host")
-      }
-      guard try Data(contentsOf: live.appending(path: "user.yaml")) == preflightLiveSentinel
-      else { fail("failed Hallelujah preflight missed its typed terminal or changed live data") }
+      _ = try await coordinator.inspectLegacy(
+        hallelujahDatabase: oversizedHallelujah, legacyUserDirectory: nil)
+      guard requestOrder.currentRequestCount() == requestsBeforeRejectedPreflight,
+        try Data(contentsOf: live.appending(path: "user.yaml")) == preflightLiveSentinel
+      else { fail("large Hallelujah inspection changed live data") }
 
       let invalidSchema = fixtureRoot.appending(path: "invalid-substitutions.sqlite3")
       try makeInvalidSubstitutionDatabase(at: invalidSchema)
@@ -775,21 +764,16 @@ struct SettingsDataCoordinatorTests {
       let crowdedLegacy = fixtureRoot.appending(
         path: "crowded-legacy", directoryHint: .isDirectory)
       try makeDirectory(crowdedLegacy)
-      for index in 0...LinnetBackupStore.maximumLiveDirectoryEntries {
+      for index in 0...512 {
         FileManager.default.createFile(
           atPath: crowdedLegacy.appending(path: "entry-\(index)").path,
           contents: Data())
       }
-      do {
-        _ = try await coordinator.inspectLegacy(
-          hallelujahDatabase: nil, legacyUserDirectory: crowdedLegacy)
-        fail("an over-limit legacy directory passed preflight")
-      } catch SettingsDataCoordinator.Failure.invalidOperation {
-        // Expected at the bounded directory owner before Host pause.
-      }
+      _ = try await coordinator.inspectLegacy(
+        hallelujahDatabase: nil, legacyUserDirectory: crowdedLegacy)
       guard requestOrder.currentRequestCount() == requestsBeforeRejectedPreflight,
         try Data(contentsOf: live.appending(path: "user.yaml")) == preflightLiveSentinel
-      else { fail("over-limit legacy data crossed the preflight boundary") }
+      else { fail("legacy inspection changed live data") }
 
       let replacedLegacy = fixtureRoot.appending(
         path: "replaced-legacy", directoryHint: .isDirectory)
@@ -944,46 +928,6 @@ struct SettingsDataCoordinatorTests {
         failedResumePhases.snapshot() == [.preflight, .pausing, .cancelling, .failed]
       else {
         fail("runtime resume failure bypassed the ordered cancellation protocol")
-      }
-
-      let oversizedStable = live.appending(path: "oversized.custom.yaml")
-      FileManager.default.createFile(atPath: oversizedStable.path, contents: nil)
-      let oversizedHandle = try FileHandle(forWritingTo: oversizedStable)
-      try oversizedHandle.truncate(
-        atOffset: UInt64(LinnetBackupStore.maximumStableArtifactBytes + 1)
-      )
-      try oversizedHandle.close()
-      let backupsBeforeRejectedSnapshot = Set(
-        try fileManager.contentsOfDirectory(atPath: registry.backupsDirectory.path)
-      )
-      let beforeRejectedSnapshot = try LinnetPersonalDataStore.snapshot(from: live)
-      let beforeRejectedDocumentSnapshot = try LinnetSettingsDocumentStore.snapshot(from: live)
-      var beforeRejectedPersonal = beforeRejectedSnapshot.data
-      beforeRejectedPersonal.disabledWords.append(.init(value: "force-full-backup"))
-      var beforeRejectedDocument = beforeRejectedDocumentSnapshot.document
-      beforeRejectedDocument.appearance.pageSize =
-        beforeRejectedDocument.appearance.pageSize == 7 ? 5 : 7
-      do {
-        _ = try await coordinator.run(
-          .applyConfiguration(
-            personal: beforeRejectedPersonal,
-            document: beforeRejectedDocument,
-            basePersonalRevision: beforeRejectedSnapshot.revision,
-            baseDocumentRevision: beforeRejectedDocumentSnapshot.revision
-          )
-        )
-        fail("an oversized stable source was copied into an automatic backup")
-      } catch let failure as LinnetBackupStore.Failure {
-        guard case .artifactTooLarge = failure else {
-          fail("the oversized stable source produced the wrong failure: \(failure)")
-        }
-      }
-      try fileManager.removeItem(at: oversizedStable)
-      guard
-        Set(try fileManager.contentsOfDirectory(atPath: registry.backupsDirectory.path))
-          == backupsBeforeRejectedSnapshot
-      else {
-        fail("a pre-manifest backup failure left its transaction behind")
       }
 
       let mergeFailureSentinel = Data(
@@ -1760,7 +1704,7 @@ struct SettingsDataCoordinatorTests {
       let cloudRecovery = fixtureRoot.appending(path: "cloud-recovery", directoryHint: .isDirectory)
       try fileManager.createDirectory(at: cloudRecovery, withIntermediateDirectories: false)
       _ = try LinnetCloudRecoveryArchive.publish(
-        portable: portableData, in: cloudRecovery, repair: false)
+        portable: portableData, in: cloudRecovery)
       let cloudCandidate = try await coordinator.inspectCloudRecovery(in: cloudRecovery)
       guard cloudCandidate?.archive == portableCandidate.archive else {
         fail("cloud recovery inspection did not use the validated portable archive")

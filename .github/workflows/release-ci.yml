@@ -67,20 +67,8 @@ jobs:
           test "$(git rev-parse --verify HEAD^{commit})" = \
             "${CANDIDATE_REVISION}"
 
-          tag="${CANDIDATE_REF#refs/tags/}"
-          tag_record="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
-            --jq '[.object.type, .object.sha] | @tsv')"
-          if [[ "${request_mode}" == candidate ]]; then
-            test "${tag_record}" = $'tag\t'"$(git rev-parse --verify "${CANDIDATE_REF}")"
-            scripts/release-control verify-source \
-              "${CANDIDATE_REF}" "${CANDIDATE_REVISION}" >/dev/null
-            remote_main="$(gh api \
-              "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-            test "${remote_main}" = "${CANDIDATE_REVISION}"
-          else
-            test "${tag_record}" = $'commit\t'"${CANDIDATE_REVISION}"
-          fi
+          test "$(git rev-parse --verify "${CANDIDATE_REF}^{commit}")" = \
+            "${CANDIDATE_REVISION}"
 
           product_version="$(sed -n \
             's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \

@@ -8,12 +8,6 @@ extension LinnetPersonalDataStore {
 }
 
 enum LinnetPersonalDataValidation: Equatable, Sendable {
-  enum Collection: Equatable, Sendable {
-    case customWords
-    case disabledWords
-    case expansions
-  }
-
   enum CustomField: Equatable, Sendable {
     case value
     case code
@@ -28,15 +22,12 @@ enum LinnetPersonalDataValidation: Equatable, Sendable {
     case customWord(UUID, CustomField)
     case disabledWord(UUID)
     case expansion(UUID, ExpansionField)
-    case collection(Collection)
   }
 
   enum Reason: Equatable, Sendable {
     case missing
     case invalid
-    case tooLarge
     case duplicate
-    case tooMany
   }
 
   struct Issue: Equatable, Sendable {
@@ -65,15 +56,6 @@ extension LinnetPersonalDataStore {
     checkCancellation: CancellationCheck
   ) rethrows -> LinnetPersonalDataValidation {
     try checkCancellation()
-    guard data.customWords.count <= maximumRows else {
-      return invalid(.collection(.customWords), .tooMany)
-    }
-    guard data.disabledWords.count <= maximumRows else {
-      return invalid(.collection(.disabledWords), .tooMany)
-    }
-    guard data.expansions.count <= maximumRows else {
-      return invalid(.collection(.expansions), .tooMany)
-    }
 
     let customWords = try validateCustomWords(
       data.customWords, checkCancellation: checkCancellation)
@@ -137,24 +119,10 @@ private extension LinnetPersonalDataStore {
     .invalid(.init(location: location, reason: reason))
   }
 
-  static func invalid(
-    _ location: LinnetPersonalDataValidation.Location,
-    _ reason: LinnetPersonalDataValidation.Reason
-  ) -> LinnetPersonalDataValidation {
-    .invalid(.init(location: location, reason: reason))
-  }
-
-  static func addRenderedBytes(_ bytes: Int, to total: inout Int) -> Bool {
-    guard bytes >= 0, bytes <= maximumFileBytes - total else { return false }
-    total += bytes
-    return true
-  }
-
   static func validateCustomWords(
     _ rows: [LinnetPersonalData.CustomWord],
     checkCancellation: CancellationCheck
   ) rethrows -> ValidationResult<[LinnetPersonalData.CustomWord]> {
-    var customFileBytes = table(name: customWordsFile, rows: []).utf8.count
     var customCodes = Set<String>()
     var customWords: [LinnetPersonalData.CustomWord] = []
     for row in rows {
@@ -167,12 +135,6 @@ private extension LinnetPersonalDataStore {
       guard let customWord else { continue }
       guard customCodes.insert(customWord.code).inserted else {
         return invalid(.customWord(row.id, .code), .duplicate)
-      }
-      let lineBytes = customWord.value.utf8.count + 1 + customWord.code.utf8.count
-      guard lineBytes <= maximumLineBytes,
-        addRenderedBytes(lineBytes + (customWords.isEmpty ? 0 : 1), to: &customFileBytes)
-      else {
-        return invalid(.collection(.customWords), .tooLarge)
       }
       customWords.append(customWord)
     }
@@ -187,12 +149,6 @@ private extension LinnetPersonalDataStore {
     if value.isEmpty, code.isEmpty { return .valid(nil) }
     if value.isEmpty { return invalid(.customWord(row.id, .value), .missing) }
     if code.isEmpty { return invalid(.customWord(row.id, .code), .missing) }
-    guard fieldIsBounded(value) else {
-      return invalid(.customWord(row.id, .value), .tooLarge)
-    }
-    guard fieldIsBounded(code) else {
-      return invalid(.customWord(row.id, .code), .tooLarge)
-    }
     guard validValue(value) else {
       return invalid(.customWord(row.id, .value), .invalid)
     }
@@ -209,7 +165,6 @@ private extension LinnetPersonalDataStore {
     _ rows: [LinnetPersonalData.Expansion],
     checkCancellation: CancellationCheck
   ) rethrows -> ValidationResult<[LinnetPersonalData.Expansion]> {
-    var expansionFileBytes = table(name: expansionsFile, rows: []).utf8.count
     var triggers = Set<String>()
     var expansions: [LinnetPersonalData.Expansion] = []
     for row in rows {
@@ -222,12 +177,6 @@ private extension LinnetPersonalDataStore {
       guard let expansion else { continue }
       guard triggers.insert(expansion.trigger).inserted else {
         return invalid(.expansion(row.id, .trigger), .duplicate)
-      }
-      let lineBytes = expansion.value.utf8.count + 1 + expansion.trigger.utf8.count
-      guard lineBytes <= maximumLineBytes,
-        addRenderedBytes(lineBytes + (expansions.isEmpty ? 0 : 1), to: &expansionFileBytes)
-      else {
-        return invalid(.collection(.expansions), .tooLarge)
       }
       expansions.append(expansion)
     }
@@ -243,12 +192,6 @@ private extension LinnetPersonalDataStore {
     if value.isEmpty { return invalid(.expansion(row.id, .value), .missing) }
     if trigger.isEmpty || trigger == "x;" {
       return invalid(.expansion(row.id, .trigger), .missing)
-    }
-    guard fieldIsBounded(value) else {
-      return invalid(.expansion(row.id, .value), .tooLarge)
-    }
-    guard fieldIsBounded(trigger) else {
-      return invalid(.expansion(row.id, .trigger), .tooLarge)
     }
     guard validValue(value) else {
       return invalid(.expansion(row.id, .value), .invalid)
@@ -271,9 +214,6 @@ private extension LinnetPersonalDataStore {
       try checkCancellation()
       let normalized = row.value.trimmingCharacters(in: .whitespaces).lowercased()
       if normalized.isEmpty { continue }
-      guard fieldIsBounded(normalized) else {
-        return invalid(.disabledWord(row.identifier), .tooLarge)
-      }
       guard validValue(normalized) else {
         return invalid(.disabledWord(row.identifier), .invalid)
       }
@@ -282,21 +222,6 @@ private extension LinnetPersonalDataStore {
     try checkCancellation()
     let uniqueDisabledWords = Dictionary(grouping: disabledWords, by: \.value).values
       .compactMap(\.first).sorted { $0.value < $1.value }
-    if !uniqueDisabledWords.isEmpty {
-      var userSettingsBytes = 128
-      for (index, row) in uniqueDisabledWords.enumerated() {
-        try checkCancellation()
-        guard let json = try? JSONEncoder().encode(row.value) else {
-          return invalid(.collection(.disabledWords), .invalid)
-        }
-        let lineBytes = 4 + json.count
-        guard lineBytes <= maximumLineBytes,
-          addRenderedBytes(lineBytes + (index == 0 ? 0 : 1), to: &userSettingsBytes)
-        else {
-          return invalid(.collection(.disabledWords), .tooLarge)
-        }
-      }
-    }
     return .valid(uniqueDisabledWords)
   }
 }

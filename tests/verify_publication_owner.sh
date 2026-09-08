@@ -121,4 +121,22 @@ if rg -n 'xattr[[:space:]].*(-d|-c)|spctl[[:space:]].*--master-disable' \
   fail "manual trust instructions disable or bypass a system security boundary"
 fi
 
+# Candidate requests bind committed source. Dirty files and absent receipts do
+# not invalidate that binding; a mismatched tag still must fail.
+fixture="$(mktemp -d "${TMPDIR:-/tmp}/linnet-candidate-source.XXXXXX")"
+trap 'rm -rf "${fixture}"' EXIT
+mkdir "${fixture}/scripts"
+cp "${release_control}" "${fixture}/scripts/release-control"
+git -C "${fixture}" init -q
+git -C "${fixture}" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  commit -q --allow-empty -m fixture
+fixture_revision="$(git -C "${fixture}" rev-parse HEAD)"
+fixture_ref="refs/tags/linnet-candidate/v0.1.20-${fixture_revision}"
+git -C "${fixture}" update-ref "${fixture_ref}" "${fixture_revision}"
+bash "${fixture}/scripts/release-control" verify-source "${fixture_ref}" "${fixture_revision}"
+if bash "${fixture}/scripts/release-control" verify-source "${fixture_ref}" \
+    0000000000000000000000000000000000000000 >/dev/null 2>&1; then
+  fail "candidate source verification accepted a different commit"
+fi
+
 echo "Linnet publication contracts: PASS"

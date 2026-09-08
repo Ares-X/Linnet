@@ -135,31 +135,20 @@ focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有�
 release identity。定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并
 上游或发布。
 
-正常正式候选先由 `scripts/release-control verify-local` 恢复并校验锁定依赖、构建，
-串行完成 strict lint、发布 owner、App/Swift/Rime 和 Periphery。验证期间冻结修改；
-临时 Git index 将待提交文件、删除、权限和 gitlink 绑定到一个 Git tree，不改真实
-暂存区；首尾 tree 必须相同。唯一收据位于 ignored
-`build/linnet-source-verification.json`，是维护者的本地验收声明，不是云端独立测试证明。
-`verify-local` 不启动桌面 UI 自动化，收据中的 Settings UI 记为 `NOT_EXERCISED`。
-在有 Developer Mode 的专用测试桌面单独运行
-`scripts/release-control verify-settings-ui`，只补跑 UI 验收，不重复已通过的非交互检查。
-它要求同一 source tree 的本地收据；失败或中断保持未通过，候选申请仍会拒绝。
+候选按实际改动选择测试。`scripts/release-control verify-local` 可显式运行完整的
+非交互构建、lint、发布 owner 和开发测试；它不生成测试收据，也不是候选申请的前置条件。
+Periphery 可单独运行 `scripts/run_periphery.sh`，作为代码清理建议。
+发布接受项目的 SSH 或 HTTPS remote，授权现有产物不要求本地保留候选标签；
+源码 revision 与产物摘要仍须一致。
+Settings UI 按需在专用测试桌面运行 `scripts/release-control verify-settings-ui`。
 独立 bundle ID、数据目录和 `CFFIXED_USER_HOME` 不隔离鼠标、键盘、焦点或输入源会话；
 不得在维护者正在使用的桌面运行 XCUITest。
 
-仅在维护者明确要求先发布预览、稍后验收时，可用 `candidate-preview "原因"`
-代替完整收据申请；它记录未测试状态，不执行测试，且不能用于正式发布。详见发布文档。
-
-提交相同 tree 后，在 clean、精确远端 `main` 上执行
-`scripts/release-control candidate`，创建携带收据的 annotated
-`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签；不再手动推送裸标签。
-唯一 macOS release Action 验证标签、commit、tree 和必需测试结果，一次
-checkout/cache/hydrate，保留历史相关的版本单调性检查及实际签名 App/package 门。
-不重跑已由收据绑定为 PASS 的源码、Rime 或 Settings UI 测试。它使用临时 Keychain
-构建、签名、打包和最终验证一次。
-互不重叠的 Core 2 件、data 4 个完整词包及对应差分和 public 1 件直接写入三个 Draft GitHub
-Releases。候选传输
-不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
+提交源码后运行 `scripts/release-control candidate`，创建指向该提交的
+`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签。无需 clean 或精确远端 main，
+未提交修改不会进入候选。Action 核对标签与 commit，恢复锁定输入，构建、签名并验证
+实际发布文件。测试结果记录实际执行范围；没有测试收据、特殊跳测候选或收据豁免路径。
+Core、data 和 Complete 产物分别暂存在三个 Draft GitHub Releases，供原字节验收。
 
 RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此普通冷构建只从
 lock 指定的同仓库固定 `data-N` LTS pack 恢复，再由 PackTool 验证容器、内部模型
@@ -196,8 +185,8 @@ owner。缓存不是版本或发布权威：
 形状，不匹配时只重建受影响部分。
 
 PR CI 和手动 commit CI 都只验证干净 checkout/SDK 边界：恢复锁定 cache、检查 lint、
-publication/data identity，hydrate 一次、完成一次 unsigned App build，再运行 Periphery。
-Swift owner、native Rime、Settings UI 和真实产品流程只由绑定精确 tree 的本机收据负责，
+publication/data identity，hydrate 一次、完成一次 unsigned App build。
+Swift owner、native Rime、Settings UI 和真实产品流程按改动在本地验证，
 不在 Action 重复。`main` push 不自动执行完整验证；连续 PR 更新只保留最新一次。
 
 ## 构建
@@ -346,7 +335,7 @@ PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机�
 `scripts/release-control preview /absolute/release-directory` 后公开候选 Core/data 和
 候选 Catalog。只有完整验收后显式运行
 `scripts/release-control authorize /absolute/release-directory` 后，本地才会用
-Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
+Git 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
 复核同一批字节并完成发布；本地命令不能上传、编辑 Release 或推进 Catalog。
 
 ## 数据维护
@@ -465,7 +454,7 @@ Foundation 的 `temporaryDirectory`（macOS 上不会随 `TMPDIR` 重定向）�
 
 主题卡片渲染或 OCR 失败时，可单独运行
 `tests/verify_swift_units.sh --appearance-preview`。它复用同一测试与编译缓存，
-不需要下载词库或构建 Rime；其结果不能替代完整本机收据或安装验收。
+不需要下载词库或构建 Rime；其结果不能替代实际安装验收。
 
 Settings 的实际点击、滚动或窗口行为失败时，在隔离桌面运行
 `tests/verify_visible_settings_fixture.sh --ui-test [test-name,...]`；不传测试名运行完整
@@ -485,6 +474,9 @@ tests/verify_development.sh
 这是准备冻结候选时运行一次的本机综合门，不是每次小改动的默认命令。它不需要签名
 或安装，覆盖 App、Swift owner、IPC、中文/英文 projection 和真实 Rime 行为；安装
 生命周期只在专用虚拟机验收，package architecture 使用下一节的独立门。
+
+安装脚本改动可单独运行 `tests/verify_installer_preflight.sh`；它在临时目录验证
+首次安装、覆盖修复和授权失败行为，不安装或注册真实 App。
 
 ### Finalized local candidate
 

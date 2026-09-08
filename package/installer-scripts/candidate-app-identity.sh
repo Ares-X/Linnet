@@ -11,8 +11,6 @@ readonly metadata_path="${script_root}/candidate-app-identity.json"
 readonly release_tool="${script_root}/linnet-pack"
 readonly user_home="${HOME:-}"
 readonly current_uid="$(/usr/bin/id -u)"
-readonly legacy_max_version='0.1.11'
-readonly legacy_max_build='28'
 
 fail_identity() {
   echo "Linnet candidate App identity: $1" >&2
@@ -39,98 +37,10 @@ read_value() {
   /usr/bin/plutil -extract "${key}" raw -o - "${path}" 2>/dev/null
 }
 
-semver_compare() {
-  local actual="$1"
-  local expected="$2"
-  local pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
-  local actual_major actual_minor actual_patch actual_pre
-  local expected_major expected_minor expected_patch expected_pre
-  local index actual_part expected_part
-  local -a actual_parts expected_parts
-
-  [[ "${actual}" =~ ${pattern} ]] || return 2
-  actual_major="${BASH_REMATCH[1]}"
-  actual_minor="${BASH_REMATCH[2]}"
-  actual_patch="${BASH_REMATCH[3]}"
-  actual_pre="${BASH_REMATCH[5]:-}"
-  [[ "${expected}" =~ ${pattern} ]] || return 2
-  expected_major="${BASH_REMATCH[1]}"
-  expected_minor="${BASH_REMATCH[2]}"
-  expected_patch="${BASH_REMATCH[3]}"
-  expected_pre="${BASH_REMATCH[5]:-}"
-
-  for index in 0 1 2; do
-    actual_part=("${actual_major}" "${actual_minor}" "${actual_patch}")
-    expected_part=("${expected_major}" "${expected_minor}" "${expected_patch}")
-    if (( 10#${actual_part[index]} < 10#${expected_part[index]} )); then
-      printf '%s\n' -1
-      return 0
-    fi
-    if (( 10#${actual_part[index]} > 10#${expected_part[index]} )); then
-      printf '%s\n' 1
-      return 0
-    fi
-  done
-  if [[ "${actual_pre}" == "${expected_pre}" ]]; then
-    printf '%s\n' 0
-    return 0
-  fi
-  if [[ -z "${actual_pre}" ]]; then
-    printf '%s\n' 1
-    return 0
-  fi
-  if [[ -z "${expected_pre}" ]]; then
-    printf '%s\n' -1
-    return 0
-  fi
-
-  IFS='.' read -r -a actual_parts <<<"${actual_pre}"
-  IFS='.' read -r -a expected_parts <<<"${expected_pre}"
-  index=0
-  while (( index < ${#actual_parts[@]} || index < ${#expected_parts[@]} )); do
-    if [[ "${actual_parts[index]+set}" != set ]]; then
-      printf '%s\n' -1
-      return 0
-    fi
-    if [[ "${expected_parts[index]+set}" != set ]]; then
-      printf '%s\n' 1
-      return 0
-    fi
-    actual_part="${actual_parts[index]}"
-    expected_part="${expected_parts[index]}"
-    if [[ "${actual_part}" != "${expected_part}" ]]; then
-      if [[ "${actual_part}" =~ ^[0-9]+$ && "${expected_part}" =~ ^[0-9]+$ ]]; then
-        if (( 10#${actual_part} < 10#${expected_part} )); then
-          printf '%s\n' -1
-        else
-          printf '%s\n' 1
-        fi
-        return 0
-      fi
-      if [[ "${actual_part}" =~ ^[0-9]+$ ]]; then
-        printf '%s\n' -1
-        return 0
-      fi
-      if [[ "${expected_part}" =~ ^[0-9]+$ ]]; then
-        printf '%s\n' 1
-        return 0
-      fi
-      if [[ "${actual_part}" < "${expected_part}" ]]; then
-        printf '%s\n' -1
-      else
-        printf '%s\n' 1
-      fi
-      return 0
-    fi
-    ((index += 1))
-  done
-  printf '%s\n' 0
-}
-
-[[ "$#" -ge 1 ]] || fail_identity "usage: existing | installed | packaged | staged APP"
+[[ "$#" -ge 1 ]] || fail_identity "usage: installed | packaged | staged APP"
 readonly verification_mode="$1"
 case "${verification_mode}" in
-  existing|installed)
+  installed)
     [[ "$#" -eq 1 ]] || fail_identity "unexpected App path"
     readonly app_path="${user_home}/Library/Input Methods/Linnet.app"
     ;;
@@ -191,14 +101,6 @@ expected_tree="$(read_value "${metadata_path}" app_tree_sha256)" ||
   "${expected_tree}" =~ ^[0-9a-f]{64}$ ]] ||
   fail_identity "candidate identity metadata shape is invalid"
 
-if [[ ! -e "${app_path}" && ! -L "${app_path}" ]]; then
-  if [[ "${verification_mode}" == existing ]]; then
-    printf '%s\n' clean-complete-install
-    exit 0
-  fi
-  fail_identity "installed App is missing"
-fi
-
 for directory in \
     "${user_home}" \
     "${user_home}/Library" \
@@ -226,9 +128,6 @@ actual_profile="$(read_value "${info_path}" LinnetCodeSigningProfile)" ||
 [[ "${actual_bundle_id}" == "${host_bundle_id}" &&
   "${actual_build}" =~ ^(0|[1-9][0-9]*)$ ]] ||
   fail_identity "installed App bundle metadata is invalid"
-version_comparison="$(semver_compare "${actual_version}" "${expected_version}")" ||
-  fail_identity "installed App version is invalid"
-
 embedded_format="$(read_value "${version_path}" format)" ||
   fail_identity "installed release metadata format is unavailable"
 embedded_product="$(read_value "${version_path}" product)" ||
@@ -269,7 +168,6 @@ embedded_trust="$(read_value "${version_path}" distribution.trust_model)" ||
   "${embedded_trust}" == manual-user-approval ]] ||
   fail_identity "installed release metadata does not describe the finalized App"
 
-identity_transition=""
 case "${embedded_profile}" in
 community-cms)
   [[ "${actual_profile}" == community-cms &&
@@ -298,57 +196,19 @@ community-cms)
   [[ "${embedded_leaf}" == "${expected_leaf}" &&
     "${embedded_same_leaf}" == true ]] ||
     fail_identity "installed release signing leaf does not match"
-  identity_transition=same-community-cms-leaf
-  ;;
-community-adhoc)
-  [[ "${verification_mode}" == existing &&
-    "${actual_profile}" == community-adhoc &&
-    "${embedded_kind}" == adhoc ]] ||
-    fail_identity "installed App is not an admitted legacy community release"
-  # This one-time legacy edge has no certificate trust chain. Verify its ad-hoc
-  # code integrity without imposing that check on current community CMS users.
-  /usr/bin/codesign --verify --deep --strict "${app_path}" >/dev/null 2>&1 ||
-    fail_identity "legacy App code signature is invalid"
-  legacy_version_comparison="$(semver_compare "${actual_version}" \
-    "${legacy_max_version}")" ||
-    fail_identity "legacy App version is invalid"
-  (( legacy_version_comparison <= 0 &&
-    10#${actual_build} <= 10#${legacy_max_build} )) ||
-    fail_identity "legacy ad-hoc compatibility ended after 0.1.11 build 28"
-  embedded_same_kind="$(read_value "${version_path}" \
-    distribution.application_code_signature.host_settings_same_kind)" ||
-    fail_identity "legacy release signing policy is unavailable"
-  signature_details="$(/usr/bin/codesign -dvvv "${app_path}" 2>&1)" || exit 1
-  [[ "${embedded_same_kind}" == true ]] &&
-    /usr/bin/grep -Fxq 'Signature=adhoc' <<<"${signature_details}" ||
-    fail_identity "installed App is not an admitted legacy ad-hoc release"
-  identity_transition=legacy-community-adhoc-to-cms
   ;;
 *)
   fail_identity "installed App signing history is not admitted"
   ;;
 esac
 
-if [[ "${verification_mode}" != existing ]]; then
-  secure_owned_path "${release_tool}" file && [[ -x "${release_tool}" ]] ||
-    fail_identity "candidate tree verifier is unavailable or unsafe"
-  actual_tree="$("${release_tool}" tree-digest --root "${app_path}")" ||
-    fail_identity "candidate App tree cannot be verified"
-  [[ "${actual_tree}" == "${expected_tree}" ]] ||
-    fail_identity "candidate App tree differs from the packaged target"
-  [[ "${actual_version}" == "${expected_version}" &&
-    "${actual_build}" == "${expected_build}" &&
-    "${embedded_revision}" == "${expected_revision}" ]] ||
-    fail_identity "installed App is not the exact packaged candidate"
-  exit 0
-fi
-
-if (( version_comparison > 0 )); then
-  fail_identity "installed App is newer than this Core candidate"
-fi
-if (( 10#${actual_build} > 10#${expected_build} )); then
-  fail_identity "installed App build is newer than this Core candidate"
-fi
-
-printf '%s\n' "${identity_transition}"
+secure_owned_path "${release_tool}" file && [[ -x "${release_tool}" ]] ||
+  fail_identity "candidate tree verifier is unavailable or unsafe"
+actual_tree="$("${release_tool}" tree-digest --root "${app_path}")" ||
+  fail_identity "candidate App tree cannot be verified"
+[[ "${actual_tree}" == "${expected_tree}" &&
+  "${actual_version}" == "${expected_version}" &&
+  "${actual_build}" == "${expected_build}" &&
+  "${embedded_revision}" == "${expected_revision}" ]] ||
+  fail_identity "App is not the exact packaged candidate"
 exit 0

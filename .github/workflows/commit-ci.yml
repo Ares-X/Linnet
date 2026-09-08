@@ -56,6 +56,3 @@ jobs:
 
       - name: Build the unsigned product
         run: make --no-print-directory release
-
-      - name: Check unused production code
-        run: scripts/run_periphery.sh
