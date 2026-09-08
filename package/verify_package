@@ -48,8 +48,21 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-expanded="${work_root}/expanded"
+expanded="${work_root}/expanded.noindex"
 pkgutil --expand-full "${package_path}" "${expanded}"
+
+core_component="${expanded}/Linnet-Core.component.pkg"
+for helper in linnet-pack linnet-runtime-inspector; do
+  helper_path="${core_component}/Scripts/${helper}"
+  [[ "$(lipo -archs "${helper_path}")" == arm64 ]] ||
+    fail_verification "${helper} is not thin arm64"
+  helper_minos="$(otool -l "${helper_path}" | awk '
+    $1 == "cmd" && $2 == "LC_BUILD_VERSION" { build = 1; next }
+    build && $1 == "minos" { print $2; exit }
+  ')"
+  [[ "${helper_minos}" == 13.0 ]] ||
+    fail_verification "${helper} requires macOS ${helper_minos}; package supports macOS 13.0"
+done
 
 case "${edition}" in
   core)
@@ -337,7 +350,6 @@ ruby -rjson -rrexml/document -e '
   None ]] ||
   fail_verification "Installer exposes the wrong ${edition} session conclusion"
 
-core_component="${expanded}/Linnet-Core.component.pkg"
 if [[ "${edition}" == core ]]; then
   [[ ! -e "${core_component}/Payload" && ! -L "${core_component}/Payload" ]] ||
     fail_verification "Core package contains a PackageKit payload"
@@ -360,17 +372,9 @@ fi
   fail_verification "Core SharedSupport is not empty"
 bash -n "${core_component}/Scripts/preinstall"
 bash -n "${core_component}/Scripts/candidate-app-identity.sh"
-[[ "$(lipo -archs "${core_component}/Scripts/linnet-runtime-inspector")" == \
-  arm64 ]] || fail_verification "installed-runtime inspector is not thin arm64"
 cmp -s "${runtime_inspector}" \
   "${core_component}/Scripts/linnet-runtime-inspector" ||
   fail_verification "installed-runtime inspector differs from the canonical build tool"
-runtime_inspector_minos="$(otool -l "${runtime_inspector}" | awk '
-  $1 == "cmd" && $2 == "LC_BUILD_VERSION" { build = 1; next }
-  build && $1 == "minos" { print $2; exit }
-')"
-[[ "${runtime_inspector_minos}" == 13.0 ]] ||
-  fail_verification "installed-runtime inspector minimum macOS version changed"
 if otool -L "${runtime_inspector}" | tail -n +2 | awk '{ print $1 }' |
     grep -Ev '^(/System/Library/|/usr/lib/)'; then
   fail_verification "installed-runtime inspector gained a non-system dependency"

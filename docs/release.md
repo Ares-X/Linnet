@@ -22,6 +22,7 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
 - 候选目录精确匹配 `package/release_asset_manifest`；正式 Release 只有 1 个完整安装包，Core
   更新频道包含 Core 和 Catalog，数据频道包含 4 个不可变词包及已绑定基线的差分；
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
+- PKG 中的 `linnet-pack` 与运行时检查工具须按 arm64 macOS 13.0 编译，并检查包内 Mach-O 的最低系统版本；仅在较新构建机器上运行成功不能证明旧系统兼容。
 - Complete 只在首次创建 App 时注册输入源并向 macOS 提交一次启用请求；已有 App
   的 Complete 字节修复与 Core 更新都不注册、启用或选择输入源。允许与菜单选择
   始终由用户和 macOS 管理。首次安装最多要求一次注销，
