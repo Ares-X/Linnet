@@ -131,11 +131,11 @@
   "core" : {
     "artifact_format" : "app-tar-gzip",
     "artifact_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.20/Linnet-0.1.20-arm64-Core.linnetcore",
-    "build" : 101,
-    "bytes" : 6607218,
+    "build" : 102,
+    "bytes" : 6583210,
     "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.20",
-    "revision" : "87e5c2b114cce94f14aba92eda2797ee569bb436",
-    "sha256" : "28fdc7433351850a1faf54f4e7c224c151f35c46118c0ba165380ceaac6412ed",
+    "revision" : "97c23042aecd7cfa77c7605b9197551eb9fc157f",
+    "sha256" : "33dbd168334676e230fc6aa4e0e504e7eab201e6ab8ce9c00d2e9c664d647b57",
     "version" : "0.1.20"
   },
   "format" : 2,
