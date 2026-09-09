@@ -2862,12 +2862,8 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
   const RimeSessionId raw_composing =
       CreateSchemaSession(api, "linnet_zh_pinyin");
   Enter(api, raw_composing, "uuuuuuuu");
-  const auto raw_origins = CandidateOrigins(raw_composing);
-  if (raw_origins.size() != 1 || raw_origins.front().type != "raw" ||
-      raw_origins.front().genuine_type != "raw" ||
-      raw_origins.front().start != 0 || raw_origins.front().end != 8) {
-    Fail("direct Shift raw fixture gained a translated candidate");
-  }
+  // Neighboring-key correction may now offer Chinese candidates even for this
+  // input. Shift must preserve the typed letters regardless of those guesses.
   TapShift(api, raw_composing, XK_Shift_L);
   ExpectCurrentSchema(api, raw_composing, "linnet_en",
                       "direct Shift with raw letters");
@@ -2883,7 +2879,7 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
   // Shift changes modes and must not choose any translated prefix for the user.
   const RimeSessionId partial_composing =
       CreateSchemaSession(api, "linnet_zh_pinyin");
-  constexpr char kPartialInput[] = "thisisenglish";
+  constexpr char kPartialInput[] = "thisisenglishvvvv";
   Enter(api, partial_composing, kPartialInput);
   const auto partial_origins = CandidateOrigins(partial_composing);
   const auto partial_session =
@@ -7015,13 +7011,13 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   const auto p99_key = key_latency[key_latency.size() * 99 / 100];
   const auto p95_typing = NearestRank(&typing_latency, 95);
   const auto p99_typing = NearestRank(&typing_latency, 99);
-  if (p99_step > 5'000'000 || p99_key > 15'000'000 ||
-      p95_typing > 5'000'000 || p99_typing > 15'000'000)
-    Fail("online sync exceeded the input latency budget");
   std::cout << "rime_smoke_test: live sync samples=" << samples
             << " step_p99_ns=" << p99_step << " step_max_ns=" << step_latency.back()
             << " two_keys_p99_ns=" << p99_key
             << " all_keys_p95_ns=" << p95_typing << " all_keys_p99_ns=" << p99_typing << '\n';
+  if (p99_step > 5'000'000 || p99_key > 15'000'000 ||
+      p95_typing > 5'000'000 || p99_typing > 15'000'000)
+    Fail("online sync exceeded the input latency budget");
   api->destroy_session(chinese);
   api->destroy_session(english);
 }

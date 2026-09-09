@@ -2705,7 +2705,7 @@ diff --git a/src/rime/algo/syllabifier.cc b/src/rime/algo/syllabifier.cc
        Corrections corrections;
 -      corrector_->ToleranceSearch(prism, current_input, &corrections, 5);
 +      corrector_->ToleranceSearch(prism, string{current_input}, &corrections,
-+                                  5);
++                                  1);  // One neighboring-key error per syllable.
        for (const auto& m : corrections) {
          for (auto accessor = prism.QuerySpelling(m.first);
               !accessor.exhausted(); accessor.Next()) {

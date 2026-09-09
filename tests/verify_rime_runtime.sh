@@ -192,6 +192,16 @@ PAIRS
     "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
       linnet_zh "${double_left}" "${double_right}" on
   done < "${scratch}/fuzzy-pairs"
+  # Combined choices must preserve the same readings as each independent pair.
+  all_pairs="$(cut -d ' ' -f 1 "${scratch}/fuzzy-pairs" | paste -sd, -)"
+  "${scratch}/projection-fixture" fuzzy-pinyin full_pinyin "${all_pairs}" "${user}"
+  compile_spelling_profiles
+  while read -r pair full_left full_right double_left double_right; do
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh_pinyin "${full_left}" "${full_right}" on
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh "${double_left}" "${double_right}" on
+  done < "${scratch}/fuzzy-pairs"
   "${scratch}/projection-fixture" default "${user}"
   compile_spelling_profiles
   while read -r pair full_left full_right double_left double_right; do

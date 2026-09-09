@@ -195,11 +195,19 @@ int main(int argc, char** argv) {
   api->select_schema(session, "linnet_zh_pinyin");
   Expect(api, session, "nihao", "你好");
   Expect(api, session, "nihap", "你好", true);
+  // Each syllable can contain its own neighboring-key error.
+  Expect(api, session, "mihap", "你好", true);
   Expect(api, session, "shnaghai", "上海");
+  Expect(api, session, "wojintianxiangqushanghai", "我今天想去上海");
+  Expect(api, session, "jisuanjikexueyujishu", "计算机科学与技术");
   Expect(api, session, "henghao", "很好");
   ExpectOriginalFirst(api, session, "henghao", staging + "/linnet_zh_pinyin.prism.bin",
                       "heng", "hao");
   api->select_schema(session, "linnet_zh");
+  Expect(api, session, "uuuuuuuu", "叔叔叔叔");
+  Require(Candidates(api, session).front() == "叔叔叔叔",
+          "neighboring-key correction displaced valid repeated double-pinyin syllables");
+  Expect(api, session, "uuuu", "叔叔");
   Expect(api, session, "hk", "好");
   Expect(api, session, "hg", "哼");
   Expect(api, session, "nihk", "你好");

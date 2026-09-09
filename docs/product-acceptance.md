@@ -9,9 +9,15 @@ Natural double pinyin `hghk` must start with a `heng hao` candidate and offer
 including after a correction was previously selected; ordinary
 `gghk`, `hfhk`, `hk` and `hg` keep their proper candidates and raw Return behavior.
 Full pinyin is checked independently with `nihap`, `shnaghai` and `henghao`.
+Neighboring-key correction permits one substitution per syllable; `mihap`
+still offers 你好 with separate errors in both syllables. Natural-code
+`uuuuuuuu` keeps 叔叔叔叔 first. Exact English words such as `banana` must
+retain their existing priority across all eight Chinese profiles even when
+Chinese correction candidates lie between the original reading and English.
 The focused `--chinese-spelling-probe` covers correction selection, subsequent
-input, all seven double-pinyin layouts, and twelve optional fuzzy pairs on/off
-in full-pinyin and natural-code indexes. English entity codes are not fuzzy
+input, all seven double-pinyin layouts, and twelve optional fuzzy pairs enabled
+individually, enabled together, and disabled in full-pinyin and natural-code
+indexes. English entity codes are not fuzzy
 pronunciations. Settings persistence and apply/rollback use the existing owner
 selectors documented in development.md.
 
