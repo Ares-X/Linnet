@@ -4,6 +4,12 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.23 — 2026-09-09
+
+### 设置
+
+- 中文学习策略、拼音反查与模式切换说明直接展示，减少只有少量选项时不必要的展开操作；模糊音和智能英文保留折叠。
+
 ## 0.1.22 — 2026-09-09
 
 ### 中文输入
