@@ -160,6 +160,10 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
    若同一份 Complete 已作为预发布公开，按同一源码与资产摘要直接转为稳定版，
    无需重传资产；正式发布会移除预发布标记。
 
+若候选提交中的工作流有发布故障，可在修复合入 `main` 后，用
+`gh workflow run release-ci.yml --ref main -f authorization_tag=<已有授权标签>`
+继续发布。工作流仍检出该标签对应的源码，并核对原资产摘要，不重新构建候选。
+
 更新锁定 LTS 模型时，显式
 `linnet-data-seed/v<VERSION>-<SEQUENCE>-<FULL_REVISION>` 标签启动同一个 macOS
 构建 owner。它从 `upstreams.lock.json` 的上游 URL 下载并验证固定 bytes/SHA-256，
