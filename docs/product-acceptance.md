@@ -1,5 +1,22 @@
 # Linnet product acceptance
 
+## Chinese spelling correction and fuzzy pronunciation
+
+Default correction uses the current profile's Rime spelling index and the shipped
+language model. Natural double pinyin `hghk` must offer 更好 and 很好; ordinary
+`gghk`, `hfhk`, `hk` and `hg` keep their proper candidates and raw Return behavior.
+Full pinyin is checked independently with `nihap`, `shnaghai` and `henghao`.
+The focused `--chinese-spelling-probe` covers correction selection, subsequent
+input, all seven double-pinyin layouts, and twelve optional fuzzy pairs on/off
+in full-pinyin and natural-code indexes. English entity codes are not fuzzy
+pronunciations. Settings persistence and apply/rollback use the existing owner
+selectors documented in development.md.
+
+Installed acceptance must apply and undo a fuzzy pair, type the examples in an
+ordinary application, select a correction and continue typing. Native tests are
+TEST evidence; installation, loaded bytes and visible typing require separate
+RUNTIME_LOADED / PRODUCT evidence. Publication is outside this feature task.
+
 ## 0.1.20 Settings implementation simplification
 
 SettingsDataCoordinator owns one document-only apply path for both appearance

@@ -223,6 +223,7 @@ struct InputTabView: View {
         } trailing: {
           VStack(alignment: .leading, spacing: 16) {
             optionsSection
+            fuzzyPinyinSection
             reverseLookupSection
           }
         }
@@ -343,6 +344,30 @@ struct InputTabView: View {
         }
       }
       .padding(8)
+    }
+    .disabled(!model.configuration.canEdit)
+  }
+
+  private var fuzzyPinyinSection: some View {
+    GroupBox("Fuzzy pinyin") {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Match the selected sounds in full and double pinyin. Original pronunciations remain available. Apply Changes to activate.")
+          .font(.callout).foregroundStyle(.secondary)
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading) {
+          ForEach(LinnetSettingsDocument.FuzzyPinyinPair.allCases, id: \.self) { pair in
+            Toggle(pair.label, isOn: Binding(
+              get: { model.configuration.documentDraft.input.fuzzyPinyin.contains(pair) },
+              set: { enabled in
+                var selected = model.configuration.documentDraft.input.fuzzyPinyin
+                selected.removeAll { $0 == pair }
+                if enabled { selected.append(pair) }
+                model.configuration.documentDraft.input.fuzzyPinyin =
+                  LinnetSettingsDocument.FuzzyPinyinPair.allCases.filter(selected.contains)
+              }
+            ))
+          }
+        }
+      }.padding(8)
     }
     .disabled(!model.configuration.canEdit)
   }

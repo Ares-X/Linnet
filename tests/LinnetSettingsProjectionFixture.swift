@@ -71,6 +71,16 @@ struct LinnetSettingsProjectionFixture {
       document.input.chineseProfile = .fullPinyin
       document.input.chineseLearningPolicy = policy
       directory = URL(filePath: arguments[3], directoryHint: .isDirectory)
+    case "fuzzy-pinyin":
+      guard arguments.count == 5,
+        let profile = LinnetSettingsContract.ChineseProfile(rawValue: arguments[2])
+      else { fail() }
+      document.input.chineseProfile = profile
+      document.input.fuzzyPinyin = arguments[3].split(separator: ",").map {
+        guard let pair = LinnetSettingsDocument.FuzzyPinyinPair(rawValue: String($0)) else { fail() }
+        return pair
+      }
+      directory = URL(filePath: arguments[4], directoryHint: .isDirectory)
     default:
       fail()
     }
@@ -84,7 +94,7 @@ struct LinnetSettingsProjectionFixture {
 
   private static func fail() -> Never {
     FileHandle.standardError.write(Data(
-      "usage: projection-fixture default USER_DIR | profile PROFILE TRIGGER USER_DIR | page-size SIZE USER_DIR | english-learning-off USER_DIR | english-suggestions-off USER_DIR | input-options USER_DIR | input-switches USER_DIR | chinese-learning POLICY USER_DIR\n".utf8
+      "usage: projection-fixture default USER_DIR | profile PROFILE TRIGGER USER_DIR | page-size SIZE USER_DIR | english-learning-off USER_DIR | english-suggestions-off USER_DIR | input-options USER_DIR | input-switches USER_DIR | chinese-learning POLICY USER_DIR | fuzzy-pinyin PROFILE PAIRS USER_DIR\n".utf8
     ))
     exit(EXIT_FAILURE)
   }
