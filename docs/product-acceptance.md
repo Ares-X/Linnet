@@ -3,7 +3,10 @@
 ## Chinese spelling correction and fuzzy pronunciation
 
 Default correction uses the current profile's Rime spelling index and the shipped
-language model. Natural double pinyin `hghk` must offer 更好 and 很好; ordinary
+language model. A complete reading of the entered code owns the first candidate.
+Natural double pinyin `hghk` must start with a `heng hao` candidate and offer
+很好 (en/eng pronunciation) before 更好 (neighboring key), both after the original,
+including after a correction was previously selected; ordinary
 `gghk`, `hfhk`, `hk` and `hg` keep their proper candidates and raw Return behavior.
 Full pinyin is checked independently with `nihap`, `shnaghai` and `henghao`.
 The focused `--chinese-spelling-probe` covers correction selection, subsequent

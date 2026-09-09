@@ -8,6 +8,9 @@
 #include <rime_api_stdbool.h>
 #include <rime/dict/prism.h>
 #include <rime/dict/table.h>
+#include <rime/context.h>
+#include <rime/gear/translator_commons.h>
+#include <rime/service.h>
 
 namespace {
 std::vector<double> keyLatencies;
@@ -98,6 +101,32 @@ void Expect(RimeApi_stdbool* api, RimeSessionId session, const std::string& inpu
     api->free_commit(&committed);
   }
 }
+
+void ExpectOriginalFirst(RimeApi_stdbool* api, RimeSessionId session,
+                         const std::string& input, const std::string& prism_path,
+                         const std::string& first_code, const std::string& last_code) {
+  Enter(api, session, input);
+  const auto live = rime::Service::instance().GetSession(session);
+  const auto candidate = live->context()->GetSelectedCandidate();
+  const auto phrase = rime::As<rime::Phrase>(rime::Candidate::GetGenuineCandidate(candidate));
+  Require(phrase && phrase->end() == input.size() && phrase->code().size() == 2,
+          input + " first choice must cover both original syllables");
+  rime::Prism prism{rime::path(prism_path)};
+  Require(prism.Load(), "cannot load profile spelling index");
+  Require(Spellings(prism, first_code).count(phrase->code()[0]) &&
+          Spellings(prism, last_code).count(phrase->code()[1]),
+          input + " correction replaced the original pronunciation: " + phrase->text());
+  const auto candidates = Candidates(api, session);
+  for (const auto& suggestion : {"很好", "更好"}) {
+    const auto found = std::find(candidates.begin(), candidates.end(), suggestion);
+    Require(found != candidates.end() && found != candidates.begin(),
+            input + " must suggest " + suggestion + " after its original first choice");
+  }
+  Require(std::find(candidates.begin(), candidates.end(), "很好") <
+          std::find(candidates.begin(), candidates.end(), "更好"),
+          input + " pronunciation correction must precede neighboring-key correction");
+  std::cout << input << " original first: " << phrase->text() << '\n';
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -153,6 +182,9 @@ int main(int argc, char** argv) {
     std::cout << profile.schema << '\n';
     Expect(api, session, profile.typo, "更好");
     Expect(api, session, profile.typo, "很好");
+    ExpectOriginalFirst(api, session, profile.typo,
+                        staging + "/" + profile.schema + ".prism.bin",
+                        std::string(profile.typo, 2), std::string(profile.typo + 2));
     Expect(api, session, profile.good, "很好");
     Require(Candidates(api, session).front() == "很好", "normal double-pinyin word lost first choice");
     Expect(api, session, profile.better, "更好");
@@ -165,12 +197,15 @@ int main(int argc, char** argv) {
   Expect(api, session, "nihap", "你好", true);
   Expect(api, session, "shnaghai", "上海");
   Expect(api, session, "henghao", "很好");
+  ExpectOriginalFirst(api, session, "henghao", staging + "/linnet_zh_pinyin.prism.bin",
+                      "heng", "hao");
   api->select_schema(session, "linnet_zh");
   Expect(api, session, "hk", "好");
   Expect(api, session, "hg", "哼");
   Expect(api, session, "nihk", "你好");
   Expect(api, session, "nihj", "你好", true);
   Expect(api, session, "hghk", "很好", true);
+  ExpectOriginalFirst(api, session, "hghk", staging + "/linnet_zh.prism.bin", "hg", "hk");
   // Committing a correction must keep normal pronunciation and later input usable.
   Expect(api, session, "hfhk", "很好");
   Enter(api, session, "hk");

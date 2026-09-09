@@ -66,6 +66,7 @@ bool IsMixedChineseCandidate(const an<Candidate>& candidate) {
   const auto phrase = As<Phrase>(candidate);
   if (!phrase || !phrase->language() ||
       phrase->language()->name() != "linnet_zh" ||
+      phrase->is_correction() ||
       !phrase->is_exact_match()) {
     return false;
   }
@@ -246,7 +247,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     has_pinyin = has_pinyin || item.genuine->type() == "linnet_pinyin";
     const auto phrase = rime::As<Phrase>(item.genuine);
     item.mixed = IsMixedChineseCandidate(item.genuine);
-    item.chinese = !item.mixed && phrase && phrase->language() &&
+    item.chinese = !item.mixed && phrase && !phrase->is_correction() && phrase->language() &&
                    phrase->language()->name() == "linnet_zh";
     item.exact = !input_word.empty() && item.word == input_word &&
                  (IsLinnetEnglishPhrase(item.genuine) || IsCustomPhrase(item.genuine)) &&
