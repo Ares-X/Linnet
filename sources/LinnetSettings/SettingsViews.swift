@@ -265,48 +265,43 @@ struct InputTabView: View {
   }
 
   private var reverseLookupSection: some View {
-    GroupBox {
-      DisclosureGroup {
-        VStack(alignment: .leading, spacing: 10) {
-          Picker(
-            "Reverse lookup trigger",
-            selection: $model.configuration.documentDraft.input.pinyinReverseTrigger
-          ) {
-            ForEach(LinnetSettingsDocument.PinyinReverseTrigger.allCases, id: \.self) {
-              Text(pinyinReverseTriggerName($0)).tag($0)
-            }
+    GroupBox("Pinyin reverse lookup") {
+      VStack(alignment: .leading, spacing: 10) {
+        Picker(
+          "Reverse lookup trigger",
+          selection: $model.configuration.documentDraft.input.pinyinReverseTrigger
+        ) {
+          ForEach(LinnetSettingsDocument.PinyinReverseTrigger.allCases, id: \.self) {
+            Text(pinyinReverseTriggerName($0)).tag($0)
           }
-          .pickerStyle(.menu)
-          .accessibilityHint(
-            Text("Type the selected key before the chosen scheme's code in Chinese mode.")
-          )
+        }
+        .pickerStyle(.menu)
+        .accessibilityHint(
+          Text("Type the selected key before the chosen scheme's code in Chinese mode.")
+        )
 
-          Text(
-            "Type the selected key before the chosen scheme's code in Chinese mode."
-          )
-          .font(.callout)
+        Text(
+          "Type the selected key before the chosen scheme's code in Chinese mode."
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
+
+        Text(
+          "Smart English recognizes the selected full- or double-pinyin scheme automatically; semicolon and other punctuation go directly to the current app."
+        )
+          .font(.caption)
           .foregroundStyle(.secondary)
 
-          Text(
-            "Smart English recognizes the selected full- or double-pinyin scheme automatically; semicolon and other punctuation go directly to the current app."
-          )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("Example")
-              .font(.callout.weight(.medium))
-            Text(verbatim: reverseLookupExample)
-              .font(.system(.body, design: .monospaced))
-              .textSelection(.enabled)
-          }
-          Text("The example follows the selected Chinese scheme and trigger key.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text("Example")
+            .font(.callout.weight(.medium))
+          Text(verbatim: reverseLookupExample)
+            .font(.system(.body, design: .monospaced))
+            .textSelection(.enabled)
         }
-        .padding(.top, 12)
-      } label: {
-        Text("Pinyin reverse lookup").font(.headline)
+        Text("The example follows the selected Chinese scheme and trigger key.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
@@ -315,52 +310,41 @@ struct InputTabView: View {
   }
 
   private var learningSection: some View {
-    GroupBox {
-      DisclosureGroup {
-        VStack(alignment: .leading, spacing: 10) {
-          Picker("Learning strategy", selection: $model.configuration.documentDraft.input.chineseLearningPolicy) {
-            ForEach(LinnetSettingsDocument.ChineseLearningPolicy.allCases, id: \.self) {
-              Text(chineseLearningPolicyName($0)).tag($0)
-            }
+    GroupBox("Chinese learning strategy") {
+      VStack(alignment: .leading, spacing: 10) {
+        Picker("Learning strategy", selection: $model.configuration.documentDraft.input.chineseLearningPolicy) {
+          ForEach(LinnetSettingsDocument.ChineseLearningPolicy.allCases, id: \.self) {
+            Text(chineseLearningPolicyName($0)).tag($0)
           }
-          .pickerStyle(.menu)
-          .accessibilityLabel("Chinese learning strategy")
-          .accessibilityValue(
-            Text(chineseLearningPolicyName(model.configuration.documentDraft.input.chineseLearningPolicy))
+        }
+        .pickerStyle(.menu)
+        .accessibilityLabel("Chinese learning strategy")
+        .accessibilityValue(
+          Text(chineseLearningPolicyName(model.configuration.documentDraft.input.chineseLearningPolicy))
+        )
+        .accessibilityHint(
+          Text(
+            "Takes effect after Apply Changes. Switching strategies never deletes learning data."
           )
-          .accessibilityHint(
-            Text(
-              "Takes effect after Apply Changes. Switching strategies never deletes learning data."
-            )
-          )
+        )
 
-          Text(chineseLearningPolicyDescription(model.configuration.documentDraft.input.chineseLearningPolicy))
-            .font(.callout)
-            .foregroundStyle(.secondary)
+        Text(chineseLearningPolicyDescription(model.configuration.documentDraft.input.chineseLearningPolicy))
+          .font(.callout)
+          .foregroundStyle(.secondary)
 
-          if model.configuration.documentDraft.input.chineseLearningPolicy
-            != model.configuration.documentBaseline?.input.chineseLearningPolicy {
-            Text("Changes pending — use Apply Changes to activate this strategy.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          } else {
-            Text(
-              "Changing this setting never deletes learning data. Use Clear Learning in Data to remove it."
-            )
+        if model.configuration.documentDraft.input.chineseLearningPolicy
+          != model.configuration.documentBaseline?.input.chineseLearningPolicy {
+          Text("Changes pending — use Apply Changes to activate this strategy.")
             .font(.caption)
             .foregroundStyle(.secondary)
-          }
-        }
-        .padding(.top, 12)
-      } label: {
-        HStack {
-          Text("Chinese learning strategy").font(.headline)
-          Spacer()
-          Text(chineseLearningPolicyName(model.configuration.documentDraft.input.chineseLearningPolicy))
-            .foregroundStyle(.secondary)
+        } else {
+          Text(
+            "Changing this setting never deletes learning data. Use Clear Learning in Data to remove it."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
       }
-      .accessibilityLabel("Chinese learning strategy")
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
     }
@@ -448,16 +432,11 @@ struct InputTabView: View {
   }
 
   private var modeSection: some View {
-    GroupBox {
-      DisclosureGroup {
-        VStack(alignment: .leading, spacing: 10) {
-          Text("Tap Shift to switch between Chinese and Smart English. Caps Lock remains the explicit raw ASCII mode.")
-          Text("The menu-bar label comes from Rime: 双 or 中 for Chinese, A for raw ASCII, and En for Smart English.")
-            .font(.callout).foregroundStyle(.secondary)
-        }
-        .padding(.top, 12)
-      } label: {
-        Text("Mode switching").font(.headline)
+    GroupBox("Mode switching") {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Tap Shift to switch between Chinese and Smart English. Caps Lock remains the explicit raw ASCII mode.")
+        Text("The menu-bar label comes from Rime: 双 or 中 for Chinese, A for raw ASCII, and En for Smart English.")
+          .font(.callout).foregroundStyle(.secondary)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)

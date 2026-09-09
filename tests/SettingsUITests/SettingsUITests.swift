@@ -250,13 +250,11 @@ final class SettingsUITests: XCTestCase {
       "Ziguang Double Pinyin",
       "Jiajia Pinyin",
     ], in: app)
-    try expandDisclosure("Chinese learning strategy", in: app)
     try selectEachPopUpOption([
       "Enhanced learning (Recommended)",
       "Standard learning",
       "Turn off learning",
     ], in: app)
-    try expandDisclosure("Pinyin reverse lookup", in: app)
     try selectEachPopUpOption(["Semicolon (;)", "Vertical bar (|)"], in: app)
     for label in [
       "Suggest emoji candidates",
