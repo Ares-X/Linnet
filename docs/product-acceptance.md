@@ -17,6 +17,14 @@ ordinary application, select a correction and continue typing. Native tests are
 TEST evidence; installation, loaded bytes and visible typing require separate
 RUNTIME_LOADED / PRODUCT evidence. Publication is outside this feature task.
 
+The Input page uses one vertical sequence. Chinese scheme and common options
+stay visible; fuzzy pronunciation, learning, reverse lookup, Smart English and
+mode-switch help use native disclosures. Fuzzy pronunciation sits directly
+below the scheme picker, shows selections while collapsed, and groups initials
+and finals in adaptive rows. Verify collapsed/expanded layouts at the default
+and minimum window widths, English/Chinese labels, selection retention across
+tab changes, Apply, and reopening the installed Settings app.
+
 ## 0.1.20 Settings implementation simplification
 
 SettingsDataCoordinator owns one document-only apply path for both appearance

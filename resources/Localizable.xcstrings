@@ -2,6 +2,9 @@
   "sourceLanguage" : "en",
   "strings" : {
     "Fuzzy pinyin" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"模糊音"}}}},
+    "Initials" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"声母"}}}},
+    "Finals" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"韵母"}}}},
+    "No pairs selected" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"未选择读音混用"}}}},
     "Match the selected sounds in full and double pinyin. Original pronunciations remain available. Apply Changes to activate." : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"全拼和双拼均可混用勾选的读音，并保留原读音候选。点击“应用更改”后生效。"}}}},
     "Add to Custom Words…" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"添加到自定义词…"}}}},
     "Last successful learning sync on this Mac" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"本机上次成功同步学习词"}}}},
