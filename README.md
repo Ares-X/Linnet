@@ -6,6 +6,13 @@
   <img src="resources/branding/readme-banner.svg" width="680" alt="Linnet — Chinese and English, in one flow">
 </p>
 
+<p align="center">
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
+  <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="macOS 13+">
+  <img src="https://img.shields.io/badge/Apple%20Silicon-arm64-blue" alt="Apple Silicon arm64">
+  <a href="https://github.com/Ares-X/Linnet/actions/workflows/pull-request-ci.yml"><img src="https://github.com/Ares-X/Linnet/actions/workflows/pull-request-ci.yml/badge.svg?event=pull_request" alt="PR CI"></a>
+</p>
+
 Linnet（双韵）是一款为 macOS 打造的开源双语输入法。它把中文输入与 Smart English 放进同一个系统输入源：轻按 Shift 即可往返，Caps Lock 则随时进入不经过转换的原始 ASCII。
 
 **一个输入源，两种语言，一种连贯的输入体验。**

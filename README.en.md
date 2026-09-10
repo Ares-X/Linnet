@@ -6,6 +6,13 @@
   <img src="resources/branding/readme-banner.svg" width="680" alt="Linnet — Chinese and English, in one flow">
 </p>
 
+<p align="center">
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
+  <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="macOS 13+">
+  <img src="https://img.shields.io/badge/Apple%20Silicon-arm64-blue" alt="Apple Silicon arm64">
+  <a href="https://github.com/Ares-X/Linnet/actions/workflows/pull-request-ci.yml"><img src="https://github.com/Ares-X/Linnet/actions/workflows/pull-request-ci.yml/badge.svg?event=pull_request" alt="PR CI"></a>
+</p>
+
 Linnet (双韵) is an open-source bilingual input method for macOS. Chinese input and Smart English share a single system input source: tap Shift to switch between them, or use Caps Lock for raw, unconverted ASCII input.
 
 **One input source. Two languages. One continuous typing experience.**
@@ -15,7 +22,7 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 **[Download the latest Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-The current stable release is **[0.1.23 (105)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23)**. It includes fuzzy pinyin, adjacent-key correction and related fixes, and keeps small groups of settings directly visible. See the [changelog (Chinese)](CHANGELOG.md) for changes in each version.
+The current stable release is **[0.1.23 (105)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23)**. It includes fuzzy pinyin, adjacent-key correction and related fixes, and keeps small groups of settings directly visible. See the [changelog](CHANGELOG.en.md) for changes in each version.
 
 [Features](#features) · [Installation](#installation) · [Usage](#usage) · [Updating and uninstalling](#updating-and-uninstalling) · [Privacy](#privacy) · [Contributing](#contributing)
 
@@ -280,7 +287,7 @@ Ordinary development requires neither a signing certificate nor registering the 
 
 ## Versions, sources and licenses
 
-See [Latest Release](https://github.com/Ares-X/Linnet/releases/latest) for the current stable version, and the [changelog (Chinese)](CHANGELOG.md) for preview versions and user-visible changes.
+See [Latest Release](https://github.com/Ares-X/Linnet/releases/latest) for the current stable version, and the [changelog](CHANGELOG.en.md) for preview versions and user-visible changes.
 
 Linnet is an independent community distribution derived from Squirrel, not an official release of any upstream project. This repository modifies upstream code and data; its first public modified release was dated 2026-08-20. The main relationships are:
 
