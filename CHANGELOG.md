@@ -1,5 +1,7 @@
 # Linnet 版本记录
 
+简体中文 · [English](CHANGELOG.en.md)
+
 本文件只记录用户安装后能够感知的程序功能、问题修复、交互优化和安装更新体验。
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
