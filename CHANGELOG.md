@@ -6,6 +6,14 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.24 — 2026-09-11（预览版）
+
+### 中文输入
+
+- 全拼和七种双拼支持英文整词连续组句，改善“跨region的migration”“我们需要align一下这个gap的solution”等多段混输。
+- 增加 size、mode、save 等易被当成拼音的英文备选，保留中文候选及其实际选词范围；选过的英文分界可在全拼和双拼之间复用。
+- 开启中文纠错时保留 CPU、DNS、HTTPS 等缩写的原有读法，减少完整英文被拆成零散字母的情况。
+
 ## 0.1.23 — 2026-09-09
 
 [正式版 0.1.23（105）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23) 包含以下设置优化，以及 0.1.21、0.1.22 预览版的中文纠错与模糊音改进。

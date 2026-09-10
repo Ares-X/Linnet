@@ -29,37 +29,18 @@ namespace {
 constexpr double kEstablishedChinesePhraseMinimumLexicalWeight =
     -13.815510557964274;
 
-struct MixedTextShape {
-  std::size_t entity_start = std::string::npos;
-  std::size_t entity_length = 0;
-
-  explicit operator bool() const {
-    return entity_start != std::string::npos;
-  }
-};
-
-MixedTextShape InspectMixedText(const string& text) {
-  MixedTextShape result;
-  bool has_non_ascii = false;
-  for (std::size_t index = 0; index < text.size();) {
-    const auto byte = static_cast<unsigned char>(text[index]);
-    if (byte >= 'A' && byte <= 'Z') {
-      const std::size_t start = index;
-      while (index < text.size() && text[index] >= 'A' &&
-             text[index] <= 'Z') {
-        ++index;
-      }
-      const std::size_t length = index - start;
-      if (result || length < 2 || length > 6) return {};
-      result.entity_start = start;
-      result.entity_length = length;
-      continue;
+bool InspectMixedText(const string& text) {
+  bool has_chinese = false, has_english = false;
+  for (const unsigned char byte : text) {
+    if ((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z')) {
+      has_english = true;
+    } else if (byte >= 0x80) {
+      has_chinese = true;
+    } else {
+      return false;
     }
-    if (byte < 0x80) return {};
-    has_non_ascii = true;
-    ++index;
   }
-  return result && has_non_ascii ? result : MixedTextShape{};
+  return has_chinese && has_english;
 }
 
 bool IsMixedChineseCandidate(const an<Candidate>& candidate) {
@@ -70,8 +51,7 @@ bool IsMixedChineseCandidate(const an<Candidate>& candidate) {
       !phrase->is_exact_match()) {
     return false;
   }
-  const MixedTextShape shape = InspectMixedText(phrase->text());
-  return static_cast<bool>(shape);
+  return InspectMixedText(phrase->text());
 }
 
 an<Candidate> ProjectSmartEnglishCandidate(
@@ -272,7 +252,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   // generated or transliterated alternatives.
   const bool explicit_english_case = !input_word.empty() && ranking_input != input_word;
   const bool lowercase_chinese_input =
-      (has_exact || has_ambiguous_english || has_mixed) &&
+      (has_exact || has_ambiguous_english) &&
       schema_id_ != kSmartEnglishSchema &&
       !explicit_english_case;
   const bool lowercase_chinese_exact = has_exact && lowercase_chinese_input;
@@ -283,10 +263,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
         candidates.begin(), candidates.end(), [](const auto& item) {
           return item.ambiguous_english;
         });
-  }
-  if (bilingual_candidate == candidates.end()) {
-    bilingual_candidate = std::find_if(candidates.begin(), candidates.end(),
-        [](const auto& item) { return item.mixed; });
   }
   bool has_same_span_chinese = false;
   bool has_strong_same_span_chinese = false;
@@ -318,8 +294,6 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
       has_ambiguous_english && lowercase_chinese_input &&
       has_same_span_chinese;
   const bool promote_exact = has_exact && !preserve_chinese_exact;
-  const bool promote_mixed =
-      !has_exact && has_mixed && !has_same_span_chinese;
   const bool has_non_raw = std::any_of(
       candidates.begin(), candidates.end(),
       [](const auto& item) { return item.genuine && !item.raw; });
@@ -348,17 +322,11 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
                        }),
         candidates.end());
   }
-  if (!is_pinyin_flow && has_mixed && has_same_span_chinese) {
-    const auto mixed = std::find_if(candidates.begin(), candidates.end(),
-                                    [](const auto& item) {
-                                      return item.mixed;
-                                    });
-    move_same_span_chinese_first(mixed,
-                                 [](const auto&) { return true; });
-  }
-  if (!is_pinyin_flow && (has_exact || promote_mixed)) {
-    std::stable_partition(candidates.begin(), candidates.end(), [has_exact](const auto& item) {
-      return has_exact ? !item.mixed : item.mixed;
+  // Rime owns mixed sentence order, including Chinese corrections and partial
+  // choices. Only the separate exact-English-word policy partitions them here.
+  if (!is_pinyin_flow && has_exact) {
+    std::stable_partition(candidates.begin(), candidates.end(), [](const auto& item) {
+      return !item.mixed;
     });
   }
   const bool ordinary_english =

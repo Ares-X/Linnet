@@ -235,6 +235,14 @@ fi
 end_phase "compile native smoke harnesses"
 
 begin_phase "run native candidate matrix"
+# Candidate/commit checks intentionally learn phrases. The separate learning
+# policy test starts from deployed settings, before those selections accumulate.
+if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
+  mixed_learning_on_user="${scratch}/mixed-learning-on-user"
+  mkdir "${mixed_learning_on_user}"
+  cp -R "${user}/." "${mixed_learning_on_user}/"
+fi
+
 smoke_args=("${shared}" "${user}")
 if [[ -n "${runtime_probe}" ]]; then
   smoke_args+=("${runtime_probe}")
@@ -250,9 +258,6 @@ end_phase "run native candidate matrix"
 
 if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
   begin_phase "verify mixed-input learning policy"
-  mixed_learning_on_user="${scratch}/mixed-learning-on-user"
-  mkdir "${mixed_learning_on_user}"
-  cp -R "${user}/." "${mixed_learning_on_user}/"
   printf 'learn 霜河栈 shuanghezhan 霜 河 栈\n' | \
     DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
       "${scratch}/auto-phrase-probe" "${shared}" \

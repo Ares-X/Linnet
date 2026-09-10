@@ -1,5 +1,29 @@
 # Linnet product acceptance
 
+## Continuous Chinese and English input (0.1.24 Preview)
+
+The Chinese ScriptTranslator consumes continuous raw keystrokes and retains whole
+English words from the existing English dictionary in the same sentence search.
+Natural Code `kwregion` must offer 跨region, and multiple English words must remain
+whole in 跨region的migration and 我们需要align一下这个gap的solution. All eight Chinese
+profiles share the dictionary and learned mixed boundaries.
+
+The mixed-input selector covers whole-word recall, correction enabled, exact
+consumption spans, Chinese partial selection, raw Return/Escape, editing, legacy
+acronym learning, cross-profile learning, and disabled learning. Ambiguous size,
+mode and save sentences remain selectable without changing the original Chinese
+first choice. CPU/DNS/HTTPS keep their established native readings. Ordinary
+Chinese spelling and vocabulary selectors remain required. Benchmark comparisons
+include prefixes, Chinese joins, candidate displacement and per-key latency.
+
+Installed acceptance uses the dedicated macOS VM and exact Action artifacts:
+real Natural Code/full-pinyin mixed sentences and Chinese composition, physical
+Shift-held uppercase across all profiles, existing application continuity, and
+the Settings Preview update from public 0.1.23 (105). Verify Core 0.1.24 (106)
+and Chinese pack 38 together, and verify an existing learned phrase after the
+update. Record native, loaded and installed-product evidence separately. Stable
+publication is outside this Preview request.
+
 ## Chinese spelling correction and fuzzy pronunciation
 
 Default correction uses the current profile's Rime spelling index and the shipped

@@ -6,6 +6,14 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.24 — 2026-09-11 (Preview)
+
+### Chinese input
+
+- Full pinyin and all seven double-pinyin layouts can compose Chinese sentences with whole English words, including multiple switches in phrases such as 跨region的migration and 我们需要align一下这个gap的solution.
+- Added selectable English interpretations for ambiguous words such as size, mode and save while preserving Chinese choices and their consumed input ranges. Learned English boundaries carry across pinyin layouts.
+- Preserved the existing CPU, DNS and HTTPS readings with Chinese correction enabled, and reduced accidental splits of complete English words into fragments.
+
 ## 0.1.23 — 2026-09-09
 
 [Stable release 0.1.23 (105)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23) includes the settings improvements below and the Chinese correction and fuzzy-pinyin improvements from previews 0.1.21 and 0.1.22.
