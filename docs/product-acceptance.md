@@ -1,5 +1,64 @@
 # Linnet product acceptance
 
+## Continuous Chinese and English input (0.1.24 Preview)
+
+The Chinese ScriptTranslator consumes continuous raw keystrokes and retains whole
+English words from the existing English dictionary in the same sentence search.
+Natural Code `kwregion` must offer 跨region, and multiple English words must remain
+whole in 跨region的migration and 我们需要align一下这个gap的solution. All eight Chinese
+profiles share the dictionary and learned mixed boundaries.
+
+The mixed-input selector covers whole-word recall, correction enabled, exact
+consumption spans, Chinese partial selection, raw Return/Escape, editing, legacy
+acronym learning, cross-profile learning, and disabled learning. Ambiguous size,
+mode and save sentences remain selectable without changing the original Chinese
+first choice. CPU/DNS/HTTPS keep their established native readings. Ordinary
+Chinese spelling and vocabulary selectors remain required. Benchmark comparisons
+include prefixes, Chinese joins, candidate displacement and per-key latency.
+
+Installed acceptance uses the dedicated macOS VM and exact Action artifacts:
+real Natural Code/full-pinyin mixed sentences and Chinese composition, physical
+Shift-held uppercase across all profiles, existing application continuity, and
+the Settings Preview update from public 0.1.23 (105). Verify Core 0.1.24 (106)
+with the existing Chinese pack 37 / data-48 retained, and verify that Core's
+startup projection enables mixed input without a language-data update or a
+separate settings Apply. Verify an existing learned phrase after the update. Record native, loaded and installed-product evidence separately. Stable
+publication is outside this Preview request.
+
+## Chinese spelling correction and fuzzy pronunciation
+
+Default correction uses the current profile's Rime spelling index and the shipped
+language model. A complete reading of the entered code owns the first candidate.
+Natural double pinyin `hghk` must start with a `heng hao` candidate and offer
+很好 (en/eng pronunciation) before 更好 (neighboring key), both after the original,
+including after a correction was previously selected; ordinary
+`gghk`, `hfhk`, `hk` and `hg` keep their proper candidates and raw Return behavior.
+Full pinyin is checked independently with `nihap`, `shnaghai` and `henghao`.
+Neighboring-key correction permits one substitution per syllable; `mihap`
+still offers 你好 with separate errors in both syllables. Natural-code
+`uuuuuuuu` keeps 叔叔叔叔 first. Exact English words such as `banana` must
+retain their existing priority across all eight Chinese profiles even when
+Chinese correction candidates lie between the original reading and English.
+The focused `--chinese-spelling-probe` covers correction selection, subsequent
+input, all seven double-pinyin layouts, and twelve optional fuzzy pairs enabled
+individually, enabled together, and disabled in full-pinyin and natural-code
+indexes. English entity codes are not fuzzy
+pronunciations. Settings persistence and apply/rollback use the existing owner
+selectors documented in development.md.
+
+Installed acceptance must apply and undo a fuzzy pair, type the examples in an
+ordinary application, select a correction and continue typing. Native tests are
+TEST evidence; installation, loaded bytes and visible typing require separate
+RUNTIME_LOADED / PRODUCT evidence. Publication is outside this feature task.
+
+The Input page uses one vertical sequence. Chinese scheme, common options, learning strategy,
+reverse lookup and mode-switch help stay visible. Fuzzy pronunciation and
+Smart English use native disclosures. Fuzzy pronunciation sits directly
+below the scheme picker, shows selections while collapsed, and groups initials
+and finals in adaptive rows. Verify collapsed/expanded layouts at the default
+and minimum window widths, English/Chinese labels, selection retention across
+tab changes, Apply, and reopening the installed Settings app.
+
 ## 0.1.20 Settings implementation simplification
 
 SettingsDataCoordinator owns one document-only apply path for both appearance

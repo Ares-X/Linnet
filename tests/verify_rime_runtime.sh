@@ -10,7 +10,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 runtime_probe="${1:-}"
-if [[ "${1:-}" == --mixed-input-probe ||
+if [[ "${1:-}" == --chinese-spelling-probe ||
+      "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --candidate-forget-probe ||
       "${1:-}" == --raw-editing-probe ||
       "${1:-}" == --mixed-latency-probe ||
@@ -21,7 +22,7 @@ if [[ "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
+  echo "usage: $0 [--chinese-spelling-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -150,6 +151,69 @@ for fixture_schema in \
 done
 end_phase "deploy native schemas"
 
+if [[ "${runtime_probe}" == --chinese-spelling-probe ]]; then
+  begin_phase "Chinese correction and configurable fuzzy pronunciation"
+  "$(xcrun --find clang++)" -isysroot "${sdk}" -std=c++17 -O2 -Wall -Wextra -Werror \
+    -DGLOG_USE_GLOG_EXPORT -isystem librime/dist/include \
+    -isystem build/dependencies/boost tests/chinese_spelling_test.cc \
+    lib/librime.1.dylib lib/rime-plugins/librime-lua.dylib \
+    -o "${scratch}/chinese-spelling"
+  export DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins"
+  "${scratch}/chinese-spelling" "${shared}" "${user}"
+  mkdir "${user}/baseline"
+  cp "${user}/build/linnet_zh.prism.bin" \
+    "${user}/build/linnet_zh_pinyin.prism.bin" "${user}/baseline/"
+  # Independently chosen syllables exercise each pronunciation relation in a
+  # full-pinyin Prism and a double-pinyin Prism produced by the real renderer.
+  cat > "${scratch}/fuzzy-pairs" <<'PAIRS'
+z_zh zan zhan zj vj
+c_ch can chan cj ij
+s_sh san shan sj uj
+n_l nan lan nj lj
+f_h fan han fj hj
+r_l ran lan rj lj
+g_k gan kan gj kj
+an_ang ban bang bj bh
+en_eng fen feng ff fg
+in_ing jin jing jn jy
+ian_iang jian jiang jm jd
+uan_uang guan guang gr gd
+PAIRS
+  compile_spelling_profiles() {
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --deploy \
+      linnet_zh_pinyin linnet_zh linnet_zh_flypy linnet_zh_mspy \
+      linnet_zh_sogou linnet_zh_abc linnet_zh_ziguang linnet_zh_jiajia
+  }
+  while read -r pair full_left full_right double_left double_right; do
+    "${scratch}/projection-fixture" fuzzy-pinyin full_pinyin "${pair}" "${user}"
+    compile_spelling_profiles
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh_pinyin "${full_left}" "${full_right}" on
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh "${double_left}" "${double_right}" on
+  done < "${scratch}/fuzzy-pairs"
+  # Combined choices must preserve the same readings as each independent pair.
+  all_pairs="$(cut -d ' ' -f 1 "${scratch}/fuzzy-pairs" | paste -sd, -)"
+  "${scratch}/projection-fixture" fuzzy-pinyin full_pinyin "${all_pairs}" "${user}"
+  compile_spelling_profiles
+  while read -r pair full_left full_right double_left double_right; do
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh_pinyin "${full_left}" "${full_right}" on
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh "${double_left}" "${double_right}" on
+  done < "${scratch}/fuzzy-pairs"
+  "${scratch}/projection-fixture" default "${user}"
+  compile_spelling_profiles
+  while read -r pair full_left full_right double_left double_right; do
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh_pinyin "${full_left}" "${full_right}" off
+    "${scratch}/chinese-spelling" "${shared}" "${user}" --fuzzy \
+      linnet_zh "${double_left}" "${double_right}" off
+  done < "${scratch}/fuzzy-pairs"
+  end_phase "Chinese correction and configurable fuzzy pronunciation"
+  exit 0
+fi
+
 begin_phase "compile native smoke harnesses"
 cxx="$(xcrun --find clang++)"
 "${cxx}" -isysroot "${sdk}" -std=c++17 -O2 -Wall -Wextra -Werror \
@@ -171,6 +235,14 @@ fi
 end_phase "compile native smoke harnesses"
 
 begin_phase "run native candidate matrix"
+# Candidate/commit checks intentionally learn phrases. The separate learning
+# policy test starts from deployed settings, before those selections accumulate.
+if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
+  mixed_learning_on_user="${scratch}/mixed-learning-on-user"
+  mkdir "${mixed_learning_on_user}"
+  cp -R "${user}/." "${mixed_learning_on_user}/"
+fi
+
 smoke_args=("${shared}" "${user}")
 if [[ -n "${runtime_probe}" ]]; then
   smoke_args+=("${runtime_probe}")
@@ -186,9 +258,6 @@ end_phase "run native candidate matrix"
 
 if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
   begin_phase "verify mixed-input learning policy"
-  mixed_learning_on_user="${scratch}/mixed-learning-on-user"
-  mkdir "${mixed_learning_on_user}"
-  cp -R "${user}/." "${mixed_learning_on_user}/"
   printf 'learn 霜河栈 shuanghezhan 霜 河 栈\n' | \
     DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
       "${scratch}/auto-phrase-probe" "${shared}" \

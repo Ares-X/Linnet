@@ -23,6 +23,7 @@ struct LinnetSettingsProjectionRendererTests {
       testSwitchProjections()
       testPinyinReverseTriggerProjection()
       testChineseProfileProjectionAndCodec()
+      try testFuzzyPinyinPersistence()
       testChineseLearningPolicyProjection()
       testEnglishExperienceProjections()
       testEnglishLearningProjectionAndMigration()
@@ -37,6 +38,36 @@ struct LinnetSettingsProjectionRendererTests {
       print("LinnetSettingsProjectionRendererTests: PASS")
     } catch {
       fail("unexpected error: \(error)")
+    }
+  }
+
+  private static func testFuzzyPinyinPersistence() throws {
+    let baseline = LinnetSettingsDocument.default
+    require(baseline.input.fuzzyPinyin.isEmpty, "new users must choose their fuzzy pronunciation pairs")
+    var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(baseline)) as! [String: Any]
+    var input = json["input"] as! [String: Any]
+    input.removeValue(forKey: "fuzzyPinyin")
+    json["input"] = input
+    let old = try JSONDecoder().decode(
+      LinnetSettingsDocument.self, from: JSONSerialization.data(withJSONObject: json))
+    require(old == baseline, "older documents must preserve pronunciation behavior")
+    for profile in LinnetSettingsContract.ChineseProfile.allCases {
+      var document = baseline
+      document.input.chineseProfile = profile
+      document.input.fuzzyPinyin = [.nL, .inIng]
+      let restored = try JSONDecoder().decode(
+        LinnetSettingsDocument.self, from: JSONEncoder().encode(document))
+      require(restored == document, "fuzzy options must survive saving in every input profile")
+      let enabled = LinnetSettingsProjectionRenderer.renderProjections(document: restored)
+      document.input.fuzzyPinyin = []
+      let disabled = LinnetSettingsProjectionRenderer.renderProjections(document: document)
+      require(enabled.filter { !$0.key.hasPrefix("linnet_zh") }
+        == disabled.filter { !$0.key.hasPrefix("linnet_zh") },
+        "Chinese fuzzy options must not modify English or appearance")
+      var clean = baseline
+      clean.input.chineseProfile = profile
+      require(disabled == LinnetSettingsProjectionRenderer.renderProjections(document: clean),
+        "disabling fuzzy options must restore the original spelling configuration")
     }
   }
 
@@ -622,7 +653,7 @@ struct LinnetSettingsProjectionRendererTests {
       guard let contents = projections[file],
         contents.contains("\"linnet_english_interaction/show_ipa\": false"),
         contents.contains("\"linnet_english_interaction/show_translation\": false"),
-        !contents.contains("enable_correction"),
+        !contents.contains("\"linnet_pinyin/enable_correction\""),
         !contents.contains("switches/@1/reset")
       else {
         fail("pinyin reverse-lookup metadata settings did not cover \(file)")
