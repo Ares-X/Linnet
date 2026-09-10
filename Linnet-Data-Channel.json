@@ -130,13 +130,13 @@
   ],
   "core" : {
     "artifact_format" : "app-tar-gzip",
-    "artifact_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.23/Linnet-0.1.23-arm64-Core.linnetcore",
-    "build" : 105,
-    "bytes" : 6613149,
-    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.23",
-    "revision" : "988dffaaeb8d2124e7ab0ff27be694f07500e155",
-    "sha256" : "f63a8f1ece3fa20d1bb4a56b742eea06083c67af791351fc110f2e1990879f79",
-    "version" : "0.1.23"
+    "artifact_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.24/Linnet-0.1.24-arm64-Core.linnetcore",
+    "build" : 106,
+    "bytes" : 6655472,
+    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.24",
+    "revision" : "1685c232fecc8650ec44eba75d79deae46830194",
+    "sha256" : "ca1f83d618b7ef0c1c610de449f3036ff239ff95a59266b8f74377fd52cbf345",
+    "version" : "0.1.24"
   },
   "format" : 2,
   "sequence" : 48
