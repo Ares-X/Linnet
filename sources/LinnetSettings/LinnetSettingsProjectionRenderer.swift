@@ -259,7 +259,11 @@ private extension LinnetSettingsProjectionRenderer {
     input: LinnetSettingsDocument.Input,
     english: LinnetSettingsDocument.English
   ) -> String? {
-    var entries: [(String, String)] = []
+    // Core updates keep the installed language packs, so Core owns this policy.
+    var entries: [(String, String)] = [
+      ("translator/sentence_dictionary", quoted("linnet_english_words")),
+      ("translator/sentence_dictionary_weight", "-6.1421625395563515")
+    ]
     appendSpellingAlgebra(input.fuzzyPinyin, profile: profile, to: &entries)
     appendCandidateLayout(
       appearance.chineseCandidateLayout,

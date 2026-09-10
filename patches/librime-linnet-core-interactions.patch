@@ -506,17 +506,18 @@ index 37b3dda..0e57a97 100644
 diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
 --- a/src/rime/gear/poet.cc
 +++ b/src/rime/gear/poet.cc
-@@ -27,6 +27,9 @@
+@@ -27,6 +27,10 @@
    size_t end_pos;
    double weight;
    size_t text_hash;  // for dedup
 +  size_t preserved_entry_count;
 +  size_t spelling_hash = 0;  // boundaries of the preserved lexical spans
 +  double lexical_weight = 0.0;
++  bool preserves_entry = false;
  
    static const Line kEmpty;
  
-@@ -69,7 +72,7 @@
+@@ -69,7 +73,7 @@
    }
  };
  
@@ -525,7 +526,7 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
  
  inline static Grammar* create_grammar(Config* config) {
    if (auto* grammar = Grammar::Require("grammar")) {
-@@ -217,7 +220,7 @@
+@@ -217,7 +221,7 @@
            double weight = candidate.weight +
                            Grammar::Evaluate(context, entry->text, entry->weight,
                                              is_rear, grammar_.get());
@@ -534,7 +535,7 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
            Line& best = Strategy::BestLineToUpdate(target_state, new_line);
            if (best.empty() || compare_(best, new_line)) {
              DLOG(INFO) << "updated line ending at " << end_pos
-@@ -259,12 +262,19 @@
+@@ -259,12 +263,19 @@
                                          size_t total_length,
                                          const string& preceding_text,
                                          size_t max_sentences,
@@ -557,16 +558,44 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
    for (const auto& sv : graph) {
      size_t start_pos = sv.first;
      if (states.find(start_pos) == states.end())
-@@ -279,7 +289,7 @@
+@@ -279,10 +290,33 @@
        bool is_rear = end_pos == total_length;
        auto& target_state = states[end_pos];
  
 -      for (const auto& source_line : source_state) {
++      // Preservation is a property of a dictionary entry, independent of the
++      // path reaching it. Classify once per word-graph edge; repeating the
++      // dictionary's reverse syllable lookup for every beam path dominates
++      // long Chinese input even when no English candidate wins.
++      vector<bool> preserved_entries;
++      if (preserve_entry) {
++        preserved_entries.reserve(entries.size());
++        for (const auto& entry : entries)
++          preserved_entries.push_back(preserve_entry(*entry));
++      }
++
 +      const auto extend = [&](const Line& source_line, bool lexical_source) {
++        const string context =
++            source_line.empty() ? preceding_text : source_line.context();
++        size_t entry_index = 0;
          for (const auto& entry : entries) {
-           const string& context =
-               source_line.empty() ? preceding_text : source_line.context();
-@@ -290,64 +300,167 @@
+-          const string& context =
+-              source_line.empty() ? preceding_text : source_line.context();
++          const bool preserves_entry =
++              preserve_entry && preserved_entries[entry_index++];
++          // A contiguous English span is one lexical word. Separate English
++          // words need a boundary; alphabet labels must not stitch an unknown
++          // suffix into a fabricated word such as v + v + v + v.
++          const auto latin = [](unsigned char c) {
++            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
++          };
++          if (source_line.preserves_entry && preserves_entry &&
++              !source_line.entry->text.empty() && !entry->text.empty() &&
++              latin(source_line.entry->text.back()) && latin(entry->text.front())) continue;
+           double weight = source_line.weight +
+                           Grammar::Evaluate(context, entry->text, entry->weight,
+                                             is_rear, grammar_.get());
+@@ -290,64 +324,170 @@
            for (char c : entry->text) {
              new_hash = new_hash * 31 + c;
            }
@@ -581,23 +610,13 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
 -              target_state.erase(dup);
 -            } else {
 -              continue;
-+          // A contiguous English span is one lexical word. Separate English
-+          // words need a boundary; alphabet labels must not stitch an unknown
-+          // suffix into a fabricated word such as v + v + v + v.
-+          const auto latin = [](unsigned char c) {
-+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-+          };
-+          if (preserve_entry && source_line.entry &&
-+              preserve_entry(*source_line.entry) && preserve_entry(*entry) &&
-+              !source_line.entry->text.empty() && !entry->text.empty() &&
-+              latin(source_line.entry->text.back()) && latin(entry->text.front())) continue;
 +          const size_t preserved_entry_count =
-+              source_line.preserved_entry_count +
-+              (preserve_entry && preserve_entry(*entry) ? 1 : 0);
++              source_line.preserved_entry_count + (preserves_entry ? 1 : 0);
 +          Line new_line{&source_line, entry.get(), end_pos, weight, new_hash,
 +                        preserved_entry_count, source_line.spelling_hash,
-+                        source_line.lexical_weight + entry->weight};
-+          if (preserve_entry && preserve_entry(*entry)) {
++                        source_line.lexical_weight + entry->weight,
++                        preserves_entry};
++          if (preserves_entry) {
 +            new_line.spelling_hash = (new_line.spelling_hash * 31 + start_pos + 1) * 31 + end_pos;
 +          }
 +
@@ -605,12 +624,25 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
 +            const auto score = [lexical](const Line& line) {
 +              return lexical ? line.lexical_weight : line.weight;
 +            };
++            // A trailing path that cannot enter this frontier would otherwise
++            // allocate a node only to discard it immediately. Preserve the
++            // extra spelling-boundary slots under the same existing budget.
++            if (!target_lines.empty() && target_lines.size() >= beam_width &&
++                score(new_line) <= score(target_lines.back()) &&
++                (lexical || preserved_entry_count == 0 ||
++                 target_lines.size() >= beam_width + max_sentences ||
++                 std::any_of(target_lines.begin(), target_lines.end(),
++                     [&](const Line& line) {
++                       return line.spelling_hash == new_line.spelling_hash;
++                     }))) {
++              return;
+             }
 +            auto dup = std::find_if(target_lines.begin(), target_lines.end(),
 +                [&](const Line& line) { return line.text_hash == new_line.text_hash; });
 +            if (dup != target_lines.end()) {
 +              if (score(new_line) <= score(*dup)) return;
 +              target_lines.erase(dup);
-             }
++            }
 +            auto at = std::find_if(target_lines.begin(), target_lines.end(),
 +                [&](const Line& line) { return score(line) < score(new_line); });
 +            target_lines.insert(at, new_line);
@@ -2120,7 +2152,21 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
      if (syllabary) {
        vector<string> syllables =
            strings::split(full_code, " ", strings::SplitBehavior::SkipToken);
-@@ -232,7 +233,8 @@
+@@ -84,6 +85,13 @@
+       for (auto s = syllables.begin(); s != syllables.end(); ++s) {
+         auto found = syllabary->find(*s);
+         if (found == syllabary->end()) {
++          // Stable whole-English-word codes belong to the mixed graph. A
++          // Chinese-only prefix lookup cannot predict their numeric IDs;
++          // leave the learned entry for a query that spells that word.
++          if (std::all_of(s->begin(), s->end(),
++                          [](char c) { return c >= 'A' && c <= 'Z'; })) {
++            return;
++          }
+           LOG(ERROR) << "failed to recruit dict entry '" << e->text
+                      << "', unrecognized syllable: " << *s;
+           return;
+@@ -232,7 +240,8 @@
        state->code.pop_back();
      }
      BOOST_SCOPE_EXIT_END
@@ -2130,7 +2176,7 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
        continue;
      for (size_t i = 0; i < spelling.second.size(); ++i) {
        auto props = spelling.second[i];
-@@ -360,6 +362,7 @@
+@@ -360,6 +369,7 @@
                                     bool predictive,
                                     size_t limit,
                                     string* resume_key) {
@@ -2138,7 +2184,7 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
    TickCount present_tick = tick_ + 1;
    size_t len = input.length();
    size_t start = result->cache_size();
-@@ -425,6 +428,9 @@
+@@ -425,6 +435,9 @@
  bool UserDictionary::UpdateEntry(const DictEntry& entry,
                                   int commits,
                                   const string& new_entry_prefix) {
@@ -2148,7 +2194,7 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
    string code_str(entry.custom_code);
    if (code_str.empty() && !TranslateCodeToString(entry.code, &code_str))
      return false;
-@@ -488,15 +494,16 @@
+@@ -488,15 +501,16 @@
    if (!db)
      return false;
    CommitPendingTransaction();
@@ -2168,7 +2214,7 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
      return false;
    return db->AbortTransaction();
  }
-@@ -509,15 +516,23 @@
+@@ -509,15 +523,23 @@
    return false;
  }
  
@@ -2197,7 +2243,7 @@ diff --git a/src/rime/dict/user_dictionary.cc b/src/rime/dict/user_dictionary.cc
      if (spelling.empty()) {
        LOG(ERROR) << "Error translating syllable_id '" << syllable_id << "'.";
        result->clear();
-@@ -572,17 +587,57 @@
+@@ -572,17 +594,57 @@
  
  UserDictionary* UserDictionaryComponent::Create(const string& dict_name,
                                                  const string& db_class) {

@@ -10,6 +10,15 @@
       "bytes": 426812801,
       "sha256": "0505451203d01d4900dd3902e7057b59339444e956c62e8e420288025e6e7fcf"
     },
+    "data_48_chinese_delta": {
+      "repository": "https://github.com/Ares-X/Linnet.git",
+      "release": "data-48",
+      "revision": "fa2bedb46746e9601033b4bd3844e189e60c2f08",
+      "asset": "Linnet-Chinese-from-eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7.linnetdelta",
+      "asset_download_url": "https://github.com/Ares-X/Linnet/releases/download/data-48/Linnet-Chinese-from-eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7.linnetdelta",
+      "bytes": 131350779,
+      "sha256": "a0d2304439d7ca7116cd4a9dc46a9445d77519bf99eed5279bdcbae0584e0052"
+    },
     "data_48_english_delta": {
       "repository": "https://github.com/Ares-X/Linnet.git",
       "release": "data-48",
@@ -27,22 +36,14 @@
       "asset_download_url": "https://github.com/Ares-X/Linnet/releases/download/data-48/Linnet-Extended-from-8df604e4e5447abbd3ea45274c7b685a3556a0c238635d3b01f8e81c8837f84d.linnetdelta",
       "bytes": 868266,
       "sha256": "2dc59f5d1a8929cd84cf343d335278dc3405b0fb42e5c14d1c19b71795d30e21"
-    },
-    "release_0_1_23": {
-      "repository": "https://github.com/Ares-X/Linnet.git",
-      "release": "v0.1.23",
-      "revision": "988dffaaeb8d2124e7ab0ff27be694f07500e155",
-      "asset": "Linnet.pkg",
-      "asset_download_url": "https://github.com/Ares-X/Linnet/releases/download/v0.1.23/Linnet.pkg",
-      "bytes": 427715523,
-      "sha256": "eb05186a6980bba18bcb469ecb2cc6d5cd7176781aad1f935a67c76fbb3a6cbf"
     }
   },
   "pack_baselines": {
     "chinese": {
-      "source": "release_0_1_23",
-      "target_sequence": 38,
-      "content_sha256": "558c7933cc22a489751e24c2bc104d3c000d9a05fdfb5a2a7039c635ac95922b"
+      "source": "release_0_1_15",
+      "delta_source": "data_48_chinese_delta",
+      "target_sequence": 37,
+      "content_sha256": "eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7"
     },
     "english": {
       "source": "release_0_1_15",

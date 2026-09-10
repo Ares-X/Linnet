@@ -7633,6 +7633,10 @@ int main(int argc, char** argv) {
     ExpectNativeMixedInput(api);
     ExpectIndependentMixedDictionary(api);
     BenchmarkSchema(api, "linnet_zh_pinyin", "xuexiCSjiting");
+    // Whole-word alternatives must not make an ordinary long Chinese sentence
+    // pay for repeated language classification on every search path.
+    BenchmarkSchema(api, "linnet_zh",
+                    "womfxuykqtrfyixwvegewftidefhanzlanplufhe");
     api->finalize();
     std::cout << "rime_smoke_test: modeless mixed input: PASS\n";
     return 0;

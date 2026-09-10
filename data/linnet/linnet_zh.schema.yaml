@@ -193,14 +193,11 @@ translator:
   initial_quality: 1.2
   max_sentences: 3
   sentence_with_uppercase_syllable: true
-  sentence_dictionary: linnet_english_words
-  sentence_dictionary_weight: -6.1421625395563515
   max_homophones: 8
   max_homographs: 7
   # 原生按段学词 + 相邻段拼接（与万象 LTS 相同的学习策略）：
   # core_word_length > 0 时按段学习并拼接相邻段；
-  # max_word_length > 0 时超过 7 音节的纯中文长句只做元素权重微调。
-  # 带完整英文整词编码的混输保留整句学习，用于恢复用户选择的中英分界。
+  # max_word_length > 0 时超过 7 音节的长句不整体入库，只做元素权重微调。
   core_word_length: 4
   max_word_length: 7
   # Corrector dependencies: spelling_hints generates pinyin comments,

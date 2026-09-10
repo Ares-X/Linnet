@@ -20,8 +20,9 @@ Installed acceptance uses the dedicated macOS VM and exact Action artifacts:
 real Natural Code/full-pinyin mixed sentences and Chinese composition, physical
 Shift-held uppercase across all profiles, existing application continuity, and
 the Settings Preview update from public 0.1.23 (105). Verify Core 0.1.24 (106)
-and Chinese pack 38 together, and verify an existing learned phrase after the
-update. Record native, loaded and installed-product evidence separately. Stable
+with the existing Chinese pack 37 / data-48 retained, and verify that Core's
+startup projection enables mixed input without a language-data update or a
+separate settings Apply. Verify an existing learned phrase after the update. Record native, loaded and installed-product evidence separately. Stable
 publication is outside this Preview request.
 
 ## Chinese spelling correction and fuzzy pronunciation
