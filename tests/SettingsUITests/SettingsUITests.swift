@@ -267,6 +267,7 @@ final class SettingsUITests: XCTestCase {
       "Prefer single characters in auxiliary-code lookup by default",
       in: app)
 
+    try expandDisclosure("Smart English", in: app)
     for label in [
       "Show IPA pronunciation",
       "Show Chinese definitions",
@@ -283,6 +284,28 @@ final class SettingsUITests: XCTestCase {
       "Pass to application",
     ], in: app)
 
+  }
+
+  @MainActor
+  func testFuzzyPinyinDisclosurePreservesDraftSelections() throws {
+    let app = try launchSettings()
+    defer { app.terminate() }
+    clickTab("Input", in: app)
+    XCTAssertFalse(app.checkBoxes["n ↔ l"].isHittable)
+    try expandDisclosure("Fuzzy pinyin", in: app)
+    try clickCheckBox("n ↔ l", in: app)
+    try clickCheckBox("en ↔ eng", in: app)
+    clickTab("Appearance", in: app)
+    clickTab("Input", in: app)
+    let disclosure = app.disclosureTriangles["Fuzzy pinyin"]
+    if (disclosure.value as? NSNumber)?.intValue != 1 {
+      try expandDisclosure("Fuzzy pinyin", in: app)
+    }
+    XCTAssertEqual((app.checkBoxes["n ↔ l"].value as? NSNumber)?.intValue, 1)
+    XCTAssertEqual((app.checkBoxes["en ↔ eng"].value as? NSNumber)?.intValue, 1)
+    try clickCheckBox("n ↔ l", in: app)
+    try clickCheckBox("en ↔ eng", in: app)
+    XCTAssertFalse(app.buttons["Apply Changes"].isEnabled)
   }
 
   @MainActor

@@ -231,16 +231,18 @@ extension SettingsDataCoordinator {
     progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws {
     let desiredRevision = try LinnetSettingsDocumentStore.snapshot(from: candidate).revision
+    // Configuration Apply can rebuild spelling indexes. It is a mutation,
+    // not the short read-only/appearance refresh request.
     let reload = try await request(
       makeRequest(
         transactionID: transactionID,
         command: .reloadConfiguration,
         candidate: candidate,
-        deadline: Date().addingTimeInterval(Self.interactiveRequestTimeout),
+        deadline: Date().addingTimeInterval(Self.transactionRequestTimeout),
         expectedSettingsRevision: expectedSettingsRevision,
         alternateSettingsRevision: alternateSettingsRevision
       ),
-      replyTimeout: Self.interactiveRequestTimeout,
+      replyTimeout: Self.transactionRequestTimeout,
       progress: progress
     )
     guard reload.status == .activated,

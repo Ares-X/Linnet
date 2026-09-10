@@ -1,5 +1,39 @@
 # Linnet product acceptance
 
+## Chinese spelling correction and fuzzy pronunciation
+
+Default correction uses the current profile's Rime spelling index and the shipped
+language model. A complete reading of the entered code owns the first candidate.
+Natural double pinyin `hghk` must start with a `heng hao` candidate and offer
+很好 (en/eng pronunciation) before 更好 (neighboring key), both after the original,
+including after a correction was previously selected; ordinary
+`gghk`, `hfhk`, `hk` and `hg` keep their proper candidates and raw Return behavior.
+Full pinyin is checked independently with `nihap`, `shnaghai` and `henghao`.
+Neighboring-key correction permits one substitution per syllable; `mihap`
+still offers 你好 with separate errors in both syllables. Natural-code
+`uuuuuuuu` keeps 叔叔叔叔 first. Exact English words such as `banana` must
+retain their existing priority across all eight Chinese profiles even when
+Chinese correction candidates lie between the original reading and English.
+The focused `--chinese-spelling-probe` covers correction selection, subsequent
+input, all seven double-pinyin layouts, and twelve optional fuzzy pairs enabled
+individually, enabled together, and disabled in full-pinyin and natural-code
+indexes. English entity codes are not fuzzy
+pronunciations. Settings persistence and apply/rollback use the existing owner
+selectors documented in development.md.
+
+Installed acceptance must apply and undo a fuzzy pair, type the examples in an
+ordinary application, select a correction and continue typing. Native tests are
+TEST evidence; installation, loaded bytes and visible typing require separate
+RUNTIME_LOADED / PRODUCT evidence. Publication is outside this feature task.
+
+The Input page uses one vertical sequence. Chinese scheme, common options, learning strategy,
+reverse lookup and mode-switch help stay visible. Fuzzy pronunciation and
+Smart English use native disclosures. Fuzzy pronunciation sits directly
+below the scheme picker, shows selections while collapsed, and groups initials
+and finals in adaptive rows. Verify collapsed/expanded layouts at the default
+and minimum window widths, English/Chinese labels, selection retention across
+tab changes, Apply, and reopening the installed Settings app.
+
 ## 0.1.20 Settings implementation simplification
 
 SettingsDataCoordinator owns one document-only apply path for both appearance

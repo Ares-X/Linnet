@@ -66,6 +66,7 @@ bool IsMixedChineseCandidate(const an<Candidate>& candidate) {
   const auto phrase = As<Phrase>(candidate);
   if (!phrase || !phrase->language() ||
       phrase->language()->name() != "linnet_zh" ||
+      phrase->is_correction() ||
       !phrase->is_exact_match()) {
     return false;
   }
@@ -214,7 +215,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     std::size_t original = 0;
     std::uint16_t session_count = 0;
     bool raw = false, exact = false, ambiguous_english = false,
-         chinese = false, mixed = false,
+         chinese = false, chinese_correction = false, mixed = false,
          strong_chinese_collision = false;
   };
   std::vector<RankedCandidate> candidates;
@@ -246,8 +247,11 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
     has_pinyin = has_pinyin || item.genuine->type() == "linnet_pinyin";
     const auto phrase = rime::As<Phrase>(item.genuine);
     item.mixed = IsMixedChineseCandidate(item.genuine);
+    // Corrections still occupy Chinese spans when moving exact English ahead;
+    // they cannot establish a Chinese reading that takes priority over English.
     item.chinese = !item.mixed && phrase && phrase->language() &&
                    phrase->language()->name() == "linnet_zh";
+    item.chinese_correction = item.chinese && phrase->is_correction();
     item.exact = !input_word.empty() && item.word == input_word &&
                  (IsLinnetEnglishPhrase(item.genuine) || IsCustomPhrase(item.genuine)) &&
                  (!phrase || phrase->is_exact_match()) &&
@@ -288,7 +292,7 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
   bool has_strong_same_span_chinese = false;
   if (lowercase_chinese_input && bilingual_candidate != candidates.end()) {
     for (auto& item : candidates) {
-      if (!item.chinese ||
+      if (!item.chinese || item.chinese_correction ||
           item.genuine->start() != bilingual_candidate->genuine->start() ||
           item.genuine->end() != bilingual_candidate->genuine->end()) {
         continue;
@@ -324,7 +328,8 @@ an<Translation> SmartEnglishFilter::Apply(an<Translation> translation,
         if (english == candidates.end()) return;
         const auto chinese = std::find_if(
             english, candidates.end(), [&](const auto& item) {
-              return item.chinese && eligible_chinese(item) &&
+              return item.chinese && !item.chinese_correction &&
+                     eligible_chinese(item) &&
                      item.genuine->start() == english->genuine->start() &&
                      item.genuine->end() == english->genuine->end();
             });

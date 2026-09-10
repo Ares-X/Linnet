@@ -775,7 +775,6 @@ diff --git a/src/rime/gear/recognizer.cc b/src/rime/gear/recognizer.cc
      input += ch;
      auto match = patterns_.GetMatch(input, ctx->composition());
 diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translator.cc
-index aef6217..ebce6e7 100644
 --- a/src/rime/gear/script_translator.cc
 +++ b/src/rime/gear/script_translator.cc
 @@ -7,6 +7,7 @@
@@ -786,7 +785,7 @@ index aef6217..ebce6e7 100644
  #include <stack>
  #include <cmath>
  #include <boost/algorithm/string/join.hpp>
-@@ -75,6 +76,10 @@ static bool syllabify_dfs(SyllabifyTask* task,
+@@ -75,6 +76,10 @@
  
  }  // anonymous namespace
  
@@ -797,7 +796,7 @@ index aef6217..ebce6e7 100644
  class ScriptSyllabifier : public PhraseSyllabifier {
   public:
    ScriptSyllabifier(ScriptTranslator* translator,
-@@ -84,6 +89,7 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+@@ -84,6 +89,7 @@
        : translator_(translator),
          input_(input),
          start_(start),
@@ -805,7 +804,7 @@ index aef6217..ebce6e7 100644
          syllabifier_(translator->delimiters(),
                       translator->enable_completion(),
                       translator->strict_spelling()) {
-@@ -97,15 +103,26 @@ class ScriptSyllabifier : public PhraseSyllabifier {
+@@ -97,15 +103,26 @@
    string GetPreeditString(const Phrase& cand) const;
    string GetOriginalSpelling(const Phrase& cand) const;
    bool IsCorrection(const Code& code, size_t code_length) const;
@@ -832,7 +831,19 @@ index aef6217..ebce6e7 100644
  };
  
  class ScriptTranslation : public Translation {
-@@ -137,14 +154,18 @@ class ScriptTranslation : public Translation {
+@@ -130,6 +147,11 @@
+     set_exhausted(true);
+   }
+   bool Evaluate(Dictionary* dict, UserDictionary* user_dict);
++  bool IsCorrection(const an<Candidate>& candidate) const {
++    auto phrase = As<Phrase>(candidate);
++    return phrase && syllabifier_->IsCorrection(
++                         phrase->code(), phrase->end() - start_);
++  }
+   virtual bool Next();
+   virtual an<Candidate> Peek();
+ 
+@@ -137,14 +159,18 @@
    bool CheckEmpty();
    bool IsNormalSpelling() const;
    bool PrepareCandidate();
@@ -853,7 +864,7 @@ index aef6217..ebce6e7 100644
  
    ScriptTranslator* translator_;
    Poet* poet_;
-@@ -155,6 +176,7 @@ class ScriptTranslation : public Translation {
+@@ -155,6 +181,7 @@
    an<DictEntryCollector> phrase_;
    an<UserDictEntryCollector> user_phrase_;
    deque<an<Sentence>> sentences_;
@@ -861,7 +872,7 @@ index aef6217..ebce6e7 100644
  
    an<Phrase> candidate_ = nullptr;
    size_t candidate_index_ = 0;
-@@ -190,6 +212,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
+@@ -190,6 +217,8 @@
      config->GetBool(name_space_ + "/always_show_comments",
                      &always_show_comments_);
      config->GetBool(name_space_ + "/enable_correction", &enable_correction_);
@@ -870,7 +881,7 @@ index aef6217..ebce6e7 100644
      if (!config->GetBool(name_space_ + "/enable_word_completion",
                           &enable_word_completion_)) {
        enable_word_completion_ = enable_completion_;
-@@ -219,10 +243,16 @@ an<Translation> ScriptTranslator::Query(const string& input,
+@@ -219,19 +248,41 @@
        user_dict_ && user_dict_->loaded() && !IsUserDictDisabledFor(input);
  
    size_t end_of_input = engine_->context()->input().length();
@@ -889,7 +900,36 @@ index aef6217..ebce6e7 100644
    if (!result || !result->Evaluate(
                       dict_.get(), enable_user_dict ? user_dict_.get() : NULL)) {
      return nullptr;
-@@ -365,8 +395,98 @@ Spans ScriptSyllabifier::Syllabify(const Phrase* phrase) {
+   }
+-  auto deduped = New<DistinctTranslation>(result);
++  an<Translation> ranked = New<DistinctTranslation>(result);
+   if (contextual_suggestions_) {
+-    return poet_->ContextualWeighted(deduped, input, segment.start, this);
+-  }
+-  return deduped;
++    ranked = poet_->ContextualWeighted(ranked, input, segment.start, this);
++  }
++  // A likely typo may suggest a better sentence, but must not replace a
++  // complete reading of the keys the user actually entered. Reuse the same
++  // translator without correction only when a correction would take first place.
++  if (corrector_ && result->IsCorrection(ranked->Peek())) {
++    auto original = New<ScriptTranslation>(
++        this, nullptr, poet_.get(), sentence_input, segment.start,
++        end_of_input, max_sentences_, sentence_cutoff_threshold_);
++    if (original->Evaluate(dict_.get(),
++                           enable_user_dict ? user_dict_.get() : nullptr)) {
++      auto first = original->Peek();
++      if (first && first->end() == segment.start + input.size()) {
++        ranked = New<UniqueTranslation>(first) + ranked;
++        ranked = New<DistinctTranslation>(ranked);
++      }
++    }
++  }
++  return ranked;
+ }
+ 
+ int ScriptTranslator::core_word_length() const {
+@@ -365,8 +416,98 @@
  }
  
  size_t ScriptSyllabifier::BuildSyllableGraph(Prism& prism) {
@@ -990,12 +1030,7 @@ index aef6217..ebce6e7 100644
  }
  
  bool ScriptSyllabifier::IsCorrection(const Code& code,
-@@ -448,11 +564,14 @@ static bool has_exact_match_phrase(Ptr ptr, Iter iter, size_t consumed) {
-          iter->second.Peek()->IsExactMatch();
- }
- 
- // ScriptTranslation implementation
- 
+@@ -453,6 +594,9 @@
  bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
    size_t consumed = syllabifier_->BuildSyllableGraph(*dict->prism());
    const auto& syllable_graph = syllabifier_->syllable_graph();
@@ -1005,7 +1040,7 @@ index aef6217..ebce6e7 100644
    bool predict_word = translator_->enable_word_completion() &&
                        start_ + consumed == end_of_input_;
  
-@@ -465,7 +584,7 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+@@ -465,7 +609,7 @@
          user_dict->Lookup(syllable_graph, 0, kUnlimitedDepth,
                            predict_word ? kNumSyllablesToPredictWord : 0);
    }
@@ -1014,7 +1049,7 @@ index aef6217..ebce6e7 100644
      return false;
  
    if (phrase_)
-@@ -492,12 +611,18 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+@@ -492,12 +636,18 @@
               << ", has_reliable_phrase: " << has_reliable_phrase
               << ", has_reliable_user_phrase: " << has_reliable_user_phrase
               << ", has_at_least_two_syllables: " << has_at_least_two_syllables;
@@ -1039,10 +1074,20 @@ index aef6217..ebce6e7 100644
        auto sentence = MakeSentence(dict, user_dict);
        if (sentence)
          sentences_ = {sentence};
-@@ -588,6 +713,15 @@ inline static bool prefer_user_phrase(
-          (user_phrase_weight == sys_phrase_weight && compare_on_tie());
+@@ -572,6 +722,7 @@
+     }
+   }
+   candidate_->set_syllabifier(syllabifier_);
++  candidate_->set_is_correction(IsCorrection(candidate_));
+   return candidate_;
  }
  
+@@ -586,6 +737,15 @@
+     function<bool()> compare_on_tie = always_true) {
+   return user_phrase_weight > sys_phrase_weight ||
+          (user_phrase_weight == sys_phrase_weight && compare_on_tie());
++}
++
 +std::optional<double> ScriptTranslation::FindSystemLexicalWeight(
 +    const string& text, size_t code_length) const {
 +  if (!phrase_) return std::nullopt;
@@ -1050,12 +1095,10 @@ index aef6217..ebce6e7 100644
 +  if (group == phrase_->end()) return std::nullopt;
 +  const auto entry = group->second.FindRemainingEntry(text);
 +  return entry ? std::optional<double>(entry->weight) : std::nullopt;
-+}
-+
+ }
+ 
  bool ScriptTranslation::PrepareCandidate() {
- iter_incremented:
-   if (exhausted()) {
-@@ -642,7 +776,10 @@ iter_incremented:
+@@ -642,7 +802,10 @@
      candidate_ =
          New<Phrase>(translator_->language(),
                      entry->IsPredictiveMatch() ? "completion" : "user_phrase",
@@ -1067,7 +1110,7 @@ index aef6217..ebce6e7 100644
      candidate_->set_quality(std::exp(entry->weight) +
                              translator_->initial_quality() +
                              (entry->quality_len / full_code_length));
-@@ -660,7 +797,9 @@ iter_incremented:
+@@ -660,7 +823,9 @@
      candidate_ =
          New<Phrase>(translator_->language(),
                      entry->IsPredictiveMatch() ? "completion" : "phrase",
@@ -1078,7 +1121,9 @@ index aef6217..ebce6e7 100644
      candidate_->set_quality(std::exp(entry->weight) +
                              translator_->initial_quality() +
                              (entry->quality_len / full_code_length));
-@@ -675,6 +814,7 @@ bool ScriptTranslation::CheckEmpty() {
+@@ -673,7 +838,8 @@
+ }
+ 
  bool ScriptTranslation::CheckEmpty() {
 -  set_exhausted((!phrase_ || phrase_iter_ == phrase_->rend()) &&
 +  set_exhausted(sentences_.empty() &&
@@ -1086,8 +1131,7 @@ index aef6217..ebce6e7 100644
                  (!user_phrase_ || user_phrase_iter_ == user_phrase_->rend()));
    return exhausted();
  }
- 
-@@ -697,7 +845,8 @@ void ScriptTranslation::EnrollEntries(
+@@ -697,7 +863,8 @@
  
  WordGraph ScriptTranslation::PrepareForMakingSentence(
      Dictionary* dict,
@@ -1097,14 +1141,10 @@ index aef6217..ebce6e7 100644
    const int kMaxSyllablesForUserPhraseQuery = 5;
    const auto& syllable_graph = syllabifier_->syllable_graph();
    WordGraph graph;
-@@ -709,21 +858,44 @@ WordGraph ScriptTranslation::PrepareForMakingSentence(
-                                       kMaxSyllablesForUserPhraseQuery));
-     }
+@@ -711,19 +878,42 @@
      // merge lookup results
--    EnrollEntries(same_start_pos, dict->Lookup(syllable_graph, x.first,
--                                               &translator_->blacklist()));
-+    EnrollEntries(same_start_pos, dict->Lookup(syllable_graph, x.first,
-+                                               &translator_->blacklist()));
+     EnrollEntries(same_start_pos, dict->Lookup(syllable_graph, x.first,
+                                                &translator_->blacklist()));
 +    const auto start_constraints = entity_constraints_.find(x.first);
 +    if (start_constraints == entity_constraints_.end())
 +      continue;
@@ -1170,7 +1210,6 @@ index e5b60a7..361b608 100644
    the<Poet> poet_;
    vector<an<Phrase>> queue_;
 diff --git a/src/rime/gear/translator_commons.h b/src/rime/gear/translator_commons.h
-index 6217e5a..8d51190 100644
 --- a/src/rime/gear/translator_commons.h
 +++ b/src/rime/gear/translator_commons.h
 @@ -7,6 +7,7 @@
@@ -1181,7 +1220,7 @@ index 6217e5a..8d51190 100644
  #include <boost/regex.hpp>
  #include <rime/common.h>
  #include <rime/config.h>
-@@ -66,8 +67,14 @@ class Phrase : public Candidate {
+@@ -66,8 +67,14 @@
           const string& type,
           size_t start,
           size_t end,
@@ -1198,7 +1237,7 @@ index 6217e5a..8d51190 100644
    const string& text() const { return entry_->text; }
    string comment() const { return entry_->comment; }
    string preedit() const { return entry_->preedit; }
-@@ -77,6 +84,10 @@ class Phrase : public Candidate {
+@@ -77,7 +84,13 @@
      syllabifier_ = syllabifier;
    }
    double weight() const { return entry_->weight; }
@@ -1207,12 +1246,16 @@ index 6217e5a..8d51190 100644
 +    return system_lexical_weight_;
 +  }
    void set_weight(double weight) { entry_->weight = weight; }
++  bool is_correction() const { return is_correction_; }
++  void set_is_correction(bool value) { is_correction_ = value; }
    Code& code() const { return entry_->code; }
    const DictEntry& entry() const { return *entry_; }
-@@ -107,6 +118,8 @@ class Phrase : public Candidate {
+   const Language* language() const { return language_; }
+@@ -107,6 +120,9 @@
    const Language* language_;
    an<DictEntry> entry_;
    an<PhraseSyllabifier> syllabifier_;
++  bool is_correction_ = false;
 +  const SpellingType spelling_type_;
 +  const std::optional<double> system_lexical_weight_;
  };
@@ -2626,7 +2669,6 @@ index 7057ed4..c00d10e 100644
    bool enable_encoder_ = false;
    bool enable_sentence_ = true;
 diff --git a/src/rime/algo/syllabifier.cc b/src/rime/algo/syllabifier.cc
-index b7ed6b79..11d0efc5 100644
 --- a/src/rime/algo/syllabifier.cc
 +++ b/src/rime/algo/syllabifier.cc
 @@ -7,6 +7,7 @@
@@ -2637,7 +2679,18 @@ index b7ed6b79..11d0efc5 100644
  #include <boost/range/adaptor/reversed.hpp>
  #include <rime/algo/syllabifier.h>
  #include <rime/dict/corrector.h>
-@@ -65,14 +66,16 @@ int Syllabifier::BuildSyllableGraph(const string& input,
+@@ -25,7 +26,9 @@
+ // 2. 簡拼：用戶輸入了縮寫，明確希望匹配某個字。Penalty ≈ -2.3
+ // 3. 補全 (Completion)：用戶還沒打完，算法瞎猜的。Penalty ≈ -3.0
+ const double kCompletionPenalty = -2.995732273553991;      // log(0.05)
+-const double kCorrectionCredibility = -4.605170185988091;  // log(0.01)
++// A generic neighboring-key guess is weaker than a configured pronunciation
++// relation, whose spelling-algebra correction credibility is log(0.01).
++const double kCorrectionCredibility = -6.907755278982137;  // log(0.001)
+ 
+ int Syllabifier::BuildSyllableGraph(const string& input,
+                                     Prism& prism,
+@@ -65,14 +68,16 @@
      // see where we can go by advancing a syllable
      vector<Prism::Match> matches;
      set<SyllableId> exact_match_syllables;
@@ -2652,17 +2705,31 @@ index b7ed6b79..11d0efc5 100644
        Corrections corrections;
 -      corrector_->ToleranceSearch(prism, current_input, &corrections, 5);
 +      corrector_->ToleranceSearch(prism, string{current_input}, &corrections,
-+                                  5);
++                                  1);  // One neighboring-key error per syllable.
        for (const auto& m : corrections) {
          for (auto accessor = prism.QuerySpelling(m.first);
               !accessor.exhausted(); accessor.Next()) {
-@@ -304,4 +307,4 @@ void Syllabifier::EnableCorrection(Corrector* corrector) {
-   corrector_ = corrector;
- }
- 
--}  // namespace rime
-+}  // namespace rime
-\ No newline at end of file
+@@ -107,6 +112,10 @@
+         while (!accessor.exhausted()) {
+           SyllableId syllable_id = accessor.syllable_id();
+           EdgeProperties props(accessor.properties());
++          if (props.is_correction && !corrector_) {
++            accessor.Next();
++            continue;
++          }
+           if (strict_spelling_ && matches_input &&
+               props.type != kNormalSpelling) {
+             // disqualify fuzzy spelling or abbreviation as single word
+@@ -222,7 +231,8 @@
+         while (!accessor.exhausted()) {
+           SyllableId syllable_id = accessor.syllable_id();
+           SpellingProperties props = accessor.properties();
+-          if (props.type < kAbbreviation) {
++          if (props.type < kAbbreviation &&
++              (corrector_ || !props.is_correction)) {
+             props.type = kCompletion;
+             props.credibility += kCompletionPenalty;
+             props.end_pos = end_pos;
 diff --git a/src/rime/dict/prism.cc b/src/rime/dict/prism.cc
 index 6ea7d264..17d2e588 100644
 --- a/src/rime/dict/prism.cc

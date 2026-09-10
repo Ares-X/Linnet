@@ -552,7 +552,7 @@ struct SettingsDataCoordinatorTests {
       let transactionRequester = FixtureTransactionRequester { request, timeout, _ in
         requestOrder.recordRequest(request, timeout: timeout)
         let isTransactionTerminal =
-          [.pause, .activate, .activateLanguage, .cancel].contains(request.command)
+          [.pause, .activate, .activateLanguage, .cancel, .reloadConfiguration].contains(request.command)
         let remainingAtDispatch = request.deadline.timeIntervalSinceNow
         let admitsVirtualTerminal = !isTransactionTerminal
           || (timeout > 31 && timeout <= remainingAtDispatch + 0.25)

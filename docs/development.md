@@ -86,6 +86,8 @@ Linnet 差异只有两个人工 owner：
 
 ### Settings 与数据
 
+中文纠错复用 Rime 的邻键搜索、Prism 音节图与现有语言模型排序。ProjectionRenderer 将默认前后鼻音弱纠错和可选的 12 组模糊音插入原始读音到全拼/双拼编码的映射之前；明确勾选的模糊音替代同组弱纠错。不同双拼布局各用自己的 Prism，不通过简拼展开或额外候选过滤器猜词。Settings document 保存显式模糊音选项；Apply 改变这些选项时 Host 用 `deploy_schema` 重建八个 Prism，复用未变化的词典，失败回滚同时恢复索引。配置应用使用已有事务超时，外观刷新和诊断保留短请求超时。
+
 Settings document 拥有候选外观、中文默认项、反查触发键、学习策略和 Smart English 交互开关；personal store 拥有自定义词、禁用词与 Text Expander。唯一标准 personal runtime patch `linnet_user.custom.yaml` 只投影禁用词；document-owned 句首大写与 Tab 确定性投影到八份中文 schema custom 和一份英文 schema custom。旧 `linnet_user.yaml` 仅作一次性迁移输入并在成功写入后退役。
 
 只改变 document 的 Apply 仅在 `Transactions/<UUID>/configuration-candidate/` 暂存一份 `linnet_settings.json`。Host 校验候选与 expected/base revision，以唯一 live document 为 canonical owner 执行 CAS 和同卷原子交换，再从已发布 document reconcile 可重建 custom YAML、按固定顺序部署 exact 11 份 config（default、九个产品 schema 与 squirrel），使旧 session generation 失效并用 fresh session 验证所选方案。成功必须回报同一 SHA-256 `activeSettingsRevision`；交换、reconcile、部署或健康检查失败时，Host 原子换回旧 document、重新 reconcile/deploy 并验证旧 revision，无法验证则 fail closed。Host 启动也会在 Rime 接受输入前从 canonical document 向前 reconcile。该快速路径不 finalize Rime、不运行 maintenance、不重编词典，也不创建备份。个人表变更在隔离候选中按内容差异重建对应 stabledb，未变化且有 canonical source 的数据库以 APFS clone 复用；Host 原子交换后只重新打开已部署配置，不运行 schema maintenance。语言数据激活仍执行完整候选部署和健康检查。
@@ -440,6 +442,7 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
 | App 内嵌 Rime 与插件 | `tests/verify_packaged_rime.sh APP APP/Contents/Applications/Settings.app`；直接加载产物中的库，不使用开发机的动态库搜索路径 |
 | 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
+| 中文纠错与模糊音 | `tests/verify_swift_units.sh --only projection-renderer,settings-data-coordinator` 和 `tests/verify_rime_runtime.sh --chinese-spelling-probe`；真实设置应用与打字在专用 VM 验收 |
 | 右键忘记候选与焦点 | `tests/verify_rime_runtime.sh --candidate-forget-probe` |
 | 原文光标编辑与代码词 | `tests/verify_rime_runtime.sh --raw-editing-probe`；混输边界同时运行 `--mixed-input-probe` |
 | Installer 脚本 | 生成精确候选后，只在专用虚拟机执行真实首次安装、升级、Core、Complete、卸载和重装 |
