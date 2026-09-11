@@ -84,7 +84,7 @@ Chinese candidates support horizontal, vertical and expanded multirow layouts. C
 
 ![Real VM recording of continuous Natural Code input for 我们需要align一下这个gap的solution](resources/readme/mixed-align.gif)
 
-_Real key events, native candidates and committed text in a Safari text field, recorded in a macOS VM running 0.1.25 Preview with Natural Code double pinyin and three candidates per page. Full pinyin and the other six double-pinyin layouts use their own Chinese codes with the same English spelling._
+_Real key events, native candidates and committed text in a Safari text field, recorded in a macOS VM running 0.1.25 Preview with Natural Code double pinyin and three candidates per page. Automated key events, played at the recorded speed. Full pinyin and the other six double-pinyin layouts use their own Chinese codes with the same English spelling._
 
 Ambiguous words such as `size`, `mode` and `save` offer selectable English interpretations alongside Chinese candidates. With Chinese learning enabled, selected mixed phrases and English word boundaries carry across pinyin layouts. Context and learning still determine the order; choose another candidate when the input is ambiguous.
 
