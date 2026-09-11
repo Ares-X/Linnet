@@ -462,14 +462,14 @@ extension DataTabView {
       let sequence = update.installedSequence {
       packReleaseDescription(version: version, sequence: sequence)
     } else {
-      String(localized: "Not installed", locale: locale)
+      String(localized: LocalizedStringResource("Not installed", locale: locale))
     }
-    return "\(String(localized: "Current", locale: locale)): \(installed) → "
-      + "\(String(localized: "Available", locale: locale)): \(update.availableVersion) · "
-      + "\(String(localized: "Data release", locale: locale)) \(update.availableSequence)"
+    return "\(String(localized: LocalizedStringResource("Current", locale: locale))): \(installed) → "
+      + "\(String(localized: LocalizedStringResource("Available", locale: locale))): \(update.availableVersion) · "
+      + "\(String(localized: LocalizedStringResource("Data release", locale: locale))) \(update.availableSequence)"
   }
   func packReleaseDescription(version: String, sequence: UInt64) -> String {
-    "\(version) · \(String(localized: "Data release", locale: locale)) \(sequence)"
+    "\(version) · \(String(localized: LocalizedStringResource("Data release", locale: locale))) \(sequence)"
   }
 
   var grammarModelSection: some View {

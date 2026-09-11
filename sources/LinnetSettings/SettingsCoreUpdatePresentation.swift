@@ -157,9 +157,10 @@ extension DataTabView {
 
   func confirmCoreActivation() {
     presentCoreActivationConfirmation(
-      title: String(localized: "Apply the installed Core now?", locale: locale),
-      detail: String(localized:
-        "Your apps stay open. Settings closes after the new Core is verified.", locale: locale)
+      title: String(localized: LocalizedStringResource(
+        "Apply the installed Core now?", locale: locale)),
+      detail: String(localized: LocalizedStringResource(
+        "Your apps stay open. Settings closes after the new Core is verified.", locale: locale))
     ) {
       updateChecker.activateInstalledCore()
     }
@@ -167,9 +168,10 @@ extension DataTabView {
 
   func confirmDownloadedCoreActivation() {
     presentCoreActivationConfirmation(
-      title: String(localized: "Apply the downloaded Core update now?", locale: locale),
-      detail: String(localized:
-        "Your apps stay open. No Installer, password, logout, or restart is required.", locale: locale)
+      title: String(localized: LocalizedStringResource(
+        "Apply the downloaded Core update now?", locale: locale)),
+      detail: String(localized: LocalizedStringResource(
+        "Your apps stay open. No Installer, password, logout, or restart is required.", locale: locale))
     ) {
       updateChecker.applyDownloadedCoreUpdate()
     }
@@ -184,12 +186,14 @@ extension DataTabView {
     let alert = NSAlert()
     alert.alertStyle = .warning
     alert.messageText = title
-    alert.informativeText = String(localized:
-      "First use the macOS input menu to select another input source.", locale: locale)
+    alert.informativeText = String(localized: LocalizedStringResource(
+      "First use the macOS input menu to select another input source.", locale: locale))
       + " " + detail
-    let apply = alert.addButton(withTitle: String(localized: "Apply Now", locale: locale))
+    let apply = alert.addButton(withTitle: String(localized: LocalizedStringResource(
+      "Apply Now", locale: locale)))
     apply.keyEquivalent = "\r"
-    let cancel = alert.addButton(withTitle: String(localized: "Cancel", locale: locale))
+    let cancel = alert.addButton(withTitle: String(localized: LocalizedStringResource(
+      "Cancel", locale: locale)))
     cancel.keyEquivalent = "\u{1b}"
     let completion: (NSApplication.ModalResponse) -> Void = { response in
       guard response == .alertFirstButtonReturn else { return }
