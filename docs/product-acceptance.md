@@ -10,6 +10,11 @@ point created during the same test and verify its actual contents before
 returning to the saved starting state. Canceling a file panel or a replacement
 confirmation must leave the current personal data unchanged.
 
+On a Chinese macOS desktop, select English in Settings and verify that the
+language-pack version details and both installed/downloaded Core confirmation
+dialogs use English. Canceling the confirmation must leave the running Core
+unchanged. Switch back to the system language and verify the Chinese copy.
+
 ## Continuous Chinese and English input (0.1.24 Preview)
 
 The Chinese ScriptTranslator consumes continuous raw keystrokes and retains whole
