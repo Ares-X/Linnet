@@ -3,177 +3,162 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Linnet 双韵</title>
-  <meta name="description" content="双韵 — macOS 离线双语输入法。中英同出一源，轻按 Shift 往返。">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Linnet 双韵，为 macOS 打造的开源离线双语输入法。中文、Smart English 与原始 ASCII，共用一个输入源，让表达一气呵成。">
+  <title>Linnet 双韵 — 让表达，一气呵成</title>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
   <header class="site-header">
-    <div class="wrap row">
-      <a class="brand" href="#">
-        <img src="assets/mark.svg" alt="" width="22" height="22">
-        <span>Linnet</span>
-        <span class="muted">双韵</span>
+    <div class="wrap header-inner">
+      <a class="brand" href="#" aria-label="Linnet 双韵首页">
+        <img src="assets/mark.svg" alt="" width="38" height="34">
+        <span>Linnet <span class="brand-cn">双韵</span></span>
       </a>
-      <nav class="nav">
-        <a href="#use">使用</a>
-        <a href="#install">安装</a>
-        <a href="https://github.com/Ares-X/Linnet">GitHub</a>
+      <nav aria-label="主导航">
+        <a href="#use">产品体验</a>
+        <a href="#appearance">外观</a>
+        <a href="https://github.com/Ares-X/Linnet" class="nav-github">GitHub <span aria-hidden="true">↗</span></a>
+        <a class="nav-download" href="#install">下载 <span aria-hidden="true">↓</span></a>
       </nav>
     </div>
   </header>
 
-  <main>
-    <section class="hero wrap">
-      <p class="eyebrow">macOS · Apple Silicon · 离线</p>
-      <h1>双韵</h1>
-      <p class="subtitle">中英，同一输入源</p>
-      <p class="lede">
-        不必在系统输入法列表里来回寻找。
-        中文与 Smart English 同出一源；轻按 <kbd>Shift</kbd> 往返，
-        <kbd>Caps Lock</kbd> 入原始 ASCII。笔墨皆在本机。
-      </p>
-      <div class="cta">
-        <a class="btn" href="https://github.com/Ares-X/Linnet/releases/download/v0.1.23/Linnet.pkg">下载 v0.1.23</a>
-        <a class="link" href="https://github.com/Ares-X/Linnet/releases/latest">Release 说明</a>
-      </div>
-      <p class="fine">约 428&nbsp;MB · macOS 13+ · GPL-3.0</p>
-    </section>
-
-    <section id="use" class="wrap panel">
-      <div class="states" role="tablist" aria-label="输入状态">
-        <button type="button" class="state active" data-state="cn" aria-selected="true">中</button>
-        <button type="button" class="state" data-state="en" aria-selected="false">En</button>
-        <button type="button" class="state" data-state="ascii" aria-selected="false">A</button>
-      </div>
-
-      <div class="mock" id="mock-cn">
-        <div class="preedit">shuangyun<span class="caret"></span></div>
-        <div class="cands">
-          <span class="on">1 双韵</span>
-          <span>2 双云</span>
-          <span>3 双轨</span>
-          <span>4 霜降</span>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>为 macOS 而作的双语输入法</p>
+        <h1 id="hero-title">中文，<span class="english-word" lang="en">English.</span><br>让表达，<br><em>一气呵成。</em></h1>
+        <p class="hero-description">写中文，夹一句 English，接着写。<br>一个输入源，让两种语言自然相遇。<br>词库与模型，都在你的 Mac 上。</p>
+        <div class="hero-actions">
+          <a class="button primary" href="https://github.com/Ares-X/Linnet/releases/latest/download/Linnet.pkg"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg>下载 Linnet</a>
+          <a class="text-link" href="#use">认识双韵 <span aria-hidden="true">↗</span></a>
         </div>
-        <p class="hint">全拼或双拼 · 词库与模型均在本地</p>
+        <p class="download-meta">免费开源 <span>·</span> macOS 13+ <span>·</span> Apple Silicon</p>
       </div>
 
-      <div class="mock hidden" id="mock-en">
-        <div class="preedit">interf<span class="caret"></span></div>
-        <div class="cands">
-          <span class="on">1 interface</span>
-          <span>2 interfere</span>
-          <span>3 interframe</span>
+      <div class="hero-demo" aria-label="输入状态演示">
+        <div class="demo-topline"><span class="demo-wordmark">L / 双韵</span><span>两种语言，同一段思路</span></div>
+        <div class="demo-window">
+          <div class="window-toolbar"><span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>一页随想</span><span class="window-mark" aria-hidden="true">双</span></div>
+          <div class="document-content">
+            <p class="document-date">随手记下，正在发生的灵感。</p>
+            <div id="panel-cn" class="demo-panel" role="tabpanel" aria-labelledby="tab-cn" tabindex="0">
+              <p class="document-line">把想法连起来，<br>也把两种语言连起来。</p>
+              <p class="composing-line">聊聊<span class="composition">跨region的migration</span><span class="caret" aria-hidden="true"></span></p>
+              <div class="candidate-window">
+                <div class="preedit">kwregiondemigration</div>
+                <div class="candidate selected"><span class="candidate-number">1</span>跨region的migration</div>
+                <div class="candidate-footnote">中文混输 <span>自然码</span></div>
+              </div>
+            </div>
+            <div id="panel-en" class="demo-panel" role="tabpanel" aria-labelledby="tab-en" tabindex="0" hidden>
+              <p class="document-line" lang="en">A little space.<br>A clearer thought.</p>
+              <p class="composing-line" lang="en">Somewhere in the <span class="composition">cloud</span><span class="caret" aria-hidden="true"></span></p>
+              <div class="candidate-window">
+                <div class="preedit">cloud</div>
+                <div class="english-candidates"><span class="selected"><span class="candidate-number">1</span>cloud</span><span><span class="candidate-number">2</span>cloudy</span><span><span class="candidate-number">3</span>cloudless</span></div>
+                <div class="candidate-definition">/klaʊd/ · n. 云；云端；云状物</div>
+              </div>
+            </div>
+            <div id="panel-ascii" class="demo-panel" role="tabpanel" aria-labelledby="tab-ascii" tabindex="0" hidden>
+              <p class="document-line">写代码的时候，<br>每个字符，保持原样。</p>
+              <div class="terminal-line"><span aria-hidden="true">❯</span> git status<span class="caret" aria-hidden="true"></span></div>
+              <p class="ascii-note">代码、路径、命令。<br>直接交给当前应用。</p>
+            </div>
+          </div>
+          <div class="window-bottom"><span>灵感未完，输入继续。</span><img src="assets/mark.svg" alt="" width="23" height="20"></div>
         </div>
-        <p class="hint">/ˈɪntərfeɪs/ · n. 界面；接口</p>
-      </div>
-
-      <div class="mock hidden" id="mock-ascii">
-        <div class="ascii-line">$ git status<span class="caret"></span></div>
-        <p class="hint">原样直达当前应用</p>
-      </div>
-
-      <ul class="keys">
-        <li><kbd>Shift</kbd> 中文与英文之间</li>
-        <li><kbd>Caps Lock</kbd> 原始 ASCII</li>
-      </ul>
-    </section>
-
-    <section class="wrap facts">
-      <div>
-        <h2>特点</h2>
-        <ul>
-          <li>一源三态：中文、Smart English、ASCII</li>
-          <li>全拼与七种双拼，学习数据共用</li>
-          <li>英文补全、纠错、音标与释义</li>
-          <li>程序与词包分离，日常更新约 7&nbsp;MB</li>
-          <li>七套候选主题，随系统浅色 / 深色</li>
-        </ul>
-      </div>
-      <div>
-        <h2>隐私</h2>
-        <p>
-          无账号，无遥测，无在线翻译。
-          字词与学习默然留在本机
-          <code>~/Library/Application Support/Linnet/</code>。
-          若需要，可用 iCloud 仅同步学习词。
-        </p>
-      </div>
-    </section>
-
-    <section class="wrap shots">
-      <figure>
-        <img src="assets/input-modes.png" alt="三种输入状态" loading="lazy">
-        <figcaption>光标旁状态提示</figcaption>
-      </figure>
-      <figure>
-        <img src="assets/bilingual.png" alt="反查与 Smart English" loading="lazy">
-        <figcaption>拼音反查与英文候选</figcaption>
-      </figure>
-      <figure class="wide">
-        <img src="assets/themes.png" alt="候选窗主题" loading="lazy">
-        <figcaption>候选窗主题</figcaption>
-      </figure>
-    </section>
-
-    <section id="install" class="wrap install">
-      <h2>安装</h2>
-      <p class="note">
-        社区版未经 Apple Developer ID 签名或公证。
-        请自 GitHub Release 取得安装包，并核对 SHA-256。
-        初次安装后注销并重新登录一次即可登记输入源。
-        位置：<code>~/Library/Input Methods/Linnet.app</code>
-      </p>
-      <div class="hash-box">
-        <div class="hash-top">
-          <span>SHA-256 · v0.1.23 · Linnet.pkg</span>
-          <button type="button" id="copy-hash">复制</button>
+        <div class="demo-controls">
+          <div class="mode-tabs" role="tablist" aria-label="输入状态">
+            <button id="tab-cn" type="button" role="tab" aria-selected="true" aria-controls="panel-cn" tabindex="0"><span class="mode-symbol">中</span>中文</button>
+            <button id="tab-en" type="button" role="tab" aria-selected="false" aria-controls="panel-en" tabindex="-1"><span class="mode-symbol">En</span>英文</button>
+            <button id="tab-ascii" type="button" role="tab" aria-selected="false" aria-controls="panel-ascii" tabindex="-1"><span class="mode-symbol">A</span>原样</button>
+          </div>
+          <p class="demo-caption">输入状态示意 · 点击切换</p>
         </div>
-        <code id="hash">eb05186a6980bba18bcb469ecb2cc6d5cd7176781aad1f935a67c76fbb3a6cbf</code>
-        <p class="cli"><code>shasum -a 256 Linnet.pkg</code></p>
       </div>
     </section>
+
+    <div class="principles wrap" aria-label="产品概览">
+      <p><span class="principle-index">01</span>中英文，共用一个输入源</p>
+      <p><span class="principle-index">02</span>日常输入，离线完成</p>
+      <p><span class="principle-index">03</span>为你熟悉的 macOS 而作</p>
+    </div>
+
+    <section id="use" class="section wrap" aria-labelledby="use-title">
+      <div class="section-heading"><div><p class="eyebrow">顺着思路，继续写</p><h2 id="use-title">语言可以切换。<br>思路不必打断。</h2></div><p>中文、Smart English、原始 ASCII。<br>常用的三种状态，在同一个输入源里各就各位。</p></div>
+      <div class="feature-grid">
+        <article class="feature-card"><div class="feature-symbol" aria-hidden="true">拼<span>En</span></div><h3>中文句子，容得下 English。</h3><p>全拼与七种双拼，共享词库与学习数据。句子里直接敲英文整词，中途不必上屏；遇到歧义，再选你想要的词。</p><div class="feature-note">全拼 / 自然码 / 小鹤 / 更多双拼</div></article>
+        <article class="feature-card"><div class="feature-symbol english-symbol" aria-hidden="true">Aa<span>↗</span></div><h3>想起意思，也找得到词。</h3><p>英文补全、拼写纠错，配合音标与中文释义。只记得中文意思？用拼音反查英文，让表达接得上。</p><div class="feature-note">补全 · 纠错 · IPA · 拼音反查</div></article>
+        <article class="feature-card"><div class="feature-symbol" aria-hidden="true">⌘<span>_</span></div><h3>该原样的时候，就原样。</h3><p>轻按 Shift，往返中文与 Smart English。Caps Lock 进入原始 ASCII，代码、终端命令直接交给应用。</p><div class="feature-note"><kbd>Shift</kbd> 切换语言 <kbd>Caps Lock</kbd> 原样输入</div></article>
+      </div>
+      <div class="bilingual-gallery">
+        <figure class="candidate-showcase">
+          <figcaption><span class="eyebrow">拼音反查</span><h3>从「算法」，找到 algorithm。</h3><p>中文模式输入 <code>|suanfa</code>，不用离开中文状态。</p></figcaption>
+          <div class="screenshot-stage"><div class="screenshot-crop reverse-crop"><img src="assets/bilingual.png" width="1360" height="660" alt="真实候选窗：|suanfa 对应 algorithm、algebra、calculate，选中 algorithm，释义为算法" loading="lazy"></div></div>
+        </figure>
+        <figure class="candidate-showcase">
+          <figcaption><span class="eyebrow">Smart English</span><h3>补全单词，也补上含义。</h3><p>候选、音标与中文释义，在同一处看清。</p></figcaption>
+          <div class="screenshot-stage"><div class="screenshot-crop english-crop"><img src="assets/bilingual.png" width="1360" height="660" alt="真实候选窗：cloud、cloudy、cloudless、cloudburst，附 cloud 的音标与中文释义" loading="lazy"></div></div>
+        </figure>
+      </div>
+      <p class="gallery-source">真实产品渲染 · 宣纸主题 <a href="assets/bilingual.png">查看原图 <span aria-hidden="true">↗</span></a></p>
+      <details class="image-disclosure"><summary>看看光标旁的三种状态提示 <span aria-hidden="true">+</span></summary><img src="assets/input-modes.png" alt="中文、Smart English 和原始 ASCII 的真实光标旁状态提示" loading="lazy"></details>
+    </section>
+
+    <section id="appearance" class="appearance-section section" aria-labelledby="appearance-title">
+      <div class="wrap">
+        <div class="section-heading"><div><p class="eyebrow">好用，也要合眼缘</p><h2 id="appearance-title">你的文字，<br>有自己的样子。</h2></div><p>七套主题，各有浅色与深色。<br>横排、竖排、字体与候选数量，<br>调成你习惯的模样。</p></div>
+        <div class="theme-gallery">
+          <figure class="theme-card">
+            <figcaption><h3>宣纸青黛</h3><span lang="en">Paper Ledger</span></figcaption>
+            <div class="theme-crop" style="--crop-left: -40.44944%; --crop-top: -214.15929%"><img src="assets/themes.png" width="1360" height="1100" alt="宣纸青黛主题，浅色和深色实际候选窗" loading="lazy"></div>
+          </figure>
+          <figure class="theme-card">
+            <figcaption><h3>月华玉青</h3><span lang="en">Moon Jade</span></figcaption>
+            <div class="theme-crop" style="--crop-left: -187.64045%; --crop-top: -214.15929%"><img src="assets/themes.png" width="1360" height="1100" alt="月华玉青主题，浅色和深色实际候选窗" loading="lazy"></div>
+          </figure>
+          <figure class="theme-card">
+            <figcaption><h3>青岩</h3><span lang="en">Sidecar Slate</span></figcaption>
+            <div class="theme-crop" style="--crop-left: -40.44944%; --crop-top: -418.58407%"><img src="assets/themes.png" width="1360" height="1100" alt="青岩主题，浅色和深色实际候选窗" loading="lazy"></div>
+          </figure>
+          <figure class="theme-card">
+            <figcaption><h3>陶印</h3><span lang="en">Clay Tiles</span></figcaption>
+            <div class="theme-crop" style="--crop-left: -187.64045%; --crop-top: -418.58407%"><img src="assets/themes.png" width="1360" height="1100" alt="陶印主题，浅色和深色实际候选窗" loading="lazy"></div>
+          </figure>
+          <figure class="theme-card">
+            <figcaption><h3>月白雾青</h3><span lang="en">Mist Jade</span></figcaption>
+            <div class="theme-crop" style="--crop-left: -40.44944%; --crop-top: -622.12389%"><img src="assets/themes.png" width="1360" height="1100" alt="月白雾青主题，浅色和深色实际候选窗" loading="lazy"></div>
+          </figure>
+          <figure class="theme-card">
+            <figcaption><h3>原生玻璃</h3><span lang="en">Native Glass</span></figcaption>
+            <div class="theme-crop" style="--crop-left: -187.64045%; --crop-top: -622.12389%"><img src="assets/themes.png" width="1360" height="1100" alt="原生玻璃主题，浅色和深色实际候选窗" loading="lazy"></div>
+          </figure>
+          <figure class="theme-card">
+            <figcaption><h3>夜墨朱砂</h3><span lang="en">Ink Cinnabar</span></figcaption>
+            <div class="theme-crop" style="--crop-left: -40.44944%; --crop-top: -825.66372%"><img src="assets/themes.png" width="1360" height="1100" alt="夜墨朱砂主题，浅色和深色实际候选窗" loading="lazy"></div>
+          </figure>
+        </div>
+        <p class="gallery-source">七套主题 · Light / Dark <a href="assets/themes.png">查看完整主题原图 <span aria-hidden="true">↗</span></a></p>
+      </div>
+    </section>
+
+    <section class="section wrap everyday" aria-label="隐私与日常使用">
+      <article class="privacy-card"><svg class="line-icon" viewBox="0 0 32 32" aria-hidden="true"><rect x="7" y="14" width="18" height="14" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5m-5 6v3"/></svg><p class="eyebrow">本地优先</p><h2>你写下的，<br>留在你这里。</h2><p>输入、词库与语言模型都在本机运行。无需账号，没有遥测；需要在 Mac 之间接续习惯时，可以选择用 iCloud 同步学习词。</p><a class="text-link" href="https://github.com/Ares-X/Linnet/blob/main/README.md#隐私">了解隐私与数据 <span aria-hidden="true">↗</span></a></article>
+      <div class="everyday-notes"><article><span class="note-number">01 / 你的词，你来定</span><h3>越用，越懂你的表达。</h3><p>自定义词、学习记录与 Text Expander，让专有名词、常用短语和固定文本有自己的位置。</p></article><article><span class="note-number">02 / 更新，轻一点</span><h3>词库留下，程序轻装更新。</h3><p>Core 与语言数据分开更新。已有用户可在 Settings 内应用 Core 更新，复用词库与模型，无需注销。</p></article></div>
+    </section>
+
+    <section id="install" class="install-section" aria-labelledby="install-title"><div class="wrap">
+      <div class="install-heading"><img src="assets/mark.svg" alt="" width="70" height="60"><p class="eyebrow">下一段文字，从双韵开始</p><h2 id="install-title">让表达，一气呵成。</h2><p>为 Apple Silicon Mac 打造 · macOS 13 或更高版本</p><a class="button primary" href="https://github.com/Ares-X/Linnet/releases/latest/download/Linnet.pkg"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg>下载最新版 Linnet.pkg</a><a class="release-link" href="https://github.com/Ares-X/Linnet/releases/latest">版本说明与 SHA-256 <span aria-hidden="true">↗</span></a></div>
+      <ol class="install-steps"><li><span class="step-number">1</span><h3>下载并安装</h3><p>从本项目 GitHub Release 获取 Linnet.pkg。社区版未获 Apple Developer ID 签名或公证；若被系统拦截，按安装指南手动确认信任。</p></li><li><span class="step-number">2</span><h3>首次登录，登记输入源</h3><p>安装成功后，保存工作，注销并重新登录一次，让 macOS 完成首次登记。后续设置内 Core 更新无需注销。</p></li><li><span class="step-number">3</span><h3>选中双韵，开始输入</h3><p>在系统设置 → 键盘 → 文本输入中添加或启用 Linnet，按提示允许，再从菜单栏输入菜单选中它。</p></li></ol>
+      <div class="install-help"><a class="text-link" href="https://github.com/Ares-X/Linnet/blob/main/README.md#安装">完整安装指南 <span aria-hidden="true">↗</span></a><details class="verify-details"><summary>如何核对下载文件？</summary><p>在下载目录执行以下命令，将结果与同一 Release 提供的 SHA-256 比较。</p><div class="command-row"><code id="verify-command">shasum -a 256 Linnet.pkg</code><button type="button" id="copy-command">复制命令</button></div><p id="copy-status" class="copy-status" role="status" aria-live="polite"></p></details></div>
+    </div></section>
   </main>
 
-  <footer class="wrap foot">
-    <span>基于 Squirrel / librime</span>
-    <span>
-      <a href="https://github.com/Ares-X/Linnet">GitHub</a>
-      ·
-      <a href="https://github.com/Ares-X/Linnet/blob/main/THIRD_PARTY_NOTICES.md">第三方</a>
-      ·
-      <a href="https://github.com/Ares-X/Linnet/blob/main/LICENSE.txt">GPL-3.0</a>
-    </span>
-  </footer>
-
-  <script>
-    const tabs = document.querySelectorAll('.state');
-    const mocks = {
-      cn: document.getElementById('mock-cn'),
-      en: document.getElementById('mock-en'),
-      ascii: document.getElementById('mock-ascii')
-    };
-    tabs.forEach((tab) => {
-      tab.addEventListener('click', () => {
-        const key = tab.dataset.state;
-        tabs.forEach((t) => {
-          t.classList.toggle('active', t === tab);
-          t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
-        });
-        Object.entries(mocks).forEach(([k, el]) => {
-          el.classList.toggle('hidden', k !== key);
-        });
-      });
-    });
-    document.getElementById('copy-hash').addEventListener('click', async (e) => {
-      const text = document.getElementById('hash').textContent.trim();
-      try {
-        await navigator.clipboard.writeText(text);
-        e.target.textContent = '已复制';
-        setTimeout(() => { e.target.textContent = '复制'; }, 1500);
-      } catch (_) {}
-    });
-  </script>
+  <footer class="wrap site-footer"><div><a class="brand" href="#"><img src="assets/mark.svg" alt="" width="32" height="28"><span>Linnet <span class="brand-cn">双韵</span></span></a><p>一个输入源，两种语言。</p></div><div class="footer-links"><a href="https://github.com/Ares-X/Linnet">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/Ares-X/Linnet/blob/main/THIRD_PARTY_NOTICES.md">致谢与第三方来源</a><a href="https://github.com/Ares-X/Linnet/blob/main/LICENSE.txt">GPL-3.0-or-later</a><span>基于 Squirrel / librime</span></div></footer>
 </body>
 </html>
