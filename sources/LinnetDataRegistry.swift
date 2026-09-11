@@ -12,11 +12,7 @@ struct LinnetDataRegistry: Sendable {
   static let transactionFormat = "io.github.ares-x.linnet.language-transaction.v2"
   static let personalScratchFormat = "io.github.ares-x.linnet.personal-scratch.v1"
   static let orphanSafetyAge: TimeInterval = 24 * 60 * 60
-  static let maximumGarbageCollectionEntries = LinnetPackContract.maximumFiles
-  static let maximumInstalledPackEntries = LinnetPackContract.maximumFiles * 2 + 2
-  static let maximumActiveProjectionEntries = LinnetPackContract.maximumFiles * 8 + 8
   // User-writable Registry JSON documents share the manifest cap.
-  static let ownedMetadataMaximumBytes = LinnetPackContract.maximumManifestBytes
 
   enum Edition: String, Codable, Equatable, Hashable, Sendable {
     case standard

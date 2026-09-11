@@ -180,8 +180,8 @@ void ExpectMixedAndRawInput(RimeApi* api, RimeSessionId session) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 3) {
-    Fail("usage: runtime_smoke SHARED_DATA_DIR USER_DATA_DIR");
+  if (argc != 3 && !(argc == 4 && std::string(argv[3]) == "--expect-deploy-failure")) {
+    Fail("usage: runtime_smoke SHARED_DATA_DIR USER_DATA_DIR [--expect-deploy-failure]");
   }
 
   RimeApi* api = rime_get_api();
@@ -204,6 +204,14 @@ int main(int argc, char** argv) {
   traits.log_dir = "";
 
   api->setup(&traits);
+  if (argc == 4) {
+    api->deployer_initialize(nullptr);
+    const bool deployed = api->deploy();
+    api->finalize();
+    if (deployed) Fail("missing user-selected schema was ignored during deployment");
+    std::cout << "linnet_windows_runtime_smoke: user customization deployment failure PASS\n";
+    return 0;
+  }
   api->initialize(nullptr);
   for (const char* module : {"lua", "octagram", "predict", "smart_english"}) {
     if (!api->find_module(module)) {
@@ -243,10 +251,24 @@ int main(int argc, char** argv) {
   api->set_option(pinyin, "emoji", False);
   ExpectCandidate(api, pinyin, "xierwanasi", "希尔瓦娜斯");
   ExpectMixedAndRawInput(api, pinyin);
+  for (const auto& sample : std::vector<std::pair<const char*, const char*>>{
+           {"kuaregiondemigration", "跨region的migration"},
+           {"womenxuyaoalignyixiazhegegapdesolution", "我们需要align一下这个gap的solution"},
+           {"nihap", "你好"}, {"henghao", "很好"}}) {
+    const auto candidates = Enter(api, pinyin, sample.first);
+    const auto& candidate = Find(candidates, sample.second);
+    const auto index = &candidate - candidates.data();
+    if (!api->select_candidate(pinyin, static_cast<size_t>(index)) ||
+        TakeCommit(api, pinyin) != sample.second) {
+      Fail("new shared input behavior cannot commit: " + std::string(sample.first));
+    }
+  }
   api->destroy_session(pinyin);
 
   const RimeSessionId reverse = CreateSession(api, "linnet_zh");
   ExpectCandidate(api, reverse, "U4e2d", "中");
+  ExpectCandidate(api, reverse, "kwregiondemigration", "跨region的migration");
+  ExpectCandidate(api, reverse, "nihj", "你好");
   api->destroy_session(reverse);
 
   for (const char* schema : {"linnet_zh_abc", "linnet_zh_flypy",

@@ -92,6 +92,7 @@
 		E90500000000000000000003 /* squirrel.yaml in Core Resources */ = {isa = PBXBuildFile; fileRef = E90500000000000000000002 /* squirrel.yaml */; };
 		E60000000000000000000001 /* LinnetSettingsMutationLease.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E60000000000000000000002 /* LinnetSettingsMutationLease.swift */; };
 		E80000000000000000000001 /* SettingsPresentationStatus.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* SettingsPresentationStatus.swift */; };
+		AB0120000000000000000001 /* SettingsOperationPhase.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = AB0120000000000000000002 /* SettingsOperationPhase.swift */; };
 		E81200000000000000000001 /* SettingsRuntimeReachability.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = E81200000000000000000002 /* SettingsRuntimeReachability.swift */; };
 		F10000000000000000000001 /* LinnetSettingsPage.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* LinnetSettingsPage.swift */; };
 		F20000000000000000000001 /* LinnetSettingsDownloadTransport.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */; };
@@ -254,6 +255,7 @@
 		E90500000000000000000002 /* squirrel.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; name = squirrel.yaml; path = data/squirrel.yaml; sourceTree = "<group>"; };
 		E60000000000000000000002 /* LinnetSettingsMutationLease.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsMutationLease.swift; path = sources/LinnetSettings/LinnetSettingsMutationLease.swift; sourceTree = "<group>"; };
 		E80000000000000000000002 /* SettingsPresentationStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsPresentationStatus.swift; path = sources/LinnetSettings/SettingsPresentationStatus.swift; sourceTree = "<group>"; };
+		AB0120000000000000000002 /* SettingsOperationPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsOperationPhase.swift; path = sources/LinnetSettings/SettingsOperationPhase.swift; sourceTree = "<group>"; };
 		E81200000000000000000002 /* SettingsRuntimeReachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsRuntimeReachability.swift; path = sources/LinnetSettings/SettingsRuntimeReachability.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* LinnetSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsPage.swift; path = sources/LinnetSettings/LinnetSettingsPage.swift; sourceTree = "<group>"; };
 		F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsDownloadTransport.swift; path = sources/LinnetSettings/LinnetSettingsDownloadTransport.swift; sourceTree = "<group>"; };
@@ -362,6 +364,7 @@
 				E60000000000000000000002 /* LinnetSettingsMutationLease.swift */,
 				E81200000000000000000002 /* SettingsRuntimeReachability.swift */,
 				E80000000000000000000002 /* SettingsPresentationStatus.swift */,
+				AB0120000000000000000002 /* SettingsOperationPhase.swift */,
 				F10000000000000000000002 /* LinnetSettingsPage.swift */,
 				F81000000000000000000002 /* SettingsWindowCloseGuard.swift */,
 				F40000000000000000000002 /* LinnetSettingsDownloadSource.swift */,
@@ -671,6 +674,7 @@
 				E60000000000000000000001 /* LinnetSettingsMutationLease.swift in Settings Sources */,
 				E81200000000000000000001 /* SettingsRuntimeReachability.swift in Settings Sources */,
 				E80000000000000000000001 /* SettingsPresentationStatus.swift in Settings Sources */,
+				AB0120000000000000000001 /* SettingsOperationPhase.swift in Settings Sources */,
 				F10000000000000000000001 /* LinnetSettingsPage.swift in Settings Sources */,
 				F81000000000000000000001 /* SettingsWindowCloseGuard.swift in Settings Sources */,
 				F40000000000000000000001 /* LinnetSettingsDownloadSource.swift in Settings Sources */,

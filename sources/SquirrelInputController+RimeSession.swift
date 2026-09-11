@@ -53,13 +53,6 @@ extension SquirrelInputController {
     rimeUpdate()
   }
 
-  /// Rebuilds the current candidate snapshot after a panel-only interaction,
-  /// such as expanding or collapsing disclosure. It never edits Rime input.
-  func refreshCandidatePresentation() {
-    guard activeClient != nil else { return }
-    rimeUpdate()
-  }
-
   func page(up towardPreviousPage: Bool) -> Bool {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput,
       activeClient != nil, sessionIsCurrent()

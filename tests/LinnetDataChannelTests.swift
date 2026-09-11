@@ -335,7 +335,13 @@ struct LinnetDataChannelTests {
       "normal update must select the exact base-bound delta")
     var noDelta = artifact
     noDelta.deltas = nil
-    require(noDelta.transfer(from: previous) == .requiresCompleteRepair, "missing delta silently authorized a full download")
+    require(noDelta.transfer(from: previous) == .complete, "missing delta must use the complete published pack")
+    var unrelatedDelta = artifact
+    unrelatedDelta.deltas = [LinnetDataChannel.Delta(
+      baseContentSHA256: String(repeating: "e", count: 64), bytes: 128,
+      sha256: String(repeating: "d", count: 64), url: artifact.deltas![0].url)]
+    require(unrelatedDelta.transfer(from: previous) == .complete,
+      "a delta for another baseline must not block the complete pack")
     require(noDelta.transfer(from: previous, allowCompleteRepair: true) == .complete,
       "explicit repair was not accepted")
     require(noDelta.transfer(from: current, allowCompleteRepair: true) == .current(current),

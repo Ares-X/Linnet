@@ -53,8 +53,6 @@ final class SettingsModel: ObservableObject {
   @Published private(set) var cloudSyncLocation: LinnetCloudSyncLocation?
   @Published private(set) var cloudSyncPreparing = false
   @Published var cloudSyncStatus: LinnetSettingsContract.CloudSyncStatus?
-  @Published var cloudRecoveryRepairConfirmationRequired = false
-  @Published var languageDataRepairTarget: SettingsLanguageDataUpdateTarget?
 
   let productName: String
   @Published private(set) var dataServicesAvailable: Bool
@@ -295,11 +293,11 @@ extension SettingsModel {
     let panel = NSSavePanel()
     panel.title = SettingsFilePanelTitle.portableExport.text(
       productName: productName, locale: locale)
-    panel.nameFieldStringValue = "\(productName)-Data.linnet-data"
     panel.canCreateDirectories = true
     panel.allowedContentTypes = [
       UTType(filenameExtension: LinnetBackupStore.portableExtension) ?? .data
     ]
+    panel.nameFieldStringValue = "\(productName)-Data"
     guard panel.runModal() == .OK, let destination = panel.url else { return }
     run(
       .portableExport,
@@ -369,14 +367,13 @@ extension SettingsModel {
       }
     }
   }
-  func uploadCloudBackupArchive(repair: Bool = false) {
+  func uploadCloudBackupArchive() {
     guard let cloudFolder = cloudSyncLocation?.folder, !operationActive else { return }
     run(
       .cloudBackup,
       operation: .exportCloudRecovery(
         categories: Set(LinnetBackupStore.Category.allCases),
-        cloudFolder: cloudFolder,
-        repair: repair
+        cloudFolder: cloudFolder
       )
     ) { outcome in
       guard let recovery = outcome.cloudRecovery else { return .operationFailed(.unknown) }
@@ -556,9 +553,6 @@ extension SettingsModel {
       presentStaleOperation()
     } catch SettingsDataCoordinator.Failure.cancelled {
       status = .operationCancelled
-    } catch SettingsDataCoordinator.Failure.cloudRecoveryRepairRequired {
-      cloudRecoveryRepairConfirmationRequired = true
-      status = .cloudBackupRepairRequired
     } catch {
       settingsModelLogger.error(
         "Settings operation failed: \(error.localizedDescription, privacy: .private)"
@@ -689,16 +683,19 @@ extension SettingsModel {
     for kind: SettingsOperationKind
   ) {
     guard activeOperation?.kind == kind else { return }
-    guard let presentationPhase = presentationPhase(update.phase) else { return }
+    switch update.phase {
+    case .completed, .cancelled, .failed: return
+    default: break
+    }
     let cancellationRequested = activeOperation?.cancellationRequested ?? false
     activeOperation = .init(
       kind: kind,
-      phase: presentationPhase,
+      phase: update.phase,
       cancellationAvailable: update.cancellation == .available,
       cancellationRequested: cancellationRequested
     )
     if !cancellationRequested {
-      status = .operationProgress(kind, presentationPhase)
+      status = .operationProgress(kind, update.phase)
     }
   }
 

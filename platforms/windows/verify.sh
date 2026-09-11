@@ -208,15 +208,15 @@ user="${scratch}/runtime-user"
 mkdir -p "${shared}/opencc" "${user}"
 cp -R data/plum/. "${shared}/"
 cp -R data/opencc/. "${shared}/opencc/"
-cp build/windows-inputs/linnet_windows_defaults.yaml "${shared}/"
-cp build/windows-inputs/linnet_grammar_active.yaml "${shared}/"
+cp build/windows-inputs/policies/*.yaml "${shared}/"
 rm "${shared}/zh-hans-t-essay-bgw.gram"
-ruby -e 'File.open(ARGV.fetch(0), "a") { |file|
-  file.puts "\n__patch: linnet_windows_defaults:/patch"
-}' "${shared}/default.yaml"
 xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
   -isystem librime/dist/include platforms/windows/runtime_smoke.cc \
   lib/librime.1.dylib -o "${scratch}/runtime-smoke"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   "${scratch}/runtime-smoke" "${shared}" "${user}"
 echo "Windows shared input configuration on macOS librime: PASS (not Windows UAT)"
+ruby -e 'File.write(ARGV.fetch(0), "patch:\n  schema_list:\n    - schema: linnet_missing_preflight\n")' \
+  "${user}/default.custom.yaml"
+DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+  "${scratch}/runtime-smoke" "${shared}" "${user}" --expect-deploy-failure

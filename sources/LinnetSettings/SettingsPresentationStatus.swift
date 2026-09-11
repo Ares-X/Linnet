@@ -12,18 +12,6 @@ enum SettingsOperationKind: Equatable {
   case diagnostics
 }
 
-enum SettingsOperationPhase: Equatable {
-  case preflight
-  case pausing
-  case snapshotting
-  case staging
-  case deploying
-  case activating
-  case verifying
-  case cancelling
-  case resuming
-}
-
 enum SettingsPresentationFailure: Equatable {
   case unavailable
   case invalidOperation
@@ -115,7 +103,6 @@ enum SettingsPresentationStatus: Equatable {
   case cloudSyncDeferred
   case cloudBackupUploaded(Date)
   case cloudBackupUnchanged(Date)
-  case cloudBackupRepairRequired
   case cloudSyncDisabled
   case backupRestored
   case backupRecordRemoved
@@ -202,17 +189,15 @@ enum SettingsPresentationStatus: Equatable {
         "Some learning data is still pending. Your local learning is kept; retry later.",
         "部分学习数据仍待同步。本机学习记录已保留，可稍后重试。")
     case .cloudBackupUploaded(let verifiedAt):
+      let timestamp = verifiedAt.formatted(Date.FormatStyle().locale(locale))
       pair = (
-        "Incremental recovery backup verified at \(verifiedAt.formatted()).",
-        "增量恢复备份已于 \(verifiedAt.formatted()) 校验完成。")
+        "Incremental recovery backup verified at \(timestamp).",
+        "增量恢复备份已于 \(timestamp) 校验完成。")
     case .cloudBackupUnchanged(let verifiedAt):
+      let timestamp = verifiedAt.formatted(Date.FormatStyle().locale(locale))
       pair = (
-        "Recovery data is unchanged; the verified backup is from \(verifiedAt.formatted()).",
-        "恢复数据没有变化；已校验备份时间为 \(verifiedAt.formatted())。")
-    case .cloudBackupRepairRequired:
-      pair = (
-        "The incremental recovery chain is unavailable. Confirm full repair to create a new baseline.",
-        "增量恢复链不可用。请确认完整修复以创建新基线。")
+        "Recovery data is unchanged; the verified backup is from \(timestamp).",
+        "恢复数据没有变化；已校验备份时间为 \(timestamp)。")
     case .cloudSyncDisabled:
       pair = (
         "iCloud Drive learning synchronization disabled. No data was deleted.",
@@ -320,7 +305,6 @@ enum SettingsPresentationStatus: Equatable {
       .success
     case .operationProgress,
       .cancellingOperation,
-      .cloudBackupRepairRequired,
       .publishingAppearance,
       .appearanceStaleRetry,
       .pack(_, .downloading),
@@ -510,6 +494,9 @@ private func phaseName(_ phase: SettingsOperationPhase) -> SettingsLocalizedPair
   case .verifying: ("verifying", "校验")
   case .cancelling: ("cancelling", "取消")
   case .resuming: ("resuming input runtime", "恢复输入法运行时")
+  case .completed: ("completed", "已完成")
+  case .cancelled: ("cancelled", "已取消")
+  case .failed: ("failed", "失败")
   }
 }
 

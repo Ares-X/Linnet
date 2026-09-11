@@ -84,10 +84,6 @@ enum LinnetInputSourceRegistration {
     return isSelected ? .selectedObservation : .enabledObservation
   }
 
-  static func state(identifier: String) -> State {
-    inspect(identifier: identifier).state
-  }
-
   static func inspect(identifier: String) -> Inspection {
     let sourceList = TISCreateInputSourceList(nil, true).takeRetainedValue()
       as! [TISInputSource]

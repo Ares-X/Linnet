@@ -139,7 +139,7 @@ final class SquirrelInputController {
     pageDirections.append(up)
     return true
   }
-  func refreshCandidatePresentation() {
+  func rimeUpdate() {
     refreshCount += 1
   }
   func selectCandidate(absoluteIndex: Int) -> Bool {

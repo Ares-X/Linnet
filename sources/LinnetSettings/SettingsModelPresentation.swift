@@ -51,23 +51,6 @@ extension SettingsModel {
     }
   }
 
-  func presentationPhase(
-    _ phase: SettingsDataCoordinator.Phase
-  ) -> SettingsOperationPhase? {
-    switch phase {
-    case .preflight: .preflight
-    case .pausing: .pausing
-    case .snapshotting: .snapshotting
-    case .staging: .staging
-    case .deploying: .deploying
-    case .activating: .activating
-    case .verifying: .verifying
-    case .cancelling: .cancelling
-    case .resuming: .resuming
-    case .completed, .cancelled, .failed: nil
-    }
-  }
-
   func presentationFailure(_ error: Error) -> SettingsPresentationFailure {
     if error is LinnetBackupStore.Failure { return .incrementalBackupFailed }
     guard let failure = error as? SettingsDataCoordinator.Failure else { return .unknown }
@@ -81,7 +64,6 @@ extension SettingsModel {
     case .configurationRestoreFailed: .configurationRecoveryFailed
     case .timedOut: .timedOut
     case .cancelled: .unknown
-    case .cloudRecoveryRepairRequired: .invalidOperation
     }
   }
 
@@ -106,7 +88,7 @@ extension SettingsModel {
 
   func personalCommitAcceptance(
     _ snapshot: LinnetPersonalDataStore.Snapshot,
-    kind: SettingsConfigurationSession.PersonalCommitKind,
+    kind: SettingsConfigurationSession.CommitKind,
     ticket: SettingsConfigurationSession.PersonalTicket
   ) -> SettingsOutcomeAcceptance {
     switch configuration.acceptPersonalCommit(snapshot, kind: kind, ticket: ticket) {
@@ -125,7 +107,7 @@ extension SettingsModel {
       return .accepted
     case .submittedDraft(let snapshot), .externalReplacement(let snapshot):
       guard let ticket else { return .rejected }
-      let kind: SettingsConfigurationSession.DocumentCommitKind
+      let kind: SettingsConfigurationSession.CommitKind
       if case .externalReplacement = outcome.documentEffect {
         kind = .externalReplacement
       } else {
@@ -305,9 +287,7 @@ extension SettingsModel {
     let reason = switch issue.reason {
     case .missing: chinese ? "不能为空。" : "is required."
     case .invalid: chinese ? "格式无效。" : "has an invalid format."
-    case .tooLarge: chinese ? "超过安全大小限制。" : "exceeds the safe size limit."
     case .duplicate: chinese ? "与另一行重复。" : "duplicates another row."
-    case .tooMany: chinese ? "超过允许的行数。" : "has too many rows."
     }
     return chinese ? "\(location)\(reason)" : "\(location) \(reason)"
   }
@@ -326,8 +306,6 @@ extension SettingsModel {
       return chinese ? "禁用词第 \(row ?? 0) 行" : "Disabled word row \(row ?? 0)"
     case .expansion(let expansionID, let field):
       return expansionLocation(expansionID: expansionID, field: field, chinese: chinese)
-    case .collection(let collection):
-      return collectionLocation(collection, chinese: chinese)
     }
   }
 
@@ -363,17 +341,6 @@ extension SettingsModel {
     return chinese
       ? "文本展开第 \(row ?? 0) 行的\(fieldName)"
       : "Text Expander row \(row ?? 0) \(fieldName)"
-  }
-
-  private func collectionLocation(
-    _ collection: LinnetPersonalDataValidation.Collection,
-    chinese: Bool
-  ) -> String {
-    switch collection {
-    case .customWords: chinese ? "自定义词" : "Custom words"
-    case .disabledWords: chinese ? "禁用词" : "Disabled words"
-    case .expansions: chinese ? "文本展开" : "Text Expander"
-    }
   }
 
   func legacyImportSummary(

@@ -1328,6 +1328,322 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
   }
 }
 
+// Rime's schema component shares mutable ConfigData across live sessions.
+// Variant probes need a private copy so correction/legacy settings cannot
+// alter the subsequent product-shaped sessions in the same process.
+rime::Schema* IsolatedSchema(const char* schema_id) {
+  auto schema = std::make_unique<rime::Schema>(schema_id);
+  std::stringstream yaml;
+  auto config = std::make_unique<rime::Config>();
+  if (!schema->config()->SaveToStream(yaml) || !config->LoadFromStream(yaml))
+    Fail("could not isolate the schema configuration for a variant probe");
+  schema->set_config(config.release());
+  return schema.release();
+}
+
+void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
+  // Correction may improve the Chinese guess, but must not erase an exact
+  // English word or displace the leading Chinese partial choice.
+  {
+    const auto correction = CreateSchemaSession(api, "linnet_zh");
+    auto* schema = IsolatedSchema("linnet_zh");
+    schema->config()->SetBool("translator/enable_correction", true);
+    rime::Service::instance().GetSession(correction)->ApplySchema(schema);
+    Enter(api, correction, "xrzesize");
+    const auto candidates = CandidateOrigins(correction, 20);
+    const auto exact = std::find_if(candidates.begin(), candidates.end(),
+        [](const auto& candidate) { return candidate.text == "选择size"; });
+    if (exact == candidates.end() || exact - candidates.begin() >= 5 ||
+        exact->start != 0 || exact->end != 8 || exact->phrase_code_size != 3 ||
+        candidates.front().type == "linnet_mixed" ||
+        CandidateIndex(api, correction, "选择四") > 1)
+      Fail("correction erased exact mixed spelling or its Chinese priority");
+    if (std::any_of(candidates.begin(),
+                    candidates.begin() + (std::min)(candidates.size(), size_t{9}),
+                    [](const auto& candidate) { return candidate.text == "选择四ze"; }))
+      Fail("correction retained a weak split instead of the whole English word");
+    ExpectNoCommit(api, correction, "correction retains mixed composition");
+    api->process_key(correction, '1' + (exact - candidates.begin()), 0);
+    if (TakeCommit(api, correction) != "选择size")
+      Fail("corrected-mode mixed selection changed the committed spelling");
+    ExpectFirstCandidate(api, correction, "xrzesize", "选择size");
+    api->destroy_session(correction);
+    const auto shared = CreateSchemaSession(api, "linnet_zh_pinyin");
+    ExpectFirstCandidate(api, shared, "xuanzesize", "选择size");
+    api->destroy_session(shared);
+  }
+  // A Chinese-only collocation score must not erase a more plausible whole
+  // English word. Selecting that interpretation teaches the complete boundary.
+  for (const auto& [schema, input, expected] :
+       std::vector<std::tuple<const char*, const char*, const char*>>{
+           {"linnet_zh", "vegesizeybdmda", "这个size有点大"},
+           {"linnet_zh_pinyin", "querenmodeyihouzaikaishiceshi",
+            "确认mode以后再开始测试"},
+           {"linnet_zh", "xmsavewfjmzlgrbiidkb", "先save文件再关闭窗口"}}) {
+    const auto alternative = CreateSchemaSession(api, schema);
+    Enter(api, alternative, input);
+    const auto candidates = CandidateOrigins(alternative, 20);
+    const auto found = std::find_if(candidates.begin(), candidates.end(),
+        [expected_text = std::string(expected)](const auto& candidate) {
+          return candidate.text == expected_text;
+        });
+    if (found == candidates.end() || found->start != 0 ||
+        found->end != std::strlen(input) || found->type != "linnet_mixed" ||
+        ContainsAscii(candidates.front().text))
+      Fail("whole-word mixed recall changed Chinese priority or lost its span");
+    if (!api->select_candidate(alternative, found - candidates.begin()) ||
+        TakeCommit(api, alternative) != expected)
+      Fail("recovered semantic mixed sentence could not be committed");
+    ExpectFirstCandidate(api, alternative, input, expected);
+    api->destroy_session(alternative);
+  }
+  // Already admitted alternatives keep their positions when weaker mixed
+  // paths are recovered. Correcting 在/再 must remain a first-page choice.
+  for (const auto& [input, expected] :
+       std::vector<std::pair<const char*, const char*>>{
+           {"lmjxserver", "连接server"},
+           {"xmvpbzbackupzlggxnconfig", "先准备backup再更新config"}}) {
+    const auto existing = CreateSchemaSession(api, "linnet_zh");
+    auto* schema = IsolatedSchema("linnet_zh");
+    schema->config()->SetBool("translator/enable_correction", true);
+    rime::Service::instance().GetSession(existing)->ApplySchema(schema);
+    Enter(api, existing, input);
+    if (CandidateIndex(api, existing, expected) >= 5)
+      Fail("recovered mixed paths displaced an existing selectable alternative");
+    api->destroy_session(existing);
+  }
+  for (const bool correction_enabled : {false, true}) {
+    const auto chinese = CreateSchemaSession(api, "linnet_zh");
+    auto* schema = IsolatedSchema("linnet_zh");
+    schema->config()->SetBool("translator/enable_correction", correction_enabled);
+    rime::Service::instance().GetSession(chinese)->ApplySchema(schema);
+    const std::string input = "womfxuykqtrfyixwvegewftidefhanzlanplufh";
+    Enter(api, chinese, input);
+    const auto candidates = CandidateOrigins(chinese);
+    if (candidates.empty() || ContainsAscii(candidates.front().text))
+      Fail("recovered English path took over an unfinished Chinese sentence");
+    // The next key completes 审核 through the unchanged Chinese path.
+    api->process_key(chinese, 'e', 0);
+    ExpectNoCommit(api, chinese, "continued Chinese composition");
+    const auto completed = CandidateOrigins(chinese);
+    if (completed.empty() || ContainsAscii(completed.front().text) ||
+        completed.front().text.find("安排审核") == std::string::npos ||
+        completed.front().end != input.size() + 1)
+      Fail("correction recall changed continued Chinese composition");
+    api->destroy_session(chinese);
+  }
+  // Mixed homophones cannot displace the leading uncorrected Chinese partial
+  // choice. Correction-on ranks retain the published 0.1.23 Chinese choices.
+  for (const bool correction_enabled : {false, true}) {
+    for (const auto& [input, expected, preedit, corrected_index] :
+         std::vector<std::tuple<const char*, const char*, const char*, size_t>>{
+             {"xito", "系统", "系统o", 5},
+             {"heton", "合同", "合同on", 6},
+             {"yujiannizh", "遇见你", "遇见你zh", 1}}) {
+      const auto partial = CreateSchemaSession(api, "linnet_zh_pinyin");
+      auto* schema = IsolatedSchema("linnet_zh_pinyin");
+      schema->config()->SetBool("translator/enable_correction", correction_enabled);
+      rime::Service::instance().GetSession(partial)->ApplySchema(schema);
+      Enter(api, partial, input);
+      const auto rank = CandidateIndex(api, partial, expected);
+      if (rank > (correction_enabled ? corrected_index : 1)) {
+        std::string details;
+        for (const auto& candidate : CandidateOrigins(partial, 9)) {
+          details += " [" + candidate.text + ":" + candidate.genuine_type + "]";
+        }
+        Fail("mixed suffix displaced leading Chinese partial choice for " +
+             std::string(input) + ":" + details);
+      }
+      api->process_key(partial, '1' + rank, 0);
+      ExpectNoCommit(api, partial, "partial Chinese selection keeps remaining input");
+      const auto native = rime::Service::instance().GetSession(partial);
+      if (std::string(api->get_input(partial)) != input ||
+          native->context()->GetPreedit().text != preedit)
+        Fail("partial Chinese selection changed consumed or remaining text");
+      api->process_key(partial, XK_Escape, 0);
+      ExpectNoCommit(api, partial, "cancel selected Chinese prefix");
+      api->destroy_session(partial);
+    }
+  }
+  {
+    const auto completion = CreateSchemaSession(api, "linnet_zh_pinyin");
+    Enter(api, completion, "tuoko");
+    if (CandidateIndex(api, completion, "托咯") > 1)
+      Fail("mixed projection displaced the native Chinese correction");
+    api->destroy_session(completion);
+  }
+  // A complete English suffix remains selectable even when a Chinese-only
+  // parse sees an unfinished syllable. Explicit selection must then learn it.
+  for (const auto& [schema, input, expected, other_schema, other_input] :
+       std::vector<std::tuple<const char*, const char*, const char*, const char*,
+                              const char*>>{
+           {"linnet_zh", "xqfuissue", "修复issue",
+            "linnet_zh_pinyin", "xiufuissue"},
+           {"linnet_zh_pinyin", "gengxinversion", "更新version",
+            "linnet_zh", "ggxnversion"}}) {
+    const auto recovery = CreateSchemaSession(api, schema);
+    Enter(api, recovery, input);
+    const auto rank = CandidateIndex(api, recovery, expected);
+    // The original reading, corrected sentences and Chinese partial choice
+    // retain their slots. The complete English word must still be selectable
+    // by a digit on the product's first nine-key page.
+    if (rank >= 9) Fail("completed English suffix is not directly selectable");
+    api->process_key(recovery, '1' + rank, 0);
+    if (TakeCommit(api, recovery) != expected)
+      Fail("completed English suffix selection changed committed text");
+    api->destroy_session(recovery);
+    const auto reopened = CreateSchemaSession(api, schema);
+    ExpectFirstCandidate(api, reopened, input, expected);
+    api->destroy_session(reopened);
+    const auto shared = CreateSchemaSession(api, other_schema);
+    ExpectFirstCandidate(api, shared, other_input, expected);
+    api->destroy_session(shared);
+  }
+  // Upgrades retain old learning. A previously selected acronym segmentation
+  // must not hide every whole-English alternative for the same raw keys.
+  {
+    const auto old = CreateSchemaSession(api, "linnet_zh");
+    // The published schema had no independent English sentence dictionary.
+    // Seed that old segmentation through its original configuration before
+    // exercising the upgraded reader and an explicit replacement selection.
+    auto* old_schema = IsolatedSchema("linnet_zh");
+    old_schema->config()->SetString("translator/sentence_dictionary", "");
+    rime::Service::instance().GetSession(old)->ApplySchema(old_schema);
+    Enter(api, old, "kwregion");
+    api->select_candidate(old, CandidateIndex(api, old, "跨热GI区宁"));
+    if (TakeCommit(api, old) != "跨热GI区宁")
+      Fail("could not establish pre-existing acronym learning");
+    api->destroy_session(old);
+
+    const auto corrected = CreateSchemaSession(api, "linnet_zh");
+    ExpectFirstCandidate(api, corrected, "kwregion", "跨热GI区宁");
+    const auto old_candidate = rime::As<rime::Phrase>(
+        rime::Candidate::GetGenuineCandidate(
+            rime::Service::instance().GetSession(corrected)->context()->GetSelectedCandidate()));
+    if (!old_candidate || old_candidate->spans().Count() != 5 ||
+        old_candidate->spans().start() != 0 || old_candidate->spans().end() != 8)
+      Fail("recovered acronym learning lost its original editing spans");
+    const auto rank = CandidateIndex(api, corrected, "跨region");
+    if (rank >= 5)
+      Fail("old acronym learning hid the whole-English alternative");
+    api->process_key(corrected, '1' + rank, 0);
+    if (TakeCommit(api, corrected) != "跨region")
+      Fail("whole-English correction changed committed text");
+    ExpectFirstCandidate(api, corrected, "kwregion", "跨region");
+    api->destroy_session(corrected);
+  }
+
+  for (const auto& [schema, hello] : LoadFormalProfileReviewedInputs()) {
+    const auto session = CreateSchemaSession(api, schema.c_str());
+    const auto input = hello + "region" + hello;
+    Enter(api, session, input);
+    const auto candidates = CandidateOrigins(session, 20);
+    const auto found = std::find_if(candidates.begin(), candidates.end(),
+        [&](const auto& candidate) {
+          return BaseText(candidate.text) == "你好region你好" &&
+                 candidate.type == "linnet_mixed" && candidate.start == 0 &&
+                 candidate.end == input.size();
+        });
+    if (found == candidates.end() || found - candidates.begin() >= 5)
+      Fail(schema + ": whole English word missing between Chinese phrases");
+    api->destroy_session(session);
+  }
+
+  const auto session = CreateSchemaSession(api, "linnet_zh");
+  for (const auto& [input, expected] :
+       std::vector<std::pair<std::string, std::string>>{
+           {"kwregion", "跨region"}, {"regionpzvi", "region配置"},
+           {"regionduqucache", "region读取cache"},
+           {"dad", "达到"}, {"bkg", "报告"}, {"mzgrx", "没关系"}}) {
+    ExpectFirstCandidate(api, session, input, expected);
+  }
+  Enter(api, session, "kwregion");
+  auto live = rime::Service::instance().GetSession(session);
+  auto phrase = rime::As<rime::Phrase>(
+      rime::Candidate::GetGenuineCandidate(live->context()->GetSelectedCandidate()));
+  if (!phrase || phrase->spans().Count() != 2)
+    Fail("the whole English word did not retain one selectable spelling span");
+  api->process_key(session, XK_BackSpace, 0);
+  api->process_key(session, 'n', 0);
+  if (!api->process_key(session, ' ', 0) || TakeCommit(api, session) != "跨region")
+    Fail("mixed word tail edit or Space commit changed its text");
+  Enter(api, session, "kwregion");
+  api->select_candidate(session, CandidateIndex(api, session, "跨"));
+  api->process_key(session, ' ', 0);
+  if (TakeCommit(api, session) != "跨region")
+    Fail("partial Chinese selection lost the English suffix");
+  Enter(api, session, "kwregion");
+  api->process_key(session, XK_Return, 0);
+  if (TakeCommit(api, session) != "kwregion")
+    Fail("mixed word Return did not preserve raw input");
+  Enter(api, session, "kwregion");
+  api->process_key(session, XK_Escape, 0);
+  ExpectNoCommit(api, session, "mixed word Escape");
+  if (std::string(api->get_input(session)) != "")
+    Fail("mixed word Escape retained input");
+  api->destroy_session(session);
+
+  // A completed Chinese word can resolve an earlier ambiguous English span.
+  // Ordinary Chinese prefixes must keep their existing first choice while
+  // that right context is still missing.
+  for (const auto& [schema, input, expected] :
+       std::vector<std::tuple<const char*, const char*, const char*>>{
+           {"linnet_zh", "serverisqi", "server重启"},
+           {"linnet_zh_pinyin", "zhecireleasexiufuleneicunxielou",
+            "这次release修复了内存泄漏"},
+           {"linnet_zh_pinyin", "jiemianshe", "界面设"},
+           {"linnet_zh_pinyin", "xiexienidebang", "谢谢你的帮"}}) {
+    const auto boundary = CreateSchemaSession(api, schema);
+    ExpectFirstCandidate(api, boundary, input, expected);
+    api->destroy_session(boundary);
+  }
+
+  struct SemanticCase {
+    const char* schema;
+    std::string input, text;
+    size_t spans;
+  };
+  for (const auto& sample : std::vector<SemanticCase>{
+           {"linnet_zh", "kwregiondemigration", "跨region的migration", 4},
+           {"linnet_zh_pinyin", "kuaregiondemigration", "跨region的migration", 4},
+           {"linnet_zh", "womfxuykalignyixwvegegapdesolution",
+            "我们需要align一下这个gap的solution", 12},
+           {"linnet_zh_pinyin", "womenxuyaoalignyixiazhegegapdesolution",
+            "我们需要align一下这个gap的solution", 12},
+           {"linnet_zh", "xmreviewvegefhanzlmergedlma",
+            "先review这个方案再merge代码", 10},
+           {"linnet_zh_pinyin", "xianreviewzhegefanganzaimergedaima",
+            "先review这个方案再merge代码", 10},
+           {"linnet_zh", "bacachedetimeouttcdayidm",
+            "把cache的timeout调大一点", 8},
+           {"linnet_zh_pinyin", "bacachedetimeouttiaodayidian",
+            "把cache的timeout调大一点", 8},
+           {"linnet_zh", "womfxmsyncyixwjnduzltklpdeadline",
+            "我们先sync一下进度再讨论deadline", 12},
+           {"linnet_zh_pinyin", "womenxiansyncyixiajinduzaitaolundeadline",
+            "我们先sync一下进度再讨论deadline", 12},
+           {"linnet_zh", "resourcepzvi", "resource配置", 3},
+           {"linnet_zh", "remotepzvi", "remote配置", 3},
+           {"linnet_zh_pinyin", "remotepeizhi", "remote配置", 3}}) {
+    const auto semantic = CreateSchemaSession(api, sample.schema);
+    Enter(api, semantic, sample.input);
+    const auto candidates = CandidateOrigins(semantic, 20);
+    const auto found = std::find_if(candidates.begin(), candidates.end(),
+        [&](const auto& candidate) { return candidate.text == sample.text; });
+    if (found == candidates.end() || found - candidates.begin() >= 5 ||
+        found->start != 0 || found->end != sample.input.size() ||
+        found->phrase_code_size != sample.spans)
+      Fail(std::string(sample.schema) + ": semantic mixed sentence or lexical spans missing");
+    api->process_key(semantic, '1' + (found - candidates.begin()), 0);
+    if (TakeCommit(api, semantic) != sample.text)
+      Fail("semantic mixed sentence digit selection changed text");
+    api->process_key(semantic, ',', 0);
+    if (TakeCommit(api, semantic) != "，")
+      Fail("mixed sentence lost Chinese punctuation after commit");
+    api->destroy_session(semantic);
+  }
+}
+
 void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
   constexpr char kExpected[] = "希尔瓦娜斯";
   constexpr std::array<std::pair<const char*, const char*>, 8> kProfiles = {{
@@ -1393,6 +1709,70 @@ void ExpectNativeMixedLearningEnabled(RimeApi_stdbool* api) {
          "the preferred mixed sentence");
   }
   api->destroy_session(session);
+  const auto natural = CreateSchemaSession(api, "linnet_zh");
+  Enter(api, natural, "kwregion");
+  if (!api->select_candidate(natural, CandidateIndex(api, natural, "夸region")) ||
+      TakeCommit(api, natural) != "夸region")
+    Fail("could not learn a different mixed homophone");
+  api->destroy_session(natural);
+  const auto full = CreateSchemaSession(api, "linnet_zh_pinyin");
+  ExpectFirstCandidate(api, full, "kuaregion", "夸region");
+  CandidateIndex(api, full, "跨region");
+  api->destroy_session(full);
+  const auto continuation = CreateSchemaSession(api, "linnet_zh");
+  Enter(api, continuation, "kwregionde");
+  if (!api->select_candidate(continuation,
+                            CandidateIndex(api, continuation, "夸region的")) ||
+      TakeCommit(api, continuation) != "夸region的")
+    Fail("could not learn a mixed phrase ending in Chinese");
+  api->destroy_session(continuation);
+  const auto reopened = CreateSchemaSession(api, "linnet_zh_pinyin");
+  ExpectFirstCandidate(api, reopened, "kuaregiondemigration", "夸region的migration");
+  api->destroy_session(reopened);
+  const auto semantic = CreateSchemaSession(api, "linnet_zh_pinyin");
+  const std::string semantic_keys = "womenxuyaoalignyixiazhegegapdesolution";
+  const std::string semantic_text = "我们需要align一下这个gap的solution";
+  Enter(api, semantic, semantic_keys);
+  if (!api->select_candidate(semantic, CandidateIndex(api, semantic, semantic_text)) ||
+      TakeCommit(api, semantic) != semantic_text)
+    Fail("could not select a long mixed segmentation");
+  api->destroy_session(semantic);
+  const auto semantic_reopened = CreateSchemaSession(api, "linnet_zh_pinyin");
+  ExpectFirstCandidate(api, semantic_reopened, semantic_keys, semantic_text);
+  api->destroy_session(semantic_reopened);
+  // The saved sentence exceeds the ordinary five-syllable component lookup.
+  // Reusing it as a prefix must retain its English boundary across schemas.
+  const auto continued = CreateSchemaSession(api, "linnet_zh");
+  const std::string continued_keys =
+      "womfxuykalignyixwvegegapdesolutionrjhbjixutklp";
+  const std::string continued_text = semantic_text + "然后继续讨论";
+  ExpectFirstCandidate(api, continued, continued_keys, continued_text);
+  const size_t edit = continued_keys.find("align") + 3;
+  api->set_caret_pos(continued, edit);
+  api->process_key(continued, XK_BackSpace, 0);
+  api->process_key(continued, continued_keys[edit - 1], 0);
+  api->set_caret_pos(continued, continued_keys.size());
+  if (continued_keys != api->get_input(continued) ||
+      CandidateIndex(api, continued, continued_text) != 0)
+    Fail("editing a learned long mixed prefix lost its boundary");
+  api->process_key(continued, XK_Return, 0);
+  if (TakeCommit(api, continued) != continued_keys)
+    Fail("learned mixed prefix changed raw Return");
+  api->destroy_session(continued);
+  const auto chinese = CreateSchemaSession(api, "linnet_zh_pinyin");
+  const std::string chinese_keys = "womenmingtianshangwutaolunzhegefangan";
+  const std::string chinese_text = "我们明天上午讨论这个方案";
+  Enter(api, chinese, chinese_keys);
+  if (!api->select_candidate(chinese, CandidateIndex(api, chinese, chinese_text)) ||
+      TakeCommit(api, chinese) != chinese_text)
+    Fail("could not select the Chinese learning control");
+  Enter(api, chinese, chinese_keys);
+  const auto chinese_candidates = CandidateOrigins(chinese, 20);
+  if (std::any_of(chinese_candidates.begin(), chinese_candidates.end(), [&](const auto& c) {
+        return c.text == chinese_text && c.genuine_type == "user_phrase";
+      }))
+    Fail("mixed learning changed the configured Chinese long-phrase policy");
+  api->destroy_session(chinese);
 }
 
 void ExpectNativeMixedLearningDisabled(RimeApi_stdbool* api) {
@@ -1424,6 +1804,34 @@ void ExpectNativeMixedLearningDisabled(RimeApi_stdbool* api) {
     Fail("disabling Chinese learning also disabled static mixed input");
   }
   api->destroy_session(static_mixed);
+  const auto word = CreateSchemaSession(api, "linnet_zh_pinyin");
+  Enter(api, word, "kuaregion");
+  const auto words = CandidateOrigins(word);
+  if (words.empty() || BaseText(words.front().text) != "跨region" ||
+      std::any_of(words.begin(), words.end(), [](const auto& candidate) {
+        return candidate.genuine_type == "user_phrase" &&
+               BaseText(candidate.text) == "夸region";
+      }))
+    Fail("disabled learning exposed a learned mixed phrase or lost its static alternative");
+  Enter(api, word, "womenxuyaoalignyixiazhegegapdesolution");
+  CandidateIndex(api, word, "我们需要align一下这个gap的solution");
+  const auto long_mixed = CandidateOrigins(word, 20);
+  if (std::any_of(long_mixed.begin(), long_mixed.end(), [](const auto& candidate) {
+        return candidate.genuine_type == "user_phrase" &&
+               candidate.text == "我们需要align一下这个gap的solution";
+      }))
+    Fail("disabled learning exposed a saved long mixed segmentation");
+  Enter(api, word, "womenxuyaoalignyixiazhegegapdesolutionranhoujixutaolun");
+  auto native = rime::Service::instance().GetSession(word);
+  auto menu = native->context()->composition().back().menu;
+  for (size_t i = 0, count = menu->Prepare(20); i < count && i < 20; ++i) {
+    const auto sentence = rime::As<rime::Sentence>(
+        rime::Candidate::GetGenuineCandidate(menu->GetCandidateAt(i)));
+    if (sentence && std::any_of(sentence->components().begin(), sentence->components().end(),
+        [](const auto& entry) { return entry.text == "我们需要align一下这个gap的solution"; }))
+      Fail("disabled learning reused the saved long mixed prefix");
+  }
+  api->destroy_session(word);
 }
 
 void ExpectCandidateAbsent(RimeApi_stdbool* api,
@@ -2862,12 +3270,8 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
   const RimeSessionId raw_composing =
       CreateSchemaSession(api, "linnet_zh_pinyin");
   Enter(api, raw_composing, "uuuuuuuu");
-  const auto raw_origins = CandidateOrigins(raw_composing);
-  if (raw_origins.size() != 1 || raw_origins.front().type != "raw" ||
-      raw_origins.front().genuine_type != "raw" ||
-      raw_origins.front().start != 0 || raw_origins.front().end != 8) {
-    Fail("direct Shift raw fixture gained a translated candidate");
-  }
+  // Neighboring-key correction may now offer Chinese candidates even for this
+  // input. Shift must preserve the typed letters regardless of those guesses.
   TapShift(api, raw_composing, XK_Shift_L);
   ExpectCurrentSchema(api, raw_composing, "linnet_en",
                       "direct Shift with raw letters");
@@ -2883,7 +3287,7 @@ void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
   // Shift changes modes and must not choose any translated prefix for the user.
   const RimeSessionId partial_composing =
       CreateSchemaSession(api, "linnet_zh_pinyin");
-  constexpr char kPartialInput[] = "thisisenglish";
+  constexpr char kPartialInput[] = "thisisenglishvvvv";
   Enter(api, partial_composing, kPartialInput);
   const auto partial_origins = CandidateOrigins(partial_composing);
   const auto partial_session =
@@ -6376,6 +6780,55 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   const auto database = component->GetDb("linnet_zh", "userdb");
   auto* transaction = dynamic_cast<rime::Transactional*>(database.get());
   if (!transaction) Fail("the live dictionary is not transactional");
+
+  // Space commits a real word but keeps its learning reversible. Stopping here
+  // must not require another key or a session restart before cloud sync works.
+  {
+    const auto directory = rime::Service::instance().deployer().user_data_dir / "idle-sync";
+    std::filesystem::create_directories(directory);
+    const auto sync_directory = directory.string();
+    const char* names[] = {"linnet_zh", "linnet_en", nullptr};
+    auto learning_rows = [&] {
+      std::map<std::string, std::string> rows;
+      auto query = database->QueryAll();
+      std::string key, value;
+      while (query && query->GetNextRecord(&key, &value)) rows.emplace(key, value);
+      return rows;
+    };
+    const auto before = learning_rows();
+    Enter(api, chinese, "nihao");
+    api->process_key(chinese, ' ', 0);
+    if (TakeCommit(api, chinese) != "你好" || !transaction->in_transaction())
+      Fail("space commit did not create real reversible learning");
+    for (int index = 0; index < 30; ++index) {
+      const int result = api->sync_user_data_step(sync_directory.c_str(), names);
+      if ((result != 1 && result != 3) || !transaction->in_transaction())
+        Fail("sync ended learning before the undo window expired");
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    int result = 1;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    do {
+      result = api->sync_user_data_step(sync_directory.c_str(), names);
+      if (result != 1 && result != 3) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    } while (std::chrono::steady_clock::now() < deadline);
+    if (result != 0 || transaction->in_transaction() || learning_rows() == before)
+      Fail("idle committed learning did not synchronize without another key: result=" +
+           std::to_string(result) + ", transaction=" +
+           std::to_string(transaction->in_transaction()) + ", changed=" +
+           std::to_string(learning_rows() != before));
+    const auto learned = learning_rows();
+    const auto exported = directory / rime::Service::instance().deployer().user_id /
+                          "linnet_zh.userdb.txt";
+    std::ifstream stream(exported);
+    const std::string contents((std::istreambuf_iterator<char>(stream)), {});
+    for (const auto& row : learned) {
+      if (contents.find(row.first + '\t' + row.second + '\n') == std::string::npos)
+        Fail("idle sync omitted committed learning from its export");
+    }
+    std::cout << "idle learning sync: PASS; undo window preserved and key-free export\n";
+  }
   // A cooperative merge must agree with one uninterrupted upstream merger
   // even when pre-existing, equally weighted rows span several work slices.
   // The reference uses the real implementation, not a copied decay formula.
@@ -6966,13 +7419,13 @@ void ExpectLiveUserDataSync(RimeApi_stdbool* api) {
   const auto p99_key = key_latency[key_latency.size() * 99 / 100];
   const auto p95_typing = NearestRank(&typing_latency, 95);
   const auto p99_typing = NearestRank(&typing_latency, 99);
-  if (p99_step > 5'000'000 || p99_key > 15'000'000 ||
-      p95_typing > 5'000'000 || p99_typing > 15'000'000)
-    Fail("online sync exceeded the input latency budget");
   std::cout << "rime_smoke_test: live sync samples=" << samples
             << " step_p99_ns=" << p99_step << " step_max_ns=" << step_latency.back()
             << " two_keys_p99_ns=" << p99_key
             << " all_keys_p95_ns=" << p95_typing << " all_keys_p99_ns=" << p99_typing << '\n';
+  if (p99_step > 5'000'000 || p99_key > 15'000'000 ||
+      p95_typing > 5'000'000 || p99_typing > 15'000'000)
+    Fail("online sync exceeded the input latency budget");
   api->destroy_session(chinese);
   api->destroy_session(english);
 }
@@ -7191,7 +7644,12 @@ int main(int argc, char** argv) {
   if (mixed_input_probe) {
     ExpectSupplementalExtendedChineseCoverage(api);
     ExpectNativeMixedInput(api);
+    ExpectIndependentMixedDictionary(api);
     BenchmarkSchema(api, "linnet_zh_pinyin", "xuexiCSjiting");
+    // Whole-word alternatives must not make an ordinary long Chinese sentence
+    // pay for repeated language classification on every search path.
+    BenchmarkSchema(api, "linnet_zh",
+                    "womfxuykqtrfyixwvegewftidefhanzlanplufhe");
     api->finalize();
     std::cout << "rime_smoke_test: modeless mixed input: PASS\n";
     return 0;
@@ -8585,6 +9043,7 @@ int main(int argc, char** argv) {
     ExpectFirstCandidate(api, english, token, token);
   }
   ExpectNativeMixedInput(api);
+  ExpectIndependentMixedDictionary(api);
   ExpectNaturalSingleKeyDefaultRanking(api);
   ExpectSingleSyllablePreferenceLearning(api);
   api->destroy_session(isolated_session);

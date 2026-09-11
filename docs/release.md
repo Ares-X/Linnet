@@ -4,13 +4,12 @@ Linnet 的公开发行采用无付费证书的社区模式：PKG 不含 Apple De
 Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动态库和插件
 使用同一张长期固定的自签 CMS 证书与 hardened runtime。固定 leaf 为跨版本
 身份连续提供一致依据，但不等同于 Apple Developer ID 或公证，仍须逐版做真实
-升级验收。用户还须核对
-同一 GitHub Release 的源码标签、文件清单和 SHA-256，并完成首次手动信任。
+升级验收。首次使用需按 macOS 提示手动确认；Release 提供源码标签、文件清单和 SHA-256 供核对。
 
 ## 用户信任边界
 
-用户必须先计算 `Linnet.pkg` 的 SHA-256，并与同一正式 Release 说明中的摘要
-逐字比对，再在 Finder 中按住 Control 点击或右键点击 `Linnet.pkg`，选择“打开”。若仍被 macOS 拦截，可在“系统设置 → 隐私与
+从项目 Release 下载 `Linnet.pkg`，在 Finder 中按住 Control 点击或右键点击，选择“打开”。
+需要确认下载文件时，可将 SHA-256 与同一 Release 的摘要比对。若仍被 macOS 拦截，可在“系统设置 → 隐私与
 安全性”中对该文件选择“仍要打开”。文档和脚本不得要求关闭 Gatekeeper、
 清除 quarantine 属性或修改系统安全策略。
 
@@ -23,6 +22,7 @@ Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动�
 - 候选目录精确匹配 `package/release_asset_manifest`；正式 Release 只有 1 个完整安装包，Core
   更新频道包含 Core 和 Catalog，数据频道包含 4 个不可变词包及已绑定基线的差分；
 - 安装脚本保持当前用户范围，不安装 daemon、LaunchAgent、特权 helper；
+- PKG 中的 `linnet-pack` 与运行时检查工具须按 arm64 macOS 13.0 编译，并检查包内 Mach-O 的最低系统版本；仅在较新构建机器上运行成功不能证明旧系统兼容。
 - Complete 只在首次创建 App 时注册输入源并向 macOS 提交一次启用请求；已有 App
   的 Complete 字节修复与 Core 更新都不注册、启用或选择输入源。允许与菜单选择
   始终由用户和 macOS 管理。首次安装最多要求一次注销，
@@ -67,36 +67,17 @@ export ARCHIVE_OUTPUT_DIR="$(mktemp -d /private/tmp/linnet-release-preflight.XXX
 以及第二个 iCloud 端点。由于 CMS 签名时间会改变字节，本地测试不能替代正式发布前
 对 Action 原始产物的安装验收，也不要求为每轮开发探索先触发 Action。
 
-正式候选只能由 `scripts/release-control candidate` 创建携带本地验收收据的
-annotated `linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签启动；裸标签会被拒绝。
-先运行 `scripts/release-control verify-local`：恢复锁定输入并构建，再串行完成
-strict lint、发布 owner、App/Swift/Rime、Periphery。验证期间不得编辑源码；临时
-Git index 绑定完整源 tree，不改变暂存区。收据只保存在 ignored
-`build/linnet-source-verification.json`；合并提交不同但 tree 完全相同时可复用。
-这是可信维护者的验收声明，不宣称 Action 独立重跑了本地测试。
+使用 `scripts/release-control candidate` 为已提交的 revision 创建候选标签。
+候选申请不要求本地测试收据、干净工作区或精确远端 main；Action 只构建标签指向的
+已提交源码，不包含未提交修改。根据改动运行相关测试并记录实际结果，未运行项目
+明确记为 `NOT_EXERCISED`。`verify-local` 是可选的完整非交互检查；Periphery 可单独
+运行，结果供审阅，不阻止构建或发布。
 
-`verify-local` 不操作桌面，Settings UI 记录为 `NOT_EXERCISED`。随后在具备
-Developer Mode 的专用测试桌面运行 `scripts/release-control verify-settings-ui`，
-为同一 source tree 补充 UI 结果，不重跑非交互检查。UI 未通过时不能申请候选；
-candidate Action 不补跑产品验收。独立应用身份和数据目录不等于隔离桌面，
-不得在维护者日常输入会话中运行此命令或直接运行 XCUITest。
-
-维护者明确要求跳过测试、先发布 Preview 交由用户验收时，可在 clean、精确远端
-`main` 执行 `scripts/release-control candidate-preview "跳过原因"`。它不执行测试，
-为当前 tree 记录 `preview_only` 与 `NOT_EXERCISED`，不伪造通过项；随后仍由同一
-Action 构建、签名并检查发布文件，只允许推进预览频道。此记录不能授权正式发布；
-正式版仍须在已完成验收的源码上使用完整收据申请新候选。
-`archive` 只构建、签名、打包及检查最终文件，不隐式调用候选运行测试；需要这些
-检查时显式运行 `make community-verified`，不要把它当作无需测试的打包命令。
-
-针对已审阅的小范围修复，维护者可在同一 `build/linnet-source-verification.json`
-记录 format 3 的范围验收：绑定 `source_tree`，在 `scope` 说明改动与验收范围，
-`checks` 逐项记录实际执行的 `command`、`result: PASS` 和 `evidence`，
-`not_exercised` 明列未执行或用户明确不要求重复的项目。这不是全量通过收据；
-已通过且实现未再变化的相关检查可复用，说明对应证据即可。使用原有 `candidate`
-命令及唯一 Action 构建产物，正式 `authorize` 前仍须完成精确产物的虚拟机实际输入
-和升级验收。用户要求不重复本机全量 UI 时，不运行本机 XCUITest，也不将其记为 PASS。
-签名、版本、完整性和远端发布资产检查不因范围验收而减少。
+Settings UI 仅在专用测试桌面按需运行 `scripts/release-control verify-settings-ui`。
+它不依赖另一份测试收据，也不是申请候选的前置条件。独立 bundle ID 和数据目录
+不能隔离鼠标、键盘或焦点，不得在维护者日常输入会话中运行 XCUITest。
+`archive` 只构建、签名、打包及检查最终文件；需额外检查时显式运行对应测试。
+正式发布仍需验证受本次变更影响的实际安装与产品行为，不能把未执行的流程记为通过。
 
 同一个 macOS job 只做一次 checkout、一次锁定 cache restore、一次 hydrate，验证
 标签到 commit/tree 的绑定，保留依赖提交历史的版本检查和实际产物门。随后 Action 使用
@@ -109,7 +90,7 @@ Action 构建、签名并检查发布文件，只允许推进预览频道。此�
 候选 Action 把 manifest 的原字节直接写入三个 Draft GitHub Releases：Core 2 件、data
 4 个完整词包及对应差分、public 1 件。GitHub Actions artifact 不是发布传输或存储 owner，因此不会再
 上传约 906 MB artifact、随后在另一个 job 下载并解压同一份数据。
-Core 与 public Draft 必须精确绑定当前候选 revision；data Draft 由固定 tag、标题、
+Core 与 public Draft 必须精确绑定当前候选 revision；data Draft 由固定 tag、
 预发布状态及词包、差分的精确文件名、字节数和 SHA-256 拥有。其 target 必须是完整的
 direct commit，但 byte-identical 的不可变 pack 可以跨候选 revision 复用，且不得删除、
 重建或重新上传。
@@ -127,7 +108,7 @@ Core 包只携带差分和安装工具；已有词包下载与其内容匹配的
 传输按差异块生成；本地保留未改变文件的 COW 副本，仅重建发生变化的文件。
 被修改文件使用 rsync 的临时文件替换，不使用 `--inplace`，以保持只读词包权限；
 因此单个被修改文件的临时空间仍按其完整大小计算，不能把网络差分大小当作磁盘峰值。
-失败保留原始安装，只有明确确认 Complete/完整词包修复后才允许全量传输。
+失败保留原始安装。语言数据没有可用差分或差分失败时，自动下载同一 Catalog 中的完整词包；完整包仍须通过原有摘要与内容校验。Core 的 Complete 重装仍由完整安装包执行。
 安装器与 Settings 复用一个数据 mutation lease，不关闭任何应用。
 Core 与已有安装的 Complete 修复必须保留 `Linnet.app` 目录的文件身份，
 只原子交换完整 `Contents`；不能将已注册 App 根目录换到暂存区再删除。
@@ -153,29 +134,35 @@ Release。新 pack sequence 才选择新的基线并生成新的差分。当前�
 正式产物的构建、签名、候选暂存和最终公开都由 GitHub Actions 完成；维护者 Mac
 负责源码验收与 Action 原字节安装验收，并在验收后创建不可变授权标签：
 
-1. 运行 `scripts/release-control verify-local`，提交其绑定的相同 source tree，
-   在 clean、精确远端 `main` 运行 `scripts/release-control candidate`；
-2. 等待唯一 macOS candidate job 成功。它复用完整源码收据，只构建、签名一次，并把
+1. 完成与改动相关的验证并提交源码，运行 `scripts/release-control candidate`；
+2. 等待唯一 macOS candidate job 成功。它只构建、签名一次，并把
    manifest 中的全部产物直接放入
    `core-v<VERSION>`、`data-<SEQUENCE>` 和 `v<VERSION>` 三个 Draft Releases；
 3. 用已认证的 GitHub CLI 把三个 Draft 的互不重叠资产下载到一个新空目录。记录
    candidate job summary 的 revision 与产物集合摘要，并在本地重新运行最终 verifier；
-4. 先完成候选原字节的首次安装、升级、重装、卸载、功能、性能和 UI 验收。随后运行
+4. 用候选原字节完成受本次变更影响的安装、功能或 UI 验收；按下文选择生命周期测试，
+   不默认重跑全部矩阵。随后运行
    `scripts/release-control preview "$ARCHIVE_OUTPUT_DIR"`；它只创建字节绑定的
    `linnet-preview/*` 标签。Ubuntu publisher 只公开 Core/data 预发布并非强制推进
    `preview-channel`，不推进 `data-channel`、不公开 `v<VERSION>`、不改变 Latest；
-5. 在前一公开版的 Settings 选择 Preview，完成真实在线发现、Core 安装、运行中生效、
-   语言数据和双向 iCloud 同步验收；再用同一目录完成“两轮同 leaf Core 升级”。两轮都须
-   无注销、无 Keychain 密码提示、Host PID 符合激活协议且 `AXHidden=false`，并保留
-   enabled/selected、UserData、输入菜单、Settings 和真实输入；
-6. 全量验收通过后运行
+5. 在受支持公开基线的 Settings 选择 Preview，完成一次真实在线发现、Core 下载和
+   候选原字节的运行中生效。验证无需注销或密码、
+   Host 符合激活协议、个人数据与应用连接保留、菜单和真实输入正常。语言数据或同步
+   有变化时，再验证对应数据更新或双向 iCloud 合并；已验证的同一原字节不重复验收。
+6. 本次变更所需验收通过后运行
    `scripts/release-control authorize "$ARCHIVE_OUTPUT_DIR"`。本地命令只能重新验证
-   全部 manifest 文件和三个远端 Release 的 SHA-256/size，并通过 SSH 创建
+   全部 manifest 文件和三个远端 Release 的 SHA-256/size，并通过 Git 创建
    `linnet-publication/v<VERSION>-<FULL_REVISION>-h<SET_SHA256>`；它不能构建、
    上传、编辑 Release 或推进 Catalog；
 7. 正式授权标签启动同一个 Ubuntu publisher job。它从 GitHub Release metadata 验证完整 manifest
    集合，只下载约 4 KB 的 `Linnet-Data-Channel.json`，然后按
    Core → data → 非强制快进 Catalog → Public / Latest 的顺序发布。大型资产不再下载。
+   若同一份 Complete 已作为预发布公开，按同一源码与资产摘要直接转为稳定版，
+   无需重传资产；正式发布会移除预发布标记。
+
+若候选提交中的工作流有发布故障，可在修复合入 `main` 后，用
+`gh workflow run release-ci.yml --ref main -f authorization_tag=<已有授权标签>`
+继续发布。工作流仍检出该标签对应的源码，并核对原资产摘要，不重新构建候选。
 
 更新锁定 LTS 模型时，显式
 `linnet-data-seed/v<VERSION>-<SEQUENCE>-<FULL_REVISION>` 标签启动同一个 macOS
@@ -199,7 +186,7 @@ macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、
 Core 更新只接受已安装的固定 CMS 身份；此前公开的旧 ad-hoc App 必须使用
 Complete 修复，不能进入 Core 的就地更新路径。
 Complete 仍须验证旧 App 的代码完整性和明确身份，在不修改既有 TIS 状态与个人数据的
-前提下替换 App。当前候选仍以步骤 5 的“两轮同 leaf Core 升级”为发布前证据。
+前提下替换 App；仅在变更涉及此路径时补做相应修复验收。
 
 Settings 只读取用户明确选择的 `data-channel` 或 `preview-channel` 指针，不读取
 可变 Release 别名，也不维护第二份 Core 版本清单；默认始终是正式频道，未知保存值
@@ -235,17 +222,25 @@ TextEdit、Teams、Codex 及其他已连接应用始终保持打开；任一安�
 保持运行且 Settings 显示拒绝原因。Settings 不关闭用户应用，也不程序化切换输入源。
 Host 接受后还须在退出前复核同一 typed 状态；Settings 只能从 canonical 路径启动并核对
 精确 revision；再单独验证 Host 自然重启后由新 build 提供输入。
-每个精确候选的“两轮同 leaf Core 升级”必须使用同一组 Draft Release 原字节。
-每轮均从前一已验收的固定 CMS 版（首次公开后即前一公开版）升级到候选；第二轮先按
-正常卸载、安装流程重建较低版本基线，再重复相同在线升级。单独记录基线重建所需的
-注销与数据恢复，不将其计入在线升级流程。在线 Core 只接受更高版本，不提供同版本
-重装；同版本 App 修复由 Complete 负责，不能用它替代 Core 升级验收。
-两轮升级均不得注销或索要密码，并须验证登录会话、enabled/selected、UserData、
-输入菜单、Settings 和真实输入。Core 只接受固定 CMS App 以及唯一、精确匹配的 TIS
-source/bundle 身份；旧 ad-hoc App、App 缺失或注册缺失都在 payload 前失败并指向
-Complete。受支持签名 App 的缺失注册由 Complete 修复；重复、冲突、未知 bundle 或
-任何残留身份必须先执行 README 的离线完整卸载命令，不能猜测或覆盖用户状态。发布
-Keychain 密码永远不属于用户安装流程。
+每个 Core 候选以一次从受支持公开基线到候选原字节的真实在线升级为正常发布证据。
+本机或专用虚拟机的有效证据均可使用；不因切换测试机器而重跑同一条路径。
+同版本 Complete 修复不能代替有序 Core 升级；Core 仍只接受更高版本。
+
+额外验收由变更决定：安装脚本、签名身份或注册流程变化时测首次安装；卸载、迁移、
+持久化或恢复路径变化时测对应流程；升级事务、失败恢复或跨次状态变化时测有具体
+失败假设的重复升级/故障场景。普通 Settings、候选 UI 或学习同步修复不要求重建
+低版本、重复同一路升级、注销或重启。仅文档修改不构建候选，也不重跑产品测试。
+已通过的检查只有在相关代码/字节变化、发现新失败或仍有明确证据缺口时才重跑。
+未执行的无关项目如实记录 NOT_EXERCISED，不自动阻塞发布。
+
+在线升级须验证无需注销或密码，登录会话、enabled/selected、UserData、输入菜单、
+Settings 和真实输入保留。
+PKG 不以旧 App 的签名、版本或 TIS 注册状态作为安装前提。旧 App 缺失 Contents
+时可补入新 Contents，失败则退回原来的空目录状态；App 根目录保持不变。Complete 可首次安装、
+覆盖重装或修复旧 App；Core 包仍需要现有 App 与兼容的语言运行时。新 App 的签名、
+目标字节、路径和现有数据兼容性在实际写入边界检查。输入源尚未启用时，安装完成后
+提示用户到系统设置添加；不要求预先完整卸载，也不把启用失败报告成安装失败。
+发布 Keychain 密码永远不属于用户安装流程。
 安装脚本也不得调用依赖用户系统信任根的深度验签来判断 App 是否损坏；用户侧只核对
 冻结的 designated requirement、发布 metadata、差分基线和精确目标整树。
 

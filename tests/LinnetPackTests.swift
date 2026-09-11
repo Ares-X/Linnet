@@ -83,7 +83,7 @@ struct LinnetPackTests {
           url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-5/update.linnetdelta")!)
         artifact.deltas = [delta]
         requireRegistryFailure(.invalidActiveState) {
-          _ = try registry.verifyAndStagePack(package: deltaFile, artifact: artifact, transfer: .requiresCompleteRepair)
+          _ = try registry.verifyAndStagePack(package: deltaFile, artifact: artifact, transfer: .current(base))
         }
         let corrupt = registry.downloadsDirectory.appending(path: "corrupt.linnetdelta")
         var corruptBytes = bytes
@@ -140,7 +140,9 @@ struct LinnetPackTests {
         secondPackage, payload: Data("second".utf8), sequence: 2)
 
       let first = try registry.verifyAndStagePack(package: firstPackage, artifact: try catalogArtifact(firstPackage), transfer: .complete)
-      let second = try registry.verifyAndStagePack(package: secondPackage, artifact: try catalogArtifact(secondPackage), transfer: .complete)
+      let artifact = try catalogArtifact(secondPackage)
+      let second = try registry.verifyAndStagePack(
+        package: secondPackage, artifact: artifact, transfer: artifact.transfer(from: first))
 
       require(first.version == second.version, "same public version")
       require(first.sequence < second.sequence, "forward sequence")
@@ -271,14 +273,12 @@ struct LinnetPackTests {
       let repeated = try registry.verifyAndStagePack(
         package: replacement, artifact: artifact, transfer: .complete, allowCompleteRepair: true)
       require(repeated == repaired, "repeated repair created a second copy")
-      var remaining = 100
       let pending = try registry.supersededPackCleanups(
         active: [first], rollback: [], pending: [LinnetDataRegistry.packPath(artifact)],
-        now: Date(), remaining: &remaining)
+        now: Date())
       require(pending.isEmpty, "cleanup removed a downloading repair")
-      remaining = 100
       let unused = try registry.supersededPackCleanups(
-        active: [first], rollback: [], pending: [], now: Date(), remaining: &remaining)
+        active: [first], rollback: [], pending: [], now: Date())
       require(unused.map(\.relativePath) == [repaired.relativePath], "cancelled repair was not collectable")
     }
   }

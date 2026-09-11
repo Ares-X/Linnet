@@ -1,5 +1,101 @@
 # Linnet product acceptance
 
+## Personal-data export and recovery
+
+In the installed Settings app, Export must save the suggested name as
+`Linnet-Data.linnet-data` with a single extension. Keep the suggested name and save, then import that file
+through the native Open panel. Verify the reviewed custom words, disabled words
+and text expansions after import and through real typing. Restore a recovery
+point created during the same test and verify its actual contents before
+returning to the saved starting state. Canceling a file panel or a replacement
+confirmation must leave the current personal data unchanged.
+
+On a Chinese macOS desktop, select English in Settings and verify that the
+language-pack version details and both installed/downloaded Core confirmation
+dialogs use English. Canceling the confirmation must leave the running Core
+unchanged. Switch back to the system language and verify the Chinese copy.
+
+## Continuous Chinese and English input (0.1.24 Preview)
+
+The Chinese ScriptTranslator consumes continuous raw keystrokes and retains whole
+English words from the existing English dictionary in the same sentence search.
+Natural Code `kwregion` must offer 跨region, and multiple English words must remain
+whole in 跨region的migration and 我们需要align一下这个gap的solution. All eight Chinese
+profiles share the dictionary and learned mixed boundaries.
+
+The mixed-input selector covers whole-word recall, correction enabled, exact
+consumption spans, Chinese partial selection, raw Return/Escape, editing, legacy
+acronym learning, cross-profile learning, and disabled learning. Ambiguous size,
+mode and save sentences remain selectable without changing the original Chinese
+first choice. CPU/DNS/HTTPS keep their established native readings. Ordinary
+Chinese spelling and vocabulary selectors remain required. Benchmark comparisons
+include prefixes, Chinese joins, candidate displacement and per-key latency.
+
+Installed acceptance uses the dedicated macOS VM and exact Action artifacts:
+real Natural Code/full-pinyin mixed sentences and Chinese composition, physical
+Shift-held uppercase across all profiles, existing application continuity, and
+the Settings Preview update from public 0.1.23 (105). Verify Core 0.1.24 (106)
+with the existing Chinese pack 37 / data-48 retained, and verify that Core's
+startup projection enables mixed input without a language-data update or a
+separate settings Apply. Verify an existing learned phrase after the update. Record native, loaded and installed-product evidence separately. Stable
+publication is outside this Preview request.
+
+## Chinese spelling correction and fuzzy pronunciation
+
+Default correction uses the current profile's Rime spelling index and the shipped
+language model. A complete reading of the entered code owns the first candidate.
+Natural double pinyin `hghk` must start with a `heng hao` candidate and offer
+很好 (en/eng pronunciation) before 更好 (neighboring key), both after the original,
+including after a correction was previously selected; ordinary
+`gghk`, `hfhk`, `hk` and `hg` keep their proper candidates and raw Return behavior.
+Full pinyin is checked independently with `nihap`, `shnaghai` and `henghao`.
+Neighboring-key correction permits one substitution per syllable; `mihap`
+still offers 你好 with separate errors in both syllables. Natural-code
+`uuuuuuuu` keeps 叔叔叔叔 first. Exact English words such as `banana` must
+retain their existing priority across all eight Chinese profiles even when
+Chinese correction candidates lie between the original reading and English.
+The focused `--chinese-spelling-probe` covers correction selection, subsequent
+input, all seven double-pinyin layouts, and twelve optional fuzzy pairs enabled
+individually, enabled together, and disabled in full-pinyin and natural-code
+indexes. English entity codes are not fuzzy
+pronunciations. Settings persistence and apply/rollback use the existing owner
+selectors documented in development.md.
+
+Installed acceptance must apply and undo a fuzzy pair, type the examples in an
+ordinary application, select a correction and continue typing. Native tests are
+TEST evidence; installation, loaded bytes and visible typing require separate
+RUNTIME_LOADED / PRODUCT evidence. Publication is outside this feature task.
+
+The Input page uses one vertical sequence. Chinese scheme, common options, learning strategy,
+reverse lookup and mode-switch help stay visible. Fuzzy pronunciation and
+Smart English use native disclosures. Fuzzy pronunciation sits directly
+below the scheme picker, shows selections while collapsed, and groups initials
+and finals in adaptive rows. Verify collapsed/expanded layouts at the default
+and minimum window widths, English/Chinese labels, selection retention across
+tab changes, Apply, and reopening the installed Settings app.
+
+## 0.1.20 Settings implementation simplification
+
+SettingsDataCoordinator owns one document-only apply path for both appearance
+and configuration. The existing ApplyScope selects Host refresh versus reload;
+revision checks, cancellation, rollback and submitted-draft effects are unchanged.
+SettingsOperationPhase is shared directly with presentation; the duplicate enum
+and renaming mapper are removed. Document and personal commits share CommitKind
+and CommitResult, while their typed tickets preserve edits made during an apply.
+Panel disclosure calls the existing rimeUpdate owner directly; its duplicate
+active-client guard and forwarding method are removed.
+
+Authority counts: phase definitions 2 -> 1; document-only apply implementations
+2 -> 1; commit-kind/result definitions 4 -> 2; candidate-refresh forwarding
+methods 1 -> 0. No new fallback, compatibility reader or runtime owner is added.
+The shared phase file replaces the mapping boundary rather than adding a layer.
+
+Focused selectors: `tests/verify_swift_units.sh --only presentation-status,settings-session,settings-data-coordinator`
+and `tests/verify_candidate_window_interaction.sh --behavior`. Installed acceptance
+must exercise appearance refresh, configuration Apply, retained drafts, candidate
+expansion, idle learning sync and the exact Action-built 0.1.20 update. Previous
+candidate evidence does not establish these new bytes as accepted.
+
 ## 2026-09-02 Complete transport input-source identity (candidate)
 
 Exact rejected installed candidate: version `0.1.11`, build `77`, source
@@ -133,7 +229,10 @@ learning merge as input-runtime maintenance; moving only the join off-thread
 would leave input unavailable. This repair replaces that runtime path, not the
 Rime merge rule or the hourly schedule. Cloud I/O must stay off the input thread,
 active database work must yield in bounded slices, and reversible learning must
-not be committed or aborted by synchronization. Live sessions and the input gate
+not be committed or aborted by synchronization within its three-second undo
+window. After that window, an idle committed word must sync without another
+keypress; `tests/verify_rime_runtime.sh --live-sync-probe` exercises both recent
+undo and idle export through real Rime input. Live sessions and the input gate
 must remain unchanged throughout success, failure, cancellation and offline retry.
 
 Scope: the existing pinned librime interaction patch and its digest, the Host's
@@ -299,6 +398,11 @@ mechanism feasibility, not product-format, cross-macOS, install or backup
 acceptance. No new dependency or resident updater was installed.
 
 ### Differential delivery design freeze — 2026-08-31
+
+Historical record: the language-pack confirmation requirement below was removed
+on 2026-09-08. Normal language updates now use complete packs when no matching
+delta is available or a delta fails; manual repair starts directly. Current
+installed data remains active until the replacement is verified and ready.
 
 User decisions confirmed on 2026-08-31, source `c53df52`: in Chinese schemas,
 same-span Chinese candidates precede English spelling corrections; exact English
@@ -695,16 +799,14 @@ direct Core-upgrade source. Public 0.1.7 and older ad-hoc Apps must use Complete
 which verifies the legacy identity and repairs the App while preserving personal
 data and existing TIS state. The package lifecycle matrix proves both that Core
 rejects this edge before mutation and that Complete retains it as a repair path.
-Every exact candidate requires `两轮同 leaf Core 升级` on its immutable bytes.
-Each round upgrades the previous accepted fixed-CMS build (the previous public
-build after the first publication) to the same candidate. Before round two,
-recreate the lower-version baseline through the normal uninstall/install flow;
-record baseline logout and data restoration separately from the online upgrade.
-Online Core accepts only newer versions. Same-version App repair belongs to
-Complete and cannot substitute for Core upgrade acceptance.
-Both upgrades must prove no Installer, password prompt or logout, the
-same login session, retained enabled/selected intent and UserData, and working
-input menu, Settings and real input.
+Choose release acceptance by the changed behavior and boundaries, following
+[release policy](release.md#安装验收). One successful ordered Core upgrade of the
+exact candidate bytes is the normal update evidence; do not recreate a lower
+baseline simply to repeat it. Same-version Complete repair remains a distinct
+path. Repeat lifecycle or failure scenarios only when the affected implementation
+or a concrete unresolved failure requires them. Reuse valid current-byte evidence
+from the development Mac or dedicated VM; keep unrun unrelated rows
+NOT_EXERCISED without making them automatic publication blockers.
 
 ## Evidence levels
 

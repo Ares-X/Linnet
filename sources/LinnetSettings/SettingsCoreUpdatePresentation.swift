@@ -155,23 +155,49 @@ extension DataTabView {
     }
   }
 
+  func confirmCoreActivation() {
+    presentCoreActivationConfirmation(
+      title: String(localized: LocalizedStringResource(
+        "Apply the installed Core now?", locale: locale)),
+      detail: String(localized: LocalizedStringResource(
+        "Your apps stay open. Settings closes after the new Core is verified.", locale: locale))
+    ) {
+      updateChecker.activateInstalledCore()
+    }
+  }
+
   func confirmDownloadedCoreActivation() {
+    presentCoreActivationConfirmation(
+      title: String(localized: LocalizedStringResource(
+        "Apply the downloaded Core update now?", locale: locale)),
+      detail: String(localized: LocalizedStringResource(
+        "Your apps stay open. No Installer, password, logout, or restart is required.", locale: locale))
+    ) {
+      updateChecker.applyDownloadedCoreUpdate()
+    }
+  }
+
+  private func presentCoreActivationConfirmation(
+    title: String,
+    detail: String,
+    activate: @escaping () -> Void
+  ) {
     guard !model.pendingChanges, !model.operationActive else { return }
     let alert = NSAlert()
     alert.alertStyle = .warning
-    alert.messageText = String(localized: "Apply the downloaded Core update now?")
-    alert.informativeText = String(localized:
-      "First use the macOS input menu to select another input source.")
-      + " "
-      + String(localized:
-        "Your apps stay open. No Installer, password, logout, or restart is required.")
-    let apply = alert.addButton(withTitle: String(localized: "Apply Now"))
+    alert.messageText = title
+    alert.informativeText = String(localized: LocalizedStringResource(
+      "First use the macOS input menu to select another input source.", locale: locale))
+      + " " + detail
+    let apply = alert.addButton(withTitle: String(localized: LocalizedStringResource(
+      "Apply Now", locale: locale)))
     apply.keyEquivalent = "\r"
-    let cancel = alert.addButton(withTitle: String(localized: "Cancel"))
+    let cancel = alert.addButton(withTitle: String(localized: LocalizedStringResource(
+      "Cancel", locale: locale)))
     cancel.keyEquivalent = "\u{1b}"
     let completion: (NSApplication.ModalResponse) -> Void = { response in
       guard response == .alertFirstButtonReturn else { return }
-      updateChecker.applyDownloadedCoreUpdate()
+      activate()
     }
     if let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible) {
       alert.beginSheetModal(for: window, completionHandler: completion)

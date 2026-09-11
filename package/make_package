@@ -25,7 +25,6 @@ complete_app_staging_location="${complete_staging_location}/App"
 complete_transport_name="Linnet.payload"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
 release_tool="${LINNET_RELEASE_TOOL:-}"
-registration_inspector="${project_root}/build/input-source-registration-inspector"
 runtime_inspector="${project_root}/build/linnet-runtime-inspector"
 unset LINNET_RELEASE_TOOL
 
@@ -62,11 +61,6 @@ build="$(plutil -extract CFBundleVersion raw -o - "${info_path}")"
 [[ "${release_tool}" == /* && -f "${release_tool}" && ! -L "${release_tool}" &&
    -x "${release_tool}" ]] ||
   fail_package "LINNET_RELEASE_TOOL must name the canonical precompiled pack CLI"
-[[ -f "${registration_inspector}" && ! -L "${registration_inspector}" &&
-   -x "${registration_inspector}" ]] ||
-  fail_package "input-source registration inspector is unavailable"
-[[ "$(lipo -archs "${registration_inspector}")" == arm64 ]] ||
-  fail_package "input-source registration inspector is not thin arm64"
 [[ -f "${runtime_inspector}" && ! -L "${runtime_inspector}" &&
    -x "${runtime_inspector}" ]] ||
   fail_package "installed-runtime inspector is unavailable"
@@ -149,8 +143,6 @@ prepare_core_scripts() {
   cp -X "${project_root}/package/installer-scripts/candidate-app-identity.sh" \
     "${destination}/candidate-app-identity.sh"
   cp -X "${candidate_app_identity}" "${destination}/candidate-app-identity.json"
-  cp -X "${registration_inspector}" \
-    "${destination}/input-source-registration-inspector"
   cp -X "${runtime_inspector}" "${destination}/linnet-runtime-inspector"
   cp -X "${pack_tool}" "${destination}/linnet-pack"
   if [[ "${install_mode}" == core-update ]]; then
@@ -162,7 +154,6 @@ prepare_core_scripts() {
   printf '%s\n' "${version}" >"${destination}/candidate-core-version"
   printf '%s\n' "${install_mode}" >"${destination}/install-mode"
   chmod 755 "${destination}/preinstall" "${destination}/candidate-app-identity.sh" \
-    "${destination}/input-source-registration-inspector" \
     "${destination}/linnet-runtime-inspector" "${destination}/linnet-pack"
   chmod 644 "${destination}/candidate-app-identity.json" \
     "${destination}/candidate-core-version" "${destination}/install-mode"
@@ -257,8 +248,6 @@ cp -X "${candidate_app_identity}" \
   "${complete_profile_scripts}/candidate-app-identity.json"
 cp -X "${runtime_inspector}" \
   "${complete_profile_scripts}/linnet-runtime-inspector"
-cp -X "${registration_inspector}" \
-  "${complete_profile_scripts}/input-source-registration-inspector"
 cp -X "${pack_tool}" "${complete_profile_scripts}/linnet-pack"
 printf '%s\n' "${version}" >"${complete_profile_scripts}/candidate-core-version"
 printf 'complete\n' >"${complete_profile_scripts}/install-mode"
@@ -266,7 +255,6 @@ chmod 755 "${complete_profile_scripts}/postinstall" \
   "${complete_profile_scripts}/lifecycle-postinstall" \
   "${complete_profile_scripts}/candidate-app-identity.sh" \
   "${complete_profile_scripts}/linnet-runtime-inspector" \
-  "${complete_profile_scripts}/input-source-registration-inspector" \
   "${complete_profile_scripts}/linnet-pack"
 chmod 644 "${complete_profile_scripts}/candidate-app-identity.json" \
   "${complete_profile_scripts}/candidate-core-version" \

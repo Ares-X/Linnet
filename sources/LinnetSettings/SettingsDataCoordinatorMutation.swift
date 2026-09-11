@@ -49,10 +49,10 @@ extension SettingsDataCoordinator {
       }
       try requireWritableDestination(destination)
       return .export(categories, destination: destination)
-    case .exportCloudRecovery(let categories, let cloudFolder, let repair):
+    case .exportCloudRecovery(let categories, let cloudFolder):
       guard !categories.isEmpty else { throw Failure.invalidOperation("no export category") }
       try requireDirectory(cloudFolder)
-      return .cloudRecovery(categories, cloudFolder: cloudFolder, repair: repair)
+      return .cloudRecovery(categories, cloudFolder: cloudFolder)
     case .importPortable(let candidate, let revision):
       guard !revision.isEmpty else { throw Failure.invalidOperation("empty revision") }
       return .portable(candidate.archive, baseRevision: revision)
@@ -88,7 +88,7 @@ extension SettingsDataCoordinator {
     destination: URL,
     environment: Environment,
     personalEffect: PersonalEffect,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws -> Outcome {
     let transactionID = UUID()
     let scratch = fileManager.temporaryDirectory.appending(
@@ -198,10 +198,9 @@ extension SettingsDataCoordinator {
   func exportCloudRecovery(
     categories: Set<LinnetBackupStore.Category>,
     cloudFolder: URL,
-    repair: Bool,
     environment: Environment,
     personalEffect: PersonalEffect,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws -> Outcome {
     let scratch = fileManager.temporaryDirectory.appending(
       path: "CloudRecoveryExport-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -216,7 +215,7 @@ extension SettingsDataCoordinator {
       personalEffect: personalEffect,
       progress: progress)
     let recovery = try LinnetCloudRecoveryArchive.publish(
-      portable: Data(contentsOf: portable), in: cloudFolder, repair: repair)
+      portable: Data(contentsOf: portable), in: cloudFolder)
     return .init(
       backupDirectory: snapshot.backupDirectory,
       personalSnapshot: snapshot.personalSnapshot,
@@ -465,7 +464,7 @@ extension SettingsDataCoordinator {
     paused: Bool,
     environment: Environment,
     context: MutationContext,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws -> Never {
     var backupCleanupError: Error?
     if !backupCommitted,
@@ -504,7 +503,7 @@ extension SettingsDataCoordinator {
     _ operation: PreparedOperation,
     environment: Environment,
     personalEffect: PersonalEffect,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws -> Outcome {
     let transactionID = UUID()
     let deadline = Date().addingTimeInterval(Self.transactionRequestTimeout)
@@ -690,7 +689,7 @@ extension SettingsDataCoordinator {
     _ record: LinnetBackupStore.BackupRecord,
     environment: Environment,
     personalEffect: PersonalEffect,
-    progress: @escaping @Sendable (Phase) -> Void
+    progress: @escaping @Sendable (SettingsOperationPhase) -> Void
   ) async throws -> Outcome {
     guard let transactionID = record.transactionID else {
       throw Failure.invalidOperation("backup transaction identity")

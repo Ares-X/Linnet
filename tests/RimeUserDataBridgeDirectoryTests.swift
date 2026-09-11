@@ -34,14 +34,12 @@ struct RimeUserDataBridgeDirectoryTests {
 
     let overflow = root.appending(path: "overflow", directoryHint: .isDirectory)
     try makeDirectory(overflow)
-    for index in 0...LinnetBackupStore.maximumLiveDirectoryEntries {
+    for index in 0...512 {
       FileManager.default.createFile(
         atPath: overflow.appending(path: "entry-\(index)").path,
         contents: Data())
     }
-    expectFailure {
-      _ = try bridge.prepareLegacyDirectory(overflow, shared: root, product: product)
-    }
+    _ = try bridge.prepareLegacyDirectory(overflow, shared: root, product: product)
 
     let linked = root.appending(path: "linked", directoryHint: .isDirectory)
     try makeDirectory(linked)

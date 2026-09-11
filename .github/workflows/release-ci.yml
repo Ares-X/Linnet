@@ -1,6 +1,12 @@
 name: Linnet release
 
 on:
+  workflow_dispatch:
+    inputs:
+      authorization_tag:
+        description: Existing Linnet publication authorization tag
+        required: true
+        type: string
   push:
     tags:
       - 'linnet-candidate/v*-*'
@@ -67,20 +73,8 @@ jobs:
           test "$(git rev-parse --verify HEAD^{commit})" = \
             "${CANDIDATE_REVISION}"
 
-          tag="${CANDIDATE_REF#refs/tags/}"
-          tag_record="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
-            --jq '[.object.type, .object.sha] | @tsv')"
-          if [[ "${request_mode}" == candidate ]]; then
-            test "${tag_record}" = $'tag\t'"$(git rev-parse --verify "${CANDIDATE_REF}")"
-            scripts/release-control verify-source \
-              "${CANDIDATE_REF}" "${CANDIDATE_REVISION}" >/dev/null
-            remote_main="$(gh api \
-              "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-            test "${remote_main}" = "${CANDIDATE_REVISION}"
-          else
-            test "${tag_record}" = $'commit\t'"${CANDIDATE_REVISION}"
-          fi
+          test "$(git rev-parse --verify "${CANDIDATE_REF}^{commit}")" = \
+            "${CANDIDATE_REVISION}"
 
           product_version="$(sed -n \
             's/^MARKETING_VERSION = \([^[:space:]]*\)$/\1/p' \
@@ -294,12 +288,13 @@ jobs:
 
   publish:
     if: >-
-      github.event_name == 'push' &&
-      github.event.created == true &&
-      github.event.deleted == false &&
       github.repository == 'Ares-X/Linnet' &&
-      (startsWith(github.ref, 'refs/tags/linnet-preview/') ||
-       startsWith(github.ref, 'refs/tags/linnet-publication/'))
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' &&
+        github.event.created == true &&
+        github.event.deleted == false &&
+        (startsWith(github.ref, 'refs/tags/linnet-preview/') ||
+         startsWith(github.ref, 'refs/tags/linnet-publication/'))))
     concurrency:
       group: linnet-release-publication
       cancel-in-progress: false
@@ -310,7 +305,7 @@ jobs:
       - name: Checkout the authorized publisher source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.authorization_tag || github.sha }}
           fetch-depth: 0
           persist-credentials: false
           submodules: false
@@ -318,15 +313,14 @@ jobs:
       - name: Verify authorization and publish staged Releases
         env:
           GH_TOKEN: ${{ github.token }}
-          AUTHORIZATION_TAG: ${{ github.ref_name }}
-          CANDIDATE_REVISION: ${{ github.sha }}
+          AUTHORIZATION_TAG: ${{ inputs.authorization_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          test "${GITHUB_EVENT_NAME}" = push
+          [[ "${GITHUB_EVENT_NAME}" == push ||
+             "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]
           test "${GITHUB_REPOSITORY}" = Ares-X/Linnet
           test -z "$(git status --porcelain)"
-          test "$(git rev-parse --verify HEAD^{commit})" = \
-            "${CANDIDATE_REVISION}"
+          CANDIDATE_REVISION="$(git rev-parse --verify HEAD^{commit})"
 
           preview_pattern='^linnet-preview/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h[0-9a-f]{64}$'
           publication_pattern='^linnet-publication/v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{40})-h[0-9a-f]{64}$'
@@ -352,7 +346,7 @@ jobs:
           if [[ "${publication_mode}" == publish ]]; then
             scripts/release-control verify-source \
               "refs/tags/linnet-candidate/v${version}-${CANDIDATE_REVISION}" \
-              "${CANDIDATE_REVISION}" --release >/dev/null
+              "${CANDIDATE_REVISION}" >/dev/null
           fi
           package/publish_github_release "${publication_mode}" "${version}" \
             "${catalog_sequence}" "${CANDIDATE_REVISION}" \

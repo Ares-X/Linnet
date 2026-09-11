@@ -56,9 +56,6 @@ jobs:
       - name: Build the unsigned product
         run: make --no-print-directory release
 
-      - name: Check unused production code
-        run: scripts/run_periphery.sh
-
       - name: Stage shared Windows inputs
         run: scripts/stage-windows-build-inputs
 
@@ -72,8 +69,7 @@ jobs:
             data/plum
             data/opencc
             build/windows-inputs/linnet_embedded_lua.h
-            build/windows-inputs/linnet_windows_defaults.yaml
-            build/windows-inputs/linnet_grammar_active.yaml
+            build/windows-inputs/policies
             build/windows-inputs/weasel.yaml
             build/windows-inputs/preview
 

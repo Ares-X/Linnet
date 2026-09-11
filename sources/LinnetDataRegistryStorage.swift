@@ -177,9 +177,9 @@ extension LinnetDataRegistry {
     expectedEntries: Set<String>,
     expectedDirectories: Set<String>
   ) throws {
-    var remaining = Self.maximumActiveProjectionEntries
-    guard let entries = try boundedOwnedDirectoryEntries(
-      at: active, recursively: true, remaining: &remaining)
+
+    guard let entries = try ownedDirectoryEntries(
+      at: active, recursively: true)
     else { throw Failure.invalidActiveState }
     var actualEntries = Set<String>()
     var actualDirectories = Set<String>()
@@ -254,9 +254,8 @@ extension LinnetDataRegistry {
       }
     }
 
-    var remaining = Self.maximumInstalledPackEntries
-    guard let entries = try boundedOwnedDirectoryEntries(
-      at: directory, recursively: true, remaining: &remaining)
+    guard let entries = try ownedDirectoryEntries(
+      at: directory, recursively: true)
     else { throw Failure.invalidActiveState }
     var actualFiles = Set<String>()
     var actualDirectories = Set<String>()
@@ -470,9 +469,9 @@ extension LinnetDataRegistry {
     if let suppliedEntries {
       entries = suppliedEntries
     } else {
-      var remaining = Self.maximumInstalledPackEntries
-      guard let discovered = try boundedOwnedDirectoryEntries(
-        at: directory, recursively: true, remaining: &remaining)
+
+      guard let discovered = try ownedDirectoryEntries(
+        at: directory, recursively: true)
       else { return }
       entries = discovered
     }
@@ -758,13 +757,12 @@ extension LinnetDataRegistry {
   }
 
   func preflightCleanupTrees(
-    _ directories: [URL],
-    remaining traversalBudget: inout Int
+    _ directories: [URL]
   ) throws -> [String: [URL]] {
     var result: [String: [URL]] = [:]
     for directory in directories {
-      if let tree = try boundedOwnedDirectoryEntries(
-        at: directory, recursively: true, remaining: &traversalBudget) {
+      if let tree = try ownedDirectoryEntries(
+        at: directory, recursively: true) {
         result[directory.standardizedFileURL.path] = tree
       }
     }

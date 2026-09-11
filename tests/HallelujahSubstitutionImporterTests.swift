@@ -14,7 +14,7 @@ struct HallelujahSubstitutionImporterTests {
       try testSchemaAndDestinationFailClosed()
       try testPreparedSnapshotDoesNotReopenSource()
       try testSQLiteInterruptionClassification()
-      try testBoundedPreflightAndMergeCancellation()
+      try testLargeImportAndMergeCancellation()
       print("HallelujahSubstitutionImporterTests: PASS")
     } catch {
       fail("unexpected error: \(error)")
@@ -227,78 +227,17 @@ struct HallelujahSubstitutionImporterTests {
     }
   }
 
-  private static func testBoundedPreflightAndMergeCancellation() throws {
+  private static func testLargeImportAndMergeCancellation() throws {
     try inTemporaryDirectory { directory in
       let sentinel = Data("existing\tx;existing\n".utf8)
 
-      let oversizedDatabase = directory.appendingPathComponent("oversized.sqlite3")
-      try makeDatabase(oversizedDatabase, rows: [("one", "1")])
-      let databaseHandle = try FileHandle(forWritingTo: oversizedDatabase)
-      try databaseHandle.truncate(
-        atOffset: UInt64(HallelujahSubstitutionImporter.maximumSourceDatabaseBytes + 1))
-      try databaseHandle.close()
-      expectFailure(.sourceTooLarge("oversized.sqlite3")) {
-        _ = try HallelujahSubstitutionImporter.prepare(
-          sourceDatabase: oversizedDatabase, timeout: 10)
-      }
-
-      let sidecarDatabase = directory.appendingPathComponent("sidecar.sqlite3")
-      try makeDatabase(sidecarDatabase, rows: [("one", "1")])
-      let sidecar = URL(fileURLWithPath: sidecarDatabase.path + "-wal")
-      FileManager.default.createFile(atPath: sidecar.path, contents: nil)
-      let sidecarHandle = try FileHandle(forWritingTo: sidecar)
-      try sidecarHandle.truncate(
-        atOffset: UInt64(HallelujahSubstitutionImporter.maximumSourceSidecarBytes + 1))
-      try sidecarHandle.close()
-      expectFailure(.sourceTooLarge("sidecar.sqlite3-wal")) {
-        _ = try HallelujahSubstitutionImporter.prepare(
-          sourceDatabase: sidecarDatabase, timeout: 10)
-      }
-
-      let aggregateDatabase = directory.appendingPathComponent("sidecar-aggregate.sqlite3")
-      try makeDatabase(aggregateDatabase, rows: [("one", "1")])
-      for suffix in ["-wal", "-shm"] {
-        let url = URL(fileURLWithPath: aggregateDatabase.path + suffix)
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: url)
-        try handle.truncate(
-          atOffset: UInt64(HallelujahSubstitutionImporter.maximumSourceSidecarBytes)
-        )
-        try handle.close()
-      }
-      expectFailure(.sourceTooLarge("SQLite source aggregate")) {
-        _ = try HallelujahSubstitutionImporter.prepare(
-          sourceDatabase: aggregateDatabase, timeout: 10)
-      }
-
-      let oversizedField = directory.appendingPathComponent("field.sqlite3")
-      try makeDatabase(
-        oversizedField,
-        rows: [(String(repeating: "a", count: HallelujahSubstitutionImporter.maximumFieldBytes + 1), "v")])
-      expectFailure(.fieldTooLarge(row: 1)) {
-        _ = try HallelujahSubstitutionImporter.prepare(
-          sourceDatabase: oversizedField, timeout: 10)
-      }
-
-      let tooManyRows = directory.appendingPathComponent("rows.sqlite3")
-      try makeDatabase(
-        tooManyRows,
-        rows: (0...HallelujahSubstitutionImporter.maximumRows).map { ("k\($0)", "v") })
-      expectFailure(.tooManyRows) {
-        _ = try HallelujahSubstitutionImporter.prepare(
-          sourceDatabase: tooManyRows, timeout: 10)
-      }
-
-      let aggregate = directory.appendingPathComponent("aggregate.sqlite3")
-      let aggregateValue = String(
-        repeating: "v", count: HallelujahSubstitutionImporter.maximumFieldBytes)
-      try makeDatabase(
-        aggregate,
-        rows: (0..<300).map { ("aggregate\($0)", aggregateValue) })
-      expectFailure(.canonicalTooLarge) {
-        _ = try HallelujahSubstitutionImporter.prepare(
-          sourceDatabase: aggregate, timeout: 10)
-      }
+      let largeSource = directory.appendingPathComponent("large.sqlite3")
+      let largeValue = String(repeating: "v", count: 128 * 1024)
+      try makeDatabase(largeSource, rows: [("large", largeValue)])
+      let largeDestination = directory.appendingPathComponent("large.txt")
+      _ = try importSource(sourceDatabase: largeSource, destinationTable: largeDestination)
+      expect(try String(contentsOf: largeDestination, encoding: .utf8).contains(largeValue),
+        "valid imported text still hits the old field quota")
 
       let valid = directory.appendingPathComponent("valid-bounded.sqlite3")
       try makeDatabase(valid, rows: (0..<20).map { ("valid\($0)", "value\($0)") })
@@ -336,50 +275,6 @@ struct HallelujahSubstitutionImporterTests {
           prepared, destinationTable: unchanged, timeout: 0)
       }
       expect(try Data(contentsOf: unchanged) == sentinel, "timed-out merge changed destination")
-
-      let oversizedExisting = directory.appendingPathComponent("existing-too-large.txt")
-      FileManager.default.createFile(atPath: oversizedExisting.path, contents: nil)
-      let existingHandle = try FileHandle(forWritingTo: oversizedExisting)
-      try existingHandle.truncate(
-        atOffset: UInt64(HallelujahSubstitutionImporter.maximumExistingBytes + 1))
-      try existingHandle.close()
-      expectFailure(.existingTooLarge) {
-        _ = try HallelujahSubstitutionImporter.merge(
-          prepared, destinationTable: oversizedExisting, timeout: 10)
-      }
-
-      let newlineFlood = directory.appendingPathComponent("existing-newline-flood.txt")
-      let newlineFloodBytes = Data(
-        String(repeating: "\n", count: HallelujahSubstitutionImporter.maximumRows + 129).utf8)
-      try newlineFloodBytes.write(to: newlineFlood)
-      expectFailure(.tooManyRows) {
-        _ = try HallelujahSubstitutionImporter.merge(
-          prepared, destinationTable: newlineFlood, timeout: 10)
-      }
-      expect(
-        try Data(contentsOf: newlineFlood) == newlineFloodBytes,
-        "existing row flood changed destination")
-
-      let outputSource = directory.appendingPathComponent("output.sqlite3")
-      let outputValue = String(repeating: "o", count: 65_000)
-      try makeDatabase(
-        outputSource,
-        rows: (0..<200).map { ("source\($0)", outputValue) })
-      let outputPrepared = try HallelujahSubstitutionImporter.prepare(
-        sourceDatabase: outputSource, timeout: 10)
-      let outputDestination = directory.appendingPathComponent("output.txt")
-      let existingOutput = (0..<200).map {
-        "\(outputValue)\tx;existing\($0)\n"
-      }.joined()
-      try Data(existingOutput.utf8).write(to: outputDestination)
-      let outputBefore = try Data(contentsOf: outputDestination)
-      expectFailure(.outputTooLarge) {
-        _ = try HallelujahSubstitutionImporter.merge(
-          outputPrepared, destinationTable: outputDestination, timeout: 10)
-      }
-      expect(
-        try Data(contentsOf: outputDestination) == outputBefore,
-        "output overflow changed destination")
 
       let writeFailureDirectory = directory.appendingPathComponent(
         "write-failure", isDirectory: true)

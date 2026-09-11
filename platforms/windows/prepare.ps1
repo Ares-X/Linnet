@@ -359,15 +359,9 @@ $OutputData = Join-Path $Projection "output\data"
 Copy-DataTree (Join-Path $DataRoot "plum") $OutputData
 Copy-DataTree (Join-Path $DataRoot "opencc") (Join-Path $OutputData "opencc")
 Copy-Item -LiteralPath $WeaselConfig -Destination (Join-Path $OutputData "weasel.yaml")
-foreach ($Policy in @("linnet_windows_defaults.yaml", "linnet_grammar_active.yaml")) {
-  Copy-Item -LiteralPath (Join-Path $InputPolicyRoot $Policy) -Destination $OutputData
-}
+Copy-Item -Path (Join-Path $InputPolicyRoot "*.yaml") -Destination $OutputData
 # The compact grammar is only a developer fixture, not a product model.
 Remove-Item -LiteralPath (Join-Path $OutputData "zh-hans-t-essay-bgw.gram")
-# Rime applies the shared Core defaults before the user's default.custom.yaml.
-# The Swift renderer owns these policies; this boundary only adds its include.
-Add-Content -LiteralPath (Join-Path $OutputData "default.yaml") -Encoding UTF8 `
-  -Value "`n__patch: linnet_windows_defaults:/patch"
 Copy-DataTree $ThemePreviewRoot (Join-Path $OutputData "preview")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE.txt") `
   -Destination (Join-Path $Projection "output\LICENSE.txt")

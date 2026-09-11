@@ -23,7 +23,6 @@ enum LinnetSettingsProjectionRenderer {
   static let emojiSwitchIndex = 3
   static let singleCharacterSearchSwitchIndex = 4
   static let englishPredictionSwitchIndex = 1
-  private static let maximumProjectionBytes = 1024 * 1024
   private static let codeTokenRecognizerPattern =
     "^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$"
 
@@ -45,13 +44,14 @@ enum LinnetSettingsProjectionRenderer {
       pageSize: document.appearance.pageSize,
       chineseProfile: document.input.chineseProfile
     )
-    for schemaID in LinnetSettingsContract.ChineseProfile.allCases.map(\.schemaID) {
+    for profile in LinnetSettingsContract.ChineseProfile.allCases {
       if let schemaCustom = renderChineseSchemaCustom(
+        profile: profile,
         appearance: document.appearance,
         input: document.input,
         english: document.english
       ) {
-        projections["\(schemaID).custom.yaml"] = schemaCustom
+        projections["\(profile.schemaID).custom.yaml"] = schemaCustom
       }
     }
     if let englishCustom = renderEnglishSchemaCustom(
@@ -79,7 +79,6 @@ enum LinnetSettingsProjectionRenderer {
       let url = directory.appending(path: name)
       if let contents = rendered[name] {
         let data = Data(contents.utf8)
-        guard data.count <= maximumProjectionBytes else { throw Failure.unsafeFile(name) }
         if try existingData(at: url, name: name) == data { continue }
         try contents.write(to: url, atomically: true, encoding: .utf8)
         changed.insert(name)
@@ -147,8 +146,7 @@ private extension LinnetSettingsProjectionRenderer {
     guard fstat(descriptor, &info) == 0,
       (info.st_mode & S_IFMT) == S_IFREG,
       info.st_uid == getuid(),
-      info.st_size >= 0,
-      info.st_size <= maximumProjectionBytes
+      info.st_size >= 0
     else { throw Failure.unsafeFile(name) }
     let data = try handle.readToEnd() ?? Data()
     guard data.count == Int(info.st_size) else { throw Failure.unsafeFile(name) }
@@ -256,11 +254,17 @@ private extension LinnetSettingsProjectionRenderer {
   }
 
   private static func renderChineseSchemaCustom(
+    profile: LinnetSettingsContract.ChineseProfile,
     appearance: LinnetSettingsDocument.Appearance,
     input: LinnetSettingsDocument.Input,
     english: LinnetSettingsDocument.English
   ) -> String? {
-    var entries: [(String, String)] = []
+    // Core updates keep the installed language packs, so Core owns this policy.
+    var entries: [(String, String)] = [
+      ("translator/sentence_dictionary", quoted("linnet_english_words")),
+      ("translator/sentence_dictionary_weight", "-6.1421625395563515")
+    ]
+    appendSpellingAlgebra(input.fuzzyPinyin, profile: profile, to: &entries)
     appendCandidateLayout(
       appearance.chineseCandidateLayout,
       defaultLayout: .horizontal,
@@ -284,6 +288,60 @@ private extension LinnetSettingsProjectionRenderer {
     appendEnglishLearningOptions(english, includeUserDictionary: false, to: &entries)
     guard !entries.isEmpty else { return nil }
     return renderPatch(entries)
+  }
+
+  /// Prepend phonetic rules before tone normalization and double-pinyin coding.
+  /// Rime's fuzzy spelling property keeps the original pronunciation available.
+  private static func appendSpellingAlgebra(
+    _ selected: [LinnetSettingsDocument.FuzzyPinyinPair],
+    profile: LinnetSettingsContract.ChineseProfile,
+    to entries: inout [(String, String)]
+  ) {
+    // Soft nasal-final corrections remain lower-weight alternatives. Explicit
+    // fuzzy choices use Rime's stronger fuzzy-spelling relation instead.
+    let nasalPairs: [LinnetSettingsDocument.FuzzyPinyinPair] = [
+      .anAng, .enEng, .inIng, .ianIang, .uanUang
+    ]
+    let corrections = nasalPairs.filter { !selected.contains($0) }
+      .flatMap(fuzzyPinyinRules).map { rule in
+        "derive/" + rule.dropFirst("fuzz/".count) + "correction"
+      }
+    let rules = corrections + LinnetSettingsDocument.FuzzyPinyinPair.allCases
+      .filter(selected.contains).flatMap(fuzzyPinyinRules)
+    entries.append(("translator/enable_correction", "true"))
+    let algebra: String
+    switch profile {
+    case .natural: algebra = "ziranma"
+    case .microsoft: algebra = "mspy"
+    default: algebra = profile.rawValue
+    }
+    let insertions = rules.reversed().map { "      - \"@before 0\": '\($0)'" }
+    entries.append(("speller/algebra", "\n    __include: linnet_algebra.yaml:/\(algebra)\n"
+      + "    __patch:\n" + insertions.joined(separator: "\n")))
+  }
+
+  private static func fuzzyPinyinRules(_ pair: LinnetSettingsDocument.FuzzyPinyinPair) -> [String] {
+    switch pair {
+    case .zZh: ["fuzz/^zh/z/", "fuzz/^z(?!h)/zh/"]
+    case .cCh: ["fuzz/^ch/c/", "fuzz/^c(?!h)/ch/"]
+    case .sSh: ["fuzz/^sh/s/", "fuzz/^s(?!h)/sh/"]
+    case .nL: ["fuzz/^n/l/", "fuzz/^l/n/"]
+    case .fH: ["fuzz/^f/h/", "fuzz/^h/f/"]
+    case .rL: ["fuzz/^r/l/", "fuzz/^l/r/"]
+    case .gK: ["fuzz/^g/k/", "fuzz/^k/g/"]
+    // Wanxiang's source spellings carry vowel tone marks. Match those literal
+    // UTF-8 alternatives before the existing algebra converts them to digits.
+    case .anAng:
+      ["fuzz/(?<![iu])(a|ā|á|ǎ|à)n$/$1ng/", "fuzz/(?<![iu])(a|ā|á|ǎ|à)ng$/$1n/"]
+    case .enEng:
+      ["fuzz/(e|ē|é|ě|è)n$/$1ng/", "fuzz/(e|ē|é|ě|è)ng$/$1n/"]
+    case .inIng:
+      ["fuzz/(i|ī|í|ǐ|ì)n$/$1ng/", "fuzz/(i|ī|í|ǐ|ì)ng$/$1n/"]
+    case .ianIang:
+      ["fuzz/i(a|ā|á|ǎ|à)n$/i$1ng/", "fuzz/i(a|ā|á|ǎ|à)ng$/i$1n/"]
+    case .uanUang:
+      ["fuzz/u(a|ā|á|ǎ|à)n$/u$1ng/", "fuzz/u(a|ā|á|ǎ|à)ng$/u$1n/"]
+    }
   }
 
   /// The document enum is the single user-facing owner of this pair. Rime's

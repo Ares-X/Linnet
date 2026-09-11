@@ -18,7 +18,8 @@ Weasel's nested librime, plum recipes, default schemas, updater and optional
 schema downloader are not product authorities. Windows consumes the exact
 `data/plum` and `data/opencc` projection made by `scripts/stage-linnet-data` on
 macOS CI. Shared input defaults are exported by the existing Settings projection
-renderer at build time and included through Rime's native `__patch` mechanism,
+renderer for all eight Chinese profiles, English and global defaults at build
+time and included through Rime's native `__patch` mechanism,
 before user customization. The grammar selection is exported from the shared
 data registry too: Windows uses the shipped Wanxiang LTS model, not the compact
 developer fixture. Windows does not duplicate those policies or ship a
@@ -59,7 +60,8 @@ package-mutating schema downloader is removed completely because root Linnet
 data is package-owned. The SwiftUI/AppKit
 Linnet Settings application is not shipped on Windows. Input defaults still
 come from the shared schemas and projection renderer, rather than a second
-Windows settings model. This includes current mixed Chinese/English input,
+Windows settings model. This includes continuous mixed Chinese/English input,
+schema-aware Chinese spelling correction and conservative nasal-final correction,
 uppercase intent, code-shaped raw input and the reviewed English and Chinese
 supplemental dictionaries.
 
@@ -84,7 +86,7 @@ git -C librime submodule update --init --recursive --depth 1
 platforms/windows/prepare.ps1 `
   -DataRoot C:\path\to\shared-data `
   -EmbeddedLuaHeader C:\path\to\linnet_embedded_lua.h `
-  -InputPolicyRoot C:\path\to\windows-inputs `
+  -InputPolicyRoot C:\path\to\windows-inputs\policies `
   -WeaselConfig C:\path\to\weasel.yaml `
   -ThemePreviewRoot C:\path\to\preview
 platforms/windows/build.ps1 -BoostRoot C:\path\to\boost_1_89_0

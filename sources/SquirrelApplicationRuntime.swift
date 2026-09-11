@@ -121,6 +121,9 @@ extension SquirrelApplicationDelegate {
       return false
     }
     rimeAPI.initialize(nil)
+    // Personal-data activation skips maintenance, but later Settings changes
+    // still need the deployment tasks that finalize unloaded.
+    rimeAPI.deployer_initialize(nil)
     let smartEnglishLoaded = "smart_english".withCString {
       rimeAPI.find_module($0) != nil
     }
@@ -517,6 +520,7 @@ extension SquirrelApplicationDelegate {
     let previous = prepared.previous
     let desired = prepared.desired
     let shouldExchange = desired.document != previous.document
+    let rebuildSpelling = desired.document.input.fuzzyPinyin != previous.document.input.fuzzyPinyin
     do {
       if shouldExchange {
         try LinnetSettingsDocumentStore.exchangeCandidateDocument(
@@ -532,7 +536,7 @@ extension SquirrelApplicationDelegate {
         document: published.document,
         to: live
       )
-      guard activatePublishedSettings(scope) else {
+      guard activatePublishedSettings(scope, rebuildSpelling: rebuildSpelling) else {
         throw LinnetSettingsDocumentStore.Failure.malformedDocument
       }
       activeSettingsRevision = published.revision
@@ -549,7 +553,8 @@ extension SquirrelApplicationDelegate {
       )
     } catch {
       guard shouldExchange,
-        rollbackSettingsPublication(candidate: candidate, live: live, scope: scope)
+        rollbackSettingsPublication(
+          candidate: candidate, live: live, scope: scope, rebuildSpelling: rebuildSpelling)
       else {
         activeSettingsRevision = nil
         isRimeInputSuspended = true
@@ -685,7 +690,8 @@ extension SquirrelApplicationDelegate {
   private func rollbackSettingsPublication(
     candidate: URL,
     live: URL,
-    scope: SettingsPublicationScope
+    scope: SettingsPublicationScope,
+    rebuildSpelling: Bool
   ) -> Bool {
     do {
       try LinnetSettingsDocumentStore.exchangeCandidateDocument(
@@ -697,7 +703,7 @@ extension SquirrelApplicationDelegate {
         document: restored.document,
         to: live
       )
-      guard activatePublishedSettings(scope) else { return false }
+      guard activatePublishedSettings(scope, rebuildSpelling: rebuildSpelling) else { return false }
       activeSettingsRevision = restored.revision
       return runtimeHealth().state == .running
     } catch {
@@ -705,7 +711,9 @@ extension SquirrelApplicationDelegate {
     }
   }
 
-  private func activatePublishedSettings(_ scope: SettingsPublicationScope) -> Bool {
+  private func activatePublishedSettings(
+    _ scope: SettingsPublicationScope, rebuildSpelling: Bool
+  ) -> Bool {
     switch scope {
     case .appearance:
       let activeSchemaID = lastLoadedSchemaID
@@ -728,6 +736,15 @@ extension SquirrelApplicationDelegate {
       config?.close()
       config = nil
 
+      // Spelling changes need a new Prism; compiling YAML alone leaves the old
+      // pronunciation map loaded. Rime reuses unchanged dictionary tables.
+      if rebuildSpelling {
+        guard let shared = runtimeDataSnapshot?.sharedDataDirectory else { return false }
+        for profile in LinnetSettingsContract.ChineseProfile.allCases {
+          let schema = shared.appending(path: "\(profile.schemaID).schema.yaml")
+          guard rimeAPI.deploy_schema(schema.path) else { return false }
+        }
+      }
       guard loadSettings() else { return false }
       let selectedProfile = settingsSnapshot.document.input.chineseProfile
 

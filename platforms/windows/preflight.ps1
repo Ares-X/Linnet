@@ -308,7 +308,9 @@ try {
   $PriorBuildFingerprint = (Get-FileHash -Algorithm SHA256 -LiteralPath `
     (Join-Path $UserData "build\default.yaml")).Hash
   Set-Content -LiteralPath $RollbackPackageSentinel -Value "prior package"
-  Set-Content -LiteralPath $InvalidUserConfig -Value "patch: ["
+  # Invalid optional customization YAML is ignored by Rime. A valid schema
+  # selection naming an absent schema exercises an actual deployment failure.
+  Set-Content -LiteralPath $InvalidUserConfig -Value "patch:`n  schema_list:`n    - schema: linnet_missing_preflight"
   try {
     Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S") `
       -Description "Reject broken Simplified upgrade and restore prior candidate" `

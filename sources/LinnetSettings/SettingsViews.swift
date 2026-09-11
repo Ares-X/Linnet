@@ -195,6 +195,7 @@ struct AppearanceTabView: View {
 
 struct InputTabView: View {
   @ObservedObject var model: SettingsModel
+  @State private var fuzzyPinyinExpanded = false
 
   var body: some View {
     LinnetSettingsPage(
@@ -214,27 +215,27 @@ struct InputTabView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         }
-        LinnetSettingsTwoColumnLayout {
-          VStack(alignment: .leading, spacing: 16) {
-            schemeSection
-            learningSection
-            modeSection
+        schemeSection
+        fuzzyPinyinSection
+        optionsSection
+        learningSection
+        reverseLookupSection
+        GroupBox {
+          DisclosureGroup {
+            VStack(alignment: .leading, spacing: 16) {
+              englishCandidateSuggestions
+              Divider()
+              englishTypingBehavior
+            }
+            .padding(.top, 12)
+          } label: {
+            Text("Smart English").font(.headline)
           }
-        } trailing: {
-          VStack(alignment: .leading, spacing: 16) {
-            optionsSection
-            reverseLookupSection
-          }
-        }
-        GroupBox("Smart English") {
-          LinnetSettingsTwoColumnLayout {
-            englishCandidateSuggestions
-          } trailing: {
-            englishTypingBehavior
-          }
+          .frame(maxWidth: .infinity, alignment: .leading)
           .padding(8)
         }
         .disabled(!model.configuration.canEdit)
+        modeSection
       }
     }
   }
@@ -257,6 +258,7 @@ struct InputTabView: View {
         .font(.callout)
         .foregroundStyle(.secondary)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
     }
     .disabled(!model.configuration.canEdit)
@@ -301,6 +303,7 @@ struct InputTabView: View {
           .font(.caption)
           .foregroundStyle(.secondary)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
     }
     .disabled(!model.configuration.canEdit)
@@ -342,9 +345,63 @@ struct InputTabView: View {
           .foregroundStyle(.secondary)
         }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
     }
     .disabled(!model.configuration.canEdit)
+  }
+
+  private var fuzzyPinyinSection: some View {
+    GroupBox {
+      DisclosureGroup(isExpanded: $fuzzyPinyinExpanded) {
+        VStack(alignment: .leading, spacing: 16) {
+          Text("Match the selected sounds in full and double pinyin. Original pronunciations remain available. Apply Changes to activate.")
+            .font(.callout).foregroundStyle(.secondary)
+          fuzzyPinyinChoices("Initials", pairs: [.zZh, .cCh, .sSh, .nL, .fH, .rL, .gK])
+          Divider()
+          fuzzyPinyinChoices("Finals", pairs: [.anAng, .enEng, .inIng, .ianIang, .uanUang])
+        }
+        .padding(.top, 12)
+      } label: {
+        HStack {
+          Text("Fuzzy pinyin").font(.headline)
+          Spacer()
+          if model.configuration.documentDraft.input.fuzzyPinyin.isEmpty {
+            Text("No pairs selected").foregroundStyle(.secondary)
+          } else {
+            Text(model.configuration.documentDraft.input.fuzzyPinyin.map(\.label).joined(separator: " · "))
+              .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+          }
+        }
+      }
+      .accessibilityLabel("Fuzzy pinyin")
+      .accessibilityIdentifier("settings.input.fuzzyPinyin")
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(8)
+    }
+    .disabled(!model.configuration.canEdit)
+  }
+
+  private func fuzzyPinyinChoices(
+    _ title: LocalizedStringKey, pairs: [LinnetSettingsDocument.FuzzyPinyinPair]
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 16)], alignment: .leading, spacing: 12) {
+        ForEach(pairs, id: \.self) { pair in
+          Toggle(pair.label, isOn: Binding(
+            get: { model.configuration.documentDraft.input.fuzzyPinyin.contains(pair) },
+            set: { enabled in
+              var selected = model.configuration.documentDraft.input.fuzzyPinyin
+              selected.removeAll { $0 == pair }
+              if enabled { selected.append(pair) }
+              model.configuration.documentDraft.input.fuzzyPinyin =
+                LinnetSettingsDocument.FuzzyPinyinPair.allCases.filter(selected.contains)
+            }
+          ))
+        }
+      }
+    }
   }
 
   private var optionsSection: some View {
@@ -367,7 +424,9 @@ struct InputTabView: View {
           "These options are applied from Settings to each new input session; no keyboard shortcut changes them."
         )
         .font(.caption).foregroundStyle(.secondary)
-      }.padding(8)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(8)
     }
     .disabled(!model.configuration.canEdit)
   }
@@ -378,7 +437,9 @@ struct InputTabView: View {
         Text("Tap Shift to switch between Chinese and Smart English. Caps Lock remains the explicit raw ASCII mode.")
         Text("The menu-bar label comes from Rime: 双 or 中 for Chinese, A for raw ASCII, and En for Smart English.")
           .font(.callout).foregroundStyle(.secondary)
-      }.padding(8)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(8)
     }
   }
 
@@ -585,7 +646,6 @@ struct DataTabView: View {
   @ObservedObject var updateChecker: LinnetSettingsUpdateChecker
   @Binding var pendingClear: Set<SettingsDataCoordinator.LearningDomain>?
   @Binding var pendingPortableImport: SettingsDataCoordinator.PortableImportCandidate?
-  @Binding var pendingCloudBackupUpload: Bool
   @Binding var pendingRestore: LinnetBackupStore.BackupRecord?
   @Binding var pendingBackupRemoval: LinnetBackupStore.BackupRecord?
   @Binding var pendingLegacyImport: SettingsDataCoordinator.LegacyImportCandidate?
@@ -661,7 +721,9 @@ struct DataTabView: View {
                 || model.packDownloadActive || model.operationActive)
         }
         downloadSourceControls
-        Button("Repair Language Update…") { model.languageDataRepairTarget = .currentEdition }
+        Button("Repair Language Update") {
+          model.downloadLanguageData(.currentEdition, allowCompleteRepair: true)
+        }
           .disabled(
             !model.languageDataUpdatesAvailable || model.packDownloadActive || model.operationActive)
         Divider()

@@ -84,7 +84,71 @@ Linnet 差异只有两个人工 owner：
 
 不要把普通 prefix、学习或 schema 选择重新实现进 plugin，也不要新增 SQLite、网络、系统拼写检查器或第二个英文词典运行时。
 
+### 连续中英混输
+
+Core 的 `ProjectionRenderer` 为八个中文方案生成 `sentence_dictionary` 与权重配置，
+启动时沿用已有设置协调流程生效。升级 Core 不要求替换现有中文或英文数据包。
+`ScriptTranslator` 从 `translator/sentence_dictionary` 引用现有英文 table 配置，
+在组句时提供独立的整词拼写边。英文词不进入中文 Prism；普通中文候选、补全、
+已有英文缩写和 recognizer 标记的代码输入继续使用原来的规则。英文词频通过
+`sentence_dictionary_weight` 换算到现有组句分数尺度；它是 Linnet 的实验校准，
+不是 Gboard 模型概率。`ScriptSyllabifier` 复用原有拼写器，排除拉丁缩写后检查
+完整中文拼写及最后一个尚未打完的音节。未完成的中文音节继续使用原来的补全；
+若同一后缀也已经完整拼出英文单词，则保留该混输备选。原有中文整句、覆盖完整原码的
+中文补全及已学词仍在前，不能因中文尾音节尚未完成就让完整英文候选无法被选择和学习。
+这条新增路径只接受以已完成英文词结束的组句，排序仍由 `ScriptTranslation` 拥有。
+中文补全仍有歧义时，原有整句和完整词之后的中文部分词与混输备选交错输出，
+先给中文部分词一个位置。中文尾音节待补全时，纠错猜测不消费这个位置，
+避免多个混输同音词连续挤压符合原按键的前缀选词。该编排不删搜索结果，
+不改变部分词实际消费的范围；完整用户词仍优先。
+完整中文解释默认保留原来的中文整句在前。混输路径先按现有整句语法分比较；
+较弱的路径只有在每个英文跨度都替代原首句的一个完整词、且英文词频分不低于该词时
+才被保留。这样“这个size有点大”仍可选择，而普通中文词内部碰巧命中的英文片段
+不会因放宽召回进入候选。比较复用 `Sentence` 已有的词长度和词频，不另设词表或模型。
+如果最佳混输路径的最后一个英文跨度之后已有完整的多音节中文词，则允许这条路径
+按既有语法分竞争首选；`server重启` 能利用后续的“重启”确定词界。
+但若英文跨度恰好替代一个完整中文音节，仍保留中文优先，避免 `an` 等短词在普通
+中文句子输入中途抢占首选。只有英文结尾或后接单字时也保留中文优先，避免“界面设”
+在继续输入“计”前变成“界面she”。明确选择英文分界后仍按原有用户词库权重学习。
+纠错开启时，新增整词组句可以排在较弱的纠错猜测之前，但保留原按键的中文读音；
+原按键查询复用相同的混输评分规则，单音节冲突保护同样生效；已学混输词继续优先。
+Smart English filter 只投影混输元数据，混输顺序由引擎拥有。上述规则利用已有词图与词频，不替代双语语义模型。
+
+原生 `Poet` 在同一张词图中保留原来的语法搜索，以及按词频保留的混输搜索状态；
+两者各自保留最优分词，词频路径不能挤掉原来的语法路径。
+词条的中英类型在每条词图边上只判断一次，后续搜索复用该结果，避免长中文输入反复反查音节。
+输出保留原有语法候选，再以现有 `max_sentences` 为预算补充不同的词频候选，避免局部中文搭配分数让
+合理同音词消失。`Poet` 拥有每组候选顺序，`ScriptTranslation` 合并原有组句和
+新增整词组句。混输搜索同时保留原有 CPU/DNS 等缩写和新增英文整词，复用各自词典
+权重，且不把相邻拉丁片段拼成伪单词。原有缩写首句与新增整词首句比较优先级，
+组内顺序仍由同一次搜索拥有；纠错不能先丢掉正确的缩写再让弱碎片抢占首选。
+英文词占一个拼写跨度。`UserDictionary` 和
+`Memory` 以标准 `custom_code` 保存中文声调码与大写英文整词码，数值 ID 只在
+当前词典图中使用；不同双拼方案和全拼共享同一个用户词库。学习禁用仍由原有
+配置拥有。已学习的混输词以中文结尾时，仍可继续接英文词组句。
+带完整英文整词编码的混输保存整句选择，普通中文仍执行原有 `max_word_length`
+学习策略；只微调组成词无法恢复用户明确选择的中英分界。混输组句读取已学前缀时
+按实际输入查询完整编码，不能再套用普通中文组成词的 5 音节查询深度，否则保存过的
+长混输在接着输入后文时会丢失已选分界。未新增搭配库或改变普通中文的写入策略。
+升级前学过的缩写混输仍可提供整词英文备选；不能因旧词覆盖完整输入就停止搜索。
+纠错词图遗漏的旧缩写学习，在不带纠错的原拼写图中读回，与新英文学习按用户词频合并；
+该查询不生成另一套组句。候选沿用查到它的拼写图，保持原码选词与编辑边界。
+普通中文前缀预测跳过当前音节表无法表示的英文整词编码；合法学习记录仍保留，
+由相应的混输词图查询读回，不能把它报告成损坏的中文词条。
+原有编码与整词英文编码查到的同长度用户词，按 Rime 原有学习权重合并排序，
+使重新选择的词界可以成为后续首选。完整普通中文词仍使用原来的查询路径。
+新增 `SyllableGraph` 字段及 Syllabifier 调用参数改变 Core 内部 ABI，
+必须通过 `scripts/build-rime-runtime` 同时重编原生插件。
+
+对这条路径运行 `tests/verify_rime_runtime.sh --mixed-input-probe`，包括逐段选择、
+词内编辑、多英文词整句选词、标点、旧混输学习纠正、跨方案学习和学习禁用。学习测试从正式部署后、
+其他选词测试运行前的数据开始，避免测试之间累积的词频影响断言。键盘及代码原样编辑分别使用
+`--profile-key-matrix-probe`、`--raw-editing-probe`。原生测试不替代 VM 真正输入验收。
+研究使用的应用样本与未采用模型不进入产品；发布验收见 [产品验收](product-acceptance.md)。
+
 ### Settings 与数据
+
+中文纠错复用 Rime 的邻键搜索、Prism 音节图与现有语言模型排序。ProjectionRenderer 将默认前后鼻音弱纠错和可选的 12 组模糊音插入原始读音到全拼/双拼编码的映射之前；明确勾选的模糊音替代同组弱纠错。不同双拼布局各用自己的 Prism，不通过简拼展开或额外候选过滤器猜词。Settings document 保存显式模糊音选项；Apply 改变这些选项时 Host 用 `deploy_schema` 重建八个 Prism，复用未变化的词典，失败回滚同时恢复索引。配置应用使用已有事务超时，外观刷新和诊断保留短请求超时。
 
 Settings document 拥有候选外观、中文默认项、反查触发键、学习策略和 Smart English 交互开关；personal store 拥有自定义词、禁用词与 Text Expander。唯一标准 personal runtime patch `linnet_user.custom.yaml` 只投影禁用词；document-owned 句首大写与 Tab 确定性投影到八份中文 schema custom 和一份英文 schema custom。旧 `linnet_user.yaml` 仅作一次性迁移输入并在成功写入后退役。
 
@@ -135,31 +199,20 @@ focused 测试、`scripts/upstream-sync verify` 与完整 product gate。只有�
 release identity。定时 GitHub workflow 只报告候选更新，不得自动修改仓库、合并
 上游或发布。
 
-正常正式候选先由 `scripts/release-control verify-local` 恢复并校验锁定依赖、构建，
-串行完成 strict lint、发布 owner、App/Swift/Rime 和 Periphery。验证期间冻结修改；
-临时 Git index 将待提交文件、删除、权限和 gitlink 绑定到一个 Git tree，不改真实
-暂存区；首尾 tree 必须相同。唯一收据位于 ignored
-`build/linnet-source-verification.json`，是维护者的本地验收声明，不是云端独立测试证明。
-`verify-local` 不启动桌面 UI 自动化，收据中的 Settings UI 记为 `NOT_EXERCISED`。
-在有 Developer Mode 的专用测试桌面单独运行
-`scripts/release-control verify-settings-ui`，只补跑 UI 验收，不重复已通过的非交互检查。
-它要求同一 source tree 的本地收据；失败或中断保持未通过，候选申请仍会拒绝。
+候选按实际改动选择测试。`scripts/release-control verify-local` 可显式运行完整的
+非交互构建、lint、发布 owner 和开发测试；它不生成测试收据，也不是候选申请的前置条件。
+Periphery 可单独运行 `scripts/run_periphery.sh`，作为代码清理建议。
+发布接受项目的 SSH 或 HTTPS remote，授权现有产物不要求本地保留候选标签；
+源码 revision 与产物摘要仍须一致。
+Settings UI 按需在专用测试桌面运行 `scripts/release-control verify-settings-ui`。
 独立 bundle ID、数据目录和 `CFFIXED_USER_HOME` 不隔离鼠标、键盘、焦点或输入源会话；
 不得在维护者正在使用的桌面运行 XCUITest。
 
-仅在维护者明确要求先发布预览、稍后验收时，可用 `candidate-preview "原因"`
-代替完整收据申请；它记录未测试状态，不执行测试，且不能用于正式发布。详见发布文档。
-
-提交相同 tree 后，在 clean、精确远端 `main` 上执行
-`scripts/release-control candidate`，创建携带收据的 annotated
-`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签；不再手动推送裸标签。
-唯一 macOS release Action 验证标签、commit、tree 和必需测试结果，一次
-checkout/cache/hydrate，保留历史相关的版本单调性检查及实际签名 App/package 门。
-不重跑已由收据绑定为 PASS 的源码、Rime 或 Settings UI 测试。它使用临时 Keychain
-构建、签名、打包和最终验证一次。
-互不重叠的 Core 2 件、data 4 个完整词包及对应差分和 public 1 件直接写入三个 Draft GitHub
-Releases。候选传输
-不使用 GitHub Actions artifact，也不把正式签名字节从本地上传。
+提交源码后运行 `scripts/release-control candidate`，创建指向该提交的
+`linnet-candidate/v<VERSION>-<FULL_REVISION>` 标签。无需 clean 或精确远端 main，
+未提交修改不会进入候选。Action 核对标签与 commit，恢复锁定输入，构建、签名并验证
+实际发布文件。测试结果记录实际执行范围；没有测试收据、特殊跳测候选或收据豁免路径。
+Core、data 和 Complete 产物分别暂存在三个 Draft GitHub Releases，供原字节验收。
 
 RIME-LMDG 的上游 `LTS` 资产允许原作者在同一 URL 原位替换，因此普通冷构建只从
 lock 指定的同仓库固定 `data-N` LTS pack 恢复，再由 PackTool 验证容器、内部模型
@@ -196,8 +249,8 @@ owner。缓存不是版本或发布权威：
 形状，不匹配时只重建受影响部分。
 
 PR CI 和手动 commit CI 都只验证干净 checkout/SDK 边界：恢复锁定 cache、检查 lint、
-publication/data identity，hydrate 一次、完成一次 unsigned App build，再运行 Periphery。
-Swift owner、native Rime、Settings UI 和真实产品流程只由绑定精确 tree 的本机收据负责，
+publication/data identity，hydrate 一次、完成一次 unsigned App build。
+Swift owner、native Rime、Settings UI 和真实产品流程按改动在本地验证，
 不在 Action 重复。`main` push 不自动执行完整验证；连续 PR 更新只保留最新一次。
 
 ## 构建
@@ -346,7 +399,7 @@ PR 只提交源码、测试和必要文档，不提交 archive、PKG 或本机�
 `scripts/release-control preview /absolute/release-directory` 后公开候选 Core/data 和
 候选 Catalog。只有完整验收后显式运行
 `scripts/release-control authorize /absolute/release-directory` 后，本地才会用
-Git SSH 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
+Git 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release metadata
 复核同一批字节并完成发布；本地命令不能上传、编辑 Release 或推进 Catalog。
 
 ## 数据维护
@@ -451,6 +504,7 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
 | App 内嵌 Rime 与插件 | `tests/verify_packaged_rime.sh APP APP/Contents/Applications/Settings.app`；直接加载产物中的库，不使用开发机的动态库搜索路径 |
 | 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
+| 中文纠错与模糊音 | `tests/verify_swift_units.sh --only projection-renderer,settings-data-coordinator` 和 `tests/verify_rime_runtime.sh --chinese-spelling-probe`；真实设置应用与打字在专用 VM 验收 |
 | 右键忘记候选与焦点 | `tests/verify_rime_runtime.sh --candidate-forget-probe` |
 | 原文光标编辑与代码词 | `tests/verify_rime_runtime.sh --raw-editing-probe`；混输边界同时运行 `--mixed-input-probe` |
 | Installer 脚本 | 生成精确候选后，只在专用虚拟机执行真实首次安装、升级、Core、Complete、卸载和重装 |
@@ -465,7 +519,7 @@ Foundation 的 `temporaryDirectory`（macOS 上不会随 `TMPDIR` 重定向）�
 
 主题卡片渲染或 OCR 失败时，可单独运行
 `tests/verify_swift_units.sh --appearance-preview`。它复用同一测试与编译缓存，
-不需要下载词库或构建 Rime；其结果不能替代完整本机收据或安装验收。
+不需要下载词库或构建 Rime；其结果不能替代实际安装验收。
 
 Settings 的实际点击、滚动或窗口行为失败时，在隔离桌面运行
 `tests/verify_visible_settings_fixture.sh --ui-test [test-name,...]`；不传测试名运行完整
@@ -485,6 +539,13 @@ tests/verify_development.sh
 这是准备冻结候选时运行一次的本机综合门，不是每次小改动的默认命令。它不需要签名
 或安装，覆盖 App、Swift owner、IPC、中文/英文 projection 和真实 Rime 行为；安装
 生命周期只在专用虚拟机验收，package architecture 使用下一节的独立门。
+
+Rime 的 schema 配置在同一进程的会话之间共享。原生测试需要临时切换纠错策略或模拟
+旧版本配置时，先用 Rime 自身的配置读写接口复制到独立配置，再交给测试会话；直接
+修改组件缓存会污染后续用例，导致完整套件和单独运行的结果不同。
+
+安装脚本改动可单独运行 `tests/verify_installer_preflight.sh`；它在临时目录验证
+首次安装、覆盖修复和授权失败行为，不安装或注册真实 App。
 
 ### Finalized local candidate
 

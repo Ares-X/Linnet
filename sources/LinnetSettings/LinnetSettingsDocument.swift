@@ -321,6 +321,15 @@ extension LinnetSettingsDocument {
     }
   }
 
+  enum FuzzyPinyinPair: String, Codable, CaseIterable, Sendable {
+    case zZh = "z_zh", cCh = "c_ch", sSh = "s_sh"
+    case nL = "n_l", fH = "f_h", rL = "r_l", gK = "g_k"
+    case anAng = "an_ang", enEng = "en_eng", inIng = "in_ing"
+    case ianIang = "ian_iang", uanUang = "uan_uang"
+
+    var label: String { rawValue.replacingOccurrences(of: "_", with: " ↔ ") }
+  }
+
   struct Input: Codable, Equatable, Sendable {
     var chineseProfile: LinnetSettingsContract.ChineseProfile
     var emojiEnabled: Bool
@@ -329,6 +338,7 @@ extension LinnetSettingsDocument {
     var singleCharacterSearchDefault: Bool
     var chineseLearningPolicy: ChineseLearningPolicy
     var pinyinReverseTrigger: PinyinReverseTrigger
+    var fuzzyPinyin: [FuzzyPinyinPair]
 
     static let `default` = Input(
       chineseProfile: .fullPinyin,
@@ -347,7 +357,8 @@ extension LinnetSettingsDocument {
       asciiPunctuationDefault: Bool,
       singleCharacterSearchDefault: Bool = false,
       chineseLearningPolicy: ChineseLearningPolicy = .enhanced,
-      pinyinReverseTrigger: PinyinReverseTrigger
+      pinyinReverseTrigger: PinyinReverseTrigger,
+      fuzzyPinyin: [FuzzyPinyinPair] = []
     ) {
       self.chineseProfile = chineseProfile
       self.emojiEnabled = emojiEnabled
@@ -356,10 +367,13 @@ extension LinnetSettingsDocument {
       self.singleCharacterSearchDefault = singleCharacterSearchDefault
       self.chineseLearningPolicy = chineseLearningPolicy
       self.pinyinReverseTrigger = pinyinReverseTrigger
+      self.fuzzyPinyin = fuzzyPinyin
     }
 
     init(from decoder: Decoder) throws {
       let container = try decoder.container(keyedBy: CodingKeys.self)
+      let fuzzy = try container.decodeIfPresent([FuzzyPinyinPair].self, forKey: .fuzzyPinyin) ?? []
+      fuzzyPinyin = FuzzyPinyinPair.allCases.filter(fuzzy.contains)
       if container.contains(.chineseProfile) {
         chineseProfile = try container.decode(
           LinnetSettingsContract.ChineseProfile.self,
