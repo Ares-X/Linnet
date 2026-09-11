@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Linnet 双韵</title>
+  <meta name="description" content="双韵 — macOS 离线双语输入法。中英同出一源，轻按 Shift 往返。">
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap row">
+      <a class="brand" href="#">
+        <img src="assets/mark.svg" alt="" width="22" height="22">
+        <span>Linnet</span>
+        <span class="muted">双韵</span>
+      </a>
+      <nav class="nav">
+        <a href="#use">使用</a>
+        <a href="#install">安装</a>
+        <a href="https://github.com/Ares-X/Linnet">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <p class="eyebrow">macOS · Apple Silicon · 离线</p>
+      <h1>双韵</h1>
+      <p class="subtitle">中英，同一输入源</p>
+      <p class="lede">
+        不必在系统输入法列表里来回寻找。
+        中文与 Smart English 同出一源；轻按 <kbd>Shift</kbd> 往返，
+        <kbd>Caps Lock</kbd> 入原始 ASCII。笔墨皆在本机。
+      </p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/Ares-X/Linnet/releases/download/v0.1.23/Linnet.pkg">下载 v0.1.23</a>
+        <a class="link" href="https://github.com/Ares-X/Linnet/releases/latest">Release 说明</a>
+      </div>
+      <p class="fine">约 428&nbsp;MB · macOS 13+ · GPL-3.0</p>
+    </section>
+
+    <section id="use" class="wrap panel">
+      <div class="states" role="tablist" aria-label="输入状态">
+        <button type="button" class="state active" data-state="cn" aria-selected="true">中</button>
+        <button type="button" class="state" data-state="en" aria-selected="false">En</button>
+        <button type="button" class="state" data-state="ascii" aria-selected="false">A</button>
+      </div>
+
+      <div class="mock" id="mock-cn">
+        <div class="preedit">shuangyun<span class="caret"></span></div>
+        <div class="cands">
+          <span class="on">1 双韵</span>
+          <span>2 双云</span>
+          <span>3 双轨</span>
+          <span>4 霜降</span>
+        </div>
+        <p class="hint">全拼或双拼 · 词库与模型均在本地</p>
+      </div>
+
+      <div class="mock hidden" id="mock-en">
+        <div class="preedit">interf<span class="caret"></span></div>
+        <div class="cands">
+          <span class="on">1 interface</span>
+          <span>2 interfere</span>
+          <span>3 interframe</span>
+        </div>
+        <p class="hint">/ˈɪntərfeɪs/ · n. 界面；接口</p>
+      </div>
+
+      <div class="mock hidden" id="mock-ascii">
+        <div class="ascii-line">$ git status<span class="caret"></span></div>
+        <p class="hint">原样直达当前应用</p>
+      </div>
+
+      <ul class="keys">
+        <li><kbd>Shift</kbd> 中文与英文之间</li>
+        <li><kbd>Caps Lock</kbd> 原始 ASCII</li>
+      </ul>
+    </section>
+
+    <section class="wrap facts">
+      <div>
+        <h2>特点</h2>
+        <ul>
+          <li>一源三态：中文、Smart English、ASCII</li>
+          <li>全拼与七种双拼，学习数据共用</li>
+          <li>英文补全、纠错、音标与释义</li>
+          <li>程序与词包分离，日常更新约 7&nbsp;MB</li>
+          <li>七套候选主题，随系统浅色 / 深色</li>
+        </ul>
+      </div>
+      <div>
+        <h2>隐私</h2>
+        <p>
+          无账号，无遥测，无在线翻译。
+          字词与学习默然留在本机
+          <code>~/Library/Application Support/Linnet/</code>。
+          若需要，可用 iCloud 仅同步学习词。
+        </p>
+      </div>
+    </section>
+
+    <section class="wrap shots">
+      <figure>
+        <img src="assets/input-modes.png" alt="三种输入状态" loading="lazy">
+        <figcaption>光标旁状态提示</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/bilingual.png" alt="反查与 Smart English" loading="lazy">
+        <figcaption>拼音反查与英文候选</figcaption>
+      </figure>
+      <figure class="wide">
+        <img src="assets/themes.png" alt="候选窗主题" loading="lazy">
+        <figcaption>候选窗主题</figcaption>
+      </figure>
+    </section>
+
+    <section id="install" class="wrap install">
+      <h2>安装</h2>
+      <p class="note">
+        社区版未经 Apple Developer ID 签名或公证。
+        请自 GitHub Release 取得安装包，并核对 SHA-256。
+        初次安装后注销并重新登录一次即可登记输入源。
+        位置：<code>~/Library/Input Methods/Linnet.app</code>
+      </p>
+      <div class="hash-box">
+        <div class="hash-top">
+          <span>SHA-256 · v0.1.23 · Linnet.pkg</span>
+          <button type="button" id="copy-hash">复制</button>
+        </div>
+        <code id="hash">eb05186a6980bba18bcb469ecb2cc6d5cd7176781aad1f935a67c76fbb3a6cbf</code>
+        <p class="cli"><code>shasum -a 256 Linnet.pkg</code></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <span>基于 Squirrel / librime</span>
+    <span>
+      <a href="https://github.com/Ares-X/Linnet">GitHub</a>
+      ·
+      <a href="https://github.com/Ares-X/Linnet/blob/main/THIRD_PARTY_NOTICES.md">第三方</a>
+      ·
+      <a href="https://github.com/Ares-X/Linnet/blob/main/LICENSE.txt">GPL-3.0</a>
+    </span>
+  </footer>
+
+  <script>
+    const tabs = document.querySelectorAll('.state');
+    const mocks = {
+      cn: document.getElementById('mock-cn'),
+      en: document.getElementById('mock-en'),
+      ascii: document.getElementById('mock-ascii')
+    };
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const key = tab.dataset.state;
+        tabs.forEach((t) => {
+          t.classList.toggle('active', t === tab);
+          t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+        });
+        Object.entries(mocks).forEach(([k, el]) => {
+          el.classList.toggle('hidden', k !== key);
+        });
+      });
+    });
+    document.getElementById('copy-hash').addEventListener('click', async (e) => {
+      const text = document.getElementById('hash').textContent.trim();
+      try {
+        await navigator.clipboard.writeText(text);
+        e.target.textContent = '已复制';
+        setTimeout(() => { e.target.textContent = '复制'; }, 1500);
+      } catch (_) {}
+    });
+  </script>
+</body>
+</html>
