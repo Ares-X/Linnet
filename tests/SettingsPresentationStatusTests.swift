@@ -37,8 +37,8 @@ struct SettingsPresentationStatusTests {
     }
     expect(
       .cloudBackupUploaded(Date(timeIntervalSince1970: 0)),
-      en: "Incremental recovery backup verified at \(Date(timeIntervalSince1970: 0).formatted()).",
-      zh: "增量恢复备份已于 \(Date(timeIntervalSince1970: 0).formatted()) 校验完成。",
+      en: "Incremental recovery backup verified at \(Date(timeIntervalSince1970: 0).formatted(Date.FormatStyle().locale(english))).",
+      zh: "增量恢复备份已于 \(Date(timeIntervalSince1970: 0).formatted(Date.FormatStyle().locale(chinese))) 校验完成。",
       english,
       chinese
     )

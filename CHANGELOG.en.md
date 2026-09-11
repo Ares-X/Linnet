@@ -6,6 +6,11 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.25 — 2026-09-11 (Preview)
+
+- Fixed the duplicated `.linnet-data` extension in the default personal-data export filename.
+- Core update confirmations, language-pack version details and backup dates now follow the selected interface language.
+
 ## 0.1.24 — 2026-09-11 (Preview)
 
 ### Chinese input

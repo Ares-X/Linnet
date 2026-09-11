@@ -1,5 +1,20 @@
 # Linnet product acceptance
 
+## Personal-data export and recovery
+
+In the installed Settings app, Export must save the suggested name as
+`Linnet-Data.linnet-data` with a single extension. Keep the suggested name and save, then import that file
+through the native Open panel. Verify the reviewed custom words, disabled words
+and text expansions after import and through real typing. Restore a recovery
+point created during the same test and verify its actual contents before
+returning to the saved starting state. Canceling a file panel or a replacement
+confirmation must leave the current personal data unchanged.
+
+On a Chinese macOS desktop, select English in Settings and verify that the
+language-pack version details and both installed/downloaded Core confirmation
+dialogs use English. Canceling the confirmation must leave the running Core
+unchanged. Switch back to the system language and verify the Chinese copy.
+
 ## Continuous Chinese and English input (0.1.24 Preview)
 
 The Chinese ScriptTranslator consumes continuous raw keystrokes and retains whole

@@ -350,31 +350,6 @@ extension DataTabView {
     }
   }
 
-  func confirmCoreActivation() {
-    guard !model.pendingChanges, !model.operationActive else { return }
-    let alert = NSAlert()
-    alert.alertStyle = .warning
-    alert.messageText = String(localized: "Apply the installed Core now?")
-    alert.informativeText = String(localized:
-      "First use the macOS input menu to select another input source.")
-      + " "
-      + String(localized:
-        "Your apps stay open. Settings closes after the new Core is verified.")
-    let apply = alert.addButton(withTitle: String(localized: "Apply Now"))
-    apply.keyEquivalent = "\r"
-    let cancel = alert.addButton(withTitle: String(localized: "Cancel"))
-    cancel.keyEquivalent = "\u{1b}"
-    let completion: (NSApplication.ModalResponse) -> Void = { response in
-      guard response == .alertFirstButtonReturn else { return }
-      updateChecker.activateInstalledCore()
-    }
-    if let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible) {
-      alert.beginSheetModal(for: window, completionHandler: completion)
-    } else {
-      completion(alert.runModal())
-    }
-  }
-
   @ViewBuilder var updateCheckRow: some View {
     Divider()
     HStack(alignment: .center, spacing: 10) {
@@ -487,14 +462,14 @@ extension DataTabView {
       let sequence = update.installedSequence {
       packReleaseDescription(version: version, sequence: sequence)
     } else {
-      String(localized: "Not installed")
+      String(localized: LocalizedStringResource("Not installed", locale: locale))
     }
-    return "\(String(localized: "Current")): \(installed) → "
-      + "\(String(localized: "Available")): \(update.availableVersion) · "
-      + "\(String(localized: "Data release")) \(update.availableSequence)"
+    return "\(String(localized: LocalizedStringResource("Current", locale: locale))): \(installed) → "
+      + "\(String(localized: LocalizedStringResource("Available", locale: locale))): \(update.availableVersion) · "
+      + "\(String(localized: LocalizedStringResource("Data release", locale: locale))) \(update.availableSequence)"
   }
   func packReleaseDescription(version: String, sequence: UInt64) -> String {
-    "\(version) · \(String(localized: "Data release")) \(sequence)"
+    "\(version) · \(String(localized: LocalizedStringResource("Data release", locale: locale))) \(sequence)"
   }
 
   var grammarModelSection: some View {
@@ -708,7 +683,7 @@ extension DataTabView {
               Text(backupTitle(record.state).text(locale: locale))
                 .font(.callout.weight(.medium))
               if let createdAt = record.createdAt {
-                Text(verbatim: createdAt.formatted(date: .abbreviated, time: .standard))
+                Text(createdAt, format: Date.FormatStyle(date: .abbreviated, time: .standard))
                   .font(.caption).foregroundStyle(.secondary)
               } else {
                 Text("No completion timestamp")

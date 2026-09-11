@@ -540,6 +540,10 @@ tests/verify_development.sh
 或安装，覆盖 App、Swift owner、IPC、中文/英文 projection 和真实 Rime 行为；安装
 生命周期只在专用虚拟机验收，package architecture 使用下一节的独立门。
 
+Rime 的 schema 配置在同一进程的会话之间共享。原生测试需要临时切换纠错策略或模拟
+旧版本配置时，先用 Rime 自身的配置读写接口复制到独立配置，再交给测试会话；直接
+修改组件缓存会污染后续用例，导致完整套件和单独运行的结果不同。
+
 安装脚本改动可单独运行 `tests/verify_installer_preflight.sh`；它在临时目录验证
 首次安装、覆盖修复和授权失败行为，不安装或注册真实 App。
 
