@@ -269,15 +269,14 @@ enum LinnetSettingsContract {
 
   struct CloudSyncStatus {
     let result: RuntimeReplyCode
-    let finishedAt: Date
     let lastSuccess: Date?
   }
 
   static func cloudSyncStatus(startingAt bundle: Bundle = .main) -> CloudSyncStatus? {
     guard let stored = hostDefaults(startingAt: bundle)?.dictionary(forKey: cloudSyncStatusKey),
-      let raw = stored["result"] as? String, let result = RuntimeReplyCode(rawValue: raw),
-      let finishedAt = stored["finishedAt"] as? Date else { return nil }
-    return .init(result: result, finishedAt: finishedAt, lastSuccess: stored["lastSuccess"] as? Date)
+      let raw = stored["result"] as? String, let result = RuntimeReplyCode(rawValue: raw)
+    else { return nil }
+    return .init(result: result, lastSuccess: stored["lastSuccess"] as? Date)
   }
 
   @discardableResult
@@ -287,6 +286,7 @@ enum LinnetSettingsContract {
     guard let defaults = hostDefaults(startingAt: bundle) else { return false }
     var stored = defaults.dictionary(forKey: cloudSyncStatusKey) ?? [:]
     stored["result"] = result.rawValue
+    // Older Settings processes require this field when reading the shared v1 record.
     stored["finishedAt"] = date
     if result == .learningSyncCompleted { stored["lastSuccess"] = date }
     defaults.set(stored, forKey: cloudSyncStatusKey)

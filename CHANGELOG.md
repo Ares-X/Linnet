@@ -6,6 +6,10 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 尚未发布
+
+- 修复导出个人数据时默认文件名重复添加 `.linnet-data` 扩展名的问题。
+
 ## 0.1.24 — 2026-09-11（预览版）
 
 ### 中文输入

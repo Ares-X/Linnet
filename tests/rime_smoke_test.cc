@@ -1328,12 +1328,25 @@ void ExpectNativeMixedInput(RimeApi_stdbool* api) {
   }
 }
 
+// Rime's schema component shares mutable ConfigData across live sessions.
+// Variant probes need a private copy so correction/legacy settings cannot
+// alter the subsequent product-shaped sessions in the same process.
+rime::Schema* IsolatedSchema(const char* schema_id) {
+  auto schema = std::make_unique<rime::Schema>(schema_id);
+  std::stringstream yaml;
+  auto config = std::make_unique<rime::Config>();
+  if (!schema->config()->SaveToStream(yaml) || !config->LoadFromStream(yaml))
+    Fail("could not isolate the schema configuration for a variant probe");
+  schema->set_config(config.release());
+  return schema.release();
+}
+
 void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
   // Correction may improve the Chinese guess, but must not erase an exact
   // English word or displace the leading Chinese partial choice.
   {
     const auto correction = CreateSchemaSession(api, "linnet_zh");
-    auto* schema = new rime::Schema("linnet_zh");
+    auto* schema = IsolatedSchema("linnet_zh");
     schema->config()->SetBool("translator/enable_correction", true);
     rime::Service::instance().GetSession(correction)->ApplySchema(schema);
     Enter(api, correction, "xrzesize");
@@ -1391,7 +1404,7 @@ void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
            {"lmjxserver", "连接server"},
            {"xmvpbzbackupzlggxnconfig", "先准备backup再更新config"}}) {
     const auto existing = CreateSchemaSession(api, "linnet_zh");
-    auto* schema = new rime::Schema("linnet_zh");
+    auto* schema = IsolatedSchema("linnet_zh");
     schema->config()->SetBool("translator/enable_correction", true);
     rime::Service::instance().GetSession(existing)->ApplySchema(schema);
     Enter(api, existing, input);
@@ -1401,7 +1414,7 @@ void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
   }
   for (const bool correction_enabled : {false, true}) {
     const auto chinese = CreateSchemaSession(api, "linnet_zh");
-    auto* schema = new rime::Schema("linnet_zh");
+    auto* schema = IsolatedSchema("linnet_zh");
     schema->config()->SetBool("translator/enable_correction", correction_enabled);
     rime::Service::instance().GetSession(chinese)->ApplySchema(schema);
     const std::string input = "womfxuykqtrfyixwvegewftidefhanzlanplufh";
@@ -1428,7 +1441,7 @@ void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
              {"heton", "合同", "合同on", 6},
              {"yujiannizh", "遇见你", "遇见你zh", 1}}) {
       const auto partial = CreateSchemaSession(api, "linnet_zh_pinyin");
-      auto* schema = new rime::Schema("linnet_zh_pinyin");
+      auto* schema = IsolatedSchema("linnet_zh_pinyin");
       schema->config()->SetBool("translator/enable_correction", correction_enabled);
       rime::Service::instance().GetSession(partial)->ApplySchema(schema);
       Enter(api, partial, input);
@@ -1493,7 +1506,7 @@ void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
     // The published schema had no independent English sentence dictionary.
     // Seed that old segmentation through its original configuration before
     // exercising the upgraded reader and an explicit replacement selection.
-    auto* old_schema = new rime::Schema("linnet_zh");
+    auto* old_schema = IsolatedSchema("linnet_zh");
     old_schema->config()->SetString("translator/sentence_dictionary", "");
     rime::Service::instance().GetSession(old)->ApplySchema(old_schema);
     Enter(api, old, "kwregion");

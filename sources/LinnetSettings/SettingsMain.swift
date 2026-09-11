@@ -293,11 +293,11 @@ extension SettingsModel {
     let panel = NSSavePanel()
     panel.title = SettingsFilePanelTitle.portableExport.text(
       productName: productName, locale: locale)
-    panel.nameFieldStringValue = "\(productName)-Data.linnet-data"
     panel.canCreateDirectories = true
     panel.allowedContentTypes = [
       UTType(filenameExtension: LinnetBackupStore.portableExtension) ?? .data
     ]
+    panel.nameFieldStringValue = "\(productName)-Data"
     guard panel.runModal() == .OK, let destination = panel.url else { return }
     run(
       .portableExport,
