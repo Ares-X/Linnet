@@ -24,12 +24,15 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 The current stable release is **[0.1.23 (105)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23)**. It includes fuzzy pinyin, adjacent-key correction and related fixes, and keeps small groups of settings directly visible. See the [changelog](CHANGELOG.en.md) for changes in each version.
 
+**[0.1.25 Preview (107)](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.25)** includes improved continuous Chinese/English composition and fixes for export filenames and interface language. Existing users can download and apply the Core update in **Settings → Data & Updates → Preview**.
+
 [Features](#features) · [Installation](#installation) · [Usage](#usage) · [Updating and uninstalling](#updating-and-uninstalling) · [Privacy](#privacy) · [Contributing](#contributing)
 
 ## Why Linnet
 
 - **Easy language switching:** Chinese and Smart English use one macOS input source, so you do not have to search the system input menu to switch languages.
 - **Complete Chinese input:** Full pinyin and seven double-pinyin layouts share Chinese candidates, learning data and a local language model.
+- **Mixed sentences in Chinese mode (Preview):** Type phrases such as 跨region的migration continuously. Whole English words join the surrounding Chinese in the same candidate, without switching modes mid-sentence.
 - **English writing support:** Smart English offers completion, spelling suggestions, IPA, Chinese definitions, contextual prediction and continuous input handling, while always keeping your original text available.
 - **Offline and under your control:** Personal words, learning data, Text Expander entries and backups stay on your Mac by default. When enabled, macOS syncs Rime learning data through the fixed `iCloud Drive/Linnet` folder.
 - **Native macOS experience:** Menu bar status, candidate windows and Settings work together, with light and dark appearances and multiple candidate themes.
@@ -70,7 +73,22 @@ For Chinese learning, choose standard Rime learning, Linnet enhanced learning or
 
 Chinese candidates support horizontal, vertical and expanded multirow layouts. Compact pages can contain 3, 5, 7 or 9 candidates. In the expanded grid, use the arrow keys to move between candidates, or choose to always scroll by page.
 
-During continuous Chinese input, all-uppercase abbreviations typed with Shift remain unchanged, while the pinyin on either side continues to form Chinese sentences. Lowercase input can also produce mixed Chinese/English candidates based on context; these participate in whole-sentence ranking rather than being pinned to the top.
+**Continuous Chinese/English composition (Preview, starting with 0.1.24):** Stay in Chinese mode, type Chinese using your selected pinyin layout, and type English words in their original spelling. You can switch languages several times within a sentence before committing, without changing modes. For example:
+
+| Continuous keystrokes in Natural Code | Committed text |
+| --- | --- |
+| `kwregiondemigration` | 跨region的migration |
+| `womfxuykalignyixwvegegapdesolution` | 我们需要align一下这个gap的solution |
+
+![Real VM recording of continuous Natural Code input for 跨region的migration](resources/readme/mixed-region.gif)
+
+![Real VM recording of continuous Natural Code input for 我们需要align一下这个gap的solution](resources/readme/mixed-align.gif)
+
+_Real key events, native candidates and committed text in a Safari text field, recorded in a macOS VM running 0.1.25 Preview with Natural Code double pinyin and three candidates per page. Full pinyin and the other six double-pinyin layouts use their own Chinese codes with the same English spelling._
+
+Ambiguous words such as `size`, `mode` and `save` offer selectable English interpretations alongside Chinese candidates. With Chinese learning enabled, selected mixed phrases and English word boundaries carry across pinyin layouts. Context and learning still determine the order; choose another candidate when the input is ambiguous.
+
+Hold Shift to type uppercase abbreviations such as `CPU`, `DNS` and `HTTPS`. They retain their spelling while the pinyin on either side continues to form Chinese sentences.
 
 Additional input tools include:
 
