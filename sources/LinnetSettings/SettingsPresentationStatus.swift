@@ -189,13 +189,15 @@ enum SettingsPresentationStatus: Equatable {
         "Some learning data is still pending. Your local learning is kept; retry later.",
         "部分学习数据仍待同步。本机学习记录已保留，可稍后重试。")
     case .cloudBackupUploaded(let verifiedAt):
+      let timestamp = verifiedAt.formatted(Date.FormatStyle().locale(locale))
       pair = (
-        "Incremental recovery backup verified at \(verifiedAt.formatted()).",
-        "增量恢复备份已于 \(verifiedAt.formatted()) 校验完成。")
+        "Incremental recovery backup verified at \(timestamp).",
+        "增量恢复备份已于 \(timestamp) 校验完成。")
     case .cloudBackupUnchanged(let verifiedAt):
+      let timestamp = verifiedAt.formatted(Date.FormatStyle().locale(locale))
       pair = (
-        "Recovery data is unchanged; the verified backup is from \(verifiedAt.formatted()).",
-        "恢复数据没有变化；已校验备份时间为 \(verifiedAt.formatted())。")
+        "Recovery data is unchanged; the verified backup is from \(timestamp).",
+        "恢复数据没有变化；已校验备份时间为 \(timestamp)。")
     case .cloudSyncDisabled:
       pair = (
         "iCloud Drive learning synchronization disabled. No data was deleted.",

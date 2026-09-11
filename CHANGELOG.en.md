@@ -9,7 +9,7 @@ README, documentation, CI, build and release-script changes are not product vers
 ## Unreleased
 
 - Fixed the duplicated `.linnet-data` extension in the default personal-data export filename.
-- Core update confirmations and language-pack version details now follow the selected interface language.
+- Core update confirmations, language-pack version details and backup dates now follow the selected interface language.
 
 ## 0.1.24 — 2026-09-11 (Preview)
 

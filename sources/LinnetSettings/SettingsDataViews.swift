@@ -683,7 +683,7 @@ extension DataTabView {
               Text(backupTitle(record.state).text(locale: locale))
                 .font(.callout.weight(.medium))
               if let createdAt = record.createdAt {
-                Text(verbatim: createdAt.formatted(date: .abbreviated, time: .standard))
+                Text(createdAt, format: Date.FormatStyle(date: .abbreviated, time: .standard))
                   .font(.caption).foregroundStyle(.secondary)
               } else {
                 Text("No completion timestamp")
