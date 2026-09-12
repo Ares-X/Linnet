@@ -84,6 +84,25 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Windows build failed with exit code $LASTEXITCODE"
   }
+  # Compile the probes before spending time compressing either installer.
+  & msbuild.exe (Join-Path $PSScriptRoot "runtime-smoke.vcxproj") `
+    /m /nologo /verbosity:minimal `
+    /p:Configuration=Release /p:Platform=x64 `
+    "/p:WindowsTargetPlatformVersion=$WindowsSDK" `
+    "/p:ProjectionRoot=$Projection"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Windows runtime smoke probe compilation failed with exit code $LASTEXITCODE"
+  }
+
+  & msbuild.exe (Join-Path $PSScriptRoot "runtime-smoke.vcxproj") `
+    /m /nologo /verbosity:minimal `
+    /p:Configuration=Release /p:Platform=Win32 `
+    "/p:WindowsTargetPlatformVersion=$WindowsSDK" `
+    "/p:ProjectionRoot=$Projection"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Windows Win32 runtime smoke probe compilation failed with exit code $LASTEXITCODE"
+  }
+
   # Compile the shared runtime/frontends once, then package the target payloads.
   $Installers = foreach ($Architecture in @("x64", "arm64")) {
     $Manifest.architecture = $Architecture
@@ -100,24 +119,6 @@ try {
   }
 } finally {
   Pop-Location
-}
-
-& msbuild.exe (Join-Path $PSScriptRoot "runtime-smoke.vcxproj") `
-  /m /nologo /verbosity:minimal `
-  /p:Configuration=Release /p:Platform=x64 `
-  "/p:WindowsTargetPlatformVersion=$WindowsSDK" `
-  "/p:ProjectionRoot=$Projection"
-if ($LASTEXITCODE -ne 0) {
-  throw "Windows runtime smoke probe compilation failed with exit code $LASTEXITCODE"
-}
-
-& msbuild.exe (Join-Path $PSScriptRoot "runtime-smoke.vcxproj") `
-  /m /nologo /verbosity:minimal `
-  /p:Configuration=Release /p:Platform=Win32 `
-  "/p:WindowsTargetPlatformVersion=$WindowsSDK" `
-  "/p:ProjectionRoot=$Projection"
-if ($LASTEXITCODE -ne 0) {
-  throw "Windows Win32 runtime smoke probe compilation failed with exit code $LASTEXITCODE"
 }
 
 foreach ($Artifact in ($Installers + @(

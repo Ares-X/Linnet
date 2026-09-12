@@ -262,3 +262,56 @@ publication path. Build owner 1 -> 1; artifact uploader implementation 1 -> 1;
 new services/dependencies 0. Scope: the existing Windows workflow and this
 evidence document. Validate YAML and the existing publication boundary, then
 confirm the corrected run's actual symbol inventory alongside its installers.
+
+## Portable update scope still open
+
+The current native Data page explicitly offers installer-based upgrades only.
+Mainline `SettingsViews` / `SettingsModelLanguageData` also expose in-app Core
+updates and independent language-data updates. These are not inherently macOS
+features and remain incomplete Windows alignment; a passing typing/Settings
+candidate must not close the full goal while they are missing.
+
+The removed Weasel updater is WinSparkle. Reusing its maintained stable library
+is the candidate approach for the installer-update boundary, pending permission
+to restore that runtime dependency. It must consume Linnet's release identity,
+not upstream Weasel's feed, and must not enable public publishing before UAT.
+The [upstream publishing guide](https://winsparkle.org/guides/publishing-updates/)
+specifies that platform matching follows the DLL architecture, not the native
+OS. Linnet's shared x64 server on Windows ARM therefore requires explicit correct
+installer targeting; a default x64 feed is not ARM64 update evidence.
+
+Independent language data already has a root owner, `LinnetPackContract` and
+`LinnetDataRegistry`; the existing shared packs include source dictionaries as
+well as precompiled artifacts. Windows must preserve this contract and its native
+deployment boundary, not grow a second format/parser or treat the macOS-built
+dictionary binaries as Windows acceptance. No updater dependency, key, feed,
+publication path or language-pack implementation has been changed in `849c6fd`.
+
+## Native probe build correction
+
+Run `34720228009` on `849c6fd` compiled the native frontend/Settings projects and
+both installers, then failed while compiling the x64 runtime probe. The exact
+diagnostics are C4244 at glog `logging.h:94,105` and C4996 at `logging.h:503`,
+promoted by `/WX` to C2220. The probe's new Settings consumer includes private
+Rime headers, but its project classified their installed dependency headers as
+first-party `/W4` source. No Linnet source diagnostic or native product link
+failure was reported. Neither installer was uploaded or installed because the
+preflight was not reached. Same-run symbols were retained successfully.
+
+- Deliverable: compile the existing runtime/Settings/archive probes with strict
+  diagnostics on Linnet code and the compiler's normal external-header boundary
+  on installed Rime/glog/Boost headers. Keep the existing IPC header exception;
+  do not patch glog, disable `/WX` globally or skip a probe.
+- Owner: `runtime-smoke.vcxproj`, consumed by both existing x64 and Win32 builds.
+  Use MSVC's documented [external include directories](https://learn.microsoft.com/en-us/cpp/build/reference/external-external-headers-diagnostics)
+  and standard MSBuild warning properties; remove duplicate command-line warning
+  overrides. Compiler/test owners 1 -> 1; probe executions 2 -> 2; new dependencies,
+  parsers, services and fallback paths 0.
+- The same run spent about 9m35s compressing its installers before discovering
+  this probe compile failure. Move those two existing compile invocations in
+  `build.ps1` before NSIS packaging, after native binaries are built. Packaging
+  and test owners remain one each; no new cache, runner or bypass is introduced.
+- Scope: the probe project, existing Windows build script and this evidence.
+  Check XML, PowerShell syntax and diff, then one corrected native build. Shared
+  input policies and product sources are unchanged; do not repeat unrelated host
+  typing matrices. Exact-candidate desktop UAT still waits for the full preflight.

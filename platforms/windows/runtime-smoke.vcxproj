@@ -41,11 +41,13 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectionRoot)\include;$(ProjectionRoot)\librime\dist_$(Platform)\include;$(ProjectionRoot)\librime\include;$(BOOST_ROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectionRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalOptions>/utf-8 /W4 /WX %(AdditionalOptions)</AdditionalOptions>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <AdditionalOptions>/utf-8 /external:I"$(ProjectionRoot)\librime\dist_$(Platform)\include" /external:I"$(ProjectionRoot)\librime\include" /external:I"$(BOOST_ROOT)" /external:W0 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(ProjectionRoot)\lib64;$(BOOST_ROOT)\stage\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -54,11 +56,13 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectionRoot)\include;$(ProjectionRoot)\librime\dist_$(Platform)\include;$(ProjectionRoot)\librime\include;$(BOOST_ROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectionRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalOptions>/utf-8 /W4 /WX %(AdditionalOptions)</AdditionalOptions>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <AdditionalOptions>/utf-8 /external:I"$(ProjectionRoot)\librime\dist_$(Platform)\include" /external:I"$(ProjectionRoot)\librime\include" /external:I"$(BOOST_ROOT)" /external:W0 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(ProjectionRoot)\lib;$(BOOST_ROOT)\stage\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -68,7 +72,7 @@
   <ItemGroup>
     <ClCompile Include="runtime_smoke.cc" />
     <ClCompile Include="ipc_archive_probe.cc">
-      <AdditionalOptions>/external:I"$(ProjectionRoot)\include" /external:I"$(BOOST_ROOT)" /external:W0 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/external:I"$(ProjectionRoot)\include" %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
