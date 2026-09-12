@@ -55,7 +55,10 @@ macOS material blur and custom underline/tile drawing are not portable Weasel
 capabilities and are deliberately not emulated.
 
 Weasel retains its mature schema selector, theme selector, user-dictionary
-management, synchronization and deployment entrypoints. Its optional
+management, synchronization and deployment entrypoints. The
+schema switcher opens with Ctrl+` or F4; choose Smart English there for English
+completion with IPA and Chinese glosses. Shift's plain ASCII mode is separate
+and does not show candidates. The optional
 package-mutating schema downloader is removed completely because root Linnet
 data is package-owned. The SwiftUI/AppKit
 Linnet Settings application is not shipped on Windows. Input defaults still

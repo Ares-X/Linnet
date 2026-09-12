@@ -110,6 +110,25 @@ void ExpectComment(RimeApi* api,
   }
 }
 
+void ExpectEnglishSchemaSwitch(RimeApi* api, RimeSessionId session) {
+  RimeConfig config = {};
+  char english_name[128] = {};
+  if (!api->schema_open("linnet_en", &config)) Fail("English schema unavailable");
+  const bool has_name = api->config_get_string(
+      &config, "schema/name", english_name, sizeof(english_name));
+  api->config_close(&config);
+  if (!has_name) Fail("English schema name unavailable");
+  const auto menu = Enter(api, session, "{Control+grave}");
+  const auto& english = Find(menu, english_name);
+  if (!api->select_candidate(session, static_cast<size_t>(&english - menu.data())))
+    Fail("English schema cannot be selected from the switcher");
+  char current[128] = {};
+  if (!api->get_current_schema(session, current, sizeof(current)) ||
+      std::string(current) != "linnet_en") {
+    Fail("schema shortcut did not activate Smart English");
+  }
+}
+
 void ExpectCorrection(RimeApi* api, RimeSessionId session) {
   const auto candidates = Enter(api, session, "deserilazation");
   if (candidates.empty() || candidates.front().text != "deserilazation") {
@@ -222,7 +241,8 @@ int main(int argc, char** argv) {
     api->join_maintenance_thread();
   }
 
-  const RimeSessionId english = CreateSession(api, "linnet_en");
+  const RimeSessionId english = CreateSession(api, "linnet_zh_pinyin");
+  ExpectEnglishSchemaSwitch(api, english);
   ExpectComment(api, english, "cloud", "cloud", "klaʊd", "云");
   ExpectCorrection(api, english);
   ExpectCandidate(api, english, "yun", "cloud");

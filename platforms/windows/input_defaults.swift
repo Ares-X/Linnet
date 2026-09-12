@@ -13,8 +13,13 @@ struct WindowsInputDefaults {
     for (name, contents) in projections where name != LinnetSettingsProjectionRenderer.squirrelCustomFile {
       let stem = String(name.dropLast(".custom.yaml".count))
       let policy = "linnet_windows_" + stem
-      try contents.write(to: output.appendingPathComponent(policy + ".yaml"),
-                         atomically: true, encoding: .utf8)
+      var policyContents = contents
+      if stem == "default" {
+        // Weasel uses Rime's switcher; the macOS frontend has its own menu.
+        policyContents += "  switcher/hotkeys:\n    - Control+grave\n    - F4\n"
+      }
+      try policyContents.write(to: output.appendingPathComponent(policy + ".yaml"),
+                               atomically: true, encoding: .utf8)
       let schema = stem == "default" ? "default.yaml" : stem + ".schema.yaml"
       let original = try String(contentsOf: source.appendingPathComponent(schema), encoding: .utf8)
       let patches = "\n__patch:\n  - " + policy + ":/patch\n  - " + stem + ".custom:/patch?\n"
