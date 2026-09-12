@@ -22,16 +22,16 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法，将中文�
 
 **[下载最新版 Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-正式版：**[0.1.23（105）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23)**。各版本功能与修复见[版本记录](CHANGELOG.md)。
+正式版：**[0.1.25（107）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25)**，包含连续中英混输增强。各版本功能与修复见[版本记录](CHANGELOG.md)。
 
-体验连续中英混输增强：**[0.1.25 Preview（107）](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.25)**。已有用户可在 **Settings → 数据与更新 → 预览版** 下载并应用 Core 更新。
+已有用户可在 **Settings → 数据与更新 → 正式版** 下载并应用 Core 更新。
 
 [产品体验](#产品体验) · [安装](#安装) · [使用指南](#使用指南) · [升级与卸载](#升级与卸载) · [隐私](#隐私) · [参与贡献](#参与贡献)
 
 ## 为什么选择 Linnet
 
 - **中文输入**：全拼与七种双拼，共享词库、学习数据和本地语言模型。
-- **连续混输（Preview）**：中文句子中直接输入英文整词，无需中途上屏或切换模式。
+- **连续混输**：中文句子中直接输入英文整词，无需中途上屏或切换模式。
 - **Smart English**：补全、纠错、IPA、中文释义与上下文预测，保留原始输入。
 - **个人词典与离线数据**：自定义词、Text Expander、学习与备份保存在本机，可选 iCloud 学习词同步。
 - **原生 macOS 体验**：统一输入源、候选窗与 Settings，七套浅色／深色主题。
@@ -75,7 +75,7 @@ Linnet 基于 Squirrel／librime，结合万象词库、RIME-LMDG 模型、rime-
 
 </details>
 
-**连续中英混输（0.1.24 起的 Preview）**：中文按当前全拼或双拼编码输入，英文直接敲原文，可在一句中多次切换，中途不必上屏。以下使用自然码：
+**连续中英混输**：中文按当前全拼或双拼编码输入，英文直接敲原文，可在一句中多次切换，中途不必上屏。以下使用自然码：
 
 | 连续敲键 | 选词上屏 |
 | --- | --- |
@@ -84,7 +84,7 @@ Linnet 基于 Squirrel／librime，结合万象词库、RIME-LMDG 模型、rime-
 
 ![自然码连续输入我们需要align一下这个gap的solution的虚拟机实录](resources/readme/mixed-align.gif)
 
-_0.1.25 Preview · macOS 虚拟机 Safari 文本框 · 自然码、每页 3 项候选；自动按键实录，原速播放。其他拼音方案使用各自中文编码，英文拼写相同。_
+_录制于 0.1.25 Preview · macOS 虚拟机 Safari 文本框 · 自然码、每页 3 项候选；自动按键实录，原速播放。其他拼音方案使用各自中文编码，英文拼写相同。_
 
 <details>
 <summary>查看短句“跨region的migration”实录</summary>
@@ -134,7 +134,7 @@ _左：中文模式的拼音反查；右：带 IPA 和中文释义的英文补�
 
 | 内容 | 参考大小 | 包含内容 |
 | --- | --- | --- |
-| [0.1.23 完整安装包](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23) | **约 428 MB** | 程序、中英文词库、本地模型和辅助数据 |
+| [0.1.25 完整安装包](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25) | **约 428 MB** | 程序、中英文词库、本地模型和辅助数据 |
 | [0.1.25 Core 更新包](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.25) | **约 7 MB** | 仅程序，复用已安装语言数据 |
 | [锁定的 LTS 模型](upstreams.lock.json) | **420.25 MB** | 未压缩模型文件，已包含在完整安装内容中 |
 

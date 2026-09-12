@@ -6,7 +6,9 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
-## 0.1.25 — 2026-09-11（预览版）
+## 0.1.25 — 2026-09-11
+
+[正式版 0.1.25（107）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25) 包含以下修复，以及 0.1.24 预览版的连续中英混输增强。
 
 - 修复导出个人数据时默认文件名重复添加 `.linnet-data` 扩展名的问题。
 - 核心更新确认窗口、词库版本详情和备份日期现在跟随所选界面语言，修复英文界面中混入中文的问题。

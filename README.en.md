@@ -22,16 +22,16 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 **[Download the latest Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-Stable: **[0.1.23 (105)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23)**. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
+Stable: **[0.1.25 (107)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25)**, including improved continuous Chinese/English composition. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
 
-Try improved continuous mixed input in **[0.1.25 Preview (107)](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.25)**. Existing users can download and apply the Core update in **Settings → Data & Updates → Preview**.
+Existing users can download and apply the Core update in **Settings → Data & Updates → Stable**.
 
 [Features](#features) · [Installation](#installation) · [Usage](#usage) · [Updating and uninstalling](#updating-and-uninstalling) · [Privacy](#privacy) · [Contributing](#contributing)
 
 ## Why Linnet
 
 - **Chinese input:** Full pinyin and seven double-pinyin layouts share dictionaries, learning data and a local language model.
-- **Continuous mixed input (Preview):** Type whole English words inside Chinese sentences without committing or switching modes mid-sentence.
+- **Continuous mixed input:** Type whole English words inside Chinese sentences without committing or switching modes mid-sentence.
 - **Smart English:** Completion, correction, IPA, Chinese definitions and contextual prediction, with original input preserved.
 - **Personal dictionaries and offline data:** Custom words, Text Expander, learning and backups stay local, with optional iCloud learning sync.
 - **Native macOS experience:** One input source, candidate windows and Settings, with seven light/dark themes.
@@ -75,7 +75,7 @@ Adjacent-key and front/back nasal-final corrections are available by default. Va
 
 </details>
 
-**Continuous Chinese/English composition (Preview, since 0.1.24):** Type Chinese using the selected pinyin layout and English in its original spelling. You can switch languages several times before committing. These examples use Natural Code:
+**Continuous Chinese/English composition:** Type Chinese using the selected pinyin layout and English in its original spelling. You can switch languages several times before committing. These examples use Natural Code:
 
 | Continuous keystrokes | Committed text |
 | --- | --- |
@@ -84,7 +84,7 @@ Adjacent-key and front/back nasal-final corrections are available by default. Va
 
 ![Real VM recording of continuous Natural Code input for 我们需要align一下这个gap的solution](resources/readme/mixed-align.gif)
 
-_0.1.25 Preview · Safari text field in a macOS VM · Natural Code, three candidates per page. Automated key events, played at the recorded speed. Other layouts use their own Chinese codes with the same English spelling._
+_Recorded with 0.1.25 Preview · Safari text field in a macOS VM · Natural Code, three candidates per page. Automated key events, played at the recorded speed. Other layouts use their own Chinese codes with the same English spelling._
 
 <details>
 <summary>View the shorter 跨region的migration recording</summary>
@@ -134,7 +134,7 @@ Sizes use decimal MB; check the corresponding release for exact package sizes.
 
 | Content | Reference size | Includes |
 | --- | --- | --- |
-| [0.1.23 complete installer](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23) | **About 428 MB** | App, Chinese/English dictionaries, local model and supplementary data |
+| [0.1.25 complete installer](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25) | **About 428 MB** | App, Chinese/English dictionaries, local model and supplementary data |
 | [0.1.25 Core update](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.25) | **About 7 MB** | App only; reuses installed language data |
 | [Pinned LTS model](upstreams.lock.json) | **420.25 MB** | Uncompressed model file, already included in the complete installation |
 
