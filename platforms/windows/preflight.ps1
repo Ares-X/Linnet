@@ -285,6 +285,10 @@ try {
     }
     Assert-File $Inproc
   }
+  # A registry entry and LoadLibrary alone do not resolve forwarded exports.
+  # Activate the installed COM class to exercise the real frontend load path.
+  $TextService = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]$Clsid))
+  [void][Runtime.InteropServices.Marshal]::ReleaseComObject($TextService)
   $ProfilePath = "Software\Microsoft\CTF\TIP\$Clsid\LanguageProfile\0x00000404\$Profile"
   if (-not (Test-RegistryKey LocalMachine Registry32 $ProfilePath) -and
       -not (Test-RegistryKey LocalMachine Registry64 $ProfilePath)) {

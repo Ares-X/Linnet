@@ -143,3 +143,23 @@ A passing macOS check or headless Windows compile is component evidence only;
 it is not Windows product UAT. Every required row must be exercised on the
 exact installer that would be published; an unexecuted row is `NOT_EXERCISED`,
 not a pass.
+
+### Desktop validation on Parallels
+
+Use the authorized Windows guest, with the exact Actions installer SHA-256
+verified after transfer. `prlctl exec "Tiny Windows 11" --current-user` runs in
+the logged-in user's desktop session; omitting `--current-user` runs as SYSTEM
+in session 0 and cannot establish user input behavior. Keep administrative
+installation and user-desktop typing separate, without changing UAC policy.
+
+`prlctl capture "Tiny Windows 11" --file <host-path.png>` captures only the guest.
+For typing, send actual press/release events with `prlctl send-key-event --json`,
+including held Shift spans. Do not use clipboard paste or editor text setters.
+Check the foreground window before each journey: launching a guest console can
+take focus from an editor or dismiss a menu. Observe the candidate before commit
+and read the application's resulting text afterwards.
+
+On ARM64, installation and menu visibility alone do not establish a working
+frontend. The installed COM class must resolve its forwarded exports using
+Linnet's own system DLLs. Record native ARM64 and emulated x64/x86 application
+results separately, and retain the exact candidate when a load failure occurs.

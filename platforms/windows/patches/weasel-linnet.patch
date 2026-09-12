@@ -2191,3 +2191,105 @@ index efa98c7..871cb93 100644
    } else if (argc > 1 && !wcscmp(L"/console", argv[1])) {
      return console_main();
      return 0;
+diff --git a/arm64x_wrapper/WeaselIME_arm64.def b/arm64x_wrapper/WeaselIME_arm64.def
+index 12c8480..fa21ddb 100644
+--- a/arm64x_wrapper/WeaselIME_arm64.def
++++ b/arm64x_wrapper/WeaselIME_arm64.def
+@@ -1,16 +1,16 @@
+ EXPORTS
+-	ImeConversionList = weaselARM64.ime.ImeConversionList
+-	ImeConfigure = weaselARM64.ime.ImeConfigure
+-	ImeDestroy = weaselARM64.ime.ImeDestroy
+-	ImeEscape = weaselARM64.ime.ImeEscape
+-	ImeInquire = weaselARM64.ime.ImeInquire
+-	ImeProcessKey = weaselARM64.ime.ImeProcessKey
+-	ImeSelect = weaselARM64.ime.ImeSelect
+-	ImeSetActiveContext = weaselARM64.ime.ImeSetActiveContext
+-	ImeToAsciiEx = weaselARM64.ime.ImeToAsciiEx
+-	NotifyIME = weaselARM64.ime.NotifyIME
+-	ImeRegisterWord = weaselARM64.ime.ImeRegisterWord
+-	ImeUnregisterWord = weaselARM64.ime.ImeUnregisterWord
+-	ImeGetRegisterWordStyle = weaselARM64.ime.ImeGetRegisterWordStyle
+-	ImeEnumRegisterWord = weaselARM64.ime.ImeEnumRegisterWord
+-	ImeSetCompositionString = weaselARM64.ime.ImeSetCompositionString
++	ImeConversionList = linnetARM64.ime.ImeConversionList
++	ImeConfigure = linnetARM64.ime.ImeConfigure
++	ImeDestroy = linnetARM64.ime.ImeDestroy
++	ImeEscape = linnetARM64.ime.ImeEscape
++	ImeInquire = linnetARM64.ime.ImeInquire
++	ImeProcessKey = linnetARM64.ime.ImeProcessKey
++	ImeSelect = linnetARM64.ime.ImeSelect
++	ImeSetActiveContext = linnetARM64.ime.ImeSetActiveContext
++	ImeToAsciiEx = linnetARM64.ime.ImeToAsciiEx
++	NotifyIME = linnetARM64.ime.NotifyIME
++	ImeRegisterWord = linnetARM64.ime.ImeRegisterWord
++	ImeUnregisterWord = linnetARM64.ime.ImeUnregisterWord
++	ImeGetRegisterWordStyle = linnetARM64.ime.ImeGetRegisterWordStyle
++	ImeEnumRegisterWord = linnetARM64.ime.ImeEnumRegisterWord
++	ImeSetCompositionString = linnetARM64.ime.ImeSetCompositionString
+diff --git a/arm64x_wrapper/WeaselIME_x64.def b/arm64x_wrapper/WeaselIME_x64.def
+index bc8fc17..0ae7e54 100644
+--- a/arm64x_wrapper/WeaselIME_x64.def
++++ b/arm64x_wrapper/WeaselIME_x64.def
+@@ -1,16 +1,16 @@
+ EXPORTS
+-	ImeConversionList = weaselx64.ime.ImeConversionList
+-	ImeConfigure = weaselx64.ime.ImeConfigure
+-	ImeDestroy = weaselx64.ime.ImeDestroy
+-	ImeEscape = weaselx64.ime.ImeEscape
+-	ImeInquire = weaselx64.ime.ImeInquire
+-	ImeProcessKey = weaselx64.ime.ImeProcessKey
+-	ImeSelect = weaselx64.ime.ImeSelect
+-	ImeSetActiveContext = weaselx64.ime.ImeSetActiveContext
+-	ImeToAsciiEx = weaselx64.ime.ImeToAsciiEx
+-	NotifyIME = weaselx64.ime.NotifyIME
+-	ImeRegisterWord = weaselx64.ime.ImeRegisterWord
+-	ImeUnregisterWord = weaselx64.ime.ImeUnregisterWord
+-	ImeGetRegisterWordStyle = weaselx64.ime.ImeGetRegisterWordStyle
+-	ImeEnumRegisterWord = weaselx64.ime.ImeEnumRegisterWord
+-	ImeSetCompositionString = weaselx64.ime.ImeSetCompositionString
++	ImeConversionList = linnetx64.ime.ImeConversionList
++	ImeConfigure = linnetx64.ime.ImeConfigure
++	ImeDestroy = linnetx64.ime.ImeDestroy
++	ImeEscape = linnetx64.ime.ImeEscape
++	ImeInquire = linnetx64.ime.ImeInquire
++	ImeProcessKey = linnetx64.ime.ImeProcessKey
++	ImeSelect = linnetx64.ime.ImeSelect
++	ImeSetActiveContext = linnetx64.ime.ImeSetActiveContext
++	ImeToAsciiEx = linnetx64.ime.ImeToAsciiEx
++	NotifyIME = linnetx64.ime.NotifyIME
++	ImeRegisterWord = linnetx64.ime.ImeRegisterWord
++	ImeUnregisterWord = linnetx64.ime.ImeUnregisterWord
++	ImeGetRegisterWordStyle = linnetx64.ime.ImeGetRegisterWordStyle
++	ImeEnumRegisterWord = linnetx64.ime.ImeEnumRegisterWord
++	ImeSetCompositionString = linnetx64.ime.ImeSetCompositionString
+diff --git a/arm64x_wrapper/WeaselTSF_arm64.def b/arm64x_wrapper/WeaselTSF_arm64.def
+index 8e3a547..98dc8de 100644
+--- a/arm64x_wrapper/WeaselTSF_arm64.def
++++ b/arm64x_wrapper/WeaselTSF_arm64.def
+@@ -1,5 +1,5 @@
+ EXPORTS
+-	DllGetClassObject = weaselARM64.dll.DllGetClassObject
+-	DllCanUnloadNow = weaselARM64.dll.DllCanUnloadNow
+-	DllRegisterServer = weaselARM64.dll.DllRegisterServer
+-	DllUnregisterServer = weaselARM64.dll.DllUnregisterServer
+\ No newline at end of file
++	DllGetClassObject = linnetARM64.dll.DllGetClassObject
++	DllCanUnloadNow = linnetARM64.dll.DllCanUnloadNow
++	DllRegisterServer = linnetARM64.dll.DllRegisterServer
++	DllUnregisterServer = linnetARM64.dll.DllUnregisterServer
+diff --git a/arm64x_wrapper/WeaselTSF_x64.def b/arm64x_wrapper/WeaselTSF_x64.def
+index 11ed1b5..fee9cb9 100644
+--- a/arm64x_wrapper/WeaselTSF_x64.def
++++ b/arm64x_wrapper/WeaselTSF_x64.def
+@@ -1,5 +1,5 @@
+ EXPORTS
+-	DllGetClassObject = weaselx64.dll.DllGetClassObject
+-	DllCanUnloadNow = weaselx64.dll.DllCanUnloadNow
+-	DllRegisterServer = weaselx64.dll.DllRegisterServer
+-	DllUnregisterServer = weaselx64.dll.DllUnregisterServer
+\ No newline at end of file
++	DllGetClassObject = linnetx64.dll.DllGetClassObject
++	DllCanUnloadNow = linnetx64.dll.DllCanUnloadNow
++	DllRegisterServer = linnetx64.dll.DllRegisterServer
++	DllUnregisterServer = linnetx64.dll.DllUnregisterServer
