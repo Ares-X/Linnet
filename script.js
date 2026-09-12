@@ -1,38 +1,112 @@
-const tabs = [...document.querySelectorAll('[role="tab"]')];
-
-function selectTab(tab, focus = false) {
-  for (const item of tabs) {
-    const selected = item === tab;
-    item.setAttribute('aria-selected', String(selected));
-    item.tabIndex = selected ? 0 : -1;
-    document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
-  }
-  if (focus) tab.focus();
-}
-
-for (const tab of tabs) {
-  tab.addEventListener('click', () => selectTab(tab));
-  tab.addEventListener('keydown', (event) => {
-    const current = tabs.indexOf(tab);
-    let next;
-    if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
-    if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
-    if (event.key === 'Home') next = 0;
-    if (event.key === 'End') next = tabs.length - 1;
-    if (next === undefined) return;
-    event.preventDefault();
-    selectTab(tabs[next], true);
+// Clipboard feedback is shared by the product page and the guide.
+for (const button of document.querySelectorAll('[data-copy]')) {
+  button.addEventListener('click', async () => {
+    const status = button.closest('.command-row').nextElementSibling;
+    try {
+      await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent);
+      status.textContent = '命令已复制。';
+    } catch {
+      status.textContent = '无法复制，请选中上方命令后手动复制。';
+    }
   });
 }
 
-const copyButton = document.getElementById('copy-command');
-const copyStatus = document.getElementById('copy-status');
-copyButton.addEventListener('click', async () => {
-  const command = document.getElementById('verify-command').textContent;
-  try {
-    await navigator.clipboard.writeText(command);
-    copyStatus.textContent = '命令已复制。';
-  } catch {
-    copyStatus.textContent = '未能访问剪贴板，请选中上方命令手动复制。';
-  }
-});
+// All theme images remain readable when JavaScript is unavailable.
+const gallery = document.querySelector('[data-theme-gallery]');
+if (gallery) {
+  const controls = document.querySelector('.theme-controls');
+  const panels = [...gallery.querySelectorAll('.theme-card')];
+  const tabs = panels.map((panel, index) => {
+    const tab = document.createElement('button');
+    panel.id = `theme-panel-${index}`;
+    panel.setAttribute('role', 'tabpanel');
+    panel.tabIndex = 0;
+    panel.setAttribute('aria-labelledby', `theme-tab-${index}`);
+    tab.id = `theme-tab-${index}`;
+    tab.type = 'button';
+    tab.textContent = panel.querySelector('h3').textContent;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', panel.id);
+    controls.append(tab);
+    return tab;
+  });
+  const selectTheme = (index, focus = false) => {
+    tabs.forEach((tab, i) => {
+      tab.setAttribute('aria-selected', String(i === index));
+      tab.tabIndex = i === index ? 0 : -1;
+      panels[i].hidden = i !== index;
+    });
+    if (focus) {
+      tabs[index].focus({ preventScroll: true });
+      tabs[index].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  };
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => selectTheme(index));
+    tab.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = tabs.length - 1;
+      if (next === undefined) return;
+      event.preventDefault();
+      selectTheme(next, true);
+    });
+  });
+  selectTheme(0);
+  controls.hidden = false;
+  gallery.classList.add('is-interactive');
+}
+
+const guideNavigation = document.querySelector('.guide-navigation');
+if (guideNavigation) {
+  const desktop = matchMedia('(min-width: 1000px)');
+  const links = [...guideNavigation.querySelectorAll('a[href^="#"]')];
+  const sections = links.map(link => document.querySelector(link.getAttribute('href')));
+  const currentLabel = guideNavigation.querySelector('.nav-current-label');
+  const fitNavigation = () => {
+    guideNavigation.open = desktop.matches;
+    guideNavigation.querySelector('summary').tabIndex = desktop.matches ? -1 : 0;
+  };
+  fitNavigation();
+  desktop.addEventListener('change', fitNavigation);
+  guideNavigation.querySelector('summary').addEventListener('click', event => {
+    if (desktop.matches) event.preventDefault();
+  });
+  guideNavigation.addEventListener('click', event => {
+    if (!event.target.closest('a') || desktop.matches) return;
+    guideNavigation.open = false;
+  });
+  const revealHash = () => {
+    let target;
+    try { target = document.getElementById(decodeURIComponent(location.hash.slice(1))); }
+    catch { return; }
+    if (!target) return;
+    for (let node = target; node; node = node.parentElement) {
+      if (node instanceof HTMLDetailsElement) node.open = true;
+    }
+  };
+  revealHash();
+  window.addEventListener('hashchange', revealHash);
+  let scheduled = false;
+  const markSection = () => {
+    scheduled = false;
+    const boundary = desktop.matches ? 145 : 190;
+    let current = 0;
+    sections.forEach((section, index) => {
+      if (section.getBoundingClientRect().top <= boundary) current = index;
+    });
+    links.forEach((link, index) => {
+      if (index === current) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    });
+    currentLabel.textContent = links[current].textContent.replace(/^\d+/, '').trim();
+  };
+  const scheduleSection = () => {
+    if (!scheduled) { scheduled = true; requestAnimationFrame(markSection); }
+  };
+  window.addEventListener('scroll', scheduleSection, { passive: true });
+  window.addEventListener('resize', scheduleSection);
+  markSection();
+}

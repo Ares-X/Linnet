@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Linnet 双韵使用指南：安装启用、全拼与双拼、英文补全与查词、个人词典、外观设置、学习同步和更新。">
+  <title>使用指南 — Linnet 双韵</title>
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css?v=1d5e2af090fe">
+  <script src="script.js?v=b2eeee60a65c" defer></script>
+</head>
+<body class="guide-body">
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="index.html" aria-label="Linnet 双韵首页"><img src="assets/mark.svg" alt="" width="38" height="34"><span>Linnet <span class="brand-cn">双韵</span></span></a>
+      <nav aria-label="主导航"><a href="index.html">产品首页</a><a href="guide.html" aria-current="page">使用指南</a><a class="nav-download" href="index.html#install">下载 <span aria-hidden="true">↓</span></a></nav>
+    </div>
+  </header>
+  <div class="wrap guide-layout">
+    <aside class="guide-sidebar">
+      <details class="guide-navigation" open>
+        <summary>指南目录 <span class="nav-current-label" aria-hidden="true">安装与启用</span><span class="disclosure-icon" aria-hidden="true">+</span></summary>
+        <nav class="guide-toc" aria-label="指南章节">
+          <p class="nav-group">开始使用</p>
+          <a href="#install"><span>01</span>安装与启用</a>
+          <a href="#modes"><span>02</span>输入模式</a>
+          <p class="nav-group">输入与配置</p>
+          <a href="#chinese"><span>03</span>中文输入</a>
+          <a href="#english"><span>04</span>英文与查词</a>
+          <a href="#dictionary"><span>05</span>词典与短语</a>
+          <a href="#appearance"><span>06</span>外观设置</a>
+          <p class="nav-group">数据与维护</p>
+          <a href="#data"><span>07</span>同步与备份</a>
+          <a href="#updates"><span>08</span>更新与修复</a>
+        </nav>
+      </details>
+      <a class="sidebar-source" href="https://github.com/Ares-X/Linnet/blob/main/README.md">项目文档 <span aria-hidden="true">↗</span></a>
+    </aside>
+    <main id="main" class="guide-content">
+      <div class="guide-intro">
+        <p class="eyebrow">Linnet 双韵</p>
+        <h1>使用指南</h1>
+        <p class="guide-lead">安装、输入与个性化设置。</p>
+        <div class="quick-links" aria-label="常用操作">
+          <a href="#chinese"><span>切换全拼 / 双拼</span><span aria-hidden="true">↗</span></a>
+          <a href="#lookup"><span>用拼音查英文</span><span aria-hidden="true">↗</span></a>
+          <a href="#expander"><span>设置常用短语</span><span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="settings-entry"><span class="entry-label">设置入口</span><p>菜单栏输入菜单 <span aria-hidden="true">›</span> <strong>Settings</strong></p><small>修改输入选项或词典后，点击「应用更改」保存。</small></div>
+      </div>
+
+      <section id="install" class="guide-section" aria-labelledby="install-title">
+        <div class="chapter-heading"><span aria-hidden="true">01</span><h2 id="install-title">安装与启用</h2></div>
+        <p class="section-lead">适用于 Apple Silicon Mac，需 macOS 13 或更高版本。</p>
+        <ol class="steps">
+          <li><h3>下载并安装</h3><p>从<a href="https://github.com/Ares-X/Linnet/releases/latest">项目发布页</a>下载 <code>Linnet.pkg</code>，在 Finder 中右键选择「打开」，按安装器提示完成安装。</p></li>
+          <li><h3>注销并重新登录一次</h3><p>保存手头的工作后注销，让 macOS 完成首次输入法登记。日后在设置中更新核心无需重复这一步。</p></li>
+          <li><h3>添加输入法</h3><p>打开「系统设置 → 键盘 → 文本输入 → 编辑」，添加或启用 Linnet，按系统提示允许。</p></li>
+          <li><h3>开始输入</h3><p>在菜单栏输入菜单中选中 Linnet，输入拼音，确认中文候选正常显示。</p></li>
+        </ol>
+        <div class="note"><strong>首次打开安装包</strong><p>社区版没有 Apple Developer ID 签名或公证。若系统拦截安装，确认文件来自本项目后，在「系统设置 → 隐私与安全性」中按提示允许打开。</p></div>
+        <details class="guide-details"><summary>文件校验与安装位置<span class="disclosure-icon" aria-hidden="true">+</span></summary><div>
+          <p>在终端中进入安装包所在目录，运行以下命令，与同一版本发布页上的 SHA-256 核对。校验值不符或提示文件损坏时，请停止安装并核对来源。</p>
+          <div class="command-row"><code id="guide-verify-command">shasum -a 256 Linnet.pkg</code><button type="button" data-copy="guide-verify-command">复制命令</button></div><p class="copy-status" role="status" aria-live="polite"></p>
+          <p>Linnet 安装到 <code>~/Library/Input Methods/Linnet.app</code>，无需管理员权限。安装后不要手动移动 App。</p>
+        </div></details>
+      </section>
+
+      <section id="modes" class="guide-section" aria-labelledby="modes-title">
+        <div class="chapter-heading"><span aria-hidden="true">02</span><h2 id="modes-title">输入模式</h2></div>
+        <p class="section-lead">中文、英文辅助和直接输入，共用一个输入法。</p>
+        <div class="mode-cards">
+          <article><span class="mode-badge" aria-hidden="true">中</span><h3>中文</h3><p>全拼或双拼，也支持连续中英混输。双拼时菜单栏显示「双」。</p></article>
+          <article><span class="mode-badge" aria-hidden="true">En</span><h3>Smart English</h3><p>英文补全、纠错、音标、中文释义和下一词预测。</p></article>
+          <article><span class="mode-badge" aria-hidden="true">A</span><h3>ASCII</h3><p>直接输入字符。适合代码、命令等不需要候选转换的内容。</p></article>
+        </div>
+        <dl class="option-list"><div><dt><kbd>Shift</kbd></dt><dd>轻按左或右 Shift，切换中文与 Smart English。</dd></div><div><dt><kbd>Caps Lock</kbd></dt><dd>进入或退出 ASCII，菜单栏和光标旁会提示当前模式。</dd></div></dl>
+        <p>从菜单栏输入菜单打开 <strong>Settings</strong>。设置界面支持简体中文与英文。</p>
+      </section>
+
+      <section id="chinese" class="guide-section" aria-labelledby="chinese-title">
+        <div class="chapter-heading"><span aria-hidden="true">03</span><h2 id="chinese-title">中文输入</h2></div>
+        <p class="settings-path">Settings <span>›</span> 输入</p>
+        <h3>全拼与双拼</h3><p>在中文方案中选择全拼或双拼，再点击「应用更改」。也可在本页选择简体或繁体输出。</p>
+        <ul class="scheme-list" aria-label="支持的拼音方案"><li>全拼</li><li>自然码</li><li>小鹤</li><li>微软</li><li>搜狗</li><li>智能 ABC</li><li>紫光</li><li>拼音加加</li></ul>
+        <h3>连续中英混输</h3><p>保持中文模式，中文按当前拼音方案输入，英文输入完整单词。一句中可以多次穿插英文，无需中途切换模式。</p>
+        <div class="input-example"><div><span>自然码输入</span><code>kwregiondemigration</code></div><span class="example-arrow" aria-hidden="true">↓</span><div><span>选词结果</span><strong>跨region的migration</strong></div></div>
+        <p class="fine-print"><code>size</code>、<code>mode</code> 等字母组合可能同时对应拼音和英文，需从候选中选择。候选排序受上下文和学习记录影响。</p>
+        <h3>纠错与学习</h3>
+        <dl class="option-list"><div><dt>中文纠错</dt><dd>默认提供邻键误按和前后鼻音纠错。固定的读音混用可在「模糊音」中设置，12 组模糊音默认关闭。</dd></div><div><dt>词句学习</dt><dd>可选标准 Rime 学习、Linnet 增强学习或关闭。增强学习会强化逐字组成的生僻词组。全拼与双拼共享学习记录。</dd></div></dl>
+        <p class="fine-print">关闭学习会保留已有记录，重新开启后可继续使用。</p>
+        <details id="tools" class="guide-details"><summary>计算与拆字查询<span class="disclosure-icon" aria-hidden="true">+</span></summary><div><p>Linnet 的中文方案接入了 Rime 生态的辅助输入工具：<code>cC</code> 加表达式用于计算，<code>uU</code> 加全拼用于部件拆字查询。字母大小写需与示例前缀一致。</p><a href="https://github.com/Ares-X/Linnet/blob/main/THIRD_PARTY_NOTICES.md">查看第三方来源</a></div></details>
+      </section>
+
+      <section id="english" class="guide-section" aria-labelledby="english-title">
+        <div class="chapter-heading"><span aria-hidden="true">04</span><h2 id="english-title">英文与查词</h2></div>
+        <p class="settings-path">Settings <span>›</span> 输入 <span>›</span> Smart English</p>
+        <p>轻按 Shift 切换到 En，输入英文即可获得补全和拼写建议。原始输入始终保留为候选；音标、中文释义、预测和英文学习可在设置中选择。</p>
+        <figure class="guide-figure candidate-showcase"><div class="screenshot-stage"><div class="screenshot-crop english-crop"><img src="assets/bilingual.png" width="1360" height="660" alt="英文候选栏显示 cloud、cloudy 等单词，下方附 cloud 的音标与中文释义" loading="lazy"></div></div><figcaption>Smart English 候选栏 · 开启音标与中文释义</figcaption></figure>
+        <details class="guide-details"><summary>Space、Tab 与 Esc 的行为<span class="disclosure-icon" aria-hidden="true">+</span></summary><div><dl class="option-list"><div><dt>Space</dt><dd>可设置确认单词后是否补空格。</dd></div><div><dt>Tab</dt><dd>可选智能接受、候选导航，或交给当前应用处理。</dd></div><div><dt>Esc</dt><dd>关闭本次预测并清除英文上下文。</dd></div></dl></div></details>
+        <h3 id="lookup">用拼音查英文</h3><p>在中文模式下，输入 <code>|</code> 加当前方案的拼音编码。以「算法」为例：</p>
+        <div class="lookup-examples"><div><span>全拼</span><code>|suanfa</code></div><div><span>自然码</span><code>|srfa</code></div><div><span>英文结果</span><strong>algorithm</strong></div></div>
+        <figure class="guide-figure candidate-showcase"><div class="screenshot-stage"><div class="screenshot-crop reverse-crop"><img src="assets/bilingual.png" width="1360" height="660" alt="全拼输入 |suanfa，候选中选中 algorithm，释义为算法" loading="lazy"></div></div><figcaption>中文模式下的拼音查词结果</figcaption></figure>
+        <details class="guide-details"><summary>查词前缀与英文模式下的查词<span class="disclosure-icon" aria-hidden="true">+</span></summary><div><p>在输入设置中可将查词前缀改为 <code>;</code>；默认分号不触发查词。Smart English 模式下可直接输入当前方案的拼音编码，无需前缀，普通英文候选优先。</p></div></details>
+      </section>
+
+      <section id="dictionary" class="guide-section" aria-labelledby="dictionary-title">
+        <div class="chapter-heading"><span aria-hidden="true">05</span><h2 id="dictionary-title">词典与短语</h2></div>
+        <p class="settings-path">Settings <span>›</span> 词典</p>
+        <h3>添加自定义词</h3><ol class="compact-steps"><li>右键点击候选，选择「添加到自定义词…」。</li><li>检查显示文本和生成的编码；也可在词典设置中直接添加文本和小写 Rime 编码。</li><li>点击「应用更改」，保存后该词参与候选和学习。</li></ol>
+        <h3 id="expander">设置常用短语</h3><p>在「文本展开 / Text Expander」中添加以 <code>x;</code> 开头的短码，并填写要展开的文本。保存后，输入短码即可展开。</p>
+        <div class="input-example"><div><span>短码示例</span><code>x;addr</code></div><span class="example-arrow" aria-hidden="true">↓</span><div><span>展开内容</span><strong>你在设置中填写的完整地址</strong></div></div>
+        <details class="guide-details"><summary>隐藏候选与删除学习记录<span class="disclosure-icon" aria-hidden="true">+</span></summary><div><p>在「禁用英文词」中添加完整单词，可隐藏该词，匹配不区分大小写。右键「忘记此候选的学习记录」只删除学习记录，不会隐藏词库中内置的单词。</p></div></details>
+      </section>
+
+      <section id="appearance" class="guide-section" aria-labelledby="appearance-title">
+        <div class="chapter-heading"><span aria-hidden="true">06</span><h2 id="appearance-title">外观设置</h2></div>
+        <p class="settings-path">Settings <span>›</span> 外观</p>
+        <p>选择主题后可直接预览。每套主题都有浅色和深色外观，也可跟随系统。中文与英文的候选排列可分别设置。</p>
+        <figure class="guide-figure settings-figure"><a href="assets/settings-appearance.png" aria-label="查看外观设置原图"><img src="assets/settings-appearance.png" width="680" height="501" alt="外观设置的主题选择区域，包含七套主题，以及 System、Light 和 Dark 选项" loading="lazy"></a><figcaption>主题选择区域 · 英文界面 <a href="assets/settings-appearance.png">查看原图 ↗</a></figcaption></figure>
+        <dl class="option-list"><div><dt>字体与字号</dt><dd>调整候选文字的字体和大小。</dd></div><div><dt>横排与竖排</dt><dd>中英文可分别设置。紧凑候选每页可显示 3、5、7 或 9 项。</dd></div><div><dt>展开布局</dt><dd>展开后使用多行网格，英文释义跟随当前选中的候选显示。</dd></div></dl>
+      </section>
+
+      <section id="data" class="guide-section" aria-labelledby="data-title">
+        <div class="chapter-heading"><span aria-hidden="true">07</span><h2 id="data-title">同步与备份</h2></div>
+        <p class="settings-path">Settings <span>›</span> 数据与更新</p>
+        <h3>iCloud 学习同步</h3><p>可选择将中英文学习记录同步到其他 Mac。开启后自动检查，也可手动立即同步；另一台 Mac 的接收时间取决于 iCloud Drive 的传输进度。</p>
+        <div class="note"><strong>学习同步的范围</strong><p>同步中英文学习记录。自定义词、禁用词、短语扩展和设置不会随学习记录自动同步。</p></div>
+        <h3>备份与数据迁移</h3><p>在同一页面管理备份、恢复和导入导出。只有主动选择导入，才会读取其他 Rime 或 Hallelujah 数据；导入前会创建本地备份。</p>
+        <details class="guide-details"><summary>备份与个人数据保存位置<span class="disclosure-icon" aria-hidden="true">+</span></summary><div><p>个人词典、学习记录和本地备份保存在 <code>~/Library/Application Support/Linnet/</code>。启用学习同步或手动上传恢复备份后，相应数据会进入你的 iCloud Drive；学习同步和恢复备份的内容范围不同。导出的文件也可能包含个人数据。</p></div></details>
+      </section>
+
+      <section id="updates" class="guide-section" aria-labelledby="updates-title">
+        <div class="chapter-heading"><span aria-hidden="true">08</span><h2 id="updates-title">更新与修复</h2></div>
+        <p class="settings-path">Settings <span>›</span> 数据与更新</p>
+        <p class="section-lead">日常使用核心（Core）更新，复用已安装的词库和模型，无需注销。</p>
+        <ol class="steps"><li><h3>下载核心更新</h3><p>在「核心更新」中点击「下载核心更新」，等待下载和校验完成。</p></li><li><h3>暂时切换输入法</h3><p>先确认或取消正在输入的文字，再从菜单栏切换到其他输入法。其他应用可以保持打开。</p></li><li><h3>应用更新</h3><p>点击「应用更新… / Apply Update…」。此按钮与保存设置的「应用更改」不同。</p></li><li><h3>切回 Linnet</h3><p>输入几个字，确认可用，并检查「正在运行」与「已安装」版本一致。</p></li></ol>
+        <details class="guide-details"><summary>词库与模型更新<span class="disclosure-icon" aria-hidden="true">+</span></summary><div><p>在「数据与更新」选择正式版或预览版，下载对应语言数据。新数据准备好前继续使用当前数据；更新会复用未变化的词包。</p></div></details>
+        <details class="guide-details"><summary>词包冲突或 App 损坏<span class="disclosure-icon" aria-hidden="true">+</span></summary><div><p>同版本词包冲突可使用「修复语言数据更新」。App 损坏时，从项目发布页获取完整 <code>Linnet.pkg</code> 进行修复，无需先卸载。健康词包和个人数据会保留。</p><a href="https://github.com/Ares-X/Linnet/blob/main/README.md#升级与卸载">完整修复与卸载说明 ↗</a></div></details>
+      </section>
+      <div class="guide-end"><p>版本变化请参阅<a href="https://github.com/Ares-X/Linnet/releases/latest">发布说明</a>。</p><a href="#main" class="text-link">返回顶部 <span aria-hidden="true">↑</span></a></div>
+    </main>
+  </div>
+  <footer class="wrap site-footer"><p>Linnet 双韵 · macOS 开源双语输入法</p><div class="footer-links"><a href="index.html">产品首页</a><a href="https://github.com/Ares-X/Linnet">GitHub ↗</a></div></footer>
+</body>
+</html>
