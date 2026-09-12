@@ -51,8 +51,9 @@ The Windows presentation is generated from all seven Linnet theme families in
 `data/squirrel.yaml`, producing fourteen light/dark schemes and seven
 deterministic selector previews. Weasel's native system-dark-mode detection and
 theme selector are retained; selecting a family writes its light/dark pair.
-macOS material blur and custom underline/tile drawing are not portable Weasel
-capabilities and are deliberately not emulated.
+Colors preserve Squirrel's ABGR interpretation. macOS underline/bar themes use
+Weasel's native selection border; tile themes retain their filled selection.
+macOS material blur and custom drawing are not emulated.
 
 Weasel retains its mature schema selector, theme selector, user-dictionary
 management, synchronization and deployment entrypoints. The

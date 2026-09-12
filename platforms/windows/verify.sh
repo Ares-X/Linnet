@@ -66,14 +66,13 @@ ruby -ryaml -rzlib -e '
   )
   actual = windows.fetch("preset_color_schemes").keys
   abort "Windows theme catalog differs from Linnet" unless actual == expected
-  abort "Windows theme colors are not declared as canonical ARGB" unless
+  abort "Windows theme colors differ from Squirrel ABGR interpretation" unless
     actual.all? do |name|
-      windows.fetch("preset_color_schemes").fetch(name).fetch("color_format") == "argb"
+      windows.fetch("preset_color_schemes").fetch(name).fetch("color_format") == "abgr"
     end
   shared_colors = %w[
     back_color border_color text_color candidate_text_color label_color
-    comment_text_color hilited_text_color hilited_back_color
-    hilited_candidate_text_color hilited_candidate_back_color
+    comment_text_color hilited_candidate_text_color
     hilited_comment_text_color
   ]
   expected.each do |name|
@@ -87,6 +86,17 @@ ruby -ryaml -rzlib -e '
     abort "Windows highlighted label differs: #{name}" unless
       windows_scheme.fetch("hilited_label_color") ==
         source_scheme.fetch("hilited_candidate_label_color")
+    abort "Windows preedit text has the wrong background: #{name}" unless
+      windows_scheme.fetch("hilited_text_color") == source_scheme.fetch("text_color") &&
+        windows_scheme.fetch("hilited_back_color") == source_scheme.fetch("back_color")
+    if %w[underline bar].include?(source_scheme["linnet_selection_style"])
+      abort "Windows outline selection lost its surface or accent: #{name}" unless
+        windows_scheme.fetch("hilited_candidate_back_color") == source_scheme.fetch("back_color") &&
+          windows_scheme.fetch("hilited_candidate_border_color") == source_scheme.fetch("hilited_candidate_back_color")
+    else
+      abort "Windows tile selection color differs: #{name}" unless
+        windows_scheme.fetch("hilited_candidate_back_color") == source_scheme.fetch("hilited_candidate_back_color")
+    end
   end
   expected.grep(/_light\z/).each do |name|
     png = File.binread(File.join(ARGV.fetch(2), "color_scheme_#{name}.png"))
@@ -101,7 +111,7 @@ ruby -ryaml -rzlib -e '
     pixels = Zlib::Inflate.inflate(compressed)
     rgba = pixels.byteslice(10 * (1 + 320 * 4) + 1 + 10 * 4, 4).bytes
     color = source.fetch("preset_color_schemes").fetch(name).fetch("back_color")
-    expected_rgba = [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff,
+    expected_rgba = [color & 0xff, (color >> 8) & 0xff, (color >> 16) & 0xff,
                      color > 0xffffff ? (color >> 24) & 0xff : 0xff]
     abort "Windows preview color channels differ: #{name}" unless
       rgba == expected_rgba

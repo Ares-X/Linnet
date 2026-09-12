@@ -44,6 +44,20 @@ same_keys = %w[
   hilited_comment_text_color
 ].freeze
 
+# Squirrel stores ABGR. Weasel renders a separate preedit and uses a filled
+# candidate tile; keep text on its intended surface when adapting Mac styles.
+catalog = catalog.transform_values do |scheme|
+  projected = scheme.merge(
+    "hilited_text_color" => scheme.fetch("text_color"),
+    "hilited_back_color" => scheme.fetch("back_color")
+  )
+  if %w[underline bar].include?(scheme["linnet_selection_style"])
+    projected["hilited_candidate_border_color"] = scheme.fetch("hilited_candidate_back_color")
+    projected["hilited_candidate_back_color"] = scheme.fetch("back_color")
+  end
+  projected
+end
+
 format_color = lambda do |value|
   fail_projection("theme color is not an integer") unless value.is_a?(Integer)
   width = value > 0xffffff ? 8 : 6
@@ -56,8 +70,8 @@ catalog.each do |name, scheme|
   lines << "  #{name}:"
   lines << "    name: #{scheme.fetch("name").to_json}"
   lines << "    author: #{scheme.fetch("author", "Linnet contributors").to_json}"
-  lines << "    color_format: argb"
-  same_keys.each do |key|
+  lines << "    color_format: abgr"
+  (same_keys + ["hilited_candidate_border_color"]).each do |key|
     next unless scheme.key?(key)
 
     lines << "    #{key}: #{format_color.call(scheme.fetch(key))}"
@@ -69,10 +83,10 @@ end
 
 File.binwrite(output_path, lines.join("\n") + "\n")
 
-decode_argb = lambda do |value|
+decode_abgr = lambda do |value|
   fail_projection("theme color is not an integer") unless value.is_a?(Integer)
   alpha = value > 0xffffff ? (value >> 24) & 0xff : 0xff
-  [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff, alpha]
+  [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, alpha]
 end
 
 png_chunk = lambda do |type, data|
@@ -83,12 +97,12 @@ end
 write_preview = lambda do |path, scheme|
   width = 320
   height = 180
-  background = decode_argb.call(scheme.fetch("back_color"))
-  border = decode_argb.call(scheme.fetch("border_color"))
-  text = decode_argb.call(scheme.fetch("candidate_text_color"))
-  comment = decode_argb.call(scheme.fetch("comment_text_color", scheme.fetch("label_color")))
-  selected_background = decode_argb.call(scheme.fetch("hilited_candidate_back_color"))
-  selected_text = decode_argb.call(scheme.fetch("hilited_candidate_text_color"))
+  background = decode_abgr.call(scheme.fetch("back_color"))
+  border = decode_abgr.call(scheme.fetch("border_color"))
+  text = decode_abgr.call(scheme.fetch("candidate_text_color"))
+  comment = decode_abgr.call(scheme.fetch("comment_text_color", scheme.fetch("label_color")))
+  selected_background = decode_abgr.call(scheme.fetch("hilited_candidate_back_color"))
+  selected_text = decode_abgr.call(scheme.fetch("hilited_candidate_text_color"))
   pixels = Array.new(width * height) { background.dup }
   fill = lambda do |left, top, right, bottom, color|
     top.upto(bottom - 1) do |y|
@@ -101,6 +115,13 @@ write_preview = lambda do |path, scheme|
   fill.call(width - 3, 0, width, height, border)
   fill.call(20, 20, 142, 26, text)
   fill.call(20, 45, width - 20, 76, selected_background)
+  if scheme.key?("hilited_candidate_border_color")
+    selected_border = decode_abgr.call(scheme.fetch("hilited_candidate_border_color"))
+    fill.call(20, 45, width - 20, 47, selected_border)
+    fill.call(20, 74, width - 20, 76, selected_border)
+    fill.call(20, 45, 22, 76, selected_border)
+    fill.call(width - 22, 45, width - 20, 76, selected_border)
+  end
   fill.call(34, 56, 154, 63, selected_text)
   fill.call(174, 57, 278, 62, selected_text)
   fill.call(34, 94, 178, 101, text)
