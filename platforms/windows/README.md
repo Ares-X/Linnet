@@ -99,6 +99,9 @@ platforms/windows/build.ps1 -BoostRoot C:\path\to\boost_1_89_0
 
 The output is `build/windows/weasel/output/archives/Linnet-Windows-*-installer.exe`.
 Product version and build number come only from `config/LinnetProduct.xcconfig`.
+Opening or cancelling the upgrade wizard before clicking Install leaves the
+existing input service in place. Package replacement begins only when installation
+starts; user dictionaries and customization remain in the user's Linnet directory.
 CI then runs `platforms/windows/preflight.ps1`; the installer is not uploaded
 unless both Win32 and x64 `rime.dll` builds pass real Chinese/English candidate
 sessions and the package passes silent Traditional Chinese installation,
