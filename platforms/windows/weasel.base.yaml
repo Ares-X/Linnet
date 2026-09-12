@@ -43,7 +43,7 @@ style:
   vertical_text_with_wrap: false
   layout:
     align_type: center
-    max_width: 0
+    max_width: 800
     min_width: 180
     min_height: 0
     max_height: 0

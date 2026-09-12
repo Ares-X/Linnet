@@ -53,6 +53,7 @@ deterministic selector previews. Weasel's native system-dark-mode detection and
 theme selector are retained; selecting a family writes its light/dark pair.
 Colors preserve Squirrel's ABGR interpretation. macOS underline/bar themes use
 Weasel's native selection border; tile themes retain their filled selection.
+Long horizontal candidate rows wrap using Weasel's native width limit.
 macOS material blur and custom drawing are not emulated.
 
 Weasel retains its mature schema selector, theme selector, user-dictionary
