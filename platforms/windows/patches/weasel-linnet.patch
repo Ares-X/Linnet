@@ -1538,10 +1538,10 @@ index 3a40f51..7af1f8d 100644
  #define ID_WEASELTRAY_INSTALLDIR        40006
  #define ID_WEASELTRAY_USERCONFIG        40007
 diff --git a/output/install.nsi b/output/install.nsi
-index 3d5130c..8720be5 100644
+index 3d5130c..16f69a0 100644
 --- a/output/install.nsi
 +++ b/output/install.nsi
-@@ -18,21 +18,39 @@ Unicode true
+@@ -18,21 +18,43 @@ Unicode true
  !define WEASEL_BUILD 0
  !endif
  
@@ -1567,6 +1567,10 @@ index 3d5130c..8720be5 100644
 +Var LinnetUserDataRoot
 +Var LinnetUserBuildRollback
 +Var LinnetRollbackExitCode
++Var LinnetProfileChanged
++Var LinnetMoveSource
++Var LinnetMoveTarget
++Var LinnetMoveFailed
  
  ; The name of the installer
 -Name "小狼毫 ${WEASEL_VERSION}"
@@ -1589,7 +1593,7 @@ index 3d5130c..8720be5 100644
  VIAddVersionKey /LANG=2052 "FileVersion" "${WEASEL_VERSION}"
  
  !define MUI_ICON ..\resource\weasel.ico
-@@ -60,59 +78,66 @@ RequestExecutionLevel admin
+@@ -60,59 +82,67 @@ RequestExecutionLevel admin
  ; Languages
  
  !insertmacro MUI_LANGUAGE "TradChinese"
@@ -1617,7 +1621,7 @@ index 3d5130c..8720be5 100644
 +LangString LNKFORAPPFOLDER ${LANG_TRADCHINESE} "Linnet 程序文件夾"
 +LangString LNKFORSETUP ${LANG_TRADCHINESE} "Linnet 安裝選項"
 +LangString LNKFORUNINSTALL ${LANG_TRADCHINESE} "卸載 Linnet"
-+LangString CONFIRMATION ${LANG_TRADCHINESE} "安裝前，請先卸載舊版本的 Linnet。$\n$\n按下「確定」移除舊版本，按下「取消」放棄本次安裝。"
++LangString CONFIRMATION ${LANG_TRADCHINESE} "已安裝 Linnet。按下「確定」繼續升級；只有點擊「安裝」後才會替換舊版本，用戶詞典及設定會保留。"
  LangString SYSTEMVERSIONNOTOK ${LANG_TRADCHINESE} "您的系统不被支持，最低系統要求:Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_TRADCHINESE} "自動檢查版本更新？"
 +LangString ARCHITECTURENOTOK ${LANG_TRADCHINESE} "此 ${LINNET_ARCH} 安裝包不適用於目前系統。請選擇與 Windows 架構相符的 Linnet 安裝包；ARM64 版需要 Windows 11。"
@@ -1647,7 +1651,7 @@ index 3d5130c..8720be5 100644
 +LangString LNKFORAPPFOLDER ${LANG_SIMPCHINESE} "Linnet 程序文件夹"
 +LangString LNKFORSETUP ${LANG_SIMPCHINESE} "Linnet 安装选项"
 +LangString LNKFORUNINSTALL ${LANG_SIMPCHINESE} "卸载 Linnet"
-+LangString CONFIRMATION ${LANG_SIMPCHINESE} '安装前，请先卸载旧版本的 Linnet。$\n$\n点击 "确定" 移除旧版本，或点击 "取消" 放弃本次安装。'
++LangString CONFIRMATION ${LANG_SIMPCHINESE} '已安装 Linnet。点击 "确定" 继续升级；只有点击 "安装" 后才会替换旧版本，用户词典及设置会保留。'
  LangString SYSTEMVERSIONNOTOK ${LANG_SIMPCHINESE} "您的系統不被支持，最低系统要求:Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_SIMPCHINESE} "自动检查版本更新？"
 +LangString ARCHITECTURENOTOK ${LANG_SIMPCHINESE} "此 ${LINNET_ARCH} 安装包不适用于当前系统。请选择与 Windows 架构相符的 Linnet 安装包；ARM64 版需要 Windows 11。"
@@ -1677,7 +1681,7 @@ index 3d5130c..8720be5 100644
 +LangString LNKFORAPPFOLDER ${LANG_ENGLISH} "Linnet App Folder"
 +LangString LNKFORSETUP ${LANG_ENGLISH} "Linnet Installation Preference"
 +LangString LNKFORUNINSTALL ${LANG_ENGLISH} "Uninstall Linnet"
-+LangString CONFIRMATION ${LANG_ENGLISH} "Before installation, please uninstall the old version of Linnet.$\n$\nPress 'OK' to remove the old version, or 'Cancel' to abort installation."
++LangString CONFIRMATION ${LANG_ENGLISH} "Linnet is already installed. Press 'OK' to continue. The old version is replaced only after you click Install; user dictionaries and settings are preserved."
  LangString SYSTEMVERSIONNOTOK ${LANG_ENGLISH} "Your system not supported, minimium system required: Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_ENGLISH} "Automatically check for updates?"
 +LangString ARCHITECTURENOTOK ${LANG_ENGLISH} "This ${LINNET_ARCH} package does not match your system. Choose the Linnet package for your Windows architecture; ARM64 requires Windows 11."
@@ -1686,6 +1690,7 @@ index 3d5130c..8720be5 100644
  
  Function .onInit
 +  StrCpy $LinnetUpgrade 0
++  StrCpy $LinnetProfileChanged 0
 +  StrCpy $LinnetCandidateStarted 0
 +  StrCpy $LinnetRollbackReady 0
 +  StrCpy $LinnetBuildRollbackReady 0
@@ -1698,7 +1703,7 @@ index 3d5130c..8720be5 100644
    ; if not version >= 8.1, quit and MessageBox(if not silent)
    ${IfNot} ${AtLeastWin8.1}
      IfSilent toquit
-@@ -121,171 +146,253 @@ toquit:
+@@ -121,171 +151,337 @@ toquit:
      Quit
    ${EndIf}
  
@@ -1772,6 +1777,50 @@ index 3d5130c..8720be5 100644
 +done:
 +FunctionEnd
 +
++; Open files can permit individual moves while preventing a directory rename
++; (for example Windows ARM's XtaCache). Use the same file-level move for backup
++; and restoration, including restoration after a partial move.
++Function MovePackageFiles
++  StrCpy $LinnetMoveFailed 0
++  ClearErrors
++  CreateDirectory "$LinnetMoveTarget"
++  IfErrors package_move_failed
++  ${Locate} "$LinnetMoveSource" "/L=FDE" "MovePackageEntry"
++  IfErrors package_move_failed
++  StrCmp $LinnetMoveFailed 0 0 package_move_done
++  RMDir /r "$LinnetMoveSource"
++  IfErrors package_move_failed
++  GoTo package_move_done
++package_move_failed:
++  StrCpy $LinnetMoveFailed 1
++package_move_done:
++  Push $LinnetMoveFailed
++FunctionEnd
++
++Function MovePackageEntry
++  Push $0
++  StrLen $0 $LinnetMoveSource
++  StrCpy $0 $R8 "" $0
++  ClearErrors
++  CreateDirectory "$LinnetMoveTarget$0"
++  IfErrors package_entry_failed
++  StrCmp $R6 "" package_entry_directory
++  Rename "$R9" "$LinnetMoveTarget$0\$R7"
++  GoTo package_entry_checked
++package_entry_directory:
++  CreateDirectory "$LinnetMoveTarget$0\$R7"
++package_entry_checked:
++  IfErrors package_entry_failed
++  Pop $0
++  Push ""
++  Return
++package_entry_failed:
++  DetailPrint "Could not move $R9 into $LinnetMoveTarget."
++  StrCpy $LinnetMoveFailed 1
++  Pop $0
++  Push "StopLocate"
++FunctionEnd
++
 +Function RestorePriorFrontend
 +  WriteRegStr HKLM SOFTWARE\Linnet "InstallDir" "$LinnetPriorInstallDir"
 +  StrCmp $LinnetPriorHant 1 0 restore_prior_frontend_hans
@@ -1797,6 +1846,10 @@ index 3d5130c..8720be5 100644
 +  StrCpy $LinnetRollbackExitCode 9
 +  GoTo cleanup_state
 +cleanup_candidate_frontend:
++  ; Re-registering the same TIP does not require removing the user's selection.
++  StrCmp $LinnetRollbackReady 1 0 cleanup_unregister_candidate
++  StrCmp $LinnetProfileChanged 0 cleanup_candidate_package
++cleanup_unregister_candidate:
 +  IfFileExists "$INSTDIR\WeaselSetup.exe" 0 cleanup_candidate_package
 +  ExecWait '"$INSTDIR\WeaselSetup.exe" /u' $R5
 +  IntCmp $R5 0 cleanup_candidate_package
@@ -1854,9 +1907,11 @@ index 3d5130c..8720be5 100644
 +build_restore_failed:
 +  StrCpy $LinnetRollbackExitCode 6
 +restore_package:
-+  ClearErrors
-+  Rename "$LinnetRollbackRoot" "$LinnetPriorRoot"
-+  IfErrors package_restore_failed
++  StrCpy $LinnetMoveSource $LinnetRollbackRoot
++  StrCpy $LinnetMoveTarget $LinnetPriorRoot
++  Call MovePackageFiles
++  Pop $R5
++  StrCmp $R5 0 0 package_restore_failed
 +  Call RestorePriorFrontend
 +  Pop $R5
 +  StrCmp $R5 0 restore_prior_finished
@@ -1902,6 +1957,16 @@ index 3d5130c..8720be5 100644
 +Section "Linnet"
  
    SectionIn RO
++  ; Resolve the setup mode once, before touching the existing installation.
++  StrCpy $R2 "/i"
++  ${GetParameters} $R0
++  ClearErrors
++  ${GetOptions} $R0 "/S" $R1
++  IfErrors +2 0
++  StrCpy $R2 "/s"
++  ${GetOptions} $R0 "/T" $R1
++  IfErrors +2 0
++  StrCpy $R2 "/t"
 +  ; Do not change an installed frontend until the user clicks Install.
 +  StrCmp $LinnetUpgrade 1 0 upgrade_done
 +  ; Preserve the previous package and generated build until the candidate
@@ -1916,6 +1981,18 @@ index 3d5130c..8720be5 100644
 +  ClearErrors
 +  ReadRegDWORD $LinnetPriorHant HKCU SOFTWARE\Linnet "Hant"
 +  IfErrors invalid_upgrade
++  StrCmp $R2 "/i" 0 upgrade_profile_resolved
++  StrCpy $R2 "/s"
++  StrCmp $LinnetPriorHant 1 0 upgrade_profile_resolved
++  StrCpy $R2 "/t"
++upgrade_profile_resolved:
++  ${If} $R2 == "/t"
++  ${AndIf} $LinnetPriorHant == 0
++    StrCpy $LinnetProfileChanged 1
++  ${ElseIf} $R2 == "/s"
++  ${AndIf} $LinnetPriorHant == 1
++    StrCpy $LinnetProfileChanged 1
++  ${EndIf}
 +  ClearErrors
 +  ReadRegStr $LinnetUserDataRoot HKCU SOFTWARE\Linnet "RimeUserDir"
 +  StrCmp $LinnetUserDataRoot "" 0 user_root_ready
@@ -1945,19 +2022,31 @@ index 3d5130c..8720be5 100644
 +  SetErrorLevel $R3
 +  Abort
 +old_server_stopped:
++  StrCmp $LinnetProfileChanged 0 old_frontend_removed
 +  ExecWait '"$R1\WeaselSetup.exe" /u' $R3
 +  IntCmp $R3 0 old_frontend_removed
 +  DetailPrint "Previous frontend cleanup returned $R3; candidate setup will replace its registration."
 +old_frontend_removed:
-+  ClearErrors
-+  Rename "$LinnetPriorRoot" "$LinnetRollbackRoot"
-+  IfErrors old_package_not_preserved
++  StrCpy $LinnetMoveSource $LinnetPriorRoot
++  StrCpy $LinnetMoveTarget $LinnetRollbackRoot
++  Call MovePackageFiles
++  Pop $R3
++  StrCmp $R3 0 0 old_package_not_preserved
 +  StrCpy $LinnetRollbackReady 1
 +  ; Prompt reboot
 +  SetRebootFlag true
 +  GoTo upgrade_done
 +
 +old_package_not_preserved:
++  IfFileExists "$LinnetRollbackRoot\*.*" 0 old_package_restore_frontend
++  StrCpy $LinnetMoveSource $LinnetRollbackRoot
++  StrCpy $LinnetMoveTarget $LinnetPriorRoot
++  Call MovePackageFiles
++  Pop $R5
++  StrCmp $R5 0 old_package_restore_frontend
++  SetErrorLevel 5
++  Abort
++old_package_restore_frontend:
 +  Call RestorePriorFrontend
 +  Pop $R5
 +  StrCmp $R5 0 old_package_restored
@@ -2077,7 +2166,7 @@ index 3d5130c..8720be5 100644
  
    File "WeaselSetup.exe"
    ; shared data files
-@@ -293,13 +400,19 @@ program_files:
+@@ -293,49 +489,83 @@ program_files:
    File "data\*.yaml"
    File /nonfatal "data\*.txt"
    File /nonfatal "data\*.gram"
@@ -2098,11 +2187,9 @@ index 3d5130c..8720be5 100644
  
    SetOutPath $INSTDIR
  
-@@ -314,29 +427,68 @@ program_files:
-   IfErrors +2 0
-   StrCpy $R2 "/t"
- 
--  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2'
+-  ; test /T flag for zh_TW locale
+-  StrCpy $R2 "/i"
+-  ${GetParameters} $R0
 +  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2' $R3
 +  IntCmp $R3 0 setup_done
 +  StrCpy $R4 $R3
@@ -2113,21 +2200,16 @@ index 3d5130c..8720be5 100644
 +  SetErrorLevel $R4
 +  Abort
 +  setup_done:
- 
--  ; Write the uninstall keys for Windows
--  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayName" "$(DISPLAYNAME)"
--  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayIcon" '"$INSTDIR\WeaselServer.exe"'
--  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayVersion" "${WEASEL_VERSION}.${WEASEL_BUILD}"
--  WriteRegStr HKLM "${REG_UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
--  WriteRegStr HKLM "${REG_UNINST_KEY}" "Publisher" "式恕堂"
--  WriteRegStr HKLM "${REG_UNINST_KEY}" "URLInfoAbout" "https://rime.im/"
--  WriteRegStr HKLM "${REG_UNINST_KEY}" "HelpLink" "https://rime.im/docs/"
--  WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoModify" 1
--  WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoRepair" 1
--  WriteUninstaller "$INSTDIR\uninstall.exe"
++
 +  StrCmp $LinnetRollbackReady 1 0 build_backup_done
 +  IfFileExists "$LinnetUserDataRoot\build\*.*" 0 build_backup_done
-+  ClearErrors
+   ClearErrors
+-  ${GetOptions} $R0 "/S" $R1
+-  IfErrors +2 0
+-  StrCpy $R2 "/s"
+-  ${GetOptions} $R0 "/T" $R1
+-  IfErrors +2 0
+-  StrCpy $R2 "/t"
 +  Rename "$LinnetUserDataRoot\build" "$LinnetUserBuildRollback"
 +  IfErrors build_backup_failed
 +  StrCpy $LinnetBuildRollbackReady 1
@@ -2142,15 +2224,14 @@ index 3d5130c..8720be5 100644
 +  Abort
 +build_backup_done:
  
-   ; run as user...
-   IfSilent deploy_silently
--  ExecWait "$INSTDIR\WeaselDeployer.exe /install"
--  GoTo deploy_done
+-  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2'
++  ; run as user...
++  IfSilent deploy_silently
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /install' $R3
 +  GoTo deploy_checked
  
-   deploy_silently:
--  ExecWait "$INSTDIR\WeaselDeployer.exe /deploy"
+-  ; Write the uninstall keys for Windows
++  deploy_silently:
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /deploy' $R3
 +  deploy_checked:
 +  IntCmp $R3 0 deploy_done
@@ -2161,28 +2242,40 @@ index 3d5130c..8720be5 100644
 +  Abort
 +  SetErrorLevel $R4
 +  Abort
-   deploy_done:
- 
++  deploy_done:
++
 +  ; Commit public installation metadata only after the candidate deploys.
-+  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayName" "$(DISPLAYNAME)"
+   WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayName" "$(DISPLAYNAME)"
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayIcon" '"$INSTDIR\WeaselServer.exe"'
 +  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayIcon" '"$INSTDIR\LinnetServer.exe"'
-+  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayVersion" "${WEASEL_VERSION}.${WEASEL_BUILD}"
-+  WriteRegStr HKLM "${REG_UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+   WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayVersion" "${WEASEL_VERSION}.${WEASEL_BUILD}"
+   WriteRegStr HKLM "${REG_UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "Publisher" "式恕堂"
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "URLInfoAbout" "https://rime.im/"
+-  WriteRegStr HKLM "${REG_UNINST_KEY}" "HelpLink" "https://rime.im/docs/"
 +  WriteRegStr HKLM "${REG_UNINST_KEY}" "Publisher" "Linnet contributors"
 +  WriteRegStr HKLM "${REG_UNINST_KEY}" "URLInfoAbout" "https://github.com/Ares-X/Linnet"
 +  WriteRegStr HKLM "${REG_UNINST_KEY}" "HelpLink" "https://github.com/Ares-X/Linnet"
-+  WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoModify" 1
-+  WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoRepair" 1
-+  WriteUninstaller "$INSTDIR\uninstall.exe"
+   WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoModify" 1
+   WriteRegDWORD HKLM "${REG_UNINST_KEY}" "NoRepair" 1
+   WriteUninstaller "$INSTDIR\uninstall.exe"
+-
+-  ; run as user...
+-  IfSilent deploy_silently
+-  ExecWait "$INSTDIR\WeaselDeployer.exe /install"
+-  GoTo deploy_done
+-
+-  deploy_silently:
+-  ExecWait "$INSTDIR\WeaselDeployer.exe /deploy"
+-  deploy_done:
 +  StrCmp $LinnetRollbackReady 1 0 shortcuts_committed
 +  SetShellVarContext all
 +  RMDir /r "$SMPROGRAMS\$(DISPLAYNAME)"
 +shortcuts_committed:
-+
+ 
    ; don't redirect on 64 bit system for auto run setting
    ${If} ${IsNativeARM64}
-     SetRegView 64
-@@ -344,22 +496,12 @@ program_files:
+@@ -344,22 +574,12 @@ program_files:
      SetRegView 64
    ${Endif}
    ; Write autorun key
@@ -2208,7 +2301,7 @@ index 3d5130c..8720be5 100644
    SetRebootFlag true
  
  SectionEnd
-@@ -373,10 +515,9 @@ Section "Start Menu Shortcuts"
+@@ -373,10 +593,9 @@ Section "Start Menu Shortcuts"
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDEPLOY).lnk" "$INSTDIR\WeaselDeployer.exe" "/deploy" "$SYSDIR\shell32.dll" 144
@@ -2222,7 +2315,7 @@ index 3d5130c..8720be5 100644
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
  
-@@ -388,30 +529,41 @@ SectionEnd
+@@ -388,30 +607,41 @@ SectionEnd
  
  Section "Uninstall"
  

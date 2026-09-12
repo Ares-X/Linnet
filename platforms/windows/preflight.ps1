@@ -316,6 +316,41 @@ try {
       (Get-RegistryValue LocalMachine Registry32 "Software\Linnet" "WeaselRoot") -ne $InstallRoot) {
     throw "Wrong-architecture installer changed the installed input service"
   }
+
+  # A non-movable file must leave the old package usable, including any files
+  # already moved before it. Do not stop other processes to release the handle.
+  $HeldRuntime = [IO.File]::Open((Join-Path $InstallRoot "rime.dll"),
+    [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+  try {
+    Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S", "/T") `
+      -Description "Restore a partially moved package when a file is locked" `
+      -TimeoutSeconds 120 -ExpectedExitCode 3
+    Assert-File (Join-Path $InstallRoot "rime.dll")
+    Assert-Absent "$InstallRoot.linnet-rollback"
+    Wait-ForServer $InstalledServer
+  } finally {
+    $HeldRuntime.Dispose()
+  }
+
+  # Windows ARM's executable cache keeps read/delete-shared file handles after
+  # the server exits. This also prevents whole-directory Rename on x64 Windows.
+  $HeldManifest = [IO.File]::Open((Join-Path $InstallRoot "linnet-windows-manifest.json"),
+    [IO.FileMode]::Open, [IO.FileAccess]::Read,
+    ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+  try {
+    Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S", "/T") `
+      -Description "Upgrade the same input language with an open package file" `
+      -TimeoutSeconds 120
+    Assert-Absent "$InstallRoot.linnet-rollback"
+    Wait-ForServer $InstalledServer
+    if ((Get-LinnetInputMethodTipCount $HantInputMethodTip) -ne 1 -or
+        (Get-LinnetInputMethodTipCount $HansInputMethodTip) -ne 0) {
+      throw "Same-language upgrade changed the enabled input profile"
+    }
+  } finally {
+    $HeldManifest.Dispose()
+  }
+
   $ObsoleteSharedData = Join-Path $InstallRoot "data\obsolete-preflight.yaml"
   $PreservedUserData = Join-Path $UserData "preserved-preflight.txt"
   Set-Content -LiteralPath $ObsoleteSharedData -Value "obsolete package data"
@@ -328,11 +363,15 @@ try {
   # Invalid optional customization YAML is ignored by Rime. A valid schema
   # selection naming an absent schema exercises an actual deployment failure.
   Set-Content -LiteralPath $InvalidUserConfig -Value "patch:`n  schema_list:`n    - schema: linnet_missing_preflight"
+  $HeldRollbackFile = [IO.File]::Open($RollbackPackageSentinel,
+    [IO.FileMode]::Open, [IO.FileAccess]::Read,
+    ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
   try {
     Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S") `
       -Description "Reject broken Simplified upgrade and restore prior candidate" `
       -TimeoutSeconds 120 -ExpectedExitCode 1
   } finally {
+    $HeldRollbackFile.Dispose()
     Remove-Item -LiteralPath $InvalidUserConfig -Force -ErrorAction SilentlyContinue
   }
   Assert-File $RollbackPackageSentinel

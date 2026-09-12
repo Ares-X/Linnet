@@ -115,6 +115,9 @@ Product version and build number come only from `config/LinnetProduct.xcconfig`.
 Opening or cancelling the upgrade wizard before clicking Install leaves the
 existing input service in place. Package replacement begins only when installation
 starts; user dictionaries and customization remain in the user's Linnet directory.
+An interactive upgrade keeps the existing Simplified/Traditional input language.
+Same-language upgrades retain its registration; an explicit language change uses
+the existing setup tool to replace it.
 CI then runs `platforms/windows/preflight.ps1`; neither installer is uploaded
 unless both Win32 and x64 `rime.dll` builds pass real Chinese/English candidate
 sessions and the package passes silent Traditional Chinese installation,
@@ -129,7 +132,9 @@ and the dictionaries generated on Windows. The installer carries the canonical
 `data/dicts` source graph needed for a clean-machine Chinese build; macOS-built
 dictionary binaries are not treated as Windows evidence. Setup or deployment
 failures must propagate as a nonzero installer result. It also installs the
-candidate a second time to exercise the upgrade path, proving obsolete package
+candidate with open package files to exercise same-language upgrade, partial
+backup failure and restoration without stopping the process holding those files.
+The normal upgrade also proves obsolete package
 data is removed while the isolated user dictionary directory survives upgrade
 and uninstall.
 An unrun or failing Windows preflight is a UAT `NO-GO`; manual testing starts
