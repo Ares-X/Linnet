@@ -7,7 +7,8 @@ $Output = Join-Path $Projection "output"
 $ProductConfig = Get-Content -LiteralPath (Join-Path $RepoRoot "config\LinnetProduct.xcconfig")
 $Version = (($ProductConfig | Select-String '^MARKETING_VERSION = ([^ ]+)$').Matches.Groups[1].Value)
 $Build = (($ProductConfig | Select-String '^CURRENT_PROJECT_VERSION = ([^ ]+)$').Matches.Groups[1].Value)
-$Installer = Join-Path $Output "archives\Linnet-Windows-$Version.$Build-installer.exe"
+$Installer = Join-Path $Output "archives\Linnet-Windows-$Version.$Build-x64-installer.exe"
+$Arm64Installer = Join-Path $Output "archives\Linnet-Windows-$Version.$Build-arm64-installer.exe"
 $Smoke = Join-Path $Output "LinnetRuntimeSmoke.exe"
 $Win32Smoke = Join-Path $Output "Win32\LinnetRuntimeSmoke.exe"
 $SharedData = Join-Path $Output "data"
@@ -166,6 +167,7 @@ function Wait-ForServer {
 
 foreach ($Required in @(
   $Installer,
+  $Arm64Installer,
   $Smoke,
   $Win32Smoke,
   (Join-Path $Output "rime.dll"),
@@ -233,7 +235,8 @@ try {
   )) {
     Assert-File (Join-Path $InstallRoot $RelativePath)
   }
-  foreach ($Forbidden in @("WinSparkle.dll", "curl.exe", "rime-install.bat")) {
+  foreach ($Forbidden in @("WinSparkle.dll", "curl.exe", "rime-install.bat",
+      "weaselARM.dll", "weaselARM64.dll", "weaselARM64X.dll")) {
     Assert-Absent (Join-Path $InstallRoot $Forbidden)
   }
   Assert-Absent (Join-Path $InstallRoot "data\build")
@@ -248,6 +251,7 @@ try {
   $InstalledConfigDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath `
     (Join-Path $InstallRoot "data\weasel.yaml")).Hash.ToLowerInvariant()
   if ($Manifest.product -ne "Linnet" -or $Manifest.platform -ne "windows" -or
+      $Manifest.architecture -ne "x64" -or
       $Manifest.version -ne $Version -or $Manifest.build -ne $Build -or
       $Manifest.frontend.commit -ne $Lock.sources.weasel.commit -or
       $Manifest.runtime.commit -ne $Lock.sources.librime.commit -or
@@ -303,6 +307,15 @@ try {
   Assert-File (Join-Path $env:windir "SysWOW64\linnet.dll")
   $InstalledServer = Join-Path $InstallRoot "LinnetServer.exe"
   Wait-ForServer $InstalledServer
+  $ServerBeforeWrongArchitecture = @(Get-Process -Name "LinnetServer").Id
+  Invoke-CheckedProcess -FilePath $Arm64Installer -Arguments @("/S") `
+    -Description "Reject ARM64 package on x64 without stopping installed input" `
+    -TimeoutSeconds 30 -ExpectedExitCode 1633
+  $ServerAfterWrongArchitecture = @(Get-Process -Name "LinnetServer").Id
+  if (@(Compare-Object $ServerBeforeWrongArchitecture $ServerAfterWrongArchitecture).Count -ne 0 -or
+      (Get-RegistryValue LocalMachine Registry32 "Software\Linnet" "WeaselRoot") -ne $InstallRoot) {
+    throw "Wrong-architecture installer changed the installed input service"
+  }
   $ObsoleteSharedData = Join-Path $InstallRoot "data\obsolete-preflight.yaml"
   $PreservedUserData = Join-Path $UserData "preserved-preflight.txt"
   Set-Content -LiteralPath $ObsoleteSharedData -Value "obsolete package data"

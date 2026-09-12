@@ -38,7 +38,7 @@ compatibility detail and are renamed only at the installer boundary.
 The Windows package consumes the same staged files and merged Rime modules as
 macOS. Portable feature truth remains in those root-owned schemas, dictionaries
 and modules; Windows does not maintain a second feature ledger. The installed
-manifest records only verifiable package provenance: product version, locked
+manifest records only verifiable package provenance: target architecture, product version, locked
 Weasel/librime commits, projected configuration digest and updater state.
 
 English glosses are not a Windows-side dictionary or online translation
@@ -97,16 +97,32 @@ platforms/windows/prepare.ps1 `
 platforms/windows/build.ps1 -BoostRoot C:\path\to\boost_1_89_0
 ```
 
-The output is `build/windows/weasel/output/archives/Linnet-Windows-*-installer.exe`.
+One build produces two packages in `build/windows/weasel/output/archives`:
+
+- `Linnet-Windows-<version>.<build>-x64-installer.exe` for Intel/AMD 64-bit Windows.
+- `Linnet-Windows-<version>.<build>-arm64-installer.exe` for Windows 11 ARM64.
+
+Both use the same runtime, language data, installer and registration owners.
+The ARM64 package includes native ARM frontends plus x86/x64 compatibility
+frontends, while the x64 package omits ARM payloads. Both retain upstream's x64
+server and librime; Windows 11 ARM64 runs these through x64 emulation. This is
+not a fully ARM-native server build. Executable emulation does not replace the
+native TSF DLLs loaded inside ARM64 applications, so install the package matching
+the operating system, not the test application's architecture. Neither package
+targets a 32-bit Windows installation.
+
 Product version and build number come only from `config/LinnetProduct.xcconfig`.
 Opening or cancelling the upgrade wizard before clicking Install leaves the
 existing input service in place. Package replacement begins only when installation
 starts; user dictionaries and customization remain in the user's Linnet directory.
-CI then runs `platforms/windows/preflight.ps1`; the installer is not uploaded
+CI then runs `platforms/windows/preflight.ps1`; neither installer is uploaded
 unless both Win32 and x64 `rime.dll` builds pass real Chinese/English candidate
 sessions and the package passes silent Traditional Chinese installation,
 Simplified Chinese upgrade, both 32/64-bit TSF registration, installer-owned
-deployment, service startup and uninstall lifecycle on the Windows runner. The
+deployment, service startup and uninstall lifecycle for the x64 package on the
+Windows runner. It also checks that choosing the ARM64 package on x64 leaves
+the existing input service untouched. ARM64 installation and native application
+input require the ARM64 desktop UAT; the x64 runner cannot establish those results. The
 gate uses an isolated temporary `%AppData%`, checks every runtime file referenced
 by OpenCC, then reruns the same input sessions against the installed shared data
 and the dictionaries generated on Windows. The installer carries the canonical
@@ -119,8 +135,9 @@ and uninstall.
 An unrun or failing Windows preflight is a UAT `NO-GO`; manual testing starts
 only from an uploaded candidate that passed this gate.
 
-These CI builds retain the verified Windows installer only as an expiring
-Actions artifact for real-machine UAT. It is deliberately absent from
+These CI builds retain the Windows installers only as separate, expiring
+`Linnet-Windows-x64-<revision>` and `Linnet-Windows-arm64-<revision>` Actions
+artifacts for real-machine UAT. Both are deliberately absent from
 the public release manifest and no publication job downloads it. Passing CI,
 adding a signature, or manually renaming that artifact does not authorize a
 Windows GitHub Release.

@@ -1288,10 +1288,34 @@ index 212eea1..94e6a57 100644
    _stprintf_s(szFileName, MAX_PATH, _T("%s\\%s-%s-%s.%lu.dmp"), _path,
                pszBaseName, pszDllBaseName, szDateTime, dwProcessId);
 diff --git a/build.bat b/build.bat
-index 6cdb23e..34499a4 100644
+index 6cdb23e..9ff024c 100644
 --- a/build.bat
 +++ b/build.bat
-@@ -160,25 +160,20 @@ if %build_rime% == 1 (
+@@ -80,7 +80,6 @@ set build_opencc=0
+ set build_rime=0
+ set rime_build_variant=release
+ set build_weasel=0
+-set build_installer=0
+ set build_arm64=0
+ 
+ rem parse the command line options
+@@ -103,7 +102,6 @@ rem parse the command line options
+   if "%1" == "rime" set build_rime=1
+   if "%1" == "librime" set build_rime=1
+   if "%1" == "weasel" set build_weasel=1
+-  if "%1" == "installer" set build_installer=1
+   if "%1" == "arm64" set build_arm64=1
+   if "%1" == "all" (
+     set build_boost=1
+@@ -111,7 +109,6 @@ rem parse the command line options
+     set build_opencc=1
+     set build_rime=1
+     set build_weasel=1
+-    set build_installer=1
+     set build_arm64=1
+   )
+   shift
+@@ -160,25 +157,20 @@ if %build_rime% == 1 (
    rem build x64 librime
    set ARCH=x64
    call :build_librime_platform x64 %WEASEL_ROOT%\lib64 %WEASEL_ROOT%\output
@@ -1322,7 +1346,23 @@ index 6cdb23e..34499a4 100644
  
  if %build_weasel% == 0 goto end
  
-@@ -283,31 +278,6 @@ rem build boost
+@@ -221,14 +213,7 @@ if %build_arm64% == 1 (
+   if errorlevel 1 goto error
+ )
+ 
+-if %build_installer% == 1 (
+-  "%ProgramFiles(x86)%"\NSIS\Bin\makensis.exe ^
+-  /DWEASEL_VERSION=%WEASEL_VERSION% ^
+-  /DWEASEL_BUILD=%WEASEL_BUILD% ^
+-  /DPRODUCT_VERSION=%PRODUCT_VERSION% ^
+-  output\install.nsi
+-  if errorlevel 1 goto error
+-)
++rem Linnet platforms/windows/build.ps1 owns architecture-specific packaging.
+ 
+ goto end
+ 
+@@ -283,31 +268,6 @@ rem build boost
    )
    exit /b
  
@@ -1354,7 +1394,7 @@ index 6cdb23e..34499a4 100644
  rem ---------------------------------------------------------------------------
  rem %1 : ARCH
  rem %2 : push | pop , push to backup when pop to restore
-@@ -368,9 +338,14 @@ rem %3 : target_path of rime.dll, base %WEASEL_ROOT% or abs path
+@@ -368,9 +328,14 @@ rem %3 : target_path of rime.dll, base %WEASEL_ROOT% or abs path
    exit /b
  rem ---------------------------------------------------------------------------
  
@@ -1498,15 +1538,21 @@ index 3a40f51..7af1f8d 100644
  #define ID_WEASELTRAY_INSTALLDIR        40006
  #define ID_WEASELTRAY_USERCONFIG        40007
 diff --git a/output/install.nsi b/output/install.nsi
-index 3d5130c..30be3de 100644
+index 3d5130c..8720be5 100644
 --- a/output/install.nsi
 +++ b/output/install.nsi
-@@ -18,21 +18,33 @@ Unicode true
+@@ -18,21 +18,39 @@ Unicode true
  !define WEASEL_BUILD 0
  !endif
  
 -!define WEASEL_ROOT $INSTDIR\weasel-${WEASEL_VERSION}
 -!define REG_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Weasel"
++!if "${LINNET_ARCH}" != "x64"
++!if "${LINNET_ARCH}" != "arm64"
++!error "LINNET_ARCH must be x64 or arm64"
++!endif
++!endif
++
 +!define WEASEL_ROOT $INSTDIR\Linnet-${WEASEL_VERSION}
 +!define REG_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Linnet"
 +
@@ -1524,11 +1570,11 @@ index 3d5130c..30be3de 100644
  
  ; The name of the installer
 -Name "小狼毫 ${WEASEL_VERSION}"
-+Name "Linnet ${WEASEL_VERSION}"
++Name "Linnet ${WEASEL_VERSION} (${LINNET_ARCH})"
  
  ; The file to write
 -OutFile "archives\weasel-${PRODUCT_VERSION}-installer.exe"
-+OutFile "archives\Linnet-Windows-${PRODUCT_VERSION}-installer.exe"
++OutFile "archives\Linnet-Windows-${PRODUCT_VERSION}-${LINNET_ARCH}-installer.exe"
  
  VIProductVersion "${WEASEL_VERSION}.${WEASEL_BUILD}"
 -VIAddVersionKey /LANG=2052 "ProductName" "小狼毫"
@@ -1539,11 +1585,11 @@ index 3d5130c..30be3de 100644
 -VIAddVersionKey /LANG=2052 "FileDescription" "小狼毫輸入法"
 +VIAddVersionKey /LANG=2052 "CompanyName" "Linnet contributors"
 +VIAddVersionKey /LANG=2052 "LegalCopyright" "Copyleft Linnet and RIME contributors"
-+VIAddVersionKey /LANG=2052 "FileDescription" "Linnet Windows input method"
++VIAddVersionKey /LANG=2052 "FileDescription" "Linnet Windows ${LINNET_ARCH} input method"
  VIAddVersionKey /LANG=2052 "FileVersion" "${WEASEL_VERSION}"
  
  !define MUI_ICON ..\resource\weasel.ico
-@@ -60,59 +72,63 @@ RequestExecutionLevel admin
+@@ -60,59 +78,66 @@ RequestExecutionLevel admin
  ; Languages
  
  !insertmacro MUI_LANGUAGE "TradChinese"
@@ -1574,6 +1620,7 @@ index 3d5130c..30be3de 100644
 +LangString CONFIRMATION ${LANG_TRADCHINESE} "安裝前，請先卸載舊版本的 Linnet。$\n$\n按下「確定」移除舊版本，按下「取消」放棄本次安裝。"
  LangString SYSTEMVERSIONNOTOK ${LANG_TRADCHINESE} "您的系统不被支持，最低系統要求:Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_TRADCHINESE} "自動檢查版本更新？"
++LangString ARCHITECTURENOTOK ${LANG_TRADCHINESE} "此 ${LINNET_ARCH} 安裝包不適用於目前系統。請選擇與 Windows 架構相符的 Linnet 安裝包；ARM64 版需要 Windows 11。"
  
  !insertmacro MUI_LANGUAGE "SimpChinese"
 -LangString DISPLAYNAME ${LANG_SIMPCHINESE} "小狼毫输入法"
@@ -1603,6 +1650,7 @@ index 3d5130c..30be3de 100644
 +LangString CONFIRMATION ${LANG_SIMPCHINESE} '安装前，请先卸载旧版本的 Linnet。$\n$\n点击 "确定" 移除旧版本，或点击 "取消" 放弃本次安装。'
  LangString SYSTEMVERSIONNOTOK ${LANG_SIMPCHINESE} "您的系統不被支持，最低系统要求:Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_SIMPCHINESE} "自动检查版本更新？"
++LangString ARCHITECTURENOTOK ${LANG_SIMPCHINESE} "此 ${LINNET_ARCH} 安装包不适用于当前系统。请选择与 Windows 架构相符的 Linnet 安装包；ARM64 版需要 Windows 11。"
  
  !insertmacro MUI_LANGUAGE "English"
 -LangString DISPLAYNAME ${LANG_ENGLISH} "Weasel"
@@ -1632,6 +1680,7 @@ index 3d5130c..30be3de 100644
 +LangString CONFIRMATION ${LANG_ENGLISH} "Before installation, please uninstall the old version of Linnet.$\n$\nPress 'OK' to remove the old version, or 'Cancel' to abort installation."
  LangString SYSTEMVERSIONNOTOK ${LANG_ENGLISH} "Your system not supported, minimium system required: Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_ENGLISH} "Automatically check for updates?"
++LangString ARCHITECTURENOTOK ${LANG_ENGLISH} "This ${LINNET_ARCH} package does not match your system. Choose the Linnet package for your Windows architecture; ARM64 requires Windows 11."
  
  ;--------------------------------
  
@@ -1649,36 +1698,47 @@ index 3d5130c..30be3de 100644
    ; if not version >= 8.1, quit and MessageBox(if not silent)
    ${IfNot} ${AtLeastWin8.1}
      IfSilent toquit
-@@ -121,121 +137,238 @@ toquit:
+@@ -121,171 +146,253 @@ toquit:
      Quit
    ${EndIf}
  
 -  ReadRegStr $R0 HKLM "Software\Rime\Weasel" "InstallDir"
++  ; TSF DLLs load inside applications: executable emulation alone is not enough.
++!if "${LINNET_ARCH}" == "x64"
++  ${If} ${IsNativeAMD64}
++!else
++  ${If} ${IsNativeARM64}
++  ${AndIf} ${AtLeastWin11}
++!endif
++  ${Else}
++    IfSilent architecture_not_supported
++    MessageBox MB_OK|MB_ICONSTOP '$(ARCHITECTURENOTOK)'
++architecture_not_supported:
++    SetErrorLevel 1633
++    Quit
++  ${EndIf}
++
 +  ReadRegStr $R0 HKLM "Software\Linnet" "InstallDir"
    StrCmp $R0 "" 0 skip
    ; The default installation directory
-   ; install x64 build for NativeARM64_WINDOWS11 and NativeAMD64_WINDOWS11
-   ${If} ${AtLeastWin11} ; Windows 11 and above
-     ${If} ${IsNativeARM64}
+-  ; install x64 build for NativeARM64_WINDOWS11 and NativeAMD64_WINDOWS11
+-  ${If} ${AtLeastWin11} ; Windows 11 and above
+-    ${If} ${IsNativeARM64}
 -      StrCpy $INSTDIR "$PROGRAMFILES64\Rime"
-+      StrCpy $INSTDIR "$PROGRAMFILES64\Linnet"
-     ${ElseIf} ${IsNativeAMD64}
+-    ${ElseIf} ${IsNativeAMD64}
 -      StrCpy $INSTDIR "$PROGRAMFILES64\Rime"
-+      StrCpy $INSTDIR "$PROGRAMFILES64\Linnet"
-     ${Else}
+-    ${Else}
 -      StrCpy $INSTDIR "$PROGRAMFILES\Rime"
-+      StrCpy $INSTDIR "$PROGRAMFILES\Linnet"
-     ${Endif}
-   ; install x64 build for NativeAMD64_BELLOW_WINDOWS11
-   ${Else} ; Windows 10 or bellow
-     ${If} ${IsNativeAMD64}
+-    ${Endif}
+-  ; install x64 build for NativeAMD64_BELLOW_WINDOWS11
+-  ${Else} ; Windows 10 or bellow
+-    ${If} ${IsNativeAMD64}
 -      StrCpy $INSTDIR "$PROGRAMFILES64\Rime"
-+      StrCpy $INSTDIR "$PROGRAMFILES64\Linnet"
-     ${Else}
+-    ${Else}
 -      StrCpy $INSTDIR "$PROGRAMFILES\Rime"
-+      StrCpy $INSTDIR "$PROGRAMFILES\Linnet"
-     ${Endif}
-   ${Endif}
+-    ${Endif}
+-  ${Endif}
++  StrCpy $INSTDIR "$PROGRAMFILES64\Linnet"
  skip:
    ReadRegStr $R0 HKLM \
 -  "Software\Microsoft\Windows\CurrentVersion\Uninstall\Weasel" \
@@ -1869,11 +1929,16 @@ index 3d5130c..30be3de 100644
 +stale_rollback:
 +  SetErrorLevel 2
 +  Abort
-+
+ 
+-  ; Write the new installation path into the registry
+-  ; redirect on 64 bit system
+-  ; HKLM SOFTWARE\WOW6432Node\Rime\Weasel "InstallDir" "$INSTDIR"
+-  WriteRegStr HKLM SOFTWARE\Rime\Weasel "InstallDir" "$INSTDIR"
 +invalid_upgrade:
 +  SetErrorLevel 1
 +  Abort
-+
+ 
+-  ; Reset INSTDIR for the new version
 +call_uninstaller:
 +  ExecWait '"$R1\LinnetServer.exe" /quit' $R3
 +  IntCmp $R3 0 old_server_stopped
@@ -1891,11 +1956,7 @@ index 3d5130c..30be3de 100644
 +  ; Prompt reboot
 +  SetRebootFlag true
 +  GoTo upgrade_done
- 
--  ; Write the new installation path into the registry
--  ; redirect on 64 bit system
--  ; HKLM SOFTWARE\WOW6432Node\Rime\Weasel "InstallDir" "$INSTDIR"
--  WriteRegStr HKLM SOFTWARE\Rime\Weasel "InstallDir" "$INSTDIR"
++
 +old_package_not_preserved:
 +  Call RestorePriorFrontend
 +  Pop $R5
@@ -1905,8 +1966,7 @@ index 3d5130c..30be3de 100644
 +old_package_restored:
 +  SetErrorLevel 3
 +  Abort
- 
--  ; Reset INSTDIR for the new version
++
 +upgrade_done:
 +  ; Keep the selected base directory while targeting the versioned package.
 +  StrCpy $R0 $INSTDIR
@@ -1951,47 +2011,73 @@ index 3d5130c..30be3de 100644
 +  File /r "licenses\*.*"
 +  SetOutPath $INSTDIR
    File "weasel.dll"
-   ${If} ${RunningX64}
-     File "weaselx64.dll"
-@@ -258,32 +391,27 @@ program_files:
-   ${If} ${AtLeastWin11} ; Windows 11 and above
-     ${If} ${IsNativeARM64}
-       File "WeaselDeployer.exe"
+-  ${If} ${RunningX64}
+-    File "weaselx64.dll"
+-  ${EndIf}
+-  ${If} ${IsNativeARM64}
+-    File /nonfatal "weaselARM.dll"
+-    File /nonfatal "weaselARM64.dll"
+-    File /nonfatal "weaselARM64X.dll"
+-  ${EndIf}
++  File "weaselx64.dll"
+   File "weasel.ime"
+-  ${If} ${RunningX64}
+-    File "weaselx64.ime"
+-  ${EndIf}
+-  ${If} ${IsNativeARM64}
+-    File /nonfatal "weaselARM.ime"
+-    File /nonfatal "weaselARM64.ime"
+-    File /nonfatal "weaselARM64X.ime"
+-  ${EndIf}
+-  ; install x64 build for NativeARM64_WINDOWS11 and NativeAMD64_WINDOWS11
+-  ${If} ${AtLeastWin11} ; Windows 11 and above
+-    ${If} ${IsNativeARM64}
+-      File "WeaselDeployer.exe"
 -      File "WeaselServer.exe"
-+      File /oname=LinnetServer.exe "WeaselServer.exe"
-       File "rime.dll"
+-      File "rime.dll"
 -      File "WinSparkle.dll"
-     ${ElseIf} ${IsNativeAMD64}
-       File "WeaselDeployer.exe"
+-    ${ElseIf} ${IsNativeAMD64}
+-      File "WeaselDeployer.exe"
 -      File "WeaselServer.exe"
-+      File /oname=LinnetServer.exe "WeaselServer.exe"
-       File "rime.dll"
+-      File "rime.dll"
 -      File "WinSparkle.dll"
-     ${Else}
-       File "Win32\WeaselDeployer.exe"
+-    ${Else}
+-      File "Win32\WeaselDeployer.exe"
 -      File "Win32\WeaselServer.exe"
-+      File /oname=LinnetServer.exe "Win32\WeaselServer.exe"
-       File "Win32\rime.dll"
+-      File "Win32\rime.dll"
 -      File "Win32\WinSparkle.dll"
-     ${Endif}
-   ; install x64 build for NativeAMD64_BELLOW_WINDOWS11
-   ${Else} ; Windows 10 or bellow
-     ${If} ${IsNativeAMD64}
-       File "WeaselDeployer.exe"
+-    ${Endif}
+-  ; install x64 build for NativeAMD64_BELLOW_WINDOWS11
+-  ${Else} ; Windows 10 or bellow
+-    ${If} ${IsNativeAMD64}
+-      File "WeaselDeployer.exe"
 -      File "WeaselServer.exe"
-+      File /oname=LinnetServer.exe "WeaselServer.exe"
-       File "rime.dll"
+-      File "rime.dll"
 -      File "WinSparkle.dll"
-     ${Else}
-       File "Win32\WeaselDeployer.exe"
+-    ${Else}
+-      File "Win32\WeaselDeployer.exe"
 -      File "Win32\WeaselServer.exe"
-+      File /oname=LinnetServer.exe "Win32\WeaselServer.exe"
-       File "Win32\rime.dll"
+-      File "Win32\rime.dll"
 -      File "Win32\WinSparkle.dll"
-     ${Endif}
-   ${Endif}
+-    ${Endif}
+-  ${Endif}
++  File "weaselx64.ime"
++!if "${LINNET_ARCH}" == "arm64"
++  File "weaselARM.dll"
++  File "weaselARM64.dll"
++  File "weaselARM64X.dll"
++  File "weaselARM.ime"
++  File "weaselARM64.ime"
++  File "weaselARM64X.ime"
++!endif
++  ; The ARM64 package uses upstream's x64 server under Windows 11 emulation.
++  File "WeaselDeployer.exe"
++  File /oname=LinnetServer.exe "WeaselServer.exe"
++  File "rime.dll"
  
-@@ -293,13 +421,19 @@ program_files:
+   File "WeaselSetup.exe"
+   ; shared data files
+@@ -293,13 +400,19 @@ program_files:
    File "data\*.yaml"
    File /nonfatal "data\*.txt"
    File /nonfatal "data\*.gram"
@@ -2012,7 +2098,7 @@ index 3d5130c..30be3de 100644
  
    SetOutPath $INSTDIR
  
-@@ -314,29 +448,68 @@ program_files:
+@@ -314,29 +427,68 @@ program_files:
    IfErrors +2 0
    StrCpy $R2 "/t"
  
@@ -2096,7 +2182,7 @@ index 3d5130c..30be3de 100644
    ; don't redirect on 64 bit system for auto run setting
    ${If} ${IsNativeARM64}
      SetRegView 64
-@@ -344,22 +517,12 @@ program_files:
+@@ -344,22 +496,12 @@ program_files:
      SetRegView 64
    ${Endif}
    ; Write autorun key
@@ -2122,7 +2208,7 @@ index 3d5130c..30be3de 100644
    SetRebootFlag true
  
  SectionEnd
-@@ -373,10 +536,9 @@ Section "Start Menu Shortcuts"
+@@ -373,10 +515,9 @@ Section "Start Menu Shortcuts"
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDEPLOY).lnk" "$INSTDIR\WeaselDeployer.exe" "/deploy" "$SYSDIR\shell32.dll" 144
@@ -2136,7 +2222,7 @@ index 3d5130c..30be3de 100644
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
  
-@@ -388,30 +550,41 @@ SectionEnd
+@@ -388,30 +529,41 @@ SectionEnd
  
  Section "Uninstall"
  

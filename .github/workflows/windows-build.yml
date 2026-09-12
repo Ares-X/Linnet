@@ -72,7 +72,7 @@ jobs:
             -ThemePreviewRoot (Join-Path $windowsInputs 'build/windows-inputs/preview') `
             -InputPolicyRoot (Join-Path $windowsInputs 'build/windows-inputs/policies')
 
-      - name: Build Windows installer
+      - name: Build x64 and ARM64 Windows installers
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -89,10 +89,18 @@ jobs:
       # This unsigned, expiring Actions artifact is engineering evidence only.
       # Product UAT must use the later signed, SHA-bound candidate, and no
       # workflow may attach Windows bytes to a GitHub Release before it passes.
-      - name: Upload private Windows engineering candidate
+      - name: Upload x64 Windows engineering candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: Linnet-Windows-${{ github.sha }}
+          name: Linnet-Windows-x64-${{ github.sha }}
           if-no-files-found: error
           retention-days: 7
-          path: build/windows/weasel/output/archives/Linnet-Windows-*-installer.exe
+          path: build/windows/weasel/output/archives/Linnet-Windows-*-x64-installer.exe
+
+      - name: Upload ARM64 Windows engineering candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: Linnet-Windows-arm64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: build/windows/weasel/output/archives/Linnet-Windows-*-arm64-installer.exe

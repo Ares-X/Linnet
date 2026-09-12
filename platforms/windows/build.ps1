@@ -44,8 +44,6 @@ $Manifest = [ordered]@{
   weasel_config_sha256 = $Prepared.weasel_config_sha256
   upstream_updater = "disabled"
 }
-$Manifest | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 `
-  -LiteralPath (Join-Path $Projection "output\linnet-windows-manifest.json")
 
 $EnvFile = @"
 @echo off
@@ -82,9 +80,23 @@ Copy-Item -LiteralPath $BoostLicense -Destination `
 
 Push-Location $Projection
 try {
-  & cmd.exe /d /c "build.bat boost librime weasel installer arm64"
+  & cmd.exe /d /c "build.bat boost librime weasel arm64"
   if ($LASTEXITCODE -ne 0) {
     throw "Windows build failed with exit code $LASTEXITCODE"
+  }
+  # Compile the shared runtime/frontends once, then package the target payloads.
+  $Installers = foreach ($Architecture in @("x64", "arm64")) {
+    $Manifest.architecture = $Architecture
+    $Manifest | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 `
+      -LiteralPath (Join-Path $Projection "output\linnet-windows-manifest.json")
+    & (Join-Path ${env:ProgramFiles(x86)} "NSIS\Bin\makensis.exe") `
+      "/DWEASEL_VERSION=$Version" "/DWEASEL_BUILD=$Build" `
+      "/DPRODUCT_VERSION=$Version.$Build" "/DLINNET_ARCH=$Architecture" `
+      output\install.nsi | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+      throw "Windows $Architecture packaging failed with exit code $LASTEXITCODE"
+    }
+    Join-Path $Projection "output\archives\Linnet-Windows-$Version.$Build-$Architecture-installer.exe"
   }
 } finally {
   Pop-Location
@@ -108,9 +120,7 @@ if ($LASTEXITCODE -ne 0) {
   throw "Windows Win32 runtime smoke probe compilation failed with exit code $LASTEXITCODE"
 }
 
-$Installer = Join-Path $Projection "output\archives\Linnet-Windows-$Version.$Build-installer.exe"
-foreach ($Artifact in @(
-  $Installer,
+foreach ($Artifact in ($Installers + @(
   (Join-Path $Projection "output\rime.dll"),
   (Join-Path $Projection "output\Win32\rime.dll"),
   (Join-Path $Projection "output\weaselx64.dll"),
@@ -124,7 +134,7 @@ foreach ($Artifact in @(
   (Join-Path $Projection "output\Win32\WeaselServer.exe"),
   (Join-Path $Projection "output\LinnetRuntimeSmoke.exe"),
   (Join-Path $Projection "output\Win32\LinnetRuntimeSmoke.exe")
-)) {
+))) {
   if (-not (Test-Path -LiteralPath $Artifact -PathType Leaf)) {
     throw "Expected Windows artifact is missing: $Artifact"
   }
@@ -133,4 +143,6 @@ if (Get-ChildItem -LiteralPath (Join-Path $Projection "output\archives") `
     -Filter '*weasel*installer.exe') {
   throw "Upstream-branded installer escaped the Linnet release projection"
 }
-Write-Host "Windows installer: $Installer"
+foreach ($Installer in $Installers) {
+  Write-Host "Windows installer: $Installer"
+}
