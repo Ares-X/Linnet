@@ -211,3 +211,54 @@ Source is ready for the Windows compiler/package boundary, not accepted for
 release. Detailed host logs are in `build/windows-settings-20260913`. The installed
 candidate is still `bcd8919`; new native controls, rendering and lifecycle rows
 remain `NOT_EXERCISED` until the new Actions bytes are installed and tested.
+
+## Native compiler/lifetime correction
+
+- Deliverable: the integrated candidate layout must compile with Windows' real
+  coordinate types and destroy its new owned presentation buffers on replacement.
+- Cause/owner: `StandardLayout` combines its `int` dimensions with `CSize::cx/cy`
+  (`LONG`) in template-deduced `std::max`. These are distinct C++ types. Convert
+  the native dimensions at those four calls; both Windows coordinate types are
+  signed 32-bit, so this does not change the dimensions. Microsoft documents
+  [CSize inheritance](https://learn.microsoft.com/en-us/cpp/atl-mfc-shared/reference/csize-class)
+  and [SIZE fields](https://learn.microsoft.com/en-us/windows/win32/api/windef/ns-windef-size).
+- `WeaselPanel::_CreateLayout` deletes through `Layout*`; new `StandardLayout`
+  vector/string members need their actual destructor to run. Give that existing
+  base a virtual default destructor, also honoring the existing FullScreenLayout
+  destructor. This is an ownership correction, not a measured performance claim.
+- Scope: those existing native layout owners, locked patch/digest and evidence.
+  Geometry owner 1 -> 1; allocation owner 1 -> 1; additional helpers, defaults,
+  fallbacks and services 0. Retire the mismatched-type calls/nonvirtual deletion.
+- Validate by collecting the current exact Windows CI diagnostics, then one
+  corrected native build after the correction batch; do not rerun unrelated
+  host input suites for these native-only changes. Layout/typing/DPI and memory
+  observations on the corrected installed candidate remain required.
+
+Actions run `34718217649` on source `0979947` now confirms this exact compiler
+failure: MSVC C2672 at all four native-coordinate calls; the two other reported
+errors are their dependent expressions. The shared-input job passed, but no
+Windows installers were produced/uploaded or installed. The correction batch
+must pass a new Windows build before any desktop acceptance can begin.
+
+The same correction batch also closes a verified test-integration omission:
+`--settings-probe` was compiled into the Windows executable but only invoked by
+the host verifier. The existing Windows preflight will invoke that mode with
+the actual x64 runtime used by the packaged deployer, in its own temporary user
+directory before installation. Reuse `Invoke-RuntimeSmoke` with optional probe
+arguments; no new runner, service or deployment owner. The existing native
+Settings test stays one owner; Windows execution changes from absent to required.
+Scope includes `platforms/windows/preflight.ps1`. Parse with guest PowerShell 5,
+then require the corrected CI to execute it; this does not replace desktop Apply.
+
+## Candidate debug evidence retention
+
+The locked upstream already builds frontend PDBs and installs librime PDBs to
+`dist_x64/lib` and `dist_Win32/lib`; its own CI retains symbols. Linnet's Windows
+workflow omitted that retention, so the ephemeral runner would discard the
+matching symbols before desktop crash/hang diagnosis. Reuse the existing pinned
+Actions artifact uploader to retain only these generated PDBs for seven days,
+bound to the source SHA. Do not add a symbol compiler, archive dependency or
+publication path. Build owner 1 -> 1; artifact uploader implementation 1 -> 1;
+new services/dependencies 0. Scope: the existing Windows workflow and this
+evidence document. Validate YAML and the existing publication boundary, then
+confirm the corrected run's actual symbol inventory alongside its installers.

@@ -2004,11 +2004,14 @@ index 60b60b4..735400d 100644
  
  GraphicsRoundRectPath::GraphicsRoundRectPath(const CRect rc,
 diff --git a/WeaselUI/Layout.h b/WeaselUI/Layout.h
-index d96ad8e..8bab49d 100644
+index d96ad8e..89986ce 100644
 --- a/WeaselUI/Layout.h
 +++ b/WeaselUI/Layout.h
-@@ -70,6 +70,8 @@ class Layout {
+@@ -68,8 +68,11 @@ class Layout {
+          const Context& context,
+          const Status& status,
           PDWR pDWR);
++  virtual ~Layout() = default;
  
    virtual void DoLayout(CDCHandle dc, PDWR pDWR = NULL) = 0;
 +  virtual void DoExpandedLayout(CDCHandle dc, PDWR pDWR,
@@ -2016,7 +2019,7 @@ index d96ad8e..8bab49d 100644
    /* All points in this class is based on the content area */
    /* The top-left corner of the content area is always (0, 0) */
    virtual CSize GetContentSize() const = 0;
-@@ -84,6 +86,11 @@ class Layout {
+@@ -84,6 +87,11 @@ class Layout {
    virtual IsToRoundStruct GetRoundInfo(int id) = 0;
    virtual IsToRoundStruct GetTextRoundInfo() = 0;
    virtual CRect GetContentRect() = 0;
@@ -2029,7 +2032,7 @@ index d96ad8e..8bab49d 100644
    virtual CRect GetNextpageRect() = 0;
    virtual weasel::TextRange GetPreeditRange() = 0;
 diff --git a/WeaselUI/StandardLayout.cpp b/WeaselUI/StandardLayout.cpp
-index bdffad0..c972d8f 100644
+index bdffad0..e2aae27 100644
 --- a/WeaselUI/StandardLayout.cpp
 +++ b/WeaselUI/StandardLayout.cpp
 @@ -1,16 +1,191 @@
@@ -2075,7 +2078,7 @@ index bdffad0..c972d8f 100644
 +    CSize size = GetPreeditSize(dc, *item.first, pDWR->pPreeditTextFormat, pDWR);
 +    item.second->SetRect(left, top, left + size.cx, top + size.cy);
 +    top += size.cy + _style.spacing;
-+    width = (std::max)(width, size.cx);
++    width = (std::max)(width, int(size.cx));
 +  }
 +  CSize labelSize;
 +  GetTextSizeDW(L"9.", 2, pDWR->pLabelTextFormat, pDWR, &labelSize);
@@ -2156,11 +2159,11 @@ index bdffad0..c972d8f 100644
 +  _disclosureRect.SetRectEmpty();
 +  _disclosureText = _context.cinfo.expanded ? L"收起 ∧" : L"展开 ∨";
 +  const int left = offsetX + real_margin_x;
-+  int bodyWidth = (std::max)(1, _contentSize.cx - 2 * left);
++  int bodyWidth = (std::max)(1, int(_contentSize.cx) - 2 * left);
 +  CSize control;
 +  if (disclosure) {
 +    GetTextSizeDW(_disclosureText, _disclosureText.size(), pDWR->pLabelTextFormat, pDWR, &control);
-+    const int growth = (std::max)(0, control.cx - bodyWidth);
++    const int growth = (std::max)(0, int(control.cx) - bodyWidth);
 +    bodyWidth += growth;
 +    _contentSize.cx += growth;
 +    _contentRect.right += growth;
@@ -2195,7 +2198,7 @@ index bdffad0..c972d8f 100644
 +          height = int(ceil(visibleHeight));
 +        }
 +        height = (std::min)(height, (std::max)(0, workArea.Height() -
-+            top - control.cy - 2 * real_margin_y - _style.spacing));
++            top - int(control.cy) - 2 * real_margin_y - _style.spacing));
 +      }
 +      _detailRect.SetRect(detailLeft, top, detailLeft + width, top + height);
 +      if (sidecar) {

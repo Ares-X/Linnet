@@ -137,12 +137,13 @@ function Invoke-RuntimeSmoke {
     [string]$RuntimeRoot,
     [string]$SharedDataRoot,
     [string]$UserDataRoot,
-    [string]$FailureMessage
+    [string]$FailureMessage,
+    [string[]]$ProbeArguments = @()
   )
   $PreviousPath = $env:PATH
   $env:PATH = "$RuntimeRoot;$PreviousPath"
   try {
-    & $Probe $SharedDataRoot $UserDataRoot
+    & $Probe $SharedDataRoot $UserDataRoot @ProbeArguments
     if ($LASTEXITCODE -ne 0) {
       throw $FailureMessage
     }
@@ -189,6 +190,14 @@ try {
   $env:APPDATA = $TestAppData
   Invoke-RuntimeSmoke $Win32Smoke (Join-Path $Output "Win32") $SharedData $SmokeUser `
     "Built Windows Win32 rime.dll failed candidate black-box verification"
+
+  # Exercise the native Settings model against the runtime used by the packaged
+  # deployer, without changing the install/lifecycle fixture's user settings.
+  $SettingsUser = Join-Path $TestRoot "settings-smoke"
+  New-Item -ItemType Directory -Path $SettingsUser | Out-Null
+  Invoke-RuntimeSmoke $Smoke $Output $SharedData $SettingsUser `
+    "Windows x64 Settings persistence/deployment verification failed" `
+    -ProbeArguments @("--settings-probe")
 
   try {
     Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S", "/T") `

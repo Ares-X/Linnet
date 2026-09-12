@@ -104,3 +104,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: build/windows/weasel/output/archives/Linnet-Windows-*-arm64-installer.exe
+
+      - name: Retain matching Windows debug symbols
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: Linnet-Windows-symbols-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            build/windows/weasel/output/**/*.pdb
+            build/windows/weasel/librime/dist_x64/lib/rime.pdb
+            build/windows/weasel/librime/dist_Win32/lib/rime.pdb
