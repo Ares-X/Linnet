@@ -110,3 +110,23 @@ if (guideNavigation) {
   window.addEventListener('resize', scheduleSection);
   markSection();
 }
+
+const recording = document.querySelector('[data-recording]');
+if (recording) {
+  const image = recording.querySelector('img');
+  const source = recording.querySelector('source');
+  const toggle = recording.querySelector('.gif-toggle');
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  let playing;
+  const setAnimation = enabled => {
+    playing = enabled;
+    const path = enabled ? image.dataset.animation : image.dataset.still;
+    source.srcset = path;
+    image.src = path;
+    toggle.textContent = enabled ? '停止动画' : '播放动画';
+  };
+  setAnimation(!reducedMotion.matches);
+  toggle.hidden = false;
+  toggle.addEventListener('click', () => setAnimation(!playing));
+  reducedMotion.addEventListener('change', () => setAnimation(!reducedMotion.matches));
+}

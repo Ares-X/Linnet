@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="Linnet 双韵，为 Mac 打造的开源双语输入法。支持全拼与双拼连续中英混输，提供离线英文补全、纠错、音标和中文释义。">
-  <title>Linnet 双韵 — 连续中英混输，离线英文辅助</title>
+  <meta name="description" content="Linnet 双韵，为 Mac 打造、开箱即用的 Rime 输入法。内置中英文词库与本地模型，提供英文翻译、拼音反查、词典管理和图形化配置。">
+  <title>Linnet 双韵 — 开箱即用的 Rime 输入法</title>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=1d5e2af090fe">
-  <script src="script.js?v=b2eeee60a65c" defer></script>
+  <link rel="stylesheet" href="style.css?v=7227267bd0d5">
+  <script src="script.js?v=f614111895a0" defer></script>
 </head>
 <body class="product-body">
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -32,7 +32,7 @@
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
         <h1 id="hero-title">Linnet 双韵</h1>
-        <p class="hero-description">为 Mac 打造的开源双语输入法。<br>支持连续中英混输，内置离线英文辅助。</p>
+        <p class="hero-description">为 Mac 打造，开箱即用的 Rime 输入法。<br>内置中英文词库、本地模型与图形化设置。</p>
         <div class="hero-actions">
           <a class="button primary" href="https://github.com/Ares-X/Linnet/releases/latest/download/Linnet.pkg">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg>
@@ -42,30 +42,18 @@
         </div>
         <p class="download-meta">免费开源 <span>·</span> macOS 13+ <span>·</span> Apple Silicon</p>
       </div>
-
-      <figure class="input-recording">
-        <div class="recording-heading"><h2>连续中英混输</h2><a href="guide.html#chinese">输入方式 <span aria-hidden="true">↗</span></a></div>
-        <video controls playsinline preload="metadata" poster="assets/mixed-align-poster.png" width="1000" height="392" aria-label="自然码中英混输实录" aria-describedby="recording-description">
-          <source src="assets/mixed-align.mp4" type="video/mp4">
-          <a href="assets/mixed-align.mp4">观看输入实录</a>
-        </video>
-        <figcaption id="recording-description">
-          <p>自然码输入实录 · 6 秒 · 0.1.25 Preview</p>
-          <details class="recording-details"><summary>录制与选词说明</summary><p>在 macOS 虚拟机 Safari 中自动按键录制，原速播放。全拼和其他双拼方案也支持连续中英混输；字母组合存在拼音与英文歧义时，需从候选中选择。</p></details>
-        </figcaption>
-      </figure>
     </section>
 
     <section id="use" class="section wrap input-section" aria-labelledby="use-title">
       <div class="section-heading">
-        <div><p class="eyebrow">Smart English</p><h2 id="use-title">离线英文辅助</h2></div>
+        <div><p class="eyebrow">翻译与查词</p><h2 id="use-title">英文翻译与拼音反查</h2></div>
         <a class="text-link" href="guide.html#english">配置与用法 <span aria-hidden="true">↗</span></a>
       </div>
       <div class="input-columns">
         <article class="input-column">
           <div class="input-copy">
-            <h3>英文补全与纠错</h3>
-            <p>支持单词补全、拼写纠错与模糊匹配，并结合上下文预测下一词。词库和语言模型在本机运行。</p>
+            <h3>英文释义与音标</h3>
+            <p>输入英文时，可在候选旁查看中文释义与音标。Smart English 同时提供补全、拼写纠错和下一词预测，离线可用。</p>
           </div>
           <figure class="candidate-showcase">
             <figcaption>
@@ -77,7 +65,7 @@
         </article>
         <article class="input-column">
           <div class="input-copy">
-            <h3>拼音查英文</h3>
+            <h3>中文拼音反查英文</h3>
             <p>在中文模式下，用当前全拼或双拼方案查找英文单词。候选中可直接查看中文释义。</p>
           </div>
           <figure class="candidate-showcase">
@@ -90,22 +78,48 @@
         </article>
       </div>
       <p class="gallery-source">候选栏截图 · 宣纸青黛主题 <a href="assets/bilingual.png">查看原图 <span aria-hidden="true">↗</span></a></p>
+    </section>
+
+    <section class="section wrap lexicon-section" aria-labelledby="lexicon-title">
+      <div class="section-heading"><div><p class="eyebrow">词典与语言数据</p><h2 id="lexicon-title">词库精校与补充</h2></div><p>整合中英文词库与离线模型，校订读音和英文释义，补充词条。</p></div>
+      <div class="lexicon-grid">
+        <article><h3>内置词库与本地模型</h3><p>完整安装包包含中英文词库与离线模型，无需自行搭配。中文以万象词库为基础，使用 RIME-LMDG 本地语言模型。</p></article>
+        <article><h3>中文读音与词条补充</h3><p>修订已确认的读音和排序问题，并从雾凇拼音选取补充词条，经过读音核对后合入中文词库。</p></article>
+        <article><h3>英文释义精校</h3><p>校订英文单词的中文释义，补充英文词条，并整理拼音反查结果。</p></article>
+      </div>
+      <p class="gallery-source">基于 Squirrel / librime，结合万象、雾凇拼音与 Hallelujah 的数据和能力。<a href="https://github.com/Ares-X/Linnet/blob/main/THIRD_PARTY_NOTICES.md">来源与修改说明 <span aria-hidden="true">↗</span></a></p>
       <article class="learning-note">
         <div><h3>全拼与双拼共享学习记录</h3><a class="text-link" href="guide.html#chinese">中文输入设置 <span aria-hidden="true">↗</span></a></div>
-        <div><p>开启中文学习后，选过的中英混合词句可在不同拼音方案中使用。</p><ul class="scheme-list" aria-label="支持的拼音方案"><li>全拼</li><li>自然码</li><li>小鹤</li><li>微软</li><li>搜狗</li><li>智能 ABC</li><li>紫光</li><li>拼音加加</li></ul></div>
+        <div><p>全拼与七种双拼方案共享词库和学习记录。方案、学习与简繁输出都可在设置中选择。</p><ul class="scheme-list" aria-label="支持的拼音方案"><li>全拼</li><li>自然码</li><li>小鹤</li><li>微软</li><li>搜狗</li><li>智能 ABC</li><li>紫光</li><li>拼音加加</li></ul></div>
       </article>
     </section>
 
     <section class="section wrap extended-features" aria-labelledby="extended-title">
-      <div class="section-heading"><div><p class="eyebrow">功能与配置</p><h2 id="extended-title">输入与个人数据</h2></div><p>中文输入、常用词句和学习记录，都可在设置中管理。</p></div>
+      <div class="section-heading"><div><p class="eyebrow">功能与配置</p><h2 id="extended-title">词典管理与输入配置</h2></div><p>中文输入、常用词句和学习记录，都可在设置中管理。</p></div>
       <div class="feature-grid">
-        <article><span class="feature-index" aria-hidden="true">01</span><h3>中文纠错与模糊音</h3><p>支持邻键误按和前后鼻音纠错，也可按需要开启固定的模糊音组合。</p><a href="guide.html#chinese">设置中文纠错 <span aria-hidden="true">↗</span></a></article>
-        <article><span class="feature-index" aria-hidden="true">02</span><h3>简繁输出与学习</h3><p>支持简体和繁体。中文学习可选择标准、增强或关闭；英文学习独立设置。</p><a href="guide.html#chinese">输入与学习选项 <span aria-hidden="true">↗</span></a></article>
-        <article><span class="feature-index" aria-hidden="true">03</span><h3>个人词典</h3><p>添加姓名和专有名词，或隐藏不需要的英文候选。</p><a href="guide.html#dictionary">管理个人词典 <span aria-hidden="true">↗</span></a></article>
-        <article><span class="feature-index" aria-hidden="true">04</span><h3>短语扩展</h3><p>将常用地址、签名或整段文字设为短码，输入短码即可展开。</p><a href="guide.html#expander">设置固定短语 <span aria-hidden="true">↗</span></a></article>
+        <article><span class="feature-index" aria-hidden="true">01</span><h3>个人词典</h3><p>添加姓名和专有名词，或隐藏不需要的英文候选。</p><a href="guide.html#dictionary">管理个人词典 <span aria-hidden="true">↗</span></a></article>
+        <article><span class="feature-index" aria-hidden="true">02</span><h3>短语扩展</h3><p>将常用地址、签名或整段文字设为短码，输入短码即可展开。</p><a href="guide.html#expander">设置固定短语 <span aria-hidden="true">↗</span></a></article>
+        <article><span class="feature-index" aria-hidden="true">03</span><h3>中文纠错与模糊音</h3><p>支持邻键误按和前后鼻音纠错，也可按需要开启固定的模糊音组合。</p><a href="guide.html#chinese">设置中文纠错 <span aria-hidden="true">↗</span></a></article>
+        <article><span class="feature-index" aria-hidden="true">04</span><h3>简繁输出与学习</h3><p>支持简体和繁体。中文学习可选择标准、增强或关闭；英文学习独立设置。</p><a href="guide.html#chinese">输入与学习选项 <span aria-hidden="true">↗</span></a></article>
         <article><span class="feature-index" aria-hidden="true">05</span><h3>iCloud 学习同步</h3><p>可选用 iCloud 在多台 Mac 间同步中英文学习记录。</p><a href="guide.html#data">同步范围与设置 <span aria-hidden="true">↗</span></a></article>
         <article><span class="feature-index" aria-hidden="true">06</span><h3>备份与数据迁移</h3><p>支持备份、恢复和导入导出，也可手动导入 Rime 或 Hallelujah 数据。</p><a href="guide.html#data">数据管理方式 <span aria-hidden="true">↗</span></a></article>
       </div>
+    </section>
+
+    <section id="mixed-input" class="section wrap mixed-section" aria-labelledby="mixed-title">
+      <div class="section-heading"><div><p class="eyebrow">其他输入功能</p><h2 id="mixed-title">中英混输</h2></div><p>中文模式下也可输入完整英文单词，支持全拼与双拼。</p></div>
+      <figure class="input-recording" data-recording>
+        <picture>
+          <source media="(prefers-reduced-motion: reduce)" srcset="assets/mixed-align-poster.png">
+          <img src="assets/mixed-align.gif" width="1000" height="392" loading="lazy" data-animation="assets/mixed-align.gif" data-still="assets/mixed-align-poster.png" alt="自然码实机动画：连续输入后，候选显示我们需要align一下这个gap的solution">
+        </picture>
+        <figcaption>
+          <p>自然码实机 GIF · 0.1.25 Preview</p>
+          <button type="button" class="gif-toggle" hidden>停止动画</button>
+          <details class="recording-details"><summary>录制与选词说明</summary><p>保留项目原始 GIF：macOS 虚拟机 Safari 中自动按键录制，原速播放。字母组合存在拼音与英文歧义时，需从候选中选择。</p></details>
+        </figcaption>
+      </figure>
+      <a class="text-link" href="guide.html#chinese">查看混输输入方式 <span aria-hidden="true">↗</span></a>
     </section>
 
     <section id="appearance" class="appearance-section section" aria-labelledby="appearance-title">
@@ -198,7 +212,7 @@
   <footer class="wrap site-footer">
     <div>
       <a class="brand" href="#"><img src="assets/mark.svg" alt="" width="32" height="28"><span>Linnet <span class="brand-cn">双韵</span></span></a>
-      <p>macOS 开源双语输入法</p>
+      <p>开箱即用的 Rime 输入法</p>
     </div>
     <div class="footer-links">
       <a href="https://github.com/Ares-X/Linnet">GitHub <span aria-hidden="true">↗</span></a>

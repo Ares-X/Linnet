@@ -54,11 +54,8 @@ kbd { display: inline-block; padding: .1rem .4rem; border: 1px solid var(--line)
 .hero-actions { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 1.6rem; margin-top: 1.9rem; }
 .download-meta { margin-top: .9rem; color: var(--muted); font-size: .75rem; }
 .download-meta span { margin-inline: .3rem; }
-.input-recording { margin: 3.5rem auto 0; max-width: 930px; }
-.recording-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
-.recording-heading h2 { font-size: .95rem; font-weight: 550; letter-spacing: 0; }
-.recording-heading a { font-size: .8rem; color: var(--muted); padding-block: .5rem; }
-.input-recording video { width: 100%; height: auto; display: block; border-radius: 14px; border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); }
+.input-recording { margin: 0; max-width: 760px; }
+.input-recording img { width: 100%; height: auto; display: block; border-radius: 14px; border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); }
 .input-recording figcaption { margin-top: 1rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: .4rem 1rem; font-size: .75rem; color: var(--muted); }
 .recording-details { max-width: 32rem; text-align: right; }
 .recording-details summary { text-decoration: underline; text-underline-offset: 3px; }
@@ -263,7 +260,6 @@ details[open] > summary .disclosure-icon { transform: rotate(45deg); }
   .site-header .nav-github, .site-header .nav-appearance { display: none; }
   .hero { padding-block: 3.3rem 3.5rem; }
   .hero-description { font-size: 1rem; }
-  .input-recording { margin-top: 2.75rem; }
   .section { padding-block: 4rem; }
   .section-heading { gap: 2rem; }
   .section-heading > p { max-width: 20rem; }
@@ -354,3 +350,11 @@ details[open] > summary .disclosure-icon { transform: rotate(45deg); }
 }
 @media (prefers-reduced-transparency: reduce) { .site-header { background: var(--bg); backdrop-filter: none; } }
 @media (prefers-contrast: more) { :root { --muted: var(--ink); --line: var(--ink); } .site-header { background: var(--bg); backdrop-filter: none; } }
+
+.lexicon-section, .mixed-section { border-top: 1px solid var(--line); }
+.lexicon-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.5rem; }
+.lexicon-grid p { color: var(--muted); font-size: .95rem; margin-top: .8rem; }
+.lexicon-section > .gallery-source { margin-top: 2rem; }
+.mixed-section .text-link { margin-top: 1.2rem; }
+.gif-toggle { border: 0; background: none; padding: 0; color: var(--muted); font-size: .75rem; text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 600px) { .lexicon-grid { grid-template-columns: 1fr; gap: 1.7rem; } }
