@@ -1,7 +1,11 @@
 # Linnet product website
 
-Static product site for `https://ares-x.github.io/Linnet/`. GitHub Pages serves
+Static product site for `https://linnet.ares-x.com/`. GitHub Pages serves
 this directory from `gh-pages`. No dependency install or build step is required.
+
+`CNAME` owns the custom domain. Cloudflare DNS should map `linnet` to
+`ares-x.github.io` as a DNS-only CNAME. GitHub Pages provides the HTTPS certificate;
+keep HTTPS enforcement enabled after certificate provisioning completes.
 
 ## Page owners
 
