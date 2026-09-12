@@ -2,6 +2,9 @@
 # is projected from data/squirrel.yaml by scripts/project-windows-weasel-config.
 # Input behavior remains owned by the shared Linnet schemas and runtime.
 config_version: "0.22"
+__patch:
+  - linnet_windows_appearance_defaults:/patch
+  - weasel.custom:/patch?
 
 show_notifications: true
 show_notifications_time: 1200
@@ -23,8 +26,8 @@ style:
   font_face: Microsoft YaHei UI
   label_font_face: Microsoft YaHei UI
   comment_font_face: Microsoft YaHei UI
-  font_point: 14
-  label_font_point: 12
+  font_point: 16
+  label_font_point: 10
   comment_font_point: 12
   candidate_abbreviate_length: 0
   click_to_capture: false

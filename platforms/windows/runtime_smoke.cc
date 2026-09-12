@@ -5,6 +5,11 @@
 #include <vector>
 
 #include "rime_api.h"
+#include "settings_model.h"
+
+#ifdef _WIN32
+void CheckWindowsIPCArchive();
+#endif
 
 namespace {
 
@@ -129,6 +134,144 @@ void ExpectEnglishSchemaSwitch(RimeApi* api, RimeSessionId session) {
   }
 }
 
+void SettingsProbe(RimeApi* api, const char* shared, const char* user) {
+  // Match the existing native installer/theme-selector output, plus an
+  // unrelated user customization that a Settings Apply must not remove.
+  const auto native_path = std::filesystem::path(user) / "weasel.custom.yaml";
+  linnet_windows::Config native;
+  auto native_patch = rime::New<rime::ConfigMap>();
+  native_patch->Set("style/color_scheme", rime::New<rime::ConfigValue>("linnet_glass_light"));
+  native_patch->Set("style/color_scheme_dark", rime::New<rime::ConfigValue>("linnet_glass_dark"));
+  native_patch->Set("style/border_width", rime::New<rime::ConfigValue>(3));
+  native.document.SetItem("patch", native_patch);
+  native.Save(native_path);
+  linnet_windows::Settings settings(shared, user);
+  for (auto& option : settings.options) {
+    if (option.id == "theme" && option.choice_ids[option.selected] != "native_glass/system")
+      Fail("Settings did not read the existing native theme");
+    if (option.id == "fuzzy_n_l" || option.id == "fuzzy_en_eng") option.selected = 1;
+    if (option.id == "ipa" || option.id == "translation") option.selected = 0;
+    if (option.id == "page_size") option.selected = 1;  // five candidates
+    if (option.id == "font_point" || option.id == "theme" || option.id == "chinese_layout") {
+      const std::string value = option.id == "font_point" ? "24" :
+                                option.id == "theme" ? "moon_jade/dark" : "vertical";
+      const auto selected = std::find(option.choice_ids.begin(), option.choice_ids.end(), value);
+      if (selected == option.choice_ids.end()) Fail("settings choice unavailable: " + value);
+      option.selected = int(selected - option.choice_ids.begin());
+    }
+  }
+  settings.font_face = "Consolas";
+  // A real filesystem failure must not report success or publish UI choices
+  // that the input runtime could not receive. The caller uses isolated data.
+  const auto blocked = std::filesystem::path(user) /
+                       "linnet_en.custom.yaml";
+  if (!std::filesystem::create_directory(blocked))
+    Fail("settings failure fixture already exists");
+  bool write_failed = false;
+  try { settings.Save(); }
+  catch (const std::runtime_error&) { write_failed = true; }
+  std::filesystem::remove(blocked);
+  if (!write_failed) Fail("settings accepted a failed projection write");
+  if (std::filesystem::exists(std::filesystem::path(user) / "linnet_windows_settings.yaml"))
+    Fail("failed projection write published the saved choices");
+  settings.Save();
+  linnet_windows::Settings reread(shared, user);
+  if (reread.font_face != "Consolas" || reread.options.size() != settings.options.size())
+    Fail("native settings did not persist");
+  for (size_t i = 0; i < settings.options.size(); ++i)
+    if (settings.options[i].selected != reread.options[i].selected)
+      Fail("setting did not round-trip: " + settings.options[i].id);
+  if (!api->deploy()) Fail("settings could not deploy");
+  RimeConfig config = {};
+  if (!api->schema_open("linnet_zh_pinyin", &config)) Fail("settings schema unavailable");
+  Bool ipa = True, translation = True;
+  api->config_get_bool(&config, "linnet_english_interaction/show_ipa", &ipa);
+  api->config_get_bool(&config, "linnet_english_interaction/show_translation", &translation);
+  if (ipa || translation) Fail("metadata visibility settings were ignored");
+  bool nasal = false, initials = false;
+  RimeConfigIterator algebra = {};
+  api->config_begin_list(&algebra, &config, "speller/algebra");
+  while (api->config_next(&algebra)) {
+    const char* value = api->config_get_cstring(&config, algebra.path);
+    const std::string rule = value ? value : "";
+    initials |= rule == "fuzz/^n/l/";
+    nasal |= rule == "fuzz/(e|ē|é|ě|è)n$/$1ng/";
+  }
+  api->config_end(&algebra);
+  api->config_close(&config);
+  if (!nasal || !initials) Fail("combined fuzzy choices overwrote each other");
+  if (!api->config_open("default", &config)) Fail("deployed defaults unavailable");
+  int page_size = 0;
+  api->config_get_int(&config, "menu/page_size", &page_size);
+  api->config_close(&config);
+  if (page_size != 5) Fail("candidate page size did not apply");
+  if (!api->deploy_config_file("weasel.yaml", "config_version") ||
+      !api->config_open("weasel", &config)) Fail("appearance settings could not deploy");
+  int font_point = 0;
+  api->config_get_int(&config, "style/font_point", &font_point);
+  const char* scheme = api->config_get_cstring(&config, "style/color_scheme");
+  const char* dark = api->config_get_cstring(&config, "style/color_scheme_dark");
+  const char* font = api->config_get_cstring(&config, "style/font_face");
+  if (font_point != 24 || !scheme || std::string(scheme) != "linnet_moon_jade_dark" ||
+      !dark || std::string(dark) != scheme || !font || std::string(font) != "Consolas")
+    Fail("appearance choices were not projected to Weasel");
+  int candidate_width = 0, sidecar_width = 0, footer_width = 0;
+  api->config_get_int(&config, "style/linnet_detail_candidate_width", &candidate_width);
+  api->config_get_int(&config, "style/linnet_detail_sidecar_width", &sidecar_width);
+  api->config_get_int(&config, "style/linnet_detail_footer_width", &footer_width);
+  if (candidate_width != 240 || sidecar_width != 104 || footer_width != 360)
+    Fail("candidate detail geometry did not follow the selected font size");
+  int border_width = 0;
+  api->config_get_int(&config, "style/border_width", &border_width);
+  if (border_width != 3) Fail("Settings Apply discarded unrelated native customization");
+  api->config_close(&config);
+  if (!api->schema_open("linnet_zh_pinyin", &config)) Fail("layout schema unavailable");
+  Bool horizontal = True;
+  api->config_get_bool(&config, "style/horizontal", &horizontal);
+  api->config_close(&config);
+  if (horizontal) Fail("vertical candidate layout was not projected to Weasel");
+  settings.AcceptChanges();
+  for (auto& option : settings.options) { option.selected = option.default_index; option.reset = true; }
+  settings.font_face.clear();
+  settings.Save();
+  if (!api->deploy()) Fail("default settings could not be restored");
+  if (!api->config_open("default", &config)) Fail("restored defaults unavailable");
+  api->config_get_int(&config, "menu/page_size", &page_size);
+  api->config_close(&config);
+  if (page_size != 9) Fail("candidate page size did not reset");
+  if (!api->deploy_config_file("weasel.yaml", "config_version") ||
+      !api->config_open("weasel", &config)) Fail("appearance reset could not deploy");
+  api->config_get_int(&config, "style/font_point", &font_point);
+  font = api->config_get_cstring(&config, "style/font_face");
+  scheme = api->config_get_cstring(&config, "style/color_scheme");
+  if (font_point != 16 || !font || std::string(font) == "Consolas" ||
+      !scheme || std::string(scheme) != "linnet_paper_light")
+    Fail("appearance reset retained previous user choices");
+  api->config_get_int(&config, "style/linnet_detail_candidate_width", &candidate_width);
+  api->config_get_int(&config, "style/linnet_detail_sidecar_width", &sidecar_width);
+  api->config_get_int(&config, "style/linnet_detail_footer_width", &footer_width);
+  if (candidate_width != 160 || sidecar_width != 104 || footer_width != 256)
+    Fail("candidate detail geometry did not reset with the font size");
+  api->config_close(&config);
+  // Unknown native themes must remain selectable as custom, not be shown as a
+  // stock theme or replaced while the user edits an unrelated setting.
+  native_patch->Set("style/color_scheme", rime::New<rime::ConfigValue>("personal_theme"));
+  native_patch->Set("style/color_scheme_dark", rime::New<rime::ConfigValue>("personal_dark"));
+  native.Save(native_path);
+  linnet_windows::Settings custom(shared, user);
+  for (auto& option : custom.options) {
+    if (option.id == "theme" && option.choice_ids[option.selected] != "custom")
+      Fail("unknown native theme was misrepresented as a stock theme");
+    if (option.id == "ipa") option.selected = 0;
+  }
+  custom.Save();
+  linnet_windows::Config preserved;
+  preserved.Load(native_path);
+  if (preserved.document.GetMap("patch")->GetValue("style/color_scheme")->str() != "personal_theme")
+    Fail("editing input settings replaced an unrelated custom theme");
+  std::cout << "Windows native settings persistence/composition/deployment: PASS\n";
+}
+
 void ExpectCorrection(RimeApi* api, RimeSessionId session) {
   const auto candidates = Enter(api, session, "deserilazation");
   if (candidates.empty() || candidates.front().text != "deserilazation") {
@@ -199,8 +342,11 @@ void ExpectMixedAndRawInput(RimeApi* api, RimeSessionId session) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 3 && !(argc == 4 && std::string(argv[3]) == "--expect-deploy-failure")) {
-    Fail("usage: runtime_smoke SHARED_DATA_DIR USER_DATA_DIR [--expect-deploy-failure]");
+#ifdef _WIN32
+  CheckWindowsIPCArchive();
+#endif
+  if (argc != 3 && !(argc == 4 && (std::string(argv[3]) == "--expect-deploy-failure" || std::string(argv[3]) == "--settings-probe"))) {
+    Fail("usage: runtime_smoke SHARED_DATA_DIR USER_DATA_DIR [--expect-deploy-failure|--settings-probe]");
   }
 
   RimeApi* api = rime_get_api();
@@ -223,6 +369,13 @@ int main(int argc, char** argv) {
   traits.log_dir = "";
 
   api->setup(&traits);
+  if (argc == 4 && std::string(argv[3]) == "--settings-probe") {
+    api->deployer_initialize(nullptr);
+    try { SettingsProbe(api, argv[1], argv[2]); }
+    catch (const std::exception& error) { Fail(error.what()); }
+    api->finalize();
+    return 0;
+  }
   if (argc == 4) {
     api->deployer_initialize(nullptr);
     const bool deployed = api->deploy();
@@ -287,14 +440,20 @@ int main(int argc, char** argv) {
 
   const RimeSessionId reverse = CreateSession(api, "linnet_zh");
   ExpectCandidate(api, reverse, "U4e2d", "中");
+  ExpectCandidate(api, reverse, "uUheng", "一");
+  ExpectCandidate(api, reverse, "uUrener", "你");
+  ExpectCandidate(api, reverse, "cC1+1", "2");
+  ExpectCandidate(api, reverse, "V1", "一");
   ExpectCandidate(api, reverse, "kwregiondemigration", "跨region的migration");
   ExpectCandidate(api, reverse, "nihj", "你好");
   api->destroy_session(reverse);
 
-  for (const char* schema : {"linnet_zh_abc", "linnet_zh_flypy",
-                             "linnet_zh_jiajia", "linnet_zh_mspy",
-                             "linnet_zh_sogou", "linnet_zh_ziguang"}) {
-    const RimeSessionId profile = CreateSession(api, schema);
+  for (const auto& sample : std::vector<std::pair<const char*, const char*>>{
+           {"linnet_zh_abc", "spfa"}, {"linnet_zh_flypy", "srfa"},
+           {"linnet_zh_jiajia", "scfa"}, {"linnet_zh_mspy", "srfa"},
+           {"linnet_zh_sogou", "srfa"}, {"linnet_zh_ziguang", "slfa"}}) {
+    const RimeSessionId profile = CreateSession(api, sample.first);
+    ExpectCandidate(api, profile, sample.second, "算法");
     api->destroy_session(profile);
   }
 

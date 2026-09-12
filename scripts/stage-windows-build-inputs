@@ -13,7 +13,7 @@ git submodule update --init --depth 1 -- upstreams/weasel
 }
 
 mkdir -p build/windows-inputs/policies
-xcrun swiftc -warnings-as-errors \
+xcrun swiftc -warnings-as-errors -enable-bare-slash-regex \
   sources/LinnetPackContract.swift sources/LinnetDataChannel.swift \
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift \
   sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
@@ -23,8 +23,11 @@ xcrun swiftc -warnings-as-errors \
   sources/LinnetSettings/LinnetSettingsDocument.swift \
   sources/LinnetSettings/LinnetSettingsDocumentStore.swift \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
+  sources/LinnetCandidatePresentation.swift \
+  platforms/windows/settings_catalog.swift \
   platforms/windows/input_defaults.swift -o build/windows-inputs/input-defaults
 build/windows-inputs/input-defaults build/windows-inputs/policies data/linnet
+ruby scripts/project-windows-settings build/windows-inputs/policies
 ruby scripts/generate-linnet-lua-embedding \
   "${repo_root}/build/windows-inputs/linnet_embedded_lua.h"
 scripts/project-windows-weasel-config platforms/windows/weasel.base.yaml \

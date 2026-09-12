@@ -1,0 +1,56 @@
+#!/usr/bin/env ruby
+# Rime's YAML parser remains the runtime owner; Ruby translates the Swift
+# renderer's complete choices into the native Windows settings catalog.
+require 'json'
+require 'yaml'
+
+root = ARGV.fetch(0)
+source = JSON.parse(File.read(File.join(root, 'settings-catalog.json')))
+options = source.fetch('options')
+baseline = Dir.glob(File.join(root, 'linnet_windows_*.yaml')).reject do |path|
+  %w[linnet_windows_settings_catalog.yaml linnet_windows_appearance_defaults.yaml].include?(File.basename(path))
+end.to_h do |path|
+  [File.basename(path, '.yaml').delete_prefix('linnet_windows_'), YAML.safe_load(File.read(path)).fetch('patch')]
+end
+baseline['weasel'] = {}
+translate = lambda do |filename, patch|
+  stem = filename.delete_suffix('.custom.yaml')
+  if stem == 'squirrel'
+    stem = 'weasel'
+    patch = patch.reject { |key, _| key == 'style/linnet_material_appearance' }
+  else
+    patch = patch.transform_keys { |key| key == 'style/candidate_list_layout' ? 'style/horizontal' : key }
+    patch['style/horizontal'] = patch['style/horizontal'] == 'linear' if patch.key?('style/horizontal')
+    patch.delete('style/text_orientation')
+  end
+  [stem, patch]
+end
+
+options.each do |option|
+  option['choices'].each do |choice|
+    projections = choice.delete('projections').to_h do |filename, yaml|
+      translate.call(filename, YAML.safe_load(yaml).fetch('patch'))
+    end
+    choice['patches'] = projections.map do |stem, values|
+      changed = values.reject { |key, value| baseline.fetch(stem, {})[key] == value }
+      next if changed.empty?
+      if option.fetch('id').start_with?('fuzzy_') && changed.key?('speller/algebra')
+        base = baseline.fetch(stem).fetch('speller/algebra')
+        selected = changed.delete('speller/algebra')
+        old_rules = base.fetch('__patch').map { |entry| entry.fetch('@before 0') }.reverse
+        new_rules = selected.fetch('__patch').map { |entry| entry.fetch('@before 0') }.reverse
+        changed['linnet/windows_fuzzy'] = {'remove' => old_rules - new_rules, 'add' => new_rules - old_rules}
+      end
+      {'schema' => stem, 'entries' => changed.map { |key, value| {'key' => key, 'value' => value} }}
+    end.compact
+  end
+end
+catalog = {'options' => options, 'algebra' => baseline.map do |stem, values|
+  value = values['speller/algebra']
+  next unless value
+  {'schema' => stem, 'include' => value.fetch('__include'),
+   'rules' => value.fetch('__patch').map { |entry| entry.fetch('@before 0') }.reverse}
+end.compact}
+File.write(File.join(root, 'linnet_windows_settings_catalog.yaml'), YAML.dump(catalog))
+File.write(File.join(root, 'linnet_windows_appearance_defaults.yaml'),
+           YAML.dump({'patch' => source.fetch('defaults').transform_keys { |key| "style/#{key}" }}))

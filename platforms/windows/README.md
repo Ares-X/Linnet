@@ -44,8 +44,10 @@ Weasel/librime commits, projected configuration digest and updater state.
 English glosses are not a Windows-side dictionary or online translation
 service. `linnet.smart.db` remains the sole metadata owner and Smart English
 projects its `m/ipa/` and `m/zh/` records into standard Rime candidate comments.
-Weasel renders that existing comment field, removing only the leading metadata
-marker used by the macOS frontend; IPA and Chinese definitions remain visible.
+The candidate panel displays the highlighted word's IPA and Chinese definitions
+below horizontal candidates or beside a vertical list. Other Rime comments keep
+their native inline presentation. Already-open applications using an older
+frontend retain compact candidates and inline glosses until they are reopened.
 
 The Windows presentation is generated from all seven Linnet theme families in
 `data/squirrel.yaml`, producing fourteen light/dark schemes and seven
@@ -56,16 +58,25 @@ Weasel's native selection border; tile themes retain their filled selection.
 Long horizontal candidate rows wrap using Weasel's native width limit.
 macOS material blur and custom drawing are not emulated.
 
-Weasel retains its mature schema selector, theme selector, user-dictionary
+The native Windows Settings dialog provides input, English, fuzzy-pinyin,
+appearance and personal-data controls. Its choices and defaults are generated
+from the shared Linnet Settings document and renderer, and changes write the
+standard Rime customization files without replacing unrelated user entries.
+Candidate expansion, row navigation, numbered selection and candidate context
+actions use the existing Weasel panel and Rime selection/learning APIs. Expanded
+candidate limits and detail sizing come from the shared presentation design.
+These new frontend paths still require exact-candidate Windows desktop acceptance;
+see [Windows acceptance](../../docs/windows-acceptance.md).
+
+Weasel retains its schema selector, installation theme selector, user-dictionary
 management, synchronization and deployment entrypoints. The
 schema switcher opens with Ctrl+` or F4; choose Smart English there for English
 completion with IPA and Chinese glosses. Shift's plain ASCII mode is separate
 and does not show candidates. The optional
 package-mutating schema downloader is removed completely because root Linnet
-data is package-owned. The SwiftUI/AppKit
-Linnet Settings application is not shipped on Windows. Input defaults still
-come from the shared schemas and projection renderer, rather than a second
-Windows settings model. This includes continuous mixed Chinese/English input,
+data is package-owned. SwiftUI/AppKit itself is not shipped on Windows. Input
+behavior still comes from the shared schemas and projection renderer. This
+includes continuous mixed Chinese/English input,
 schema-aware Chinese spelling correction and conservative nasal-final correction,
 uppercase intent, code-shaped raw input and the reviewed English and Chinese
 supplemental dictionaries.

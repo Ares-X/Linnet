@@ -219,13 +219,17 @@ mkdir -p "${shared}/opencc" "${user}"
 cp -R data/plum/. "${shared}/"
 cp -R data/opencc/. "${shared}/opencc/"
 cp build/windows-inputs/policies/*.yaml "${shared}/"
+cp "${generated_weasel}" "${shared}/weasel.yaml"
 rm "${shared}/zh-hans-t-essay-bgw.gram"
-xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
-  -isystem librime/dist/include platforms/windows/runtime_smoke.cc \
+xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -DGLOG_USE_GLOG_EXPORT \
+  -isystem librime/dist/include -isystem build/dependencies/boost \
+  platforms/windows/runtime_smoke.cc \
   lib/librime.1.dylib -o "${scratch}/runtime-smoke"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   "${scratch}/runtime-smoke" "${shared}" "${user}"
 echo "Windows shared input configuration on macOS librime: PASS (not Windows UAT)"
+DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+  "${scratch}/runtime-smoke" "${shared}" "${user}" --settings-probe
 ruby -e 'File.write(ARGV.fetch(0), "patch:\n  schema_list:\n    - schema: linnet_missing_preflight\n")' \
   "${user}/default.custom.yaml"
 DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \

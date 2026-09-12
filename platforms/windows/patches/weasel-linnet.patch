@@ -1,8 +1,16 @@
 diff --git a/RimeWithWeasel/RimeWithWeasel.cpp b/RimeWithWeasel/RimeWithWeasel.cpp
-index 3f4e59d..b962e92 100644
+index 3f4e59d..1cb7f4b 100644
 --- a/RimeWithWeasel/RimeWithWeasel.cpp
 +++ b/RimeWithWeasel/RimeWithWeasel.cpp
-@@ -46,7 +46,7 @@ static void CleanOldLogs() {
+@@ -11,6 +11,7 @@
+ #include <map>
+ #include <regex>
+ #include <rime_api.h>
++#include <linnet_candidate_design.h>
+ 
+ #define TRANSPARENT_COLOR 0x00000000
+ #define ARGB2ABGR(value)                                 \
+@@ -46,7 +47,7 @@ static void CleanOldLogs() {
    time_t now = time(NULL);
    strftime(ymd, sizeof(ymd), ".%Y%m%d", localtime(&now));
    std::string today(ymd);
@@ -11,7 +19,7 @@ index 3f4e59d..b962e92 100644
    std::string dir = WeaselLogPath().string();
    if (!fs::exists(fs::path(dir)))
      return;
-@@ -137,7 +137,7 @@ void RimeWithWeaselHandler::_Setup() {
+@@ -137,7 +138,7 @@ void RimeWithWeaselHandler::_Setup() {
    weasel_traits.distribution_name = distribution_name.c_str();
    weasel_traits.distribution_code_name = WEASEL_CODE_NAME;
    weasel_traits.distribution_version = WEASEL_VERSION;
@@ -20,34 +28,192 @@ index 3f4e59d..b962e92 100644
    std::string log_dir = WeaselLogPath().u8string();
    weasel_traits.log_dir = log_dir.c_str();
    rime_api->setup(&weasel_traits);
-@@ -150,9 +150,9 @@ void RimeWithWeaselHandler::Initialize() {
+@@ -311,8 +312,45 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
+   if (m_disabled)
+     return FALSE;
+   RimeSessionId session_id = to_session_id(ipc_id);
+-  Bool handled = rime_api->process_key(session_id, keyEvent.keycode,
+-                                       expand_ibus_modifier(keyEvent.mask));
++  auto& view = get_session_status(ipc_id);
++  RIME_STRUCT(RimeContext, navigation);
++  const bool has_context = rime_api->get_context(session_id, &navigation);
++  if (!has_context || !navigation.menu.num_candidates)
++    view.expanded = false;
++  const bool linear = view.expanded ||
++      view.style.layout_type == UIStyle::LAYOUT_HORIZONTAL ||
++      view.style.layout_type == UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN;
++  const bool vertical = !view.expanded &&
++      view.style.layout_type == UIStyle::LAYOUT_VERTICAL_TEXT;
++  const int selected = has_context
++      ? navigation.menu.page_no * navigation.menu.page_size +
++        navigation.menu.highlighted_candidate_index : 0;
++  bool changed_layout = false;
++  for (const auto& option : {std::make_pair("_linear", linear),
++                             std::make_pair("_vertical", vertical)}) {
++    if (bool(rime_api->get_option(session_id, option.first)) != option.second) {
++      rime_api->set_option(session_id, option.first, option.second);
++      changed_layout = true;
++    }
++  }
++  if (changed_layout && has_context && navigation.menu.num_candidates)
++    rime_api->highlight_candidate(session_id, selected);
++  if (has_context) rime_api->free_context(&navigation);
++  if (!view.expanded) {
++    const char* target = view.candidate_ui &&
++        view.style.candidate_expansion_allowed ? "expand" : "";
++    rime_api->set_property(session_id, "linnet/candidate_previous_row_v1", target);
++    rime_api->set_property(session_id, "linnet/candidate_next_row_v1", target);
++  }
++  const Bool handled = rime_api->process_key(session_id, keyEvent.keycode,
++                                             expand_ibus_modifier(keyEvent.mask));
++  char request[2] = {};
++  if (rime_api->get_property(session_id, "linnet/candidate_expansion_request_v1",
++                             request, sizeof(request))) {
++    rime_api->set_property(session_id, "linnet/candidate_expansion_request_v1", "");
++    if (request[0] == '1' && view.candidate_ui)
++      view.expanded = view.style.candidate_expansion_allowed;
++  }
+   // vim_mode when keydown only
+   if (!handled && !(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
+     bool isVimBackInCommandMode =
+@@ -358,7 +396,9 @@ void RimeWithWeaselHandler::SelectCandidateOnCurrentPage(
+              << ", index = " << index;
+   if (m_disabled)
      return;
-   }
+-  rime_api->select_candidate_on_current_page(to_session_id(ipc_id), index);
++  const auto& view = get_session_status(ipc_id);
++  if (view.expanded) rime_api->select_candidate(view.session_id, view.candidate_base + index);
++  else rime_api->select_candidate_on_current_page(view.session_id, index);
+ }
  
--  LOG(INFO) << "Initializing la rime.";
--  rime_api->initialize(NULL);
--#if 0
-+  LOG(INFO) << "Initializing la rime.";
-+  rime_api->initialize(NULL);
-+#if 0
-   if (rime_api->start_maintenance(/*full_check = */ False)) {
-     m_disabled = true;
+ bool RimeWithWeaselHandler::HighlightCandidateOnCurrentPage(
+@@ -367,8 +407,11 @@ bool RimeWithWeaselHandler::HighlightCandidateOnCurrentPage(
+     EatLine eat) {
+   DLOG(INFO) << "highlight candidate on current page, ipc_id = " << ipc_id
+              << ", index = " << index;
+-  bool res = rime_api->highlight_candidate_on_current_page(
+-      to_session_id(ipc_id), index);
++  const auto& view = get_session_status(ipc_id);
++  const auto target = int64_t(view.candidate_base) + int32_t(index);
++  bool res = view.expanded
++      ? (target >= 0 && rime_api->highlight_candidate(view.session_id, size_t(target)))
++      : rime_api->highlight_candidate_on_current_page(view.session_id, index);
+   _Respond(ipc_id, eat);
+   _UpdateUI(ipc_id);
+   return res;
+@@ -385,6 +428,32 @@ bool RimeWithWeaselHandler::ChangePage(bool backward,
+   return res;
+ }
+ 
++void RimeWithWeaselHandler::CandidateRows(int previous, int next, WeaselSessionId ipc_id) {
++  if (m_disabled) return;
++  const auto& view = get_session_status(ipc_id);
++  if (!view.expanded) return;
++  const auto before = std::to_string(int(view.candidate_base) + previous);
++  const auto after = std::to_string(int(view.candidate_base) + next);
++  rime_api->set_property(view.session_id, "linnet/candidate_previous_row_v1", before.c_str());
++  rime_api->set_property(view.session_id, "linnet/candidate_next_row_v1", after.c_str());
++}
++
++bool RimeWithWeaselHandler::CandidateAction(UINT action, size_t index, WeaselSessionId ipc_id, EatLine eat) {
++  if (m_disabled) return false;
++  auto& view = get_session_status(ipc_id);
++  bool result = false;
++  if (action == TOGGLE_CANDIDATE_EXPANSION && view.candidate_ui && view.style.candidate_expansion_allowed) {
++    view.expanded = !view.expanded;
++    result = true;
++  } else if (action == FORGET_CANDIDATE) {
++    result = view.expanded ? rime_api->delete_candidate(view.session_id, view.candidate_base + index)
++                           : rime_api->delete_candidate_on_current_page(view.session_id, index);
++  }
++  _Respond(ipc_id, eat);
++  _UpdateUI(ipc_id);
++  return result;
++}
++
+ void RimeWithWeaselHandler::FocusIn(DWORD client_caps, WeaselSessionId ipc_id) {
+   DLOG(INFO) << "Focus in: ipc_id = " << ipc_id
+              << ", client_caps = " << client_caps;
+@@ -449,6 +518,7 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
+                                             LPWSTR buffer) {
+   std::string app_name;
+   std::string client_type;
++  bool candidate_ui = false;
+   // parse request text
+   wbufferstream bs(buffer, WEASEL_IPC_BUFFER_LENGTH);
+   std::wstring line;
+@@ -459,6 +529,7 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
+     // file ends
+     if (line == L".")
+       break;
++    if (line == L"session.linnet_candidate_ui=1") candidate_ui = true;
+     const std::wstring kClientAppKey = L"session.client_app=";
+     if (starts_with(line, kClientAppKey)) {
+       std::wstring lwr = line;
+@@ -472,6 +543,7 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
    }
-@@ -502,8 +502,12 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
+   SessionStatus& session_status = get_session_status(ipc_id);
+   RimeSessionId session_id = session_status.session_id;
++  session_status.candidate_ui = candidate_ui;
+   // set app specific options
+   if (!app_name.empty()) {
+     rime_api->set_property(session_id, "client_app", app_name.c_str());
+@@ -496,15 +568,51 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
+ }
+ 
+ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
+-                                              RimeContext& ctx) {
++                                              RimeContext& ctx, SessionStatus* session) {
++  if (session && session->expanded) {
++    const int count = linnet_design::expanded_candidate_count;
++    const int selected = ctx.menu.page_no * ctx.menu.page_size + ctx.menu.highlighted_candidate_index;
++    const int pages = (std::max)(1, count / ctx.menu.page_size);
++    int first = session->candidate_base < 0 ? ctx.menu.page_no : session->candidate_base / ctx.menu.page_size;
++    if (ctx.menu.page_no < first) first = ctx.menu.page_no;
++    else if (ctx.menu.page_no >= first + pages) first = ctx.menu.page_no - pages + 1;
++    session->candidate_base = first * ctx.menu.page_size;
++    RimeCandidateListIterator iterator = {};
++    cinfo.expanded = true;
++    cinfo.highlighted = selected - int(session->candidate_base);
++    cinfo.currentPage = ctx.menu.page_no;
++    cinfo.is_last_page = true;
++    if (rime_api->candidate_list_from_index(session->session_id, &iterator, session->candidate_base)) {
++      while (rime_api->candidate_list_next(&iterator)) {
++        const int index = int(cinfo.candies.size());
++        if (index == count) { cinfo.is_last_page = false; break; }
++        const auto& candidate = iterator.candidate;
++        cinfo.candies.emplace_back(escape_string(u8tow(candidate.text ? candidate.text : "")));
++        const char* comment = candidate.comment ? candidate.comment : "";
++        if (*comment == '\x1d') ++comment;
++        if (index == cinfo.highlighted) cinfo.detail = escape_string(u8tow(comment));
++        cinfo.comments.emplace_back(L"");
++        cinfo.labels.emplace_back(L"");
++      }
++      rime_api->candidate_list_end(&iterator);
++    }
++    return;
++  }
+   cinfo.candies.resize(ctx.menu.num_candidates);
+   cinfo.comments.resize(ctx.menu.num_candidates);
    cinfo.labels.resize(ctx.menu.num_candidates);
    for (int i = 0; i < ctx.menu.num_candidates; ++i) {
      cinfo.candies[i].str = escape_string(u8tow(ctx.menu.candidates[i].text));
      if (ctx.menu.candidates[i].comment) {
+-      cinfo.comments[i].str =
+-          escape_string(u8tow(ctx.menu.candidates[i].comment));
 +      // Smart English marks definition comments for richer frontends. Weasel
 +      // displays the same text inline and must not render the wire marker.
 +      const char* comment = ctx.menu.candidates[i].comment;
++      const bool detail = *comment == '\x1d' && session && session->candidate_ui;
 +      if (*comment == '\x1d') ++comment;
-       cinfo.comments[i].str =
--          escape_string(u8tow(ctx.menu.candidates[i].comment));
-+          escape_string(u8tow(comment));
++      if (detail) {
++        if (i == ctx.menu.highlighted_candidate_index)
++          cinfo.detail = escape_string(u8tow(comment));
++      } else cinfo.comments[i].str = escape_string(u8tow(comment));
      }
      if (RIME_STRUCT_HAS_MEMBER(ctx, ctx.select_labels) && ctx.select_labels) {
-@@ -555,7 +559,7 @@ void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
+       cinfo.labels[i].str = escape_string(u8tow(ctx.select_labels[i]));
+@@ -555,7 +663,7 @@ void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
  }
  
  bool RimeWithWeaselHandler::_IsDeployerRunning() {
@@ -56,7 +222,7 @@ index 3f4e59d..b962e92 100644
    bool deployer_detected = hMutex && GetLastError() == ERROR_ALREADY_EXISTS;
    if (hMutex) {
      CloseHandle(hMutex);
-@@ -738,14 +738,14 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
+@@ -738,14 +846,14 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
      else if (m_message_value == "failure") {
        if (GetThreadUILanguage() ==
            MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL))
@@ -74,6 +240,67 @@ index 3f4e59d..b962e92 100644
      }
    } else if (m_message_type == "schema") {
      tips = /*L"【" + */ status.schema_name /* + L"】"*/;
+@@ -803,6 +911,9 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
+   RIME_STRUCT(RimeStatus, status);
+   if (rime_api->get_status(session_id, &status)) {
+     is_composing = !!status.is_composing;
++    if (!is_composing || (status.schema_id && !strcmp(status.schema_id, ".default")))
++      session_status.expanded = false;
++    if (!session_status.expanded) session_status.candidate_base = -1;
+     actions.insert("status");
+     messages.push_back(std::string("status.ascii_mode=") +
+                        std::to_string(status.is_ascii_mode) + '\n');
+@@ -910,11 +1021,13 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
+       CandidateInfo cinfo;
+       std::wstringstream ss;
+       boost::archive::text_woarchive oa(ss);
+-      _GetCandidateInfo(cinfo, ctx);
++      _GetCandidateInfo(cinfo, ctx, &session_status);
+ 
+       oa << cinfo;
+ 
+       messages.push_back(std::string("ctx.cand=") + wtou8(ss.str()) + '\n');
++      messages.push_back(std::string("ctx.expanded=") + (cinfo.expanded ? "1\n" : "0\n"));
++      messages.push_back(std::string("ctx.detail=") + wtou8(cinfo.detail) + '\n');
+     }
+     rime_api->free_context(&ctx);
+   }
+@@ -926,6 +1039,16 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
+                      '\n');
+ 
+   // style
++  if (session_status.candidate_ui) {
++    const auto& style = session_status.style;
++    messages.push_back("config.candidate_expansion=" + std::to_string(style.candidate_expansion_allowed) + '\n');
++    messages.push_back("config.candidate_columns=" + std::to_string(style.expanded_columns) + '\n');
++    messages.push_back("config.candidate_rows=" + std::to_string(style.expanded_rows) + '\n');
++    messages.push_back("config.candidate_vertical_count=" + std::to_string(style.expanded_vertical_count) + '\n');
++    messages.push_back("config.detail_candidate_width=" + std::to_string(style.detail_candidate_width) + '\n');
++    messages.push_back("config.detail_sidecar_width=" + std::to_string(style.detail_sidecar_width) + '\n');
++    messages.push_back("config.detail_footer_width=" + std::to_string(style.detail_footer_width) + '\n');
++  }
+   if (!session_status.__synced) {
+     std::wstringstream ss;
+     boost::archive::text_woarchive oa(ss);
+@@ -1198,6 +1321,18 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
+                UIStyle::LAYOUT_HORIZONTAL, UIStyle::LAYOUT_VERTICAL);
+   _RimeGetBool(config, "style/paging_on_scroll", initialize,
+                style.paging_on_scroll);
++  _RimeGetBool(config, "style/linnet_candidate_expansion_allowed", false, style.candidate_expansion_allowed);
++  rime_api->config_get_int(config, "style/linnet_expanded_horizontal_count", &style.expanded_columns);
++  rime_api->config_get_int(config, "style/linnet_expanded_horizontal_rows", &style.expanded_rows);
++  rime_api->config_get_int(config, "style/linnet_expanded_vertical_count", &style.expanded_vertical_count);
++  rime_api->config_get_int(config, "style/linnet_detail_candidate_width", &style.detail_candidate_width);
++  rime_api->config_get_int(config, "style/linnet_detail_sidecar_width", &style.detail_sidecar_width);
++  rime_api->config_get_int(config, "style/linnet_detail_footer_width", &style.detail_footer_width);
++  // The upstream layout has room for 100 candidates. Bound manual settings at
++  // that actual array boundary, not at the Settings UI's narrower choices.
++  style.expanded_columns = std::clamp(style.expanded_columns, 1, 10);
++  style.expanded_rows = std::clamp(style.expanded_rows, 1, 10);
++  style.expanded_vertical_count = std::clamp(style.expanded_vertical_count, 1, 100);
+   _RimeGetBool(config, "style/click_to_capture", initialize,
+                style.click_to_capture, true, false);
+   _RimeGetBool(config, "style/fullscreen", false, style.layout_type,
 diff --git a/RimeWithWeasel/WeaselUtility.cpp b/RimeWithWeasel/WeaselUtility.cpp
 index 9a07343..0ba5076 100644
 --- a/RimeWithWeasel/WeaselUtility.cpp
@@ -97,10 +324,19 @@ index 9a07343..0ba5076 100644
  }
  
 diff --git a/WeaselDeployer/Configurator.cpp b/WeaselDeployer/Configurator.cpp
-index 1502322..61804ef 100644
+index 1502322..65824da 100644
 --- a/WeaselDeployer/Configurator.cpp
 +++ b/WeaselDeployer/Configurator.cpp
-@@ -42,13 +42,13 @@ void Configurator::Initialize() {
+@@ -1,6 +1,8 @@
+ ﻿#include "stdafx.h"
+ #include "WeaselDeployer.h"
+ #include "Configurator.h"
++#include "LinnetSettingsDialog.h"
++#include <stdexcept>
+ #include "SwitcherSettingsDialog.h"
+ #include "UIStyleSettings.h"
+ #include "UIStyleSettingsDialog.h"
+@@ -42,13 +44,13 @@ void Configurator::Initialize() {
    weasel_traits.distribution_name = distribution_name.c_str();
    weasel_traits.distribution_code_name = WEASEL_CODE_NAME;
    weasel_traits.distribution_version = WEASEL_VERSION;
@@ -116,63 +352,238 @@ index 1502322..61804ef 100644
    rime_api->deployer_initialize(NULL);
  }
  
-@@ -114,7 +114,7 @@ int Configurator::Run(bool installing) {
+@@ -83,6 +85,7 @@ static bool configure_ui(RimeLeversApi* api,
  }
  
- int Configurator::UpdateWorkspace(bool report_errors) {
--  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
-+  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerMutex");
-   if (!hMutex) {
-     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+ int Configurator::Run(bool installing) {
++  if (!installing) return RunLinnetSettings(*this);
+   RimeModule* levers = rime_get_api()->find_module("levers");
+   if (!levers)
      return 1;
-@@ -138,12 +138,18 @@ int Configurator::UpdateWorkspace(bool report_errors) {
-     client.StartMaintenance();
-   }
+@@ -113,125 +116,90 @@ int Configurator::Run(bool installing) {
+   return 0;
+ }
  
+-int Configurator::UpdateWorkspace(bool report_errors) {
+-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
+-  if (!hMutex) {
+-    LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+-    return 1;
+-  }
+-  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+-    LOG(WARNING) << "another deployer process is running; aborting operation.";
+-    CloseHandle(hMutex);
+-    if (report_errors) {
+-      // MessageBox(NULL,
+-      // L"正在執行另一項部署任務，方纔所做的修改將在輸入法再次啓動後生效。",
+-      // L"【小狼毫】", MB_OK | MB_ICONINFORMATION);
+-      MSG_BY_IDS(IDS_STR_DEPLOYING_RESTARTREQ, IDS_STR_WEASEL,
+-                 MB_OK | MB_ICONINFORMATION);
++namespace {
++// One existing native boundary for deployment, Settings and dictionaries.
++// Release exclusion before resuming the server, including on failures.
++class MaintenanceScope {
++ public:
++  MaintenanceScope() {
++    mutex_ = CreateMutex(nullptr, TRUE, L"LinnetDeployerMutex");
++    if (!mutex_) throw std::runtime_error("Cannot acquire Linnet deployment mutex");
++    if (GetLastError() == ERROR_ALREADY_EXISTS) {
++      CloseHandle(mutex_);
++      throw std::runtime_error("Another Linnet deployment operation is running");
+     }
+-    return 1;
+-  }
+-
+-  weasel::Client client;
+-  if (client.Connect()) {
+-    LOG(INFO) << "Turning WeaselServer into maintenance mode.";
+-    client.StartMaintenance();
+-  }
+-
 -  {
 -    RimeApi* rime = rime_get_api();
 -    // initialize default config, preset schemas
 -    rime->deploy();
 -    // initialize weasel config
 -    rime->deploy_config_file("weasel.yaml", "config_version");
-+  bool deployment_succeeded = false;
-+  {
-+    RimeApi* rime = rime_get_api();
-+    // initialize default config, preset schemas
-+    const bool workspace_deployed = rime->deploy();
-+    // initialize weasel config
-+    const bool frontend_config_deployed =
-+        rime->deploy_config_file("weasel.yaml", "config_version");
-+    deployment_succeeded = workspace_deployed && frontend_config_deployed;
-+    if (!deployment_succeeded) {
-+      LOG(ERROR) << "Linnet workspace deployment failed.";
-+    }
-   }
- 
-   CloseHandle(hMutex);  // should be closed before resuming service.
-@@ -152,11 +158,11 @@ int Configurator::UpdateWorkspace(bool report_errors) {
-     LOG(INFO) << "Resuming service.";
-     client.EndMaintenance();
-   }
+-  }
+-
+-  CloseHandle(hMutex);  // should be closed before resuming service.
+-
+-  if (client.Connect()) {
+-    LOG(INFO) << "Resuming service.";
+-    client.EndMaintenance();
+-  }
 -  return 0;
-+  return deployment_succeeded ? 0 : 1;
++    connected_ = client_.Connect();
++    if (connected_) client_.StartMaintenance();
++  }
++  ~MaintenanceScope() {
++    CloseHandle(mutex_);
++    if (connected_ && client_.Connect()) client_.EndMaintenance();
++  }
++ private:
++  HANDLE mutex_ = nullptr;
++  weasel::Client client_;
++  bool connected_ = false;
++};
++
++bool DeployWorkspace() {
++  auto* rime = rime_get_api();
++  const bool workspace = rime->deploy();
++  const bool frontend = rime->deploy_config_file("weasel.yaml", "config_version");
++  return workspace && frontend;
  }
- 
- int Configurator::DictManagement() {
+-
+-int Configurator::DictManagement() {
 -  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
-+  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerMutex");
-   if (!hMutex) {
-     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+-  if (!hMutex) {
+-    LOG(ERROR) << "Error creating WeaselDeployerMutex.";
++}  // namespace
++
++int Configurator::WithMaintenance(const std::function<int()>& operation,
++                                  bool report_errors) {
++  try {
++    MaintenanceScope maintenance;
++    return operation();
++  } catch (const std::exception& error) {
++    LOG(ERROR) << error.what();
++    if (report_errors)
++      MessageBoxW(nullptr, u8tow(error.what()).c_str(), L"Linnet", MB_OK | MB_ICONERROR);
      return 1;
-@@ -196,7 +202,7 @@ int Configurator::DictManagement() {
+   }
+-  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+-    LOG(WARNING) << "another deployer process is running; aborting operation.";
+-    CloseHandle(hMutex);
+-    // MessageBox(NULL, L"正在執行另一項部署任務，請稍候再試。", L"【小狼毫】",
+-    // MB_OK | MB_ICONINFORMATION);
+-    MSG_BY_IDS(IDS_STR_DEPLOYING_WAIT, IDS_STR_WEASEL,
+-               MB_OK | MB_ICONINFORMATION);
+-    return 1;
+-  }
+-
+-  weasel::Client client;
+-  if (client.Connect()) {
+-    LOG(INFO) << "Turning WeaselServer into maintenance mode.";
+-    client.StartMaintenance();
+-  }
++}
+ 
+-  {
+-    RimeApi* rime = rime_get_api();
+-    if (RIME_API_AVAILABLE(rime, run_task)) {
+-      rime->run_task("installation_update");  // setup user data sync dir
++int Configurator::UpdateWorkspace(bool report_errors,
++                                  const std::function<void()>& change,
++                                  const std::function<void()>& restore) {
++  return WithMaintenance([&] {
++    try {
++      if (change) change();
++      if (!DeployWorkspace()) throw std::runtime_error("Linnet workspace deployment failed");
++      return 0;
++    } catch (const std::exception& error) {
++      std::string detail = error.what();
++      if (restore) {
++        try {
++          restore();
++          if (!DeployWorkspace()) detail += "\nPrevious configuration redeployment also failed";
++        } catch (const std::exception& recovery) {
++          detail += "\nPrevious configuration recovery failed: " + std::string(recovery.what());
++        }
++      }
++      throw std::runtime_error(detail);
+     }
+-    DictManagementDialog dlg;
+-    dlg.DoModal();
+-  }
+-
+-  CloseHandle(hMutex);  // should be closed before resuming service.
++  }, report_errors);
++}
+ 
+-  if (client.Connect()) {
+-    LOG(INFO) << "Resuming service.";
+-    client.EndMaintenance();
+-  }
+-  return 0;
++int Configurator::DictManagement() {
++  return WithMaintenance([] {
++    auto* rime = rime_get_api();
++    if (RIME_API_AVAILABLE(rime, run_task)) rime->run_task("installation_update");
++    DictManagementDialog dialog;
++    dialog.DoModal();
++    return 0;
++  });
  }
  
  int Configurator::SyncUserData() {
 -  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
-+  HANDLE hMutex = CreateMutex(NULL, TRUE, L"LinnetDeployerMutex");
-   if (!hMutex) {
-     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
-     return 1;
+-  if (!hMutex) {
+-    LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+-    return 1;
+-  }
+-  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+-    LOG(WARNING) << "another deployer process is running; aborting operation.";
+-    CloseHandle(hMutex);
+-    // MessageBox(NULL, L"正在執行另一項部署任務，請稍候再試。", L"【小狼毫】",
+-    // MB_OK | MB_ICONINFORMATION);
+-    MSG_BY_IDS(IDS_STR_DEPLOYING_WAIT, IDS_STR_WEASEL,
+-               MB_OK | MB_ICONINFORMATION);
+-    return 1;
+-  }
+-
+-  weasel::Client client;
+-  if (client.Connect()) {
+-    LOG(INFO) << "Turning WeaselServer into maintenance mode.";
+-    client.StartMaintenance();
+-  }
+-
+-  {
+-    RimeApi* rime = rime_get_api();
+-    if (!rime->sync_user_data()) {
+-      LOG(ERROR) << "Error synching user data.";
+-      CloseHandle(hMutex);
+-      return 1;
+-    }
++  return WithMaintenance([] {
++    auto* rime = rime_get_api();
++    if (!rime->sync_user_data()) throw std::runtime_error("Rime synchronization failed");
+     rime->join_maintenance_thread();
+-  }
+-
+-  CloseHandle(hMutex);  // should be closed before resuming service.
+-
+-  if (client.Connect()) {
+-    LOG(INFO) << "Resuming service.";
+-    client.EndMaintenance();
+-  }
+-  return 0;
++    return 0;
++  });
+ }
+diff --git a/WeaselDeployer/Configurator.h b/WeaselDeployer/Configurator.h
+index ac14091..531d612 100644
+--- a/WeaselDeployer/Configurator.h
++++ b/WeaselDeployer/Configurator.h
+@@ -1,4 +1,5 @@
+ #pragma once
++#include <functional>
+ 
+ class UIStyleSettings;
+ 
+@@ -8,7 +9,11 @@ class Configurator {
+ 
+   void Initialize();
+   int Run(bool installing);
+-  int UpdateWorkspace(bool report_errors = false);
++  int UpdateWorkspace(bool report_errors = false,
++                      const std::function<void()>& change = {},
++                      const std::function<void()>& restore = {});
++  int WithMaintenance(const std::function<int()>& operation,
++                      bool report_errors = true);
+   int DictManagement();
+   int SyncUserData();
+ };
 diff --git a/WeaselDeployer/SwitcherSettingsDialog.cpp b/WeaselDeployer/SwitcherSettingsDialog.cpp
 index 587cbc7..a2735f8 100644
 --- a/WeaselDeployer/SwitcherSettingsDialog.cpp
@@ -334,10 +745,18 @@ index 22e7380..7b77608 100644
    return true;
  }
 diff --git a/WeaselDeployer/WeaselDeployer.cpp b/WeaselDeployer/WeaselDeployer.cpp
-index a578014..0507745 100644
+index a578014..3164748 100644
 --- a/WeaselDeployer/WeaselDeployer.cpp
 +++ b/WeaselDeployer/WeaselDeployer.cpp
-@@ -40,7 +40,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
+@@ -5,6 +5,7 @@
+ #include <fstream>
+ #include "WeaselDeployer.h"
+ #include "Configurator.h"
++#include "LinnetSettingsDialog.h"
+ 
+ CAppModule _Module;
+ 
+@@ -40,7 +41,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
    CreateDirectory(WeaselUserDataPath().c_str(), NULL);
  
    int ret = 0;
@@ -346,7 +765,20 @@ index a578014..0507745 100644
    if (!hMutex) {
      ret = 1;
    } else if (GetLastError() == ERROR_ALREADY_EXISTS) {
-@@ -66,7 +66,7 @@ static int Run(LPTSTR lpCmdLine) {
+@@ -62,11 +63,20 @@ static int Run(LPTSTR lpCmdLine) {
+   Configurator configurator;
+   configurator.Initialize();
+ 
++  int argument_count = 0;
++  LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
++  if (arguments && argument_count == 3 && !wcscmp(arguments[1], L"/add-word")) {
++    const std::wstring word(arguments[2]);
++    LocalFree(arguments);
++    return RunLinnetSettings(configurator, word);
++  }
++  if (arguments) LocalFree(arguments);
++
+   if (!wcscmp(L"/?", lpCmdLine) || !wcscmp(L"/help", lpCmdLine)) {
      WCHAR msg[1024] = {0};
      if (LoadString(GetModuleHandle(NULL), IDS_STR_HELP, msg,
                     sizeof(msg) / sizeof(TCHAR))) {
@@ -355,7 +787,7 @@ index a578014..0507745 100644
      } else {
        MessageBox(NULL,
                   L"Usage: WeaselDeployer.exe [options]\n"
-@@ -74,8 +74,8 @@ static int Run(LPTSTR lpCmdLine) {
+@@ -74,8 +84,8 @@ static int Run(LPTSTR lpCmdLine) {
                   L"/deploy		- Update Workspace\n"
                   L"/dict		- Manage dictionary\n"
                   L"/sync		- Sync user data\n"
@@ -366,6 +798,30 @@ index a578014..0507745 100644
      }
      return 0;
    }
+diff --git a/WeaselDeployer/WeaselDeployer.vcxproj b/WeaselDeployer/WeaselDeployer.vcxproj
+index 88fbaa2..4187b5a 100644
+--- a/WeaselDeployer/WeaselDeployer.vcxproj
++++ b/WeaselDeployer/WeaselDeployer.vcxproj
+@@ -199,6 +199,11 @@
+   <ItemGroup>
+     <ClCompile Include="..\RimeWithWeasel\WeaselUtility.cpp" />
+     <ClCompile Include="Configurator.cpp" />
++    <ClCompile Include="LinnetSettingsDialog.cpp">
++      <PrecompiledHeader>NotUsing</PrecompiledHeader>
++      <PreprocessorDefinitions>WEASEL_ENABLE_LOGGING;GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalIncludeDirectories>$(SolutionDir)librime\dist_$(Platform)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++    </ClCompile>
+     <ClCompile Include="DictManagementDialog.cpp" />
+     <ClCompile Include="stdafx.cpp">
+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+@@ -213,6 +218,7 @@
+   </ItemGroup>
+   <ItemGroup>
+     <ResourceCompile Include="WeaselDeployer.rc" />
++    <ResourceCompile Include="LinnetSettingsDialog.rc" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\WeaselIPC\WeaselIPC.vcxproj">
 diff --git a/WeaselDeployer/resource.h b/WeaselDeployer/resource.h
 index 25bc31a..3f33a37 100644
 --- a/WeaselDeployer/resource.h
@@ -380,8 +836,52 @@ index 25bc31a..3f33a37 100644
  #define IDC_COLOR_SCHEME                1004
  #define IDC_SELECT_FONT                 1005
  #define IDC_PREVIEW                     1006
+diff --git a/WeaselIPC/Configurator.cpp b/WeaselIPC/Configurator.cpp
+index a16c4fa..58da055 100644
+--- a/WeaselIPC/Configurator.cpp
++++ b/WeaselIPC/Configurator.cpp
+@@ -14,10 +14,20 @@ Configurator::~Configurator() {}
+ 
+ void Configurator::Store(Deserializer::KeyType const& key,
+                          std::wstring const& value) {
+-  if (!m_pTarget->p_context || key.size() < 2)
++  if (key.size() < 2)
+     return;
+   bool bool_value = (!value.empty() && value != L"0");
+-  if (key[1] == L"inline_preedit") {
++  if (key[1] == L"inline_preedit" && m_pTarget->p_config) {
+     m_pTarget->p_config->inline_preedit = bool_value;
+   }
++  if (m_pTarget->p_style) {
++    UIStyle& style = *m_pTarget->p_style;
++    if (key[1] == L"candidate_expansion") style.candidate_expansion_allowed = bool_value;
++    if (key[1] == L"candidate_columns") style.expanded_columns = _wtoi(value.c_str());
++    if (key[1] == L"candidate_rows") style.expanded_rows = _wtoi(value.c_str());
++    if (key[1] == L"candidate_vertical_count") style.expanded_vertical_count = _wtoi(value.c_str());
++    if (key[1] == L"detail_candidate_width") style.detail_candidate_width = _wtoi(value.c_str());
++    if (key[1] == L"detail_sidecar_width") style.detail_sidecar_width = _wtoi(value.c_str());
++    if (key[1] == L"detail_footer_width") style.detail_footer_width = _wtoi(value.c_str());
++  }
+ }
+diff --git a/WeaselIPC/ContextUpdater.cpp b/WeaselIPC/ContextUpdater.cpp
+index 8d8c2f0..f46072d 100644
+--- a/WeaselIPC/ContextUpdater.cpp
++++ b/WeaselIPC/ContextUpdater.cpp
+@@ -37,6 +37,12 @@ void ContextUpdater::Store(Deserializer::KeyType const& k,
+     _StoreCand(k, value);
+     return;
+   }
++  if (k[1] == L"expanded") {
++    m_pTarget->p_context->cinfo.expanded = value == L"1";
++  }
++  if (k[1] == L"detail") {
++    m_pTarget->p_context->cinfo.detail = unescape_string(value);
++  }
+ }
+ 
+ void ContextUpdater::_StoreText(Text& target,
 diff --git a/WeaselIPC/WeaselClientImpl.cpp b/WeaselIPC/WeaselClientImpl.cpp
-index 26122ad..a964ffa 100644
+index 26122ad..37ab918 100644
 --- a/WeaselIPC/WeaselClientImpl.cpp
 +++ b/WeaselIPC/WeaselClientImpl.cpp
 @@ -51,8 +51,19 @@ void ClientImpl::Disconnect() {
@@ -389,7 +889,6 @@ index 26122ad..a964ffa 100644
  }
  
 -void ClientImpl::ShutdownServer() {
--  _SendMessage(WEASEL_IPC_SHUTDOWN_SERVER, 0, 0);
 +bool ClientImpl::ShutdownServer() {
 +  constexpr DWORD kShutdownTimeoutMs = 10000;
 +  DWORD process_id = channel.ServerProcessId();
@@ -398,7 +897,7 @@ index 26122ad..a964ffa 100644
 +  HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, process_id);
 +  if (!process)
 +    return false;
-+  _SendMessage(WEASEL_IPC_SHUTDOWN_SERVER, 0, 0);
+   _SendMessage(WEASEL_IPC_SHUTDOWN_SERVER, 0, 0);
 +  channel.Disconnect();
 +  DWORD wait_result = WaitForSingleObject(process, kShutdownTimeoutMs);
 +  CloseHandle(process);
@@ -406,21 +905,52 @@ index 26122ad..a964ffa 100644
  }
  
  bool ClientImpl::ProcessKeyEvent(KeyEvent const& keyEvent) {
-@@ -216,9 +227,9 @@ void Client::Disconnect() {
+@@ -186,6 +197,7 @@ bool ClientImpl::_WriteClientInfo() {
+   channel << L"action=session\n";
+   channel << L"session.client_app=" << app_name.c_str() << L"\n";
+   channel << L"session.client_type=" << (is_ime ? L"ime" : L"tsf") << L"\n";
++  if (!is_ime) channel << L"session.linnet_candidate_ui=1\n";
+   channel << L".\n";
+   return true;
+ }
+@@ -216,8 +228,13 @@ void Client::Disconnect() {
    m_pImpl->Disconnect();
  }
  
 -void Client::ShutdownServer() {
 -  m_pImpl->ShutdownServer();
--}
 +bool Client::ShutdownServer() {
 +  return m_pImpl->ShutdownServer();
 +}
++
++bool ClientImpl::CandidateAction(UINT action, size_t index) {
++  if (!_Active()) return false;
++  return _SendMessage(WEASEL_IPC_CANDIDATE_ACTION, MAKELONG(action, index), session_id) != 0;
+ }
  
  bool Client::ProcessKeyEvent(KeyEvent const& keyEvent) {
-   return m_pImpl->ProcessKeyEvent(keyEvent);
+@@ -244,6 +261,19 @@ bool Client::ChangePage(bool backward) {
+   return m_pImpl->ChangePage(backward);
+ }
+ 
++bool Client::CandidateAction(UINT action, size_t index) {
++  return m_pImpl->CandidateAction(action, index);
++}
++
++void ClientImpl::CandidateRows(int previous, int next) {
++  if (_Active())
++    _SendMessage(WEASEL_IPC_CANDIDATE_ROWS, MAKELONG(previous, next), session_id);
++}
++
++void Client::CandidateRows(int previous, int next) {
++  m_pImpl->CandidateRows(previous, next);
++}
++
+ void Client::UpdateInputPosition(RECT const& rc) {
+   m_pImpl->UpdateInputPosition(rc);
+ }
 diff --git a/WeaselIPC/WeaselClientImpl.h b/WeaselIPC/WeaselClientImpl.h
-index 7602792..0fa20df 100644
+index 7602792..48e5299 100644
 --- a/WeaselIPC/WeaselClientImpl.h
 +++ b/WeaselIPC/WeaselClientImpl.h
 @@ -11,7 +11,7 @@ class ClientImpl {
@@ -432,6 +962,60 @@ index 7602792..0fa20df 100644
    void StartSession();
    void EndSession();
    void StartMaintenance();
+@@ -23,6 +23,8 @@ class ClientImpl {
+   bool SelectCandidateOnCurrentPage(size_t index);
+   bool HighlightCandidateOnCurrentPage(size_t index);
+   bool ChangePage(bool backward);
++  bool CandidateAction(UINT action, size_t index);
++  void CandidateRows(int previous, int next);
+   void UpdateInputPosition(RECT const& rc);
+   void FocusIn();
+   void FocusOut();
+diff --git a/WeaselIPCServer/WeaselServerImpl.cpp b/WeaselIPCServer/WeaselServerImpl.cpp
+index 11225c4..243e601 100644
+--- a/WeaselIPCServer/WeaselServerImpl.cpp
++++ b/WeaselIPCServer/WeaselServerImpl.cpp
+@@ -358,6 +358,18 @@ DWORD ServerImpl::OnChangePage(WEASEL_IPC_COMMAND uMsg,
+   return 0;
+ }
+ 
++DWORD ServerImpl::OnCandidateRows(WEASEL_IPC_COMMAND, DWORD value, DWORD session) {
++  if (!m_pRequestHandler) return 0;
++  m_pRequestHandler->CandidateRows(short(LOWORD(value)), short(HIWORD(value)), session);
++  return 1;
++}
++
++DWORD ServerImpl::OnCandidateAction(WEASEL_IPC_COMMAND, DWORD value, DWORD session) {
++  if (!m_pRequestHandler) return 0;
++  auto eat = [this](std::wstring& message) { *channel << message; return true; };
++  return m_pRequestHandler->CandidateAction(LOWORD(value), HIWORD(value), session, eat);
++}
++
+ #define MAP_PIPE_MSG_HANDLE(__msg, __wParam, __lParam) \
+   {                                                    \
+     auto lParam = __lParam;                            \
+@@ -396,6 +408,8 @@ void ServerImpl::HandlePipeMessage(PipeMessage pipe_msg, _Resp resp) {
+   PIPE_MSG_HANDLE(WEASEL_IPC_HIGHLIGHT_CANDIDATE_ON_CURRENT_PAGE,
+                   OnHighlightCandidateOnCurrentPage);
+   PIPE_MSG_HANDLE(WEASEL_IPC_CHANGE_PAGE, OnChangePage);
++  PIPE_MSG_HANDLE(WEASEL_IPC_CANDIDATE_ACTION, OnCandidateAction);
++  PIPE_MSG_HANDLE(WEASEL_IPC_CANDIDATE_ROWS, OnCandidateRows);
+   PIPE_MSG_HANDLE(WEASEL_IPC_TRAY_COMMAND, OnCommand);
+   END_MAP_PIPE_MSG_HANDLE(result);
+ 
+diff --git a/WeaselIPCServer/WeaselServerImpl.h b/WeaselIPCServer/WeaselServerImpl.h
+index a4d123d..3991770 100644
+--- a/WeaselIPCServer/WeaselServerImpl.h
++++ b/WeaselIPCServer/WeaselServerImpl.h
+@@ -70,6 +70,8 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
+                                           DWORD wParam,
+                                           DWORD lParam);
+   DWORD OnChangePage(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
++  DWORD OnCandidateAction(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
++  DWORD OnCandidateRows(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
+ 
+  public:
+   ServerImpl();
 diff --git a/WeaselServer/WeaselServer.cpp b/WeaselServer/WeaselServer.cpp
 index b4cf8b2..a615ace 100644
 --- a/WeaselServer/WeaselServer.cpp
@@ -1085,6 +1669,76 @@ index ed48aea..8503fa0 100644
    return (attr != INVALID_FILE_ATTRIBUTES &&
            !(attr & FILE_ATTRIBUTE_DIRECTORY));
  }
+diff --git a/WeaselTSF/CandidateList.cpp b/WeaselTSF/CandidateList.cpp
+index 7c1e850..1dc30c0 100644
+--- a/WeaselTSF/CandidateList.cpp
++++ b/WeaselTSF/CandidateList.cpp
+@@ -222,6 +222,27 @@ void CCandidateList::UpdateStyle(const UIStyle& sty) {
+   _ui->style() = sty;
+ }
+ 
++bool CCandidateList::ProcessCandidateKeyEvent(const KeyEvent& key, Client& client) {
++  if (!_ui || !_ui->candidate_geometry.expanded || (key.mask & ~ibus::LOCK_MASK))
++    return false;
++  const auto& geometry = _ui->candidate_geometry;
++  if (key.keycode == ibus::Up || key.keycode == ibus::Down) {
++    client.HighlightCandidateOnCurrentPage(key.keycode == ibus::Up ? geometry.previous : geometry.next);
++    return true;
++  }
++  if (key.keycode >= '1' && key.keycode <= '9') {
++    const int index = geometry.numbers[key.keycode - '1'];
++    if (index >= 0) client.SelectCandidateOnCurrentPage(index);
++    // Fetch the normal commit/context response through the existing key path.
++    client.ProcessKeyEvent(KeyEvent(0, 0));
++    return true;
++  }
++  // Publish geometry without deciding whether a printable symbol is paging.
++  // The shared Rime processor remains the sole owner of that classification.
++  client.CandidateRows(geometry.previous, geometry.next);
++  return false;
++}
++
+ void CCandidateList::UpdateInputPosition(RECT const& rc) {
+   _ui->UpdateInputPosition(rc);
+ }
+@@ -303,6 +324,9 @@ void CCandidateList::StartUI() {
+                               bool* const next, bool* const scroll_next) {
+       _tsf->HandleUICallback(sel, hov, next, scroll_next);
+     });
++  _ui->candidateAction = [this](UINT action, size_t index) {
++    _tsf->HandleCandidateAction(action, index);
++  };
+   pUIElementMgr->BeginUIElement(this, &_pbShow, &uiid);
+   // pUIElementMgr->UpdateUIElement(uiid);
+   if (_pbShow) {
+@@ -440,3 +464,8 @@ void WeaselTSF::HandleUICallback(size_t* const sel,
+   else if (next || scroll_next)
+     _HandleMousePageEvent(next, scroll_next);
+ }
++
++void WeaselTSF::HandleCandidateAction(UINT action, size_t index) {
++  m_client.CandidateAction(action, index);
++  _UpdateComposition(_pEditSessionContext);
++}
+diff --git a/WeaselTSF/CandidateList.h b/WeaselTSF/CandidateList.h
+index 648732c..d0bc80b 100644
+--- a/WeaselTSF/CandidateList.h
++++ b/WeaselTSF/CandidateList.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ #include <WeaselUI.h>
++#include <WeaselIPC.h>
+ #include "ctffunc.h"
+ 
+ class WeaselTSF;
+@@ -64,6 +65,7 @@ class CCandidateList : public ITfIntegratableCandidateListUIElement,
+   }
+ 
+   weasel::UIStyle& style();
++  bool ProcessCandidateKeyEvent(const weasel::KeyEvent& key, weasel::Client& client);
+ 
+  private:
+   // void _UpdateOwner();
 diff --git a/WeaselTSF/Globals.cpp b/WeaselTSF/Globals.cpp
 index c5d28b9..9386bb2 100644
 --- a/WeaselTSF/Globals.cpp
@@ -1168,6 +1822,20 @@ index c5d28b9..9386bb2 100644
 +    0xa2b2,
 +    0x47e5,
 +    {0xb6, 0x81, 0x54, 0xa5, 0x42, 0x53, 0x01, 0x51}};
+diff --git a/WeaselTSF/KeyEventSink.cpp b/WeaselTSF/KeyEventSink.cpp
+index c885ddd..b5369e2 100644
+--- a/WeaselTSF/KeyEventSink.cpp
++++ b/WeaselTSF/KeyEventSink.cpp
+@@ -35,7 +35,8 @@ void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
+         ke.keycode = ibus::Up;
+     }
+     if (!keyCountToSimulate)
+-      *pfEaten = (BOOL)m_client.ProcessKeyEvent(ke);
++      *pfEaten = _cand->ProcessCandidateKeyEvent(ke, m_client) ||
++                 (BOOL)m_client.ProcessKeyEvent(ke);
+ 
+     if (ke.keycode == ibus::Caps_Lock) {
+       if (prevKeyEvent.keycode == ibus::Caps_Lock && prevfEaten == TRUE &&
 diff --git a/WeaselTSF/LanguageBar.cpp b/WeaselTSF/LanguageBar.cpp
 index a03b615..1a863c5 100644
 --- a/WeaselTSF/LanguageBar.cpp
@@ -1274,6 +1942,18 @@ index 590d3b8..36c3536 100644
        if (!m_client.Echo() && GetLastError() != ERROR_ALREADY_EXISTS) {
          std::wstring dir = _GetRootDir();
          std::thread th([dir, this]() {
+diff --git a/WeaselTSF/WeaselTSF.h b/WeaselTSF/WeaselTSF.h
+index 696d3cc..8f51b8e 100644
+--- a/WeaselTSF/WeaselTSF.h
++++ b/WeaselTSF/WeaselTSF.h
+@@ -151,6 +151,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
+                         size_t* const hov,
+                         bool* const next,
+                         bool* const scroll_next);
++  void HandleCandidateAction(UINT action, size_t index);
+ 
+  private:
+   /* ui callback functions private */
 diff --git a/WeaselTSF/dllmain.cpp b/WeaselTSF/dllmain.cpp
 index 212eea1..94e6a57 100644
 --- a/WeaselTSF/dllmain.cpp
@@ -1287,6 +1967,682 @@ index 212eea1..94e6a57 100644
    // 构造 dump 文件名：应用程序名称-DLL名称-时间.进程号.dmp
    _stprintf_s(szFileName, MAX_PATH, _T("%s\\%s-%s-%s.%lu.dmp"), _path,
                pszBaseName, pszDllBaseName, szDateTime, dwProcessId);
+diff --git a/WeaselUI/Layout.cpp b/WeaselUI/Layout.cpp
+index 60b60b4..735400d 100644
+--- a/WeaselUI/Layout.cpp
++++ b/WeaselUI/Layout.cpp
+@@ -16,13 +16,16 @@ Layout::Layout(const UIStyle& style,
+       candidates_count((int)candidates.size()),
+       labelFontValid(!!(_style.label_font_point > 0)),
+       textFontValid(!!(_style.font_point > 0)),
+-      cmtFontValid(!!(_style.comment_font_point > 0)) {
++      cmtFontValid(!_context.cinfo.expanded && _style.comment_font_point > 0) {
+   if (pDWR) {
+     float scale = pDWR->dpiScaleLayout;
+     _style.min_width = (int)(_style.min_width * scale);
+     _style.min_height = (int)(_style.min_height * scale);
+     _style.max_width = (int)(_style.max_width * scale);
+     _style.max_height = (int)(_style.max_height * scale);
++    _style.detail_candidate_width = (int)(_style.detail_candidate_width * scale);
++    _style.detail_sidecar_width = (int)(_style.detail_sidecar_width * scale);
++    _style.detail_footer_width = (int)(_style.detail_footer_width * scale);
+     _style.border = (int)(_style.border * scale);
+     _style.margin_x = (int)(_style.margin_x * scale);
+     _style.margin_y = (int)(_style.margin_y * scale);
+@@ -54,6 +57,13 @@ Layout::Layout(const UIStyle& style,
+   }
+   offsetX += _style.border * 2;
+   offsetY += _style.border * 2;
++  if (!_context.cinfo.detail.empty() && _style.detail_candidate_width > 0 &&
++      (_style.layout_type == UIStyle::LAYOUT_VERTICAL ||
++       _style.layout_type == UIStyle::LAYOUT_VERTICAL_FULLSCREEN)) {
++    _style.max_width = _style.max_width > 0
++        ? (std::min)(_style.max_width, _style.detail_candidate_width)
++        : _style.detail_candidate_width;
++  }
+ }
+ 
+ GraphicsRoundRectPath::GraphicsRoundRectPath(const CRect rc,
+diff --git a/WeaselUI/Layout.h b/WeaselUI/Layout.h
+index d96ad8e..8bab49d 100644
+--- a/WeaselUI/Layout.h
++++ b/WeaselUI/Layout.h
+@@ -70,6 +70,8 @@ class Layout {
+          PDWR pDWR);
+ 
+   virtual void DoLayout(CDCHandle dc, PDWR pDWR = NULL) = 0;
++  virtual void DoExpandedLayout(CDCHandle dc, PDWR pDWR,
++                                const CRect& workArea, CandidateGeometry& geometry) = 0;
+   /* All points in this class is based on the content area */
+   /* The top-left corner of the content area is always (0, 0) */
+   virtual CSize GetContentSize() const = 0;
+@@ -84,6 +86,11 @@ class Layout {
+   virtual IsToRoundStruct GetRoundInfo(int id) = 0;
+   virtual IsToRoundStruct GetTextRoundInfo() = 0;
+   virtual CRect GetContentRect() = 0;
++  virtual CRect GetDetailRect() const = 0;
++  virtual CRect GetDetailDividerRect() const = 0;
++  virtual CRect GetDisclosureRect() const = 0;
++  virtual const std::wstring& GetDisclosureText() const = 0;
++  virtual void AddDetail(PDWR, const std::wstring&, const CRect&, bool) = 0;
+   virtual CRect GetPrepageRect() = 0;
+   virtual CRect GetNextpageRect() = 0;
+   virtual weasel::TextRange GetPreeditRange() = 0;
+diff --git a/WeaselUI/StandardLayout.cpp b/WeaselUI/StandardLayout.cpp
+index bdffad0..c972d8f 100644
+--- a/WeaselUI/StandardLayout.cpp
++++ b/WeaselUI/StandardLayout.cpp
+@@ -1,16 +1,191 @@
+ #include "stdafx.h"
+ #include "StandardLayout.h"
++#include <linnet_candidate_design.h>
+ 
+ using namespace weasel;
++static_assert(linnet_design::expanded_candidate_count <= MAX_CANDIDATES_COUNT,
++              "Shared expanded candidates must fit Weasel's native arrays");
+ 
+ std::wstring StandardLayout::GetLabelText(const std::vector<Text>& labels,
+                                           int id,
+                                           const wchar_t* format) const {
++  const auto& current = _context.cinfo.expanded ? _expandedLabels : labels;
++  if (current.at(id).str.empty()) return L"";
+   wchar_t buffer[128];
+-  swprintf_s<128>(buffer, format, labels.at(id).str.c_str());
++  swprintf_s<128>(buffer, format, current.at(id).str.c_str());
+   return std::wstring(buffer);
+ }
+ 
++void StandardLayout::DoExpandedLayout(CDCHandle dc, PDWR pDWR,
++                                      const CRect& workArea, CandidateGeometry& geometry) {
++  geometry = CandidateGeometry();
++  geometry.expanded = true;
++  const int count = (std::min)(candidates_count, MAX_CANDIDATES_COUNT);
++  const bool horizontal = _style.layout_type == UIStyle::LAYOUT_HORIZONTAL ||
++                          _style.layout_type == UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN;
++  const int rowLimit = horizontal ? _style.expanded_rows : _style.expanded_vertical_count;
++  int columns = horizontal ? (std::min)(_style.expanded_columns, count) : 1;
++  const int left = offsetX + real_margin_x;
++  const int available = (std::max)(1, workArea.Width() - 2 * left);
++  const int maximum = _style.max_width > 0
++      ? (std::min)(available, (std::max)(1, _style.max_width - 2 * real_margin_x))
++      : available;
++  _style.max_width = maximum;
++  int top = offsetY + real_margin_y;
++  int width = 0;
++  for (const auto& item : {std::make_pair(&_context.preedit, &_preeditRect),
++                            std::make_pair(&_context.aux, &_auxiliaryRect)}) {
++    if (item.first->empty() || (item.first == &_context.preedit && IsInlinePreedit())) continue;
++    CSize size = GetPreeditSize(dc, *item.first, pDWR->pPreeditTextFormat, pDWR);
++    item.second->SetRect(left, top, left + size.cx, top + size.cy);
++    top += size.cy + _style.spacing;
++    width = (std::max)(width, size.cx);
++  }
++  CSize labelSize;
++  GetTextSizeDW(L"9.", 2, pDWR->pLabelTextFormat, pDWR, &labelSize);
++  const int labelWidth = labelFontValid ? labelSize.cx + _style.hilite_spacing : 0;
++  std::vector<int> widths(count);
++  for (int i = 0; i < count; ++i) {
++    CSize size;
++    GetTextSizeDW(candidates[i].str, candidates[i].str.size(), pDWR->pTextFormat, pDWR, &size);
++    widths[i] = labelWidth + size.cx;
++    _candidateRects[i].SetRectEmpty();
++    _candidateLabelRects[i].SetRectEmpty();
++    _candidateTextRects[i].SetRectEmpty();
++    _candidateCommentRects[i].SetRectEmpty();
++  }
++  int firstRow = 0, lastRow = 0;
++  std::vector<int> columnWidths;
++  // Match the shared design: preserve whole words and column guides, reducing
++  // the number of columns before narrowing the final single-column surface.
++  for (; columns >= 1; --columns) {
++    const int selectedRow = id / columns;
++    firstRow = selectedRow / rowLimit * rowLimit;
++    lastRow = (std::min)((count + columns - 1) / columns, firstRow + rowLimit);
++    columnWidths.assign(columns, 1);
++    for (int i = firstRow * columns; i < (std::min)(count, lastRow * columns); ++i)
++      columnWidths[i % columns] = (std::max)(columnWidths[i % columns], widths[i]);
++    int total = _style.candidate_spacing * (columns - 1);
++    for (int cell : columnWidths) total += cell;
++    if (total <= maximum || columns == 1) break;
++  }
++  if (columns == 1) columnWidths[0] = (std::min)(columnWidths[0], maximum);
++  _expandedLabels.assign(count, Text());
++  const int rowStart = id / columns * columns;
++  for (int i = firstRow * columns; i < (std::min)(count, lastRow * columns); ++i) {
++    const int number = horizontal ? (i / columns == id / columns ? i - rowStart : -1)
++                                  : i - firstRow;
++    if (number >= 0 && number < int(geometry.numbers.size())) {
++      geometry.numbers[number] = i;
++      _expandedLabels[i].str = std::to_wstring(number + 1);
++    }
++  }
++  geometry.previous = id >= columns ? id - columns : -1;
++  geometry.next = id + columns < count ? id + columns
++      : (id / columns < (count - 1) / columns ? count - 1 : count);
++  for (int row = firstRow; row < lastRow; ++row) {
++    int rowHeight = labelSize.cy;
++    for (int i = row * columns; i < (std::min)(count, (row + 1) * columns); ++i) {
++      if (SUCCEEDED(pDWR->CreateTextLayout(candidates[i].str, int(candidates[i].str.size()),
++          pDWR->pTextFormat.Get(), float((std::max)(1, columnWidths[i % columns] - labelWidth)), 0))) {
++        DWRITE_TEXT_METRICS metrics = {};
++        if (SUCCEEDED(pDWR->GetLayoutMetrics(&metrics)))
++          rowHeight = (std::max)(rowHeight, int(ceil(metrics.height)));
++      }
++    }
++    int x = left;
++    for (int i = row * columns; i < (std::min)(count, (row + 1) * columns); ++i) {
++      const int cellWidth = columnWidths[i % columns];
++      _candidateRects[i].SetRect(x, top, x + cellWidth, top + rowHeight);
++      _candidateLabelRects[i].SetRect(x, top, x + labelWidth, top + rowHeight);
++      _candidateTextRects[i].SetRect(x + labelWidth, top, x + cellWidth, top + rowHeight);
++      x += cellWidth + _style.candidate_spacing;
++    }
++    width = (std::max)(width, x - left - _style.candidate_spacing);
++    top += rowHeight + _style.candidate_spacing;
++  }
++  _contentSize.SetSize(width + 2 * left,
++      top - _style.candidate_spacing + offsetY + real_margin_y);
++  _contentRect.SetRect(0, 0, _contentSize.cx, _contentSize.cy);
++  _highlightRect = _candidateRects[id];
++  _bgRect = _contentRect;
++  _bgRect.DeflateRect(offsetX + 1, offsetY + 1);
++  _contentRect.DeflateRect(offsetX, offsetY);
++}
++
++void StandardLayout::AddDetail(PDWR pDWR, const std::wstring& text,
++                               const CRect& workArea, bool disclosure) {
++  _detailRect.SetRectEmpty();
++  _detailDividerRect.SetRectEmpty();
++  _disclosureRect.SetRectEmpty();
++  _disclosureText = _context.cinfo.expanded ? L"收起 ∧" : L"展开 ∨";
++  const int left = offsetX + real_margin_x;
++  int bodyWidth = (std::max)(1, _contentSize.cx - 2 * left);
++  CSize control;
++  if (disclosure) {
++    GetTextSizeDW(_disclosureText, _disclosureText.size(), pDWR->pLabelTextFormat, pDWR, &control);
++    const int growth = (std::max)(0, control.cx - bodyWidth);
++    bodyWidth += growth;
++    _contentSize.cx += growth;
++    _contentRect.right += growth;
++    _bgRect.right += growth;
++  }
++  const int bodyBottom = _contentSize.cy - offsetY - real_margin_y;
++  int bottom = bodyBottom;
++  const bool sidecar = _style.layout_type == UIStyle::LAYOUT_VERTICAL ||
++                       _style.layout_type == UIStyle::LAYOUT_VERTICAL_FULLSCREEN;
++  const int detailLeft = sidecar ? left + bodyWidth + 2 * _style.spacing + 1 : left;
++  const int maximumWidth = sidecar ? _style.detail_sidecar_width : _style.detail_footer_width;
++  const int availableWidth = sidecar
++      ? workArea.Width() - detailLeft - left : bodyWidth;
++  const int width = (std::min)(maximumWidth, availableWidth);
++  if (!text.empty() && width > 0 && pDWR->pCommentTextFormat &&
++      SUCCEEDED(pDWR->CreateTextLayout(text, int(text.size()),
++          pDWR->pCommentTextFormat.Get(), float(width), 0))) {
++    DWRITE_TEXT_METRICS metrics = {};
++    if (SUCCEEDED(pDWR->GetLayoutMetrics(&metrics))) {
++      const int top = sidecar ? offsetY + real_margin_y : bodyBottom + _style.spacing;
++      int height = int(ceil(metrics.height));
++      if (sidecar) {
++        height = (std::min)(height, bodyBottom - top);
++      } else {
++        UINT32 count = 0;
++        pDWR->pTextLayout->GetLineMetrics(nullptr, 0, &count);
++        std::vector<DWRITE_LINE_METRICS> lines(count);
++        if (count && SUCCEEDED(pDWR->pTextLayout->GetLineMetrics(lines.data(), count, &count))) {
++          float visibleHeight = 0;
++          for (UINT32 i = 0; i < count && i < linnet_design::footer_detail_lines; ++i)
++            visibleHeight += lines[i].height;
++          height = int(ceil(visibleHeight));
++        }
++        height = (std::min)(height, (std::max)(0, workArea.Height() -
++            top - control.cy - 2 * real_margin_y - _style.spacing));
++      }
++      _detailRect.SetRect(detailLeft, top, detailLeft + width, top + height);
++      if (sidecar) {
++        _detailDividerRect.SetRect(left + bodyWidth + _style.spacing, top,
++            left + bodyWidth + _style.spacing + 1, bodyBottom);
++        const int growth = 2 * _style.spacing + 1 + width;
++        _contentSize.cx += growth;
++        _contentRect.right += growth;
++        _bgRect.right += growth;
++      } else {
++        bottom = top + height;
++      }
++    }
++  }
++  if (disclosure) {
++    bottom += _style.spacing;
++    const int right = _contentSize.cx - left;
++    _disclosureRect.SetRect(right - control.cx, bottom, right, bottom + control.cy);
++    bottom += control.cy;
++  }
++  const int extra = bottom - bodyBottom;
++  _contentSize.cy += extra;
++  _contentRect.bottom += extra;
++  _bgRect.bottom += extra;
++}
++
+ void weasel::StandardLayout::GetTextSizeDW(
+     const std::wstring& text,
+     size_t nCount,
+diff --git a/WeaselUI/StandardLayout.h b/WeaselUI/StandardLayout.h
+index 23eef35..e2311dc 100644
+--- a/WeaselUI/StandardLayout.h
++++ b/WeaselUI/StandardLayout.h
+@@ -21,6 +21,8 @@ class StandardLayout : public Layout {
+   /* Layout */
+ 
+   virtual void DoLayout(CDCHandle dc, PDWR pDWR = NULL) = 0;
++  virtual void DoExpandedLayout(CDCHandle dc, PDWR pDWR,
++                                const CRect& workArea, CandidateGeometry& geometry);
+   virtual CSize GetContentSize() const { return _contentSize; }
+   virtual CRect GetPreeditRect() const { return _preeditRect; }
+   virtual CRect GetAuxiliaryRect() const { return _auxiliaryRect; }
+@@ -44,6 +46,12 @@ class StandardLayout : public Layout {
+   virtual IsToRoundStruct GetRoundInfo(int id) { return _roundInfo[id]; }
+   virtual IsToRoundStruct GetTextRoundInfo() { return _textRoundInfo; }
+   virtual CRect GetContentRect() { return _contentRect; }
++  virtual CRect GetDetailRect() const { return _detailRect; }
++  virtual CRect GetDetailDividerRect() const { return _detailDividerRect; }
++  virtual CRect GetDisclosureRect() const { return _disclosureRect; }
++  virtual const std::wstring& GetDisclosureText() const { return _disclosureText; }
++  virtual void AddDetail(PDWR pDWR, const std::wstring& text,
++                         const CRect& workArea, bool disclosure);
+   virtual CRect GetPrepageRect() { return _prePageRect; }
+   virtual CRect GetNextpageRect() { return _nextPageRect; }
+   virtual CSize GetBeforeSize() { return _beforesz; }
+@@ -72,6 +80,9 @@ class StandardLayout : public Layout {
+   weasel::TextRange _range;
+   CSize _contentSize;
+   CRect _preeditRect, _auxiliaryRect, _highlightRect;
++  CRect _detailRect, _detailDividerRect, _disclosureRect;
++  std::vector<Text> _expandedLabels;
++  std::wstring _disclosureText;
+   CRect _candidateRects[MAX_CANDIDATES_COUNT];
+   CRect _candidateLabelRects[MAX_CANDIDATES_COUNT];
+   CRect _candidateTextRects[MAX_CANDIDATES_COUNT];
+diff --git a/WeaselUI/WeaselPanel.cpp b/WeaselUI/WeaselPanel.cpp
+index 18964a0..839d374 100644
+--- a/WeaselUI/WeaselPanel.cpp
++++ b/WeaselUI/WeaselPanel.cpp
+@@ -56,6 +56,7 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
+       m_status(ui.status()),
+       m_style(ui.style()),
+       m_ostyle(ui.ostyle()),
++      m_geometry(ui.candidate_geometry),
+       m_candidateCount(0),
+       m_current_zhung_icon(),
+       m_inputPos(CRect()),
+@@ -64,6 +65,7 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
+       hide_candidates(false),
+       pDWR(ui.pdwr()),
+       _UICallback(ui.uiCallback()),
++      _candidateAction(ui.candidateAction),
+       _m_gdiplusToken(0) {
+   m_iconDisabled.LoadIconW(IDI_RELOAD, STATUS_ICON_SIZE, STATUS_ICON_SIZE,
+                            LR_DEFAULTCOLOR);
+@@ -130,6 +132,12 @@ void WeaselPanel::_CreateLayout() {
+ 
+ // 更新界面
+ void WeaselPanel::Refresh() {
++  m_geometry = CandidateGeometry();
++  if (m_ctx.cinfo.expanded || !m_ctx.cinfo.detail.empty()) m_istorepos = false;
++  if (m_ctx != m_octx) {
++    m_hoverIndex = -1;
++    m_disclosurePressed = false;
++  }
+   bool should_show_icon =
+       (m_status.ascii_mode || !m_status.composing || !m_ctx.aux.empty());
+   m_candidateCount = (BYTE)m_ctx.cinfo.candies.size();
+@@ -159,7 +167,16 @@ void WeaselPanel::Refresh() {
+     _CreateLayout();
+ 
+     CDCHandle dc = GetDC();
+-    m_layout->DoLayout(dc, pDWR);
++    MONITORINFO monitor = {sizeof(MONITORINFO)};
++    GetMonitorInfo(MonitorFromRect(m_inputPos, MONITOR_DEFAULTTONEAREST), &monitor);
++    CRect workArea(monitor.rcWork);
++    if (m_ctx.cinfo.expanded && m_candidateCount)
++      m_layout->DoExpandedLayout(dc, pDWR, workArea, m_geometry);
++    else
++      m_layout->DoLayout(dc, pDWR);
++    const bool disclosure = !show_schema_menu && m_style.candidate_expansion_allowed && m_candidateCount &&
++        (m_ctx.cinfo.expanded || m_ctx.cinfo.currentPage > 0 || !m_ctx.cinfo.is_last_page);
++    m_layout->AddDetail(pDWR, m_ctx.cinfo.detail, workArea, disclosure);
+     ReleaseDC(dc);
+     _ResizeWindow();
+     _RepositionWindow();
+@@ -266,6 +283,14 @@ LRESULT WeaselPanel::OnLeftClickedUp(UINT uMsg,
+   point.x = GET_X_LPARAM(lParam);
+   point.y = GET_Y_LPARAM(lParam);
+ 
++  const bool disclosurePressed = m_disclosurePressed;
++  m_disclosurePressed = false;
++  if (disclosurePressed && m_layout->GetDisclosureRect().PtInRect(point)) {
++    if (_candidateAction) _candidateAction(TOGGLE_CANDIDATE_EXPANSION, 0);
++    return 0;
++  }
++  if (m_ctx.cinfo.empty()) return 0;
++
+   ::KillTimer(m_hWnd, AUTOREV_TIMER);
+   bar_scale_ = 1.0;
+   ptimer = 0;
+@@ -292,6 +317,57 @@ LRESULT WeaselPanel::OnLeftClickedUp(UINT uMsg,
+   return 0;
+ }
+ 
++LRESULT WeaselPanel::OnRightClicked(UINT, WPARAM, LPARAM position, BOOL&) {
++  if (hide_candidates || !m_layout || m_ctx.cinfo.empty() || m_status.schema_id == L".default") return 0;
++  CPoint point(GET_X_LPARAM(position), GET_Y_LPARAM(position));
++  size_t index = m_ctx.cinfo.candies.size();
++  for (size_t i = 0; i < m_ctx.cinfo.candies.size(); ++i) {
++    CRect rect = m_layout->GetCandidateRect(int(i));
++    if (rect.IsRectEmpty()) continue;
++    if (m_istorepos) rect.OffsetRect(0, m_offsetys[i]);
++    rect.InflateRect(DPI_SCALE(m_style.hilite_padding_x), DPI_SCALE(m_style.hilite_padding_y));
++    if (rect.PtInRect(point)) { index = i; break; }
++  }
++  if (index == m_ctx.cinfo.candies.size()) return 0;
++  // Copy before opening the menu: a focus notification may update the panel.
++  const auto word = m_ctx.cinfo.candies[index].str;
++  const Context publication = m_ctx;
++  HMENU menu = CreatePopupMenu();
++  AppendMenuW(menu, MF_STRING, 1, L"忘记此候选的学习记录 / Forget learning");
++  AppendMenuW(menu, MF_STRING, 2, L"加入个人词 / Add to custom words…");
++  if (m_style.candidate_expansion_allowed)
++    AppendMenuW(menu, MF_STRING, 3, m_ctx.cinfo.expanded ? L"收起候选 / Collapse" : L"展开候选 / Expand");
++  ClientToScreen(&point);
++  const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
++                                      point.x, point.y, 0, m_hWnd, nullptr);
++  DestroyMenu(menu);
++  // A modal menu can process focus/composition updates. Never apply the old
++  // candidate index to a replacement publication.
++  if (m_ctx != publication || !IsWindowVisible()) return 0;
++  if (command == 1 && _candidateAction) _candidateAction(FORGET_CANDIDATE, index);
++  if (command == 3 && _candidateAction) _candidateAction(TOGGLE_CANDIDATE_EXPANSION, 0);
++  if (command == 2) {
++    // Quote a single Windows argv value, never a shell command. Opening this
++    // endpoint creates an editable draft; it does not save personal data.
++    std::wstring quoted = L"\"";
++    size_t slashes = 0;
++    for (wchar_t ch : word) {
++      if (ch == L'\\') { ++slashes; continue; }
++      quoted.append(ch == L'\"' ? slashes * 2 + 1 : slashes, L'\\');
++      quoted += ch;
++      slashes = 0;
++    }
++    quoted.append(slashes * 2, L'\\');
++    quoted += L'\"';
++    std::wstring installed;
++    if (RegGetStringValue(HKEY_LOCAL_MACHINE, WEASEL_REG_KEY, L"WeaselRoot", installed) != ERROR_SUCCESS) return 0;
++    const auto deployer = fs::path(installed) / L"WeaselDeployer.exe";
++    const auto arguments = L"/add-word " + quoted;
++    ShellExecuteW(m_hWnd, L"open", deployer.c_str(), arguments.c_str(), nullptr, SW_SHOWNORMAL);
++  }
++  return 0;
++}
++
+ LRESULT WeaselPanel::OnLeftClickedDown(UINT uMsg,
+                                        WPARAM wParam,
+                                        LPARAM lParam,
+@@ -304,6 +380,9 @@ LRESULT WeaselPanel::OnLeftClickedDown(UINT uMsg,
+   point.x = GET_X_LPARAM(lParam);
+   point.y = GET_Y_LPARAM(lParam);
+ 
++  m_disclosurePressed = m_layout->GetDisclosureRect().PtInRect(point);
++  if (m_disclosurePressed || m_ctx.cinfo.empty()) return 0;
++
+   // capture
+   if (m_style.click_to_capture) {
+     CRect recth = m_layout->GetCandidateRect((int)m_ctx.cinfo.highlighted);
+@@ -381,6 +460,7 @@ LRESULT WeaselPanel::OnLeftClickedDown(UINT uMsg,
+     // select by click relative actions
+     for (size_t i = 0; i < m_candidateCount && i < MAX_CANDIDATES_COUNT; ++i) {
+       CRect rect = m_layout->GetCandidateRect((int)i);
++      if (rect.IsRectEmpty()) continue;
+       if (m_istorepos)
+         rect.OffsetRect(0, m_offsetys[i]);
+       rect.InflateRect(DPI_SCALE(m_style.hilite_padding_x),
+@@ -441,6 +521,7 @@ LRESULT WeaselPanel::OnMouseMove(UINT uMsg,
+ 
+   for (size_t i = 0; i < m_candidateCount && i < MAX_CANDIDATES_COUNT; ++i) {
+     CRect rect = m_layout->GetCandidateRect((int)i);
++    if (rect.IsRectEmpty()) continue;
+     if (m_istorepos)
+       rect.OffsetRect(0, m_offsetys[i]);
+     rect.InflateRect(DPI_SCALE(m_style.hilite_padding_x),
+@@ -756,6 +837,7 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
+         if (i == m_ctx.cinfo.highlighted || i == m_hoverIndex)
+           continue;  // draw non hilited candidates only
+         rect = m_layout->GetCandidateRect((int)i);
++        if (rect.IsRectEmpty()) continue;
+         IsToRoundStruct rd = m_layout->GetRoundInfo(i);
+         if (m_istorepos) {
+           rect.OffsetRect(0, m_offsetys[i]);
+@@ -775,6 +857,7 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
+         if (i == m_ctx.cinfo.highlighted || i == m_hoverIndex)
+           continue;
+         rect = m_layout->GetCandidateRect((int)i);
++        if (rect.IsRectEmpty()) continue;
+         IsToRoundStruct rd = m_layout->GetRoundInfo(i);
+         if (m_istorepos) {
+           rect.OffsetRect(0, m_offsetys[i]);
+@@ -859,6 +942,7 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
+     // begin draw candidate texts
+     int label_text_color, candidate_text_color, comment_text_color;
+     for (auto i = 0; i < m_candidateCount && i < MAX_CANDIDATES_COUNT; ++i) {
++      if (m_layout->GetCandidateRect(i).IsRectEmpty()) continue;
+       if (i == m_ctx.cinfo.highlighted || i == m_hoverIndex) {
+         label_text_color = m_style.hilited_label_text_color;
+         candidate_text_color = m_style.hilited_candidate_text_color;
+@@ -889,7 +973,7 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
+       }
+       // Draw comment
+       std::wstring comment = comments.at(i).str;
+-      if (!comment.empty() && COLORNOTTRANSPARENT(comment_text_color)) {
++      if (!m_ctx.cinfo.expanded && !comment.empty() && COLORNOTTRANSPARENT(comment_text_color)) {
+         rect = m_layout->GetCandidateCommentRect((int)i);
+         if (m_istorepos)
+           rect.OffsetRect(0, m_offsetys[i]);
+@@ -1021,6 +1105,22 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
+     // draw candidates string
+     if (m_candidateCount)
+       drawn |= _DrawCandidates(memDC);
++    if (!m_ctx.cinfo.detail.empty()) {
++      _TextOut(m_layout->GetDetailRect(), m_ctx.cinfo.detail, m_ctx.cinfo.detail.size(),
++               m_style.comment_text_color, pDWR->pCommentTextFormat.Get());
++      const auto divider = m_layout->GetDetailDividerRect();
++      if (!divider.IsRectEmpty() && pDWR->pBrush) {
++        pDWR->pRenderTarget->FillRectangle(D2D1::RectF(float(divider.left), float(divider.top),
++            float(divider.right), float(divider.bottom)), pDWR->pBrush.Get());
++      }
++      drawn = true;
++    }
++    if (!m_layout->GetDisclosureRect().IsRectEmpty()) {
++      const auto& title = m_layout->GetDisclosureText();
++      _TextOut(m_layout->GetDisclosureRect(), title, title.size(),
++               m_style.label_text_color, pDWR->pLabelTextFormat.Get());
++      drawn = true;
++    }
+     if (FAILED(pDWR->pRenderTarget->EndDraw())) {
+       _InitFontRes(true);
+       Refresh();
+@@ -1206,7 +1306,8 @@ void WeaselPanel::_RepositionWindow(const bool& adj) {
+     if (DPI_SCALE(m_style.shadow_radius) &&
+         DPI_SCALE(m_style.shadow_offset_y) > 0)
+       y -= DPI_SCALE(m_style.shadow_offset_y);
+-    m_istorepos = (m_style.vertical_auto_reverse &&
++    m_istorepos = (!m_ctx.cinfo.expanded && m_ctx.cinfo.detail.empty() &&
++                   m_style.vertical_auto_reverse &&
+                    m_style.layout_type == UIStyle::LAYOUT_VERTICAL);
+     if (DPI_SCALE(m_style.shadow_radius) > 0)
+       y += (DPI_SCALE(m_style.shadow_offset_y) < 0 ||
+@@ -1227,7 +1328,7 @@ void WeaselPanel::_TextOut(const CRect& rc,
+                            const size_t& cch,
+                            const int& inColor,
+                            IDWriteTextFormat1* const pTextFormat) {
+-  if (pTextFormat == NULL)
++  if (pTextFormat == NULL || rc.IsRectEmpty())
+     return;
+   float r = (float)(GetRValue(inColor)) / 255.0f;
+   float g = (float)(GetGValue(inColor)) / 255.0f;
+@@ -1261,7 +1362,17 @@ void WeaselPanel::_TextOut(const CRect& rc,
+     offsety += omt.top;
+ 
+   if (pDWR->pTextLayout != NULL) {
++    const bool detail = rc == m_layout->GetDetailRect();
++    if (detail) {
++      DWRITE_TRIMMING trimming = {DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
++      ComPtr<IDWriteInlineObject> ellipsis;
++      if (SUCCEEDED(pDWR->pDWFactory->CreateEllipsisTrimmingSign(pTextFormat, &ellipsis)))
++        pDWR->pTextLayout->SetTrimming(&trimming, ellipsis.Get());
++      pDWR->pRenderTarget->PushAxisAlignedClip(D2D1::RectF(float(rc.left), float(rc.top),
++          float(rc.right), float(rc.bottom)), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
++    }
+     pDWR->DrawTextLayoutAt({offsetx, offsety});
++    if (detail) pDWR->pRenderTarget->PopAxisAlignedClip();
+ #if 0
+     D2D1_RECT_F rectf =  D2D1::RectF(offsetx, offsety, offsetx + rc.Width(), offsety + rc.Height());
+     pDWR->DrawRect(&rectf);
+diff --git a/WeaselUI/WeaselPanel.h b/WeaselUI/WeaselPanel.h
+index 478e798..f40f268 100644
+--- a/WeaselUI/WeaselPanel.h
++++ b/WeaselUI/WeaselPanel.h
+@@ -32,6 +32,7 @@ class WeaselPanel
+   MESSAGE_HANDLER(WM_MOUSEACTIVATE, OnMouseActivate)
+   MESSAGE_HANDLER(WM_LBUTTONUP, OnLeftClickedUp)
+   MESSAGE_HANDLER(WM_LBUTTONDOWN, OnLeftClickedDown)
++  MESSAGE_HANDLER(WM_RBUTTONUP, OnRightClicked)
+   MESSAGE_HANDLER(WM_MOUSEWHEEL, OnMouseWheel)
+   MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
+   MESSAGE_HANDLER(WM_MOUSELEAVE, OnMouseLeave)
+@@ -54,6 +55,7 @@ class WeaselPanel
+                             LPARAM lParam,
+                             BOOL& bHandled);
+   LRESULT OnMouseWheel(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
++  LRESULT OnRightClicked(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
+   LRESULT OnMouseMove(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
+   LRESULT OnMouseLeave(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
+ 
+@@ -109,6 +111,8 @@ class WeaselPanel
+   weasel::Status& m_status;
+   weasel::UIStyle& m_style;
+   weasel::UIStyle& m_ostyle;
++  CandidateGeometry& m_geometry;
++  bool m_disclosurePressed = false;
+ 
+   CRect m_inputPos;
+   int m_offsetys[MAX_CANDIDATES_COUNT];  // offset y for candidates when
+@@ -141,6 +145,7 @@ class WeaselPanel
+   PDWR pDWR;
+   std::function<void(size_t* const, size_t* const, bool* const, bool* const)>&
+       _UICallback;
++  std::function<void(UINT, size_t)>& _candidateAction;
+   float bar_scale_ = 1.0;
+   float dpiScaleLayout = 1.0f;
+   int m_hoverIndex = -1;
+diff --git a/arm64x_wrapper/WeaselIME_arm64.def b/arm64x_wrapper/WeaselIME_arm64.def
+index 12c8480..fa21ddb 100644
+--- a/arm64x_wrapper/WeaselIME_arm64.def
++++ b/arm64x_wrapper/WeaselIME_arm64.def
+@@ -1,16 +1,16 @@
+ EXPORTS
+-	ImeConversionList = weaselARM64.ime.ImeConversionList
+-	ImeConfigure = weaselARM64.ime.ImeConfigure
+-	ImeDestroy = weaselARM64.ime.ImeDestroy
+-	ImeEscape = weaselARM64.ime.ImeEscape
+-	ImeInquire = weaselARM64.ime.ImeInquire
+-	ImeProcessKey = weaselARM64.ime.ImeProcessKey
+-	ImeSelect = weaselARM64.ime.ImeSelect
+-	ImeSetActiveContext = weaselARM64.ime.ImeSetActiveContext
+-	ImeToAsciiEx = weaselARM64.ime.ImeToAsciiEx
+-	NotifyIME = weaselARM64.ime.NotifyIME
+-	ImeRegisterWord = weaselARM64.ime.ImeRegisterWord
+-	ImeUnregisterWord = weaselARM64.ime.ImeUnregisterWord
+-	ImeGetRegisterWordStyle = weaselARM64.ime.ImeGetRegisterWordStyle
+-	ImeEnumRegisterWord = weaselARM64.ime.ImeEnumRegisterWord
+-	ImeSetCompositionString = weaselARM64.ime.ImeSetCompositionString
++	ImeConversionList = linnetARM64.ime.ImeConversionList
++	ImeConfigure = linnetARM64.ime.ImeConfigure
++	ImeDestroy = linnetARM64.ime.ImeDestroy
++	ImeEscape = linnetARM64.ime.ImeEscape
++	ImeInquire = linnetARM64.ime.ImeInquire
++	ImeProcessKey = linnetARM64.ime.ImeProcessKey
++	ImeSelect = linnetARM64.ime.ImeSelect
++	ImeSetActiveContext = linnetARM64.ime.ImeSetActiveContext
++	ImeToAsciiEx = linnetARM64.ime.ImeToAsciiEx
++	NotifyIME = linnetARM64.ime.NotifyIME
++	ImeRegisterWord = linnetARM64.ime.ImeRegisterWord
++	ImeUnregisterWord = linnetARM64.ime.ImeUnregisterWord
++	ImeGetRegisterWordStyle = linnetARM64.ime.ImeGetRegisterWordStyle
++	ImeEnumRegisterWord = linnetARM64.ime.ImeEnumRegisterWord
++	ImeSetCompositionString = linnetARM64.ime.ImeSetCompositionString
+diff --git a/arm64x_wrapper/WeaselIME_x64.def b/arm64x_wrapper/WeaselIME_x64.def
+index bc8fc17..0ae7e54 100644
+--- a/arm64x_wrapper/WeaselIME_x64.def
++++ b/arm64x_wrapper/WeaselIME_x64.def
+@@ -1,16 +1,16 @@
+ EXPORTS
+-	ImeConversionList = weaselx64.ime.ImeConversionList
+-	ImeConfigure = weaselx64.ime.ImeConfigure
+-	ImeDestroy = weaselx64.ime.ImeDestroy
+-	ImeEscape = weaselx64.ime.ImeEscape
+-	ImeInquire = weaselx64.ime.ImeInquire
+-	ImeProcessKey = weaselx64.ime.ImeProcessKey
+-	ImeSelect = weaselx64.ime.ImeSelect
+-	ImeSetActiveContext = weaselx64.ime.ImeSetActiveContext
+-	ImeToAsciiEx = weaselx64.ime.ImeToAsciiEx
+-	NotifyIME = weaselx64.ime.NotifyIME
+-	ImeRegisterWord = weaselx64.ime.ImeRegisterWord
+-	ImeUnregisterWord = weaselx64.ime.ImeUnregisterWord
+-	ImeGetRegisterWordStyle = weaselx64.ime.ImeGetRegisterWordStyle
+-	ImeEnumRegisterWord = weaselx64.ime.ImeEnumRegisterWord
+-	ImeSetCompositionString = weaselx64.ime.ImeSetCompositionString
++	ImeConversionList = linnetx64.ime.ImeConversionList
++	ImeConfigure = linnetx64.ime.ImeConfigure
++	ImeDestroy = linnetx64.ime.ImeDestroy
++	ImeEscape = linnetx64.ime.ImeEscape
++	ImeInquire = linnetx64.ime.ImeInquire
++	ImeProcessKey = linnetx64.ime.ImeProcessKey
++	ImeSelect = linnetx64.ime.ImeSelect
++	ImeSetActiveContext = linnetx64.ime.ImeSetActiveContext
++	ImeToAsciiEx = linnetx64.ime.ImeToAsciiEx
++	NotifyIME = linnetx64.ime.NotifyIME
++	ImeRegisterWord = linnetx64.ime.ImeRegisterWord
++	ImeUnregisterWord = linnetx64.ime.ImeUnregisterWord
++	ImeGetRegisterWordStyle = linnetx64.ime.ImeGetRegisterWordStyle
++	ImeEnumRegisterWord = linnetx64.ime.ImeEnumRegisterWord
++	ImeSetCompositionString = linnetx64.ime.ImeSetCompositionString
+diff --git a/arm64x_wrapper/WeaselTSF_arm64.def b/arm64x_wrapper/WeaselTSF_arm64.def
+index 8e3a547..98dc8de 100644
+--- a/arm64x_wrapper/WeaselTSF_arm64.def
++++ b/arm64x_wrapper/WeaselTSF_arm64.def
+@@ -1,5 +1,5 @@
+ EXPORTS
+-	DllGetClassObject = weaselARM64.dll.DllGetClassObject
+-	DllCanUnloadNow = weaselARM64.dll.DllCanUnloadNow
+-	DllRegisterServer = weaselARM64.dll.DllRegisterServer
+-	DllUnregisterServer = weaselARM64.dll.DllUnregisterServer
+\ No newline at end of file
++	DllGetClassObject = linnetARM64.dll.DllGetClassObject
++	DllCanUnloadNow = linnetARM64.dll.DllCanUnloadNow
++	DllRegisterServer = linnetARM64.dll.DllRegisterServer
++	DllUnregisterServer = linnetARM64.dll.DllUnregisterServer
+diff --git a/arm64x_wrapper/WeaselTSF_x64.def b/arm64x_wrapper/WeaselTSF_x64.def
+index 11ed1b5..fee9cb9 100644
+--- a/arm64x_wrapper/WeaselTSF_x64.def
++++ b/arm64x_wrapper/WeaselTSF_x64.def
+@@ -1,5 +1,5 @@
+ EXPORTS
+-	DllGetClassObject = weaselx64.dll.DllGetClassObject
+-	DllCanUnloadNow = weaselx64.dll.DllCanUnloadNow
+-	DllRegisterServer = weaselx64.dll.DllRegisterServer
+-	DllUnregisterServer = weaselx64.dll.DllUnregisterServer
+\ No newline at end of file
++	DllGetClassObject = linnetx64.dll.DllGetClassObject
++	DllCanUnloadNow = linnetx64.dll.DllCanUnloadNow
++	DllRegisterServer = linnetx64.dll.DllRegisterServer
++	DllUnregisterServer = linnetx64.dll.DllUnregisterServer
 diff --git a/build.bat b/build.bat
 index 6cdb23e..9ff024c 100644
 --- a/build.bat
@@ -1431,6 +2787,38 @@ index bebc73a..3302ff2 100644
    void Disconnect() { _FinalizePipe(hpipe); }
  
    /* Write data to buffer */
+diff --git a/include/RimeWithWeasel.h b/include/RimeWithWeasel.h
+index 6fb0a4c..f740f36 100644
+--- a/include/RimeWithWeasel.h
++++ b/include/RimeWithWeasel.h
+@@ -29,6 +29,9 @@ struct SessionStatus {
+   RimeStatus status;
+   bool __synced;
+   RimeSessionId session_id;
++  bool expanded = false;
++  int candidate_base = -1;
++  bool candidate_ui = false;
+ };
+ typedef std::map<DWORD, SessionStatus> SessionStatusMap;
+ typedef DWORD WeaselSessionId;
+@@ -52,6 +55,8 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
+                                                WeaselSessionId ipc_id,
+                                                EatLine eat);
+   virtual bool ChangePage(bool backward, WeaselSessionId ipc_id, EatLine eat);
++  virtual bool CandidateAction(UINT action, size_t index, WeaselSessionId ipc_id, EatLine eat);
++  virtual void CandidateRows(int previous, int next, WeaselSessionId ipc_id);
+   virtual void FocusIn(DWORD param, WeaselSessionId ipc_id);
+   virtual void FocusOut(DWORD param, WeaselSessionId ipc_id);
+   virtual void UpdateInputPosition(RECT const& rc, WeaselSessionId ipc_id);
+@@ -75,7 +80,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
+   bool _ShowMessage(weasel::Context& ctx, weasel::Status& status);
+   bool _Respond(WeaselSessionId ipc_id, EatLine eat);
+   void _ReadClientInfo(WeaselSessionId ipc_id, LPWSTR buffer);
+-  void _GetCandidateInfo(weasel::CandidateInfo& cinfo, RimeContext& ctx);
++  void _GetCandidateInfo(weasel::CandidateInfo& cinfo, RimeContext& ctx, SessionStatus* session = nullptr);
+   void _GetStatus(weasel::Status& stat,
+                   WeaselSessionId ipc_id,
+                   weasel::Context& ctx);
 diff --git a/include/WeaselConstants.h b/include/WeaselConstants.h
 index 09625e4..58b7bf6 100644
 --- a/include/WeaselConstants.h
@@ -1447,7 +2835,7 @@ index 09625e4..58b7bf6 100644
  #define STRINGIZE(x) #x
  #define VERSION_STR(x) STRINGIZE(x)
 diff --git a/include/WeaselIPC.h b/include/WeaselIPC.h
-index 3065cb5..9fd3808 100644
+index 3065cb5..305664c 100644
 --- a/include/WeaselIPC.h
 +++ b/include/WeaselIPC.h
 @@ -6,8 +6,8 @@
@@ -1461,7 +2849,25 @@ index 3065cb5..9fd3808 100644
  
  #define WEASEL_IPC_METADATA_SIZE 1024
  #define WEASEL_IPC_BUFFER_SIZE (4 * 1024)
-@@ -109,7 +109,7 @@ class Client {
+@@ -32,6 +32,8 @@ enum WEASEL_IPC_COMMAND {
+   WEASEL_IPC_SELECT_CANDIDATE_ON_CURRENT_PAGE,
+   WEASEL_IPC_HIGHLIGHT_CANDIDATE_ON_CURRENT_PAGE,
+   WEASEL_IPC_CHANGE_PAGE,
++  WEASEL_IPC_CANDIDATE_ACTION,
++  WEASEL_IPC_CANDIDATE_ROWS,
+   WEASEL_IPC_LAST_COMMAND
+ };
+ 
+@@ -74,6 +76,8 @@ struct RequestHandler {
+   virtual bool ChangePage(bool backward, DWORD session_id, EatLine eat) {
+     return false;
+   }
++  virtual bool CandidateAction(UINT action, size_t index, DWORD session_id, EatLine eat) { return false; }
++  virtual void CandidateRows(int previous, int next, DWORD session_id) {}
+   virtual void FocusIn(DWORD param, DWORD session_id) {}
+   virtual void FocusOut(DWORD param, DWORD session_id) {}
+   virtual void UpdateInputPosition(RECT const& rc, DWORD session_id) {}
+@@ -109,7 +113,7 @@ class Client {
    // 断开连接
    void Disconnect();
    // 终止服务
@@ -1470,6 +2876,134 @@ index 3065cb5..9fd3808 100644
    // 發起會話
    void StartSession();
    // 結束會話
+@@ -132,6 +136,8 @@ class Client {
+   bool HighlightCandidateOnCurrentPage(size_t index);
+   // 翻页，backward = true 向前翻，false向后翻
+   bool ChangePage(bool backward);
++  bool CandidateAction(UINT action, size_t index = 0);
++  void CandidateRows(int previous, int next);
+   // 更新输入位置
+   void UpdateInputPosition(RECT const& rc);
+   // 输入窗口获得焦点
+diff --git a/include/WeaselIPCData.h b/include/WeaselIPCData.h
+index 09f22f9..5ca2084 100644
+--- a/include/WeaselIPCData.h
++++ b/include/WeaselIPCData.h
+@@ -7,6 +7,8 @@
+ 
+ namespace weasel {
+ 
++enum CandidateActionCommand { TOGGLE_CANDIDATE_EXPANSION = 1, FORGET_CANDIDATE = 2 };
++
+ enum TextAttributeType { NONE = 0, HIGHLIGHTED, LAST_TYPE };
+ 
+ struct TextRange {
+@@ -69,6 +71,8 @@ struct Text {
+ };
+ 
+ struct CandidateInfo {
++  bool expanded = false;
++  std::wstring detail;
+   CandidateInfo() {
+     currentPage = 0;
+     totalPages = 0;
+@@ -76,16 +80,19 @@ struct CandidateInfo {
+     is_last_page = false;
+   }
+   void clear() {
++    expanded = false;
++    detail.clear();
+     currentPage = 0;
+     totalPages = 0;
+     highlighted = 0;
+     is_last_page = false;
+     candies.clear();
++    comments.clear();
+     labels.clear();
+   }
+   bool empty() const { return candies.empty(); }
+   bool operator==(const CandidateInfo& ci) {
+-    if (currentPage != ci.currentPage || totalPages != ci.totalPages ||
++    if (expanded != ci.expanded || detail != ci.detail || currentPage != ci.currentPage || totalPages != ci.totalPages ||
+         highlighted != ci.highlighted || is_last_page != ci.is_last_page ||
+         notequal(candies, ci.candies) || notequal(comments, ci.comments) ||
+         notequal(labels, ci.labels))
+@@ -93,7 +100,7 @@ struct CandidateInfo {
+     return true;
+   }
+   bool operator!=(const CandidateInfo& ci) {
+-    if (currentPage != ci.currentPage || totalPages != ci.totalPages ||
++    if (expanded != ci.expanded || detail != ci.detail || currentPage != ci.currentPage || totalPages != ci.totalPages ||
+         highlighted != ci.highlighted || is_last_page != ci.is_last_page ||
+         notequal(candies, ci.candies) || notequal(comments, ci.comments) ||
+         notequal(labels, ci.labels))
+@@ -242,6 +249,14 @@ struct UIStyle {
+   std::wstring mark_text;
+   // layout relative parameters
+   LayoutType layout_type;
++  // Root-generated policy; optional fields stay outside the legacy archive.
++  bool candidate_expansion_allowed = false;
++  int expanded_columns = 1;
++  int expanded_rows = 1;
++  int expanded_vertical_count = 1;
++  int detail_candidate_width = 0;
++  int detail_sidecar_width = 0;
++  int detail_footer_width = 0;
+   LayoutAlignType align_type;
+   bool vertical_text_left_to_right;
+   bool vertical_text_with_wrap;
+@@ -364,6 +379,11 @@ struct UIStyle {
+         client_caps(0) {}
+   bool operator!=(const UIStyle& st) {
+     return (
++        candidate_expansion_allowed != st.candidate_expansion_allowed ||
++        expanded_columns != st.expanded_columns || expanded_rows != st.expanded_rows ||
++        expanded_vertical_count != st.expanded_vertical_count ||
++        detail_candidate_width != st.detail_candidate_width ||
++        detail_sidecar_width != st.detail_sidecar_width || detail_footer_width != st.detail_footer_width ||
+         align_type != st.align_type || antialias_mode != st.antialias_mode ||
+         preedit_type != st.preedit_type || layout_type != st.layout_type ||
+         vertical_text_left_to_right != st.vertical_text_left_to_right ||
+diff --git a/include/WeaselUI.h b/include/WeaselUI.h
+index da17956..7376e7b 100755
+--- a/include/WeaselUI.h
++++ b/include/WeaselUI.h
+@@ -8,10 +8,19 @@
+ #include <dwrite_2.h>
+ #include <memory>
+ #include <functional>
++#include <array>
+ #include <WeaselUtility.h>
+ 
+ namespace weasel {
+ 
++// Published by the measured panel layout; indices refer to its Rime snapshot.
++struct CandidateGeometry {
++  bool expanded = false;
++  int previous = -1;
++  int next = -1;
++  std::array<int, 9> numbers = {{-1, -1, -1, -1, -1, -1, -1, -1, -1}};
++};
++
+ enum ClientCapabilities {
+   INLINE_PREEDIT_CAPABLE = 1,
+ };
+@@ -27,6 +36,7 @@ using PDWR = an<DirectWriteResources>;
+ //
+ class UI {
+  public:
++  CandidateGeometry candidate_geometry;
+   UI() : pimpl_(0) {}
+ 
+   virtual ~UI() {
+@@ -66,6 +76,7 @@ class UI {
+   UIStyle& ostyle() { return ostyle_; }
+   PDWR pdwr() { return pDWR; }
+   bool GetIsReposition();
++  std::function<void(UINT, size_t)> candidateAction;
+ 
+   std::function<void(size_t* const, size_t* const, bool* const, bool* const)>&
+   uiCallback() {
 diff --git a/include/WeaselUtility.h b/include/WeaselUtility.h
 index 54f840f..2fa1789 100755
 --- a/include/WeaselUtility.h
@@ -2377,105 +3911,3 @@ index efa98c7..871cb93 100644
    } else if (argc > 1 && !wcscmp(L"/console", argv[1])) {
      return console_main();
      return 0;
-diff --git a/arm64x_wrapper/WeaselIME_arm64.def b/arm64x_wrapper/WeaselIME_arm64.def
-index 12c8480..fa21ddb 100644
---- a/arm64x_wrapper/WeaselIME_arm64.def
-+++ b/arm64x_wrapper/WeaselIME_arm64.def
-@@ -1,16 +1,16 @@
- EXPORTS
--	ImeConversionList = weaselARM64.ime.ImeConversionList
--	ImeConfigure = weaselARM64.ime.ImeConfigure
--	ImeDestroy = weaselARM64.ime.ImeDestroy
--	ImeEscape = weaselARM64.ime.ImeEscape
--	ImeInquire = weaselARM64.ime.ImeInquire
--	ImeProcessKey = weaselARM64.ime.ImeProcessKey
--	ImeSelect = weaselARM64.ime.ImeSelect
--	ImeSetActiveContext = weaselARM64.ime.ImeSetActiveContext
--	ImeToAsciiEx = weaselARM64.ime.ImeToAsciiEx
--	NotifyIME = weaselARM64.ime.NotifyIME
--	ImeRegisterWord = weaselARM64.ime.ImeRegisterWord
--	ImeUnregisterWord = weaselARM64.ime.ImeUnregisterWord
--	ImeGetRegisterWordStyle = weaselARM64.ime.ImeGetRegisterWordStyle
--	ImeEnumRegisterWord = weaselARM64.ime.ImeEnumRegisterWord
--	ImeSetCompositionString = weaselARM64.ime.ImeSetCompositionString
-+	ImeConversionList = linnetARM64.ime.ImeConversionList
-+	ImeConfigure = linnetARM64.ime.ImeConfigure
-+	ImeDestroy = linnetARM64.ime.ImeDestroy
-+	ImeEscape = linnetARM64.ime.ImeEscape
-+	ImeInquire = linnetARM64.ime.ImeInquire
-+	ImeProcessKey = linnetARM64.ime.ImeProcessKey
-+	ImeSelect = linnetARM64.ime.ImeSelect
-+	ImeSetActiveContext = linnetARM64.ime.ImeSetActiveContext
-+	ImeToAsciiEx = linnetARM64.ime.ImeToAsciiEx
-+	NotifyIME = linnetARM64.ime.NotifyIME
-+	ImeRegisterWord = linnetARM64.ime.ImeRegisterWord
-+	ImeUnregisterWord = linnetARM64.ime.ImeUnregisterWord
-+	ImeGetRegisterWordStyle = linnetARM64.ime.ImeGetRegisterWordStyle
-+	ImeEnumRegisterWord = linnetARM64.ime.ImeEnumRegisterWord
-+	ImeSetCompositionString = linnetARM64.ime.ImeSetCompositionString
-diff --git a/arm64x_wrapper/WeaselIME_x64.def b/arm64x_wrapper/WeaselIME_x64.def
-index bc8fc17..0ae7e54 100644
---- a/arm64x_wrapper/WeaselIME_x64.def
-+++ b/arm64x_wrapper/WeaselIME_x64.def
-@@ -1,16 +1,16 @@
- EXPORTS
--	ImeConversionList = weaselx64.ime.ImeConversionList
--	ImeConfigure = weaselx64.ime.ImeConfigure
--	ImeDestroy = weaselx64.ime.ImeDestroy
--	ImeEscape = weaselx64.ime.ImeEscape
--	ImeInquire = weaselx64.ime.ImeInquire
--	ImeProcessKey = weaselx64.ime.ImeProcessKey
--	ImeSelect = weaselx64.ime.ImeSelect
--	ImeSetActiveContext = weaselx64.ime.ImeSetActiveContext
--	ImeToAsciiEx = weaselx64.ime.ImeToAsciiEx
--	NotifyIME = weaselx64.ime.NotifyIME
--	ImeRegisterWord = weaselx64.ime.ImeRegisterWord
--	ImeUnregisterWord = weaselx64.ime.ImeUnregisterWord
--	ImeGetRegisterWordStyle = weaselx64.ime.ImeGetRegisterWordStyle
--	ImeEnumRegisterWord = weaselx64.ime.ImeEnumRegisterWord
--	ImeSetCompositionString = weaselx64.ime.ImeSetCompositionString
-+	ImeConversionList = linnetx64.ime.ImeConversionList
-+	ImeConfigure = linnetx64.ime.ImeConfigure
-+	ImeDestroy = linnetx64.ime.ImeDestroy
-+	ImeEscape = linnetx64.ime.ImeEscape
-+	ImeInquire = linnetx64.ime.ImeInquire
-+	ImeProcessKey = linnetx64.ime.ImeProcessKey
-+	ImeSelect = linnetx64.ime.ImeSelect
-+	ImeSetActiveContext = linnetx64.ime.ImeSetActiveContext
-+	ImeToAsciiEx = linnetx64.ime.ImeToAsciiEx
-+	NotifyIME = linnetx64.ime.NotifyIME
-+	ImeRegisterWord = linnetx64.ime.ImeRegisterWord
-+	ImeUnregisterWord = linnetx64.ime.ImeUnregisterWord
-+	ImeGetRegisterWordStyle = linnetx64.ime.ImeGetRegisterWordStyle
-+	ImeEnumRegisterWord = linnetx64.ime.ImeEnumRegisterWord
-+	ImeSetCompositionString = linnetx64.ime.ImeSetCompositionString
-diff --git a/arm64x_wrapper/WeaselTSF_arm64.def b/arm64x_wrapper/WeaselTSF_arm64.def
-index 8e3a547..98dc8de 100644
---- a/arm64x_wrapper/WeaselTSF_arm64.def
-+++ b/arm64x_wrapper/WeaselTSF_arm64.def
-@@ -1,5 +1,5 @@
- EXPORTS
--	DllGetClassObject = weaselARM64.dll.DllGetClassObject
--	DllCanUnloadNow = weaselARM64.dll.DllCanUnloadNow
--	DllRegisterServer = weaselARM64.dll.DllRegisterServer
--	DllUnregisterServer = weaselARM64.dll.DllUnregisterServer
-\ No newline at end of file
-+	DllGetClassObject = linnetARM64.dll.DllGetClassObject
-+	DllCanUnloadNow = linnetARM64.dll.DllCanUnloadNow
-+	DllRegisterServer = linnetARM64.dll.DllRegisterServer
-+	DllUnregisterServer = linnetARM64.dll.DllUnregisterServer
-diff --git a/arm64x_wrapper/WeaselTSF_x64.def b/arm64x_wrapper/WeaselTSF_x64.def
-index 11ed1b5..fee9cb9 100644
---- a/arm64x_wrapper/WeaselTSF_x64.def
-+++ b/arm64x_wrapper/WeaselTSF_x64.def
-@@ -1,5 +1,5 @@
- EXPORTS
--	DllGetClassObject = weaselx64.dll.DllGetClassObject
--	DllCanUnloadNow = weaselx64.dll.DllCanUnloadNow
--	DllRegisterServer = weaselx64.dll.DllRegisterServer
--	DllUnregisterServer = weaselx64.dll.DllUnregisterServer
-\ No newline at end of file
-+	DllGetClassObject = linnetx64.dll.DllGetClassObject
-+	DllCanUnloadNow = linnetx64.dll.DllCanUnloadNow
-+	DllRegisterServer = linnetx64.dll.DllRegisterServer
-+	DllUnregisterServer = linnetx64.dll.DllUnregisterServer

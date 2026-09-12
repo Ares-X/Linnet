@@ -68,7 +68,7 @@ $env:RELEASE_BUILD = "1"
 $env:LINNET_DATA_READY = "1"
 $env:RIME_PLUGINS = "lua octagram predict smart_english"
 $env:WindowsTargetPlatformVersion = $WindowsSDK
-$env:common_cmake_flags = "-DBUILD_MERGED_PLUGINS:BOOL=ON -DBUILD_TOOLS:BOOL=OFF -DCMAKE_SYSTEM_VERSION:STRING=$WindowsSDK"
+$env:common_cmake_flags = "-DBUILD_MERGED_PLUGINS:BOOL=ON -DBUILD_TOOLS:BOOL=OFF -DINSTALL_PRIVATE_HEADERS:BOOL=ON -DCMAKE_SYSTEM_VERSION:STRING=$WindowsSDK"
 
 $BoostLicense = Join-Path $BoostRoot $Lock.build_inputs.boost_headers.license_path
 $BoostLicenseDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath $BoostLicense).Hash.ToLowerInvariant()

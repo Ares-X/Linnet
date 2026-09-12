@@ -281,9 +281,19 @@ Copy-Item -LiteralPath (Join-Path $Runtime "plugins\predict\src\predict_engine.h
 Copy-Item -LiteralPath (Join-Path $Runtime "plugins\predict\src\predict_db.h") `
   -Destination $PredictPublic
 
+Copy-Item -LiteralPath (Join-Path $WeaselSource "include\WeaselIPCData.h") `
+  -Destination (Join-Path $Projection "include\linnet_legacy_ipc_data.h")
 Apply-LockedPatch $Projection `
   $Lock.downstream_patches.weasel_linnet_windows_projection.path `
   $Lock.downstream_patches.weasel_linnet_windows_projection.sha256
+
+Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "frontend") -File | ForEach-Object {
+  Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Projection "WeaselDeployer")
+}
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "settings_model.h") `
+  -Destination (Join-Path $Projection "include\linnet_settings_model.h")
+Copy-Item -LiteralPath (Join-Path $InputPolicyRoot "linnet_candidate_design.h") `
+  -Destination (Join-Path $Projection "include\linnet_candidate_design.h")
 
 $Utf16 = [Text.UnicodeEncoding]::new($false, $true)
 $UpdaterResources = @(
