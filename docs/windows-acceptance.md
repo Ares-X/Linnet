@@ -27,7 +27,67 @@ input method and the dirty main checkout. Do not reset the guest or discard
 learning data to make a test pass. Carry old failures forward as failures of
 their own exact candidates, not as the status of replacement bytes.
 
-## Active milestone: Settings projection and persistence
+## Active milestone: Unicode backup and native snapshot integrity
+
+- Deliver Unicode sync-folder backup, lossless learning snapshots and truthful
+  sync completion. Rime owns snapshot serialization/merge and worker results;
+  Settings and native Dictionary Manager consume those owners.
+- Source `2bff3aa` crashed during native Output Snapshot with a Chinese sync
+  path. An isolated call against those exact installed DLL bytes succeeds for
+  ASCII but throws with code page 1252 for Chinese. The same probe with a Windows
+  UTF-8 process manifest passes both paths. Matching-symbol dumps and the
+  preserved pre-repair databases are under
+  `build/windows-uat-20260913-2bff3aa/unicode-crash`. After the first crash,
+  six physical mixed-input cases passed in the original Notepad without a
+  server restart.
+- A test folder-selection mistake selected Downloads before the intended
+  Unicode folder. Sync consumed this old candidate's incorrectly formatted
+  backup there and added swapped text/code entries. Original valid learning was
+  retained. Both pre-incident snapshots and post-incident databases are preserved.
+  Selective repair passed first on a database copy, then in the native Windows
+  Dictionary Manager: exactly 17 erroneous zero-frequency entries received Rime
+  deletion marks. The complete actual Chinese and English sync snapshots match
+  the verified repair; all other records, weights and ticks are unchanged.
+- Retire the Settings-only text-table header check; reject that known wrong
+  format at `UserDbHelper::UniformRestore`, covering native merge and sync too.
+  Keep native text-table import available. Enable UTF-8 in the deployer process
+  manifest (Windows 10 1903+ / Windows 11); do not change Rime's path API encoding
+  contract. Replace Dictionary Manager's 260-byte conversion buffer with the
+  existing Settings-sized buffer and a guaranteed terminator; a valid Chinese
+  Windows path can exceed 260 UTF-8 bytes. Use the standard native path
+  conversion instead of a second fixed wide buffer. The installed-DLL probe
+  confirmed the old buffer has no terminator for a valid 100-Chinese-character
+  directory; the full-sized getter preserves the exact path. Catch the observed
+  backup filesystem exception inside its Windows callback. Read the existing
+  worker completion notification instead of treating
+  successful scheduling as successful synchronization.
+- Allowed files: existing core and Weasel patches/lock; Windows frontend
+  manifest/dialog, existing runtime smoke source/project and this evidence file.
+  No new dependency, parser, scheduler, sync engine or retry. Authority counts:
+  format check 1 -> 1 (moved to its native owner); sync result 1 -> 1 (worker
+  replaces scheduling inference); path owner 1 -> 1; pass-through/fallback
+  paths 0 -> 0; duplicated defaults 0 -> 0. The manifest owns the OS encoding
+  boundary; callback containment is distinct from the outer maintenance scope.
+- Focused validation: existing `runtime_smoke --settings-probe`, extended with
+  Unicode native snapshots, deleted entries/weights/ticks, rejected text-table
+  restore/sync and the preserved text-import route. Then Windows compile and
+  exact-candidate native/Settings backup/restore/failure UI and uninterrupted
+  typing. No loaded Mac or daily-desktop mutation is needed.
+- Host component results: locked core rebuild, existing Windows projection/
+  runtime/Settings composite and `tests/verify_rime_runtime.sh --live-sync-probe`
+  passed. The latter retained 5,907 live samples and rejected/recovered failure
+  cases. Final source also uses the same native `path.c_str()` stream overload
+  as Rime's TSV reader, with focused compilation checked. New Windows native
+  compilation, manifest loading and exact-candidate GUI regression are still
+  NOT_EXERCISED; no Windows Release was published.
+- Actual post-repair typing: the original Notepad passed all six physical mixed
+  input cases with the same server process. The Unicode sync folder is retained
+  for the new candidate's backup regression; attempted navigation back to the
+  old folder was cancelled without a settings change. Temporary per-app crash
+  collection was removed and VM idle pause restored. The daily Mac and dirty
+  main checkout were not changed. A fresh fetch found no unmerged main commits.
+
+## Earlier milestone: Settings projection and persistence
 
 - Deliverable: native Windows settings must apply the root product choices,
   combine independent options, restore defaults and report a failed write;

@@ -364,7 +364,7 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
       if (!levers->backup_user_dict(name.c_str()))
         throw std::runtime_error("Cannot snapshot learning dictionary: " + name);
       // The native snapshot retains deleted entries, dynamic weights and ticks.
-      // Rime's directory getter uses the native narrow path encoding, not UTF-8.
+      // The Windows process manifest makes Rime's native narrow paths UTF-8.
       const auto filename = fs::u8path(name + ".userdb.txt");
       fs::copy_file(fs::path(sync_dir) / filename, folder / filename,
                     fs::copy_options::overwrite_existing);
@@ -387,13 +387,6 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
         if (!item.is_regular_file()) continue;
         const auto name = item.path().filename().u8string();
         if (name.size() > 11 && name.substr(name.size() - 11) == ".userdb.txt") {
-          std::ifstream stream(item.path(), std::ios::binary);
-          std::string header;
-          if (!std::getline(stream, header))
-            throw std::runtime_error("Cannot read learning snapshot: " + item.path().u8string());
-          if (!header.empty() && header.back() == '\r') header.pop_back();
-          if (header == "# Rime user dictionary export")
-            throw std::runtime_error("This backup contains text tables, not learning snapshots. Use Dictionaries > Import Text Table: " + item.path().u8string());
           dictionaries.push_back(item.path());
         } else if ((item.path().extension() == ".yaml" && name != "installation.yaml" && name != "user.yaml") ||
                    name == "linnet_custom_words.txt" || name == "linnet_text_expander.txt") {

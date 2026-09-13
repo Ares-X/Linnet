@@ -40,7 +40,7 @@
     "librime_core_interactions": {
       "target": "sources.librime",
       "path": "patches/librime-linnet-core-interactions.patch",
-      "sha256": "5e4cdf7d4147c6cb04247cdf910a9073d4dbd30ce1f84c12ae1549215898d2ea"
+      "sha256": "611ccb982b1b0718f744665cebc05b27a8d9389ce13c0372ab57e409a0403286"
     },
     "librime_lua_state_lifetime": {
       "target": "sources.librime.bundled_plugins.lua",
@@ -55,7 +55,7 @@
     "weasel_linnet_windows_projection": {
       "target": "sources.weasel",
       "path": "platforms/windows/patches/weasel-linnet.patch",
-      "sha256": "3716c19ffb2719ff9ef46f3ca54ad7e05c72ac70431b6d5511f4d6ef45e45716"
+      "sha256": "487b5b0db1c66f4f6d8a7efd7f57564fbbfe5bcbd8100bfe776065ebc20212aa"
     }
   },
   "sources": {

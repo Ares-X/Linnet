@@ -69,6 +69,11 @@
       <AdditionalDependencies>rime.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)frontend\LinnetUTF8.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="runtime_smoke.cc" />
     <ClCompile Include="ipc_archive_probe.cc">

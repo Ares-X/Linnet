@@ -1,10 +1,13 @@
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
 #include "rime_api.h"
+#include "rime_levers_api.h"
 #include "settings_model.h"
 
 #ifdef _WIN32
@@ -132,6 +135,76 @@ void ExpectEnglishSchemaSwitch(RimeApi* api, RimeSessionId session) {
       std::string(current) != "linnet_en") {
     Fail("schema shortcut did not activate Smart English");
   }
+}
+
+void SnapshotProbe(RimeApi* api, const char* user) {
+  namespace fs = std::filesystem;
+  const fs::path root(user);
+  const auto sync = root / fs::u8path("sync-数据");
+  linnet_windows::Config installation;
+  installation.Load(root / "installation.yaml");
+  installation.document.SetString("sync_dir", sync.u8string());
+  installation.Save(root / "installation.yaml");
+  if (!api->run_task("installation_update")) Fail("snapshot installation fixture failed");
+  auto* levers = reinterpret_cast<RimeLeversApi*>(api->find_module("levers")->get_api());
+  const char* dictionary = "linnet_snapshot_probe";
+  const auto source = root / "snapshot-probe.userdb.txt";
+  const std::string records =
+      "bao liu \t保留学习\tc=12 d=1.25 t=19\n"
+      "shan chu \t删除标记\tc=-5 d=0.75 t=19\n";
+  {
+    std::ofstream fixture(source, std::ios::binary);
+    fixture.exceptions(std::ios::badbit | std::ios::failbit);
+    fixture << "# Rime user dictionary\n#@/db_name\t" << dictionary
+            << "\n#@/db_type\tuserdb\n#@/tick\t19\n#@/user_id\t"
+            << api->get_user_id() << '\n' << records;
+  }
+  if (!levers->restore_user_dict(source.u8string().c_str()) ||
+      !levers->backup_user_dict(dictionary)) Fail("native snapshot round-trip failed");
+  char directory[32768] = {};
+  api->get_user_data_sync_dir(directory, sizeof(directory) - 1);
+  if (fs::path(directory) != sync / api->get_user_id())
+    Fail("native snapshot getter changed the Unicode directory");
+  const auto backup = fs::path(directory) / (std::string(dictionary) + ".userdb.txt");
+  const auto read = [](const fs::path& file) {
+    std::ifstream stream(file, std::ios::binary);
+    if (!stream) Fail("cannot read snapshot fixture");
+    std::string result((std::istreambuf_iterator<char>(stream)), {});
+    result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
+    return result;
+  };
+  const std::string before = read(backup);
+  if (before.find(records) == std::string::npos)
+    Fail("snapshot lost learning weights, ticks or deleted entries");
+  const auto foreign = sync / "foreign-device";
+  fs::create_directory(foreign);
+  const auto table = foreign / backup.filename();
+  if (levers->export_user_dict(dictionary, table.u8string().c_str()) != 1)
+    Fail("native text export fixture failed");
+  if (levers->restore_user_dict(table.u8string().c_str()))
+    Fail("text table was accepted as a learning snapshot");
+  if (!levers->backup_user_dict(dictionary) || read(backup) != before)
+    Fail("rejected text-table restore changed native learning");
+  if (levers->import_user_dict("linnet_import_probe", table.u8string().c_str()) != 1)
+    Fail("native text-table import is no longer available");
+  // sync_user_data returns scheduling status; the worker owns completion.
+  // Rejecting a bad peer must fail the first cycle, not poison the next one.
+  for (const bool valid : {false, true}) {
+    if (valid) fs::remove(table);
+    std::string completion;
+    api->set_notification_handler([](void* context, RimeSessionId,
+                                    const char* type, const char* value) {
+      if (std::string(type) == "deploy")
+        *static_cast<std::string*>(context) = value;
+    }, &completion);
+    const bool started = api->sync_user_data();
+    if (started) api->join_maintenance_thread();
+    api->set_notification_handler(nullptr, nullptr);
+    if (!started || completion != (valid ? "success" : "failure"))
+      Fail("native synchronization reported the wrong completion status: " + completion);
+    if (read(backup) != before) Fail("synchronization changed protected snapshot records");
+  }
+  std::cout << "Windows Unicode snapshots/learning integrity/native sync result: PASS\n";
 }
 
 void SettingsProbe(RimeApi* api, const char* shared, const char* user) {
@@ -270,6 +343,7 @@ void SettingsProbe(RimeApi* api, const char* shared, const char* user) {
   if (preserved.document.GetMap("patch")->GetValue("style/color_scheme")->str() != "personal_theme")
     Fail("editing input settings replaced an unrelated custom theme");
   std::cout << "Windows native settings persistence/composition/deployment: PASS\n";
+  SnapshotProbe(api, user);
 }
 
 void ExpectCorrection(RimeApi* api, RimeSessionId session) {

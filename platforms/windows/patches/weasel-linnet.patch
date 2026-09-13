@@ -324,7 +324,7 @@ index 9a07343..0ba5076 100644
  }
  
 diff --git a/WeaselDeployer/Configurator.cpp b/WeaselDeployer/Configurator.cpp
-index 1502322..65824da 100644
+index 1502322..78f7a7c 100644
 --- a/WeaselDeployer/Configurator.cpp
 +++ b/WeaselDeployer/Configurator.cpp
 @@ -1,6 +1,8 @@
@@ -360,7 +360,7 @@ index 1502322..65824da 100644
    RimeModule* levers = rime_get_api()->find_module("levers");
    if (!levers)
      return 1;
-@@ -113,125 +116,90 @@ int Configurator::Run(bool installing) {
+@@ -113,125 +116,99 @@ int Configurator::Run(bool installing) {
    return 0;
  }
  
@@ -439,6 +439,15 @@ index 1502322..65824da 100644
 -  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
 -  if (!hMutex) {
 -    LOG(ERROR) << "Error creating WeaselDeployerMutex.";
+-    return 1;
+-  }
+-  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+-    LOG(WARNING) << "another deployer process is running; aborting operation.";
+-    CloseHandle(hMutex);
+-    // MessageBox(NULL, L"正在執行另一項部署任務，請稍候再試。", L"【小狼毫】",
+-    // MB_OK | MB_ICONINFORMATION);
+-    MSG_BY_IDS(IDS_STR_DEPLOYING_WAIT, IDS_STR_WEASEL,
+-               MB_OK | MB_ICONINFORMATION);
 +}  // namespace
 +
 +int Configurator::WithMaintenance(const std::function<int()>& operation,
@@ -452,27 +461,19 @@ index 1502322..65824da 100644
 +      MessageBoxW(nullptr, u8tow(error.what()).c_str(), L"Linnet", MB_OK | MB_ICONERROR);
      return 1;
    }
--  if (GetLastError() == ERROR_ALREADY_EXISTS) {
--    LOG(WARNING) << "another deployer process is running; aborting operation.";
--    CloseHandle(hMutex);
--    // MessageBox(NULL, L"正在執行另一項部署任務，請稍候再試。", L"【小狼毫】",
--    // MB_OK | MB_ICONINFORMATION);
--    MSG_BY_IDS(IDS_STR_DEPLOYING_WAIT, IDS_STR_WEASEL,
--               MB_OK | MB_ICONINFORMATION);
--    return 1;
--  }
 -
 -  weasel::Client client;
 -  if (client.Connect()) {
 -    LOG(INFO) << "Turning WeaselServer into maintenance mode.";
 -    client.StartMaintenance();
 -  }
-+}
- 
+-
 -  {
 -    RimeApi* rime = rime_get_api();
 -    if (RIME_API_AVAILABLE(rime, run_task)) {
 -      rime->run_task("installation_update");  // setup user data sync dir
++}
++
 +int Configurator::UpdateWorkspace(bool report_errors,
 +                                  const std::function<void()>& change,
 +                                  const std::function<void()>& restore) {
@@ -498,14 +499,15 @@ index 1502322..65824da 100644
 -  }
 -
 -  CloseHandle(hMutex);  // should be closed before resuming service.
-+  }, report_errors);
-+}
- 
+-
 -  if (client.Connect()) {
 -    LOG(INFO) << "Resuming service.";
 -    client.EndMaintenance();
 -  }
 -  return 0;
++  }, report_errors);
++}
++
 +int Configurator::DictManagement() {
 +  return WithMaintenance([] {
 +    auto* rime = rime_get_api();
@@ -516,7 +518,7 @@ index 1502322..65824da 100644
 +  });
  }
  
- int Configurator::SyncUserData() {
+-int Configurator::SyncUserData() {
 -  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
 -  if (!hMutex) {
 -    LOG(ERROR) << "Error creating WeaselDeployerMutex.";
@@ -545,10 +547,7 @@ index 1502322..65824da 100644
 -      CloseHandle(hMutex);
 -      return 1;
 -    }
-+  return WithMaintenance([] {
-+    auto* rime = rime_get_api();
-+    if (!rime->sync_user_data()) throw std::runtime_error("Rime synchronization failed");
-     rime->join_maintenance_thread();
+-    rime->join_maintenance_thread();
 -  }
 -
 -  CloseHandle(hMutex);  // should be closed before resuming service.
@@ -558,9 +557,24 @@ index 1502322..65824da 100644
 -    client.EndMaintenance();
 -  }
 -  return 0;
+-}
++int Configurator::SyncUserData() {
++  return WithMaintenance([] {
++    auto* rime = rime_get_api();
++    bool succeeded = false;
++    rime->set_notification_handler([](void* context, RimeSessionId,
++                                     const char* type, const char* value) {
++      if (std::string(type) == "deploy")
++        *static_cast<bool*>(context) = std::string(value) == "success";
++    }, &succeeded);
++    const bool started = rime->sync_user_data();
++    if (started) rime->join_maintenance_thread();
++    rime->set_notification_handler(nullptr, nullptr);
++    if (!started || !succeeded)
++      throw std::runtime_error("Rime synchronization failed; see diagnostic logs");
 +    return 0;
 +  });
- }
++}
 diff --git a/WeaselDeployer/Configurator.h b/WeaselDeployer/Configurator.h
 index ac14091..531d612 100644
 --- a/WeaselDeployer/Configurator.h
@@ -799,10 +813,22 @@ index a578014..3164748 100644
      return 0;
    }
 diff --git a/WeaselDeployer/WeaselDeployer.vcxproj b/WeaselDeployer/WeaselDeployer.vcxproj
-index 88fbaa2..4187b5a 100644
+index 88fbaa2..7e09c20 100644
 --- a/WeaselDeployer/WeaselDeployer.vcxproj
 +++ b/WeaselDeployer/WeaselDeployer.vcxproj
-@@ -199,6 +199,11 @@
+@@ -185,6 +185,11 @@
+       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+     </Manifest>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup>
++    <Manifest>
++      <AdditionalManifestFiles>$(ProjectDir)LinnetUTF8.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
++    </Manifest>
++  </ItemDefinitionGroup>
+   <ItemGroup>
+     <ClInclude Include="Configurator.h" />
+     <ClInclude Include="DictManagementDialog.h" />
+@@ -199,6 +204,11 @@
    <ItemGroup>
      <ClCompile Include="..\RimeWithWeasel\WeaselUtility.cpp" />
      <ClCompile Include="Configurator.cpp" />
@@ -814,7 +840,7 @@ index 88fbaa2..4187b5a 100644
      <ClCompile Include="DictManagementDialog.cpp" />
      <ClCompile Include="stdafx.cpp">
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-@@ -213,6 +218,7 @@
+@@ -213,6 +223,7 @@
    </ItemGroup>
    <ItemGroup>
      <ResourceCompile Include="WeaselDeployer.rc" />
@@ -3933,3 +3959,49 @@ index efa98c7..871cb93 100644
    } else if (argc > 1 && !wcscmp(L"/console", argv[1])) {
      return console_main();
      return 0;
+diff --git a/WeaselDeployer/DictManagementDialog.cpp b/WeaselDeployer/DictManagementDialog.cpp
+index 078dbb0..6e0691b 100644
+--- a/WeaselDeployer/DictManagementDialog.cpp
++++ b/WeaselDeployer/DictManagementDialog.cpp
+@@ -97,7 +97,7 @@ LRESULT DictManagementDialog::OnClose(UINT, WPARAM, LPARAM, BOOL&) {
+   return 0;
+ }
+ 
+-LRESULT DictManagementDialog::OnBackup(WORD, WORD code, HWND, BOOL&) {
++LRESULT DictManagementDialog::OnBackup(WORD, WORD code, HWND, BOOL&) try {
+   int sel = user_dict_list_.GetCurSel();
+   if (sel < 0 || sel >= user_dict_list_.GetCount()) {
+     MSG_BY_IDS(IDS_STR_SEL_EXPORT_DICT_NAME, IDS_STR_SAD,
+@@ -106,11 +106,9 @@ LRESULT DictManagementDialog::OnBackup(WORD, WORD code, HWND, BOOL&) {
+   }
+   std::wstring path;
+   {
+-    char dir[MAX_PATH] = {0};
+-    rime_get_api()->get_user_data_sync_dir(dir, _countof(dir));
+-    WCHAR wdir[MAX_PATH] = {0};
+-    MultiByteToWideChar(CP_ACP, 0, dir, -1, wdir, _countof(wdir));
+-    path = wdir;
++    char dir[32768] = {0};
++    rime_get_api()->get_user_data_sync_dir(dir, sizeof(dir) - 1);
++    path = std::filesystem::path(dir).wstring();
+   }
+   if (_waccess_s(path.c_str(), 0) != 0 &&
+       !CreateDirectoryW(path.c_str(), NULL) &&
+@@ -129,9 +127,14 @@ LRESULT DictManagementDialog::OnBackup(WORD, WORD code, HWND, BOOL&) {
+     MSG_BY_IDS(IDS_STR_ERR_EXPORT_SNAP_LOST, IDS_STR_SAD, MB_OK | MB_ICONERROR);
+     return 0;
+   }
+-  OpenFolderAndSelectItem(path);
+-  return 0;
+-}
++  OpenFolderAndSelectItem(path);
++  return 0;
++} catch (const std::exception& error) {
++  // Do not unwind a C++ filesystem error across the Windows dialog callback.
++  LOG(ERROR) << error.what();
++  MessageBoxW(u8tow(error.what()).c_str(), L"Linnet", MB_OK | MB_ICONERROR);
++  return 0;
++}
+ 
+ LRESULT DictManagementDialog::OnRestore(WORD, WORD code, HWND, BOOL&) {
+   CString open_str, dict_snapshot_str, kcss_dict_snapshot_str, all_files_str;
