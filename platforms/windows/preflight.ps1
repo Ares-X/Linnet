@@ -14,7 +14,9 @@ $Win32Smoke = Join-Path $Output "Win32\LinnetRuntimeSmoke.exe"
 $SharedData = Join-Path $Output "data"
 $Lock = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot "upstreams.lock.json") |
   ConvertFrom-Json
-$TemporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+# This fixture models private per-user data, not the runner's shared scratch
+# volume. Inherit the Windows profile ACL instead of synthesizing permissions.
+$TemporaryRoot = [Environment]::GetFolderPath('LocalApplicationData')
 $TestRoot = Join-Path $TemporaryRoot `
   ("linnet-windows-preflight-" + [Guid]::NewGuid().ToString("N"))
 $SmokeUser = Join-Path $TestRoot "candidate-smoke"

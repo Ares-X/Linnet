@@ -8,6 +8,52 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-14 Per-user native preflight fixtures
+
+Milestone: exercise Settings and installer user-data behavior under the actual
+Windows per-user filesystem contract. The preflight script owns its synthetic
+profile; Registry remains the sole product directory owner. Run34768256347 built
+both175739a installers, passed artwork, shared DLL/run-loop/cancellation, Win32
+runtime and candidate archive checks, then rejected the precreated
+`D:/a/_temp/.../settings-smoke` root before Settings/deployment or installation.
+The root was created beneath the runner's general temporary directory rather
+than a Windows user profile. The failed job did not retain its ACL, so the exact
+rejected ACE/owner is not claimed as observed.
+
+The actual unchanged native directory owner was exercised through
+`linnet_data_setup` on Tiny using retained6b11af2 bytes: a native-created private
+directory and an ordinary inherited per-user directory both pass the directory
+boundary and reach the expected missing-activation result. A fixture granting
+Authenticated Users Modify reproduces the unsafe-root rejection. No factory
+import, application restart or installed-user-data mutation was used. This
+disproves a blanket rejection of normal Windows user directories; it does not
+turn the failed CI Settings/lifecycle rows into PASS.
+
+Correction scope: preflight.ps1 and this evidence only. Locate the existing
+isolated profile under the standard LocalApplicationData special folder, not
+RUNNER_TEMP/TEMP; inherit the real per-user ACL instead of inventing another
+permission policy or changing product checks. Fixture location selectors2 -> 1;
+product owners1 -> 1; new ACL implementations, fallbacks and dependencies0 -> 0.
+Focused validation: native PowerShell5 parse and the real current-candidate C
+ABI against that per-user location, then final diff inspection. This changes no
+installer bytes and does not justify another full compiler run by itself.
+Complete Settings/install lifecycle verification remains pending an appropriate
+target; Tiny has148MiB free and shutdown/disk expansion approval is pending.
+
+Focused result: Windows PowerShell5 parsing passes. The same three empty-directory
+cases also pass with the actual175739a DLL under LocalApplicationData, SHA-256
+`280607d23a1291a675744890788085e02d422ab99fd20b44d8a8d511554cd247`.
+Both accepted-directory cases deliberately stop at missing activation; this is
+directory-boundary evidence, not completed factory bootstrap or Settings UAT.
+No product permissions or test outcome checks were weakened. Final diff check
+passes; the complete CI preflight has not been rerun after this fixture change.
+
+Both175739a installers and14PDBs are retained on the Mac. Shared-runtime DLL
+debug identity `5A86D691-9A39-4C3E-AFD6-F07A4A581720-00000001` was read by LLDB;
+its matching LinnetSharedRuntime.pdb was accepted and linnet_data_setup resolved.
+The new ARM64 installer extracts successfully,94files/563799921bytes, and reports
+non-solid LZMA. These are package/component proofs, not installed-product UAT.
+
 ### 2026-09-14 Debug bridging-header compilation
 
 CI34767219183 on41111f2 passed its Mac/shared job, then compiled all Swift
