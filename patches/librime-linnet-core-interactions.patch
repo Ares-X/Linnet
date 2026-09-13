@@ -1610,7 +1610,7 @@ diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translato
    const int kMaxSyllablesForUserPhraseQuery = 5;
    const auto& syllable_graph = syllabifier_->syllable_graph();
    WordGraph graph;
-@@ -711,19 +1042,42 @@
+@@ -711,19 +1042,47 @@
      // merge lookup results
      EnrollEntries(same_start_pos, dict->Lookup(syllable_graph, x.first,
                                                 &translator_->blacklist()));
@@ -1647,16 +1647,21 @@ diff --git a/src/rime/gear/script_translator.cc b/src/rime/gear/script_translato
 +      return preserved_entries.count(&entry) != 0;
 +    };
 +  }
++  // Homophone recall applies to completed Chinese spellings. A pending
++  // suffix must retain its existing Chinese partial/completion choices.
++  const bool lexical_alternatives = preserved_entries.empty() &&
++      syllable_graph.interpreted_length == input_.size() &&
++      syllabifier_->SpellingTypeAt(input_.size()) == kNormalSpelling;
    auto sentences =
        poet_->MakeSentences(graph, syllable_graph.interpreted_length,
                             translator_->GetPrecedingText(start_),
 -                           max_sentences_, sentence_cutoff_threshold_);
 +                           max_sentences_, sentence_cutoff_threshold_,
-+                           preserve_entity, mode, preserved_entries.empty());
++                           preserve_entity, mode, lexical_alternatives);
    for (auto& sentence : sentences) {
      sentence->Offset(start_);
      sentence->set_syllabifier(syllabifier_);
-@@ -745,4 +1099,264 @@
+@@ -745,4 +1104,264 @@
    return nullptr;
  }
  
