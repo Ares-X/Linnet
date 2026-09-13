@@ -571,7 +571,7 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
    for (const auto& sv : graph) {
      size_t start_pos = sv.first;
      if (states.find(start_pos) == states.end())
-@@ -279,75 +296,238 @@
+@@ -279,75 +296,246 @@
        bool is_rear = end_pos == total_length;
        auto& target_state = states[end_pos];
  
@@ -780,6 +780,11 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
 +  // its relative-score cutoff. Fill the remaining ordinary sentence slots
 +  // from the existing lexical frontier, without displacing the grammar leader.
 +  if (lexical_alternatives && !preserve_entry) {
++    vector<size_t> word_ends;
++    if (!found->second.ordinary.empty()) {
++      for (const auto* component : found->second.ordinary.front().components())
++        word_ends.push_back(component->end_pos);
++    }
 +    for (const auto& line : found->second.lexical) {
 +      if (results.size() == max_sentences) break;
 +      // Only rescue alternatives supported at least as strongly by word
@@ -787,10 +792,13 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
 +      if (!found->second.ordinary.empty()) {
 +        const auto& leader = found->second.ordinary.front();
 +        if (line.lexical_weight < leader.lexical_weight) break;
-+        // Rescue homophones within the grammar leader's word boundaries.
-+        // Independent word frequencies cannot justify splitting a collocation
-+        // into shorter words (such as 四则 into 死 + 则).
-+        if (line.word_lengths() != leader.word_lengths()) continue;
++        // Word frequencies may join existing words, but cannot justify
++        // cutting through a word selected by the grammar search. This keeps
++        // 已经 + 失效 / 已经失效 while excluding 选择 + 四则 / 选择死 + 则.
++        const auto components = line.components();
++        if (std::any_of(components.begin(), components.end(), [&](const auto* c) {
++              return !std::binary_search(word_ends.begin(), word_ends.end(), c->end_pos);
++            })) continue;
 +      }
 +      auto sentence = make_sentence(line, true);
 +      if (std::none_of(results.begin(), results.end(), [&](const auto& kept) {
