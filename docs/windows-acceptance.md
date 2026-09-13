@@ -8,6 +8,21 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Native read-access mask type
+
+CI `34757008371` reached all shared Swift compilation jobs after UUID
+disambiguation. Its only reported source error is `pack_file.swift:33`:
+`GENERIC_READ` imports as UInt32 while `READ_CONTROL` imports as Int32, so OR
+cannot be applied before the outer DWORD conversion. Milestone: retain the
+exact native file-read rights with a well-typed mask. `LinnetWindowsDataFile`
+remains the HANDLE/access owner for pack and Registry readers; convert
+READ_CONTROL to DWORD before combining it with GENERIC_READ. Remove the invalid
+mixed-type expression, not any rights/ACL check. Allowed files: that native
+file boundary and this record. Owners 1 -> 1, layers/fallbacks unchanged,
+new defaults/identity inference 0 -> 0. Focused check: exact 0x80020000 mask,
+then one native build including the pending repair entry point. Linking,
+packaging, installed input and repair UI are still unverified.
+
 ### 2026-09-13 Language-update repair entry point
 
 Milestone: Windows Settings must expose macOS's explicit Repair Language Update

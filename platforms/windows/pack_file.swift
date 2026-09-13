@@ -30,7 +30,7 @@ final class LinnetWindowsDataFile {
   init(_ url: URL, access: Access) throws {
     let rights: DWORD = switch access {
     case .directory, .metadata: DWORD(FILE_READ_ATTRIBUTES | READ_CONTROL)
-    case .read: DWORD(GENERIC_READ | READ_CONTROL)
+    case .read: GENERIC_READ | DWORD(READ_CONTROL)
     case .create: DWORD(GENERIC_WRITE | FILE_READ_ATTRIBUTES | READ_CONTROL)
     case .remove: DWORD(DELETE | FILE_READ_ATTRIBUTES | READ_CONTROL)
     }
