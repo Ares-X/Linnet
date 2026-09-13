@@ -571,7 +571,7 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
    for (const auto& sv : graph) {
      size_t start_pos = sv.first;
      if (states.find(start_pos) == states.end())
-@@ -279,75 +296,232 @@
+@@ -279,75 +296,238 @@
        bool is_rear = end_pos == total_length;
        auto& target_state = states[end_pos];
  
@@ -784,8 +784,14 @@ diff --git a/src/rime/gear/poet.cc b/src/rime/gear/poet.cc
 +      if (results.size() == max_sentences) break;
 +      // Only rescue alternatives supported at least as strongly by word
 +      // frequency as the grammar leader, not arbitrary low-scoring sentences.
-+      if (!found->second.ordinary.empty() &&
-+          line.lexical_weight < found->second.ordinary.front().lexical_weight) break;
++      if (!found->second.ordinary.empty()) {
++        const auto& leader = found->second.ordinary.front();
++        if (line.lexical_weight < leader.lexical_weight) break;
++        // Rescue homophones within the grammar leader's word boundaries.
++        // Independent word frequencies cannot justify splitting a collocation
++        // into shorter words (such as 四则 into 死 + 则).
++        if (line.word_lengths() != leader.word_lengths()) continue;
++      }
 +      auto sentence = make_sentence(line, true);
 +      if (std::none_of(results.begin(), results.end(), [&](const auto& kept) {
 +            return kept->text() == sentence->text();
