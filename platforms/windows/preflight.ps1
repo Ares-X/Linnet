@@ -92,7 +92,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 public static class LinnetIconProbe {
-  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   static extern uint ExtractIconEx(string path, int index, out IntPtr large,
                                    out IntPtr small, uint count);
   [DllImport("user32.dll")]
@@ -102,8 +102,11 @@ public static class LinnetIconProbe {
     IntPtr large, small;
     uint count = ExtractIconEx(path, 0, out large, out small, 1);
     try {
-      if (count != 1 || large == IntPtr.Zero || small == IntPtr.Zero)
-        throw new InvalidOperationException("Cannot extract product icon: " + path);
+      if (count == 0 || count == uint.MaxValue ||
+          large == IntPtr.Zero || small == IntPtr.Zero)
+        throw new InvalidOperationException(String.Format(
+          "Cannot extract product icon (count={0}, large={1}, small={2}, error={3}): {4}",
+          count, large, small, Marshal.GetLastWin32Error(), path));
       var pixels = new StringBuilder();
       foreach (IntPtr handle in new [] {large, small}) {
         using (Icon icon = Icon.FromHandle(handle))

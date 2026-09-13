@@ -181,6 +181,33 @@ publish a Windows Release to make a test endpoint available.
 
 ### 2026-09-13 Windows brand icon correction
 
+Follow-up milestone: let the existing packaged-icon check accept successfully
+extracted large and small icons without weakening artwork equality. CI
+`34760616037` built both installers from `870fb28`, then stopped at the first
+installer's icon check, before shared-runtime or lifecycle execution. The
+earliest reproduced defect is in `LinnetIconProbe.Pixels`: on Tiny Windows 11,
+`ExtractIconExW` returns 1 for an ICO but 2 for a PE with both output handles;
+the check incorrectly required exactly 1. The Windows shell owns extraction;
+the existing probe and its installer/EXE/TIP consumers keep the same pixel
+comparison. Retire only the incorrect exact-count restriction, retaining failed
+return/handle checks and useful native diagnostics. Retain successfully built
+engineering candidates even if a later preflight fails, so exact bytes remain
+available for diagnosis; this does not publish a Release or mark UAT passed.
+Allowed files: `preflight.ps1`, `windows-build.yml` and this evidence document.
+Artwork/extraction/validation owners, pass-through layers, fallbacks and defaults
+all remain unchanged. Focused check: use the existing guest C# compiler to embed
+the same ICO in a disposable PE, compare both shell sizes against the ICO, and
+reject different artwork and a missing path; then one affected native CI.
+No daily-Mac load is required; exact installed candidate visuals remain required.
+
+Focused guest verification passed: the unchanged Linnet ICO embedded by the
+already installed C# compiler in a disposable x64 PE produced exactly the same
+large/small shell pixels; different upstream artwork remained different, and a
+missing file was rejected with native error 2. Windows PowerShell 5 parsed the
+corrected preflight. Workflow YAML and diff checks passed. This verifies the
+extraction boundary only, not the unavailable `870fb28` installer: the failed
+run retained symbols and shared inputs but skipped both installer artifacts.
+
 Milestone: Explorer, installation/uninstallation, Settings, the registered input
 method and its Chinese-mode tray/language-bar icon must show Linnet's existing
 bird, not Weasel's mark. The proven cause is preparation retaining upstream
