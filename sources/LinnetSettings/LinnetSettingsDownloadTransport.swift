@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// The Settings process's only external byte-transfer boundary.
 ///
@@ -139,7 +142,9 @@ struct LinnetSettingsDownloadTransport: @unchecked Sendable {
     configuration.urlCredentialStorage = nil
     configuration.httpCookieStorage = nil
     configuration.httpShouldSetCookies = false
+    #if !os(Windows)
     configuration.waitsForConnectivity = false
+    #endif
     configuration.httpMaximumConnectionsPerHost = 1
     return configuration
   }

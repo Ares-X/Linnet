@@ -138,12 +138,16 @@ function Invoke-RuntimeSmoke {
     [string]$SharedDataRoot,
     [string]$UserDataRoot,
     [string]$FailureMessage,
+    [switch]$Registry,
     [string[]]$ProbeArguments = @()
   )
   $PreviousPath = $env:PATH
-  $env:PATH = "$RuntimeRoot;$PreviousPath"
+  # Resolve only the candidate payload and OS dependencies. The build SDK's
+  # installed Swift runtime must not make an incomplete package appear usable.
+  $env:PATH = "$RuntimeRoot;$(Join-Path $RuntimeRoot 'swift-runtime');$env:SystemRoot\System32;$env:SystemRoot"
   try {
-    & $Probe $SharedDataRoot $UserDataRoot @ProbeArguments
+    $Prefix = if ($Registry) { @('--registry', $Version) } else { @() }
+    & $Probe @Prefix $SharedDataRoot $UserDataRoot @ProbeArguments
     if ($LASTEXITCODE -ne 0) {
       throw $FailureMessage
     }
@@ -188,6 +192,12 @@ New-Item -ItemType Directory -Path $TestAppData -Force | Out-Null
 $OldAppData = $env:APPDATA
 try {
   $env:APPDATA = $TestAppData
+  $BeforeRuntimeProbe = $env:PATH
+  try {
+    $env:PATH = "$(Join-Path $Output 'swift-runtime');$env:SystemRoot\System32;$env:SystemRoot"
+    & $Smoke --shared-runtime (Join-Path $Output 'swift-runtime\LinnetSharedRuntime.dll')
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged shared Swift runtime callback verification failed' }
+  } finally { $env:PATH = $BeforeRuntimeProbe }
   Invoke-RuntimeSmoke $Win32Smoke (Join-Path $Output "Win32") $SharedData $SmokeUser `
     "Built Windows Win32 rime.dll failed candidate black-box verification"
 
@@ -196,7 +206,7 @@ try {
   $SettingsUser = Join-Path $TestRoot "settings-smoke"
   New-Item -ItemType Directory -Path $SettingsUser | Out-Null
   Invoke-RuntimeSmoke $Smoke $Output $SharedData $SettingsUser `
-    "Windows x64 Settings persistence/deployment verification failed" `
+    "Windows x64 Settings persistence/deployment verification failed" -Registry `
     -ProbeArguments @("--settings-probe")
 
   try {
@@ -225,31 +235,38 @@ try {
     "LinnetServer.exe",
     "WeaselSetup.exe",
     "uninstall.exe",
-    "data\default.yaml",
-    "data\dicts\jichu.dict.yaml",
-    "data\linnet.smart.db",
-    "data\linnet.english-data-manifest.json",
-    "data\linnet_en.schema.yaml",
+    "data\weasel.yaml",
+    "data\linnet_windows_default.yaml",
+    "data\factory\Runtime\Active\activation.json",
+    "data\factory\Linnet-Chinese.linnetpack",
+    "data\factory\Linnet-English.linnetpack",
+    "data\factory\Linnet-LTS.linnetpack",
+    "data\factory\Linnet-Extended.linnetpack",
     "data\linnet_english.ico",
-    "data\linnet_zh_pinyin.schema.yaml",
-    "data\radical_pinyin.schema.yaml",
-    "data\opencc\s2t.json",
-    "data\opencc\t2s.json",
-    "data\opencc\emoji.json",
-    "data\opencc\emoji.txt",
-    "data\opencc\others.txt",
     "licenses\Weasel-GPL-3.0-only.txt",
     "licenses\librime-BSD-3-Clause.txt",
     "licenses\Boost-BSL-1.0.txt",
-    "licenses\Darts-clone-BSD-3-Clause.txt"
+    "licenses\Darts-clone-BSD-3-Clause.txt",
+    "licenses\WinSparkle-MIT.txt",
+    "licenses\WinSparkle-Expat-MIT.txt",
+    "WinSparkle.dll",
+    "LinnetSharedRuntime.dll",
+    "swiftCore.dll",
+    "Foundation.dll",
+    "licenses\Swift-LICENSE.txt",
+    "licenses\Swift-libdispatch-LICENSE.txt",
+    "licenses\Swift-Foundation-ICU-LICENSE.md",
+    "licenses\Swift-ICU-76.1-LICENSE.txt"
   )) {
     Assert-File (Join-Path $InstallRoot $RelativePath)
   }
-  foreach ($Forbidden in @("WinSparkle.dll", "curl.exe", "rime-install.bat",
+  foreach ($Forbidden in @("curl.exe", "rime-install.bat",
       "weaselARM.dll", "weaselARM64.dll", "weaselARM64X.dll")) {
     Assert-Absent (Join-Path $InstallRoot $Forbidden)
   }
   Assert-Absent (Join-Path $InstallRoot "data\build")
+  Assert-Absent (Join-Path $InstallRoot "data\linnet.smart.db")
+  Assert-Absent (Join-Path $InstallRoot "data\default.yaml")
   $Previews = @(Get-ChildItem -LiteralPath (Join-Path $InstallRoot "data\preview") `
     -Filter "color_scheme_linnet_*_light.png" -File)
   if ($Previews.Count -ne 7) {
@@ -266,8 +283,22 @@ try {
       $Manifest.frontend.commit -ne $Lock.sources.weasel.commit -or
       $Manifest.runtime.commit -ne $Lock.sources.librime.commit -or
       $Manifest.weasel_config_sha256 -ne $InstalledConfigDigest -or
-      $Manifest.upstream_updater -ne "disabled") {
+      $Manifest.updater.name -ne "WinSparkle" -or
+      $Manifest.updater.version -ne $Lock.build_inputs.winsparkle.version -or
+      $Manifest.updater.dll_sha256 -ne (Get-FileHash -Algorithm SHA256 -LiteralPath `
+        (Join-Path $InstallRoot "WinSparkle.dll")).Hash.ToLowerInvariant()) {
     throw "Installed Windows manifest differs from the built candidate"
+  }
+  if ($Manifest.shared_runtime.version -ne $Lock.build_inputs.swift_windows.version -or
+      $Manifest.shared_runtime.architecture -ne 'x64') {
+    throw 'Installed shared Swift runtime differs from the locked toolchain'
+  }
+  foreach ($File in $Manifest.shared_runtime.files) {
+    $Installed = Join-Path $InstallRoot $File.name
+    Assert-File $Installed
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $Installed).Hash.ToLowerInvariant() -ne $File.sha256) {
+      throw "Installed shared runtime DLL differs from the candidate: $($File.name)"
+    }
   }
 
   $UninstallDisplay = Get-RegistryValue LocalMachine Registry32 `
@@ -458,7 +489,7 @@ try {
   Copy-Item -LiteralPath $Smoke -Destination $InstalledProbe
   Invoke-RuntimeSmoke $InstalledProbe $InstallRoot `
     (Join-Path $InstallRoot "data") $UserData `
-    "Installed Linnet data failed Windows-generated dictionary verification"
+    "Installed Linnet data failed Windows-generated dictionary verification" -Registry
   Wait-ForServer $InstalledServer
 
   Invoke-CheckedProcess -FilePath (Join-Path $InstallRoot "uninstall.exe") `

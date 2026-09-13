@@ -1,6 +1,9 @@
-import CryptoKit
-import Darwin
 import Foundation
+#if !os(Windows)
+import Darwin
+#else
+import WinSDK
+#endif
 
 extension LinnetDataRegistry {
   func loadActiveStateDocument() throws -> (state: ActiveState, data: Data) {
@@ -24,10 +27,16 @@ extension LinnetDataRegistry {
     } catch {
       throw Failure.invalidActiveState
     }
+    return (try decodeActiveState(data), data)
+  }
+
+  // Installed factory metadata and the live owned document use the same
+  // decoder/compatibility checks; only their filesystem trust boundary differs.
+  func decodeActiveState(_ data: Data) throws -> ActiveState {
     guard let state = try? JSONDecoder().decode(ActiveState.self, from: data),
       state.format == Self.stateFormat,
       state.generation > 0,
-      state.activeView == "Runtime/Active",
+      Self.validActiveView(state.activeView),
       packsAreCompatible(state.packs, edition: state.edition),
       validDataChannelReceipt(state.acceptedCatalog),
       Set(state.rollbackPacks.map(\.kind)).count == state.rollbackPacks.count,
@@ -36,7 +45,7 @@ extension LinnetDataRegistry {
     else {
       throw Failure.invalidActiveState
     }
-    return (state, data)
+    return state
   }
 
   func verifiedInstalledManifest(
@@ -48,7 +57,7 @@ extension LinnetDataRegistry {
     // declared shape and byte sizes; re-reading every dictionary here makes
     // each Host launch proportional to the full language-data footprint.
     let installed = try verifiedInstalledManifest(at: directory, verifyContents: false)
-    guard Self.sha256(installed.manifestData) == pack.manifestSHA256,
+    guard try LinnetPackContract.sha256(installed.manifestData) == pack.manifestSHA256,
       Self.activePack(
         from: installed.manifest, manifestSHA256: pack.manifestSHA256,
         separateRepairCopy: directory.lastPathComponent.hasSuffix("-" + pack.manifestSHA256)) == pack
@@ -79,7 +88,7 @@ extension LinnetDataRegistry {
 
   func verifiedInstalledPack(at directory: URL) throws -> ActivePack {
     let installed = try verifiedInstalledManifest(at: directory)
-    let manifestSHA256 = Self.sha256(installed.manifestData)
+    let manifestSHA256 = try LinnetPackContract.sha256(installed.manifestData)
     let expectedPack = Self.activePack(
       from: installed.manifest, manifestSHA256: manifestSHA256,
       separateRepairCopy: directory.lastPathComponent.hasSuffix("-" + manifestSHA256))
@@ -93,7 +102,7 @@ extension LinnetDataRegistry {
     state: ActiveState,
     manifests: [LinnetPackContract.Kind: LinnetPackContract.Manifest]
   ) throws {
-    let active = activeSharedDataDirectory.standardizedFileURL
+    let active = rootDirectory.appending(path: state.activeView, directoryHint: .isDirectory).standardizedFileURL
     let expectedTargets = try activeProjectionTargets(state: state, manifests: manifests)
     let expectedDirectories = activeProjectionDirectories(for: expectedTargets.keys)
     let expectedEntries = Set(expectedTargets.keys)
@@ -105,6 +114,13 @@ extension LinnetDataRegistry {
       expectedDirectories: expectedDirectories
     )
     try verifyActiveGrammar(at: active)
+    #if os(Windows)
+    let view = try loadActiveStateDocument(at: active).state
+    guard view.generation == state.generation, view.packs == state.packs,
+      view.edition == state.edition, view.transactionID == state.transactionID else {
+      throw Failure.invalidActiveState
+    }
+    #endif
   }
 
   func activeProjectionTargets(
@@ -118,6 +134,10 @@ extension LinnetDataRegistry {
       let packRoot = rootDirectory.appending(
         path: pack.relativePath, directoryHint: .isDirectory)
       for entry in manifest.files where !excluded.contains(entry.path) {
+        #if os(Windows)
+        // macOS prebuilt tables/configuration are not Windows deployment input.
+        if entry.path == "squirrel.yaml" || entry.path.hasPrefix("build/") { continue }
+        #endif
         guard expectedTargets.updateValue(
           packRoot.appending(path: entry.path, directoryHint: .notDirectory),
           forKey: entry.path) == nil
@@ -141,7 +161,27 @@ extension LinnetDataRegistry {
     ] where expectedTargets[required] == nil {
       throw Failure.incompleteActiveView(required)
     }
+    #if os(Windows)
+    for (name, source) in try windowsCoreFiles() {
+      guard expectedTargets.updateValue(source, forKey: name) == nil else {
+        throw Failure.invalidActiveState
+      }
+    }
+    #endif
     return expectedTargets
+  }
+
+  static func generationViewPath(_ identifier: UUID) -> String {
+    "Runtime/Views/" + identifier.uuidString
+  }
+
+  static func validActiveView(_ path: String) -> Bool {
+    #if os(Windows)
+    guard let identifier = UUID(uuidString: String(path.split(separator: "/").last ?? "")) else { return false }
+    return path == generationViewPath(identifier)
+    #else
+    return path == "Runtime/Active"
+    #endif
   }
 
   func activeProjectionSelector(for state: ActiveState) throws -> (ActivePack, String) {
@@ -177,6 +217,10 @@ extension LinnetDataRegistry {
     expectedEntries: Set<String>,
     expectedDirectories: Set<String>
   ) throws {
+    #if os(Windows)
+    try verifyWindowsActiveProjection(at: active, expectedTargets: expectedTargets,
+      expectedEntries: expectedEntries, expectedDirectories: expectedDirectories)
+    #else
 
     guard let entries = try ownedDirectoryEntries(
       at: active, recursively: true)
@@ -216,6 +260,7 @@ extension LinnetDataRegistry {
     guard actualEntries == expectedEntries, actualDirectories == expectedDirectories else {
       throw Failure.invalidActiveState
     }
+    #endif
   }
 
   func verifyActiveGrammar(at active: URL) throws {
@@ -264,6 +309,16 @@ extension LinnetDataRegistry {
       let path = entry.standardizedFileURL.path
       guard path.hasPrefix(prefix) else { throw Failure.invalidActiveState }
       let relative = String(path.dropFirst(prefix.count))
+      #if os(Windows)
+      let opened = try LinnetWindowsDataFile(entry, access: .metadata)
+      guard !relative.isEmpty else { throw Failure.invalidActiveState }
+      if opened.isDirectory {
+        guard actualDirectories.insert(relative).inserted else { throw Failure.invalidActiveState }
+      } else {
+        guard relative == "manifest.json" || declaredBytes[relative] == opened.byteCount,
+          actualFiles.insert(relative).inserted else { throw Failure.invalidActiveState }
+      }
+      #else
       var info = stat()
       guard !relative.isEmpty, lstat(entry.path, &info) == 0,
         info.st_uid == getuid(),
@@ -285,6 +340,7 @@ extension LinnetDataRegistry {
       default:
         throw Failure.invalidActiveState
       }
+      #endif
     }
     guard actualFiles == expectedFiles, actualDirectories == expectedDirectories else {
       throw Failure.invalidActiveState
@@ -298,6 +354,7 @@ extension LinnetDataRegistry {
 
   /// Verifies one manifest-owned file through the descriptor actually read.
   /// Every declared component must remain a user-owned, non-writable non-symlink.
+  #if !os(Windows)
   func verifiedManifestFile(
     _ entry: LinnetPackContract.FileEntry,
     in directory: URL
@@ -320,7 +377,9 @@ extension LinnetDataRegistry {
     )
     return resolved.file
   }
+  #endif
 
+  #if !os(Windows)
   func resolveManifestFile(
     _ entry: LinnetPackContract.FileEntry,
     in directory: URL
@@ -347,7 +406,9 @@ extension LinnetDataRegistry {
       packRoot.appending(path: entry.path).standardizedFileURL.path
     )
   }
+  #endif
 
+  #if !os(Windows)
   func openManifestFile(
     _ file: URL,
     expectedPath: String,
@@ -376,12 +437,14 @@ extension LinnetDataRegistry {
     }
     return (descriptor, before)
   }
+  #endif
 
+  #if !os(Windows)
   func digestManifestFile(
     _ descriptor: Int32,
     maximumBytes: UInt64
   ) throws -> (byteCount: UInt64, digest: String) {
-    var hasher = SHA256()
+    var hasher = try LinnetPackContract.Hasher()
     var total: UInt64 = 0
     var buffer = [UInt8](repeating: 0, count: 65_536)
     while true {
@@ -395,14 +458,16 @@ extension LinnetDataRegistry {
       if count == 0 { break }
       total += UInt64(count)
       guard total <= maximumBytes else { throw Failure.invalidActiveState }
-      hasher.update(data: Data(buffer.prefix(count)))
+      try hasher.update(data: Data(buffer.prefix(count)))
     }
     return (
       total,
-      hasher.finalize().map { String(format: "%02x", $0) }.joined()
+      try hasher.finalize()
     )
   }
+  #endif
 
+  #if !os(Windows)
   func validateStableManifestRead(
     _ descriptor: Int32,
     before: stat,
@@ -422,6 +487,7 @@ extension LinnetDataRegistry {
       digest == entry.sha256
     else { throw Failure.invalidActiveState }
   }
+  #endif
 
   static func activePack(
     from manifest: LinnetPackContract.Manifest,
@@ -443,6 +509,7 @@ extension LinnetDataRegistry {
       manifestSHA256: manifestSHA256)
   }
 
+  #if !os(Windows)
   func makeImmutable(_ directory: URL) throws {
     let contents = try FileManager.default.contentsOfDirectory(
       at: directory,
@@ -458,9 +525,11 @@ extension LinnetDataRegistry {
     }
     try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
   }
+  #endif
 
   /// Restores owner write permission only on directories in a preflighted,
   /// Registry-owned tree so Foundation can unlink immutable descendants.
+  #if !os(Windows)
   func prepareOwnedTreeForRemoval(
     _ directory: URL,
     entries suppliedEntries: [URL]? = nil
@@ -486,6 +555,7 @@ extension LinnetDataRegistry {
       }
     }
   }
+  #endif
 
   func contains(_ url: URL) -> Bool {
     let root = rootDirectory.standardizedFileURL.path
@@ -493,6 +563,13 @@ extension LinnetDataRegistry {
     return candidate == root || candidate.hasPrefix(root + "/")
   }
 
+  #if !os(Windows)
+  func removeOwnedTree(_ directory: URL, entries _: [URL]? = nil) throws {
+    try FileManager.default.removeItem(at: directory)
+  }
+  #endif
+
+  #if !os(Windows)
   func verifyCanonicalRoot() throws {
     let descriptor = open(rootDirectory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard descriptor >= 0 else { throw Failure.unsafePath(rootDirectory.path) }
@@ -508,7 +585,9 @@ extension LinnetDataRegistry {
       URL(fileURLWithPath: String(cString: descriptorPath)).path == rootDirectory.path
     else { throw Failure.unsafePath(rootDirectory.path) }
   }
+  #endif
 
+  #if !os(Windows)
   func swapDirectories(_ lhs: URL, _ rhs: URL) -> Bool {
     lhs.path.withCString { lhsPath in
       rhs.path.withCString { rhsPath in
@@ -519,6 +598,7 @@ extension LinnetDataRegistry {
       }
     }
   }
+  #endif
 
   static func applicationSupportDirectory() throws -> URL {
     guard let directory = FileManager.default.urls(
@@ -530,6 +610,7 @@ extension LinnetDataRegistry {
     return directory
   }
 
+  #if !os(Windows)
   static func openOrCreateCanonicalRoot(
     applicationSupportDirectory: URL,
     productName: String
@@ -545,7 +626,9 @@ extension LinnetDataRegistry {
     let rootInfo = try ensureOwnedDirectory(root, withIntermediateDirectories: false)
     return try openCanonicalRoot(root, expected: rootInfo)
   }
+  #endif
 
+  #if !os(Windows)
   static func openExistingCanonicalRoot(applicationSupportDirectory: URL, productName: String) throws -> (url: URL, device: dev_t, inode: ino_t) {
     guard applicationSupportDirectory.isFileURL,
       applicationSupportDirectory.path.hasPrefix("/")
@@ -556,7 +639,9 @@ extension LinnetDataRegistry {
     let root = resolvedSupport.appending(component: productName, directoryHint: .isDirectory).standardizedFileURL
     return try openCanonicalRoot(root, expected: existingOwnedDirectory(root))
   }
+  #endif
 
+  #if !os(Windows)
   static func ensureOwnedDirectory(
     _ directory: URL,
     withIntermediateDirectories: Bool
@@ -579,7 +664,9 @@ extension LinnetDataRegistry {
     }
     return try validateOwnedDirectory(info, at: directory)
   }
+  #endif
 
+  #if !os(Windows)
   static func existingOwnedDirectory(_ directory: URL) throws -> stat {
     var info = stat()
     if lstat(directory.path, &info) != 0 {
@@ -588,7 +675,9 @@ extension LinnetDataRegistry {
     }
     return try validateOwnedDirectory(info, at: directory)
   }
+  #endif
 
+  #if !os(Windows)
   func validateInstalledRootLayout() throws -> Bool {
     var found = false
     for name in ["Data", "Runtime", "Build", "Downloads", "State", "Profiles", "UserData", "Backups", "Transactions"] {
@@ -607,7 +696,9 @@ extension LinnetDataRegistry {
     }
     return found
   }
+  #endif
 
+  #if !os(Windows)
   static func validateOwnedDirectory(_ info: stat, at directory: URL) throws -> stat {
     guard (info.st_mode & S_IFMT) == S_IFDIR,
       info.st_uid == getuid(),
@@ -615,7 +706,9 @@ extension LinnetDataRegistry {
     else { throw Failure.unsafePath(directory.path) }
     return info
   }
+  #endif
 
+  #if !os(Windows)
   static func openCanonicalRoot(
     _ root: URL,
     expected rootInfo: stat
@@ -639,6 +732,7 @@ extension LinnetDataRegistry {
     }
     return (openedRoot, opened.st_dev, opened.st_ino)
   }
+  #endif
 
   static func isSafeIdentifier(_ value: String) -> Bool {
     guard !value.isEmpty, value.count <= 128 else { return false }
@@ -646,10 +740,6 @@ extension LinnetDataRegistry {
       CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
         .contains($0)
     }
-  }
-
-  static func sha256(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 
   static func validPacks(_ packs: [ActivePack], edition: Edition) -> Bool {
@@ -745,6 +835,7 @@ extension LinnetDataRegistry {
     "\(sequence)-\(version)"
   }
 
+  #if !os(Windows)
   static func isSecureOwnedDirectory(_ directory: URL) -> Bool {
     var info = stat()
     guard lstat(directory.path, &info) == 0,
@@ -755,6 +846,7 @@ extension LinnetDataRegistry {
     }
     return (info.st_mode & (S_IWGRP | S_IWOTH)) == 0
   }
+  #endif
 
   func preflightCleanupTrees(
     _ directories: [URL]
@@ -805,7 +897,7 @@ extension LinnetDataRegistry {
           try retireLanguageTransaction(
             at: cleanup.directory, markerData: markerData, entries: immediate)
         } else {
-          try FileManager.default.removeItem(at: cleanup.directory)
+          try removeOwnedTree(cleanup.directory)
         }
       } catch {
         failures.formUnion(cleanup.protectedPackPaths)

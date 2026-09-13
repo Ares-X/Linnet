@@ -2,8 +2,11 @@
 #include "LinnetSettingsDialog.h"
 #include "LinnetSettingsResource.h"
 #include "Configurator.h"
+#include <WeaselConstants.h>
 #include <WeaselUtility.h>
 #include <linnet_settings_model.h>
+#include <linnet_native_platform.h>
+#include <linnet_shared_runtime.h>
 #include <rime_levers_api.h>
 #include <fstream>
 #include <sstream>
@@ -86,6 +89,8 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
   BEGIN_MSG_MAP(SettingsDialog)
     MESSAGE_HANDLER(WM_INITDIALOG, OnInit)
     MESSAGE_HANDLER(WM_CLOSE, OnClose)
+    MESSAGE_HANDLER(WM_TIMER, OnTimer)
+    MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
     NOTIFY_HANDLER(IDC_LINNET_TABS, TCN_SELCHANGE, OnTab)
     NOTIFY_HANDLER(IDC_LINNET_LIST, LVN_ITEMCHANGED, OnItem)
     COMMAND_HANDLER(IDC_LINNET_CHOICE, CBN_SELCHANGE, OnChoice)
@@ -94,6 +99,13 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     COMMAND_ID_HANDLER(IDC_LINNET_APPLY, OnApply)
     COMMAND_ID_HANDLER(IDC_LINNET_RESET, OnReset)
     COMMAND_ID_HANDLER(IDC_LINNET_FONT, OnFont)
+    COMMAND_ID_HANDLER(IDC_LINNET_UPDATE, OnUpdate)
+    COMMAND_HANDLER(IDC_LINNET_SOURCE, CBN_SELCHANGE, OnSource)
+    COMMAND_ID_HANDLER(IDC_LINNET_SAVE_SOURCE, OnSaveSource)
+    COMMAND_ID_HANDLER(IDC_LINNET_UPDATE_DATA, OnUpdateData)
+    COMMAND_ID_HANDLER(IDC_LINNET_COMPLETE_DATA, OnUpdateData)
+    COMMAND_ID_HANDLER(IDC_LINNET_CANCEL_DATA, OnCancelData)
+    COMMAND_ID_HANDLER(IDC_LINNET_AUTO_SYNC, OnAutoSync)
     COMMAND_RANGE_HANDLER(IDC_LINNET_BACKUP, IDC_LINNET_DICTIONARIES, OnData)
     COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
   END_MSG_MAP()
@@ -111,9 +123,14 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
   bool dirty_ = false;
   std::set<int> dirty_personal_;
   int editing_row_ = -1;
+  void* data_update_ = nullptr;
+  bool cancelling_update_ = false;
+  bool close_after_update_ = false;
+  static constexpr UINT_PTR UpdateTimer = 1;
   const std::vector<std::wstring> pages_ = {
     L"输入 / Input", L"英文 / English", L"外观 / Appearance", L"模糊音 / Fuzzy",
-    L"个人词 / Words", L"禁用词 / Blocked", L"短语 / Snippets", L"数据 / Data"};
+    L"个人词 / Words", L"禁用词 / Blocked", L"短语 / Snippets", L"数据 / Data",
+    L"更新 / Updates"};
 
   int Page() { return tabs_.GetCurSel(); }
   bool Personal() { return Page() >= 4 && Page() <= 6; }
@@ -165,6 +182,20 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     choice_.Attach(GetDlgItem(IDC_LINNET_CHOICE));
     list_.SetExtendedListViewStyle(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     for (const auto& page : pages_) tabs_.AddItem(page.c_str());
+    CComboBox source(GetDlgItem(IDC_LINNET_SOURCE));
+    source.AddString(L"GitHub 直连 / Direct");
+    source.AddString(L"公共镜像 / Public mirror");
+    source.AddString(L"自定义镜像 / Custom mirror");
+    source.SetCurSel(0);
+#if defined(_M_X64)
+    linnet_data_source_read(this, [](void* context, const char* mode, const char* mirror, const char* failure) {
+      auto& dialog = *static_cast<SettingsDialog*>(context);
+      CComboBox source(dialog.GetDlgItem(IDC_LINNET_SOURCE));
+      source.SetCurSel(std::string(mode) == "customMirror" ? 2 : std::string(mode) == "publicMirror" ? 1 : 0);
+      dialog.SetDlgItemTextW(IDC_LINNET_MIRROR, u8tow(mirror).c_str());
+      if (*failure) dialog.Status(u8tow(failure));
+    });
+#endif
     CRect list_bounds;
     list_.GetClientRect(&list_bounds);
     const int column_width = list_bounds.Width() / 2 - GetSystemMetrics(SM_CXVSCROLL);
@@ -191,8 +222,12 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
       GetDlgItem(id).ShowWindow(Page() == 7 ? SW_SHOW : SW_HIDE);
     GetDlgItem(IDC_LINNET_FONT).ShowWindow(Page() == 2 ? SW_SHOW : SW_HIDE);
     GetDlgItem(IDC_LINNET_RESET).ShowWindow(Page() < 4 ? SW_SHOW : SW_HIDE);
+    GetDlgItem(IDC_LINNET_UPDATE).ShowWindow(Page() == 8 ? SW_SHOW : SW_HIDE);
+    for (int id = IDC_LINNET_SOURCE_LABEL; id <= IDC_LINNET_UPDATE_NOTE; ++id)
+      GetDlgItem(id).ShowWindow(Page() == 8 ? SW_SHOW : SW_HIDE);
+    GetDlgItem(IDC_LINNET_AUTO_SYNC).ShowWindow(Page() == 7 ? SW_SHOW : SW_HIDE);
     choice_.ShowWindow(Page() < 4 ? SW_SHOW : SW_HIDE);
-    list_.ShowWindow(Page() == 7 ? SW_HIDE : SW_SHOW);
+    list_.ShowWindow(Page() >= 7 ? SW_HIDE : SW_SHOW);
     if (Personal()) {
       const auto& rows = Rows();
       for (size_t i = 0; i < rows.size(); ++i) {
@@ -212,15 +247,143 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
         list_.SetItemText(row, 1, u8tow(option.choices[option.selected]).c_str());
       }
       if (!visible_.empty()) list_.SetItemState(0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-    } else {
-      SetDlgItemTextW(IDC_LINNET_DATA_NOTE,
-        L"备份使用 Rime 原生词典快照及配置文件；恢复会合并学习记录，并替换备份中明确包含的设置。\r\n"
-        L"Backups contain Rime snapshots and settings. Restore merges learning and replaces included settings.\r\n\r\n"
-        L"同步文件夹可放在 OneDrive 等已同步的目录中；不要让两台机器共享正在使用的 userdb。\r\n"
-        L"Use an already-synchronized folder, never a shared live userdb.\r\n\r\n"
-        L"Windows 尚未发布正式更新通道。升级请使用经验证的 Linnet Windows 安装包。\r\n"
-        L"No Windows public update feed yet. Use a verified Linnet Windows installer.");
+    } else if (Page() == 7) {
+      try {
+        Config installation;
+        installation.Load(user_ / "installation.yaml");
+        Bool enabled = False;
+        rime_get_api()->config_get_bool(&installation.value, "linnet_auto_sync", &enabled);
+        CheckDlgButton(IDC_LINNET_AUTO_SYNC, enabled ? BST_CHECKED : BST_UNCHECKED);
+      } catch (const std::exception& error) { Error(error); }
+      int sync_result = -2;
+      DWORD result_size = sizeof(sync_result);
+      const auto sync_status = RegGetValueW(HKEY_CURRENT_USER,
+        linnet_windows::LearningSyncRegistryKey, L"LastResult", RRF_RT_REG_DWORD,
+        nullptr, &sync_result, &result_size);
+      const wchar_t* result_label = L"状态不可用 / Status unavailable";
+      if (sync_status == ERROR_FILE_NOT_FOUND) result_label = L"尚未运行 / Not run";
+      else if (sync_status == ERROR_SUCCESS) {
+        if (sync_result == 0) result_label = L"已完成 / Completed";
+        else if (sync_result == 2) result_label = L"已延后，学习数据保留 / Deferred; learning retained";
+        else if (sync_result == -1) result_label = L"失败，请查看诊断日志 / Failed; see diagnostic logs";
+      }
+      const std::wstring note = std::wstring(L"最近学习同步 / Last learning sync: ") + result_label +
+        L"\r\n请选择云同步文件夹，勿共享 userdb。Use a cloud folder, not a live userdb.";
+      SetDlgItemTextW(IDC_LINNET_DATA_NOTE, note.c_str());
     }
+    UpdateControls();
+  }
+
+  void UpdateControls() {
+    const bool idle = data_update_ == nullptr;
+    for (const auto id : {IDC_LINNET_APPLY, IDC_LINNET_CHOICE, IDC_LINNET_ADD,
+        IDC_LINNET_REMOVE, IDC_LINNET_RESET, IDC_LINNET_FONT, IDC_LINNET_AUTO_SYNC,
+        IDC_LINNET_UPDATE}) GetDlgItem(id).EnableWindow(idle);
+    for (int id = IDC_LINNET_BACKUP; id <= IDC_LINNET_DICTIONARIES; ++id)
+      GetDlgItem(id).EnableWindow(idle);
+#if defined(_M_X64)
+    for (const auto id : {IDC_LINNET_SOURCE, IDC_LINNET_SAVE_SOURCE,
+        IDC_LINNET_UPDATE_DATA, IDC_LINNET_COMPLETE_DATA}) GetDlgItem(id).EnableWindow(idle);
+    CComboBox source(GetDlgItem(IDC_LINNET_SOURCE));
+    GetDlgItem(IDC_LINNET_MIRROR).EnableWindow(idle && source.GetCurSel() == 2);
+    GetDlgItem(IDC_LINNET_CANCEL_DATA).EnableWindow(!idle && !cancelling_update_);
+#else
+    for (int id = IDC_LINNET_SOURCE; id <= IDC_LINNET_CANCEL_DATA; ++id)
+      GetDlgItem(id).EnableWindow(FALSE);
+#endif
+  }
+
+  bool SaveSource() {
+#if defined(_M_X64)
+    CComboBox source(GetDlgItem(IDC_LINNET_SOURCE));
+    const auto mode = source.GetCurSel() == 2 ? "customMirror" : source.GetCurSel() == 1 ? "publicMirror" : "github";
+    std::string failure;
+    if (linnet_data_source_save(mode, Text(IDC_LINNET_MIRROR).c_str(), &failure,
+        [](void* context, const char* message) { *static_cast<std::string*>(context) = message; }) != 0) {
+      Error(std::runtime_error(failure));
+      return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+  }
+  LRESULT OnSource(WORD, WORD, HWND, BOOL&) { UpdateControls(); return 0; }
+  LRESULT OnSaveSource(WORD, WORD, HWND, BOOL&) {
+    if (SaveSource()) Status(L"词库下载源已保存 / Data source saved");
+    return 0;
+  }
+  LRESULT OnUpdateData(WORD, WORD id, HWND, BOOL&) {
+#if defined(_M_X64)
+    if (data_update_ || !SaveSource()) return 0;
+    // Establish UI observation before starting the task. No worker retains an HWND.
+    if (!SetTimer(UpdateTimer, 200)) {
+      Error(std::runtime_error("Cannot start language update timer"));
+      return 0;
+    }
+    std::string failure;
+    data_update_ = linnet_data_update_start(WeaselSharedDataPath().u8string().c_str(),
+      user_.u8string().c_str(), WEASEL_VERSION, id == IDC_LINNET_COMPLETE_DATA, &failure,
+      [](void* context, const char* message) { *static_cast<std::string*>(context) = message; });
+    if (!data_update_) {
+      KillTimer(UpdateTimer);
+      Error(std::runtime_error(failure));
+      return 0;
+    }
+    cancelling_update_ = close_after_update_ = false;
+    UpdateControls();
+    Status(L"正在下载词库 / Downloading language data…");
+#endif
+    return 0;
+  }
+  void CancelDataUpdate() {
+#if defined(_M_X64)
+    if (data_update_) {
+      cancelling_update_ = true;
+      linnet_data_update_cancel(data_update_);
+      UpdateControls();
+      Status(L"正在取消下载 / Cancelling download…");
+    }
+#endif
+  }
+  LRESULT OnCancelData(WORD, WORD, HWND, BOOL&) { CancelDataUpdate(); return 0; }
+  LRESULT OnTimer(UINT, WPARAM timer, LPARAM, BOOL& handled) {
+    if (timer != UpdateTimer || !data_update_) { handled = FALSE; return 0; }
+#if defined(_M_X64)
+    struct Progress { double fraction = 0; std::string failure; } progress;
+    const int state = linnet_data_update_poll(data_update_, &progress,
+      [](void* context, double value, const char* message) {
+        auto& progress = *static_cast<Progress*>(context);
+        progress.fraction = value;
+        progress.failure = message;
+      });
+    if (state == 2 && !cancelling_update_) {
+      GetDlgItem(IDC_LINNET_CANCEL_DATA).EnableWindow(FALSE);
+      Status(L"正在切换并检查词库 / Activating and checking language data…");
+      configurator_.UpdateLanguageData(data_update_);
+    } else if (state == -1 || state == 4 || state == 5) {
+      KillTimer(UpdateTimer);
+      linnet_data_update_release(data_update_);
+      data_update_ = nullptr;
+      UpdateControls();
+      if (state == -1) Error(std::runtime_error(progress.failure));
+      else Status(state == 4 ? L"词库已更新 / Language data updated" : L"下载已取消 / Download cancelled");
+      if (close_after_update_) Close();
+    } else if (!cancelling_update_ && (state == 0 || state == 1)) {
+      Status(std::wstring(state == 0 ? L"正在下载 / Downloading " : L"正在校验 / Verifying ") +
+        std::to_wstring(int(progress.fraction * 100)) + L"%");
+    }
+#endif
+    return 0;
+  }
+  LRESULT OnDestroy(UINT, WPARAM, LPARAM, BOOL& handled) {
+    KillTimer(UpdateTimer);
+#if defined(_M_X64)
+    if (data_update_) linnet_data_update_release(data_update_);
+#endif
+    data_update_ = nullptr;
+    handled = FALSE;
+    return 0;
   }
   LRESULT OnTab(int, LPNMHDR, BOOL&) { ShowPage(); return 0; }
   LRESULT OnItem(int, LPNMHDR header, BOOL&) {
@@ -417,9 +580,31 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     // Reopen so the controls cannot retain the pre-restore draft.
     EndDialog(IDOK);
   }
+  LRESULT OnAutoSync(WORD, WORD, HWND, BOOL&) {
+    const bool enabled = IsDlgButtonChecked(IDC_LINNET_AUTO_SYNC) == BST_CHECKED;
+    const auto result = configurator_.WithMaintenance([&] {
+      Config installation;
+      installation.Load(user_ / "installation.yaml");
+      if (enabled && installation.String("sync_dir").empty())
+        throw std::runtime_error("Select a synchronization folder first");
+      rime_get_api()->config_set_bool(&installation.value, "linnet_auto_sync", enabled);
+      installation.Save(user_ / "installation.yaml");
+      return 0;
+    });
+    if (result != 0) CheckDlgButton(IDC_LINNET_AUTO_SYNC, enabled ? BST_UNCHECKED : BST_CHECKED);
+    Status(result == 0 ? L"自动同步设置已保存 / Automatic sync setting saved"
+                       : L"自动同步设置未保存 / Automatic sync setting not saved");
+    return 0;
+  }
+  LRESULT OnUpdate(WORD, WORD, HWND, BOOL&) {
+    const auto server = WeaselSharedDataPath().parent_path() / "LinnetServer.exe";
+    if (reinterpret_cast<INT_PTR>(ShellExecuteW(m_hWnd, L"open", server.c_str(),
+        L"/update", nullptr, SW_SHOWNORMAL)) <= 32)
+      Status(L"无法打开更新检查 / Cannot open update check");
+    return 0;
+  }
   LRESULT OnData(WORD, WORD id, HWND, BOOL&) {
     try {
-      if (!Apply()) return 0;
       if (id == IDC_LINNET_BACKUP) {
         const auto folder = Folder(m_hWnd, L"选择备份父文件夹 / Backup destination");
         if (folder.empty()) return 0;
@@ -432,7 +617,7 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
       } else if (id == IDC_LINNET_RESTORE) {
         const auto folder = Folder(m_hWnd, L"选择 Rime/Linnet 备份文件夹 / Restore source");
         if (folder.empty()) return 0;
-        if (MessageBoxW(L"将合并学习数据并替换备份中的设置。当前数据会先备份。\nMerge learning and replace included settings? Current data will be backed up.",
+        if (MessageBoxW(L"将合并学习数据并替换备份中的设置。当前已应用的数据会先备份。恢复成功后，尚未应用的修改将丢弃。\nMerge learning and replace included settings? Applied data will be backed up. A successful restore discards unsaved changes.",
                         L"Linnet", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) Restore(folder);
         return 0;
       } else if (id == IDC_LINNET_SYNC_FOLDER) {
@@ -459,10 +644,10 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
         std::string report = "Linnet Windows diagnostics\nNo input text, learning data or user names are included.\n";
         const auto manifest = WeaselSharedDataPath().parent_path() / "linnet-windows-manifest.json";
         if (fs::exists(manifest)) report += Read(manifest);
-        SYSTEM_INFO system = {};
-        GetNativeSystemInfo(&system);
-        report += "\nNative processor architecture: " + std::to_string(system.wProcessorArchitecture) + "\n";
-        for (const auto& option : settings_.options)
+        report += "\nNative machine (IMAGE_FILE_MACHINE): " +
+                  std::to_string(linnet_windows::NativeMachine()) + "\n";
+        const Settings applied(WeaselSharedDataPath(), user_);
+        for (const auto& option : applied.options)
           report += option.id + "=" + option.choices[option.selected] + "\n";
         Write(fs::path(folder) / "Linnet-diagnostics.txt", report);
       }
@@ -471,6 +656,11 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     return 0;
   }
   bool Close() {
+    if (data_update_) {
+      close_after_update_ = true;
+      CancelDataUpdate();
+      return false;
+    }
     if (dirty_) {
       const auto result = MessageBoxW(L"保存尚未应用的修改？\nApply unsaved changes?", L"Linnet", MB_YESNOCANCEL | MB_ICONQUESTION);
       if (result == IDCANCEL || (result == IDYES && !Apply())) return false;

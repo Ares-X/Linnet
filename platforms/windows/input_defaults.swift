@@ -26,8 +26,7 @@ struct WindowsInputDefaults {
                                atomically: true, encoding: .utf8)
       let schema = stem == "default" ? "default.yaml" : stem + ".schema.yaml"
       let original = try String(contentsOf: source.appendingPathComponent(schema), encoding: .utf8)
-      let patches = "\n__patch:\n  - " + policy + ":/patch\n  - " + stem + ".custom:/patch?\n"
-      try (original + patches).write(
+      try WindowsInputPolicy.applying(to: original, stem: stem).write(
         to: output.appendingPathComponent(schema), atomically: true, encoding: .utf8)
     }
     try LinnetDataRegistry.activeGrammarConfiguration.write(

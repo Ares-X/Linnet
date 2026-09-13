@@ -132,7 +132,10 @@ enum WindowsSettingsCatalog {
     ]
     for (key, value) in detailWidths(fontPoint: appearance.fontPoint) { defaults[key] = value }
     let encodedOptions = try JSONSerialization.jsonObject(with: JSONEncoder().encode(options))
-    let data = try JSONSerialization.data(withJSONObject: ["options": encodedOptions, "defaults": defaults])
+    let data = try JSONSerialization.data(withJSONObject: [
+      "options": encodedOptions, "defaults": defaults,
+      "learning_dictionaries": LinnetSettingsContract.learningDictionaries.sorted()
+    ])
     try data.write(to: directory.appendingPathComponent("settings-catalog.json"))
     let design = """
     // Generated from the shared candidate presentation owner. Do not edit.

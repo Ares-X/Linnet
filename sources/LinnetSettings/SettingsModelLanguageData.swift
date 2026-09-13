@@ -147,67 +147,18 @@ extension SettingsModel {
         let lease = try await LinnetSettingsMutationLease.acquire(
           at: registry.settingsMutationLeaseURL, timeout: 300)
         defer { _ = lease }
-        try Task.checkCancellation()
-        let transport = LinnetSettingsDownloadTransport(source: downloadSource)
-        let catalogData = try await transport.downloadCatalog(at: catalogURL)
-        try Task.checkCancellation()
-        await self?.setLanguageDataUpdateState(target, .verifying)
-        let catalog = try registry.verifyDataChannel(catalogData)
-        let snapshot = try registry.runtimeSnapshot()
-        let requestedEdition: LinnetDataRegistry.Edition = target == .completeOffline
-          ? .full : snapshot.state.edition
-        guard let selected = catalog.catalog.activationSet(for: requestedEdition) else {
-          throw LinnetDataRegistry.Failure.invalidActiveState
-        }
-        let update = try registry.beginDataChannelUpdate(
-          accepting: catalog, edition: requestedEdition, allowCompleteRepair: allowCompleteRepair)
-        let downloadDirectory = update.downloadDirectory
-        defer { try? registry.cancelDataChannelUpdate(transactionID: update.transactionID) }
-        var targetPacks: [LinnetDataRegistry.ActivePack] = []
-        for artifact in selected.packs {
-          try Task.checkCancellation()
-          let installed = snapshot.state.packs.first { $0.kind == artifact.kind }
-          var transfer = artifact.transfer(from: installed, allowCompleteRepair: allowCompleteRepair)
-          if case .current(let pack) = transfer {
-            targetPacks.append(pack)
-            continue
-          }
-          while true {
-            let url: URL, bytes: UInt64
-            if case .delta(let delta, _) = transfer {
-              (url, bytes) = (delta.url, delta.bytes)
-            } else {
-              (url, bytes) = (artifact.url, artifact.bytes)
-            }
-            let package = downloadDirectory.appending(path: url.lastPathComponent)
-            do {
-              await self?.setLanguageDataUpdateState(target, .downloading)
-              try await transport.downloadArtifact(from: url, expectedBytes: bytes, to: package)
-              try Task.checkCancellation()
-              await self?.setLanguageDataUpdateState(target, .verifying)
-              let staged = try registry.verifyAndStagePack(
-                package: package, artifact: artifact, transfer: transfer,
-                allowCompleteRepair: allowCompleteRepair)
-              targetPacks.append(staged)
-              break
-            } catch {
-              try Task.checkCancellation()
-              guard case .delta = transfer else { throw error }
-              linnetLanguageDataLogger.error(
-                "Language-data delta failed; downloading complete pack: \(error.localizedDescription, privacy: .private)"
-              )
-              transfer = .complete
-            }
-          }
-          await self?.setPackDownloadProgress(
-            Double(targetPacks.count) / Double(selected.packs.count))
-          try Task.checkCancellation()
-        }
-        try Task.checkCancellation()
-        let activation = try registry.prepareDataChannelUpdate(update, target: targetPacks)
-        await self?.beginLanguageDataActivation(target)
-        try Task.checkCancellation()
-        try await coordinator.activateLanguage(activation)
+        try await LinnetLanguageDataUpdate.run(
+          registry: registry, transport: LinnetSettingsDownloadTransport(source: downloadSource),
+          catalogURL: catalogURL,
+          edition: target == .completeOffline ? .full : nil,
+          allowCompleteRepair: allowCompleteRepair,
+          progress: { [weak self] phase, progress in
+            await self?.reportLanguageDataProgress(target, phase: phase, progress: progress)
+          },
+          diagnostic: { message in
+            linnetLanguageDataLogger.error("\(message, privacy: .private)")
+          },
+          activate: { candidate in try await coordinator.activateLanguage(candidate) })
         await self?.finishLanguageDataUpdate(target)
       } catch is CancellationError {
         await self?.finishPackDownloadCancellation(target)
@@ -223,8 +174,15 @@ extension SettingsModel {
     }
   }
 
-  private func setPackDownloadProgress(_ progress: Double) {
+  private func reportLanguageDataProgress(
+    _ target: SettingsLanguageDataUpdateTarget, phase: LinnetLanguageDataUpdate.Phase, progress: Double
+  ) {
     packDownloadProgress = progress
+    switch phase {
+    case .downloading: setLanguageDataUpdateState(target, .downloading)
+    case .verifying: setLanguageDataUpdateState(target, .verifying)
+    case .activating: beginLanguageDataActivation(target)
+    }
   }
 
   private func setLanguageDataUpdateState(

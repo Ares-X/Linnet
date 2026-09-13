@@ -12,9 +12,9 @@ not fork Rime behavior or maintain a second language-data build.
 | Lua, octagram, prediction, Smart English | root locked plugins | unchanged: merged into the root-owned `rime.dll` |
 | macOS frontend | Squirrel-derived app | unchanged |
 | Windows TSF, IPC, candidate UI, installer | none | one locked Weasel projection |
-| Windows updates | none | none; Weasel's updater is removed until Linnet owns a signed Windows update contract |
+| Windows application updates | removed upstream updater | stable WinSparkle with Linnet's key and native-OS feeds; no accepted public update yet |
 
-Weasel's nested librime, plum recipes, default schemas, updater and optional
+Weasel's nested librime, plum recipes, default schemas, update feeds and optional
 schema downloader are not product authorities. Windows consumes the exact
 `data/plum` and `data/opencc` projection made by `scripts/stage-linnet-data` on
 macOS CI. Shared input defaults are exported by the existing Settings projection
@@ -22,8 +22,8 @@ renderer for all eight Chinese profiles, English and global defaults at build
 time and included through Rime's native `__patch` mechanism,
 before user customization. The grammar selection is exported from the shared
 data registry too: Windows uses the shipped Wanxiang LTS model, not the compact
-developer fixture. Windows does not duplicate those policies or ship a
-Swift runtime. `weasel.yaml` owns candidate window presentation and application
+developer fixture. Windows does not duplicate those policies. Shared Swift
+update/sync integration is authored and awaiting native validation. `weasel.yaml` owns candidate window presentation and application
 integration, not input behavior.
 
 The projection assigns Linnet its own TSF/profile/language-bar GUIDs, registry
@@ -62,6 +62,10 @@ The native Windows Settings dialog provides input, English, fuzzy-pinyin,
 appearance and personal-data controls. Its choices and defaults are generated
 from the shared Linnet Settings document and renderer, and changes write the
 standard Rime customization files without replacing unrelated user entries.
+Data actions do not implicitly apply pending edits. Backups contain applied
+settings; diagnostic export and cancelled folder selections leave drafts
+unchanged. A confirmed, successful restore closes the dialog and discards
+unapplied edits.
 Candidate expansion, row navigation, numbered selection and candidate context
 actions use the existing Weasel panel and Rime selection/learning APIs. Expanded
 candidate limits and detail sizing come from the shared presentation design.
@@ -103,13 +107,65 @@ to Windows. In a Visual Studio 2022 developer environment:
 git submodule update --init --depth 1 -- librime upstreams/weasel
 git -C librime submodule update --init --recursive --depth 1
 platforms/windows/prepare.ps1 `
+  -WinSparkleRoot C:\path\to\WinSparkle-0.9.4 `
   -DataRoot C:\path\to\shared-data `
   -EmbeddedLuaHeader C:\path\to\linnet_embedded_lua.h `
   -InputPolicyRoot C:\path\to\windows-inputs\policies `
+  -FactoryRoot C:\path\to\windows-inputs\factory `
   -WeaselConfig C:\path\to\weasel.yaml `
   -ThemePreviewRoot C:\path\to\preview
-platforms/windows/build.ps1 -BoostRoot C:\path\to\boost_1_89_0
+platforms/windows/build.ps1 -BoostRoot C:\path\to\boost_1_89_0 `
+  -SwiftRoot "$env:LOCALAPPDATA\Programs\Swift"
 ```
+
+Use the WinSparkle binary archive pinned in `upstreams.lock.json`, including its
+headers and import libraries, not the old copies in Weasel's source snapshot.
+The build workflow downloads and verifies this dependency before preparation.
+It also installs the pinned Swift 6.3.3 Windows toolchain on the build runner.
+Users do not install Swift: the installer carries the shared controller DLL and
+its required runtime DLLs, including the app-local Visual C++ runtime. No compiler,
+SDK or Swift background service is installed on the user's computer.
+Application update checks are available from Settings and the tray menu without
+restarting the input service or applying a Settings draft. WinSparkle verifies
+Ed25519 signatures; the NSIS installer continues to own the upgrade. The two
+native-OS feeds are intentionally empty until Windows release acceptance and
+publication are separately authorized. An empty feed is not upgrade acceptance.
+The private signing key belongs outside the repository and must not be included
+in an installer, source commit, log or Actions artifact. Use upstream's
+`winsparkle-tool sign --private-key-file <key> <installer>` to sign future
+accepted bytes. Each per-OS feed uses `sparkle:os="windows"` because the x64
+server also runs on ARM64 Windows; the feed URL, not DLL emulation, selects the
+installer architecture.
+
+The Data page's automatic-sync switch uses the shared hourly learning-sync
+controller and the selected native sync folder. It is off until explicitly
+enabled. Cloud transport belongs to the chosen folder provider (for example
+OneDrive), not a second Linnet network service. The host uses Rime's incremental
+operation under its normal serialization; maintenance cancels that operation
+before closing the runtime. This source integration still awaits the consolidated
+build and installed-product acceptance.
+
+Language data now uses the shared pack Registry rather than the installation
+directory. The installer embeds the same four complete offline `.linnetpack`
+containers produced for macOS. First startup verifies and installs that baseline
+under the existing user directory; later Core upgrades retain the active data
+set. Windows builds its own Rime configuration/dictionaries, projects immutable
+payloads with hard links, and retains the flat learning/customization directory.
+Core policies and UI assets remain installation-owned. The shared Registry/native
+setup and bootstrap are source changes awaiting compilation and installed UAT.
+The Updates page provides current-edition updates, complete offline data,
+direct/public/custom download sources and cancellation. Both platforms call
+the same catalog/download/staging operation. Downloading does not pause input;
+publication uses native maintenance, Rime deployment and a selected-schema
+readiness check before committing. A failed activation restores the previous
+data set. Pending Settings edits are not applied by an update.
+Manual synchronization retains the upstream implementation and records its
+attempt/result alongside automatic synchronization, so automatic scheduling
+does not immediately repeat a just-completed manual sync.
+
+The x64 installer requires Windows 10 version 1903 or later; ARM64 requires
+Windows 11. The former Windows 8.1 check was inherited from Weasel and did not
+match Linnet's [UTF-8 application manifest requirement](https://learn.microsoft.com/en-us/windows/apps/design/globalizing/use-utf8-code-page).
 
 One build produces two packages in `build/windows/weasel/output/archives`:
 
@@ -141,10 +197,11 @@ Windows runner. It also checks that choosing the ARM64 package on x64 leaves
 the existing input service untouched. ARM64 installation and native application
 input require the ARM64 desktop UAT; the x64 runner cannot establish those results. The
 gate uses an isolated temporary `%AppData%`, checks every runtime file referenced
-by OpenCC, then reruns the same input sessions against the installed shared data
-and the dictionaries generated on Windows. The installer carries the canonical
-`data/dicts` source graph needed for a clean-machine Chinese build; macOS-built
-dictionary binaries are not treated as Windows evidence. Setup or deployment
+by OpenCC, then reruns the same input sessions through the installed Registry
+and the dictionaries generated on Windows. The factory containers carry the
+canonical source graph needed for clean-machine deployment; macOS-built
+dictionary binaries are excluded from the Windows runtime view and are not
+treated as Windows evidence. Setup or deployment
 failures must propagate as a nonzero installer result. It also installs the
 candidate with open package files to exercise same-language upgrade, partial
 backup failure and restoration without stopping the process holding those files.

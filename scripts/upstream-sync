@@ -99,7 +99,7 @@ def load_lock
   end
 
   build_inputs = require_hash(lock, "build_inputs")
-  fail_lock("unexpected build input set") unless build_inputs.keys.sort == %w[boost_headers cmake]
+  fail_lock("unexpected build input set") unless build_inputs.keys.sort == %w[boost_headers cmake swift_windows winsparkle]
   boost = require_hash(build_inputs, "boost_headers")
   require_string(boost, "version")
   boost_url = require_string(boost, "url")
@@ -127,6 +127,49 @@ def load_lock
     require_string(cmake, "executable") == "bin/cmake"
   fail_lock("unexpected CMake license") unless
     require_string(cmake, "license") == "BSD-3-Clause"
+
+  swift = require_hash(build_inputs, "swift_windows")
+  swift_version = require_string(swift, "version")
+  fail_lock("Swift must come from its official versioned Windows release") unless
+    require_string(swift, "url") == "https://download.swift.org/swift-#{swift_version}-release/windows10/" \
+      "swift-#{swift_version}-RELEASE/swift-#{swift_version}-RELEASE-windows10.exe"
+  require_string(swift, "sha256", SHA256)
+  fail_lock("unexpected Swift license") unless
+    require_string(swift, "license") == "Apache-2.0 WITH Swift-exception"
+  zlib = require_hash(swift, "zlib")
+  zlib_version = require_string(zlib, "version")
+  fail_lock("unexpected Swift SDK zlib library") unless require_string(zlib, "sdk_library") ==
+    "WindowsExperimental.sdk/usr/lib/swift_static/windows/x86_64/zlibstatic.lib"
+  fail_lock("unexpected zlib header set") unless zlib.fetch("headers").map { |entry| entry.fetch("name") }.sort == %w[zconf.h zlib.h]
+  zlib.fetch("headers").each do |entry|
+    fail_lock("unexpected zlib header source") unless require_string(entry, "url") ==
+      "https://raw.githubusercontent.com/madler/zlib/v#{zlib_version}/#{entry.fetch('name')}"
+    require_string(entry, "sha256", SHA256)
+  end
+  swift.fetch("licenses").each do |license|
+    fail_lock("unexpected Swift license source") unless require_string(license, "url").start_with?(
+      "https://raw.githubusercontent.com/swiftlang/", "https://raw.githubusercontent.com/unicode-org/icu/",
+      "https://raw.githubusercontent.com/curl/curl/", "https://raw.githubusercontent.com/google/brotli/",
+      "https://raw.githubusercontent.com/GNOME/libxml2/",
+      "https://raw.githubusercontent.com/madler/zlib/v#{zlib_version}/")
+    require_string(license, "name")
+    require_string(license, "sha256", SHA256)
+  end
+
+  winsparkle = require_hash(build_inputs, "winsparkle")
+  winsparkle_version = require_string(winsparkle, "version")
+  fail_lock("WinSparkle must come from its official versioned release") unless
+    require_string(winsparkle, "url") ==
+      "https://github.com/vslavik/winsparkle/releases/download/v#{winsparkle_version}/WinSparkle-#{winsparkle_version}.zip"
+  require_string(winsparkle, "sha256", SHA256)
+  fail_lock("unexpected WinSparkle archive root") unless
+    require_string(winsparkle, "archive_root") == "WinSparkle-#{winsparkle_version}"
+  fail_lock("unexpected WinSparkle license") unless
+    require_string(winsparkle, "license") == "MIT" &&
+    require_string(winsparkle, "license_path") == "COPYING" &&
+    require_string(winsparkle, "expat_license_path") == "COPYING.expat"
+  require_string(winsparkle, "license_sha256", SHA256)
+  require_string(winsparkle, "expat_license_sha256", SHA256)
 
   patches = require_hash(lock, "downstream_patches")
   expected_patches = {

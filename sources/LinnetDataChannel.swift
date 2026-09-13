@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 // The transport choice owns the verified pack to reuse or reconstruct.
@@ -153,11 +152,17 @@ extension LinnetDataChannel {
     ) -> PackTransfer {
       guard let installed else { return .complete }
       if matches(installed) { return .current(installed) }
+      #if os(Windows)
+      // The shared directory-delta transport uses macOS rsync batches. Both
+      // platforms still consume the exact same complete pack/container format.
+      return .complete
+      #else
       if allowCompleteRepair { return .complete }
       guard installed.kind == kind, installed.dataABI == dataABI,
         let delta = deltas?.first(where: { $0.baseContentSHA256 == installed.contentSHA256 })
       else { return .complete }
       return .delta(delta, base: installed)
+      #endif
     }
   }
 }
@@ -332,7 +337,7 @@ enum LinnetDataChannel {
     }
     let canonical = try canonicalCatalogData(catalog)
     try validate(catalog, minimumSequence: minimumCatalogSequence)
-    return .init(catalog: catalog, digest: sha256(canonical))
+    return .init(catalog: catalog, digest: try LinnetPackContract.sha256(canonical))
   }
 
   static func canonicalCatalogData(_ catalog: Catalog) throws -> Data {
@@ -353,7 +358,7 @@ enum LinnetDataChannel {
         return identity
       })
     }
-    return try sha256(encoder.encode(packsOnly))
+    return try LinnetPackContract.sha256(encoder.encode(packsOnly))
   }
 
   /// The canonical catalog binds the complete downloaded container before the
@@ -370,11 +375,11 @@ enum LinnetDataChannel {
     else { throw Failure.invalidArtifact("size") }
     let handle = try FileHandle(forReadingFrom: file)
     defer { try? handle.close() }
-    var hasher = SHA256()
+    var hasher = try LinnetPackContract.Hasher()
     while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
-      hasher.update(data: chunk)
+      try hasher.update(data: chunk)
     }
-    let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    let digest = try hasher.finalize()
     guard digest == sha256 else {
       throw Failure.invalidArtifact("SHA-256")
     }
@@ -496,10 +501,6 @@ enum LinnetDataChannel {
     value.count == 40 && value.unicodeScalars.allSatisfy {
       CharacterSet(charactersIn: "0123456789abcdef").contains($0)
     }
-  }
-
-  private static func sha256(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 }
 

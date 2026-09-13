@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$BoostRoot
+  [string]$BoostRoot,
+  [Parameter(Mandatory = $true)]
+  [string]$SwiftRoot
 )
 
 Set-StrictMode -Version Latest
@@ -42,7 +44,12 @@ $Manifest = [ordered]@{
   frontend = [ordered]@{ name = "Weasel"; commit = $Prepared.weasel_commit }
   runtime = [ordered]@{ name = "librime"; commit = $Prepared.librime_commit }
   weasel_config_sha256 = $Prepared.weasel_config_sha256
-  upstream_updater = "disabled"
+  updater = [ordered]@{
+    name = "WinSparkle"
+    version = $Lock.build_inputs.winsparkle.version
+    dll_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+      (Join-Path $Projection "output\WinSparkle.dll")).Hash.ToLowerInvariant()
+  }
 }
 
 $EnvFile = @"
@@ -77,6 +84,9 @@ if ($BoostLicenseDigest -ne $Lock.build_inputs.boost_headers.license_sha256) {
 }
 Copy-Item -LiteralPath $BoostLicense -Destination `
   (Join-Path $Projection "output\licenses\Boost-BSL-1.0.txt")
+
+$Manifest.shared_runtime = & (Join-Path $PSScriptRoot 'build-shared-runtime.ps1') `
+  -SwiftRoot $SwiftRoot -Projection $Projection
 
 Push-Location $Projection
 try {

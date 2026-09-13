@@ -45,7 +45,8 @@ options.each do |option|
     end.compact
   end
 end
-catalog = {'options' => options, 'algebra' => baseline.map do |stem, values|
+catalog = {'options' => options, 'learning_dictionaries' => source.fetch('learning_dictionaries'),
+  'algebra' => baseline.map do |stem, values|
   value = values['speller/algebra']
   next unless value
   {'schema' => stem, 'include' => value.fetch('__include'),

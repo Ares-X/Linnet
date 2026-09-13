@@ -13,6 +13,8 @@
 
 namespace linnet_windows {
 
+inline constexpr wchar_t LearningSyncRegistryKey[] = L"Software\\Linnet\\LearningSync";
+
 // The native Rime parser and serializer own all YAML. This small model only
 // applies the choices exported by the shared Swift settings renderer.
 class Config {

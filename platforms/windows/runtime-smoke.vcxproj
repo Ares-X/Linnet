@@ -44,7 +44,7 @@
       <AdditionalIncludeDirectories>$(ProjectionRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <PreprocessorDefinitions>GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;GLOG_NO_ABBREVIATED_SEVERITIES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
       <AdditionalOptions>/utf-8 /external:I"$(ProjectionRoot)\librime\dist_$(Platform)\include" /external:I"$(ProjectionRoot)\librime\include" /external:I"$(BOOST_ROOT)" /external:W0 %(AdditionalOptions)</AdditionalOptions>
@@ -59,7 +59,7 @@
       <AdditionalIncludeDirectories>$(ProjectionRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <PreprocessorDefinitions>GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;GLOG_NO_ABBREVIATED_SEVERITIES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
       <AdditionalOptions>/utf-8 /external:I"$(ProjectionRoot)\librime\dist_$(Platform)\include" /external:I"$(ProjectionRoot)\librime\include" /external:I"$(BOOST_ROOT)" /external:W0 %(AdditionalOptions)</AdditionalOptions>

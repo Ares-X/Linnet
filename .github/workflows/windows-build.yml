@@ -39,7 +39,7 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57  # v3
 
-      - name: Prepare locked Boost source
+      - name: Prepare locked Boost and WinSparkle
         id: boost
         shell: pwsh
         run: |
@@ -55,10 +55,41 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Boost extraction failed' }
           $root = Join-Path $env:RUNNER_TEMP $lock.build_inputs.boost_headers.archive_root
           "root=$root" >> $env:GITHUB_OUTPUT
+          $updater = $lock.build_inputs.winsparkle
+          $updaterArchive = Join-Path $env:RUNNER_TEMP 'winsparkle.zip'
+          Invoke-WebRequest -Uri $updater.url -OutFile $updaterArchive
+          if ((Get-FileHash -Algorithm SHA256 $updaterArchive).Hash.ToLowerInvariant() -ne $updater.sha256) {
+            throw 'WinSparkle archive digest differs from upstreams.lock.json'
+          }
+          Expand-Archive -LiteralPath $updaterArchive -DestinationPath $env:RUNNER_TEMP
+          "winsparkle=$(Join-Path $env:RUNNER_TEMP $updater.archive_root)" >> $env:GITHUB_OUTPUT
           $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\Bin\makensis.exe'
           if (-not (Test-Path -LiteralPath $nsis -PathType Leaf)) {
             throw 'The Windows runner does not provide the NSIS compiler required by Weasel'
           }
+
+      - name: Install locked Swift build toolchain
+        id: swift
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $swift = (Get-Content -Raw upstreams.lock.json | ConvertFrom-Json).build_inputs.swift_windows
+          $installer = Join-Path $env:RUNNER_TEMP 'swift-toolchain.exe'
+          Invoke-WebRequest -Uri $swift.url -OutFile $installer
+          if ((Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant() -ne $swift.sha256) {
+            throw 'Swift installer digest differs from upstreams.lock.json'
+          }
+          # Compiler and Windows SDK only. No debugger, Python, IDE, Android or
+          # second-architecture Swift runtime; both products use the x64 server.
+          $setup = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+            '/install', '/quiet', '/norestart', 'OptionsInstallCLI=0',
+            'OptionsInstallDBG=0', 'OptionsInstallPy=0', 'OptionsInstallIDE=0',
+            'OptionsInstallUtilities=0', 'OptionsInstallAndroidPlatform=0',
+            'OptionsInstallWindowsSDKARM64=0', 'OptionsInstallWindowsRedistARM64=0',
+            'OptionsInstallWindowsSDKX86=0', 'OptionsInstallWindowsRedistX86=0')
+          if ($setup.ExitCode -notin @(0, 3010)) { throw "Swift setup failed: $($setup.ExitCode)" }
+          $root = Join-Path $env:LOCALAPPDATA 'Programs\Swift'
+          "root=$root" >> $env:GITHUB_OUTPUT
 
       - name: Project Linnet onto locked Weasel
         shell: pwsh
@@ -66,17 +97,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $windowsInputs = Join-Path $env:RUNNER_TEMP 'linnet-windows-inputs'
           platforms/windows/prepare.ps1 `
+            -WinSparkleRoot '${{ steps.boost.outputs.winsparkle }}' `
             -DataRoot (Join-Path $windowsInputs 'data') `
             -EmbeddedLuaHeader (Join-Path $windowsInputs 'build/windows-inputs/linnet_embedded_lua.h') `
             -WeaselConfig (Join-Path $windowsInputs 'build/windows-inputs/weasel.yaml') `
             -ThemePreviewRoot (Join-Path $windowsInputs 'build/windows-inputs/preview') `
-            -InputPolicyRoot (Join-Path $windowsInputs 'build/windows-inputs/policies')
+            -InputPolicyRoot (Join-Path $windowsInputs 'build/windows-inputs/policies') `
+            -FactoryRoot (Join-Path $windowsInputs 'build/windows-inputs/factory')
 
       - name: Build x64 and ARM64 Windows installers
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          platforms/windows/build.ps1 -BoostRoot '${{ steps.boost.outputs.root }}'
+          platforms/windows/build.ps1 -BoostRoot '${{ steps.boost.outputs.root }}' `
+            -SwiftRoot '${{ steps.swift.outputs.root }}'
 
       - name: Verify candidate runtime and install lifecycle
         # The Windows International module used to inspect enabled TIPs is a

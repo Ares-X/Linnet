@@ -72,6 +72,7 @@ jobs:
             build/windows-inputs/policies
             build/windows-inputs/weasel.yaml
             build/windows-inputs/preview
+            build/windows-inputs/factory
 
   windows:
     needs: build

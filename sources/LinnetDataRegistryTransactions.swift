@@ -4,14 +4,16 @@ extension LinnetDataRegistry {
   static func inspectInstalledRuntime(
     productName: String,
     coreVersion: String,
-    applicationSupportDirectory: URL
+    applicationSupportDirectory: URL,
+    coreDataDirectory: URL? = nil
   ) throws -> InstalledRuntimeState {
     do {
       let registry = try LinnetDataRegistry(
         productName: productName,
         coreVersion: coreVersion,
         applicationSupportDirectory: applicationSupportDirectory,
-        rootAccess: .existing)
+        rootAccess: .existing,
+        coreDataDirectory: coreDataDirectory)
       try registry.verifyCanonicalRoot()
       guard try registry.validateInstalledRootLayout() else { return .missing }
       _ = try registry.validatedRuntimeSnapshot(requirement: .committed)
@@ -53,8 +55,7 @@ extension LinnetDataRegistry {
     let transactionID = UUID()
     let directory = transactionsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
     let download = downloadsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-      attributes: [.posixPermissions: 0o700])
+    _ = try Self.ensureOwnedDirectory(directory, withIntermediateDirectories: false)
     do {
       try writeJSON(
         LanguageTransactionRecord(
@@ -69,10 +70,10 @@ extension LinnetDataRegistry {
           phase: .downloading,
           candidateRevision: nil),
         to: directory.appending(path: Self.languageTransactionMarkerName))
-      try FileManager.default.createDirectory(at: download, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+      _ = try Self.ensureOwnedDirectory(download, withIntermediateDirectories: false)
     } catch {
-      try? FileManager.default.removeItem(at: download)
-      try? FileManager.default.removeItem(at: directory)
+      try? removeOwnedTree(download)
+      try? removeOwnedTree(directory)
       throw error
     }
     return .init(transactionID: transactionID, downloadDirectory: download)
@@ -90,7 +91,7 @@ extension LinnetDataRegistry {
     let active = try loadActiveStateDocument().state
     if active.transactionID == transactionID, active.publication == .prepared { return }
     try removeOwnedDownloadDirectory(transactionID: transactionID)
-    try FileManager.default.removeItem(at: directory)
+    try removeOwnedTree(directory)
     try? reconcileLanguageStorage(activeState: active)
   }
 
@@ -111,15 +112,25 @@ extension LinnetDataRegistry {
       record.phase == .prepared,
       record.candidateRevision == ActiveRevision(
         generation: activeDocument.state.generation,
-        stateSHA256: Self.sha256(activeDocument.data))
+        stateSHA256: try LinnetPackContract.sha256(activeDocument.data))
     else { throw Failure.invalidActiveState }
     let previous = directory.appending(path: "language-active", directoryHint: .isDirectory)
+    #if os(Windows)
+    let previousState = try loadActiveStateDocument(at: previous)
+    guard previousState.state.publication == .committed,
+      record.baseRevision == ActiveRevision(generation: previousState.state.generation,
+        stateSHA256: try LinnetPackContract.sha256(previousState.data)) else { throw Failure.invalidActiveState }
+    try LinnetWindowsDataFile.writeAtomically(previousState.data,
+      to: activeSharedDataDirectory.appendingPathComponent("activation.json"))
+    try? removeOwnedTree(rootDirectory.appending(path: activeDocument.state.activeView, directoryHint: .isDirectory))
+    #else
     guard let previousState = try? loadActiveStateDocument(at: previous),
       previousState.state.publication == .committed,
       swapDirectories(activeSharedDataDirectory, previous)
     else { throw Failure.invalidActiveState }
+    #endif
     try? removeOwnedDownloadDirectory(transactionID: transactionID)
-    try? FileManager.default.removeItem(at: directory)
+    try? removeOwnedTree(directory)
     return true
   }
 
@@ -146,7 +157,7 @@ extension LinnetDataRegistry {
     if requirement == .committed, state.publication != .committed {
       throw Failure.invalidActiveState
     }
-    let active = activeSharedDataDirectory.standardizedFileURL
+    let active = rootDirectory.appending(path: state.activeView, directoryHint: .isDirectory).standardizedFileURL
     guard Self.isSecureOwnedDirectory(active),
       active.resolvingSymlinksInPath() == active
     else {
@@ -169,7 +180,7 @@ extension LinnetDataRegistry {
       state: state,
       activeRevision: .init(
         generation: state.generation,
-        stateSHA256: Self.sha256(activeDocument.data))
+        stateSHA256: try LinnetPackContract.sha256(activeDocument.data))
     )
   }
 
@@ -180,7 +191,7 @@ extension LinnetDataRegistry {
     let document = try loadActiveStateDocument()
     return .init(
       generation: document.state.generation,
-      stateSHA256: Self.sha256(document.data))
+      stateSHA256: try LinnetPackContract.sha256(document.data))
   }
 
   /// Catalog-selected download authentication and immutable pack staging.
@@ -216,11 +227,10 @@ extension LinnetDataRegistry {
       throw Failure.invalidActiveState
     }
     let kindRoot = packsDirectory.appending(path: artifact.kind.rawValue, directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(
-      at: kindRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    _ = try Self.ensureOwnedDirectory(kindRoot, withIntermediateDirectories: true)
     guard Self.isSecureOwnedDirectory(kindRoot) else { throw Failure.unsafePath(kindRoot.path) }
     let identity = Self.packIdentity(sequence: artifact.sequence, version: artifact.version)
-    var final = kindRoot.appending(path: identity, directoryHint: .isDirectory)
+    let final = kindRoot.appending(path: identity, directoryHint: .isDirectory)
     var separateRepairCopy = false
     if FileManager.default.fileExists(atPath: final.path) {
       let installed = try verifiedInstalledPack(at: final)
@@ -233,6 +243,10 @@ extension LinnetDataRegistry {
     do {
       let manifest: LinnetPackContract.Manifest, manifestData: Data
       switch transfer {
+      #if os(Windows)
+      case .delta:
+        throw LinnetDataChannel.Failure.invalidArtifact("Directory-delta transport is unavailable on Windows")
+      #else
       case .delta(_, let base):
         let baseRoot = rootDirectory.appending(path: base.relativePath, directoryHint: .isDirectory)
         guard try verifiedInstalledPack(at: baseRoot) == base else { throw Failure.invalidActiveState }
@@ -240,9 +254,9 @@ extension LinnetDataRegistry {
           base: baseRoot, delta: resolvedPackage, output: partial, verifyTreeIdentity: false)
         let staged = try verifiedInstalledManifest(at: partial)
         (manifest, manifestData) = (staged.manifest, staged.manifestData)
+      #endif
       case .complete:
-        try FileManager.default.createDirectory(
-          at: partial, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        _ = try Self.ensureOwnedDirectory(partial, withIntermediateDirectories: false)
         let staged = try LinnetPackContract.verify(
           package: resolvedPackage, coreVersion: self.coreVersion, extractingTo: partial)
         (manifest, manifestData) = (staged.manifest, staged.manifestData)
@@ -251,26 +265,36 @@ extension LinnetDataRegistry {
         throw Failure.invalidActiveState
       }
       let active = Self.activePack(
-        from: manifest, manifestSHA256: Self.sha256(manifestData),
+        from: manifest, manifestSHA256: try LinnetPackContract.sha256(manifestData),
         separateRepairCopy: separateRepairCopy)
       guard artifact.matches(active) else {
         throw LinnetPackContract.Failure.invalidManifest("catalog artifact identity")
       }
-      final = rootDirectory.appending(path: active.relativePath, directoryHint: .isDirectory)
-      if FileManager.default.fileExists(atPath: final.path) {
-        guard try verifiedInstalledPack(at: final) == active else { throw Failure.invalidActiveState }
-        try prepareOwnedTreeForRemoval(partial)
-        try FileManager.default.removeItem(at: partial)
-        return active
-      }
-      try makeImmutable(partial)
-      try FileManager.default.moveItem(at: partial, to: final)
+      try publishVerifiedPack(active, from: partial)
       return active
     } catch {
+      #if !os(Windows)
       try? prepareOwnedTreeForRemoval(partial)
-      try? FileManager.default.removeItem(at: partial)
+      #endif
+      try? removeOwnedTree(partial)
       throw error
     }
+  }
+
+  /// Both authenticated downloads and the installed factory container reach
+  /// this boundary only after PackContract has verified every payload byte.
+  func publishVerifiedPack(_ pack: ActivePack, from partial: URL) throws {
+    let final = rootDirectory.appending(path: pack.relativePath, directoryHint: .isDirectory)
+    if FileManager.default.fileExists(atPath: final.path) {
+      guard try verifiedInstalledPack(at: final) == pack else { throw Failure.invalidActiveState }
+      #if !os(Windows)
+      try prepareOwnedTreeForRemoval(partial)
+      #endif
+      try removeOwnedTree(partial)
+      return
+    }
+    try makeImmutable(partial)
+    try FileManager.default.moveItem(at: partial, to: final)
   }
 
   /// Rebuilds the complete Active projection from one compatible target
@@ -296,11 +320,7 @@ extension LinnetDataRegistry {
       packs: targetState.packs,
       edition: targetState.edition
     )
-    try FileManager.default.createDirectory(
-      at: candidate,
-      withIntermediateDirectories: false,
-      attributes: [.posixPermissions: 0o700]
-    )
+    _ = try Self.ensureOwnedDirectory(candidate, withIntermediateDirectories: false)
     do {
       return try materializeActivationCandidate(
         candidate: candidate,
@@ -313,7 +333,7 @@ extension LinnetDataRegistry {
     } catch {
       // The downloading record remains the single cleanup owner until the
       // prepared record is atomically published.
-      try? FileManager.default.removeItem(at: candidate)
+      try? removeOwnedTree(candidate)
       throw error
     }
   }
@@ -354,73 +374,63 @@ extension LinnetDataRegistry {
     edition: Edition,
     record: inout LanguageTransactionRecord
   ) throws -> ActivationCandidate {
-    try FileManager.default.createDirectory(
-      at: candidate.appending(path: "build", directoryHint: .isDirectory),
-      withIntermediateDirectories: false,
-      attributes: [.posixPermissions: 0o700])
-    let excluded = Set(["linnet_zh.dict.yaml", "linnet_zh_full.dict.yaml"])
+    let generation = snapshot.state.generation + 1
+    #if os(Windows)
+    let activeView = Self.generationViewPath(record.transactionID)
+    #else
+    let activeView = "Runtime/Active"
+    #endif
+    let state = ActiveState(
+      format: Self.stateFormat, edition: edition, generation: generation,
+      activeView: activeView, packs: packs, publication: .prepared,
+      transactionID: record.transactionID, acceptedCatalog: record.catalog,
+      rollbackPacks: rollbackPacksAfterPublication(previous: snapshot.state, candidate: packs))
+    var manifests: [LinnetPackContract.Kind: LinnetPackContract.Manifest] = [:]
+    for pack in packs { manifests[pack.kind] = try verifiedInstalledManifest(for: pack).manifest }
+    // Construction and verification consume the same complete projection map,
+    // including the selected Standard/Full dictionary root.
+    let targets = try activeProjectionTargets(state: state, manifests: manifests)
+    let selectedSources = Set(targets.values.map(\.standardizedFileURL))
     for pack in packs {
       let packRoot = rootDirectory.appending(path: pack.relativePath, directoryHint: .isDirectory)
-      let manifest = try verifiedInstalledManifest(for: pack).manifest
-      for entry in manifest.files {
-        let relative = entry.path
-        if excluded.contains(relative) { continue }
+      for entry in manifests[pack.kind]!.files
+        where selectedSources.contains(packRoot.appending(path: entry.path).standardizedFileURL) {
         _ = try verifiedManifestFile(entry, in: packRoot)
-        let projected = candidate.appending(path: relative)
-        try FileManager.default.createDirectory(
-          at: projected.deletingLastPathComponent(), withIntermediateDirectories: true,
-          attributes: [.posixPermissions: 0o700])
-        var projectedInfo = stat()
-        guard lstat(projected.path, &projectedInfo) != 0, errno == ENOENT else {
-          throw Failure.invalidActiveState
-        }
-        let parentDepth = max(0, relative.split(separator: "/").count - 1)
-        let upward = String(repeating: "../", count: 2 + parentDepth)
-        try FileManager.default.createSymbolicLink(
-          atPath: projected.path,
-          withDestinationPath: upward + pack.relativePath + "/" + relative)
       }
     }
-
-    let generation = snapshot.state.generation + 1
-    let grammar = candidate.appending(path: "linnet_grammar_active.yaml")
-    try Self.activeGrammarConfiguration
-      .write(to: grammar, options: .atomic)
-    try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: grammar.path)
-    guard let chinese = packs.first(where: { $0.kind == .chinese }) else {
-      throw Failure.invalidActiveState
+    #if os(Windows)
+    try materializeWindowsView(at: candidate, targets: targets)
+    #else
+    try FileManager.default.createDirectory(
+      at: candidate.appending(path: "build", directoryHint: .isDirectory),
+      withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    for (relative, source) in targets.sorted(by: { $0.key < $1.key }) {
+      let projected = candidate.appending(path: relative)
+      try FileManager.default.createDirectory(
+        at: projected.deletingLastPathComponent(), withIntermediateDirectories: true,
+        attributes: [.posixPermissions: 0o700])
+      let depth = max(0, relative.split(separator: "/").count - 1)
+      let path = String(source.path.dropFirst(rootDirectory.path.count + 1))
+      try FileManager.default.createSymbolicLink(atPath: projected.path,
+        withDestinationPath: String(repeating: "../", count: 2 + depth) + path)
     }
-    let selectorPack = edition == .full
-      ? packs.first(where: { $0.kind == .extended }) : chinese
-    guard let selectorPack else { throw Failure.invalidActiveState }
-    let selectorName = edition == .full
-      ? "linnet_zh_full.dict.yaml" : "linnet_zh.dict.yaml"
-    try FileManager.default.createSymbolicLink(
-      atPath: candidate.appending(path: "linnet_zh.dict.yaml").path,
-      withDestinationPath: "../../\(selectorPack.relativePath)/\(selectorName)"
-    )
-    let state = ActiveState(
-      format: Self.stateFormat,
-      edition: edition,
-      generation: generation,
-      activeView: "Runtime/Active",
-      packs: packs,
-      publication: .prepared,
-      transactionID: record.transactionID,
-      acceptedCatalog: record.catalog,
-      rollbackPacks: rollbackPacksAfterPublication(previous: snapshot.state, candidate: packs)
-    )
+    let grammar = candidate.appending(path: "linnet_grammar_active.yaml")
+    try Self.activeGrammarConfiguration.write(to: grammar, options: .atomic)
+    try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: grammar.path)
+    #endif
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     let stateData = try encoder.encode(state) + Data("\n".utf8)
+    #if os(Windows)
+    try LinnetWindowsDataFile.writeAtomically(stateData, to: candidate.appending(path: "activation.json"))
+    #else
     try stateData.write(to: candidate.appending(path: "activation.json"), options: .atomic)
+    #endif
     record.phase = .prepared
     record.candidateRevision = .init(
-      generation: generation, stateSHA256: Self.sha256(stateData))
+      generation: generation, stateSHA256: try LinnetPackContract.sha256(stateData))
     try writeJSON(record, to: transaction.appending(path: Self.languageTransactionMarkerName))
-    return ActivationCandidate(
-      transactionID: record.transactionID,
-      directory: candidate,
+    return ActivationCandidate(transactionID: record.transactionID, directory: candidate,
       expectedActiveRevision: snapshot.activeRevision)
   }
 
@@ -434,7 +444,7 @@ extension LinnetDataRegistry {
     guard let record = validatedLanguageTransaction(at: transaction, now: Date()),
       record.phase == .prepared,
       record.candidateRevision == ActiveRevision(
-        generation: active.generation, stateSHA256: Self.sha256(activeDocument.data)),
+        generation: active.generation, stateSHA256: try LinnetPackContract.sha256(activeDocument.data)),
       active.publication == .prepared,
       active.transactionID == transactionID
     else { throw Failure.invalidActiveState }
@@ -451,6 +461,9 @@ extension LinnetDataRegistry {
     activeState: ActiveState,
     now: Date = Date()
   ) throws {
+    #if os(Windows)
+    try retireWindowsViews(active: activeState, now: now)
+    #endif
 
     guard let entries = try ownedDirectoryEntries(
       at: transactionsDirectory, recursively: false)
@@ -474,13 +487,15 @@ extension LinnetDataRegistry {
       preflightedTrees: preflightedTrees,
       retirementMarkers: retirementMarkers
     )
-    for directory in transactionPlan.scratch { try? FileManager.default.removeItem(at: directory) }
+    for directory in transactionPlan.scratch { try? removeOwnedTree(directory) }
     let protected = transactionPlan.pendingPackPaths.union(cleanupFailures)
     for cleanup in packCleanups where !protected.contains(cleanup.relativePath) {
       guard let tree = preflightedTrees[cleanup.directory.standardizedFileURL.path] else { continue }
       do {
+        #if !os(Windows)
         try prepareOwnedTreeForRemoval(cleanup.directory, entries: tree)
-        try FileManager.default.removeItem(at: cleanup.directory)
+        #endif
+        try removeOwnedTree(cleanup.directory, entries: tree)
       } catch { continue }
     }
   }
@@ -574,23 +589,28 @@ extension LinnetDataRegistry {
   func removeOwnedDownloadDirectory(transactionID: UUID) throws {
     let directory = downloadsDirectory.appending(
       path: transactionID.uuidString, directoryHint: .isDirectory)
+    #if os(Windows)
+    guard try LinnetWindowsDataFile.existing(directory, access: .directory) != nil else { return }
+    #else
     var info = stat()
     guard lstat(directory.path, &info) == 0 else {
       if errno == ENOENT { return }
       throw Failure.invalidActiveState
     }
+    #endif
     guard directory.deletingLastPathComponent().standardizedFileURL
       == downloadsDirectory.standardizedFileURL,
       Self.isSecureOwnedDirectory(downloadsDirectory),
       Self.isSecureOwnedDirectory(directory),
       contains(directory.resolvingSymlinksInPath())
     else { throw Failure.invalidActiveState }
-    try FileManager.default.removeItem(at: directory)
+    try removeOwnedTree(directory)
   }
 
   /// Removes a fully projected committed transaction while keeping its marker
   /// as the last recovery fact. If the final directory removal fails, the
   /// exact marker is restored before the error is returned for a later retry.
+  #if !os(Windows)
   func retireLanguageTransaction(
     at directory: URL,
     markerData: Data,
@@ -598,7 +618,7 @@ extension LinnetDataRegistry {
   ) throws {
     let markerURL = directory.appending(path: Self.languageTransactionMarkerName)
     for entry in entries where entry.lastPathComponent != Self.languageTransactionMarkerName {
-      try? FileManager.default.removeItem(at: entry)
+      try? removeOwnedTree(entry)
     }
     guard unlink(markerURL.path) == 0 else {
       if errno == ENOENT, !FileManager.default.fileExists(atPath: directory.path) { return }
@@ -612,6 +632,7 @@ extension LinnetDataRegistry {
       throw failure
     }
   }
+  #endif
 
   func rollbackPacksAfterPublication(
     previous: ActiveState,
@@ -673,8 +694,9 @@ extension LinnetDataRegistry {
       identity.packID == kind.packID,
       Self.isSafeIdentifier(identity.version), identity.sequence > 0,
       Self.isSHA256(identity.contentSHA256),
+      let manifestDigest = try? LinnetPackContract.sha256(manifestData),
       [Self.packIdentity(sequence: identity.sequence, version: identity.version),
-       Self.packIdentity(sequence: identity.sequence, version: identity.version) + "-" + Self.sha256(manifestData)]
+       Self.packIdentity(sequence: identity.sequence, version: identity.version) + "-" + manifestDigest]
         .contains(directory.lastPathComponent)
     else { return false }
     return true
@@ -708,6 +730,7 @@ extension LinnetDataRegistry {
 
   /// Lists a Registry-owned directory before cleanup.
   /// Callers finish every preflight before they execute the first deletion.
+  #if !os(Windows)
   func ownedDirectoryEntries(
     at directory: URL,
     recursively: Bool) throws -> [URL]? {
@@ -745,6 +768,7 @@ extension LinnetDataRegistry {
     guard !enumerationFailed else { throw Failure.invalidActiveState }
     return entries
   }
+  #endif
 
   func readOwnedJSON<T: Decodable>(_ url: URL) -> T? {
     guard let data = try? readOwnedFile(url) else { return nil }
@@ -753,6 +777,7 @@ extension LinnetDataRegistry {
 
   /// Reads one user-writable Registry control file through the descriptor that
   /// was validated. Size and identity must remain stable for the whole read.
+  #if !os(Windows)
   func readOwnedFile(
     _ url: URL
   ) throws -> Data {
@@ -810,11 +835,16 @@ extension LinnetDataRegistry {
     else { throw OwnedFileReadFailure.invalid }
     return data
   }
+  #endif
 
   func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    #if os(Windows)
+    try LinnetWindowsDataFile.writeAtomically(encoder.encode(value) + Data("\n".utf8), to: url)
+    #else
     try (encoder.encode(value) + Data("\n".utf8)).write(to: url, options: .atomic)
+    #endif
   }
 
 }

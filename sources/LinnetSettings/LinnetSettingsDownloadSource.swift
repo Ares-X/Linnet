@@ -1,4 +1,8 @@
+#if os(Windows)
+import WinSDK
+#else
 import Darwin
+#endif
 import Foundation
 
 /// Settings-only owner for choosing how canonical Linnet release URLs are fetched.
@@ -233,10 +237,19 @@ struct LinnetSettingsDownloadSource: Equatable, Sendable {
       })
     else { return false }
 
+    #if os(Windows)
+    return (Array(host.utf16) + [0]).withUnsafeBufferPointer { name in
+      var address4 = IN_ADDR()
+      if InetPtonW(INT(AF_INET), name.baseAddress, &address4) == 1 { return false }
+      var address6 = IN6_ADDR()
+      return InetPtonW(INT(AF_INET6), name.baseAddress, &address6) != 1
+    }
+    #else
     var address4 = in_addr()
     if host.withCString({ inet_pton(AF_INET, $0, &address4) }) == 1 { return false }
     var address6 = in6_addr()
     if host.withCString({ inet_pton(AF_INET6, $0, &address6) }) == 1 { return false }
     return true
+    #endif
   }
 }

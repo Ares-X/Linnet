@@ -1,6 +1,10 @@
+import Foundation
+#if os(Windows)
+import WinSDK
+#else
 import CryptoKit
 import Darwin
-import Foundation
+#endif
 import zlib
 
 /// Canonical on-disk contract for deterministic Linnet language packs.
@@ -141,6 +145,10 @@ enum LinnetPackContract {
     coreVersion: String,
     extractingTo destination: URL? = nil
   ) throws -> VerifiedPack {
+    #if os(Windows)
+    let rootLease = try destination.map { try LinnetWindowsDataFile($0, access: .directory) }
+    defer { withExtendedLifetime(rootLease) {} }
+    #endif
     if let destination {
       try requireEmptySecureDirectory(destination)
     }
@@ -260,21 +268,33 @@ extension LinnetPackContract {
     destination: URL?
   ) throws {
     var remaining = entry.bytes
-    var fileHasher = SHA256()
+    var fileHasher = try Hasher()
+    #if os(Windows)
+    var output: LinnetWindowsDataFile?
+    let parentLeases = try destination.map {
+      try LinnetWindowsDataFile.prepareParents(path: entry.path, beneath: $0)
+    } ?? []
+    defer { withExtendedLifetime(parentLeases) {} }
+    #else
     var output: FileHandle?
+    #endif
     if let destination {
       let fileURL = destination.appending(path: entry.path, directoryHint: .notDirectory)
+      #if os(Windows)
+      output = try LinnetWindowsDataFile(fileURL, access: .create)
+      #else
       try prepareParentDirectories(for: fileURL, beneath: destination)
       let descriptor = open(fileURL.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
       guard descriptor >= 0 else { throw Failure.unsafePath(entry.path) }
       output = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+      #endif
     }
     do {
       while remaining > 0 {
         let count = Int(min(remaining, 1_048_576))
         let chunk = try payload.read(maximumBytes: count)
         guard !chunk.isEmpty else { throw Failure.invalidPayload("unpacked size") }
-        fileHasher.update(data: chunk)
+        try fileHasher.update(data: chunk)
         try output?.write(contentsOf: chunk)
         remaining -= UInt64(chunk.count)
       }
@@ -284,14 +304,18 @@ extension LinnetPackContract {
       try? output?.close()
       throw error
     }
-    guard hex(fileHasher.finalize()) == entry.sha256 else {
+    guard try fileHasher.finalize() == entry.sha256 else {
       throw Failure.invalidPayload("hash \(entry.path)")
     }
     if let destination {
+      #if os(Windows)
+      try LinnetWindowsDataFile.makeReadOnly(destination.appending(path: entry.path))
+      #else
       try FileManager.default.setAttributes(
         [.posixPermissions: 0o444],
         ofItemAtPath: destination.appending(path: entry.path).path
       )
+      #endif
     }
   }
 
@@ -299,6 +323,7 @@ extension LinnetPackContract {
     guard !path.isEmpty, path.utf8.count <= maximumPathBytes,
       path == path.precomposedStringWithCanonicalMapping,
       !path.hasPrefix("/"), !path.hasPrefix("~"), !path.contains("\\"),
+      path.rangeOfCharacter(from: CharacterSet(charactersIn: "<>:\"|?*")) == nil,
       !path.unicodeScalars.contains(where: {
         $0.value == 0 || CharacterSet.controlCharacters.contains($0)
       })
@@ -306,8 +331,17 @@ extension LinnetPackContract {
       throw Failure.unsafePath(path)
     }
     let components = path.split(separator: "/", omittingEmptySubsequences: false)
-    guard components.allSatisfy({
-      !$0.isEmpty && $0 != "." && $0 != ".." && $0.utf8.count <= 255
+    guard components.allSatisfy({ component in
+      guard !component.isEmpty, component != ".", component != "..",
+        component.utf8.count <= 255, !component.hasSuffix("."), !component.hasSuffix(" ")
+      else { return false }
+      // DOS device names stay reserved inside subdirectories and with an
+      // extension. Do not let a portable payload name resolve to a device.
+      let stem = component.split(separator: ".", omittingEmptySubsequences: false)[0].uppercased()
+      if ["CON", "PRN", "AUX", "NUL"].contains(stem) { return false }
+      if stem.count == 4, stem.hasPrefix("COM") || stem.hasPrefix("LPT"),
+        "123456789¹²³".contains(stem.last!) { return false }
+      return true
     }), kindOwns(path: path, kind: kind) else {
       throw Failure.unsafePath(path)
     }
@@ -353,6 +387,12 @@ extension LinnetPackContract {
   }
 
   fileprivate static func requireEmptySecureDirectory(_ directory: URL) throws {
+    #if os(Windows)
+    // verify() holds the native owner/ACL/no-reparse lease for the entire run.
+    guard try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty else {
+      throw Failure.outputNotEmpty
+    }
+    #else
     var info = stat()
     guard lstat(directory.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
       info.st_uid == getuid(), (info.st_mode & (S_IWGRP | S_IWOTH)) == 0,
@@ -360,6 +400,7 @@ extension LinnetPackContract {
     else {
       throw Failure.outputNotEmpty
     }
+    #endif
   }
 
   fileprivate static func prepareParentDirectories(for file: URL, beneath root: URL) throws {
@@ -390,30 +431,33 @@ extension LinnetPackContract {
     private let handle: FileHandle
     private let expectedBytes: UInt64
     private let expectedSHA256: String
-    private let input = UnsafeMutablePointer<UInt8>.allocate(capacity: 1_048_576)
-    private let output = UnsafeMutablePointer<UInt8>.allocate(capacity: 1_048_576)
+    private let input: UnsafeMutablePointer<UInt8>
+    private let output: UnsafeMutablePointer<UInt8>
     private var stream: z_stream
-    private var unpackedHasher = SHA256()
+    private var unpackedHasher: Hasher
     private var unpackedBytes: UInt64 = 0
     private var inputEnded = false
     private var ended = false
+    private var inflateInitialized = false
 
     init(handle: FileHandle, expectedBytes: UInt64, expectedSHA256: String) throws {
       self.handle = handle
       self.expectedBytes = expectedBytes
       self.expectedSHA256 = expectedSHA256
+      unpackedHasher = try Hasher()
+      input = .allocate(capacity: 1_048_576)
+      output = .allocate(capacity: 1_048_576)
       stream = z_stream()
       guard inflateInit_(
         &stream, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK
       else {
-        input.deallocate()
-        output.deallocate()
         throw Failure.invalidPayload("zlib initialization")
       }
+      inflateInitialized = true
     }
 
     deinit {
-      inflateEnd(&stream)
+      if inflateInitialized { inflateEnd(&stream) }
       input.deallocate()
       output.deallocate()
     }
@@ -446,7 +490,7 @@ extension LinnetPackContract {
           guard unpackedBytes <= expectedBytes else {
             throw Failure.invalidPayload("unpacked size")
           }
-          unpackedHasher.update(data: chunk)
+          try unpackedHasher.update(data: chunk)
           if status == Z_STREAM_END {
             try markEnded()
           }
@@ -469,7 +513,7 @@ extension LinnetPackContract {
           throw Failure.invalidPayload("unpacked size")
         }
       }
-      guard LinnetPackContract.hex(unpackedHasher.finalize()) == expectedSHA256 else {
+      guard try unpackedHasher.finalize() == expectedSHA256 else {
         throw Failure.invalidPayload("unpacked hash")
       }
     }
@@ -495,7 +539,87 @@ extension LinnetPackContract {
     return data.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
   }
 
-  static func sha256(_ data: Data) -> String { hex(SHA256.hash(data: data)) }
+  static func sha256(_ data: Data) throws -> String {
+    var hasher = try Hasher()
+    try hasher.update(data: data)
+    return try hasher.finalize()
+  }
+
+  /// Platform cryptography only; manifest, catalog and installed-file callers
+  /// share this byte identity. A native error must not look like a valid hash.
+  struct Hasher {
+    #if os(Windows)
+    private let context: CNGContext
+
+    init() throws { context = try CNGContext() }
+
+    mutating func update(data: Data) throws {
+      try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+        var offset = 0
+        while offset < bytes.count {
+          let count = min(bytes.count - offset, Int(UInt32.max))
+          try CNGContext.check(
+            BCryptHashData(context.hash,
+              UnsafeMutablePointer(mutating: bytes.baseAddress!
+                .advanced(by: offset).assumingMemoryBound(to: UInt8.self)),
+              UInt32(count), 0), operation: "BCryptHashData")
+          offset += count
+        }
+      }
+    }
+
+    mutating func finalize() throws -> String {
+      var bytes = [UInt8](repeating: 0, count: 32)
+      try CNGContext.check(
+        BCryptFinishHash(context.hash, &bytes, 32, 0),
+        operation: "BCryptFinishHash")
+      return LinnetPackContract.hex(bytes)
+    }
+
+    private final class CNGContext {
+      let algorithm: BCRYPT_ALG_HANDLE?
+      let hash: BCRYPT_HASH_HANDLE?
+
+      init() throws {
+        var algorithm: BCRYPT_ALG_HANDLE?
+        var hash: BCRYPT_HASH_HANDLE?
+        try (Array("SHA256".utf16) + [0]).withUnsafeBufferPointer {
+          try Self.check(BCryptOpenAlgorithmProvider(&algorithm, $0.baseAddress, nil, 0),
+            operation: "BCryptOpenAlgorithmProvider")
+        }
+        do {
+          // CNG owns the object allocation on all supported Windows versions.
+          try Self.check(BCryptCreateHash(algorithm, &hash, nil, 0, nil, 0, 0),
+            operation: "BCryptCreateHash")
+        } catch {
+          BCryptCloseAlgorithmProvider(algorithm, 0)
+          throw error
+        }
+        self.algorithm = algorithm
+        self.hash = hash
+      }
+
+      deinit {
+        BCryptDestroyHash(hash)
+        BCryptCloseAlgorithmProvider(algorithm, 0)
+      }
+
+      static func check(_ status: NTSTATUS, operation: String) throws {
+        guard status >= 0 else {
+          throw NSError(domain: "Windows.CNG", code: Int(status), userInfo: [
+            NSLocalizedDescriptionKey: "\(operation) failed (NTSTATUS \(status))."
+          ])
+        }
+      }
+    }
+    #else
+    private var value = SHA256()
+
+    init() throws {}
+    mutating func update(data: Data) throws { value.update(data: data) }
+    mutating func finalize() throws -> String { LinnetPackContract.hex(value.finalize()) }
+    #endif
+  }
 
   fileprivate static func hex<S: Sequence>(_ bytes: S) -> String where S.Element == UInt8 {
     bytes.map { String(format: "%02x", $0) }.joined()

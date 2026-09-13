@@ -8,6 +8,272 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 consolidated local validation
+
+Passed on the development Mac with isolated data (not Windows UAT):
+
+- `rime-sync-controller`, `data-registry`, `data-channel`, `download-transport`,
+  `download-source`, `pack`, `settings-update-checker`, `settings-data-coordinator`.
+  The new shared online-operation cases cover current-pack reuse, native
+  activation rejection/success, cancellation and transaction cleanup.
+- Current locked Rime runtime rebuilt; Windows projection/input, native Settings
+  persistence, failed-write preservation, Unicode snapshots/learning integrity,
+  native sync results and missing-user-schema failure probes passed against it.
+- `scripts/stage-windows-build-inputs` produced all four shared factory packs and
+  the Windows activation profile, then passed its projection/runtime checks.
+- `make release` compiled the local unsigned macOS app and embedded Settings
+  successfully, including the migrated shared online-operation caller. It was
+  not installed or loaded into the daily input method.
+- Lock verification, patch applicability, Xcode project parsing and diff whitespace
+  checks passed. SwiftLint exits successfully but reports existing style/size
+  warnings, including the enlarged conditional Registry files; it is not a
+  warning-free result. No lint threshold or baseline was changed.
+
+Two fixture corrections were needed: per-session URLProtocol configuration
+instead of global registration, and matching catalog Core/minimum pack versions.
+The real callers now pass the concrete transport they configure; there is no
+test-only network API. An initial Settings probe linked the old Rime binary;
+it passed after rebuilding the current patch. One coordinator compile overlapped
+SDK-header publication and failed PCH timestamp validation; its serial rerun
+passed. Neither was hidden by changing the behavior assertions.
+
+Final installer review also found the newly installed factory subdirectory was
+absent from upstream's flat-file uninstall list. Native NSIS now removes the
+four factory containers, activation document and empty parent directories;
+learned/user data remains untouched. Its actual removal is still a native
+preflight/lifecycle item. Windows compiler, packaged DLL closure, installed
+updates and desktop workflows remain NOT_EXERCISED for this source batch.
+
+### Consolidated completion batch (supersedes incremental UAT)
+
+The maintainer has now authorized stable WinSparkle and a Windows Swift build
+toolchain with packaged runtime. This resolves the dependency-strategy blocker;
+it does not authorize Windows Release publication. Keep the existing correction
+batch and finish the portable update/sync integration before building or UAT.
+
+Update milestone: restore an in-app upgrade flow through maintained WinSparkle,
+retain the root language-pack/activation and synchronization policy owners,
+and project them into the Windows host. WinSparkle owns installer downloading,
+signature verification and update UI; the existing NSIS installer still owns
+installation. Remove the blanket updater removal in preparation, packaging and
+preflight, not the release-publication restriction. Use the native OS
+architecture for installer selection because the shared x64 server also runs
+on ARM64 Windows. One installer owner remains one; update-library integration
+0 -> 1; duplicate updater/download implementations 0 -> 0. Allowed files are
+the Windows projection/build/preflight/UI and current Weasel patch/lock, the
+existing shared update/sync owners for actual Windows platform adaptations,
+and this record. Later validation: existing Windows source/projection gate,
+focused shared pack/sync selectors, then one native build/preflight and exact
+candidate update/data/typing UAT. No development toolchain goes into Tiny.
+
+The unbuilt source now restores WinSparkle 0.9.4 from its official binary
+archive (SHA-256 `6037df37fc263bd1650a1c4949681a9d40ffe991d01f35892a406cb5d103c976`).
+Preparation uses its current headers/import libraries and packages its DLL and
+licenses. Tray and Settings requests share the existing server: `/update`
+forwards the native tray command before the normal restart path, so a check
+does not restart input or apply a draft. Installer execution remains native
+WinSparkle/NSIS; no competing download or shutdown coordinator was added.
+One native-platform helper replaces the diagnostic architecture guess and
+serves update selection. Microsoft documents that GetNativeSystemInfo may
+report x64 emulation on ARM; IsWow64Process2 supplies the actual native machine.
+The pre-1709 compatibility branch is restricted to the existing Intel/AMD
+Windows target; ARM64 requires Windows 11. Native-machine owners 2 guesses -> 1;
+new parser/service 0 -> 0. These source paths are not compiled or accepted yet.
+
+A dedicated Ed25519 key has been generated and retained locally outside Git
+with private-file mode 600. Only its public key is in the Windows update
+contract. The two appcasts contain no release entries. No private key, feed or
+Windows artifact has been uploaded or published. Package/UAT evidence must
+still cover exact signed bytes, per-OS selection, cancellation and failed
+downloads without disturbing ongoing input.
+
+The maintainer has requested one complete correction/alignment batch before
+more desktop testing. Do not install the in-flight 385cb89 intermediate build,
+dispatch another native build after each edit, or treat old-candidate results
+as final acceptance. Its CI has now failed; retain it as diagnostic evidence
+only. No build or UAT is currently running.
+
+The remaining implementation work is distinct from missing acceptance:
+
+Automatic-sync implementation milestone: an explicitly selected Windows sync
+folder participates in the same hourly incremental learning schedule as macOS.
+The existing Swift controller owns timing, retry, cancellation and terminal
+results; Rime owns the incremental operation; the native installation config
+owns the selected Windows folder. The missing Windows caller, not the Rime
+algorithm, is the cause. Compile the actual controller into one x64 Swift DLL
+used by the installed server on both OS architectures. A C ABI translates only
+callbacks, and the existing IPC server serializes its run-loop pump with Rime
+using a non-blocking lock. No second scheduler, parser, daemon or x86 Swift
+runtime. The non-shipped Win32 server remains a build compatibility target;
+x86 input clients continue to use the installed x64 server. Policy owners
+1 -> 1; language/OS interoperability boundaries 0 -> 1; duplicate schedules
+0 -> 0. Allowed files additionally include the shared sync controller, Windows
+Swift/native boundary and its build/packaging inputs. Later focused checks:
+existing sync-controller tests, native callback/run-loop and maintenance
+regressions, then installed folder selection, automatic merge and continuous
+typing. These are not run before the complete source batch closes.
+
+Pack portability milestone: the existing manifest path validator accepts names
+such as `opencc/CON.txt`, `opencc/file:stream`, and trailing-dot aliases, which
+have different file/device meanings on Windows. Reject these in the canonical
+downloaded-pack boundary before extraction on every build platform, so the one
+pack format stays portable. Keep local Settings/user-dictionary names outside
+this check. The existing validator and pack test own this correction; path
+validators 1 -> 1, new parsers/layers/quotas 0 -> 0. This alone does not complete
+Windows extraction or activation. The focused later selector is
+`tests/verify_swift_units.sh --only pack`; it remains unrun in this phase.
+
+The shared pack extractor now has an unbuilt Windows filesystem/cryptography
+implementation. PackContract remains the single manifest/payload parser.
+DataChannel and DataRegistry consume its throwing SHA-256 implementation
+(CryptoKit on macOS, system CNG on Windows); the two separate digest entry
+points are removed, 3 -> 1. Existing tool/fixture callers propagate errors and
+the pack suite adds known-answer/chunk-boundary coverage. Windows extraction
+holds non-reparse directory handles, checks the actual owner/write ACL, creates
+files exclusively, flushes/closes them and marks completed files read-only.
+These checks apply to downloaded-pack staging, not local Settings names.
+
+The Swift DLL build now includes PackContract and that native file boundary.
+It reuses zlibstatic.lib already supplied by the authorized Swift 6.3.3 SDK,
+with matching pinned zlib 1.3.1 headers and license; there is no new zlib build,
+installer or DLL. The exact SDK layout, MSVC linkage, CNG and filesystem behavior
+remain NOT_EXERCISED. Registry storage, factory bootstrap and native runtime
+setup and the online activation/UI workflow are now authored as described below.
+No pack-specific public ABI was added solely for a test.
+This source phase ran only read-only inspection and `git diff --check`, not
+the pack/data-channel/data-registry tests or a Windows build.
+
+Registry/factory/native setup milestone (CODE only, not compiled):
+
+- The shared Registry remains the only ActiveState, manifest, compatibility and
+  language-transaction owner. Windows publishes `Runtime/Active/activation.json`
+  atomically and uses its existing `active_view` to select `Runtime/Views/UUID`.
+  No second pointer format, state parser or recovery daemon was added. macOS
+  keeps its atomic directory exchange; common projection selection is shared.
+- One native HANDLE owner now handles private directories, identities, ACLs,
+  exclusive reads/writes and readonly hard-link retirement (2 extraction handle
+  classes -> 1 filesystem owner). User/SYSTEM/Administrators are the same
+  trusted principals for ownership and write authority; Windows token default
+  ownership is not assumed to be the individual user SID. New private
+  directories have an explicit user-owned ACL; existing ACLs are not rewritten.
+- Factory preparation uses `stage_language_pack_sources`, `build_data_pack`
+  and the existing pack/profile CLI, not a Windows JSON/pack producer. The
+  installer ships those four containers instead of a second flat dictionary
+  tree. First activation alone uses the factory; Core upgrades do not downgrade
+  already active packs. The existing flat user/learning directory is retained.
+- `linnet_data_setup` supplies the Registry snapshot to actual Rime server and
+  Configurator consumers. Setup/module registration is rerun after maintenance
+  so resource resolvers cannot retain Program Files or a previous generation.
+  Core-derived policy files reuse the build-time Windows schema appender.
+  Shared immutable packs are never rewritten for platform policy changes.
+- Native startup and resume use the existing deployment mutex and Rime's
+  incremental deploy operation before accepting input; this also completes a
+  restored generation after a crash. The mutex creator is consolidated (2 -> 1),
+  deployment implementation remains 1 -> 1, new deployment receipts/caches 0.
+  Startup and Settings resume deployment cost is **not measured** and remains
+  a focused native acceptance item, not a claim of acceptable latency.
+- Existing x64 runtime probes now enter through that production ABI, assert
+  the flat learning path and activated view, and use only candidate/OS DLL
+  search paths. Factory/installed input and Settings probes have not run.
+- Installer minimum is corrected to Win10 1903+, ARM64 still Win11; silent
+  rejection returns 1633 before any upgrade mutation. The old guessed-AMD64
+  fallback is removed. This matches the UTF-8 manifest boundary and covers the
+  readonly unlink API floor; older Windows support is not claimed.
+- Allowed owners/callers are the Registry/Pack/Channel files, native setup,
+  installer, shared Swift ABI, factory producer/build inputs, existing focused
+  probes and these docs. Decoder/activation formats remain 1 -> 1; the old
+  Program Files runtime-data path is de-authorized in shipped x64 hosts.
+
+Later acceptance after the whole source batch: `pack,data-channel,data-registry`,
+Windows projection, target compiler/linker and native bootstrap/read-only-pack
+cleanup/atomic activation recovery; then exact installed upgrade/input/settings
+and timings. Online download and native activation source is now integrated;
+it still needs these focused/native checks. Directory-delta transport
+remains macOS-only; Windows selects complete containers in the shared channel.
+
+Online update/source freeze (CODE only until validation results below):
+
+- Moved the actual catalog/download/staging/prepare loop out of the macOS
+  Settings model into `LinnetLanguageDataUpdate`; both native consumers call it.
+  The old inline loop is removed, 1 -> 1 operation, no new HTTP stack, pack
+  selector, transaction format or mirror parser. Mac mutation lease/activation
+  coordinator are unchanged; its Xcode source list includes the shared file.
+- Windows adapts the same URLSession transport with FoundationNetworking,
+  native IP parsing and the existing HANDLE/exclusive-file sink. Foundation,
+  curl 8.9.1, Brotli 1.1.0 and libxml2 2.11.5 notices follow the tagged Swift
+  toolchain dependency inputs. Actual linked DLL closure remains a native-build
+  check; no separately built networking runtime is introduced.
+- Native Settings polls the retained Swift async operation on its UI timer;
+  no background callback retains an HWND. The Updates tab provides current/full
+  data, source selection and cancellation. Close cancels and waits for cleanup;
+  other mutation controls are disabled without applying or discarding drafts.
+- Configurator's existing UpdateWorkspace owns publication, deploy, rollback
+  and redeploy. Its commit hook opens a real selected-schema session and checks
+  required modules, without typing or imposing a second schema inventory.
+  Only after health succeeds does the shared Registry commit. Errors retain
+  the original cause and surface once through the update UI.
+- Manual upstream synchronization now shares automatic synchronization's two
+  registry writers for attempt/result metadata (1 -> 1 storage owner). The
+  unrecorded manual path is removed; no second scheduler or IPC path is added.
+- Focused download-transport coverage now exercises the actual shared operation:
+  current-pack reuse, activation success/rejection, unchanged Active before
+  native publication, cancellation and owned-transaction cleanup. Tests are
+  authored at this point, not claimed PASS.
+
+| Area | Current source boundary | Completion work |
+| --- | --- | --- |
+| Normal input, English definitions/reverse lookup, themes and candidate actions | Shared Rime/data/renderers plus locked Weasel projection | Consolidated consumer review; retain existing source fixes and later verify the final bytes |
+| Native snapshots and configuration persistence | Rime UserDbHelper / ConfigData / CustomSettings; native installer and Settings consumers | Snapshot correction is in 385cb89. The unbuilt source batch corrects configuration truncation, final stream failure and discarded native save results at their existing owners |
+| Application updates | Stable WinSparkle 0.9.4 restored in the unbuilt batch | Build/verify signatures and per-OS selection; no published Windows channel or Release |
+| Independent language-data updates | Shared PackContract/Registry, online operation and native Settings/activation are authored | Focused shared checks, native build and exact update/cancel/rollback/typing acceptance |
+| Automatic learning synchronization | Unbuilt shared Swift controller DLL and native Rime callbacks, opt-in switch, native folder and attempt/result registry metadata | The existing native probe now covers actual DLL loading, incremental completion and cancellation, but it and installed typing/maintenance journeys remain unrun |
+| Final desktop/lifecycle acceptance | Exact x64/ARM64 artifacts and dedicated targets | Resume only after the implementation batch closes; missing targets or reboot/uninstall authority remain explicit |
+
+Persistence milestone: a failed configuration write must preserve the previous
+file and report failure through native configuration consumers. ConfigData
+remains the sole YAML serializer/file owner, with CustomSettings and the Windows
+Configurator consuming its result. Replace direct destination truncation and
+ignored save results with complete sibling-file publication and explicit native
+failure propagation. Keep stream serialization separate from file publication;
+no retry, quota, new parser, dependency, daemon or transaction framework.
+Allowed files: existing core/Weasel patches and lock digests, native runtime
+smoke coverage, Windows Settings consumer if its direct write behavior needs
+correction, and this record. Owners 1 -> 1 at each existing boundary; new layers,
+fallbacks and duplicate defaults 0 -> 0. Later focused acceptance must cover
+failed output preserving old configuration bytes, successful overwrite and
+native save-result propagation, then the affected composite after source freeze.
+No daily Mac loading or new VM test is authorized by this source-review phase.
+Atomic configuration publication also resolves the existing destination and
+preserves its file permissions, so replacing direct stream writes does not
+replace a valid configuration symlink or widen an existing private file.
+The existing isolated host Settings probe now includes that compatibility row;
+it remains unrun until the consolidated batch is ready.
+
+The already-running 385cb89 CI terminated at 13:56 +08: production compilation
+completed, but the native smoke probe failed C1189 because windows.h defines
+ERROR and the newly included Rime DB header includes glog. Add glog's existing
+GLOG_NO_ABBREVIATED_SEVERITIES configuration to both native probe targets in
+runtime-smoke.vcxproj; keep the warnings/error policy and existing dependencies.
+No installer was uploaded, no native preflight ran, and no retry was dispatched.
+This compiler correction belongs to the same completion batch, not a new UAT
+candidate. The source edits and failure-preservation coverage are not yet built
+or run; only patch application/format inspection has been performed.
+
+The consolidated Settings consumer review also found a concrete mutation bug:
+OnData called Apply before identifying the requested action or opening a folder
+picker. Exporting diagnostics, cancelling a backup destination, or cancelling
+restore therefore silently saved every draft setting and redeployed input.
+Remove that unconditional call. Apply and the existing save-on-close prompt
+remain the only draft-publication entrypoints; backup snapshots applied files,
+diagnostics reads the existing persisted Settings model, and confirmed restore
+explicitly states that a successful restore discards unapplied drafts. Sync and
+dictionary actions retain their existing native owners. Scope is the existing
+Settings dialog and README; implicit draft-publication paths 1 -> 0, added
+layers/guards/dependencies 0 -> 0. Final desktop coverage must edit a draft,
+export diagnostics and cancel each file picker, then verify unchanged native
+configuration and a retained draft before explicit Apply. Do not execute that
+journey before the consolidated implementation phase closes.
+
 ### Active correction batch after dacaf10 desktop UAT
 
 - Native `/sync` at 13:01 encountered ENOSPC on the 20 GB guest disk. The
@@ -554,6 +820,36 @@ well as precompiled artifacts. Windows must preserve this contract and its nativ
 deployment boundary, not grow a second format/parser or treat the macOS-built
 dictionary binaries as Windows acceptance. No updater dependency, key, feed,
 publication path or language-pack implementation has been changed in `849c6fd`.
+
+The consolidated source review identifies a portability boundary, not a
+macOS-only product feature: PackContract imports Darwin and CryptoKit, while
+DataRegistry storage uses descriptor identity, symlink projections and
+`renameatx_np` directory exchange. Changing imports alone cannot preserve the
+activation contract on Windows. Reusing this Swift implementation would add a
+Windows build toolchain and packaged runtime, plus native filesystem adaptation;
+that dependency-strategy change needs approval before implementation. Do not
+install a full development environment in the small UAT VM or implement a
+parallel Windows pack parser/registry to bypass the decision. No new dependency
+has been added in the consolidated source batch.
+
+Automatic learning synchronization is another portable gap, separate from
+language-pack downloads. Mainline's LinnetRimeSyncController schedules the
+shared `sync_user_data_step` API; Windows currently exposes manual sync.
+Weasel's pipe workers serialize Rime calls with `g_api_mutex`, whereas its GUI
+message loop runs on another thread. A GUI timer must not call Rime outside
+that boundary or block it in a way that deadlocks synchronous UI callbacks.
+The current batch has not added a scheduler; this row is not implemented or
+accepted and must remain open in the full Windows goal. The full controller
+already owns timing, cancellation, last-attempt recording and terminal results,
+with host operations supplied as closures. Projecting its numeric constants
+into a second C++ scheduler would still duplicate those decisions. Resolve the
+pending shared Swift dependency choice before selecting the Windows host
+integration; do not introduce an interim scheduler that the reuse path replaces.
+
+That dependency-strategy approval has now been received. Independent
+persistence, Settings and compiler corrections are retained as source changes,
+not installed evidence. Continue the shared Swift adaptation as part of the
+same consolidated batch; no intermediate UAT or release is authorized.
 
 ## Native probe build correction
 

@@ -11,6 +11,7 @@ struct LinnetPackTests {
   }
 
   private static func run() throws {
+    try sha256KnownAnswers()
     try directoryDeltaRoundTrip()
     try differentialPackStagesThroughRegistry()
     try validCatalogSelectedPackStagesThroughRegistry()
@@ -22,6 +23,7 @@ struct LinnetPackTests {
     try corruptInstalledSameIdentityFailsClosed()
     try oversizedInstalledManifestFailsClosed()
     try traversalFailsClosed()
+    try windowsPackNamesStayPortable()
     try chineseLuaFailsClosed()
     try payloadHashAndTrailingBytesFailClosed()
     try corruptAndTruncatedZlibFailClosed()
@@ -32,6 +34,36 @@ struct LinnetPackTests {
     try extendedPackRequiresMatchingChineseABI()
     try unsupportedRequirementFailsClosed()
     print("LinnetPackTests: PASS")
+  }
+
+  private static func sha256KnownAnswers() throws {
+    for (input, expected) in [
+      (Data(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+      (Data("abc".utf8), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+      (Data(repeating: 97, count: 1_000_000),
+       "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+    ] {
+      require(try LinnetPackContract.sha256(input) == expected, "SHA-256 known answer")
+      var streaming = try LinnetPackContract.Hasher()
+      try streaming.update(data: Data())
+      for offset in stride(from: 0, to: input.count, by: 8191) {
+        try streaming.update(data: input.subdata(in: offset..<min(offset + 8191, input.count)))
+      }
+      require(try streaming.finalize() == expected, "SHA-256 chunk boundaries")
+    }
+  }
+
+  private static func windowsPackNamesStayPortable() throws {
+    for path in ["opencc/CON.txt", "opencc/nul", "opencc/COM1.json",
+                 "opencc/LPT³.txt", "opencc/file:stream", "opencc/file.",
+                 "opencc/folder /file.txt", "opencc/alias?.txt"] {
+      requirePackFailure(.unsafePath(path)) {
+        try LinnetPackContract.validatePath(path, kind: .chinese)
+      }
+    }
+    for path in ["opencc/COM10.txt", "opencc/中文词典.txt", "opencc/normal.name.txt"] {
+      try LinnetPackContract.validatePath(path, kind: .chinese)
+    }
   }
 
   private static func englishEntityDictionaryIsOwnedByEnglishPack() throws {
@@ -79,7 +111,7 @@ struct LinnetPackTests {
         let before = try LinnetDirectoryDelta.digest(baseRoot)
         let bytes = try Data(contentsOf: deltaFile)
         let delta = LinnetDataChannel.Delta(
-          baseContentSHA256: base.contentSHA256, bytes: UInt64(bytes.count), sha256: LinnetPackContract.sha256(bytes),
+          baseContentSHA256: base.contentSHA256, bytes: UInt64(bytes.count), sha256: try LinnetPackContract.sha256(bytes),
           url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-5/update.linnetdelta")!)
         artifact.deltas = [delta]
         requireRegistryFailure(.invalidActiveState) {
@@ -482,7 +514,7 @@ struct LinnetPackTests {
       minCore: manifest.minCore,
       contentSHA256: manifest.contentSHA256,
       bytes: UInt64(bytes.count),
-      containerSHA256: LinnetPackContract.sha256(bytes),
+      containerSHA256: try LinnetPackContract.sha256(bytes),
       url: URL(
         string: "https://github.com/Ares-X/Linnet/releases/download/data-5/\(manifest.kind.releaseAssetName)"
       )!)
@@ -531,7 +563,7 @@ struct LinnetPackTests {
       files: [.init(
         path: path,
         bytes: UInt64(payload.count),
-        sha256: fileHash ?? LinnetPackContract.sha256(payload))]
+        sha256: try fileHash ?? LinnetPackContract.sha256(payload))]
     )
     let manifestData = try LinnetPackContract.canonicalManifestData(manifest)
     if !trailing.isEmpty {

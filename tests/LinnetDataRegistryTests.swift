@@ -909,7 +909,7 @@ struct LinnetDataRegistryTests {
         LinnetPackContract.Manifest.self, from: JSONSerialization.data(withJSONObject: object))
       let manifestData = try LinnetPackContract.canonicalManifestData(manifest)
       let replacement = LinnetDataRegistry.activePack(
-        from: manifest, manifestSHA256: LinnetPackContract.sha256(manifestData), separateRepairCopy: true)
+        from: manifest, manifestSHA256: try LinnetPackContract.sha256(manifestData), separateRepairCopy: true)
       let files = try Dictionary(uniqueKeysWithValues: manifest.files.map {
         ($0.path, try Data(contentsOf: originalRoot.appending(path: $0.path)))
       })
@@ -1795,10 +1795,10 @@ struct LinnetDataRegistryTests {
     }
     let requirements: [LinnetPackContract.Requirement] =
       kind == .lts || kind == .extended ? [.init(kind: .chinese, dataABI: 1)] : []
-    let entries = files.keys.sorted().map {
+    let entries = try files.keys.sorted().map {
       LinnetPackContract.FileEntry(
         path: $0, bytes: UInt64(files[$0]!.count),
-        sha256: LinnetPackContract.sha256(files[$0]!))
+        sha256: try LinnetPackContract.sha256(files[$0]!))
     }
     let contentSHA256 = String(repeating: marker, count: 64)
     let manifest = LinnetPackContract.Manifest(
@@ -1824,7 +1824,7 @@ struct LinnetDataRegistryTests {
       minCore: manifest.minCore,
       requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
-      manifestSHA256: LinnetPackContract.sha256(manifestData))
+      manifestSHA256: try LinnetPackContract.sha256(manifestData))
     return .init(pack: pack, manifestData: manifestData, files: files)
   }
 

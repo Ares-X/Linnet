@@ -1,3 +1,63 @@
+diff --git a/src/rime/config/config_data.cc b/src/rime/config/config_data.cc
+index e3e73db..153e961 100644
+--- a/src/rime/config/config_data.cc
++++ b/src/rime/config/config_data.cc
+@@ -57,7 +57,7 @@ bool ConfigData::SaveToStream(std::ostream& stream) {
+     LOG(ERROR) << "Error emitting YAML: " << e.what();
+     return false;
+   }
+-  return true;
++  return stream.good();
+ }
+ 
+ bool ConfigData::LoadFromFile(const path& file_path, ConfigCompiler* compiler) {
+@@ -90,9 +90,29 @@ bool ConfigData::SaveToFile(const path& file_path) {
+     return false;
+   }
+   LOG(INFO) << "saving config file '" << file_path << "'.";
+-  // dump tree
+-  std::ofstream out(file_path.c_str());
+-  return SaveToStream(out);
++  path temporary;
++  try {
++    const path destination = std::filesystem::weakly_canonical(file_path);
++    const auto previous = std::filesystem::status(destination);
++    temporary = destination;
++    temporary += path(".tmp").native();
++    std::ofstream out(temporary.c_str());
++    const bool emitted = SaveToStream(out);
++    out.close();
++    if (!emitted || !out.good()) {
++      throw std::runtime_error("failed to complete configuration output");
++    }
++    if (std::filesystem::exists(previous))
++      std::filesystem::permissions(temporary, previous.permissions());
++    std::filesystem::rename(temporary, destination);
++    return true;
++  } catch (const std::exception& error) {
++    LOG(ERROR) << "failed to save config '" << file_path << "': " << error.what();
++    std::error_code cleanup_error;
++    if (!temporary.empty())
++      std::filesystem::remove(temporary, cleanup_error);
++    return false;
++  }
+ }
+ 
+ bool ConfigData::IsListItemReference(const string& key) {
+diff --git a/src/rime/lever/custom_settings.cc b/src/rime/lever/custom_settings.cc
+index 25545d6..5537970 100644
+--- a/src/rime/lever/custom_settings.cc
++++ b/src/rime/lever/custom_settings.cc
+@@ -53,7 +53,8 @@ bool CustomSettings::Save() {
+   signature.Sign(&custom_config_, deployer_);
+   path custom_config_path(deployer_->user_data_dir);
+   custom_config_path /= custom_config_file(config_id_);
+-  custom_config_.SaveToFile(custom_config_path);
++  if (!custom_config_.SaveToFile(custom_config_path))
++    return false;
+   modified_ = false;
+   return true;
+ }
 diff --git a/src/rime/context.cc b/src/rime/context.cc
 index ec840a3..c83c0d2 100644
 --- a/src/rime/context.cc

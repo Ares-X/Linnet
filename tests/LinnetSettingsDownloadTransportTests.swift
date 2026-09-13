@@ -18,6 +18,7 @@ struct LinnetSettingsDownloadTransportTests {
       try await publicMirrorMatrix()
       try await mirrorMatrix()
       try await freshInstallReplayFloorMatrix()
+      try await languageOperationMatrix()
       try await cancellationAndTimeoutMatrix()
       print("LinnetSettingsDownloadTransportTests: PASS")
     } catch {
@@ -489,6 +490,80 @@ struct LinnetSettingsDownloadTransportTests {
     try assertUnpublished(totalDestination, root: root, label: "total timeout")
   }
 
+  private enum ActivationRejected: Error { case expected }
+
+  private static func languageOperationMatrix() async throws {
+    // Use the same concrete transport as both native callers, configured with
+    // URLSession's standard per-session protocol interception point.
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let registry = try LinnetDataRegistry(productName: "Linnet", coreVersion: "0.1.1",
+      applicationSupportDirectory: root)
+    try installFreshActiveState(in: registry)
+    let before = try registry.runtimeSnapshot()
+    let activeURL = registry.activeSharedDataDirectory.appending(path: "activation.json")
+    let beforeBytes = try Data(contentsOf: activeURL)
+    let base = catalog(sequence: 4)
+    let artifacts = before.state.packs.map { pack in
+      LinnetDataChannel.Artifact(kind: pack.kind, version: pack.version, sequence: pack.sequence,
+        dataABI: pack.dataABI, minCore: pack.minCore, contentSHA256: pack.contentSHA256,
+        bytes: 4, containerSHA256: String(repeating: "b", count: 64),
+        url: URL(string: "https://github.com/Ares-X/Linnet/releases/download/data-4/\(pack.kind.releaseAssetName)")!)
+    }
+    let core = LinnetDataChannel.Core(version: "0.1.1", build: base.core.build,
+      revision: base.core.revision, bytes: base.core.bytes, sha256: base.core.sha256,
+      artifactFormat: .installerPackage,
+      artifactURL: URL(string: "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.1/Linnet-0.1.1-arm64-Core-community-beta.pkg")!,
+      releaseURL: URL(string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.1")!)
+    let current = LinnetDataChannel.Catalog(format: base.format, sequence: base.sequence, core: core,
+      activationSets: [.init(edition: .standard, packs: artifacts),
+        .init(edition: .full, packs: artifacts + [base.activationSet(for: .full)!.packs.last!])])
+    let bytes = try JSONEncoder().encode(current)
+    for reject in [true, false] {
+      StubURLProtocol.install([.response(), .data(bytes), .finish])
+      do {
+        try await LinnetLanguageDataUpdate.run(registry: registry, transport: transport(source: .publicMirror),
+          catalogURL: catalogURL, progress: { _, _ in }, diagnostic: { _ in }, activate: { candidate in
+            try require(try Data(contentsOf: activeURL) == beforeBytes,
+              "preparation published before native activation")
+            if reject { throw ActivationRejected.expected }
+            try require(registry.swapDirectories(registry.activeSharedDataDirectory, candidate.directory),
+              "fixture activation swap failed")
+            try registry.commitDataChannelUpdate(transactionID: candidate.transactionID)
+          })
+        try require(!reject, "activation rejection was swallowed")
+      } catch ActivationRejected.expected {
+        try require(reject, "unexpected activation rejection")
+        try require(try Data(contentsOf: activeURL) == beforeBytes, "rejected activation changed active data")
+      }
+      try require(StubURLProtocol.requests.count == 1, "current packs were redownloaded")
+      try require(StubURLProtocol.requests[0].url == catalogURL, "catalog used a pack mirror")
+      try require(try FileManager.default.contentsOfDirectory(atPath: registry.transactionsDirectory.path).isEmpty,
+        "operation left its transaction after completion/rejection")
+      try require(try FileManager.default.contentsOfDirectory(atPath: registry.downloadsDirectory.path).isEmpty,
+        "operation left its download directory")
+    }
+    let committed = try registry.runtimeSnapshot()
+    try require(committed.state.generation == before.state.generation + 1 &&
+      committed.state.publication == .committed && committed.state.packs == before.state.packs,
+      "current-pack activation lost generation/publication/pack identity")
+
+    StubURLProtocol.install([.response(), .data(bytes), .finish])
+    let cancelled = Task.detached {
+      try await LinnetLanguageDataUpdate.run(registry: registry, transport: transport(),
+        catalogURL: catalogURL, progress: { phase, _ in
+          if phase == .verifying { withUnsafeCurrentTask { $0?.cancel() } }
+        }, diagnostic: { _ in }, activate: { _ in throw TestFailure.message("cancelled update activated") })
+    }
+    do {
+      try await cancelled.value
+      throw TestFailure.message("cancelled update completed")
+    } catch is CancellationError { }
+    try require(try registry.activeRevision() == committed.activeRevision, "cancel changed active revision")
+    try require(try FileManager.default.contentsOfDirectory(atPath: registry.transactionsDirectory.path).isEmpty,
+      "cancel retained an unpublished transaction")
+  }
+
   private static let catalogURL = URL(
     string: "https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/catalog.json")!
 
@@ -641,12 +716,12 @@ struct LinnetSettingsDownloadTransportTests {
         attributes: [.posixPermissions: 0o700])
       try data.write(to: file)
       return LinnetPackContract.FileEntry(
-        path: path, bytes: UInt64(data.count), sha256: LinnetPackContract.sha256(data))
+        path: path, bytes: UInt64(data.count), sha256: try LinnetPackContract.sha256(data))
     }
     let unpacked = entries.reduce(into: Data()) { result, entry in
       result.append(files[entry.path]!)
     }
-    let contentSHA256 = LinnetPackContract.sha256(unpacked)
+    let contentSHA256 = try LinnetPackContract.sha256(unpacked)
     let requirements: [LinnetPackContract.Requirement] =
       kind == .lts || kind == .extended ? [.init(kind: .chinese, dataABI: dataABI)] : []
     let manifest = LinnetPackContract.Manifest(
@@ -665,7 +740,7 @@ struct LinnetSettingsDownloadTransportTests {
       dataABI: dataABI, contentSHA256: contentSHA256, minCore: minCore,
       requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
-      manifestSHA256: LinnetPackContract.sha256(manifestData))
+      manifestSHA256: try LinnetPackContract.sha256(manifestData))
     return (pack, root, files)
   }
 

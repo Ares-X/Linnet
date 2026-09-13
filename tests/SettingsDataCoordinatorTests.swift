@@ -2099,7 +2099,7 @@ struct SettingsDataCoordinatorTests {
     let document = dataChannelCatalog(for: target, sequence: sequence)
     let catalog = LinnetDataChannel.Verified(
       catalog: document,
-      digest: LinnetPackContract.sha256(try LinnetDataChannel.canonicalCatalogData(document)))
+      digest: try LinnetPackContract.sha256(LinnetDataChannel.canonicalCatalogData(document)))
     let receipt = try registry.receiptForCatalog(catalog)
     print("Language fixture \(replacement.kind.rawValue) \(replacement.version), pack \(replacement.sequence): "
       + "Catalog \(active.acceptedCatalog?.sequence ?? 0) -> \(sequence); "
@@ -2180,7 +2180,7 @@ struct SettingsDataCoordinatorTests {
     let entries = try files.sorted().map { path in
       let data = try Data(contentsOf: directory.appending(path: path))
       return LinnetPackContract.FileEntry(
-        path: path, bytes: UInt64(data.count), sha256: LinnetPackContract.sha256(data))
+        path: path, bytes: UInt64(data.count), sha256: try LinnetPackContract.sha256(data))
     }
     let marker: Character = switch kind {
     case .chinese: "a"
@@ -2215,7 +2215,7 @@ struct SettingsDataCoordinatorTests {
       minCore: manifest.minCore,
       requirements: requirements,
       relativePath: "Data/Packs/\(kind.rawValue)/\(sequence)-\(version)",
-      manifestSHA256: LinnetPackContract.sha256(manifestData))
+      manifestSHA256: try LinnetPackContract.sha256(manifestData))
   }
 
   private static func requireLanguageFailure(

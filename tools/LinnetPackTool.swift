@@ -64,7 +64,7 @@ struct LinnetPackTool {
       linnet-pack asset-name --kind KIND
       linnet-pack build-activation-profile --output FILE --core-version VERSION \\
         --chinese-pack DIR --english-pack DIR --lts-pack DIR \\
-        --extended-pack DIR
+        --extended-pack DIR [--windows-view UUID]
       linnet-pack build-catalog --sequence N --core-version VERSION --output FILE
         --core-build N --core-revision REVISION
         (--core-package FILE | --core-archive FILE)
@@ -289,7 +289,7 @@ struct LinnetPackTool {
       for (file, entry) in zip(source, manifest.files) {
         let data = try Data(contentsOf: file.url, options: [.mappedIfSafe])
         guard UInt64(data.count) == entry.bytes,
-          LinnetPackContract.sha256(data) == entry.sha256
+          try LinnetPackContract.sha256(data) == entry.sha256
         else { throw ToolFailure.invalidSource("pack differs from the accepted source bytes") }
       }
     }
@@ -308,7 +308,8 @@ struct LinnetPackTool {
   /// to the shared runtime ActiveState contract. Package scripts assemble the
   /// filesystem projection but never serialize that contract themselves.
   static func buildActivationProfile(_ options: [String: String]) throws {
-    guard options.count == 6, let coreVersion = options["core-version"] else {
+    guard options.count == (options["windows-view"] == nil ? 6 : 7),
+      let coreVersion = options["core-version"] else {
       throw ToolFailure.usage(help)
     }
     let output = try requiredURL("output", options)
@@ -331,11 +332,20 @@ struct LinnetPackTool {
       output.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent == "Runtime",
       !FileManager.default.fileExists(atPath: output.path)
     else { throw ToolFailure.invalidSource("activation output is unsafe") }
+    let activeView: String
+    if let value = options["windows-view"] {
+      guard let identifier = UUID(uuidString: value), identifier.uuidString == value else {
+        throw ToolFailure.usage("--windows-view requires a canonical UUID")
+      }
+      activeView = LinnetDataRegistry.generationViewPath(identifier)
+    } else {
+      activeView = "Runtime/Active"
+    }
     let state = LinnetDataRegistry.ActiveState(
       format: LinnetDataRegistry.stateFormat,
       edition: .full,
       generation: 1,
-      activeView: "Runtime/Active",
+      activeView: activeView,
       packs: packs)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -545,7 +555,7 @@ extension LinnetPackTool {
     for (file, entry) in zip(files, manifest.files) {
       let data = try Data(contentsOf: file.url, options: [.mappedIfSafe])
       guard UInt64(data.count) == entry.bytes,
-        LinnetPackContract.sha256(data) == entry.sha256
+        try LinnetPackContract.sha256(data) == entry.sha256
       else {
         throw ToolFailure.invalidSource("installed pack file differs from manifest")
       }

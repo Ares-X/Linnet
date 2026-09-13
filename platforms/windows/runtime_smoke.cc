@@ -1,14 +1,18 @@
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
+#include "shared_runtime.h"
 #else
 #include <csignal>
 #include <sys/resource.h>
@@ -17,6 +21,9 @@
 #include "rime_api.h"
 #include "rime_levers_api.h"
 #include "settings_model.h"
+#if defined(_M_X64)
+#include "data_runtime.h"
+#endif
 #include <rime/dict/user_db.h>
 
 #ifdef _WIN32
@@ -35,6 +42,69 @@ struct Candidate {
   std::cerr.flush();
   std::_Exit(1);
 }
+
+#if defined(_M_X64)
+void SharedRuntimeProbe(const char* library) {
+  const auto path = std::filesystem::absolute(std::filesystem::u8path(library));
+  // Do not let the CI machine's Swift installation hide a missing packaged DLL.
+  const auto module = LoadLibraryExW(path.c_str(), nullptr,
+      LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (!module) Fail("cannot load packaged Swift runtime: " + std::to_string(GetLastError()));
+  const auto create = reinterpret_cast<decltype(&linnet_sync_create)>(GetProcAddress(module, "linnet_sync_create"));
+  const auto destroy = reinterpret_cast<decltype(&linnet_sync_destroy)>(GetProcAddress(module, "linnet_sync_destroy"));
+  const auto poll = reinterpret_cast<decltype(&linnet_sync_poll)>(GetProcAddress(module, "linnet_sync_poll"));
+  if (!create || !destroy || !poll) Fail("shared Swift C exports are missing");
+  struct Fixture {
+    int attempts = 0, steps = 0, cancellations = 0, result = -99;
+    bool keep_running = false;
+  };
+  const auto step = +[](void* context, const char* directory) -> int {
+    auto& state = *static_cast<Fixture*>(context);
+    if (!directory) { ++state.cancellations; return 0; }
+    if (state.attempts != 1) Fail("shared sync ran before recording its attempt");
+    if (std::filesystem::u8path(directory) != std::filesystem::u8path(u8"C:\\Linnet 同步"))
+      Fail("shared sync changed the Unicode native folder");
+    ++state.steps;
+    if (state.keep_running) return 1;
+    return state.steps == 1 ? 3 : state.steps == 2 ? 1 : 0;
+  };
+  const auto attempt = +[](void* context, double date) -> int {
+    if (date <= 0) Fail("shared sync attempt time was not a Unix timestamp");
+    ++static_cast<Fixture*>(context)->attempts;
+    return 1;
+  };
+  const auto result = +[](void* context, int value) {
+    static_cast<Fixture*>(context)->result = value;
+  };
+  auto pumpUntil = [&](void* handle, const std::function<bool()>& done) {
+    const auto deadline = GetTickCount64() + 5000;
+    do {
+      poll(handle);
+      if (done()) return;
+      Sleep(10);
+    } while (GetTickCount64() < deadline);
+    Fail("shared Foundation run loop did not finish the native callback journey");
+  };
+  Fixture completed;
+  void* handle = create(u8"C:\\Linnet 同步", 0, &completed, step, attempt, result);
+  pumpUntil(handle, [&] { return completed.result != -99; });
+  if (completed.result != 0 || completed.steps != 3 || poll(handle) < 3500)
+    Fail("shared incremental sync lost its terminal result or hourly deadline");
+  destroy(handle);
+
+  Fixture cancelled;
+  cancelled.keep_running = true;
+  handle = create(u8"C:\\Linnet 同步", 0, &cancelled, step, attempt, result);
+  pumpUntil(handle, [&] { return cancelled.steps != 0; });
+  const int cancellations = cancelled.cancellations;
+  destroy(handle);
+  if (cancelled.result != 2 || cancelled.cancellations != cancellations + 1)
+    Fail("shared controller destruction failed to cancel and publish deferral");
+
+  // Swift/dispatch are process-lifetime dependencies, just as in the server.
+  std::cout << "linnet_windows_runtime_smoke: shared DLL/run-loop/cancellation PASS\n";
+}
+#endif
 
 std::string BaseText(const std::string& value) {
   return !value.empty() && value.front() == ' ' ? value.substr(1) : value;
@@ -255,6 +325,68 @@ void SettingsProbe(RimeApi* api, const char* shared, const char* user) {
   native_patch->Set("style/border_width", rime::New<rime::ConfigValue>(3));
   native.document.SetItem("patch", native_patch);
   native.Save(native_path);
+#ifndef _WIN32
+  // Atomic publication must retain an existing private configuration and
+  // follow its symlink, as the former stream-based save did.
+  const auto private_permissions = std::filesystem::perms::owner_read |
+                                   std::filesystem::perms::owner_write;
+  std::filesystem::permissions(native_path, private_permissions);
+  const auto linked_configuration = std::filesystem::path(user) / "settings-link.yaml";
+  std::filesystem::create_symlink(native_path.filename(), linked_configuration);
+  native.Save(linked_configuration);
+  if (!std::filesystem::is_symlink(linked_configuration) ||
+      std::filesystem::status(native_path).permissions() != private_permissions)
+    Fail("atomic configuration save replaced a symlink or widened permissions");
+  std::filesystem::remove(linked_configuration);
+#endif
+  // Exercise the native settings consumer too: it must not turn a failed
+  // configuration write into success or discard the caller's unsaved choice.
+  auto* levers = reinterpret_cast<RimeLeversApi*>(api->find_module("levers")->get_api());
+  auto* custom_settings = levers->custom_settings_init("weasel", "linnet_windows_runtime_smoke");
+  if (!custom_settings || !levers->load_settings(custom_settings) ||
+      !levers->customize_int(custom_settings, "style/border_width", 4))
+    Fail("cannot prepare native configuration write fixture");
+  const auto read_configuration = [&] {
+    std::ifstream input(native_path, std::ios::binary);
+    if (!input) Fail("cannot read native configuration fixture");
+    return std::string((std::istreambuf_iterator<char>(input)), {});
+  };
+  const auto previous_configuration = read_configuration();
+#ifdef _WIN32
+  HANDLE configuration_reader = CreateFileW(native_path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (configuration_reader == INVALID_HANDLE_VALUE)
+    Fail("cannot hold native configuration replacement fixture");
+  const bool saved_configuration = levers->save_settings(custom_settings);
+  CloseHandle(configuration_reader);
+#else
+  struct rlimit previous_configuration_limit;
+  if (getrlimit(RLIMIT_FSIZE, &previous_configuration_limit))
+    Fail("cannot read configuration output-size limit");
+  auto configuration_limit = previous_configuration_limit;
+  configuration_limit.rlim_cur = 32;
+  const auto previous_configuration_signal = std::signal(SIGXFSZ, SIG_IGN);
+  if (setrlimit(RLIMIT_FSIZE, &configuration_limit))
+    Fail("cannot limit configuration output size");
+  const bool saved_configuration = levers->save_settings(custom_settings);
+  if (setrlimit(RLIMIT_FSIZE, &previous_configuration_limit))
+    Fail("cannot restore configuration output-size limit");
+  std::signal(SIGXFSZ, previous_configuration_signal);
+#endif
+  if (saved_configuration || !levers->settings_is_modified(custom_settings) ||
+      read_configuration() != previous_configuration)
+    Fail("failed configuration write lost prior bytes or reported saved choices");
+  if (!levers->save_settings(custom_settings) || levers->settings_is_modified(custom_settings))
+    Fail("native configuration save did not recover after filesystem failure");
+  levers->custom_settings_destroy(custom_settings);
+  linnet_windows::Config published;
+  published.Load(native_path);
+  const auto published_patch = published.document.GetMap("patch");
+  const auto published_border = published_patch ? published_patch->GetValue("style/border_width") : nullptr;
+  int border = 0;
+  if (!published_border || !published_border->GetInt(&border) || border != 4)
+    Fail("successful native configuration overwrite lost the selected value");
+  native.Save(native_path);  // Restore this isolated fixture's three-pixel border.
   linnet_windows::Settings settings(shared, user);
   for (auto& option : settings.options) {
     if (option.id == "theme" && option.choice_ids[option.selected] != "native_glass/system")
@@ -453,6 +585,18 @@ void ExpectMixedAndRawInput(RimeApi* api, RimeSessionId session) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(_M_X64)
+  std::string registry_version;
+  if (argc >= 3 && std::string(argv[1]) == "--registry") {
+    registry_version = argv[2];
+    argc -= 2;
+    argv += 2;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--shared-runtime") {
+    SharedRuntimeProbe(argv[2]);
+    return 0;
+  }
+#endif
 #ifdef _WIN32
   CheckWindowsIPCArchive();
 #endif
@@ -472,6 +616,22 @@ int main(int argc, char** argv) {
   traits.user_data_dir = argv[2];
   traits.prebuilt_data_dir = argv[1];
   traits.staging_dir = staging_dir.c_str();
+#if defined(_M_X64)
+  std::unique_ptr<linnet_windows::RuntimePaths> registry;
+  if (!registry_version.empty()) {
+    try {
+      registry = std::make_unique<linnet_windows::RuntimePaths>(
+          std::filesystem::u8path(argv[1]), std::filesystem::u8path(argv[2]), registry_version.c_str(), true);
+      registry->Apply(traits);
+      if (!std::filesystem::equivalent(std::filesystem::u8path(registry->user),
+                                      std::filesystem::u8path(argv[2])))
+        Fail("Registry relocated the flat Windows learning directory");
+      if (std::filesystem::equivalent(std::filesystem::u8path(registry->shared),
+                                      std::filesystem::u8path(argv[1])))
+        Fail("Registry did not activate its validated language-data view");
+    } catch (const std::exception& error) { Fail(error.what()); }
+  }
+#endif
   traits.distribution_name = "Linnet Windows Smoke";
   traits.distribution_code_name = "linnet-windows-smoke";
   traits.distribution_version = "1";

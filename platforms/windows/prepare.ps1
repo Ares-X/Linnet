@@ -1,5 +1,7 @@
 param(
   [Parameter(Mandatory = $true)]
+  [string]$WinSparkleRoot,
+  [Parameter(Mandatory = $true)]
   [string]$DataRoot,
   [Parameter(Mandatory = $true)]
   [string]$EmbeddedLuaHeader,
@@ -9,6 +11,8 @@ param(
   [string]$ThemePreviewRoot,
   [Parameter(Mandatory = $true)]
   [string]$InputPolicyRoot,
+  [Parameter(Mandatory = $true)]
+  [string]$FactoryRoot,
   [string]$BuildRoot = ""
 )
 
@@ -132,18 +136,6 @@ function Replace-RequiredText {
   [IO.File]::WriteAllText($Path, $Text.Replace($Before, $After), $Encoding)
 }
 
-function Remove-UpdaterMenuItem {
-  param([string]$Path, [string]$Label, [Text.Encoding]$Encoding)
-  $Text = [IO.File]::ReadAllText($Path, $Encoding)
-  $Pattern = '(?m)^[^\S\r\n]*MENUITEM\s+"' + [Regex]::Escape($Label) + `
-    '",\s+ID_WEASELTRAY_CHECKUPDATE\r?$'
-  $Updated = [Regex]::Replace($Text, $Pattern, '')
-  if ($Updated -eq $Text) {
-    throw "Expected updater menu item is missing in $Path"
-  }
-  [IO.File]::WriteAllText($Path, $Updated, $Encoding)
-}
-
 function Remove-ResourceControl {
   param([string]$Path, [string]$ControlId, [Text.Encoding]$Encoding)
   $Text = [IO.File]::ReadAllText($Path, $Encoding)
@@ -169,6 +161,8 @@ $EmbeddedLuaHeader = (Resolve-Path -LiteralPath $EmbeddedLuaHeader).Path
 $WeaselConfig = (Resolve-Path -LiteralPath $WeaselConfig).Path
 $ThemePreviewRoot = (Resolve-Path -LiteralPath $ThemePreviewRoot).Path
 $InputPolicyRoot = (Resolve-Path -LiteralPath $InputPolicyRoot).Path
+$FactoryRoot = (Resolve-Path -LiteralPath $FactoryRoot).Path
+$WinSparkleRoot = (Resolve-Path -LiteralPath $WinSparkleRoot).Path
 $ExpectedThemePreviews = @(
   "color_scheme_linnet_clay_light.png",
   "color_scheme_linnet_glass_light.png",
@@ -294,17 +288,30 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "settings_model.h") `
   -Destination (Join-Path $Projection "include\linnet_settings_model.h")
 Copy-Item -LiteralPath (Join-Path $InputPolicyRoot "linnet_candidate_design.h") `
   -Destination (Join-Path $Projection "include\linnet_candidate_design.h")
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "update_config.h") `
+  -Destination (Join-Path $Projection "include\linnet_update_config.h")
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "native_platform.h") `
+  -Destination (Join-Path $Projection "include\linnet_native_platform.h")
+foreach ($Header in @("shared_runtime", "learning_sync", "data_runtime")) {
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot "$Header.h") `
+    -Destination (Join-Path $Projection "include\linnet_$Header.h")
+}
+foreach ($Header in @("winsparkle.h", "winsparkle-version.h")) {
+  Copy-Item -LiteralPath (Join-Path $WinSparkleRoot "include\$Header") `
+    -Destination (Join-Path $Projection "include\$Header")
+}
+foreach ($Target in @(
+  @{ Architecture = "x64"; Library = "lib64"; Output = "output" },
+  @{ Architecture = "Win32"; Library = "lib"; Output = "output\Win32" }
+)) {
+  $Release = Join-Path $WinSparkleRoot "$($Target.Architecture)\Release"
+  Copy-Item -LiteralPath (Join-Path $Release "WinSparkle.lib") `
+    -Destination (Join-Path $Projection "$($Target.Library)\WinSparkle.lib")
+  Copy-Item -LiteralPath (Join-Path $Release "WinSparkle.dll") `
+    -Destination (Join-Path $Projection "$($Target.Output)\WinSparkle.dll")
+}
 
 $Utf16 = [Text.UnicodeEncoding]::new($false, $true)
-$UpdaterResources = @(
-  (Join-Path $Projection "WeaselServer\WeaselServer.rc"),
-  (Join-Path $Projection "WeaselTSF\WeaselTSF.rc")
-)
-foreach ($Resource in $UpdaterResources) {
-  foreach ($UpdateLabel in @("检查新版本 (&U)", "檢查新版本 (&U)", "Check for updates (&U)")) {
-    Remove-UpdaterMenuItem $Resource $UpdateLabel $Utf16
-  }
-}
 Remove-ResourceControl (Join-Path $Projection "WeaselDeployer\WeaselDeployer.rc") `
   "IDC_GET_SCHEMATA" $Utf16
 # The English paragraph wraps to three lines at the native dialog font size.
@@ -372,6 +379,7 @@ foreach ($Replacement in @(
 $OutputData = Join-Path $Projection "output\data"
 Copy-DataTree (Join-Path $DataRoot "plum") $OutputData
 Copy-DataTree (Join-Path $DataRoot "opencc") (Join-Path $OutputData "opencc")
+Copy-DataTree $FactoryRoot (Join-Path $OutputData "factory")
 Copy-Item -LiteralPath $WeaselConfig -Destination (Join-Path $OutputData "weasel.yaml")
 Copy-Item -Path (Join-Path $InputPolicyRoot "*.yaml") -Destination $OutputData
 Copy-Item -LiteralPath (Join-Path $WeaselSource "resource\en.ico") `
@@ -389,6 +397,8 @@ $RuntimeLicenses = Join-Path $Projection "output\licenses"
 $PluginLocks = $Lock.sources.librime.bundled_plugins
 $DependencyLocks = $Lock.sources.librime.static_dependencies
 $LicenseProjection = @(
+  @{ Name = "WinSparkle-MIT.txt"; Source = (Join-Path $WinSparkleRoot $Lock.build_inputs.winsparkle.license_path); Sha256 = $Lock.build_inputs.winsparkle.license_sha256 },
+  @{ Name = "WinSparkle-Expat-MIT.txt"; Source = (Join-Path $WinSparkleRoot $Lock.build_inputs.winsparkle.expat_license_path); Sha256 = $Lock.build_inputs.winsparkle.expat_license_sha256 },
   @{ Name = "Weasel-GPL-3.0-only.txt"; Source = (Join-Path $WeaselSource "LICENSE.txt"); Sha256 = $Lock.sources.weasel.license_sha256 },
   @{ Name = "librime-BSD-3-Clause.txt"; Source = (Join-Path $Runtime "LICENSE"); Sha256 = $Lock.sources.librime.license_sha256 },
   @{ Name = "librime-lua-BSD-3-Clause.txt"; Source = (Join-Path $Runtime "plugins\lua\LICENSE"); Sha256 = $PluginLocks.lua.license_sha256 },

@@ -136,10 +136,10 @@ scripts/project-windows-weasel-config platforms/windows/weasel.base.yaml \
 cmp "${generated_weasel}" "${second_weasel}"
 diff -qr "${generated_previews}" "${second_previews}" >/dev/null
 # Linnet and upstream Weasel must remain separate installed products.
-if rg -n 'win_sparkle_|check_update\(|L"/update"|rime-install\.bat' \
+if rg -n 'ManualUpdateFeedURL|TestingManualUpdateFeedURL|rime-install\.bat' \
     "${scratch}/WeaselServer" "${scratch}/WeaselSetup" \
     "${scratch}/WeaselDeployer" "${scratch}/output/install.nsi"; then
-  echo "An upstream updater or second data installer remains authoritative." >&2
+  echo "An upstream Weasel feed or second data installer remains authoritative." >&2
   exit 1
 fi
 if rg -n 'Software\\\\Rime\\\\[Ww]easel|WeaselNamedPipe|rime\.weasel' \

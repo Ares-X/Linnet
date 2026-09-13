@@ -8,7 +8,12 @@ final class LinnetSettingsExclusiveFileSink {
 
   private let destination: URL
   private let partial: URL
+  #if os(Windows)
+  private var handle: LinnetWindowsDataFile?
+  private var parentLease: LinnetWindowsDataFile?
+  #else
   private var handle: FileHandle?
+  #endif
   private var active = true
 
   init(destination: URL) throws {
@@ -26,6 +31,10 @@ final class LinnetSettingsExclusiveFileSink {
     self.destination = destination
     partial = parent.appending(
       path: ".\(destination.lastPathComponent).partial-\(UUID().uuidString)")
+    #if os(Windows)
+    parentLease = try LinnetWindowsDataFile(parent, access: .directory)
+    handle = try LinnetWindowsDataFile(partial, access: .create)
+    #else
     guard FileManager.default.createFile(
       atPath: partial.path,
       contents: nil,
@@ -37,6 +46,7 @@ final class LinnetSettingsExclusiveFileSink {
       try? FileManager.default.removeItem(at: partial)
       throw Failure.storage(Self.code(for: error))
     }
+    #endif
   }
 
   deinit { try? discard() }
@@ -56,9 +66,14 @@ final class LinnetSettingsExclusiveFileSink {
       try handle.synchronize()
       try handle.close()
       self.handle = nil
+      #if os(Windows)
+      try LinnetWindowsDataFile.makeReadOnly(partial)
+      try LinnetWindowsDataFile.move(partial, to: destination)
+      #else
       try FileManager.default.setAttributes(
         [.posixPermissions: 0o444], ofItemAtPath: partial.path)
       try FileManager.default.moveItem(at: partial, to: destination)
+      #endif
       active = false
     } catch {
       if Self.itemExists(at: destination) {
@@ -77,7 +92,13 @@ final class LinnetSettingsExclusiveFileSink {
       self.handle = nil
     }
     if Self.itemExists(at: partial) {
-      do { try FileManager.default.removeItem(at: partial) } catch {
+      do {
+        #if os(Windows)
+        if let file = try LinnetWindowsDataFile.existing(partial, access: .remove) { try file.remove() }
+        #else
+        try FileManager.default.removeItem(at: partial)
+        #endif
+      } catch {
         firstError = firstError ?? error
       }
     }

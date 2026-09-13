@@ -1,10 +1,12 @@
 import Foundation
+#if canImport(os)
 import os
 
 private let linnetSyncLogger = Logger(
   subsystem: Bundle.main.bundleIdentifier ?? "Linnet",
   category: "LearningSync"
 )
+#endif
 
 enum LinnetRimeSyncSchedule {
   static let automaticInterval: TimeInterval = 60 * 60
@@ -73,6 +75,13 @@ final class LinnetRimeSyncController: @unchecked Sendable {
   private var configurationCompletion: ((LinnetRimeSyncResult) -> Void)?
   private var timer: Timer?
   private var cycle: LinnetRimeSyncCycle?
+
+  // Foreign main loops use this deadline to wake Foundation without duplicating
+  // its schedule. A configuration completion is dispatched to the main queue.
+  var nextWakeUp: Date? {
+    if configurationOperation != nil { return Date().addingTimeInterval(0.01) }
+    return timer?.fireDate
+  }
 
   init(
     loadConfiguration: @escaping () throws -> LinnetRimeSyncConfiguration,
@@ -149,9 +158,13 @@ final class LinnetRimeSyncController: @unchecked Sendable {
         scheduleAutomatic(at: next)
       }
     } catch {
+#if canImport(os)
       linnetSyncLogger.error(
         "Learning sync configuration is unavailable: \(error.localizedDescription, privacy: .private)"
       )
+#else
+      NSLog("Learning sync configuration is unavailable: %@", error.localizedDescription)
+#endif
       recordResult(.unavailable)
       completion?(.unavailable)
       scheduleAutomatic(at: Date().addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
@@ -225,7 +238,11 @@ final class LinnetRimeSyncController: @unchecked Sendable {
     guard now < current.deadline else {
       cancelOperation()
       finish(current, result: .deferred)
+#if canImport(os)
       linnetSyncLogger.notice("Learning sync was deferred; pending learning was preserved.")
+#else
+      NSLog("Learning sync was deferred; pending learning was preserved.")
+#endif
       return
     }
     schedule(at: now.addingTimeInterval(interval)) { [weak self] in self?.attempt(cycleID) }

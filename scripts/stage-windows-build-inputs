@@ -25,6 +25,7 @@ xcrun swiftc -warnings-as-errors -enable-bare-slash-regex \
   sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
   sources/LinnetCandidatePresentation.swift \
   platforms/windows/settings_catalog.swift \
+  platforms/windows/input_policy.swift \
   platforms/windows/input_defaults.swift -o build/windows-inputs/input-defaults
 build/windows-inputs/input-defaults build/windows-inputs/policies data/linnet
 ruby scripts/project-windows-settings build/windows-inputs/policies
@@ -33,4 +34,43 @@ ruby scripts/generate-linnet-lua-embedding \
 scripts/project-windows-weasel-config platforms/windows/weasel.base.yaml \
   data/squirrel.yaml build/windows-inputs/weasel.yaml \
   build/windows-inputs/preview
+
+# Reuse the same release metadata, source split, installed manifests and pack
+# container producer as macOS. Windows changes only the runtime projection.
+make --no-print-directory linnet-pack-tool
+factory_work="$(mktemp -d "${repo_root}/build/.windows-factory.XXXXXX")"
+cleanup_factory() {
+  if [[ "${factory_work}" == "${repo_root}/build/.windows-factory."* ]]; then
+    chmod -R u+w "${factory_work}"
+    rm -rf -- "${factory_work}"
+  fi
+}
+trap cleanup_factory EXIT
+mkdir -p "${factory_work}/sources" "${factory_work}/Data/Packs" \
+  "${factory_work}/factory/Runtime/Active"
+package/stage_language_pack_sources "${factory_work}/sources" >/dev/null
+pack_tool="${repo_root}/build/linnet-pack"
+release_metadata="${repo_root}/config/linnet-data-releases.json"
+core_version="$(sed -n 's/^MARKETING_VERSION = //p' config/LinnetProduct.xcconfig)"
+package/data_release_metadata check-core "${release_metadata}" "${core_version}" >/dev/null
+profile_options=()
+for kind in chinese english lts extended; do
+  pack_root="$(LINNET_RELEASE_TOOL="${pack_tool}" package/build_data_pack \
+    "${kind}" \
+    "$(package/data_release_metadata get "${release_metadata}" "${kind}" version)" \
+    "$(package/data_release_metadata get "${release_metadata}" "${kind}" sequence)" \
+    "$(package/data_release_metadata get "${release_metadata}" "${kind}" data_abi)" \
+    "${factory_work}/sources/${kind}" "${factory_work}/Data/Packs" \
+    "$(package/data_release_metadata get "${release_metadata}" "${kind}" min_core)" \
+    "$(package/data_release_metadata get "${release_metadata}" "${kind}" content_sha256)")"
+  asset_name="$("${pack_tool}" asset-name --kind "${kind}")"
+  "${pack_tool}" build-container --root "${pack_root}" --core-version "${core_version}" \
+    --output "${factory_work}/factory/${asset_name}"
+  profile_options+=("--${kind}-pack" "${pack_root}")
+done
+"${pack_tool}" build-activation-profile \
+  --output "${factory_work}/factory/Runtime/Active/activation.json" \
+  --core-version "${core_version}" --windows-view "$(uuidgen)" "${profile_options[@]}"
+rm -rf -- "${repo_root}/build/windows-inputs/factory"
+mv "${factory_work}/factory" "${repo_root}/build/windows-inputs/factory"
 platforms/windows/verify.sh

@@ -1,10 +1,21 @@
-import Darwin
 import Foundation
+#if os(Windows)
+import WinSDK
+#else
+import Darwin
+#endif
 
 /// The single filesystem owner for Linnet's immutable language data and
 /// mutable per-user state. Callers consume a validated snapshot; they never
 /// search the App bundle, Packs, or UserData for alternative data sources.
 struct LinnetDataRegistry: Sendable {
+  #if os(Windows)
+  typealias VolumeID = UInt32
+  typealias FileID = UInt64
+  #else
+  typealias VolumeID = dev_t
+  typealias FileID = ino_t
+  #endif
   static let activeGrammarConfiguration = Data("grammar:\n  language: wanxiang-lts-zh-hans\n".utf8)
   static let stateFormat = "io.github.ares-x.linnet.active-set.v1"
   static let languageTransactionMarkerName = ".linnet-language-transaction.json"
@@ -294,8 +305,11 @@ struct LinnetDataRegistry: Sendable {
 
   let rootDirectory: URL
   let coreVersion: String
-  let rootDevice: dev_t
-  let rootInode: ino_t
+  let rootDevice: VolumeID
+  let rootInode: FileID
+  #if os(Windows)
+  let coreDataDirectory: URL
+  #endif
 
   enum RootAccess {
     case createIfMissing
@@ -306,7 +320,8 @@ struct LinnetDataRegistry: Sendable {
     productName: String,
     coreVersion: String,
     applicationSupportDirectory: URL? = nil,
-    rootAccess: RootAccess = .createIfMissing
+    rootAccess: RootAccess = .createIfMissing,
+    coreDataDirectory: URL? = nil
   ) throws {
     guard !productName.isEmpty,
       productName != ".", productName != "..",
@@ -317,8 +332,18 @@ struct LinnetDataRegistry: Sendable {
     guard LinnetPackContract.supportsCore(required: "0.0.0", actual: coreVersion) else {
       throw Failure.invalidActiveState
     }
+    #if os(Windows)
+    // The native frontend owns both paths; Foundation's default support path
+    // must not relocate an existing Weasel/Linnet learning directory.
+    guard let support = applicationSupportDirectory, let coreDataDirectory,
+      support.isFileURL, coreDataDirectory.isFileURL else {
+      throw Failure.applicationSupportUnavailable
+    }
+    self.coreDataDirectory = coreDataDirectory
+    #else
     let support = try applicationSupportDirectory ?? Self.applicationSupportDirectory()
-    let boundary: (url: URL, device: dev_t, inode: ino_t)
+    #endif
+    let boundary: (url: URL, device: VolumeID, inode: FileID)
     switch rootAccess {
     case .createIfMissing:
       boundary = try Self.openOrCreateCanonicalRoot(
@@ -336,7 +361,11 @@ struct LinnetDataRegistry: Sendable {
 
 extension LinnetDataRegistry {
   var userDataDirectory: URL {
+    #if os(Windows)
+    rootDirectory
+    #else
     rootDirectory.appending(path: "UserData", directoryHint: .isDirectory)
+    #endif
   }
 
   var stagingDirectory: URL {
@@ -387,14 +416,7 @@ extension LinnetDataRegistry {
       userDataDirectory, stagingDirectory, downloadsDirectory,
       transactionsDirectory, backupsDirectory
     ] {
-      try FileManager.default.createDirectory(
-        at: directory,
-        withIntermediateDirectories: true,
-        attributes: [.posixPermissions: 0o700]
-      )
-      guard Self.isSecureOwnedDirectory(directory) else {
-        throw Failure.unsafePath(directory.path)
-      }
+      _ = try Self.ensureOwnedDirectory(directory, withIntermediateDirectories: true)
     }
   }
 
@@ -403,14 +425,26 @@ extension LinnetDataRegistry {
   func prepareRuntimeLogDirectory() throws -> URL {
     try verifyCanonicalRoot()
     let runtimeInfo = try Self.existingOwnedDirectory(runtimeDirectory)
+    #if os(Windows)
+    guard runtimeInfo.dwVolumeSerialNumber == rootDevice else {
+      throw Failure.unsafePath(runtimeDirectory.path)
+    }
+    #else
     guard runtimeInfo.st_dev == rootDevice else {
       throw Failure.unsafePath(runtimeDirectory.path)
     }
+    #endif
     let logInfo = try Self.ensureOwnedDirectory(
       runtimeLogDirectory, withIntermediateDirectories: false)
+    #if os(Windows)
+    guard logInfo.dwVolumeSerialNumber == rootDevice else {
+      throw Failure.unsafePath(runtimeLogDirectory.path)
+    }
+    #else
     guard logInfo.st_dev == rootDevice else {
       throw Failure.unsafePath(runtimeLogDirectory.path)
     }
+    #endif
     return runtimeLogDirectory
   }
 
@@ -430,9 +464,7 @@ extension LinnetDataRegistry {
       createdAt.timeIntervalSince1970.isFinite,
       createdAt.timeIntervalSince1970 > 0
     else { throw Failure.invalidActiveState }
-    try FileManager.default.createDirectory(
-      at: directory, withIntermediateDirectories: false,
-      attributes: [.posixPermissions: 0o700])
+    _ = try Self.ensureOwnedDirectory(directory, withIntermediateDirectories: false)
     do {
       try writeJSON(
         PersonalScratchMarker(
@@ -441,7 +473,7 @@ extension LinnetDataRegistry {
           createdAt: createdAt.timeIntervalSince1970),
         to: directory.appending(path: Self.personalScratchMarkerName))
     } catch {
-      try? FileManager.default.removeItem(at: directory)
+      try? removeOwnedTree(directory)
       throw error
     }
   }

@@ -97,6 +97,7 @@
 		F10000000000000000000001 /* LinnetSettingsPage.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* LinnetSettingsPage.swift */; };
 		F20000000000000000000001 /* LinnetSettingsDownloadTransport.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */; };
 		F20000000000000000000003 /* LinnetSettingsExclusiveFileSink.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */; };
+		F21000000000000000000001 /* LinnetLanguageDataUpdate.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F21000000000000000000002 /* LinnetLanguageDataUpdate.swift */; };
 		F30000000000000000000001 /* SettingsSessionState.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000002 /* SettingsSessionState.swift */; };
 		F40000000000000000000001 /* LinnetSettingsDownloadSource.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000002 /* LinnetSettingsDownloadSource.swift */; };
 		FA0000000000000000000001 /* LinnetSettingsUpdateChecker.swift in Settings Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000002 /* LinnetSettingsUpdateChecker.swift */; };
@@ -260,6 +261,7 @@
 		F10000000000000000000002 /* LinnetSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsPage.swift; path = sources/LinnetSettings/LinnetSettingsPage.swift; sourceTree = "<group>"; };
 		F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsDownloadTransport.swift; path = sources/LinnetSettings/LinnetSettingsDownloadTransport.swift; sourceTree = "<group>"; };
 		F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsExclusiveFileSink.swift; path = sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift; sourceTree = "<group>"; };
+		F21000000000000000000002 /* LinnetLanguageDataUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetLanguageDataUpdate.swift; path = sources/LinnetSettings/LinnetLanguageDataUpdate.swift; sourceTree = "<group>"; };
 		F30000000000000000000002 /* SettingsSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsSessionState.swift; path = sources/LinnetSettings/SettingsSessionState.swift; sourceTree = "<group>"; };
 		F40000000000000000000002 /* LinnetSettingsDownloadSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsDownloadSource.swift; path = sources/LinnetSettings/LinnetSettingsDownloadSource.swift; sourceTree = "<group>"; };
 		FA0000000000000000000002 /* LinnetSettingsUpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinnetSettingsUpdateChecker.swift; path = sources/LinnetSettings/LinnetSettingsUpdateChecker.swift; sourceTree = "<group>"; };
@@ -375,6 +377,7 @@
 				FB3000000000000000000002 /* LinnetRimeSyncController.swift */,
 				F20000000000000000000002 /* LinnetSettingsDownloadTransport.swift */,
 				F20000000000000000000004 /* LinnetSettingsExclusiveFileSink.swift */,
+				F21000000000000000000002 /* LinnetLanguageDataUpdate.swift */,
 				F30000000000000000000002 /* SettingsSessionState.swift */,
 				D30000000000000000000018 /* PersonalDataStore.swift */,
 				A12E55000000000000000001 /* PersonalDataValidation.swift */,
@@ -684,6 +687,7 @@
 				FB2000000000000000000001 /* SettingsRootView.swift in Settings Sources */,
 				F20000000000000000000001 /* LinnetSettingsDownloadTransport.swift in Settings Sources */,
 				F20000000000000000000003 /* LinnetSettingsExclusiveFileSink.swift in Settings Sources */,
+				F21000000000000000000001 /* LinnetLanguageDataUpdate.swift in Settings Sources */,
 				F30000000000000000000001 /* SettingsSessionState.swift in Settings Sources */,
 				D30000000000000000000008 /* PersonalDataStore.swift in Settings Sources */,
 				A12E55000000000000000002 /* PersonalDataValidation.swift in Settings Sources */,

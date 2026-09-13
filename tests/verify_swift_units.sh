@@ -244,6 +244,7 @@ compile_run_selected download-transport \
   sources/LinnetSettings/LinnetSettingsDownloadSource.swift \
   sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift \
   sources/LinnetSettings/LinnetSettingsDownloadTransport.swift \
+  sources/LinnetSettings/LinnetLanguageDataUpdate.swift \
   tests/LinnetSettingsDownloadTransportTests.swift
 compile_run_selected download-source \
   sources/LinnetSettings/LinnetSettingsDownloadSource.swift \
