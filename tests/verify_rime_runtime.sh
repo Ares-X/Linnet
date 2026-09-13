@@ -10,7 +10,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${repo_root}"
 
 runtime_probe="${1:-}"
-if [[ "${1:-}" == --chinese-spelling-probe ||
+if [[ "${1:-}" == --chinese-phrase-ranking-probe ||
+      "${1:-}" == --chinese-spelling-probe ||
       "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --candidate-forget-probe ||
       "${1:-}" == --raw-editing-probe ||
@@ -22,7 +23,7 @@ if [[ "${1:-}" == --chinese-spelling-probe ||
       "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--chinese-spelling-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
+  echo "usage: $0 [--chinese-phrase-ranking-probe|--chinese-spelling-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -150,6 +151,22 @@ for fixture_schema in \
       "${user}" "${shared}" "${user}/build" >/dev/null
 done
 end_phase "deploy native schemas"
+
+if [[ -z "${runtime_probe}" || "${runtime_probe}" == --chinese-phrase-ranking-probe ]]; then
+  begin_phase "Chinese whole words, compositions and learned homophones"
+  "$(xcrun --find clang++)" -isysroot "${sdk}" -std=c++17 -O2 -Wall -Wextra -Werror \
+    -isystem librime/dist/include tests/chinese_phrase_ranking_test.cc \
+    lib/librime.1.dylib -o "${scratch}/chinese-phrase-ranking"
+  # Its deliberate homophone learning must not seed later smoke assertions.
+  ranking_user="${scratch}/phrase-ranking-user"
+  mkdir "${ranking_user}"
+  cp -R "${user}/." "${ranking_user}/"
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${scratch}/chinese-phrase-ranking" "${shared}" "${ranking_user}" \
+    tests/fixtures/chinese_phrase_ranking.tsv
+  end_phase "Chinese whole words, compositions and learned homophones"
+  if [[ -n "${runtime_probe}" ]]; then exit 0; fi
+fi
 
 if [[ "${runtime_probe}" == --chinese-spelling-probe ]]; then
   begin_phase "Chinese correction and configurable fuzzy pronunciation"
