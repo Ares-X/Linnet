@@ -358,10 +358,16 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     std::vector<std::string> dictionaries;
     while (const auto* name = levers->next_user_dict(&iterator)) dictionaries.emplace_back(name);
     levers->user_dict_iterator_destroy(&iterator);
+    char sync_dir[32768] = {};
+    rime->get_user_data_sync_dir(sync_dir, sizeof(sync_dir) - 1);
     for (const auto& name : dictionaries) {
-      const auto path = folder / (name + ".userdb.txt");
-      if (levers->export_user_dict(name.c_str(), path.u8string().c_str()) < 0)
-        throw std::runtime_error("Cannot export learning dictionary: " + name);
+      if (!levers->backup_user_dict(name.c_str()))
+        throw std::runtime_error("Cannot snapshot learning dictionary: " + name);
+      // The native snapshot retains deleted entries, dynamic weights and ticks.
+      // Rime's directory getter uses the native narrow path encoding, not UTF-8.
+      const auto filename = fs::u8path(name + ".userdb.txt");
+      fs::copy_file(fs::path(sync_dir) / filename, folder / filename,
+                    fs::copy_options::overwrite_existing);
     }
     for (const auto& item : fs::directory_iterator(user_)) {
       const auto name = item.path().filename().u8string();
@@ -381,6 +387,13 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
         if (!item.is_regular_file()) continue;
         const auto name = item.path().filename().u8string();
         if (name.size() > 11 && name.substr(name.size() - 11) == ".userdb.txt") {
+          std::ifstream stream(item.path(), std::ios::binary);
+          std::string header;
+          if (!std::getline(stream, header))
+            throw std::runtime_error("Cannot read learning snapshot: " + item.path().u8string());
+          if (!header.empty() && header.back() == '\r') header.pop_back();
+          if (header == "# Rime user dictionary export")
+            throw std::runtime_error("This backup contains text tables, not learning snapshots. Use Dictionaries > Import Text Table: " + item.path().u8string());
           dictionaries.push_back(item.path());
         } else if ((item.path().extension() == ".yaml" && name != "installation.yaml" && name != "user.yaml") ||
                    name == "linnet_custom_words.txt" || name == "linnet_text_expander.txt") {
@@ -397,10 +410,8 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
       }
       auto* levers = reinterpret_cast<RimeLeversApi*>(rime_get_api()->find_module("levers")->get_api());
       for (const auto& source : dictionaries) {
-        const auto name = source.filename().u8string();
-        const auto dictionary = name.substr(0, name.size() - 11);
-        if (levers->import_user_dict(dictionary.c_str(), source.u8string().c_str()) < 0)
-          throw std::runtime_error("Cannot merge learning dictionary: " + dictionary);
+        if (!levers->restore_user_dict(source.u8string().c_str()))
+          throw std::runtime_error("Cannot merge learning snapshot: " + source.u8string());
       }
     }, [&] {
       for (const auto& item : before) Write(item.first, item.second);

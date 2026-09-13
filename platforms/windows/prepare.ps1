@@ -307,6 +307,10 @@ foreach ($Resource in $UpdaterResources) {
 }
 Remove-ResourceControl (Join-Path $Projection "WeaselDeployer\WeaselDeployer.rc") `
   "IDC_GET_SCHEMATA" $Utf16
+# The English paragraph wraps to three lines at the native dialog font size.
+Replace-RequiredText (Join-Path $Projection "WeaselDeployer\WeaselDeployer.rc") `
+  'left column.",IDC_STATIC1,128,27,281,20' `
+  'left column.",IDC_STATIC1,128,27,281,27' $Utf16
 foreach ($Resource in @(
   "WeaselIME\WeaselIME.rc",
   "WeaselTSF\WeaselTSF.rc",

@@ -385,3 +385,45 @@ for this diagnostic.
   server/TIP/package assertions; then interactive Retry/Cancel while Settings is
   open, followed by ordinary upgrade and finish-page/bounds acceptance. Use
   Tiny Windows 11 only; no logout, reboot or daily Mac loading needed.
+
+## Native learning snapshots, 2026-09-13
+
+- Product failure in installed `2bff3aa`: the Data page's backup contains
+  `Rime user dictionary export` text tables, not snapshots. Direct comparison
+  with Dictionary Manager's native Output Snapshot and locked Rime source
+  proves the table formatter omits deleted entries and serializes only commit
+  counts, losing per-entry dynamic weights and ticks. Restore used the paired
+  text-table importer, so it could not recover those missing facts.
+- Deliverable/owner: existing Settings `Backup` / `Restore` must invoke Rime
+  `backup_user_dict` / `restore_user_dict` within the existing Configurator
+  maintenance scope. Copy the native snapshot from the directory returned by
+  Rime, then keep the current configuration backup/recovery behavior. Rime,
+  not the UI's filename inference, identifies the restored dictionary.
+- Retire export/import-table calls in these two paths; Dictionary Manager's
+  explicit text-table import/export remains available for its intended use.
+  No custom format/parser, new dependency, restart or fallback is added.
+  Learning-format owner 1 -> 1; Settings backup path 1 -> 1; pass-through layers
+  0 -> 0; fallback branches 0 -> 0; duplicated defaults 0 -> 0.
+- Allowed files: native Settings dialog, existing resource preparation script
+  for the measured Dictionary Manager text clipping, and this acceptance record. Focused
+  checks: isolated native snapshot round-trip with live and deleted entries,
+  weights and ticks; diff/lock checks and native compilation. Exact-candidate
+  Windows UI backup/restore must still prove these values, Unicode destination
+  handling, unchanged settings and typing continuity. No daily Mac loading,
+  logout or reboot is needed. Engineering table exports already collected are
+  retained as defect evidence, not silently converted into accepted snapshots.
+- The old engineering export is explicitly rejected by its native Rime text
+  table header before configuration writes. An isolated negative test showed
+  that upstream snapshot restore otherwise accepts this wrong format, reverses
+  text/code and loses counts. This is a format-boundary check for actual files
+  already produced, not a second parser or a compatibility importer. Other
+  snapshot parsing remains Rime-owned; explicit text-table import stays in
+  Dictionary Manager.
+- The native Dictionary Manager opens and creates its own snapshot successfully.
+  Its English first help paragraph is clipped at 20 DLU; the existing resource
+  projection increases its height to 27 DLU, ending before the next label at
+  y=55. Retire only the undersized resource value, with native resource/layout
+  owners 1 -> 1 and no new layout layer. Exact-candidate visual acceptance
+  remains open. Reopening Settings' folder picker after
+  Dictionary Manager Output Snapshot worked; a hypothesized COM initialization
+  failure was not reproduced and no COM lifecycle change was made.
