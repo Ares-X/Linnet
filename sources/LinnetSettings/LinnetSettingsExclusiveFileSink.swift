@@ -30,7 +30,7 @@ final class LinnetSettingsExclusiveFileSink {
 
     self.destination = destination
     partial = parent.appending(
-      path: ".\(destination.lastPathComponent).partial-\(UUID().uuidString)")
+      path: ".\(destination.lastPathComponent).partial-\(Foundation.UUID().uuidString)")
     #if os(Windows)
     parentLease = try LinnetWindowsDataFile(parent, access: .directory)
     handle = try LinnetWindowsDataFile(partial, access: .create)

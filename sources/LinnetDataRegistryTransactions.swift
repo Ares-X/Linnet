@@ -52,7 +52,7 @@ extension LinnetDataRegistry {
     case .conflict: throw Failure.invalidActiveState
     case .current, .available: break
     }
-    let transactionID = UUID()
+    let transactionID = Foundation.UUID()
     let directory = transactionsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
     let download = downloadsDirectory.appending(path: transactionID.uuidString, directoryHint: .isDirectory)
     _ = try Self.ensureOwnedDirectory(directory, withIntermediateDirectories: false)
@@ -81,7 +81,7 @@ extension LinnetDataRegistry {
 
   /// The only explicit cancellation owner for both downloading and prepared
   /// language transactions. Live prepared candidates remain recovery-owned.
-  func cancelDataChannelUpdate(transactionID: UUID) throws {
+  func cancelDataChannelUpdate(transactionID: Foundation.UUID) throws {
     let directory = transactionsDirectory.appending(
       path: transactionID.uuidString, directoryHint: .isDirectory)
     guard FileManager.default.fileExists(atPath: directory.path) else { return }
@@ -239,7 +239,7 @@ extension LinnetDataRegistry {
       separateRepairCopy = true
     }
 
-    let partial = kindRoot.appending(path: ".\(identity).partial-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let partial = kindRoot.appending(path: ".\(identity).partial-\(Foundation.UUID().uuidString)", directoryHint: .isDirectory)
     do {
       let manifest: LinnetPackContract.Manifest, manifestData: Data
       switch transfer {
@@ -436,7 +436,7 @@ extension LinnetDataRegistry {
 
   /// Completes the successful publication. Active becomes the immutable
   /// runtime state; the shared reconciler retires superseded data.
-  func commitDataChannelUpdate(transactionID: UUID) throws {
+  func commitDataChannelUpdate(transactionID: Foundation.UUID) throws {
     let transaction = transactionsDirectory.appending(
       path: transactionID.uuidString, directoryHint: .isDirectory)
     let activeDocument = try loadActiveStateDocument()
@@ -546,7 +546,7 @@ extension LinnetDataRegistry {
       .standardizedFileURL,
       Self.isSecureOwnedDirectory(transactionsDirectory),
       Self.isSecureOwnedDirectory(directory), contains(directory.resolvingSymlinksInPath()),
-      let directoryID = UUID(uuidString: directory.lastPathComponent),
+      let directoryID = Foundation.UUID(uuidString: directory.lastPathComponent),
       directoryID.uuidString == directory.lastPathComponent,
       let marker: PersonalScratchMarker = readOwnedJSON(
         directory.appending(path: Self.personalScratchMarkerName)),
@@ -566,7 +566,7 @@ extension LinnetDataRegistry {
       .standardizedFileURL,
       Self.isSecureOwnedDirectory(transactionsDirectory),
       Self.isSecureOwnedDirectory(directory), contains(directory.resolvingSymlinksInPath()),
-      let directoryID = UUID(uuidString: directory.lastPathComponent),
+      let directoryID = Foundation.UUID(uuidString: directory.lastPathComponent),
       directoryID.uuidString == directory.lastPathComponent,
       let record: LanguageTransactionRecord = readOwnedJSON(
         directory.appending(path: Self.languageTransactionMarkerName)),
@@ -586,7 +586,7 @@ extension LinnetDataRegistry {
     return record
   }
 
-  func removeOwnedDownloadDirectory(transactionID: UUID) throws {
+  func removeOwnedDownloadDirectory(transactionID: Foundation.UUID) throws {
     let directory = downloadsDirectory.appending(
       path: transactionID.uuidString, directoryHint: .isDirectory)
     #if os(Windows)
@@ -715,7 +715,7 @@ extension LinnetDataRegistry {
       contains(directory.resolvingSymlinksInPath()), name.first == ".",
       let marker = name.range(of: ".partial-", options: .backwards),
       marker.lowerBound > name.index(after: name.startIndex),
-      UUID(uuidString: String(name[marker.upperBound...])) != nil,
+      Foundation.UUID(uuidString: String(name[marker.upperBound...])) != nil,
       let identitySeparator = name[..<marker.lowerBound].firstIndex(of: "-")
     else { return false }
     let sequenceStart = name.index(after: name.startIndex)

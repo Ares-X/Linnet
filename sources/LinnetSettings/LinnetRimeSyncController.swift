@@ -55,7 +55,7 @@ enum LinnetRimeSyncResult: Equatable {
 }
 
 private struct LinnetRimeSyncCycle {
-  let cycleID: UUID
+  let cycleID: Foundation.UUID
   let deadline: Date
   var attempt: Int
   var recorded: Bool
@@ -186,13 +186,13 @@ final class LinnetRimeSyncController: @unchecked Sendable {
   ) {
     timer?.invalidate()
     let cycle = LinnetRimeSyncCycle(
-      cycleID: UUID(), deadline: now.addingTimeInterval(60), attempt: 0, recorded: false,
+      cycleID: Foundation.UUID(), deadline: now.addingTimeInterval(60), attempt: 0, recorded: false,
       syncDirectory: syncDirectory, completion: completion)
     self.cycle = cycle
     attempt(cycle.cycleID)
   }
 
-  private func attempt(_ cycleID: UUID) {
+  private func attempt(_ cycleID: Foundation.UUID) {
     guard var current = cycle, current.cycleID == cycleID else { return }
     if !current.recorded {
       guard recordAttempt(Date()) else {
@@ -231,7 +231,7 @@ final class LinnetRimeSyncController: @unchecked Sendable {
 
   private func continueCycle(
     _ current: LinnetRimeSyncCycle,
-    cycleID: UUID,
+    cycleID: Foundation.UUID,
     after interval: TimeInterval
   ) {
     let now = Date()

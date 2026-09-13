@@ -135,7 +135,7 @@ final class LinnetWindowsDataFile {
     let parent = destination.deletingLastPathComponent()
     let lease = try LinnetWindowsDataFile(parent, access: .directory)
     defer { withExtendedLifetime(lease) {} }
-    let temporary = parent.appendingPathComponent(".\(destination.lastPathComponent).partial-\(UUID().uuidString)")
+    let temporary = parent.appendingPathComponent(".\(destination.lastPathComponent).partial-\(Foundation.UUID().uuidString)")
     do {
       let file = try LinnetWindowsDataFile(temporary, access: .create)
       try file.write(contentsOf: data)

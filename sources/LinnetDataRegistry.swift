@@ -68,7 +68,7 @@ struct LinnetDataRegistry: Sendable {
     let activeView: String
     let packs: [ActivePack]
     var publication: Publication
-    let transactionID: UUID?
+    let transactionID: Foundation.UUID?
     let acceptedCatalog: DataChannelReceipt?
     let rollbackPacks: [ActivePack]
 
@@ -91,7 +91,7 @@ struct LinnetDataRegistry: Sendable {
       activeView: String,
       packs: [ActivePack],
       publication: Publication = .committed,
-      transactionID: UUID? = nil,
+      transactionID: Foundation.UUID? = nil,
       acceptedCatalog: DataChannelReceipt? = nil,
       rollbackPacks: [ActivePack] = []
     ) {
@@ -114,7 +114,7 @@ struct LinnetDataRegistry: Sendable {
       activeView = try values.decode(String.self, forKey: .activeView)
       packs = try values.decode([ActivePack].self, forKey: .packs)
       publication = try values.decode(Publication.self, forKey: .publication)
-      transactionID = try values.decode(UUID?.self, forKey: .transactionID)
+      transactionID = try values.decode(Foundation.UUID?.self, forKey: .transactionID)
       acceptedCatalog = try values.decode(
         DataChannelReceipt?.self, forKey: .acceptedCatalog)
       rollbackPacks = try values.decode(
@@ -166,19 +166,19 @@ struct LinnetDataRegistry: Sendable {
   }
 
   struct ActivationCandidate: Equatable, Sendable {
-    let transactionID: UUID
+    let transactionID: Foundation.UUID
     let directory: URL
     let expectedActiveRevision: ActiveRevision
   }
 
   struct DataChannelUpdateTransaction: Equatable, Sendable {
-    let transactionID: UUID
+    let transactionID: Foundation.UUID
     let downloadDirectory: URL
   }
 
   struct PersonalScratchMarker: Codable {
     let format: String
-    let transactionID: UUID
+    let transactionID: Foundation.UUID
     let createdAt: TimeInterval
 
     enum CodingKeys: String, CodingKey {
@@ -194,7 +194,7 @@ struct LinnetDataRegistry: Sendable {
       case prepared
     }
     let format: String
-    let transactionID: UUID
+    let transactionID: Foundation.UUID
     let createdAt: TimeInterval
     let catalog: DataChannelReceipt
     let edition: Edition
@@ -217,7 +217,7 @@ struct LinnetDataRegistry: Sendable {
   }
 
   struct LanguageTransactionCleanup {
-    let transactionID: UUID
+    let transactionID: Foundation.UUID
     let directory: URL
     let protectedPackPaths: [String]
     let retiresCommittedTransaction: Bool
@@ -451,7 +451,7 @@ extension LinnetDataRegistry {
   /// Creates and marks Settings-owned personal mutation scratch for
   /// Registry-only crash reclamation. Unmarked UUID directories remain foreign.
   func beginPersonalScratch(
-    transactionID: UUID,
+    transactionID: Foundation.UUID,
     createdAt: Date = Date()
   ) throws {
     let directory = transactionsDirectory.appending(

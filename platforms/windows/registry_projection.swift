@@ -144,7 +144,7 @@ extension LinnetDataRegistry {
     let root = rootDirectory.appending(path: "Runtime/Views", directoryHint: .isDirectory)
     guard let entries = try ownedDirectoryEntries(at: root, recursively: false) else { return }
     for entry in entries {
-      guard let identifier = UUID(uuidString: entry.lastPathComponent),
+      guard let identifier = Foundation.UUID(uuidString: entry.lastPathComponent),
         let state = try? loadActiveStateDocument(at: entry).state,
         state.activeView == Self.generationViewPath(identifier), state.activeView != active.activeView,
         entry.standardizedFileURL == rootDirectory.appending(path: state.activeView, directoryHint: .isDirectory)

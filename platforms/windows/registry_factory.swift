@@ -27,7 +27,7 @@ extension LinnetDataRegistry {
         guard try verifiedInstalledPack(at: final) == pack else { throw Failure.invalidActiveState }
       } else {
         let partial = final.deletingLastPathComponent().appendingPathComponent(
-          ".\(final.lastPathComponent).partial-\(UUID().uuidString)", isDirectory: true)
+          ".\(final.lastPathComponent).partial-\(Foundation.UUID().uuidString)", isDirectory: true)
         _ = try Self.ensureOwnedDirectory(partial, withIntermediateDirectories: false)
         do {
           let verified = try LinnetPackContract.verify(

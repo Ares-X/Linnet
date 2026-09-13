@@ -171,13 +171,13 @@ extension LinnetDataRegistry {
     return expectedTargets
   }
 
-  static func generationViewPath(_ identifier: UUID) -> String {
+  static func generationViewPath(_ identifier: Foundation.UUID) -> String {
     "Runtime/Views/" + identifier.uuidString
   }
 
   static func validActiveView(_ path: String) -> Bool {
     #if os(Windows)
-    guard let identifier = UUID(uuidString: String(path.split(separator: "/").last ?? "")) else { return false }
+    guard let identifier = Foundation.UUID(uuidString: String(path.split(separator: "/").last ?? "")) else { return false }
     return path == generationViewPath(identifier)
     #else
     return path == "Runtime/Active"

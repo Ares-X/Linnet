@@ -8,6 +8,34 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Foundation UUID disambiguation
+
+CI `34756136006` passed the Mac/shared-input job and reached Windows Swift
+compilation beyond the removed CoreFoundation import. The next error is the
+Registry transaction field: Windows `rpcdce.h` defines `UUID` as `GUID`, which
+collides with `Foundation.UUID` through the native imports/bridging header.
+
+Milestone: build the same shared transaction, temporary-file and synchronization
+identities on Windows without changing their serialized representation. The
+existing Foundation UUID remains the owner. Qualify its references throughout
+the affected Windows compilation inputs: Registry declaration/storage/transactions,
+sync controller, exclusive download sink, and Windows file/factory/view code.
+Retire unqualified UUID lookup, not the native Windows headers or shared models.
+No UUID alias, conversion layer, new producer or format; owners 1 -> 1, adapters
+unchanged, fallbacks 0 -> 0, duplicate identity/default producers 0 -> 0.
+Allowed files: those eight source files, the native compiler invocation and this
+record. The compiler is also instructed with its upstream-supported
+`-continue-building-after-errors` option to report errors from the remaining
+compilation jobs in the same run. The existing nonzero-exit check still stops
+packaging; no error is suppressed or treated as success. Focused checks:
+`tests/verify_swift_units.sh --only data-registry,rime-sync-controller,download-transport`,
+followed by the native Windows build/runtime probe. Exact installed-product
+input, updates and lifecycle UAT remain required and are not yet exercised.
+All three selected host tests passed (the original v0.1.10 process compatibility
+row remains NOT_EXERCISED without its isolated probe). An isolated imported C
+`typedef GUID UUID` reproduced the same ambiguous lookup; the qualified
+Foundation type compiled and preserved exact UUID JSON encoding/decoding.
+
 ### 2026-09-13 Public Foundation run-loop boundary
 
 CI `34755444537` proves the compiler loader fix: Swift 6.3.3 starts, emits
