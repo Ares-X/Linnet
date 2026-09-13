@@ -39,11 +39,14 @@ foreach ($Header in $Swift.zlib.headers) {
     throw "Swift SDK zlib header differs from upstreams.lock.json: $($Header.name)"
   }
 }
-& $Compiler -v -continue-building-after-errors -swift-version 5 -O -emit-library -module-name LinnetSharedRuntime `
+& $Compiler -v -continue-building-after-errors -swift-version 5 -O -g -debug-info-format=codeview `
+  -emit-library -module-name LinnetSharedRuntime `
   -sdk $SwiftSDK -o $Library -I $ZlibModule `
   -import-objc-header (Join-Path $PSScriptRoot 'shared_runtime-bridging.h') `
   -Xlinker bcrypt.lib -Xlinker advapi32.lib -Xlinker ws2_32.lib -Xlinker $ZlibLibrary `
   -Xlinker "/IMPLIB:$(Join-Path $Projection 'lib64\LinnetSharedRuntime.lib')" `
+  -Xlinker /DEBUG -Xlinker /OPT:REF -Xlinker /OPT:ICF `
+  -Xlinker "/PDB:$(Join-Path $Payload 'LinnetSharedRuntime.pdb')" `
   (Join-Path $RepoRoot 'sources\LinnetPackContract.swift') `
   (Join-Path $RepoRoot 'sources\LinnetDataChannel.swift') `
   (Join-Path $RepoRoot 'sources\LinnetDataRegistry.swift') `

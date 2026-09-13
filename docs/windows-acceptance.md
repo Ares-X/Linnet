@@ -8,6 +8,67 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Shared-runtime matching symbols
+
+Milestone: native shared-runtime crash dumps must have same-build function/line
+symbols alongside the existing frontend and librime PDBs. The exact6b11af2
+symbols artifact contains 13 PDBs but no LinnetSharedRuntime PDB. Its build owner,
+`build-shared-runtime.ps1`, invokes Swift with `-O` and no debug emission/linker
+option. Retire that symbol-less invocation. Use supported Swift CodeView debug
+emission and the existing MSVC linker's PDB output, with Release optimization
+retained. The existing recursive PDB artifact upload already owns retention;
+the installer's DLL-only runtime selection continues to exclude PDBs.
+No debugger/SDK installation in Tiny, new symbol service, uploader, dependency
+or production API. Compiler/packager/uploader owners 1 -> 1 each; added
+layers/fallbacks/default producers 0. Allowed files: shared-runtime build script
+and this evidence. Focused checks: Windows PowerShell parsing, upstream option
+support, then actual next-build DLL/PDB identity and native runtime checks.
+Previous native binary behavior is not acceptance of the newly built bytes.
+Windows PowerShell 5 parsed both changed scripts successfully; diff check passed.
+Actual generated PDB and DLL matching remain NOT_EXERCISED until native build.
+References: [Swift Windows debugging options](https://github.com/compnerd/swift-win32-application#debugging)
+and [locked driver linker support](https://github.com/swiftlang/swift-driver/blob/swift-6.3.3-RELEASE/Sources/SwiftDriver/Jobs/WindowsToolchain%2BLinkerSupport.swift).
+
+### 2026-09-13 Resource-less ARM64X forwarding modules
+
+CI34763560267 on6b11af2 built both installers. Its corrected icon extraction
+passed both installers, Server/Deployer/Setup and x86/x64/ARM/ARM64 DLLs, then
+failed on `weaselARM64X.dll` with count0/error1812 (no resource section). No
+shared-runtime or lifecycle probe ran. Unlike the previous failed run, both
+engineering installers and matching symbols were retained for diagnosis.
+
+Milestone: check branding on its actual resource owners, not upstream's
+resource-less forwarding stubs. Locked `arm64x_wrapper/build.bat` links both
+ARM64X DLL/IME files with `/noentry`, dummy objects and export-forwarder libraries,
+without a resource file. TSF RegisterProfiles obtains its icon path from the
+real loaded module; only RegisterServer redirects the COM server path to the
+wrapper. Retire the two wrong icon-target entries, not the wrappers, native
+registration or any artwork comparison. Keep the installer, frontend EXE and
+resource-bearing x86/x64/ARM/ARM64 DLL/IME checks. Existing package/runtime tests
+remain responsible for forwarding modules. No new icon copy, resource loader,
+fallback, production path or dependency; owner/layer counts unchanged.
+Allowed files: preflight.ps1 and this evidence. Focused acceptance: inspect the
+exact retained package's PE resources and execute the icon check on the real
+resource-bearing payload; then the next native gate also includes ba5bf84's
+non-solid installer. Installed branding and physical input remain separate UAT.
+
+The retained ARM64 installer is 506,571,783 bytes, SHA256
+`af997762103d7686b1a22bbf1b6f6a906359ee4b76c102d64d65a0affd50ae7f`.
+Read-only native extraction in Tiny passed all 11 packaged product-icon targets
+(installer, three EXEs, four DLLs, three packaged IMEs), plus Chinese/tray
+resource102 in Server and all four native TSF DLLs. Both icon sizes match the
+shared Linnet artwork. The actual installed old Server, Deployer and ARM64 TIP
+still match Weasel artwork; installed Setup/uninstaller also differ from Linnet.
+This is old installed payload, not evidence of a shell-cache-only issue. No
+installation or icon-cache reset was performed; installed branding remains open.
+
+The same package's app-local shared runtime loaded in Tiny and passed the real
+channel C ABI cross-process round trip: a child changes the selection, the
+resident process observes it, then both processes verify the original restored
+selection. DLL SHA256 is
+`c34f1767176c95678c50985a88124d4095b05555a24c88e14d2eab0996036d3b`.
+This is component evidence, not Settings UI, installed feed or lifecycle PASS.
+
 ### 2026-09-13 Installer peak disk footprint
 
 Milestone: install the same complete offline product without retaining a second

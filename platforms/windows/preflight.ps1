@@ -232,10 +232,12 @@ foreach ($Required in @(
   Assert-File $Required
 }
 $IconTargets = @($Installer, $Arm64Installer)
+# ARM64X files are upstream's resource-less export forwarders. Branding belongs
+# to the native modules they load, including the TSF profile's icon path.
 $IconTargets += @(
   "WeaselServer.exe", "WeaselDeployer.exe", "WeaselSetup.exe",
-  "weasel.dll", "weaselx64.dll", "weaselARM.dll", "weaselARM64.dll", "weaselARM64X.dll",
-  "weasel.ime", "weaselx64.ime", "weaselARM.ime", "weaselARM64.ime", "weaselARM64X.ime"
+  "weasel.dll", "weaselx64.dll", "weaselARM.dll", "weaselARM64.dll",
+  "weasel.ime", "weaselx64.ime", "weaselARM.ime", "weaselARM64.ime"
 ) | ForEach-Object { Join-Path $Output $_ }
 foreach ($IconTarget in $IconTargets) {
   Assert-LinnetIcon $IconTarget
