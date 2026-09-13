@@ -347,3 +347,41 @@ preflight was not reached. Same-run symbols were retained successfully.
   reads only after commit. Do not patch Rime/TSF to compensate for this observer.
   Pointer disclosure remains unverified until the actual button receives a
   physical click without an intervening focus-changing command.
+
+## Installer boundary correction before the next desktop candidate
+
+The `a6aa1ea` reboot correction was incomplete: a second `SetRebootFlag true`
+at the end of the main installation section still runs for upgrades. That is
+not the separate uninstaller flag. Remove this second normal-upgrade site;
+retain the uninstaller flag and native old-DLL deletion. No new candidate may
+be described as having passed the finish-page correction before actual UAT.
+
+A read-only guest `/help` launch also returned 1 while native Settings PID 1436
+was open (`build/windows-uat-20260913-a6aa1ea/deployer-open-settings-check.json`).
+The upstream `WeaselDeployer.cpp` process-wide exclusive mutex rejects the
+new process before command dispatch, including the installer's `/install` or
+`/deploy`. The installer currently discovers that conflict only after stopping
+input and replacing package files. The server and settings were not stopped
+for this diagnostic.
+
+- Deliverable: ask the user to close Settings/dictionary operations before
+  installer mutation; Cancel or silent busy rejection leaves the existing
+  package, server, registration and data untouched. Retry is user-driven after
+  closing the window normally, allowing its unsaved-change prompt to run.
+- Owner: existing deployer exclusive mutex. The NSIS installation section
+  observes it at the first mutation boundary, with the standard System plug-in
+  and Windows OpenMutex/CloseHandle. Do not invent another lock, terminate
+  Settings, weaken its existing exclusion or retry an uncertain install.
+- Retire the installer's assumption that deployment can start despite an
+  already-open deployer. Retain the deployment command's own exclusion for
+  genuinely concurrent launches. This does not claim the user cannot start a
+  new Settings process later during installation.
+- Scope: locked installer patch/digest, existing Windows installer preflight,
+  this acceptance record. No input changes or dependency additions. Mutex/state
+  owner 1 -> 1; pass-through layers 0 -> 0; fallback paths 0 -> 0; duplicate
+  normal-upgrade reboot sites 1 -> 0 (originally 2, not 1); duplicated defaults 0.
+- Focused checks: patch apply/reverse and lock verification, PowerShell 5 syntax,
+  existing native preflight with the actual named mutex held and unchanged
+  server/TIP/package assertions; then interactive Retry/Cancel while Settings is
+  open, followed by ordinary upgrade and finish-page/bounds acceptance. Use
+  Tiny Windows 11 only; no logout, reboot or daily Mac loading needed.

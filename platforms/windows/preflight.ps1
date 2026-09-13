@@ -326,6 +326,30 @@ try {
     throw "Wrong-architecture installer changed the installed input service"
   }
 
+  # The long-lived Settings dialog owns this same upstream mutex. Installation
+  # must stop before mutating anything, not fail at /deploy after replacing files.
+  [bool]$CreatedDeployerMutex = $false
+  $OpenSettingsMutex = [Threading.Mutex]::new($false,
+    "LinnetDeployerExclusiveMutex", [ref]$CreatedDeployerMutex)
+  try {
+    if (-not $CreatedDeployerMutex) { throw "A real Linnet deployer is already running" }
+    $ServerBeforeBusyUpgrade = @(Get-Process -Name "LinnetServer").Id
+    $ManifestBeforeBusyUpgrade = (Get-FileHash -LiteralPath `
+      (Join-Path $InstallRoot "linnet-windows-manifest.json")).Hash
+    Invoke-CheckedProcess -FilePath $Installer -Arguments @("/S", "/T") `
+      -Description "Reject upgrade while Settings owns deployment without stopping input" `
+      -TimeoutSeconds 30 -ExpectedExitCode 1618
+    if (@(Compare-Object $ServerBeforeBusyUpgrade @(Get-Process -Name "LinnetServer").Id).Count -ne 0 -or
+        (Get-RegistryValue LocalMachine Registry32 "Software\Linnet" "WeaselRoot") -ne $InstallRoot -or
+        (Get-FileHash -LiteralPath (Join-Path $InstallRoot "linnet-windows-manifest.json")).Hash -ne $ManifestBeforeBusyUpgrade -or
+        (Get-LinnetInputMethodTipCount $HantInputMethodTip) -ne 1) {
+      throw "Busy upgrade changed the existing server, package or input profile"
+    }
+    Assert-Absent "$InstallRoot.linnet-rollback"
+  } finally {
+    $OpenSettingsMutex.Dispose()
+  }
+
   # A non-movable file must leave the old package usable, including any files
   # already moved before it. Do not stop other processes to release the handle.
   $HeldRuntime = [IO.File]::Open((Join-Path $InstallRoot "rime.dll"),

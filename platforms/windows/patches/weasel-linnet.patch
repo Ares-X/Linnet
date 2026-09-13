@@ -3075,7 +3075,7 @@ index 3a40f51..7af1f8d 100644
  #define ID_WEASELTRAY_INSTALLDIR        40006
  #define ID_WEASELTRAY_USERCONFIG        40007
 diff --git a/output/install.nsi b/output/install.nsi
-index 3d5130c..3e12042 100644
+index 3d5130c..65a8968 100644
 --- a/output/install.nsi
 +++ b/output/install.nsi
 @@ -18,21 +18,43 @@ Unicode true
@@ -3130,7 +3130,7 @@ index 3d5130c..3e12042 100644
  VIAddVersionKey /LANG=2052 "FileVersion" "${WEASEL_VERSION}"
  
  !define MUI_ICON ..\resource\weasel.ico
-@@ -60,59 +82,67 @@ RequestExecutionLevel admin
+@@ -60,59 +82,70 @@ RequestExecutionLevel admin
  ; Languages
  
  !insertmacro MUI_LANGUAGE "TradChinese"
@@ -3162,6 +3162,7 @@ index 3d5130c..3e12042 100644
  LangString SYSTEMVERSIONNOTOK ${LANG_TRADCHINESE} "您的系统不被支持，最低系統要求:Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_TRADCHINESE} "自動檢查版本更新？"
 +LangString ARCHITECTURENOTOK ${LANG_TRADCHINESE} "此 ${LINNET_ARCH} 安裝包不適用於目前系統。請選擇與 Windows 架構相符的 Linnet 安裝包；ARM64 版需要 Windows 11。"
++LangString DEPLOYERBUSY ${LANG_TRADCHINESE} "請先儲存並關閉 Linnet 設定或詞典視窗，等待部署或同步完成，再按「重試」。目前的輸入服務及資料尚未變更。"
  
  !insertmacro MUI_LANGUAGE "SimpChinese"
 -LangString DISPLAYNAME ${LANG_SIMPCHINESE} "小狼毫输入法"
@@ -3192,6 +3193,7 @@ index 3d5130c..3e12042 100644
  LangString SYSTEMVERSIONNOTOK ${LANG_SIMPCHINESE} "您的系統不被支持，最低系统要求:Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_SIMPCHINESE} "自动检查版本更新？"
 +LangString ARCHITECTURENOTOK ${LANG_SIMPCHINESE} "此 ${LINNET_ARCH} 安装包不适用于当前系统。请选择与 Windows 架构相符的 Linnet 安装包；ARM64 版需要 Windows 11。"
++LangString DEPLOYERBUSY ${LANG_SIMPCHINESE} "请先保存并关闭 Linnet 设置或词典窗口，等待部署或同步完成，再按“重试”。当前输入服务及数据尚未变更。"
  
  !insertmacro MUI_LANGUAGE "English"
 -LangString DISPLAYNAME ${LANG_ENGLISH} "Weasel"
@@ -3222,6 +3224,7 @@ index 3d5130c..3e12042 100644
  LangString SYSTEMVERSIONNOTOK ${LANG_ENGLISH} "Your system not supported, minimium system required: Windows 8.1!"
 -LangString AUTOCHKUPDATE ${LANG_ENGLISH} "Automatically check for updates?"
 +LangString ARCHITECTURENOTOK ${LANG_ENGLISH} "This ${LINNET_ARCH} package does not match your system. Choose the Linnet package for your Windows architecture; ARM64 requires Windows 11."
++LangString DEPLOYERBUSY ${LANG_ENGLISH} "Save and close Linnet Settings or Dictionary Manager, wait for deployment or sync to finish, then click Retry. Your current input service and data have not been changed."
  
  ;--------------------------------
  
@@ -3240,7 +3243,7 @@ index 3d5130c..3e12042 100644
    ; if not version >= 8.1, quit and MessageBox(if not silent)
    ${IfNot} ${AtLeastWin8.1}
      IfSilent toquit
-@@ -121,171 +151,335 @@ toquit:
+@@ -121,171 +154,353 @@ toquit:
      Quit
    ${EndIf}
  
@@ -3494,6 +3497,24 @@ index 3d5130c..3e12042 100644
 +Section "Linnet"
  
    SectionIn RO
++  ; The existing deployer owns exclusion. Check before stopping input or
++  ; moving files, not after the new /install command encounters that owner.
++deployer_check:
++  System::Call 'kernel32::OpenMutexW(i 0x100000, i 0, w "LinnetDeployerExclusiveMutex") p .r0 ?e'
++  Pop $1
++  StrCmp $0 0 deployer_not_open
++  System::Call 'kernel32::CloseHandle(p r0)'
++  GoTo deployer_busy
++deployer_not_open:
++  StrCmp $1 2 deployer_idle
++  DetailPrint "Cannot inspect the Linnet deployment mutex (Windows error $1)."
++deployer_busy:
++  IfSilent deployer_cancel
++  MessageBox MB_RETRYCANCEL|MB_ICONINFORMATION "$(DEPLOYERBUSY)" IDRETRY deployer_check
++deployer_cancel:
++  SetErrorLevel 1618
++  Abort
++deployer_idle:
 +  ; Resolve the setup mode once, before touching the existing installation.
 +  StrCpy $R2 "/i"
 +  ${GetParameters} $R0
@@ -3551,8 +3572,7 @@ index 3d5130c..3e12042 100644
 +invalid_upgrade:
 +  SetErrorLevel 1
 +  Abort
- 
--  ; Reset INSTDIR for the new version
++
 +call_uninstaller:
 +  ExecWait '"$R1\LinnetServer.exe" /quit' $R3
 +  IntCmp $R3 0 old_server_stopped
@@ -3590,7 +3610,8 @@ index 3d5130c..3e12042 100644
 +old_package_restored:
 +  SetErrorLevel 3
 +  Abort
-+
+ 
+-  ; Reset INSTDIR for the new version
 +upgrade_done:
 +  ; Keep the selected base directory while targeting the versioned package.
 +  StrCpy $R0 $INSTDIR
@@ -3701,7 +3722,7 @@ index 3d5130c..3e12042 100644
  
    File "WeaselSetup.exe"
    ; shared data files
-@@ -293,49 +487,83 @@ program_files:
+@@ -293,49 +508,83 @@ program_files:
    File "data\*.yaml"
    File /nonfatal "data\*.txt"
    File /nonfatal "data\*.gram"
@@ -3758,13 +3779,14 @@ index 3d5130c..3e12042 100644
 +  SetErrorLevel $R4
 +  Abort
 +build_backup_done:
-+
+ 
+-  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2'
 +  ; run as user...
 +  IfSilent deploy_silently
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /install' $R3
 +  GoTo deploy_checked
  
--  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2'
+-  ; Write the uninstall keys for Windows
 +  deploy_silently:
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /deploy' $R3
 +  deploy_checked:
@@ -3777,8 +3799,7 @@ index 3d5130c..3e12042 100644
 +  SetErrorLevel $R4
 +  Abort
 +  deploy_done:
- 
--  ; Write the uninstall keys for Windows
++
 +  ; Commit public installation metadata only after the candidate deploys.
    WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayName" "$(DISPLAYNAME)"
 -  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayIcon" '"$INSTDIR\WeaselServer.exe"'
@@ -3810,7 +3831,7 @@ index 3d5130c..3e12042 100644
  
    ; don't redirect on 64 bit system for auto run setting
    ${If} ${IsNativeARM64}
-@@ -344,22 +572,12 @@ program_files:
+@@ -344,23 +593,9 @@ program_files:
      SetRegView 64
    ${Endif}
    ; Write autorun key
@@ -3828,15 +3849,15 @@ index 3d5130c..3e12042 100644
 -  EnableAutoCheckUpdate:
 -  WriteRegStr HKCU "Software\Rime\Weasel\Updates" "CheckForUpdates" "1"
 -  end:
+-
+-  ; Prompt reboot
+-  StrCmp $0 "Upgrade" 0 +2
+-  SetRebootFlag true
 +  Exec "$INSTDIR\LinnetServer.exe"
  
-   ; Prompt reboot
--  StrCmp $0 "Upgrade" 0 +2
-+  StrCmp $LinnetUpgrade 1 0 +2
-   SetRebootFlag true
- 
  SectionEnd
-@@ -373,10 +591,9 @@ Section "Start Menu Shortcuts"
+ 
+@@ -373,10 +608,9 @@ Section "Start Menu Shortcuts"
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDEPLOY).lnk" "$INSTDIR\WeaselDeployer.exe" "/deploy" "$SYSDIR\shell32.dll" 144
@@ -3850,7 +3871,7 @@ index 3d5130c..3e12042 100644
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
  
-@@ -388,30 +605,41 @@ SectionEnd
+@@ -388,30 +622,41 @@ SectionEnd
  
  Section "Uninstall"
  

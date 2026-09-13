@@ -55,7 +55,7 @@
     "weasel_linnet_windows_projection": {
       "target": "sources.weasel",
       "path": "platforms/windows/patches/weasel-linnet.patch",
-      "sha256": "fa6d49477e4824657488b747529d07ccb698a08d8bddcdb5182686955d262b70"
+      "sha256": "3716c19ffb2719ff9ef46f3ca54ad7e05c72ac70431b6d5511f4d6ef45e45716"
     }
   },
   "sources": {
