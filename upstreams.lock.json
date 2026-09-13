@@ -36,7 +36,7 @@
     "librime_core_interactions": {
       "target": "sources.librime",
       "path": "patches/librime-linnet-core-interactions.patch",
-      "sha256": "24e935b4562d15754ce1ddd52c8086c3e9fd0236192721d516fa121e18588541"
+      "sha256": "d35ad810d07ec2cb15a4bfb1f073a919f58f51a16a5ca4de68383e09c7305329"
     },
     "librime_lua_state_lifetime": {
       "target": "sources.librime.bundled_plugins.lua",

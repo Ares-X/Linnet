@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -7,6 +9,8 @@
 #include <vector>
 #include <rime_api_stdbool.h>
 #include <rime_api.h>
+#include <rime/algo/syllabifier.h>
+#include <rime/dict/table.h>
 
 namespace {
 void Require(bool value, const std::string& message) {
@@ -14,6 +18,63 @@ void Require(bool value, const std::string& message) {
     std::cerr << "chinese_phrase_ranking_test: " << message << '\n';
     std::_Exit(1);
   }
+}
+
+// Branching spellings must retain their own accumulated quality and penalty,
+// including three-syllable index entries with a longer tail. This exercises
+// the table search shared by whole words, compositions and mixed candidates.
+void DictionaryGraph(const std::string& user_dir) {
+  rime::Table table(rime::path{user_dir + "/ranking-table-test.bin"});
+  rime::Syllabary syllables{"a", "b", "c", "d", "e"};
+  rime::Vocabulary vocabulary;
+  const auto add = [&](std::initializer_list<int> code, const char* text) {
+    auto entry = rime::New<rime::ShortDictEntry>();
+    entry->code.assign(code); entry->text = text; entry->weight = 10;
+    auto* node = &vocabulary;
+    size_t depth = 0;
+    for (int id : code) {
+      auto& part = (*node)[depth == rime::Code::kIndexCodeMaxLength ? -1 : id];
+      if (++depth == code.size() || depth > rime::Code::kIndexCodeMaxLength) {
+        part.entries.push_back(entry); break;
+      }
+      if (!part.next_level) part.next_level = rime::New<rime::Vocabulary>();
+      node = part.next_level.get();
+    }
+  };
+  add({0}, "A"); add({0, 4}, "AE"); add({0, 1, 2}, "ABC");
+  add({0, 1, 2, 3}, "ABCD"); add({4, 1, 2}, "EBC");
+  Require(table.Build(syllables, vocabulary, 5) && table.Save() && table.Load(),
+          "cannot build dictionary query fixture");
+  rime::SyllableGraph graph;
+  graph.input_length = graph.interpreted_length = 4;
+  const auto edge = [&](int begin, int id, double penalty, bool full = true) {
+    auto& p = graph.edges[begin][begin + 1][id];
+    p.end_pos = begin + 1; p.credibility = penalty;
+    p.type = full ? rime::kNormalSpelling : rime::kAbbreviation;
+    graph.indices[begin][id].push_back(&p);
+  };
+  edge(0, 0, -.1); edge(0, 4, -.4);
+  edge(1, 1, -.2); edge(1, 4, -.5, false);
+  edge(2, 2, -.3); edge(3, 3, -.6);
+  rime::TableQueryResult result;
+  Require(table.Query(graph, 0, &result), "dictionary graph returned no paths");
+  std::map<std::string, std::pair<double, double>> expected{
+      {"A", {-.1, 1}}, {"AE", {-.6, 1}}, {"ABC", {-.6, 3}},
+      {"ABCD", {-.6, 3}}, {"EBC", {-.9, 3}}};
+  for (auto& group : result) for (auto& accessor : group.second) {
+    for (; !accessor.exhausted(); accessor.Next()) {
+      const auto text = table.GetEntryText(*accessor.entry());
+      auto found = expected.find(text);
+      Require(found != expected.end(), "unexpected/duplicate dictionary path " + text);
+      Require(std::abs(accessor.credibility() - found->second.first) < 1e-10 &&
+              accessor.quality_len() == found->second.second,
+              "sibling dictionary path changed its penalty or spelling quality " + text);
+      Require(bool(accessor.extra_code()) == (text == "ABCD"), "lost long dictionary tail");
+      expected.erase(found);
+    }
+  }
+  Require(expected.empty(), "dictionary graph lost a branch");
+  std::cout << "dictionary branching, spelling scores and long tail: PASS\n";
 }
 
 std::vector<std::string> Split(const std::string& line) {
@@ -210,6 +271,7 @@ int main(int argc, char** argv) {
   api->setup(&traits);
   api->initialize(nullptr);
   Require(api->find_module("octagram"), "missing shipped grammar module");
+  DictionaryGraph(argv[2]);
   Corpus(api, argv[3]);
   SelectionAndLearning(api);
   api->finalize();

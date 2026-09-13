@@ -155,7 +155,8 @@ end_phase "deploy native schemas"
 if [[ -z "${runtime_probe}" || "${runtime_probe}" == --chinese-phrase-ranking-probe ]]; then
   begin_phase "Chinese whole words, compositions and learned homophones"
   "$(xcrun --find clang++)" -isysroot "${sdk}" -std=c++17 -O2 -Wall -Wextra -Werror \
-    -isystem librime/dist/include tests/chinese_phrase_ranking_test.cc \
+    -DGLOG_USE_GLOG_EXPORT -isystem librime/dist/include \
+    -isystem build/dependencies/boost tests/chinese_phrase_ranking_test.cc \
     lib/librime.1.dylib -o "${scratch}/chinese-phrase-ranking"
   # Its deliberate homophone learning must not seed later smoke assertions.
   ranking_user="${scratch}/phrase-ranking-user"
