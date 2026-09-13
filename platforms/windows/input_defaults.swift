@@ -17,6 +17,10 @@ struct WindowsInputDefaults {
       if stem == "default" {
         // Weasel uses Rime's switcher; the macOS frontend has its own menu.
         policyContents += "  switcher/hotkeys:\n    - Control+grave\n    - F4\n"
+      } else if stem == LinnetSettingsContract.englishSchemaID {
+        // Smart English composes with ascii_mode=false. Weasel's native schema
+        // icon keeps its tray, language bar and status bubble English too.
+        policyContents += "  schema/icon: linnet_english.ico\n"
       }
       try policyContents.write(to: output.appendingPathComponent(policy + ".yaml"),
                                atomically: true, encoding: .utf8)

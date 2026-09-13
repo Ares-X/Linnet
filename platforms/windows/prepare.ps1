@@ -374,6 +374,8 @@ Copy-DataTree (Join-Path $DataRoot "plum") $OutputData
 Copy-DataTree (Join-Path $DataRoot "opencc") (Join-Path $OutputData "opencc")
 Copy-Item -LiteralPath $WeaselConfig -Destination (Join-Path $OutputData "weasel.yaml")
 Copy-Item -Path (Join-Path $InputPolicyRoot "*.yaml") -Destination $OutputData
+Copy-Item -LiteralPath (Join-Path $WeaselSource "resource\en.ico") `
+  -Destination (Join-Path $OutputData "linnet_english.ico")
 # The compact grammar is only a developer fixture, not a product model.
 Remove-Item -LiteralPath (Join-Path $OutputData "zh-hans-t-essay-bgw.gram")
 Copy-DataTree $ThemePreviewRoot (Join-Path $OutputData "preview")

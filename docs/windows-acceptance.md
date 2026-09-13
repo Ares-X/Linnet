@@ -17,7 +17,7 @@ Local evidence: `build/windows-uat-20260913-2bff3aa/RESULTS.md`.
 | Boundary | Evidence for that candidate | Remaining work |
 | --- | --- | --- |
 | Shared core and packaging | Both architectures built; Windows CI runtime and x64 installer lifecycle passed | Repeat affected gates after the next source freeze |
-| Windows 11 ARM desktop | Original four ARM64/x86/x64 editors retained connections and passed 24 physical cases after upgrade; both Edge editors retained text and accepted mixed input; config and learning retained | Settings bounds FAIL; full Settings, candidate interactions/design, English/reverse lookup on these bytes and measured performance still open |
+| Windows 11 ARM desktop | Original four ARM64/x86/x64 editors retained connections and passed 24 physical cases after upgrade; both Edge editors retained text and accepted mixed input; config and learning retained. Additional ARM64 WordPad English gloss, Right-selection, pinyin/reverse lookup and Shift round trips passed | Settings bounds FAIL; English status icon FAIL; full Settings, remaining candidate interactions/design and measured performance still open |
 | Lifecycle | Same-language upgrade retained selection and open application connections without logout/reboot in this run | Clean install/uninstall/reinstall, login/reboot and upstream Weasel coexistence on the final candidate |
 | Native x64 desktop / Windows 10 | NOT_EXERCISED; CI is not desktop acceptance | Identify an available dedicated target before claiming these rows |
 | Signing / publication | Engineering package is unsigned; no Windows Release | Formal signing and exact accepted-byte publication need a separate authorized release step |
@@ -86,6 +86,73 @@ their own exact candidates, not as the status of replacement bytes.
   old folder was cancelled without a settings change. Temporary per-app crash
   collection was removed and VM idle pause restored. The daily Mac and dirty
   main checkout were not changed. A fresh fetch found no unmerged main commits.
+
+## Active milestone: native snapshot probe link correction
+
+Run `34732355632` / `ad122b9` built the native frontend projects, then failed
+linking the x64 runtime probe: LNK2019 for `rime::Config::SetString` called by
+`SnapshotProbe`. It did not reach installer compression, runtime preflight or
+installer uploads. Matching symbols were retained; the guest still runs
+`2bff3aa`. This is a native test-link failure, not a passed candidate.
+
+- Cause/owner: the new snapshot fixture called a C++ method absent from the
+  Windows DLL export surface. Use the already-exported Rime C configuration API,
+  as the native Settings model already does, on the same borrowed Config object.
+  Retire that direct SetString call; do not export another private method or
+  weaken/remove the probe. API owner 1 -> 1; fixture paths 1 -> 1; new wrappers,
+  dependencies, fallbacks and product policy changes 0.
+- Scope: existing `runtime_smoke.cc` and this record. Run the affected Windows
+  host composite once, then rebuild the corrected full batch natively. The new
+  artifact still requires native Unicode backup/restore and normal-input UAT;
+  no daily Mac or guest lifecycle mutation is needed for the fixture correction.
+- `scripts/stage-windows-build-inputs` completed with exit 0 after the complete
+  label/icon/probe edit batch. Lock/publication/projection, shared runtime,
+  native Settings persistence, Unicode snapshots/learning/sync and rejected
+  user-customization deployment checks all passed. Evidence:
+  `build/windows-uat-20260913-ad122b9/link-fix-host-verify.log`.
+  This macOS-hosted composite is not Windows DLL linking or product UAT.
+
+## Active milestone: Smart English native status icon
+
+- Installed `2bff3aa` in ARM64 WordPad 6528 physically showed English completion,
+  changing IPA/gloss details, exact Space commits, automatic pinyin lookup,
+  prefixed Chinese lookup and Shift round trips. The Smart English schema bubble
+  nevertheless displayed the default Chinese icon. Evidence is under
+  `build/windows-uat-20260913-2bff3aa/english-review-*`.
+- Cause/owner: shared Smart English correctly remains `ascii_mode=false` to
+  provide candidates; the Windows projection provides no `schema/icon`, so
+  Weasel's native schema-icon loader uses IDI_ZH. Supply the existing locked
+  upstream `resource/en.ico` through `schema/icon`. The same native style feeds
+  the tray, TSF language bar and status bubble. Do not falsify ascii_mode or add
+  schema-specific branches to three separate UI consumers.
+- Scope: existing Windows input-defaults projection, preparation script,
+  Windows README and this evidence. Icon owner 1 -> 1; input-mode owner 1 -> 1;
+  new runtime helpers/branches/dependencies 0; duplicated policy/defaults 0.
+  Retire the missing English icon projection and stale README statement that
+  Shift selects plain ASCII. User customization retains normal precedence.
+- Validate the projected schema path and reuse of the locked icon, parse the
+  PowerShell preparation script and use native Windows LoadImageW on that icon.
+  The later exact candidate must prove packaging and all native UI consumers;
+  these bytes are not part of the failed `ad122b9` CI. No Mac loading,
+  iCloud or logout/reboot is required for this display change.
+- Projection comparison passed: only English `schema/icon` changed; all other
+  policies, labels, defaults and UI choice ordering were retained. Native
+  Windows `LoadImageW` accepted the locked upstream icon at 16/32/64 pixels and
+  PowerShell 5 parsed the preparation script with no errors. Packaged icon and
+  tray/language-bar/status-bubble behavior remain NOT_EXERCISED on new bytes.
+- The old candidate's physical tests committed exact `algorithm ` and
+  `algorithms ` with IPA/gloss details following Right selection. Smart English
+  `suanfa` and Chinese `|suanfa` produced English lookup candidates; tap Shift
+  switched both ways, while held Shift preserved `你好WAF你好`. Original editor
+  text was retained. Down means next page in the horizontal selector, not next
+  candidate; semicolon is not the current default lookup prefix. Neither test
+  expectation error is a product defect.
+- Fresh native sync snapshots after these intentional commits retain all 17
+  prior repair deletion marks. Chinese records differ only in the exercised
+  `你好` dynamic weight; English adds `algorithm` and advances the native tick.
+  New learning is preserved in `learning-before-candidate`, alongside the six
+  original app identities and installed server PID 6296. VM idle pause is back
+  on; no logout, reboot or server restart was used.
 
 ## Active milestone: shared user-facing Settings names
 

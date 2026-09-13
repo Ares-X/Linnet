@@ -143,7 +143,8 @@ void SnapshotProbe(RimeApi* api, const char* user) {
   const auto sync = root / fs::u8path("sync-数据");
   linnet_windows::Config installation;
   installation.Load(root / "installation.yaml");
-  installation.document.SetString("sync_dir", sync.u8string());
+  if (!api->config_set_string(&installation.value, "sync_dir", sync.u8string().c_str()))
+    Fail("snapshot sync directory fixture failed");
   installation.Save(root / "installation.yaml");
   if (!api->run_task("installation_update")) Fail("snapshot installation fixture failed");
   auto* levers = reinterpret_cast<RimeLeversApi*>(api->find_module("levers")->get_api());

@@ -71,8 +71,11 @@ see [Windows acceptance](../../docs/windows-acceptance.md).
 Weasel retains its schema selector, installation theme selector, user-dictionary
 management, synchronization and deployment entrypoints. The
 schema switcher opens with Ctrl+` or F4; choose Smart English there for English
-completion with IPA and Chinese glosses. Shift's plain ASCII mode is separate
-and does not show candidates. The optional
+completion with IPA and Chinese glosses. Tap Shift to switch between the selected
+Chinese profile and Smart English; holding Shift for uppercase does not switch
+modes. Plain ASCII is separate and does not show candidates. Chinese-mode pinyin
+lookup uses `|` by default (configurable in Settings); Smart English recognizes
+pinyin without that prefix. The optional
 package-mutating schema downloader is removed completely because root Linnet
 data is package-owned. SwiftUI/AppKit itself is not shipped on Windows. Input
 behavior still comes from the shared schemas and projection renderer. This
