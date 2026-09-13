@@ -1083,14 +1083,21 @@ index a578014..7d6b424 100644
    if (deployment_scheduled) {
      return configurator.UpdateWorkspace();
 diff --git a/WeaselDeployer/WeaselDeployer.vcxproj b/WeaselDeployer/WeaselDeployer.vcxproj
-index 88fbaa2..7e09c20 100644
+index 88fbaa2..2679c52 100644
 --- a/WeaselDeployer/WeaselDeployer.vcxproj
 +++ b/WeaselDeployer/WeaselDeployer.vcxproj
-@@ -185,6 +185,11 @@
+@@ -185,6 +185,18 @@
        <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
      </Manifest>
    </ItemDefinitionGroup>
 +  <ItemDefinitionGroup>
++    <ClCompile>
++      <PreprocessorDefinitions>WEASEL_ENABLE_LOGGING;GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalIncludeDirectories>$(SolutionDir)librime\dist_$(Platform)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <AdditionalDependencies>$(SolutionDir)librime\lib_$(Platform)\glog.lib;dbghelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
 +    <Manifest>
 +      <AdditionalManifestFiles>$(ProjectDir)LinnetUTF8.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
 +    </Manifest>
@@ -1098,19 +1105,17 @@ index 88fbaa2..7e09c20 100644
    <ItemGroup>
      <ClInclude Include="Configurator.h" />
      <ClInclude Include="DictManagementDialog.h" />
-@@ -199,6 +204,11 @@
+@@ -199,6 +211,9 @@
    <ItemGroup>
      <ClCompile Include="..\RimeWithWeasel\WeaselUtility.cpp" />
      <ClCompile Include="Configurator.cpp" />
 +    <ClCompile Include="LinnetSettingsDialog.cpp">
 +      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-+      <PreprocessorDefinitions>WEASEL_ENABLE_LOGGING;GLOG_USE_GLOG_EXPORT;GLOG_STATIC_DEFINE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+      <AdditionalIncludeDirectories>$(SolutionDir)librime\dist_$(Platform)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
 +    </ClCompile>
      <ClCompile Include="DictManagementDialog.cpp" />
      <ClCompile Include="stdafx.cpp">
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-@@ -213,6 +223,7 @@
+@@ -213,6 +228,7 @@
    </ItemGroup>
    <ItemGroup>
      <ResourceCompile Include="WeaselDeployer.rc" />
@@ -1432,7 +1437,7 @@ index b4cf8b2..61a9c2f 100644
      // bad luck...
      nRet = -1;
 diff --git a/WeaselServer/WeaselServer.vcxproj b/WeaselServer/WeaselServer.vcxproj
-index 8e3cc1f..cc437eb 100644
+index 8e3cc1f..7f3d852 100644
 --- a/WeaselServer/WeaselServer.vcxproj
 +++ b/WeaselServer/WeaselServer.vcxproj
 @@ -498,7 +498,6 @@
@@ -1451,13 +1456,18 @@ index 8e3cc1f..cc437eb 100644
      <ClInclude Include="WeaselTrayIcon.h" />
    </ItemGroup>
    <ItemGroup>
-@@ -539,4 +537,4 @@
+@@ -536,6 +534,11 @@
+     <Image Include="..\resource\full.ico" />
+     <Image Include="..\resource\half.ico" />
+   </ItemGroup>
++  <ItemDefinitionGroup Condition="'$(Platform)'=='x64' Or '$(Platform)'=='Win32'">
++    <Link>
++      <AdditionalDependencies>$(SolutionDir)librime\lib_$(Platform)\glog.lib;dbghelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
    <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
    <ImportGroup Label="ExtensionTargets">
    </ImportGroup>
--</Project>
-\ No newline at end of file
-+</Project>
 diff --git a/WeaselServer/WeaselServer.vcxproj.filters b/WeaselServer/WeaselServer.vcxproj.filters
 index 9054fc4..de6693f 100644
 --- a/WeaselServer/WeaselServer.vcxproj.filters
@@ -1490,20 +1500,33 @@ index 9054fc4..de6693f 100644
 \ No newline at end of file
 +</Project>
 diff --git a/WeaselServer/WeaselServerApp.cpp b/WeaselServer/WeaselServerApp.cpp
-index e09c4c5..97912a7 100644
+index e09c4c5..bf9ea8e 100644
 --- a/WeaselServer/WeaselServerApp.cpp
 +++ b/WeaselServer/WeaselServerApp.cpp
-@@ -1,6 +1,9 @@
+@@ -1,6 +1,22 @@
  #include "stdafx.h"
  #include "WeaselServerApp.h"
  #include <filesystem>
 +#include <linnet_update_config.h>
 +#include <linnet_native_platform.h>
++#include <linnet_shared_runtime.h>
 +#include <winsparkle.h>
++
++namespace {
++const char* UpdateFeed() {
++  bool preview = false;
++#if defined(_M_X64)
++  preview = linnet_update_channel_read() == 1;
++#endif
++  if (linnet_windows::NativeMachine() == IMAGE_FILE_MACHINE_ARM64)
++    return preview ? linnet_update::arm64_preview_feed : linnet_update::arm64_feed;
++  return preview ? linnet_update::x64_preview_feed : linnet_update::x64_feed;
++}
++}  // namespace
  
  WeaselServerApp::WeaselServerApp()
      : m_handler(std::make_unique<RimeWithWeaselHandler>(&m_ui)),
-@@ -12,21 +15,10 @@ WeaselServerApp::WeaselServerApp()
+@@ -12,21 +28,10 @@ WeaselServerApp::WeaselServerApp()
  
  WeaselServerApp::~WeaselServerApp() {}
  
@@ -1526,14 +1549,13 @@ index e09c4c5..97912a7 100644
    m_ui.Create(m_server.GetHWnd());
  
    m_handler->Initialize();
-@@ -35,16 +27,30 @@ int WeaselServerApp::Run() {
+@@ -35,16 +40,31 @@ int WeaselServerApp::Run() {
    tray_icon.Create(m_server.GetHWnd());
    tray_icon.Refresh();
  
 +  win_sparkle_set_registry_path("Software\\Linnet\\Updates");
 +  win_sparkle_set_langid(GetThreadUILanguage());
-+  win_sparkle_set_appcast_url(linnet_windows::NativeMachine() == IMAGE_FILE_MACHINE_ARM64
-+      ? linnet_update::arm64_feed : linnet_update::x64_feed);
++  win_sparkle_set_appcast_url(UpdateFeed());
 +  win_sparkle_set_eddsa_public_key(linnet_update::public_key);
 +  // Updates are requested explicitly; opening an input service must not prompt.
 +  win_sparkle_set_automatic_check_for_updates(0);
@@ -1552,6 +1574,8 @@ index e09c4c5..97912a7 100644
  }
  
 +bool WeaselServerApp::check_update() {
++  // As in upstream Weasel, refresh the selected feed before each manual check.
++  win_sparkle_set_appcast_url(UpdateFeed());
 +  win_sparkle_check_update_with_ui();
 +  return true;
 +}
@@ -1559,7 +1583,7 @@ index e09c4c5..97912a7 100644
  void WeaselServerApp::SetupMenuHandlers() {
    std::filesystem::path dir = install_dir();
    m_server.AddMenuHandler(ID_WEASELTRAY_QUIT,
-@@ -64,7 +70,7 @@ void WeaselServerApp::SetupMenuHandlers() {
+@@ -64,7 +84,7 @@ void WeaselServerApp::SetupMenuHandlers() {
    m_server.AddMenuHandler(ID_WEASELTRAY_WIKI,
                            std::bind(open, L"https://rime.im/docs/"));
    m_server.AddMenuHandler(ID_WEASELTRAY_HOMEPAGE,

@@ -133,10 +133,12 @@ Users do not install Swift: the installer carries the shared controller DLL and
 its required runtime DLLs, including the app-local Visual C++ runtime. No compiler,
 SDK or Swift background service is installed on the user's computer.
 Application update checks are available from Settings and the tray menu without
-restarting the input service or applying a Settings draft. WinSparkle verifies
-Ed25519 signatures; the NSIS installer continues to own the upgrade. The two
-native-OS feeds are intentionally empty until Windows release acceptance and
-publication are separately authorized. An empty feed is not upgrade acceptance.
+restarting the input service or applying a Settings draft. The Stable/Preview
+selection applies to both application and language-data checks and is shared
+with the resident input service. WinSparkle verifies Ed25519 signatures; the
+NSIS installer continues to own the upgrade. Public Windows feeds are not yet
+available; channel selection is not proof of an accepted online upgrade. Feed
+publication and Windows release acceptance remain open.
 The private signing key belongs outside the repository and must not be included
 in an installer, source commit, log or Actions artifact. Use upstream's
 `winsparkle-tool sign --private-key-file <key> <installer>` to sign future

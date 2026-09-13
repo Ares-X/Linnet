@@ -8,4 +8,8 @@ inline constexpr char x64_feed[] =
     "https://raw.githubusercontent.com/Ares-X/Linnet/main/platforms/windows/appcast-x64.xml";
 inline constexpr char arm64_feed[] =
     "https://raw.githubusercontent.com/Ares-X/Linnet/main/platforms/windows/appcast-arm64.xml";
+inline constexpr char x64_preview_feed[] =
+    "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/platforms/windows/appcast-x64.xml";
+inline constexpr char arm64_preview_feed[] =
+    "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/platforms/windows/appcast-arm64.xml";
 }  // namespace linnet_update

@@ -27,24 +27,24 @@ struct LinnetSettingsUpdateCheckerStateTests {
     }
     defer { updateDefaults.removePersistentDomain(forName: defaultsSuite) }
     require(
-      LinnetSettingsUpdateChecker.UpdateChannel.load(from: updateDefaults) == .stable,
+      LinnetSettingsDownloadSource.UpdateChannel.load(from: updateDefaults) == .stable,
       "a fresh installation did not default to the stable update channel"
     )
-    LinnetSettingsUpdateChecker.UpdateChannel.preview.save(to: updateDefaults)
+    LinnetSettingsDownloadSource.UpdateChannel.preview.save(to: updateDefaults)
     require(
-      LinnetSettingsUpdateChecker.UpdateChannel.load(from: updateDefaults) == .preview,
+      LinnetSettingsDownloadSource.UpdateChannel.load(from: updateDefaults) == .preview,
       "the Preview channel selection was not persisted"
     )
     require(
-      LinnetSettingsUpdateChecker.UpdateChannel.stable.catalogURL.absoluteString
+      LinnetSettingsDownloadSource.UpdateChannel.stable.catalogURL.absoluteString
         == "https://raw.githubusercontent.com/Ares-X/Linnet/data-channel/Linnet-Data-Channel.json"
-        && LinnetSettingsUpdateChecker.UpdateChannel.preview.catalogURL.absoluteString
+        && LinnetSettingsDownloadSource.UpdateChannel.preview.catalogURL.absoluteString
           == "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/Linnet-Data-Channel.json",
       "Stable and Preview do not own their exact Catalog endpoints"
     )
-    updateDefaults.set("nightly", forKey: LinnetSettingsUpdateChecker.UpdateChannel.defaultsKey)
+    updateDefaults.set("nightly", forKey: LinnetSettingsDownloadSource.UpdateChannel.defaultsKey)
     require(
-      LinnetSettingsUpdateChecker.UpdateChannel.load(from: updateDefaults) == .stable,
+      LinnetSettingsDownloadSource.UpdateChannel.load(from: updateDefaults) == .stable,
       "an unknown update channel did not fail closed to Stable"
     )
 
@@ -363,7 +363,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
         let catalogData = try await LinnetSettingsDownloadTransport(
           source: .direct
         ).downloadCatalog(
-          at: LinnetSettingsUpdateChecker.UpdateChannel.stable.catalogURL)
+          at: LinnetSettingsDownloadSource.UpdateChannel.stable.catalogURL)
         let publishedCore = try LinnetDataChannel.verifyPublished(catalogData).catalog.core
         let liveRoot = fixture.root.appending(
           path: "Live Core Download", directoryHint: .isDirectory)

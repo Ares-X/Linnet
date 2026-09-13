@@ -101,6 +101,7 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     COMMAND_ID_HANDLER(IDC_LINNET_RESET, OnReset)
     COMMAND_ID_HANDLER(IDC_LINNET_FONT, OnFont)
     COMMAND_ID_HANDLER(IDC_LINNET_UPDATE, OnUpdate)
+    COMMAND_HANDLER(IDC_LINNET_CHANNEL, CBN_SELCHANGE, OnChannel)
     COMMAND_HANDLER(IDC_LINNET_SOURCE, CBN_SELCHANGE, OnSource)
     COMMAND_ID_HANDLER(IDC_LINNET_SAVE_SOURCE, OnSaveSource)
     COMMAND_ID_HANDLER(IDC_LINNET_UPDATE_DATA, OnUpdateData)
@@ -190,12 +191,16 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     choice_.Attach(GetDlgItem(IDC_LINNET_CHOICE));
     list_.SetExtendedListViewStyle(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     for (const auto& page : pages_) tabs_.AddItem(page.c_str());
+    CComboBox channel(GetDlgItem(IDC_LINNET_CHANNEL));
+    channel.AddString(L"稳定版 / Stable");
+    channel.AddString(L"预览版 / Preview");
     CComboBox source(GetDlgItem(IDC_LINNET_SOURCE));
     source.AddString(L"GitHub 直连 / Direct");
     source.AddString(L"公共镜像 / Public mirror");
     source.AddString(L"自定义镜像 / Custom mirror");
     source.SetCurSel(0);
 #if defined(_M_X64)
+    channel.SetCurSel(linnet_update_channel_read());
     linnet_data_source_read(this, [](void* context, const char* mode, const char* mirror, const char* failure) {
       auto& dialog = *static_cast<SettingsDialog*>(context);
       CComboBox source(dialog.GetDlgItem(IDC_LINNET_SOURCE));
@@ -231,7 +236,7 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     GetDlgItem(IDC_LINNET_FONT).ShowWindow(Page() == 2 ? SW_SHOW : SW_HIDE);
     GetDlgItem(IDC_LINNET_RESET).ShowWindow(Page() < 4 ? SW_SHOW : SW_HIDE);
     GetDlgItem(IDC_LINNET_UPDATE).ShowWindow(Page() == 8 ? SW_SHOW : SW_HIDE);
-    for (int id = IDC_LINNET_SOURCE_LABEL; id <= IDC_LINNET_UPDATE_NOTE; ++id)
+    for (int id = IDC_LINNET_SOURCE_LABEL; id <= IDC_LINNET_CHANNEL; ++id)
       GetDlgItem(id).ShowWindow(Page() == 8 ? SW_SHOW : SW_HIDE);
     GetDlgItem(IDC_LINNET_AUTO_SYNC).ShowWindow(Page() == 7 ? SW_SHOW : SW_HIDE);
     choice_.ShowWindow(Page() < 4 ? SW_SHOW : SW_HIDE);
@@ -291,7 +296,8 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
       GetDlgItem(id).EnableWindow(idle);
 #if defined(_M_X64)
     for (const auto id : {IDC_LINNET_SOURCE, IDC_LINNET_SAVE_SOURCE,
-        IDC_LINNET_UPDATE_DATA, IDC_LINNET_COMPLETE_DATA, IDC_LINNET_REPAIR_DATA})
+        IDC_LINNET_UPDATE_DATA, IDC_LINNET_COMPLETE_DATA, IDC_LINNET_REPAIR_DATA,
+        IDC_LINNET_CHANNEL})
       GetDlgItem(id).EnableWindow(idle);
     CComboBox source(GetDlgItem(IDC_LINNET_SOURCE));
     GetDlgItem(IDC_LINNET_MIRROR).EnableWindow(idle && source.GetCurSel() == 2);
@@ -299,7 +305,18 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
 #else
     for (int id = IDC_LINNET_SOURCE; id <= IDC_LINNET_REPAIR_DATA; ++id)
       GetDlgItem(id).EnableWindow(FALSE);
+    GetDlgItem(IDC_LINNET_CHANNEL).EnableWindow(FALSE);
 #endif
+  }
+
+  LRESULT OnChannel(WORD, WORD, HWND, BOOL&) {
+#if defined(_M_X64)
+    CComboBox channel(GetDlgItem(IDC_LINNET_CHANNEL));
+    const bool saved = linnet_update_channel_save(channel.GetCurSel()) == 0;
+    Status(saved ? L"更新通道已保存 / Update channel saved"
+                 : L"更新通道未保存 / Update channel could not be saved");
+#endif
+    return 0;
   }
 
   bool SaveSource() {

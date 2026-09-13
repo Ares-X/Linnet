@@ -1,5 +1,25 @@
 import Foundation
 
+// Settings and the resident server are different executables. The channel must
+// not live in either executable's default preferences domain.
+private let updateDefaults = UserDefaults(
+  suiteName: LinnetPackContract.productIdentifier + ".Updates")!
+
+private var selectedUpdateChannel: LinnetSettingsDownloadSource.UpdateChannel {
+  updateDefaults.synchronize()
+  return LinnetSettingsDownloadSource.UpdateChannel.load(from: updateDefaults)
+}
+
+@_cdecl("linnet_update_channel_read")
+public func readUpdateChannel() -> Int32 { selectedUpdateChannel == .preview ? 1 : 0 }
+
+@_cdecl("linnet_update_channel_save")
+public func saveUpdateChannel(_ preview: Int32) -> Int32 {
+  let channel: LinnetSettingsDownloadSource.UpdateChannel = preview == 1 ? .preview : .stable
+  channel.save(to: updateDefaults)
+  return updateDefaults.synchronize() ? 0 : -1
+}
+
 // A retained async task at the Swift/C boundary, not a second update algorithm.
 // Native Settings polls it on its UI thread and performs activation under the
 // existing Configurator maintenance scope. No callback outlives a closed HWND.
@@ -16,13 +36,14 @@ private final class WindowsLanguageUpdate: @unchecked Sendable {
 
   init(registry: LinnetDataRegistry) { self.registry = registry }
 
-  func start(source: LinnetSettingsDownloadSource, complete: Bool, repair: Bool) {
+  func start(source: LinnetSettingsDownloadSource,
+    channel: LinnetSettingsDownloadSource.UpdateChannel, complete: Bool, repair: Bool) {
     lock.lock()
     task = Task.detached { [self] in
       do {
         try await LinnetLanguageDataUpdate.run(
           registry: registry, transport: LinnetSettingsDownloadTransport(source: source),
-          catalogURL: LinnetSettingsDownloadSource.canonicalCatalogURL,
+          catalogURL: channel.catalogURL,
           edition: complete ? .full : nil,
           allowCompleteRepair: repair,
           progress: { [self] phase, value in report(phase, progress: value) },
@@ -154,7 +175,8 @@ public func startLanguageUpdate(
     if let failure = preference.failure { throw failure }
     guard let source = preference.source else { throw LinnetSettingsDownloadSource.Failure.invalidStoredMode }
     let operation = WindowsLanguageUpdate(registry: registry)
-    operation.start(source: source, complete: complete != 0, repair: repair != 0)
+    operation.start(source: source, channel: selectedUpdateChannel,
+      complete: complete != 0, repair: repair != 0)
     return Unmanaged.passRetained(operation).toOpaque()
   } catch {
     error.localizedDescription.withCString { failed(context, $0) }

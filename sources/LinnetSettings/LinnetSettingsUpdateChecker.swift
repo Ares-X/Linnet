@@ -106,38 +106,6 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     }
   }
 
-  enum UpdateChannel: String, CaseIterable, Identifiable, Sendable {
-    case stable
-    case preview
-
-    static let defaultsKey = "Linnet.Settings.UpdateChannel.v1"
-
-    var id: String { rawValue }
-
-    var catalogURL: URL {
-      switch self {
-      case .stable:
-        LinnetSettingsDownloadSource.canonicalCatalogURL
-      case .preview:
-        URL(
-          string:
-            "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/Linnet-Data-Channel.json"
-        )!
-      }
-    }
-
-    static func load(from defaults: UserDefaults = .standard) -> Self {
-      guard let rawValue = defaults.string(forKey: defaultsKey),
-        let channel = Self(rawValue: rawValue)
-      else { return .stable }
-      return channel
-    }
-
-    func save(to defaults: UserDefaults = .standard) {
-      defaults.set(rawValue, forKey: Self.defaultsKey)
-    }
-  }
-
   enum RuntimeVersionState: Equatable {
     case checking(installed: LinnetSettingsContract.ProductIdentity?)
     case current(LinnetSettingsContract.ProductIdentity)
@@ -226,7 +194,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   @Published private(set) var installedIdentity: LinnetSettingsContract.ProductIdentity?
   @Published private(set) var runtimeVersionState: RuntimeVersionState =
     .checking(installed: nil)
-  @Published private(set) var updateChannel: UpdateChannel
+  @Published private(set) var updateChannel: LinnetSettingsDownloadSource.UpdateChannel
   @Published private(set) var coreDownloadState: CoreDownloadState = .idle
 
   var activationInProgress: Bool {
@@ -280,7 +248,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     self.coreDownloader = coreDownloader
     self.coreInstaller = coreInstaller
     self.revealCorePackage = revealCorePackage
-    updateChannel = UpdateChannel.load(from: updateDefaults)
+    updateChannel = LinnetSettingsDownloadSource.UpdateChannel.load(from: updateDefaults)
     self.transactionRequester = transactionRequester
       ?? LinnetSettingsTransactionIPC.Client(startingAt: bundle)
     refreshInstalledIdentity()
@@ -292,7 +260,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     refreshRuntime()
   }
 
-  func setUpdateChannel(_ channel: UpdateChannel) {
+  func setUpdateChannel(_ channel: LinnetSettingsDownloadSource.UpdateChannel) {
     guard channel != updateChannel, !activationInProgress else { return }
     task?.cancel()
     cycle &+= 1

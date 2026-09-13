@@ -11,6 +11,38 @@ import Foundation
 /// the Core and language-data request route; the catalog always comes directly
 /// from the official HTTPS endpoint, and artifacts are verified by their owners.
 struct LinnetSettingsDownloadSource: Equatable, Sendable {
+  enum UpdateChannel: String, CaseIterable, Identifiable, Sendable {
+    case stable
+    case preview
+
+    static let defaultsKey = "Linnet.Settings.UpdateChannel.v1"
+
+    var id: String { rawValue }
+
+    var catalogURL: URL {
+      switch self {
+      case .stable:
+        LinnetSettingsDownloadSource.canonicalCatalogURL
+      case .preview:
+        URL(
+          string:
+            "https://raw.githubusercontent.com/Ares-X/Linnet/preview-channel/Linnet-Data-Channel.json"
+        )!
+      }
+    }
+
+    static func load(from defaults: UserDefaults = .standard) -> Self {
+      guard let rawValue = defaults.string(forKey: defaultsKey),
+        let channel = Self(rawValue: rawValue)
+      else { return .stable }
+      return channel
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+      defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+  }
+
   enum Mode: String, CaseIterable, Sendable {
     case github
     case publicMirror

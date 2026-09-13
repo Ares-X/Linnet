@@ -8,6 +8,63 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Native frontend build dependencies
+
+CI34757845236 compiled/linked the shared Swift DLL and built both librime
+architectures, then failed in the x64 Weasel solution. Configurator.cpp now
+consumes learning_sync.h -> settings_model.h -> rime/config.h, but the private
+header/compiler definitions were supplied only to LinnetSettingsDialog.cpp.
+RimeWithWeasel's existing enabled glog calls also have no linked implementation;
+the four missing LogMessage symbols are not exported by rime.dll. The existing
+locked glog static archive is retained by upstream's lib_x64/lib_Win32 stash.
+
+Milestone: give the native consumers their actual declared build dependencies.
+Promote Deployer's existing Rime include/definitions to its compile group (with
+consistent PCH definitions), and link the existing per-architecture glog archive
+and its Windows dbghelp dependency into Server and Deployer. Remove the redundant
+Settings-only definitions/path. No new dependency/download/version or disabled
+logging; the shared runtime and Rime behavior are unchanged. Native build-owner
+count1->1, runtime operation owners unchanged, new fallback/default producers0.
+Allowed files: the two projected vcxproj sections, patch lock and this record.
+Focused evidence: original link errors, upstream stash/library path and glog's
+declared dbghelp dependency, project XML/patch applicability; next native build
+must verify linking. Logging output and installed input still require runtime
+observation; successful linking alone does not prove their behavior.
+The two projected project files parsed as XML and the complete patch applies
+to pristine locked Weasel. The shared-source changes passed the existing
+download-source and settings-update-checker selectors (1s/8s respectively), and
+the lock/projection verifier plus diff check passed. Native compilation,
+cross-process preferences, logging and installed-product journeys remain pending.
+
+### 2026-09-13 Shared Stable and Preview channel selection
+
+Milestone: Windows Settings must select the same Stable/Preview channel for Core
+and language-data updates as macOS. The proven omission is the channel enum
+being nested in the macOS update checker, while the Windows language-operation
+caller always supplies the Stable Catalog and its Core caller has no preference.
+Move that existing enum unchanged into LinnetSettingsDownloadSource and migrate
+its Mac consumers/tests. Preserve the shipped Mac defaults key and Catalog URLs.
+The Windows Swift boundary uses one product-scoped UserDefaults suite shared by
+Settings and the server; synchronize at that cross-process preference boundary.
+Native Settings saves the selection immediately, like macOS. Each language
+operation captures its selected Catalog at start. The server selects its native
+OS/channel feed before each manual check, following locked Weasel's existing
+check_update path and WinSparkle0.9.4's locked appcast setting/read implementation.
+
+Retire the Mac-private channel owner and Windows's hardcoded Stable data caller;
+do not introduce an updater process, downloader, parser or new IPC operation.
+Channel policy owners1->1, update engines1->1, C ABI boundary1->1; Windows gains
+one necessary shared preference store rather than two executable-local stores.
+The existing unshipped Win32 frontend still uses Stable without loading Swift.
+Allowed files: shared download-source/checker/view and their existing tests,
+Windows data-update ABI, native dialog/resources, update-config header,
+WeaselServerApp projection patch/lock, and the owning Windows docs.
+Focused checks: download-source and settings-update-checker selectors, exact
+patch applicability/digest, then the next native build. Actual two-process
+preference refresh, channel UI layout, per-native-OS feed selection and input
+continuity require Windows UAT. This does not publish feeds or cure the existing
+404/strictly-lower-updater baseline gap. Do not mark online updates accepted.
+
 ### 2026-09-13 Native read-access mask type
 
 CI `34757008371` reached all shared Swift compilation jobs after UUID

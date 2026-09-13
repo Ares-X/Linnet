@@ -4,6 +4,10 @@
 // talk to that server through the unchanged Weasel IPC boundary.
 #if defined(_M_X64)
 extern "C" {
+// Shared Settings/server preference: 0 Stable, 1 Preview. Save returns 0 on
+// success, -1 when the preference could not be persisted for the other process.
+__declspec(dllimport) int linnet_update_channel_read();
+__declspec(dllimport) int linnet_update_channel_save(int preview);
 __declspec(dllimport) int linnet_data_setup(
     const char* core, const char* user, const char* version, int recover, void* context,
     void (*paths)(void*, const char*, const char*, const char*, const char*),

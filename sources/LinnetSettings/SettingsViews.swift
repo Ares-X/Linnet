@@ -827,8 +827,8 @@ extension DataTabView {
         get: { updateChecker.updateChannel },
         set: { updateChecker.setUpdateChannel($0) }
       )) {
-        Text("Stable").tag(LinnetSettingsUpdateChecker.UpdateChannel.stable)
-        Text("Preview").tag(LinnetSettingsUpdateChecker.UpdateChannel.preview)
+        Text("Stable").tag(LinnetSettingsDownloadSource.UpdateChannel.stable)
+        Text("Preview").tag(LinnetSettingsDownloadSource.UpdateChannel.preview)
       }
       .pickerStyle(.segmented)
       .disabled(
