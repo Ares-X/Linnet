@@ -8,6 +8,32 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-14 Debug bridging-header compilation
+
+CI34767219183 on41111f2 passed its Mac/shared job, then compiled all Swift
+objects but failed the debug `emit-module` job before linking or packaging.
+The driver reused `shared_runtime-bridging.pch` from Clang cache variant
+`7D6D0O1IW674` in a job expecting variant `3P3YV7OHZI451`; the emitted commands
+also show CRT arguments on object compilation but not module emission. This is
+within one fresh build, not stale installed input-method state.
+
+Milestone: build the same optimized DLL with matching full CodeView/PDB symbols
+without sharing that bridging PCH across incompatible compiler job contexts.
+The existing build script remains the sole owner. Use the locked Swift driver's
+`-disable-bridging-pch` option so each frontend imports the original header;
+retain the header/API, full debug info, optimization and normal Clang validation.
+Retire only automatic bridging-PCH reuse. No cache deletion, retries, validation
+bypass, new dependency or duplicated CRT defaults. Compiler owner1->1; shared
+bridging-PCH path1->0; new runtime layers/fallbacks/default producers0.
+Allowed files: build-shared-runtime.ps1 and this evidence. Focused checks:
+locked driver option/behavior, printed job plan, Windows PowerShell parsing and
+the next native build. This build correction does not replace installed UAT.
+Reference: [locked Swift driver's PCH job selection](https://github.com/swiftlang/swift-driver/blob/swift-6.3.3-RELEASE/Sources/SwiftDriver/Driver/Driver.swift#L1069-L1085).
+The host driver printed object/module jobs importing the original header with
+no PCH generation; this is job-plan evidence, not a Windows SDK compilation.
+Windows PowerShell 5 parsing and diff checks passed. Native linking, matching
+PDB identity and installation remain NOT_EXERCISED for this revision.
+
 ### 2026-09-13 Shared-runtime matching symbols
 
 Milestone: native shared-runtime crash dumps must have same-build function/line

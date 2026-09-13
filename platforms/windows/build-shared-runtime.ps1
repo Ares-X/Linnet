@@ -39,9 +39,12 @@ foreach ($Header in $Swift.zlib.headers) {
     throw "Swift SDK zlib header differs from upstreams.lock.json: $($Header.name)"
   }
 }
+# Debug module emission and object compilation use different Clang contexts.
+# Import the same header directly instead of reusing an incompatible PCH.
 & $Compiler -v -continue-building-after-errors -swift-version 5 -O -g -debug-info-format=codeview `
   -emit-library -module-name LinnetSharedRuntime `
   -sdk $SwiftSDK -o $Library -I $ZlibModule `
+  -disable-bridging-pch `
   -import-objc-header (Join-Path $PSScriptRoot 'shared_runtime-bridging.h') `
   -Xlinker bcrypt.lib -Xlinker advapi32.lib -Xlinker ws2_32.lib -Xlinker $ZlibLibrary `
   -Xlinker "/IMPLIB:$(Join-Path $Projection 'lib64\LinnetSharedRuntime.lib')" `
