@@ -3502,10 +3502,10 @@ index 54f840f..d97eec6 100755
      if (lang == L"chs")
        return MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED);
 diff --git a/output/install.nsi b/output/install.nsi
-index 3d5130c..b2f8b4f 100644
+index 3d5130c..24d9102 100644
 --- a/output/install.nsi
 +++ b/output/install.nsi
-@@ -18,21 +18,43 @@ Unicode true
+@@ -18,24 +18,47 @@ Unicode true
  !define WEASEL_BUILD 0
  !endif
  
@@ -3557,7 +3557,11 @@ index 3d5130c..b2f8b4f 100644
  VIAddVersionKey /LANG=2052 "FileVersion" "${WEASEL_VERSION}"
  
  !define MUI_ICON ..\resource\weasel.ico
-@@ -60,282 +82,510 @@ RequestExecutionLevel admin
++!define MUI_UNICON ..\resource\weasel.ico
+ SetCompressor /SOLID lzma
+ 
+ 
+@@ -60,282 +83,510 @@ RequestExecutionLevel admin
  ; Languages
  
  !insertmacro MUI_LANGUAGE "TradChinese"
@@ -4272,7 +4276,7 @@ index 3d5130c..b2f8b4f 100644
  
    ; don't redirect on 64 bit system for auto run setting
    ${If} ${IsNativeARM64}
-@@ -344,23 +594,9 @@ program_files:
+@@ -344,23 +595,9 @@ program_files:
      SetRegView 64
    ${Endif}
    ; Write autorun key
@@ -4298,7 +4302,7 @@ index 3d5130c..b2f8b4f 100644
  
  SectionEnd
  
-@@ -373,10 +609,9 @@ Section "Start Menu Shortcuts"
+@@ -373,10 +610,9 @@ Section "Start Menu Shortcuts"
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDEPLOY).lnk" "$INSTDIR\WeaselDeployer.exe" "/deploy" "$SYSDIR\shell32.dll" 144
@@ -4312,7 +4316,7 @@ index 3d5130c..b2f8b4f 100644
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
  
-@@ -388,30 +623,49 @@ SectionEnd
+@@ -388,30 +624,49 @@ SectionEnd
  
  Section "Uninstall"
  

@@ -39,7 +39,7 @@ foreach ($Header in $Swift.zlib.headers) {
     throw "Swift SDK zlib header differs from upstreams.lock.json: $($Header.name)"
   }
 }
-& $Compiler -swift-version 5 -O -emit-library -module-name LinnetSharedRuntime `
+& $Compiler -v -swift-version 5 -O -emit-library -module-name LinnetSharedRuntime `
   -sdk $SwiftSDK -o $Library -I $ZlibModule `
   -import-objc-header (Join-Path $PSScriptRoot 'shared_runtime-bridging.h') `
   -Xlinker bcrypt.lib -Xlinker advapi32.lib -Xlinker ws2_32.lib -Xlinker $ZlibLibrary `
@@ -60,8 +60,10 @@ foreach ($Header in $Swift.zlib.headers) {
   (Join-Path $RepoRoot 'sources\LinnetSettings\LinnetSettingsDownloadTransport.swift') `
   (Join-Path $RepoRoot 'sources\LinnetSettings\LinnetLanguageDataUpdate.swift') `
   (Join-Path $PSScriptRoot 'data_update.swift') `
-  (Join-Path $PSScriptRoot 'shared_runtime.swift') | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'Shared Windows Swift runtime compilation failed' }
+  (Join-Path $PSScriptRoot 'shared_runtime.swift') 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) {
+  throw "Shared Windows Swift runtime compilation failed (native exit $LASTEXITCODE)"
+}
 
 # Package the actual PE dependency closure, not the compiler, SDK, testing
 # libraries or unrelated DLLs from PATH. Standard OS DLLs remain OS-owned.

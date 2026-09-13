@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "LinnetSettingsDialog.h"
 #include "LinnetSettingsResource.h"
+#include "resource.h"
 #include "Configurator.h"
 #include <WeaselConstants.h>
 #include <WeaselUtility.h>
@@ -177,6 +178,12 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     config.Save(path);
   }
   LRESULT OnInit(UINT, WPARAM, LPARAM, BOOL&) {
+    SetIcon(static_cast<HICON>(::LoadImageW(ModuleHelper::GetResourceInstance(),
+      MAKEINTRESOURCEW(IDI_DEPLOY), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+      GetSystemMetrics(SM_CYICON), LR_SHARED)), TRUE);
+    SetIcon(static_cast<HICON>(::LoadImageW(ModuleHelper::GetResourceInstance(),
+      MAKEINTRESOURCEW(IDI_DEPLOY), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+      GetSystemMetrics(SM_CYSMICON), LR_SHARED)), FALSE);
     tabs_.Attach(GetDlgItem(IDC_LINNET_TABS));
     list_.Attach(GetDlgItem(IDC_LINNET_LIST));
     choice_.Attach(GetDlgItem(IDC_LINNET_CHOICE));

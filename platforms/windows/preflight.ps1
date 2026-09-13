@@ -84,6 +84,54 @@ function Assert-Absent {
   }
 }
 
+Add-Type -AssemblyName System.Drawing
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class LinnetIconProbe {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  static extern uint ExtractIconEx(string path, int index, out IntPtr large,
+                                   out IntPtr small, uint count);
+  [DllImport("user32.dll")]
+  static extern bool DestroyIcon(IntPtr icon);
+
+  public static string Pixels(string path) {
+    IntPtr large, small;
+    uint count = ExtractIconEx(path, 0, out large, out small, 1);
+    try {
+      if (count != 1 || large == IntPtr.Zero || small == IntPtr.Zero)
+        throw new InvalidOperationException("Cannot extract product icon: " + path);
+      var pixels = new StringBuilder();
+      foreach (IntPtr handle in new [] {large, small}) {
+        using (Icon icon = Icon.FromHandle(handle))
+        using (Bitmap bitmap = icon.ToBitmap()) {
+          pixels.Append(bitmap.Width).Append('x').Append(bitmap.Height).Append(':');
+          for (int y = 0; y < bitmap.Height; ++y)
+            for (int x = 0; x < bitmap.Width; ++x) {
+              Color color = bitmap.GetPixel(x, y);
+              pixels.Append((color.A == 0 ? 0 : color.ToArgb()).ToString("X8"));
+            }
+        }
+      }
+      return pixels.ToString();
+    } finally {
+      if (large != IntPtr.Zero) DestroyIcon(large);
+      if (small != IntPtr.Zero) DestroyIcon(small);
+    }
+  }
+}
+'@
+$ExpectedIconPixels = [LinnetIconProbe]::Pixels((Join-Path $Projection "resource\weasel.ico"))
+function Assert-LinnetIcon {
+  param([string]$Path)
+  if ([LinnetIconProbe]::Pixels($Path) -ne $ExpectedIconPixels) {
+    throw "Packaged product icon differs from Linnet artwork: $Path"
+  }
+}
+
 function Get-LinnetInputMethodTipCount {
   param([string]$ExpectedInputMethodTip)
   $Count = 0
@@ -180,6 +228,15 @@ foreach ($Required in @(
 )) {
   Assert-File $Required
 }
+$IconTargets = @($Installer, $Arm64Installer)
+$IconTargets += @(
+  "WeaselServer.exe", "WeaselDeployer.exe", "WeaselSetup.exe",
+  "weasel.dll", "weaselx64.dll", "weaselARM.dll", "weaselARM64.dll", "weaselARM64X.dll",
+  "weasel.ime", "weaselx64.ime", "weaselARM.ime", "weaselARM64.ime", "weaselARM64X.ime"
+) | ForEach-Object { Join-Path $Output $_ }
+foreach ($IconTarget in $IconTargets) {
+  Assert-LinnetIcon $IconTarget
+}
 if (Test-RegistryKey LocalMachine Registry32 "Software\Linnet") {
   throw "Windows preflight requires a runner without an existing Linnet installation"
 }
@@ -259,6 +316,9 @@ try {
     "licenses\Swift-ICU-76.1-LICENSE.txt"
   )) {
     Assert-File (Join-Path $InstallRoot $RelativePath)
+  }
+  foreach ($IconTarget in @("LinnetServer.exe", "WeaselDeployer.exe", "WeaselSetup.exe", "uninstall.exe")) {
+    Assert-LinnetIcon (Join-Path $InstallRoot $IconTarget)
   }
   foreach ($Forbidden in @("curl.exe", "rime-install.bat",
       "weaselARM.dll", "weaselARM64.dll", "weaselARM64X.dll")) {

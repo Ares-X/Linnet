@@ -8,6 +8,49 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Windows brand icon correction
+
+Milestone: Explorer, installation/uninstallation, Settings, the registered input
+method and its Chinese-mode tray/language-bar icon must show Linnet's existing
+bird, not Weasel's mark. The proven cause is preparation retaining upstream
+`resource/weasel.ico`, `resource/zh.ico` and `WeaselSetup.ico`, plus NSIS's default
+uninstaller icon and the new Settings dialog not assigning an icon.
+The authoritative artwork remains the shared `Linnet.xcassets/AppIcon.appiconset`;
+the Mac input-staging executable exports its existing resolutions with ImageIO.
+Windows preparation replaces only the projected resource bytes, retaining
+upstream resource IDs/loaders. Generic A, hourglass and full/half-width state
+symbols remain distinct; they are not product logos. Smart English keeps its
+existing packaged A icon and native schema-icon path.
+
+Allowed files: Windows input staging, preparation, Settings dialog, NSIS patch
+and lock, native preflight and owning documentation. Brand-art owners 2 -> 1;
+resource loaders 1 -> 1; new wrappers/fallbacks/services 0 -> 0. Retire the
+upstream product artwork and NSIS default uninstaller artwork, not mode state.
+Focused checks: run the input-staging executable, inspect exported ICO frames,
+verify patch applicability and native packaged icon extraction. Actual Settings,
+input-switcher, tray and Explorer visuals require exact-candidate Windows UAT;
+neither a Mac icon preview nor resource extraction is desktop acceptance.
+
+Executed checks: the input-staging executable compiled and ran successfully;
+all five ICO frames (16/32/64/128/256) decode to the exact shared PNG pixels.
+ImageIO orders ICO frames largest-first; the first probe incorrectly assumed
+insertion order, then comparison by actual dimensions passed without changing
+production code. Tiny Windows 11 ARM64 accepted all five sizes through native
+`LoadImageW`; its shell extracted the large/small icons and confirmed they differ
+from upstream artwork. Windows PowerShell 5 parsed preparation, preflight and
+the shared-runtime build script successfully. Icon SHA-256:
+`21c347ae03b818513f2a78c03187d63e0a6a5ead2aab3cb829a642b560ef9ee1`.
+Lock/diff/applicability checks passed. Installed candidate and desktop visuals
+remain unchanged and NOT_EXERCISED. No Windows Release was published.
+
+The preceding native CI run `34753222263` passed the Mac build and Windows
+preparation but stopped at the first Swift invocation without a compiler
+diagnostic. The current build wrapper discards the native exit code in a generic
+exception. Before another run, retain that code and the compiler's standard
+verbose output in the existing build owner; do not guess a dependency change
+or install additional components. This is a diagnostic correction, not evidence
+that the Windows compiler failure has been fixed.
+
 ### 2026-09-13 consolidated local validation
 
 Passed on the development Mac with isolated data (not Windows UAT):

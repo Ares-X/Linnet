@@ -281,6 +281,13 @@ Apply-LockedPatch $Projection `
   $Lock.downstream_patches.weasel_linnet_windows_projection.path `
   $Lock.downstream_patches.weasel_linnet_windows_projection.sha256
 
+# Keep upstream resource IDs and loaders; only the projected artwork changes.
+# Generic ASCII, maintenance and width-state symbols retain their meaning.
+foreach ($Icon in @("resource\weasel.ico", "resource\zh.ico", "WeaselSetup\WeaselSetup.ico")) {
+  Copy-Item -LiteralPath (Join-Path $InputPolicyRoot "linnet.ico") `
+    -Destination (Join-Path $Projection $Icon)
+}
+
 Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "frontend") -File | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Projection "WeaselDeployer")
 }

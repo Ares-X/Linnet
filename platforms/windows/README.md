@@ -33,6 +33,11 @@ are designed to coexist without sharing those owners; coexistence remains a
 target-Windows acceptance item. Internal build-target names remain an upstream
 compatibility detail and are renamed only at the installer boundary.
 
+Windows uses the same Linnet bird artwork as macOS for the installer,
+uninstaller, application windows and registered input method. Chinese-mode
+status uses the bird; Smart English/plain ASCII use the distinct A status
+symbol. Windows resource IDs and native icon loading remain upstream-owned.
+
 ## Portable product features
 
 The Windows package consumes the same staged files and merged Rime modules as

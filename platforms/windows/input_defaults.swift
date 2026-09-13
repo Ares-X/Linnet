@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 
 // Build-time boundary only: Windows consumes the same Core input policies as
 // macOS, with Weasel continuing to own user customization at deployment time.
@@ -33,5 +34,27 @@ struct WindowsInputDefaults {
       to: output.appendingPathComponent("linnet_grammar_active.yaml"), options: .atomic)
     try WindowsSettingsCatalog.write(to: output,
       localizations: URL(fileURLWithPath: "resources/Localizable.xcstrings"))
+    try writeAppIcon(to: output.appendingPathComponent("linnet.ico"))
+  }
+
+  private static func writeAppIcon(to output: URL) throws {
+    let assets = URL(fileURLWithPath: "Linnet.xcassets/AppIcon.appiconset")
+    let filenames = ["icon_16x16.png", "icon_32x32.png", "icon_32x32@2x.png",
+                     "icon_128x128.png", "icon_256x256.png"]
+    guard let destination = CGImageDestinationCreateWithURL(
+      output as CFURL, "com.microsoft.ico" as CFString, filenames.count, nil) else {
+      throw CocoaError(.fileWriteUnknown)
+    }
+    for filename in filenames {
+      guard let source = CGImageSourceCreateWithURL(
+        assets.appendingPathComponent(filename) as CFURL, nil),
+        let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        throw CocoaError(.fileReadCorruptFile)
+      }
+      CGImageDestinationAddImage(destination, image, nil)
+    }
+    guard CGImageDestinationFinalize(destination) else {
+      throw CocoaError(.fileWriteUnknown)
+    }
   }
 }
