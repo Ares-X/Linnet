@@ -8,6 +8,29 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Public Foundation run-loop boundary
+
+CI `34755444537` proves the compiler loader fix: Swift 6.3.3 starts, emits
+the bridging-header PCH, and reaches Linnet source compilation. Compilation
+then fails at `shared_runtime.swift:1`: `no such module 'CoreFoundation'`.
+The locked Windows SDK does not expose that imported C module. Its public
+Foundation `RunLoop.run(mode:before:)` calls the same one-pass run-loop operation.
+
+Milestone: native learning-sync polling must service the existing shared
+controller without blocking input or importing an unavailable module. The owner
+is `platforms/windows/shared_runtime.swift:linnet_sync_poll`; its consumers are
+`LearningSync::Poll` and the existing `SharedRuntimeProbe`. Remove the direct
+CoreFoundation import/call and use `RunLoop.current.run(mode: .default,
+before: Date())`. The controller, C ABI, native timer and runtime dependency
+packager are unchanged. Owners 1 -> 1, adapters 1 -> 1, fallbacks 0 -> 0,
+duplicated schedules/defaults 0 -> 0. Allowed files: this boundary and this
+acceptance record. Focused acceptance is the native shared-DLL probe (incremental
+completion, hourly deadline and cancellation) in the next Windows CI. Installed
+learning-sync/input UAT remains required; no new candidate is installed yet.
+The host-only public RunLoop probe serviced both a due Timer and the main queue
+with zero-wait polling (maximum observed call 0.027 ms). This is API/behavior
+evidence on macOS, not Windows DLL or installed-product acceptance.
+
 ### 2026-09-13 Swift compiler loader correction
 
 Milestone: the locked Windows compiler must start and reach the actual Linnet

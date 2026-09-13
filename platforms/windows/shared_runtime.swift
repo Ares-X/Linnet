@@ -1,4 +1,3 @@
-import CoreFoundation
 import Foundation
 
 public typealias DataPaths = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?,
@@ -91,6 +90,6 @@ public func destroySync(_ handle: UnsafeMutableRawPointer) {
 @_cdecl("linnet_sync_poll")
 public func pollSync(_ handle: UnsafeMutableRawPointer) -> Double {
   let controller = Unmanaged<LinnetRimeSyncController>.fromOpaque(handle).takeUnretainedValue()
-  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true)
+  _ = RunLoop.current.run(mode: .default, before: Date())
   return controller.nextWakeUp.map { max(0, $0.timeIntervalSinceNow) } ?? -1
 }
