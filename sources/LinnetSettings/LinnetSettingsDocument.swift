@@ -37,6 +37,14 @@ extension LinnetSettingsDocument {
     case system
     case light
     case dark
+
+    var settingsTitle: String {
+      switch self {
+      case .system: "System"
+      case .light: "Light"
+      case .dark: "Dark"
+      }
+    }
   }
 
   enum ThemeFamily: String, Codable, CaseIterable, Sendable {
@@ -49,6 +57,18 @@ extension LinnetSettingsDocument {
     case inkCinnabar = "ink_cinnabar"
 
     static let defaultValue = ThemeFamily.paperLedger
+
+    var settingsTitle: String {
+      switch self {
+      case .paperLedger: "Xuan"
+      case .moonJade: "Moon"
+      case .sidecarSlate: "Slate"
+      case .clayTiles: "Clay"
+      case .mistJade: "Mist"
+      case .nativeGlass: "Glass"
+      case .inkCinnabar: "Ink"
+      }
+    }
 
     func schemeIdentifier(isDark: Bool) -> String {
       let prefix: String
@@ -97,6 +117,13 @@ extension LinnetSettingsDocument {
   enum CandidateLayout: String, Codable, CaseIterable, Sendable {
     case horizontal
     case vertical
+
+    var settingsTitle: String {
+      switch self {
+      case .horizontal: "Horizontal"
+      case .vertical: "Vertical"
+      }
+    }
   }
 
   /// Controls whether the candidate window offers its native-like disclosure
@@ -105,12 +132,27 @@ extension LinnetSettingsDocument {
   enum CandidateBrowsingMode: String, Codable, CaseIterable, Sendable {
     case scrollingOnly = "scrolling_only"
     case expandable
+
+    var settingsTitle: String {
+      switch self {
+      case .scrollingOnly: "Scrolling only"
+      case .expandable: "Expandable"
+      }
+    }
   }
 
   enum TabBehavior: String, Codable, CaseIterable, Sendable {
     case pass
     case navigate
     case smartComplete = "smart_complete"
+
+    var settingsTitle: String {
+      switch self {
+      case .pass: "Pass to application"
+      case .navigate: "Navigate candidates"
+      case .smartComplete: "Smart complete"
+      }
+    }
   }
 
   /// One product-level choice owns the two Rime learning switches. Keeping
@@ -119,6 +161,14 @@ extension LinnetSettingsDocument {
     case enhanced
     case standard
     case disabled
+
+    var settingsTitle: String {
+      switch self {
+      case .enhanced: "Enhanced learning (Recommended)"
+      case .standard: "Standard learning"
+      case .disabled: "Turn off learning"
+      }
+    }
   }
 
   /// One finite product choice owns both Rime projections required by the
@@ -128,6 +178,13 @@ extension LinnetSettingsDocument {
   enum PinyinReverseTrigger: String, Codable, CaseIterable, Sendable {
     case semicolon
     case verticalBar = "vertical_bar"
+
+    var settingsTitle: String {
+      switch self {
+      case .semicolon: "Semicolon (;)"
+      case .verticalBar: "Vertical bar (|)"
+      }
+    }
 
     var prefix: String {
       switch self {

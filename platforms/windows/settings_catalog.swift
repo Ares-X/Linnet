@@ -17,7 +17,15 @@ enum WindowsSettingsCatalog {
     let choices: [Choice]
   }
 
-  static func write(to directory: URL) throws {
+  static func write(to directory: URL, localizations: URL) throws {
+    let catalog = try JSONSerialization.jsonObject(with: Data(contentsOf: localizations)) as! [String: Any]
+    let strings = catalog["strings"] as! [String: [String: Any]]
+    func title(_ key: String) -> String {
+      let translations = strings[key]?["localizations"] as? [String: Any]
+      let chinese = translations?["zh-Hans"] as? [String: Any]
+      let unit = chinese?["stringUnit"] as? [String: String]
+      return unit?["value"].map { $0 + " / " + key } ?? key
+    }
     var options: [Option] = []
     func choice(_ id: String, _ label: String, _ update: (inout Document) -> Void) -> Choice {
       var document = Document.default
@@ -49,17 +57,17 @@ enum WindowsSettingsCatalog {
     }
     add("profile", "中文方案 / Chinese profile", "输入 / Input",
         LinnetSettingsContract.ChineseProfile.allCases, Document.default.input.chineseProfile,
-        label: { $0.schemaID }) { $0.input.chineseProfile = $1 }
+        label: { title($0.settingsTitle) }) { $0.input.chineseProfile = $1 }
     toggle("emoji", "Emoji", "输入 / Input", \.input.emojiEnabled)
     toggle("traditional", "繁体中文 / Traditional Chinese", "输入 / Input", \.input.traditionalChinese)
     toggle("ascii_punctuation", "英文标点 / ASCII punctuation", "输入 / Input", \.input.asciiPunctuationDefault)
     toggle("single_character", "单字优先 / Single character first", "输入 / Input", \.input.singleCharacterSearchDefault)
     add("chinese_learning", "中文学习 / Chinese learning", "输入 / Input",
         Document.ChineseLearningPolicy.allCases, Document.default.input.chineseLearningPolicy,
-        label: { $0.rawValue }) { $0.input.chineseLearningPolicy = $1 }
+        label: { title($0.settingsTitle) }) { $0.input.chineseLearningPolicy = $1 }
     add("reverse_trigger", "反查前缀 / Reverse lookup prefix", "输入 / Input",
         Document.PinyinReverseTrigger.allCases, Document.default.input.pinyinReverseTrigger,
-        label: { $0.prefix }) { $0.input.pinyinReverseTrigger = $1 }
+        label: { title($0.settingsTitle) }) { $0.input.pinyinReverseTrigger = $1 }
     for pair in Document.FuzzyPinyinPair.allCases {
       add("fuzzy_" + pair.rawValue, pair.label, "模糊音 / Fuzzy pinyin", [false, true], false,
           label: { $0 ? "开启 / On" : "关闭 / Off" }) {
@@ -73,7 +81,7 @@ enum WindowsSettingsCatalog {
     toggle("english_learning", "学习选词 / Learn selections", "英文 / English", \.english.learnFromSelections)
     toggle("trailing_space", "空格选词后加空格 / Trailing space", "英文 / English", \.english.spaceAddsTrailingSpace)
     add("tab", "Tab 行为 / Tab behavior", "英文 / English", Document.TabBehavior.allCases,
-        Document.default.english.tabBehavior, label: { $0.rawValue }) { $0.english.tabBehavior = $1 }
+        Document.default.english.tabBehavior, label: { title($0.settingsTitle) }) { $0.english.tabBehavior = $1 }
     add("page_size", "每页候选 / Candidates per page", "外观 / Appearance", Document.Appearance.pageSizeOptions,
         Document.default.appearance.pageSize, label: String.init) { $0.appearance.pageSize = $1 }
     add("font_point", "字号 / Font size", "外观 / Appearance",
@@ -84,11 +92,11 @@ enum WindowsSettingsCatalog {
       ("english_layout", "英文排列 / English layout", \Document.appearance.englishCandidateLayout)
     ] {
       add(id, label, "外观 / Appearance", Document.CandidateLayout.allCases,
-          Document.default[keyPath: path], label: { $0.rawValue }) { $0[keyPath: path] = $1 }
+          Document.default[keyPath: path], label: { title($0.settingsTitle) }) { $0[keyPath: path] = $1 }
     }
     add("browsing", "候选展开 / Candidate expansion", "外观 / Appearance",
         Document.CandidateBrowsingMode.allCases, Document.default.appearance.candidateBrowsingMode,
-        label: { $0.rawValue }) { $0.appearance.candidateBrowsingMode = $1 }
+        label: { title($0.settingsTitle) }) { $0.appearance.candidateBrowsingMode = $1 }
     add("grid_columns", "展开列数 / Expanded columns", "外观 / Appearance",
         Array(LinnetSettingsContract.horizontalExpandedGridRange), Document.default.appearance.expandedHorizontalCount,
         label: String.init) { $0.appearance.expandedHorizontalCount = $1 }
@@ -101,7 +109,8 @@ enum WindowsSettingsCatalog {
     var themes: [Choice] = []
     for family in Document.ThemeFamily.allCases {
       for mode in Document.ThemeMode.allCases {
-        themes.append(choice(family.rawValue + "/" + mode.rawValue, family.rawValue + " / " + mode.rawValue) {
+        themes.append(choice(family.rawValue + "/" + mode.rawValue,
+                             title(family.settingsTitle) + " · " + title(mode.settingsTitle)) {
           $0.appearance.themeFamily = family
           $0.appearance.themeMode = mode
         })

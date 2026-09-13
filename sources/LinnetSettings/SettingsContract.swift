@@ -44,6 +44,19 @@ enum LinnetSettingsContract {
     case ziguang
     case jiajia
 
+    var settingsTitle: String {
+      switch self {
+      case .natural: "Natural Code"
+      case .fullPinyin: "Full Pinyin"
+      case .flypy: "Flypy Double Pinyin"
+      case .microsoft: "Microsoft Double Pinyin"
+      case .sogou: "Sogou Double Pinyin"
+      case .abc: "Intelligent ABC"
+      case .ziguang: "Ziguang Double Pinyin"
+      case .jiajia: "Jiajia Pinyin"
+      }
+    }
+
     var schemaID: String {
       switch self {
       case .natural: "linnet_zh"

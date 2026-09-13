@@ -105,14 +105,16 @@ struct AppearanceTabView: View {
         Divider()
 
         Picker("Chinese candidates", selection: $model.configuration.documentDraft.appearance.chineseCandidateLayout) {
-          Text("Horizontal").tag(LinnetSettingsDocument.CandidateLayout.horizontal)
-          Text("Vertical").tag(LinnetSettingsDocument.CandidateLayout.vertical)
+          ForEach(LinnetSettingsDocument.CandidateLayout.allCases, id: \.self) {
+            Text(LocalizedStringKey($0.settingsTitle)).tag($0)
+          }
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("settings.appearance.chineseLayout")
         Picker("English candidates", selection: $model.configuration.documentDraft.appearance.englishCandidateLayout) {
-          Text("Horizontal").tag(LinnetSettingsDocument.CandidateLayout.horizontal)
-          Text("Vertical").tag(LinnetSettingsDocument.CandidateLayout.vertical)
+          ForEach(LinnetSettingsDocument.CandidateLayout.allCases, id: \.self) {
+            Text(LocalizedStringKey($0.settingsTitle)).tag($0)
+          }
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("settings.appearance.englishLayout")
@@ -121,10 +123,9 @@ struct AppearanceTabView: View {
           "Candidate browsing",
           selection: $model.configuration.documentDraft.appearance.candidateBrowsingMode
         ) {
-          Text("Scrolling only").tag(
-            LinnetSettingsDocument.CandidateBrowsingMode.scrollingOnly)
-          Text("Expandable").tag(
-            LinnetSettingsDocument.CandidateBrowsingMode.expandable)
+          ForEach(LinnetSettingsDocument.CandidateBrowsingMode.allCases, id: \.self) {
+            Text(LocalizedStringKey($0.settingsTitle)).tag($0)
+          }
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("settings.appearance.browsing")
@@ -248,7 +249,7 @@ struct InputTabView: View {
           selection: $model.configuration.documentDraft.input.chineseProfile
         ) {
           ForEach(LinnetSettingsContract.ChineseProfile.allCases, id: \.self) { profile in
-            Text(chineseProfileName(profile)).tag(profile)
+            Text(LocalizedStringKey(profile.settingsTitle)).tag(profile)
           }
         }
         .pickerStyle(.menu)
@@ -272,7 +273,7 @@ struct InputTabView: View {
           selection: $model.configuration.documentDraft.input.pinyinReverseTrigger
         ) {
           ForEach(LinnetSettingsDocument.PinyinReverseTrigger.allCases, id: \.self) {
-            Text(pinyinReverseTriggerName($0)).tag($0)
+            Text(LocalizedStringKey($0.settingsTitle)).tag($0)
           }
         }
         .pickerStyle(.menu)
@@ -314,13 +315,13 @@ struct InputTabView: View {
       VStack(alignment: .leading, spacing: 10) {
         Picker("Learning strategy", selection: $model.configuration.documentDraft.input.chineseLearningPolicy) {
           ForEach(LinnetSettingsDocument.ChineseLearningPolicy.allCases, id: \.self) {
-            Text(chineseLearningPolicyName($0)).tag($0)
+            Text(LocalizedStringKey($0.settingsTitle)).tag($0)
           }
         }
         .pickerStyle(.menu)
         .accessibilityLabel("Chinese learning strategy")
         .accessibilityValue(
-          Text(chineseLearningPolicyName(model.configuration.documentDraft.input.chineseLearningPolicy))
+          Text(LocalizedStringKey(model.configuration.documentDraft.input.chineseLearningPolicy.settingsTitle))
         )
         .accessibilityHint(
           Text(
@@ -479,49 +480,15 @@ struct InputTabView: View {
         isOn: $model.configuration.documentDraft.english.spaceAddsTrailingSpace
       )
       Picker("Tab key", selection: $model.configuration.documentDraft.english.tabBehavior) {
-        Text("Smart complete").tag(LinnetSettingsDocument.TabBehavior.smartComplete)
-        Text("Navigate candidates").tag(LinnetSettingsDocument.TabBehavior.navigate)
-        Text("Pass to application").tag(LinnetSettingsDocument.TabBehavior.pass)
+        ForEach([LinnetSettingsDocument.TabBehavior.smartComplete, .navigate, .pass], id: \.self) {
+          Text(LocalizedStringKey($0.settingsTitle)).tag($0)
+        }
       }
       Text(
         "Turning off learning stops reading and updating English learning data. Existing data returns when learning is enabled again; static context suggestions and spacing remain available."
       )
       .font(.caption)
       .foregroundStyle(.secondary)
-    }
-  }
-
-  private func chineseLearningPolicyName(
-    _ policy: LinnetSettingsDocument.ChineseLearningPolicy
-  ) -> LocalizedStringKey {
-    switch policy {
-    case .enhanced: "Enhanced learning (Recommended)"
-    case .standard: "Standard learning"
-    case .disabled: "Turn off learning"
-    }
-  }
-
-  private func chineseProfileName(
-    _ profile: LinnetSettingsContract.ChineseProfile
-  ) -> LocalizedStringKey {
-    switch profile {
-    case .natural: "Natural Code"
-    case .fullPinyin: "Full Pinyin"
-    case .flypy: "Flypy Double Pinyin"
-    case .microsoft: "Microsoft Double Pinyin"
-    case .sogou: "Sogou Double Pinyin"
-    case .abc: "Intelligent ABC"
-    case .ziguang: "Ziguang Double Pinyin"
-    case .jiajia: "Jiajia Pinyin"
-    }
-  }
-
-  private func pinyinReverseTriggerName(
-    _ trigger: LinnetSettingsDocument.PinyinReverseTrigger
-  ) -> LocalizedStringKey {
-    switch trigger {
-    case .semicolon: "Semicolon (;)"
-    case .verticalBar: "Vertical bar (|)"
     }
   }
 

@@ -28,6 +28,7 @@ struct WindowsInputDefaults {
     }
     try LinnetDataRegistry.activeGrammarConfiguration.write(
       to: output.appendingPathComponent("linnet_grammar_active.yaml"), options: .atomic)
-    try WindowsSettingsCatalog.write(to: output)
+    try WindowsSettingsCatalog.write(to: output,
+      localizations: URL(fileURLWithPath: "resources/Localizable.xcstrings"))
   }
 }

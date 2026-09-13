@@ -4,19 +4,6 @@
 import AppKit
 import SwiftUI
 
-extension LinnetSettingsDocument.ThemeFamily {
-  fileprivate var settingsTitle: LocalizedStringKey {
-    switch self {
-    case .paperLedger: "Xuan"
-    case .moonJade: "Moon"
-    case .sidecarSlate: "Slate"
-    case .clayTiles: "Clay"
-    case .mistJade: "Mist"
-    case .nativeGlass: "Glass"
-    case .inkCinnabar: "Ink"
-    }
-  }
-}
 /// The single Settings entry point for selecting a theme family. Every card
 /// projects its paired Light and Dark schemes from the bundled Catalog; the
 /// native Settings chrome never inherits a candidate-window palette.
@@ -50,9 +37,9 @@ struct LinnetSettingsThemeFamilyPicker: View {
         Divider()
 
         Picker("Appearance mode", selection: $mode) {
-          Text("System").tag(LinnetSettingsDocument.ThemeMode.system)
-          Text("Light").tag(LinnetSettingsDocument.ThemeMode.light)
-          Text("Dark").tag(LinnetSettingsDocument.ThemeMode.dark)
+          ForEach(LinnetSettingsDocument.ThemeMode.allCases, id: \.self) {
+            Text(LocalizedStringKey($0.settingsTitle)).tag($0)
+          }
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("settings.appearance.mode")
@@ -81,7 +68,7 @@ struct LinnetSettingsThemeFamilyPicker: View {
         }
         .buttonStyle(.borderless)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(family.settingsTitle))
+        .accessibilityLabel(Text(LocalizedStringKey(family.settingsTitle)))
         .accessibilityIdentifier("settings.appearance.theme.\(family.rawValue)")
         .accessibilityValue(selected ? Text("Selected") : Text("Not selected"))
         .accessibilityHint(Text("Choose this candidate-window theme."))
@@ -102,7 +89,7 @@ struct LinnetSettingsThemeFamilyPicker: View {
       }
 
       HStack(spacing: 5) {
-        Text(family.settingsTitle)
+        Text(LocalizedStringKey(family.settingsTitle))
           .font(.callout.weight(.medium))
           .foregroundStyle(.primary)
         Spacer(minLength: 2)

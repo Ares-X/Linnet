@@ -87,6 +87,38 @@ their own exact candidates, not as the status of replacement bytes.
   collection was removed and VM idle pause restored. The daily Mac and dirty
   main checkout were not changed. A fresh fetch found no unmerged main commits.
 
+## Active milestone: shared user-facing Settings names
+
+- Deliver readable Chinese/English choices for Chinese profiles, learning,
+  reverse prefixes, Tab behavior, layouts, expansion and themes. The generated
+  Windows catalog currently uses schema IDs and raw enum strings, while macOS
+  already has user-facing names and Chinese translations.
+- Move those existing names to the shared Settings enums; both native views and
+  the Windows build-time catalog consume them. Windows reads the existing root
+  string catalog using Foundation JSON, not a second translation table. Retire
+  the private macOS name switches and the Windows raw-ID display paths. Stored
+  IDs, ordering, defaults, Rime projections and native dialog behavior stay intact.
+- Scope: Settings document/contract, the two existing macOS Settings views,
+  Windows catalog/input-defaults generator and this evidence document. Naming
+  owners 2 -> 1; translation catalogs 1 -> 1; pass-through layers 0 -> 0;
+  fallback/compatibility branches 0 -> 0; duplicated policy/defaults 0 -> 0.
+- Focused validation: regenerate the catalog and compare its complete contents
+  excluding labels to the frozen baseline; run existing projection-renderer and
+  appearance-preview selectors and compile the affected Settings views. No new
+  wording-policing test, dependency or parser. Desktop label/layout acceptance
+  requires the later exact Windows package; no live Mac/iCloud change is needed.
+  This batch is separate from the in-flight `ad122b9` candidate; do not restart
+  that CI or attribute these labels to its bytes.
+- Results: all 43 changed choice labels are readable. The complete generated
+  catalog is identical to the baseline after removing labels, including every
+  saved ID, ordering, default, policy projection and design value. Existing
+  projection-renderer and appearance-preview tests passed; the latter rendered
+  all seven paired themes at both tested widths and appearances. The macOS
+  Settings target compiled with a separate test bundle identity; all 30 shared
+  names retain the exact compiled Chinese translations. No Settings application
+  was opened; its build-created test registration was removed. Windows desktop
+  label/fit acceptance remains NOT_EXERCISED until the later candidate.
+
 ## Earlier milestone: Settings projection and persistence
 
 - Deliverable: native Windows settings must apply the root product choices,
