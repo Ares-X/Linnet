@@ -165,8 +165,11 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     choice_.Attach(GetDlgItem(IDC_LINNET_CHOICE));
     list_.SetExtendedListViewStyle(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     for (const auto& page : pages_) tabs_.AddItem(page.c_str());
-    list_.InsertColumn(0, L"选项 / Code", LVCFMT_LEFT, 370);
-    list_.InsertColumn(1, L"当前值 / Text", LVCFMT_LEFT, 480);
+    CRect list_bounds;
+    list_.GetClientRect(&list_bounds);
+    const int column_width = list_bounds.Width() / 2 - GetSystemMetrics(SM_CXVSCROLL);
+    list_.InsertColumn(0, L"选项 / Code", LVCFMT_LEFT, column_width);
+    list_.InsertColumn(1, L"当前值 / Text", LVCFMT_LEFT, column_width);
     tabs_.SetCurSel(draft_word_.empty() ? 0 : 4);
     ShowPage();
     if (!draft_word_.empty()) {

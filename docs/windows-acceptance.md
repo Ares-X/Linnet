@@ -8,16 +8,16 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
-The latest installed engineering candidate is source `bcd8919`, build 107.
-Actions run: <https://github.com/Ares-X/Linnet/actions/runs/34709910769>.
+The latest installed engineering candidate is source `2bff3aa`, build 107.
+Actions run: <https://github.com/Ares-X/Linnet/actions/runs/34722883865>.
 The ARM64 installer SHA-256 is
-`c275d621e68d9a11ae99b3db565e4f462db130a3bd181878564125ada5c12bec`.
-Local evidence: `build/windows-uat-20260913-bcd8919/RESULTS.md`.
+`2e1dc0c324e8a1da5b59456fcca77acde2d3e5d868211d4b18f121508d913935`.
+Local evidence: `build/windows-uat-20260913-2bff3aa/RESULTS.md`.
 
 | Boundary | Evidence for that candidate | Remaining work |
 | --- | --- | --- |
 | Shared core and packaging | Both architectures built; Windows CI runtime and x64 installer lifecycle passed | Repeat affected gates after the next source freeze |
-| Windows 11 ARM desktop | Upgrade and cancellation, 84 physical typing cases in ARM64/x86/x64 applications, English glosses, reverse lookup, retained learning and theme passed | Full Settings, candidate interaction/design, font coverage and measured performance |
+| Windows 11 ARM desktop | Original four ARM64/x86/x64 editors retained connections and passed 24 physical cases after upgrade; both Edge editors retained text and accepted mixed input; config and learning retained | Settings bounds FAIL; full Settings, candidate interactions/design, English/reverse lookup on these bytes and measured performance still open |
 | Lifecycle | Same-language upgrade retained selection and open application connections without logout/reboot in this run | Clean install/uninstall/reinstall, login/reboot and upstream Weasel coexistence on the final candidate |
 | Native x64 desktop / Windows 10 | NOT_EXERCISED; CI is not desktop acceptance | Identify an available dedicated target before claiming these rows |
 | Signing / publication | Engineering package is unsigned; no Windows Release | Formal signing and exact accepted-byte publication need a separate authorized release step |
@@ -65,9 +65,9 @@ their own exact candidates, not as the status of replacement bytes.
   compile and Settings UI Apply/cancel/reopen/typing on an exact installed
   candidate remain required; host tests do not establish those results.
 
-The existing uncommitted Windows Settings/frontend files are drafts, not part of
-`bcd8919`. In particular, candidate expansion has draft consumers only. Do not
-describe them as shipped or accepted until integrated and exercised.
+The following milestones record the earlier integration work. Settings and
+candidate expansion are now compiled and installed in `2bff3aa`, but their full
+desktop acceptance remains open; installed is not synonymous with accepted.
 
 ### 2026-09-13 checkpoint
 
@@ -315,3 +315,35 @@ preflight was not reached. Same-run symbols were retained successfully.
   Check XML, PowerShell syntax and diff, then one corrected native build. Shared
   input policies and product sources are unchanged; do not repeat unrelated host
   typing matrices. Exact-candidate desktop UAT still waits for the full preflight.
+
+## Active milestone: installed dialog bounds and upgrade finish page
+
+- Deliver a fully reachable native Settings window at the tested desktop scale
+  and finish an ordinary upgrade without an unsolicited restart requirement.
+- Proven causes: the dialog resource is 650x385 DLU (actual 2139x1611 on the
+  2560x1314 guest, Apply/Close below the work area); list columns use unscaled
+  fixed pixel widths. The normal upgrade path unconditionally sets the NSIS
+  reboot flag, although the new DLLs are installed immediately and only renamed
+  old DLL deletion is deferred by the existing setup owner.
+- Owners/consumers: `LinnetSettingsDialog.rc` -> native dialog and its list;
+  `output/install.nsi` in the locked Weasel patch -> installer finish page.
+  Retire the oversized resource coordinates, fixed column widths and ordinary
+  upgrade's unconditional reboot flag. Preserve upstream deferred DLL cleanup,
+  uninstall behavior and all input/session/selection paths.
+- Allowed files: existing dialog resource/implementation, Weasel installer
+  patch and its lock digest, this evidence document. No dependency or layout
+  framework. Geometry owner 1 -> 1; installer reboot policy owner 1 -> 1;
+  unconditional upgrade reboot sites 1 -> 0; new pass-through layers, fallbacks
+  and duplicated defaults 0.
+- Focused checks: fresh locked patch apply/reverse, `upstream-sync verify`,
+  `verify_publication_owner.sh`, native dual-architecture compile and installer
+  preflight; then exact-byte Settings bounds/Apply/cancel/reopen and retained-app
+  normal upgrade in Tiny Windows 11. No daily Mac loading or guest logout is
+  needed for this milestone. Full-goal update/lifecycle gaps remain open.
+- Disproved digit-loss hypothesis: physical `nihao]]4` selects the partial `你`
+  and keeps `hao` composing; Space then commits the complete `你好`. Starting a
+  desktop PowerShell observation mid-composition steals focus and cancels it.
+  Use hypervisor screenshots/keys between composition and commit, with text
+  reads only after commit. Do not patch Rime/TSF to compensate for this observer.
+  Pointer disclosure remains unverified until the actual button receives a
+  physical click without an intervening focus-changing command.

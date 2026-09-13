@@ -3075,7 +3075,7 @@ index 3a40f51..7af1f8d 100644
  #define ID_WEASELTRAY_INSTALLDIR        40006
  #define ID_WEASELTRAY_USERCONFIG        40007
 diff --git a/output/install.nsi b/output/install.nsi
-index 3d5130c..16f69a0 100644
+index 3d5130c..3e12042 100644
 --- a/output/install.nsi
 +++ b/output/install.nsi
 @@ -18,21 +18,43 @@ Unicode true
@@ -3240,7 +3240,7 @@ index 3d5130c..16f69a0 100644
    ; if not version >= 8.1, quit and MessageBox(if not silent)
    ${IfNot} ${AtLeastWin8.1}
      IfSilent toquit
-@@ -121,171 +151,337 @@ toquit:
+@@ -121,171 +151,335 @@ toquit:
      Quit
    ${EndIf}
  
@@ -3570,8 +3570,6 @@ index 3d5130c..16f69a0 100644
 +  Pop $R3
 +  StrCmp $R3 0 0 old_package_not_preserved
 +  StrCpy $LinnetRollbackReady 1
-+  ; Prompt reboot
-+  SetRebootFlag true
 +  GoTo upgrade_done
 +
 +old_package_not_preserved:
@@ -3703,7 +3701,7 @@ index 3d5130c..16f69a0 100644
  
    File "WeaselSetup.exe"
    ; shared data files
-@@ -293,49 +489,83 @@ program_files:
+@@ -293,49 +487,83 @@ program_files:
    File "data\*.yaml"
    File /nonfatal "data\*.txt"
    File /nonfatal "data\*.gram"
@@ -3760,14 +3758,13 @@ index 3d5130c..16f69a0 100644
 +  SetErrorLevel $R4
 +  Abort
 +build_backup_done:
- 
--  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2'
++
 +  ; run as user...
 +  IfSilent deploy_silently
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /install' $R3
 +  GoTo deploy_checked
  
--  ; Write the uninstall keys for Windows
+-  ExecWait '"$INSTDIR\WeaselSetup.exe" $R2'
 +  deploy_silently:
 +  ExecWait '"$INSTDIR\WeaselDeployer.exe" /deploy' $R3
 +  deploy_checked:
@@ -3780,7 +3777,8 @@ index 3d5130c..16f69a0 100644
 +  SetErrorLevel $R4
 +  Abort
 +  deploy_done:
-+
+ 
+-  ; Write the uninstall keys for Windows
 +  ; Commit public installation metadata only after the candidate deploys.
    WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayName" "$(DISPLAYNAME)"
 -  WriteRegStr HKLM "${REG_UNINST_KEY}" "DisplayIcon" '"$INSTDIR\WeaselServer.exe"'
@@ -3812,7 +3810,7 @@ index 3d5130c..16f69a0 100644
  
    ; don't redirect on 64 bit system for auto run setting
    ${If} ${IsNativeARM64}
-@@ -344,22 +574,12 @@ program_files:
+@@ -344,22 +572,12 @@ program_files:
      SetRegView 64
    ${Endif}
    ; Write autorun key
@@ -3838,7 +3836,7 @@ index 3d5130c..16f69a0 100644
    SetRebootFlag true
  
  SectionEnd
-@@ -373,10 +593,9 @@ Section "Start Menu Shortcuts"
+@@ -373,10 +591,9 @@ Section "Start Menu Shortcuts"
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDEPLOY).lnk" "$INSTDIR\WeaselDeployer.exe" "/deploy" "$SYSDIR\shell32.dll" 144
@@ -3852,7 +3850,7 @@ index 3d5130c..16f69a0 100644
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
    CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
  
-@@ -388,30 +607,41 @@ SectionEnd
+@@ -388,30 +605,41 @@ SectionEnd
  
  Section "Uninstall"
  
