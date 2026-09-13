@@ -2349,7 +2349,7 @@ index 6740e99..3b9f6ba 100644
  
  class UserDbImporter : public Sink {
 diff --git a/src/rime/dict/user_db.cc b/src/rime/dict/user_db.cc
-index e8f6788..013d2fd 100644
+index e8f6788..2083a22 100644
 --- a/src/rime/dict/user_db.cc
 +++ b/src/rime/dict/user_db.cc
 @@ -6,6 +6,7 @@
@@ -2360,7 +2360,26 @@ index e8f6788..013d2fd 100644
  #include <sstream>
  #include <boost/algorithm/string.hpp>
  #include <rime/service.h>
-@@ -126,10 +127,21 @@ bool UserDbHelper::UniformBackup(const path& snapshot_file) {
+@@ -114,22 +115,39 @@ bool UserDbHelper::IsUniformFormat(const path& file_path) {
+ 
+ bool UserDbHelper::UniformBackup(const path& snapshot_file) {
+   LOG(INFO) << "backing up userdb '" << db_->name() << "' to " << snapshot_file;
+-  TsvWriter writer(snapshot_file, plain_userdb_format.formatter);
++  // Failed writes must not truncate the previous learning snapshot.
++  path temporary(snapshot_file);
++  temporary += ".tmp";
++  TsvWriter writer(temporary, plain_userdb_format.formatter);
+   writer.file_description = plain_userdb_format.file_description;
+   DbSource source(db_);
+   try {
+     writer << source;
++    std::filesystem::rename(temporary, snapshot_file);
+   } catch (std::exception& ex) {
+     LOG(ERROR) << ex.what();
++    std::error_code ignored;
++    std::filesystem::remove(temporary, ignored);
+     return false;
+   }
    return true;
  }
  
@@ -2383,7 +2402,7 @@ index e8f6788..013d2fd 100644
    DbSink sink(db_);
    try {
      reader >> sink;
-@@ -169,7 +181,7 @@ string UserDbHelper::GetRimeVersion() {
+@@ -169,7 +187,7 @@ string UserDbHelper::GetRimeVersion() {
    return version;
  }
  
@@ -2392,7 +2411,7 @@ index e8f6788..013d2fd 100644
    string tick;
    if (db && db->MetaFetch("/tick", &tick)) {
      try {
-@@ -177,11 +189,11 @@ static TickCount get_tick_count(Db* db) {
+@@ -177,11 +195,11 @@ static TickCount get_tick_count(Db* db) {
      } catch (...) {
      }
    }
@@ -2406,7 +2425,7 @@ index e8f6788..013d2fd 100644
    their_tick_ = 0;
    max_tick_ = our_tick_;
  }
-@@ -194,49 +206,64 @@ bool UserDbMerger::MetaPut(const string& key, const string& value) {
+@@ -194,49 +212,64 @@ bool UserDbMerger::MetaPut(const string& key, const string& value) {
    if (key == "/tick") {
      try {
        their_tick_ = std::stoul(value);

@@ -6,9 +6,18 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <csignal>
+#include <sys/resource.h>
+#endif
+
 #include "rime_api.h"
 #include "rime_levers_api.h"
 #include "settings_model.h"
+#include <rime/dict/user_db.h>
 
 #ifdef _WIN32
 void CheckWindowsIPCArchive();
@@ -177,6 +186,33 @@ void SnapshotProbe(RimeApi* api, const char* user) {
   const std::string before = read(backup);
   if (before.find(records) == std::string::npos)
     Fail("snapshot lost learning weights, ticks or deleted entries");
+  // Open before constraining output: LevelDB's read-only open itself writes
+  // bookkeeping, which must not substitute for the snapshot-write failure.
+  rime::the<rime::Db> snapshot_db(rime::UserDb::Require("userdb")->Create(dictionary));
+  if (!snapshot_db->OpenReadOnly()) Fail("cannot open snapshot failure fixture");
+  // Exercise the real filesystem failure boundary, not a production test hook.
+#ifdef _WIN32
+  HANDLE reader = CreateFileW(backup.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (reader == INVALID_HANDLE_VALUE) Fail("cannot hold snapshot replacement fixture");
+  const bool failed_backup = snapshot_db->Backup(rime::path(backup));
+  CloseHandle(reader);
+#else
+  struct rlimit previous_limit;
+  if (getrlimit(RLIMIT_FSIZE, &previous_limit)) Fail("cannot read output-size limit");
+  auto limited = previous_limit;
+  limited.rlim_cur = 32;
+  const auto previous_signal = std::signal(SIGXFSZ, SIG_IGN);
+  if (setrlimit(RLIMIT_FSIZE, &limited)) Fail("cannot limit snapshot fixture output");
+  const bool failed_backup = snapshot_db->Backup(rime::path(backup));
+  if (setrlimit(RLIMIT_FSIZE, &previous_limit)) Fail("cannot restore output-size limit");
+  std::signal(SIGXFSZ, previous_signal);
+#endif
+  if (!snapshot_db->Close()) Fail("cannot close snapshot failure fixture");
+  if (failed_backup || read(backup) != before)
+    Fail("failed native backup replaced or truncated the previous snapshot");
+  if (!levers->backup_user_dict(dictionary) || read(backup) != before)
+    Fail("native snapshot overwrite did not recover after filesystem failure");
   const auto foreign = sync / "foreign-device";
   fs::create_directory(foreign);
   const auto table = foreign / backup.filename();

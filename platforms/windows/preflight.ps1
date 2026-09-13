@@ -230,6 +230,7 @@ try {
     "data\linnet.smart.db",
     "data\linnet.english-data-manifest.json",
     "data\linnet_en.schema.yaml",
+    "data\linnet_english.ico",
     "data\linnet_zh_pinyin.schema.yaml",
     "data\radical_pinyin.schema.yaml",
     "data\opencc\s2t.json",

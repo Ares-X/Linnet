@@ -213,6 +213,7 @@ echo "Windows lock, patch, theme and data projection: PASS"
 # Exercise the Windows data/defaults with the same API probe used on Windows.
 # This catches shared integration failures before an expensive target build;
 # it does not exercise Weasel, TSF or installation on this macOS host.
+make --no-print-directory verify-rime-binaries
 shared="${scratch}/runtime-shared"
 user="${scratch}/runtime-user"
 mkdir -p "${shared}/opencc" "${user}"

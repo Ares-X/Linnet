@@ -8,17 +8,90 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
-The latest installed engineering candidate is source `2bff3aa`, build 107.
-Actions run: <https://github.com/Ares-X/Linnet/actions/runs/34722883865>.
+### Active correction batch after dacaf10 desktop UAT
+
+- Native `/sync` at 13:01 encountered ENOSPC on the 20 GB guest disk. The
+  failure dialog is truthful and the same server resumed without restart, but
+  `UserDbHelper::UniformBackup` opens the destination snapshot directly: a
+  failed Chinese write truncated the previous 1,461-byte backup to zero.
+  Preserve that failure and the live-database diagnostic copies; do not restore
+  old learning or clear the database to obtain a pass. Windows servicing was
+  active and its download/extraction tree is 1.67 GB; Linnet installed data is
+  574 MB and user data 119 MB, without comparable new growth. Exact disk-growth
+  attribution is not established by those inventory observations alone.
+- Correct the existing native uniform-snapshot writer to finish and close a
+  sibling temporary file before replacing the destination. Reuse standard
+  filesystem rename, retain the native error result and remove only its failed
+  temporary output. Retire direct truncation of an existing learning backup.
+  Native backup, Settings backup and manual sync share this one owner; the
+  separate live-sync cancellation/commit boundary remains unchanged. No new
+  dependency, disk quota/preflight gate, retry, parser or backup coordinator.
+  Allowed additional files: existing core patch/digest and Windows runtime
+  smoke probe. Atomic publication owners 0 -> 1 for native snapshots; writer
+  paths 1 -> 1; layers/fallbacks 0 -> 0. Validate failed output preserving old
+  bytes plus successful overwrite/Unicode metadata, then affected shared and
+  Windows native gates. Positive guest data UAT waits for adequate disk space.
+- Validation consumer correction: the first host composite still loaded the
+  older staged `lib/` runtime, while the fresh build was in `librime/dist/`.
+  Its nominal pass is not new-code evidence. Reuse the existing Makefile
+  `verify-rime-binaries` identity check before the Windows host runtime probe;
+  do not duplicate fingerprint logic. The failure fixture must open LevelDB
+  before constraining output, otherwise LevelDB bookkeeping fails before the
+  snapshot writer is reached. Scope additionally includes `verify.sh`. This
+  reuses one identity owner and removes an unchecked test-consumer path.
+- Corrected host evidence: pinned runtime rebuilt and staged with matching
+  hashes, Windows projection/runtime/Settings/snapshot composite passed, and
+  existing live-sync regression passed with 5,904 samples. The original
+  full-pinyin editor also passed six physical cases after the failed guest sync,
+  on the same server process. Isolated host reads of the preserved guest DB
+  copies retain all 5 English/34 Chinese keys and every deletion mark; no copy
+  was restored to the guest. These results do not accept the failed dacaf10
+  backup or prove the new source on Windows. Latest fetched main `92dd442` has
+  no changes absent from this branch. The complete correction batch now needs
+  one exact native build/preflight and installed-candidate regression.
+- Exact dacaf10 Actions build/preflight passed and was upgraded on Tiny Windows
+  11 ARM64 without logout/reboot. Installed payload hashes match, original
+  registration/configuration and applications remain, and four original
+  ARM64/x86/x64 editors passed 24 physical cases. New Settings fits the work
+  area and readable labels/draft cancellation work. A fresh ARM64 application
+  displays English IPA/glosses and its candidate Add-to-custom-words action
+  opens the correct editable draft and cancels without committing input.
+- English status icon still fails: preparation copies the locked upstream icon,
+  but the NSIS shared-data file list omits .ico files. Include that required
+  asset at the existing installer owner and add it to the existing installed
+  file inventory check. Retire the incomplete package inventory, not the
+  upstream schema-icon loader; no second icon, theme branch or fallback.
+- During installation the schema selector's shortcut explanation is blank.
+  Its Rime CustomSettings consumer reads staging/default.yaml, then the shared
+  source when staging has been moved aside for upgrade. The shared source's
+  Windows __patch has not been compiled at that point. Compile the two native
+  configuration documents through Rime's existing deploy_config_file API before
+  the installation UI reads them; keep the later workspace deployment owner.
+  Do not hardcode a second shortcut/default list. Actual Ctrl+grave already
+  works in a fresh installed application; this is the installation UI reader.
+- The same native schema-selection consumer allocates const char*[] but uses
+  scalar delete on both exits. Match those two deallocations to new[]; do not
+  rewrite schema selection or claim an unobserved heap crash.
+- Allowed production files: existing Weasel patch and lock digest, existing
+  Windows preflight inventory, this record. Authoritative owners remain one
+  per resource/configuration/allocation; additional layers, fallback branches,
+  dependencies and duplicated defaults remain zero. Focused verification:
+  fresh locked patch application/reversal and lock checks, guest PowerShell5
+  parsing, then one native build/preflight after the correction batch is frozen
+  and exact-candidate GUI/resource validation. No daily Mac loading is required.
+  Current dacaf10 remains an engineering candidate, not release-accepted.
+
+The latest installed engineering candidate is source `dacaf10`, build 107.
+Actions run: <https://github.com/Ares-X/Linnet/actions/runs/34735427779>.
 The ARM64 installer SHA-256 is
-`2e1dc0c324e8a1da5b59456fcca77acde2d3e5d868211d4b18f121508d913935`.
-Local evidence: `build/windows-uat-20260913-2bff3aa/RESULTS.md`.
+`99eb9ed33c1cd1b79aaa5c90c6e7269f80119fc98b8c596360e48702f737538d`.
+Local evidence: `build/windows-uat-20260913-dacaf10/RESULTS.md`.
 
 | Boundary | Evidence for that candidate | Remaining work |
 | --- | --- | --- |
-| Shared core and packaging | Both architectures built; Windows CI runtime and x64 installer lifecycle passed | Repeat affected gates after the next source freeze |
-| Windows 11 ARM desktop | Original four ARM64/x86/x64 editors retained connections and passed 24 physical cases after upgrade; both Edge editors retained text and accepted mixed input; config and learning retained. Additional ARM64 WordPad English gloss, Right-selection, pinyin/reverse lookup and Shift round trips passed | Settings bounds FAIL; English status icon FAIL; full Settings, remaining candidate interactions/design and measured performance still open |
-| Lifecycle | Same-language upgrade retained selection and open application connections without logout/reboot in this run | Clean install/uninstall/reinstall, login/reboot and upstream Weasel coexistence on the final candidate |
+| Shared core and packaging | Both architectures built; Windows CI runtime and x64 installer lifecycle passed. Desktop UAT proved the English icon is missing from the package | Correct the installer resource inventory and repeat affected native gates after source freeze |
+| Windows 11 ARM desktop | Original four ARM64/x86/x64 editors retained connections and passed 24 physical cases after upgrade. Five original applications retain their UI text. New native WordPad English gloss/selection/commit and candidate-to-Settings draft/cancel pass. Settings bounds, readable names and draft cancellation pass | English status icon FAIL; full Settings, Unicode backup/sync, remaining candidate/design and measured performance still open. One supplemental old WordPad gained a paragraph separator during the installer-focus key sequence; no product cause established |
+| Lifecycle | Settings-busy Cancel retained old files/service/data; closing Settings and Retry completed upgrade with exit 0, no reboot question and no logout/reboot | Clean install/uninstall/reinstall, login/reboot and upstream Weasel coexistence on the final candidate |
 | Native x64 desktop / Windows 10 | NOT_EXERCISED; CI is not desktop acceptance | Identify an available dedicated target before claiming these rows |
 | Signing / publication | Engineering package is unsigned; no Windows Release | Formal signing and exact accepted-byte publication need a separate authorized release step |
 
