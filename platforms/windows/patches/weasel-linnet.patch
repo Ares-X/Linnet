@@ -1863,26 +1863,27 @@ index c885ddd..b5369e2 100644
      if (ke.keycode == ibus::Caps_Lock) {
        if (prevKeyEvent.keycode == ibus::Caps_Lock && prevfEaten == TRUE &&
 diff --git a/WeaselTSF/LanguageBar.cpp b/WeaselTSF/LanguageBar.cpp
-index a03b615..1a863c5 100644
+index a03b615..5b643af 100644
 --- a/WeaselTSF/LanguageBar.cpp
 +++ b/WeaselTSF/LanguageBar.cpp
-@@ -35,13 +35,9 @@ static void HMENU2ITfMenu(HMENU hMenu, ITfMenu* pTfMenu) {
+@@ -34,16 +34,6 @@ static void HMENU2ITfMenu(HMENU hMenu, ITfMenu* pTfMenu) {
+   }
  }
  
- static LPCWSTR GetWeaselRegName() {
+-static LPCWSTR GetWeaselRegName() {
 -  LPCWSTR WEASEL_REG_NAME_;
-   if (is_wow64())
+-  if (is_wow64())
 -    WEASEL_REG_NAME_ = L"Software\\WOW6432Node\\Rime\\Weasel";
 -  else
 -    WEASEL_REG_NAME_ = L"Software\\Rime\\Weasel";
 -
 -  return WEASEL_REG_NAME_;
-+    return L"Software\\WOW6432Node\\Linnet";
-+  return WEASEL_REG_KEY;
- }
- 
+-}
+-
  static bool open(const std::wstring& path) {
-@@ -111,7 +107,7 @@ STDAPI CLangBarItemButton::GetInfo(TF_LANGBARITEMINFO* pInfo) {
+   return (uintptr_t)ShellExecuteW(NULL, L"open", path.c_str(), NULL, NULL,
+                                   SW_SHOWNORMAL) > 32;
+@@ -111,7 +101,7 @@ STDAPI CLangBarItemButton::GetInfo(TF_LANGBARITEMINFO* pInfo) {
    pInfo->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_MENU |
                     TF_LBI_STYLE_SHOWNINTRAY;
    pInfo->ulSort = 1;
@@ -1891,7 +1892,7 @@ index a03b615..1a863c5 100644
    return S_OK;
  }
  
-@@ -227,7 +223,7 @@ STDAPI CLangBarItemButton::GetIcon(HICON* phIcon) {
+@@ -227,7 +217,7 @@ STDAPI CLangBarItemButton::GetIcon(HICON* phIcon) {
  }
  
  STDAPI CLangBarItemButton::GetText(BSTR* pbstrText) {
@@ -1900,7 +1901,7 @@ index a03b615..1a863c5 100644
    return (*pbstrText == NULL) ? E_OUTOFMEMORY : S_OK;
  }
  
-@@ -316,11 +312,11 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
+@@ -316,11 +306,11 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
        }
        break;
      case ID_WEASELTRAY_USERCONFIG:
@@ -2291,7 +2292,7 @@ index 23eef35..e2311dc 100644
    CRect _candidateLabelRects[MAX_CANDIDATES_COUNT];
    CRect _candidateTextRects[MAX_CANDIDATES_COUNT];
 diff --git a/WeaselUI/WeaselPanel.cpp b/WeaselUI/WeaselPanel.cpp
-index 18964a0..839d374 100644
+index 18964a0..50caa6c 100644
 --- a/WeaselUI/WeaselPanel.cpp
 +++ b/WeaselUI/WeaselPanel.cpp
 @@ -56,6 +56,7 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
@@ -2403,7 +2404,7 @@ index 18964a0..839d374 100644
 +    quoted.append(slashes * 2, L'\\');
 +    quoted += L'\"';
 +    std::wstring installed;
-+    if (RegGetStringValue(HKEY_LOCAL_MACHINE, WEASEL_REG_KEY, L"WeaselRoot", installed) != ERROR_SUCCESS) return 0;
++    if (RegGetStringValue(HKEY_LOCAL_MACHINE, GetWeaselRegName(), L"WeaselRoot", installed) != ERROR_SUCCESS) return 0;
 +    const auto deployer = fs::path(installed) / L"WeaselDeployer.exe";
 +    const auto arguments = L"/add-word " + quoted;
 +    ShellExecuteW(m_hWnd, L"open", deployer.c_str(), arguments.c_str(), nullptr, SW_SHOWNORMAL);
@@ -3034,7 +3035,7 @@ index da17956..7376e7b 100755
    std::function<void(size_t* const, size_t* const, bool* const, bool* const)>&
    uiCallback() {
 diff --git a/include/WeaselUtility.h b/include/WeaselUtility.h
-index 54f840f..2fa1789 100755
+index 54f840f..d97eec6 100755
 --- a/include/WeaselUtility.h
 +++ b/include/WeaselUtility.h
 @@ -2,7 +2,8 @@
@@ -3056,7 +3057,7 @@ index 54f840f..2fa1789 100755
    fs::path path = fs::path(_path);
    if (!fs::exists(path)) {
      fs::create_directories(path);
-@@ -186,18 +187,8 @@ inline std::basic_string<CharT> unescape_string(
+@@ -186,21 +187,17 @@ inline std::basic_string<CharT> unescape_string(
  // resource
  std::string GetCustomResource(const char* name, const char* type);
  
@@ -3076,8 +3077,18 @@ index 54f840f..2fa1789 100755
 +  return L"Linnet";
  }
  
- inline LONG RegGetStringValue(HKEY key,
-@@ -217,7 +208,7 @@ inline LONG RegGetStringValue(HKEY key,
+-inline LONG RegGetStringValue(HKEY key,
++inline LPCWSTR GetWeaselRegName() {
++  if (is_wow64())
++    return L"Software\\WOW6432Node\\Linnet";
++  return WEASEL_REG_KEY;
++}
++
++inline LONG RegGetStringValue(HKEY key,
+                               LPCWSTR lpSubKey,
+                               LPCWSTR lpValue,
+                               std::wstring& value) {
+@@ -217,7 +214,7 @@ inline LONG RegGetStringValue(HKEY key,
  
  inline LANGID get_language_id() {
    std::wstring lang{};

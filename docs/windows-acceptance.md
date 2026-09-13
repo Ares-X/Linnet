@@ -27,6 +27,42 @@ input method and the dirty main checkout. Do not reset the guest or discard
 learning data to make a test pass. Carry old failures forward as failures of
 their own exact candidates, not as the status of replacement bytes.
 
+## Active milestone: candidate-to-Settings installation lookup
+
+- Installed `2bff3aa` in ARM64 WordPad 6528: the candidate menu expands,
+  collapses and forgets learning correctly. Forget changed only the intentional
+  test entry `algorithm` from `c=1` to `c=-1`; Chinese snapshots and every other
+  English value are byte-identical. Original editor text is unchanged.
+- `Add to custom words` does not open Settings. Its new panel consumer reads
+  `HKLM\Software\Linnet` in the native ARM64 registry view, while the installer
+  owns the 32-bit view. Native RegGetValue returns ERROR_FILE_NOT_FOUND there;
+  the existing upstream language-bar lookup resolves the exact installed root.
+  ARM64 and x86 probes both confirm that existing lookup. Directly launching
+  the same installed deployer with `/add-word algorithm` opens the expected
+  editable draft, proving the Settings endpoint itself works. It was closed
+  normally without saving; no personal-word file was created.
+- Deliverable/owner: share the existing upstream `GetWeaselRegName` utility
+  between language-bar entrypoints and the candidate panel. Move its definition
+  to the existing utility header and remove the private language-bar copy and
+  the panel's raw default-view lookup. No second registration, architecture
+  fallback, key copy, dependency or generic launcher. Lookup owners 2 -> 1;
+  duplicated definitions 1 -> 1 (moved); new pass-through layers 0; fallback
+  paths 0. Existing quoting/draft/save and all input/learning owners unchanged.
+- Scope: three existing Weasel consumers/header through the locked patch and
+  digest, plus this record. Focused checks: native ARM64/x86 registry results,
+  fresh patch apply/reverse and lock checks, then the existing native build and
+  exact-candidate context-menu opening/cancel plus normal-input continuity.
+  No daily Mac loading, guest logout or dependency change is needed. Current
+  in-flight `8973d03` does not contain this newly proven correction.
+- Result: `platforms/windows/verify.sh` finished exit 0 after the complete
+  correction. Fresh patch application/reversal, lock/publication, projections,
+  runtime and native Settings/Unicode snapshot checks passed on the host.
+  Native ARM64/x86 registry probes and direct draft/cancel evidence are under
+  `build/windows-uat-20260913-8973d03`. Run `34734396702` passed its shared/mac
+  job, then was deliberately cancelled during the Windows build because it
+  lacks this product fix. No installer from that run was downloaded or installed;
+  the next frozen source still requires Windows compilation and desktop UAT.
+
 ## Active milestone: Unicode backup and native snapshot integrity
 
 - Deliver Unicode sync-folder backup, lossless learning snapshots and truthful
