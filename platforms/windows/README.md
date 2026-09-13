@@ -127,6 +127,8 @@ Use the WinSparkle binary archive pinned in `upstreams.lock.json`, including its
 headers and import libraries, not the old copies in Weasel's source snapshot.
 The build workflow downloads and verifies this dependency before preparation.
 It also installs the pinned Swift 6.3.3 Windows toolchain on the build runner.
+The upstream CLI component is required by the compiler itself (`llbuildSwift`);
+the runner omits the debugger, IDE and Python components.
 Users do not install Swift: the installer carries the shared controller DLL and
 its required runtime DLLs, including the app-local Visual C++ runtime. No compiler,
 SDK or Swift background service is installed on the user's computer.

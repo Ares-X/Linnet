@@ -79,10 +79,11 @@ jobs:
           if ((Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant() -ne $swift.sha256) {
             throw 'Swift installer digest differs from upstreams.lock.json'
           }
-          # Compiler and Windows SDK only. No debugger, Python, IDE, Android or
+          # SwiftDriverExecution depends on llbuildSwift from upstream's default
+          # CLI component. No debugger, Python, IDE, Android or
           # second-architecture Swift runtime; both products use the x64 server.
           $setup = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
-            '/install', '/quiet', '/norestart', 'OptionsInstallCLI=0',
+            '/install', '/quiet', '/norestart',
             'OptionsInstallDBG=0', 'OptionsInstallPy=0', 'OptionsInstallIDE=0',
             'OptionsInstallUtilities=0', 'OptionsInstallAndroidPlatform=0',
             'OptionsInstallWindowsSDKARM64=0', 'OptionsInstallWindowsRedistARM64=0',

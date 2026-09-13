@@ -8,6 +8,36 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Swift compiler loader correction
+
+Milestone: the locked Windows compiler must start and reach the actual Linnet
+source build. CI `34754322721` passed the Mac product/shared-input stages and
+Windows preparation, then exited `-1073741515` (`0xC0000135`, missing DLL) before
+any compiler output. Offline inspection of the exact SHA-256-verified Swift
+installer, its SHA-512-verified BLD/RTL payloads and native MSI file inventory
+proved `swiftc.exe -> SwiftDriverExecution.dll -> llbuildSwift.dll`. The last DLL
+is absent from BLD/RTL and belongs to the upstream CLI component, which our
+workflow explicitly disabled. This is not a Linnet source compiler diagnostic.
+
+The existing workflow installer remains the sole owner: remove
+`OptionsInstallCLI=0` and retain upstream's default CLI component. Keep debugger,
+IDE, Python, Android and other-architecture SDK/runtime exclusions. No new
+dependency version, extracted-DLL installation path, loader wrapper or fallback;
+build-tool installer owners 1 -> 1, package runtime-closure owners 1 -> 1.
+Allowed files: the Windows workflow and this evidence/Windows build docs.
+Focused checks: native installer component/dependency inspection, workflow YAML
+parse, then one native build. User payload remains the actual application DLL
+closure, not the compiler's DLL closure. Installed-product UAT is still required.
+
+Latest `origin/main` is `92dd4429803f2a70919791ae2da5b63d01ebd4e9`, with no
+commits missing from this branch. Both configured Windows Core appcast URLs
+currently return HTTP 404 because those files are only on this branch, not on
+main. Their local empty XML documents do not prove a working update endpoint.
+Real ordered online-update acceptance additionally needs a lower installed build
+with the updater enabled and an authorized reachable candidate feed; the old
+Tiny build 107 has its updater disabled. Do not claim that journey passed or
+publish a Windows Release to make a test endpoint available.
+
 ### 2026-09-13 Windows brand icon correction
 
 Milestone: Explorer, installation/uninstallation, Settings, the registered input
