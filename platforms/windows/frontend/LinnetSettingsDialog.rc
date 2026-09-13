@@ -32,8 +32,9 @@ BEGIN
     PUSHBUTTON "保存源 / Save source", IDC_LINNET_SAVE_SOURCE, 385, 99, 110, 20
     PUSHBUTTON "更新当前词库 / Update data", IDC_LINNET_UPDATE_DATA, 25, 131, 225, 26
     PUSHBUTTON "安装完整离线词库 / Full offline data", IDC_LINNET_COMPLETE_DATA, 270, 131, 225, 26
-    LTEXT "下载时可继续输入；切换词库时短暂停用。\nInput remains available during download.", IDC_LINNET_UPDATE_NOTE, 25, 171, 350, 33
-    PUSHBUTTON "取消下载 / Cancel", IDC_LINNET_CANCEL_DATA, 385, 173, 110, 24
+    PUSHBUTTON "修复语言数据更新 / Repair language update", IDC_LINNET_REPAIR_DATA, 25, 163, 300, 24
+    PUSHBUTTON "取消下载 / Cancel", IDC_LINNET_CANCEL_DATA, 385, 163, 110, 24
+    LTEXT "下载时可继续输入；切换词库时短暂停用。\nInput remains available during download.", IDC_LINNET_UPDATE_NOTE, 25, 190, 470, 24
     LTEXT "", IDC_LINNET_STATUS, 10, 225, 310, 28
     DEFPUSHBUTTON "应用 Apply", IDC_LINNET_APPLY, 330, 229, 80, 24
     PUSHBUTTON "关闭 Close", IDCANCEL, 430, 229, 80, 24

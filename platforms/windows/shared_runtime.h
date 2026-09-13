@@ -19,7 +19,7 @@ __declspec(dllimport) double linnet_sync_poll(void* handle);
 // activation, 3 activating, 4 completed, 5 cancelled. Poll on the UI thread;
 // release after completion or request cancellation when closing the window.
 __declspec(dllimport) void* linnet_data_update_start(
-    const char* core, const char* user, const char* version, int complete,
+    const char* core, const char* user, const char* version, int complete, int repair,
     void* context, void (*failed)(void*, const char*));
 __declspec(dllimport) int linnet_data_update_poll(
     void* handle, void* context, void (*receive)(void*, double, const char*));

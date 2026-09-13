@@ -161,7 +161,9 @@ payloads with hard links, and retains the flat learning/customization directory.
 Core policies and UI assets remain installation-owned. The shared Registry/native
 setup and bootstrap are source changes awaiting compilation and installed UAT.
 The Updates page provides current-edition updates, complete offline data,
-direct/public/custom download sources and cancellation. Both platforms call
+direct/public/custom download sources and cancellation. Repair Language Update
+explicitly replaces conflicting same-version pack metadata from the channel,
+keeping the current edition and personal learning data. Both platforms call
 the same catalog/download/staging operation. Downloading does not pause input;
 publication uses native maintenance, Rime deployment and a selected-schema
 readiness check before committing. A failed activation restores the previous

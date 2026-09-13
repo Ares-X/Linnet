@@ -105,6 +105,7 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     COMMAND_ID_HANDLER(IDC_LINNET_SAVE_SOURCE, OnSaveSource)
     COMMAND_ID_HANDLER(IDC_LINNET_UPDATE_DATA, OnUpdateData)
     COMMAND_ID_HANDLER(IDC_LINNET_COMPLETE_DATA, OnUpdateData)
+    COMMAND_ID_HANDLER(IDC_LINNET_REPAIR_DATA, OnUpdateData)
     COMMAND_ID_HANDLER(IDC_LINNET_CANCEL_DATA, OnCancelData)
     COMMAND_ID_HANDLER(IDC_LINNET_AUTO_SYNC, OnAutoSync)
     COMMAND_RANGE_HANDLER(IDC_LINNET_BACKUP, IDC_LINNET_DICTIONARIES, OnData)
@@ -290,12 +291,13 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
       GetDlgItem(id).EnableWindow(idle);
 #if defined(_M_X64)
     for (const auto id : {IDC_LINNET_SOURCE, IDC_LINNET_SAVE_SOURCE,
-        IDC_LINNET_UPDATE_DATA, IDC_LINNET_COMPLETE_DATA}) GetDlgItem(id).EnableWindow(idle);
+        IDC_LINNET_UPDATE_DATA, IDC_LINNET_COMPLETE_DATA, IDC_LINNET_REPAIR_DATA})
+      GetDlgItem(id).EnableWindow(idle);
     CComboBox source(GetDlgItem(IDC_LINNET_SOURCE));
     GetDlgItem(IDC_LINNET_MIRROR).EnableWindow(idle && source.GetCurSel() == 2);
     GetDlgItem(IDC_LINNET_CANCEL_DATA).EnableWindow(!idle && !cancelling_update_);
 #else
-    for (int id = IDC_LINNET_SOURCE; id <= IDC_LINNET_CANCEL_DATA; ++id)
+    for (int id = IDC_LINNET_SOURCE; id <= IDC_LINNET_REPAIR_DATA; ++id)
       GetDlgItem(id).EnableWindow(FALSE);
 #endif
   }
@@ -330,7 +332,8 @@ class SettingsDialog : public CDialogImpl<SettingsDialog> {
     }
     std::string failure;
     data_update_ = linnet_data_update_start(WeaselSharedDataPath().u8string().c_str(),
-      user_.u8string().c_str(), WEASEL_VERSION, id == IDC_LINNET_COMPLETE_DATA, &failure,
+      user_.u8string().c_str(), WEASEL_VERSION, id == IDC_LINNET_COMPLETE_DATA,
+      id == IDC_LINNET_REPAIR_DATA, &failure,
       [](void* context, const char* message) { *static_cast<std::string*>(context) = message; });
     if (!data_update_) {
       KillTimer(UpdateTimer);

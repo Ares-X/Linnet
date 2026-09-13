@@ -8,6 +8,24 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Language-update repair entry point
+
+Milestone: Windows Settings must expose macOS's explicit Repair Language Update
+operation for conflicting same-version pack metadata. The proven omission is
+the native UI/start ABI always using the shared operation's default
+`allowCompleteRepair: false`; the existing shared Registry already owns repair
+selection, separate replacement storage, activation, rollback and learning-data
+preservation. Add an explicit Repair button and pass that choice through the
+existing start ABI. Normal update and Full remain non-repair operations, and
+repair keeps the current edition. Retire the native omission, not any validation
+or shared mutation path. Owners 1 -> 1, ABI layers 1 -> 1, fallback/default
+producers unchanged. Allowed files: native dialog/resources, shared-runtime
+header and Windows update Swift boundary, this record and the Windows README.
+Existing Registry repair coverage proves rejection without consent, separate
+replacement/rollback retention and unchanged learning data; native build and
+actual UI repair/cancel/input UAT must still validate this caller. No Core
+updater/feed change, new parser, downloader or transaction state is introduced.
+
 ### 2026-09-13 Foundation UUID disambiguation
 
 CI `34756136006` passed the Mac/shared-input job and reached Windows Swift

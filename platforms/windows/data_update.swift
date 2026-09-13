@@ -16,7 +16,7 @@ private final class WindowsLanguageUpdate: @unchecked Sendable {
 
   init(registry: LinnetDataRegistry) { self.registry = registry }
 
-  func start(source: LinnetSettingsDownloadSource, complete: Bool) {
+  func start(source: LinnetSettingsDownloadSource, complete: Bool, repair: Bool) {
     lock.lock()
     task = Task.detached { [self] in
       do {
@@ -24,6 +24,7 @@ private final class WindowsLanguageUpdate: @unchecked Sendable {
           registry: registry, transport: LinnetSettingsDownloadTransport(source: source),
           catalogURL: LinnetSettingsDownloadSource.canonicalCatalogURL,
           edition: complete ? .full : nil,
+          allowCompleteRepair: repair,
           progress: { [self] phase, value in report(phase, progress: value) },
           diagnostic: { message in FileHandle.standardError.write(Data((message + "\n").utf8)) },
           activate: { [self] candidate in try await awaitNativeActivation(candidate) })
@@ -141,7 +142,8 @@ private func languageUpdate(_ handle: UnsafeMutableRawPointer) -> WindowsLanguag
 @_cdecl("linnet_data_update_start")
 public func startLanguageUpdate(
   _ core: UnsafePointer<CChar>, _ user: UnsafePointer<CChar>, _ version: UnsafePointer<CChar>,
-  _ complete: Int32, _ context: UnsafeMutableRawPointer?, _ failed: @escaping DataError
+  _ complete: Int32, _ repair: Int32,
+  _ context: UnsafeMutableRawPointer?, _ failed: @escaping DataError
 ) -> UnsafeMutableRawPointer? {
   do {
     let root = URL(fileURLWithPath: String(cString: user), isDirectory: true)
@@ -152,7 +154,7 @@ public func startLanguageUpdate(
     if let failure = preference.failure { throw failure }
     guard let source = preference.source else { throw LinnetSettingsDownloadSource.Failure.invalidStoredMode }
     let operation = WindowsLanguageUpdate(registry: registry)
-    operation.start(source: source, complete: complete != 0)
+    operation.start(source: source, complete: complete != 0, repair: repair != 0)
     return Unmanaged.passRetained(operation).toOpaque()
   } catch {
     error.localizedDescription.withCString { failed(context, $0) }
