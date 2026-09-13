@@ -6,6 +6,12 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.26 — 2026-09-13 (Preview)
+
+- Improved homophone composition during continuous Chinese input. Rare dictionary phrases such as “异径连接” no longer suppress common combinations such as “已经连接／已经链接”, while technical terms and learned preferences remain available.
+- Kept reasonable complete homophone alternatives selectable, including “链接” combinations after frequent use of “连接”. Explicit choices continue to share learning across full and double pinyin.
+- Reduced repeated model scoring and dictionary-query allocations in Chinese and mixed Chinese/English composition to control long-input overhead. The existing Wanxiang model and dictionaries are unchanged.
+
 ## 0.1.25 — 2026-09-11
 
 [Stable release 0.1.25 (107)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25) includes the fixes below and the continuous Chinese/English composition improvements from preview 0.1.24.
