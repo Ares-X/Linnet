@@ -141,7 +141,20 @@ void SelectionAndLearning(RimeApi_stdbool* api) {
   api->process_key(id, ' ', 0);
   const auto first = Commit(api, id);
   Require(first == "已经连接" || first == "已经链接", "space committed wrong first choice");
+  // An existing user's component learning must not turn a dynamic preference
+  // into the lexical recall threshold and erase the unselected homophone.
+  for (const auto& item : std::vector<std::pair<const char*, const char*>>{
+           {"yijy", "已经"}, {"lmjx", "连接"}, {"yijylmjx", "异径连接"}}) {
+    Enter(api, id, item.first);
+    Choose(api, id, item.second);
+    Require(Commit(api, id) == item.second, "failed to seed component learning");
+  }
   Enter(api, id, "yijylmjx");
+  const auto learned = Candidates(api, id);
+  Require(!learned.empty() && learned.front() == "异径连接",
+          "explicitly learned technical term lost priority");
+  Require(Rank(learned, "已经链接") && Rank(learned, "已经链接") <= 3,
+          "component learning erased the alternative homophone");
   Choose(api, id, "已经链接");
   Require(Commit(api, id) == "已经链接", "selection changed sentence text");
   for (const auto& p : profiles) {
