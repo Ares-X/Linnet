@@ -3526,10 +3526,10 @@ index 54f840f..d97eec6 100755
      if (lang == L"chs")
        return MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED);
 diff --git a/output/install.nsi b/output/install.nsi
-index 3d5130c..24d9102 100644
+index 3d5130c..b710cc6 100644
 --- a/output/install.nsi
 +++ b/output/install.nsi
-@@ -18,24 +18,47 @@ Unicode true
+@@ -18,25 +18,48 @@ Unicode true
  !define WEASEL_BUILD 0
  !endif
  
@@ -3581,10 +3581,12 @@ index 3d5130c..24d9102 100644
  VIAddVersionKey /LANG=2052 "FileVersion" "${WEASEL_VERSION}"
  
  !define MUI_ICON ..\resource\weasel.ico
+-SetCompressor /SOLID lzma
 +!define MUI_UNICON ..\resource\weasel.ico
- SetCompressor /SOLID lzma
++SetCompressor lzma
  
  
+ ; Request application privileges for Windows Vista
 @@ -60,282 +83,510 @@ RequestExecutionLevel admin
  ; Languages
  

@@ -8,6 +8,44 @@ by the root schemas, Settings document/renderer and Rime modules.
 
 ## Current evidence
 
+### 2026-09-13 Installer peak disk footprint
+
+Milestone: install the same complete offline product without retaining a second
+uncompressed installer-sized temporary file. Tiny's fresh read-only observation
+at 22:52 +08:00 reports 1,661,767,680 free C: bytes, a 574,058,151-byte old Core
+and 118,727,174-byte old build cache; no Registry Data/Runtime or rollback folders
+exist yet. The preceding native ARM64 packaging log reports 563,788,160 total
+uncompressed bytes. The staged factory expands to 677,662,701 bytes. Existing
+package/build rollback uses same-volume rename, and Registry views hard-link
+immutable packs, so neither should be counted as an additional full copy.
+
+The proven extra disk owner is NSIS `SetCompressor /SOLID lzma`: its upstream
+`Source/exehead/fileform.c` whole-compression path creates `dbd_hFile` in TEMP,
+decompresses into it, then copies file bytes to their installation destinations.
+New Core + that temporary data + first factory expansion is approximately
+1.80 GB before regenerated Rime caches or filesystem overhead, already above
+current free space even when the installer EXE stays on the host share. This is
+a source-and-size projection, not a measured new-candidate installation peak.
+
+Use the existing NSIS non-solid LZMA path, which writes decompressed file chunks
+directly to each destination. Retire only `/SOLID`; preserve complete factory
+packs, icons, metadata, install commands, learning data and rollback. No new
+dependency, compression engine, temporary-directory override, disk guard or
+cleanup procedure. Compression/installer/Registry owners 1 -> 1 each; added
+layers/fallbacks/defaults 0. Allowed files: the NSIS patch, its lock digest and
+this evidence document. Focused checks: pristine patch applicability and lock
+verification; native packaging/runtime/lifecycle once after source freeze, then
+actual guest peak-free-space observation. Existing CI34763560267 on6b11af2 must
+finish unchanged; do not cancel it or treat it as validation of this later edit.
+Reference: [NSIS compression option](https://nsis.sourceforge.io/Reference/SetCompressor)
+and [upstream decompression paths](https://github.com/NSIS-Dev/nsis/blob/v311/Source/exehead/fileform.c).
+
+The four current staged pack manifests independently sum to 677,662,701 payload
+bytes (483,743,711 container bytes). Complete patch applicability against the
+pristine locked Weasel, `scripts/upstream-sync verify` and diff checks passed.
+No guest installation, cleanup or runtime change was performed. Actual package
+size, peak free space and installed workflows remain unverified for this edit.
+
 ### 2026-09-13 Native frontend build dependencies
 
 CI34757845236 compiled/linked the shared Swift DLL and built both librime
