@@ -1356,8 +1356,13 @@ void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
     if (exact == candidates.end() || exact - candidates.begin() >= 5 ||
         exact->start != 0 || exact->end != 8 || exact->phrase_code_size != 3 ||
         candidates.front().type == "linnet_mixed" ||
-        CandidateIndex(api, correction, "选择四") > 1)
+        CandidateIndex(api, correction, "选择四") > 1) {
+      for (const auto& candidate : candidates)
+        std::cerr << candidate.text << " type=" << candidate.type
+                  << " range=" << candidate.start << ':' << candidate.end
+                  << " syllables=" << candidate.phrase_code_size << '\n';
       Fail("correction erased exact mixed spelling or its Chinese priority");
+    }
     if (std::any_of(candidates.begin(),
                     candidates.begin() + (std::min)(candidates.size(), size_t{9}),
                     [](const auto& candidate) { return candidate.text == "选择四ze"; }))

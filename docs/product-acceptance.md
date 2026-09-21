@@ -1,5 +1,22 @@
 # Linnet product acceptance
 
+## Chinese homophone composition (candidate)
+
+With an empty learning state, continuous Natural Code `yijylmjx` and full pinyin
+`yijinglianjie` must start with 已经连接 or 已经链接, offer 已经链接 within the first
+three candidates, and retain the technical term 异径连接. Selecting 已经链接 must
+commit the complete text and retain that preference across Chinese profiles.
+Selecting the technical term must likewise remain learnable. With prior learning
+of 已经, 连接 and 异径连接, preserve the learned first choice while keeping
+已经链接 within the first three candidates so one selection can correct it. Verify partial
+selection of 已经 followed by 链接, raw editing, Return/Escape, and subsequent typing.
+
+Keep 时机成熟、时机合适、意见统一、异径三通 and 实践调研 first. Longer ambiguous
+sentences must retain their sensible whole-sentence alternatives. Run the normal
+Chinese and mixed-input regressions and compare per-key latency. Installed
+acceptance uses a local signed candidate in the dedicated macOS VM; native tests
+alone do not establish visible typing, and this fix does not authorize publication.
+
 ## Personal-data export and recovery
 
 In the installed Settings app, Export must save the suggested name as

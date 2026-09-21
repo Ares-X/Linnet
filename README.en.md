@@ -22,7 +22,7 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 **[Download the latest Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-Stable: **[0.1.25 (107)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25)**, including improved continuous Chinese/English composition. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
+Stable: **[0.1.26 (108)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26)**, with improved Chinese homophone composition and alternatives alongside continuous Chinese/English input. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
 
 Existing users can download and apply the Core update in **Settings → Data & Updates → Stable**.
 
@@ -134,8 +134,8 @@ Sizes use decimal MB; check the corresponding release for exact package sizes.
 
 | Content | Reference size | Includes |
 | --- | --- | --- |
-| [0.1.25 complete installer](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25) | **About 428 MB** | App, Chinese/English dictionaries, local model and supplementary data |
-| [0.1.25 Core update](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.25) | **About 7 MB** | App only; reuses installed language data |
+| [0.1.26 complete installer](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26) | **About 428 MB** | App, Chinese/English dictionaries, local model and supplementary data |
+| [0.1.26 Core update](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.26) | **About 7 MB** | App only; reuses installed language data |
 | [Pinned LTS model](upstreams.lock.json) | **420.25 MB** | Uncompressed model file, already included in the complete installation |
 
 Download size is not installed disk usage: extracted data, generated schemas, learning records and backups also take space. The model's file size is not its resident memory usage.

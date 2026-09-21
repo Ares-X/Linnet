@@ -22,7 +22,7 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法，将中文�
 
 **[下载最新版 Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-正式版：**[0.1.25（107）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25)**，包含连续中英混输增强。各版本功能与修复见[版本记录](CHANGELOG.md)。
+正式版：**[0.1.26（108）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26)**，改善连续中文的同音组词与备选，同时保留中英混输能力。各版本功能与修复见[版本记录](CHANGELOG.md)。
 
 已有用户可在 **Settings → 数据与更新 → 正式版** 下载并应用 Core 更新。
 
@@ -134,8 +134,8 @@ _左：中文模式的拼音反查；右：带 IPA 和中文释义的英文补�
 
 | 内容 | 参考大小 | 包含内容 |
 | --- | --- | --- |
-| [0.1.25 完整安装包](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25) | **约 428 MB** | 程序、中英文词库、本地模型和辅助数据 |
-| [0.1.25 Core 更新包](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.25) | **约 7 MB** | 仅程序，复用已安装语言数据 |
+| [0.1.26 完整安装包](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26) | **约 428 MB** | 程序、中英文词库、本地模型和辅助数据 |
+| [0.1.26 Core 更新包](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.26) | **约 7 MB** | 仅程序，复用已安装语言数据 |
 | [锁定的 LTS 模型](upstreams.lock.json) | **420.25 MB** | 未压缩模型文件，已包含在完整安装内容中 |
 
 下载大小不等于安装后占用：磁盘还保存解压数据、生成方案、学习记录和备份；模型文件大小也不等于常驻内存用量。
