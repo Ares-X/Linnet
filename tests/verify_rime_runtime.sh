@@ -274,6 +274,22 @@ if ! DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
 fi
 end_phase "run native candidate matrix"
 
+if [[ -z "${runtime_probe}" || "${runtime_probe}" == --profile-key-matrix-probe ]]; then
+  begin_phase "apply and restore Caps Lock uppercase preference"
+  caps_user="${scratch}/caps-user"
+  mkdir "${caps_user}"
+  cp -R "${user}/." "${caps_user}/"
+  for uppercase in true false; do
+    "${scratch}/projection-fixture" caps-lock-uppercase "${uppercase}" "${caps_user}"
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      bin/rime_deployer --build "${caps_user}" "${shared}" "${caps_user}/build" >/dev/null
+    DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+      "${scratch}/rime-smoke" "${shared}" "${caps_user}" \
+        --caps-lock-probe "${uppercase}"
+  done
+  end_phase "apply and restore Caps Lock uppercase preference"
+fi
+
 if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; then
   begin_phase "verify mixed-input learning policy"
   printf 'learn 霜河栈 shuanghezhan 霜 河 栈\n' | \

@@ -51,7 +51,7 @@ Linnet builds on Squirrel and librime, with data and capabilities from Rime Wanx
 | Smart English | `En` | English completion, correction, definitions, pronunciation and contextual prediction |
 | Raw ASCII | `A` | Code, passwords, terminals and text you want to enter without conversion |
 
-Tap either Shift key to switch between Chinese and Smart English. Caps Lock enters or leaves raw ASCII. Both the cursor indicator and menu bar show the current mode.
+Tap either Shift key to switch between Chinese and Smart English. Both the cursor indicator and menu bar show the current mode. Caps Lock behavior depends on the macOS option below.
 
 <details>
 <summary>View the three cursor indicators</summary>
@@ -59,6 +59,25 @@ Tap either Shift key to switch between Chinese and Smart English. Caps Lock ente
 ![Linnet cursor indicators for Chinese, Smart English and raw ASCII](resources/readme/input-modes.png)
 
 </details>
+
+### Caps Lock: input-source switching or raw ASCII
+
+Open **System Settings → Keyboard → Text Input → Edit** and find “Use the Caps Lock key to switch to and from”. Its label may name ABC or the last used Latin input source.
+
+| System option | A short Caps Lock press | English input owner |
+| --- | --- | --- |
+| On | Switches between Linnet and the last used Latin input source; hold to lock uppercase | ABC, Unicode Hex Input or another system keyboard layout: normal lowercase, Shift for uppercase |
+| Off | Keeps Linnet selected and enters or leaves raw ASCII, indicated by `A` | Linnet; 0.1.27 and earlier also produce uppercase. Version 0.1.28 (unreleased) defaults to normal lowercase with Shift for uppercase; enable “Caps Lock also locks uppercase” in Settings → Input → Mode switching to restore traditional behavior |
+
+**To switch to English without locking uppercase:** enable the system option. ABC works immediately, or use **Unicode Hex Input** in place of Linnet's raw ASCII:
+
+1. Click **＋** in the same Edit window, search for `Unicode`, and add Unicode Hex Input (under the Other language category).
+2. Enable the system option and click Done. Select Unicode Hex Input from the menu bar, then select Linnet, making it the last used Latin input source.
+3. Tap Caps Lock to switch between them. Selecting ABC or another Latin layout later changes the destination; select Unicode Hex Input once again to restore it.
+
+This works in current releases too. A system keyboard layout enters ordinary English letters directly, without Linnet's Smart English candidates or completion. For Smart English, return to Linnet and tap Shift. If a previous long press locked uppercase, unlock it first.
+
+With the system option off, Linnet's letter-case preference affects only its internal raw ASCII; macOS's global Caps Lock state remains active in other input sources and password fields that bypass the input method. Use system input-source switching above to avoid the global uppercase lock. [Apple's Input Sources settings guide](https://support.apple.com/en-gb/guide/mac-help/mchl84525d76/mac)
 
 ### Chinese input
 

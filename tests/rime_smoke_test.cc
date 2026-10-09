@@ -2877,7 +2877,8 @@ void ExpectNoCommit(RimeApi_stdbool* api,
 
 void ExpectCapsLockCommitsRawCode(RimeApi_stdbool* api,
                                   const char* schema_id,
-                                  const char* input) {
+                                  const char* input,
+                                  bool uppercase = false) {
   const RimeSessionId session = CreateSchemaSession(api, schema_id);
   Enter(api, session, input);
   const auto before = rime::Service::instance().GetSession(session);
@@ -2886,7 +2887,7 @@ void ExpectCapsLockCommitsRawCode(RimeApi_stdbool* api,
          " Caps Lock raw-code fixture did not start composing '" + input +
          "'");
   }
-  if (api->process_key(session, XK_Caps_Lock, 0) ||
+  if (api->process_key(session, XK_Caps_Lock, 0) == uppercase ||
       !api->get_option(session, "ascii_mode")) {
     Fail(std::string(schema_id) +
          " did not enter raw ASCII while preserving composition '" + input +
@@ -2940,7 +2941,7 @@ void ExpectCapsLockPreservesExplicitPrefix(RimeApi_stdbool* api) {
   constexpr char kExpected[] = "下周ii";
   const RimeSessionId session =
       CreateExplicitChinesePrefixFixture(api, "Caps Lock fixture");
-  if (api->process_key(session, XK_Caps_Lock, 0) ||
+  if (!api->process_key(session, XK_Caps_Lock, 0) ||
       !api->get_option(session, "ascii_mode")) {
     Fail("Caps Lock did not enter raw ASCII from a partially confirmed composition");
   }
@@ -2975,20 +2976,41 @@ void ExpectReturnPreservesExplicitPrefix(RimeApi_stdbool* api) {
   api->destroy_session(session);
 }
 
-void ExpectCapsLockRawPath(RimeApi_stdbool* api, const char* schema_id) {
-  ExpectCapsLockCommitsRawCode(api, schema_id, "shi");
+void ExpectCapsLockRawPath(RimeApi_stdbool* api, const char* schema_id,
+                           bool uppercase = false) {
+  ExpectCapsLockCommitsRawCode(api, schema_id, "shi", uppercase);
   const RimeSessionId session = CreateSchemaSession(api, schema_id);
   if (api->get_option(session, "ascii_mode")) {
     Fail(std::string(schema_id) + " unexpectedly started in ASCII mode");
   }
-  if (api->process_key(session, XK_Caps_Lock, 0) ||
+  if (api->process_key(session, XK_Caps_Lock, 0) == uppercase ||
       !api->get_option(session, "ascii_mode")) {
     Fail(std::string(schema_id) + " did not enter the Caps Lock raw path");
   }
-  if (api->process_key(session, 'A', kLockMask)) {
-    Fail(std::string(schema_id) + " swallowed Caps Lock raw text");
+  for (const auto& letter : std::vector<std::pair<int, unsigned int>>{
+           {'A', kLockMask}, {'a', kLockMask | kShiftMask}}) {
+    const bool handled = api->process_key(session, letter.first, letter.second);
+    if (handled == uppercase) {
+      Fail(std::string(schema_id) + " did not apply Caps Lock case preference");
+    }
+    if (!uppercase && TakeCommit(api, session, "Caps Lock letter") !=
+                          (letter.first == 'A' ? "a" : "A")) {
+      Fail(std::string(schema_id) + " changed ordinary Caps Lock letter case");
+    }
+    ExpectNoCommit(api, session, "Caps Lock letter passthrough or duplicate");
   }
-  ExpectNoCommit(api, session, "Caps Lock raw text");
+  for (const unsigned int modifier :
+       std::vector<unsigned int>{kControlMask, kAltMask, kSuperMask}) {
+    if (api->process_key(session, 'A', kLockMask | modifier)) {
+      Fail(std::string(schema_id) + " swallowed a Caps Lock shortcut");
+    }
+    ExpectNoCommit(api, session, "Caps Lock shortcut");
+  }
+  if (api->process_key(session, '1', kLockMask) ||
+      api->process_key(session, '/', kLockMask)) {
+    Fail(std::string(schema_id) + " swallowed raw numbers or punctuation");
+  }
+  ExpectNoCommit(api, session, "Caps Lock raw punctuation");
 
   // Caps Lock owns this raw-ASCII session. Shift events carry LockMask and
   // must remain ordinary host events rather than being mistaken for a fresh
@@ -3012,7 +3034,7 @@ void ExpectCapsLockRawPath(RimeApi_stdbool* api, const char* schema_id) {
   if (!api->get_option(session, "ascii_mode")) {
     Fail(std::string(schema_id) + " left raw ASCII after a Caps Lock Shift chord");
   }
-  if (api->process_key(session, XK_Caps_Lock, kLockMask) ||
+  if (api->process_key(session, XK_Caps_Lock, kLockMask) == uppercase ||
       api->get_option(session, "ascii_mode")) {
     Fail(std::string(schema_id) + " did not leave the Caps Lock raw path");
   }
@@ -4462,7 +4484,7 @@ void ExpectLifecycleRawExitContract(RimeApi_stdbool* api,
 void ExpectCapsLockDismissesPassivePrediction(RimeApi_stdbool* api) {
   const RimeSessionId session =
       CreatePassivePrediction(api, "Caps Lock passive prediction");
-  if (api->process_key(session, XK_Caps_Lock, 0) ||
+  if (!api->process_key(session, XK_Caps_Lock, 0) ||
       !api->get_option(session, "ascii_mode")) {
     Fail("Caps Lock did not enter raw ASCII from a passive prediction");
   }
@@ -7465,6 +7487,10 @@ static void ExpectCandidateForgetFocus(RimeApi_stdbool* api) {
 }
 
 int main(int argc, char** argv) {
+  const bool caps_lock_probe =
+      argc == 5 && std::strcmp(argv[3], "--caps-lock-probe") == 0 &&
+      (std::strcmp(argv[4], "true") == 0 ||
+       std::strcmp(argv[4], "false") == 0);
   const bool raw_editing_probe =
       argc == 4 && std::strcmp(argv[3], "--raw-editing-probe") == 0;
   const bool candidate_forget_probe =
@@ -7509,6 +7535,7 @@ int main(int argc, char** argv) {
   const bool cold_client_probe =
       argc == 4 && std::strcmp(argv[3], "--cold-client-probe") == 0;
   if (argc != 3 && !input_options_probe && !input_switches_probe &&
+      !caps_lock_probe &&
       !settings_off_probe && !learning_off_probe && !candidate_forget_probe && !raw_editing_probe &&
       !profile_key_matrix_probe &&
       !lifecycle_raw_exit_probe &&
@@ -7521,6 +7548,7 @@ int main(int argc, char** argv) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
          "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|"
          "--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|"
+         "--caps-lock-probe true|false|"
          "--lifecycle-raw-exit-probe|"
          "--page-size-probe EXPECTED|"
          "--english-profile-probe PROFILE CHINESE_SCHEMA CODE PREFIX|"
@@ -7570,6 +7598,16 @@ int main(int argc, char** argv) {
     Fail("octagram module was not loaded");
   }
   ExpectSchemaList(api);
+  if (caps_lock_probe) {
+    const bool uppercase = std::strcmp(argv[4], "true") == 0;
+    for (const auto& schema_id : RuntimeProductSchemaIDs(api)) {
+      ExpectCapsLockRawPath(api, schema_id.c_str(), uppercase);
+    }
+    api->finalize();
+    std::cout << "rime_smoke_test: Caps Lock preference " << argv[4]
+              << ": PASS\n";
+    return 0;
+  }
   if (candidate_forget_probe) {
     ExpectCandidateForgetFocus(api);
     api->finalize();

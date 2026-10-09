@@ -6,6 +6,10 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.28 — Unreleased
+
+- Caps Lock raw ASCII now types normal lowercase by default, with Shift for uppercase. Enable the new “Caps Lock also locks uppercase” setting to restore traditional behavior.
+
 ## 0.1.27 — 2026-10-09
 
 - Updated the application signing certificate. Versions 0.1.26 and earlier require one manual installation of the 0.1.27 complete package over the existing app. Do not uninstall; personal data and input-source state are preserved. Settings Core updates work normally afterward.
