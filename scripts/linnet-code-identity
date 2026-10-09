@@ -424,7 +424,10 @@ verify_product() (
   actual_leaf="$(verify_code "${host_app}" "${expected_leaf}" \
     "${verification_scratch}" host-bundle "${host_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "Host leaf mismatch"
-  if [[ "${signing_profile}" == community-cms ]]; then
+  # Historical baselines are already bound to an immutable whole-package
+  # digest by prepare_update_baseline. Their sealed metadata and actual code
+  # must agree on one leaf, but that leaf may predate the current certificate.
+  if [[ "${signing_profile}" == community-cms && -z "${published_revision}" ]]; then
     [[ "${expected_leaf}" == "$(community_certificate_contract | sed -n '2p')" ]] ||
       fail_identity "public product does not use the pinned community CMS leaf"
   fi

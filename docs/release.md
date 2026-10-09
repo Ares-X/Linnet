@@ -102,8 +102,9 @@ direct commit，但 byte-identical 的不可变 pack 可以跨候选 revision �
 
 `config/linnet-update-baselines.json` 锁定前一公开 Complete 的 revision、字节数和
 SHA-256，以及每个目标词包对应的基线内容身份。`package/prepare_update_baseline`
-通过现有下载 owner 获取同仓库资产并缓存；旧 App 按它自己的已发布 revision 验证
-CMS 和资源，不能拿当前源码重新推算旧版 metadata。Core 基线与词包基线独立推进，
+通过现有下载 owner 获取同仓库资产并在 `.noindex` 内缓存；旧 App 按它自己的已发布
+revision、同 leaf CMS 与资源封印验证，不要求旧基线使用当前证书，不能拿当前源码
+重新推算旧版 metadata。新候选仍必须匹配当前钉住的签名证书。Core 基线与词包基线独立推进，
 修改 Core 不能隐式增加任何词包的 sequence。
 
 Core 包只携带差分和安装工具；已有词包下载与其内容匹配的 `.linnetdelta`，没有变化
