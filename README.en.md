@@ -22,9 +22,9 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 **[Download the latest Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-Stable: **[0.1.27 (109)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.27)**, with an updated application signing certificate. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
+Stable: **[0.1.28 (110)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.28)**, fixing letter case in Caps Lock raw ASCII input. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
 
-Users on 0.1.27 and later can download and apply Core updates in **Settings → Data & Updates → Stable**. Versions 0.1.26 and earlier must first install the 0.1.27 complete package manually over the existing app.
+Users on 0.1.27 and later can download and apply Core updates in **Settings → Data & Updates → Stable**. Because the signing certificate changed, versions 0.1.26 and earlier must first install the latest complete `Linnet.pkg` manually over the existing app. Do not uninstall.
 
 [Features](#features) · [Installation](#installation) · [Usage](#usage) · [Updating and uninstalling](#updating-and-uninstalling) · [Privacy](#privacy) · [Contributing](#contributing)
 
@@ -67,7 +67,7 @@ Open **System Settings → Keyboard → Text Input → Edit** and find “Use th
 | System option | A short Caps Lock press | English input owner |
 | --- | --- | --- |
 | On | Switches between Linnet and the last used Latin input source; hold to lock uppercase | ABC, Unicode Hex Input or another system keyboard layout: normal lowercase, Shift for uppercase |
-| Off | Keeps Linnet selected and enters or leaves raw ASCII, indicated by `A` | Linnet; 0.1.27 and earlier also produce uppercase. Version 0.1.28 (unreleased) defaults to normal lowercase with Shift for uppercase; enable “Caps Lock also locks uppercase” in Settings → Input → Mode switching to restore traditional behavior |
+| Off | Keeps Linnet selected and enters or leaves raw ASCII, indicated by `A` | Linnet; 0.1.27 and earlier also produce uppercase. Version 0.1.28 and later default to normal lowercase with Shift for uppercase; enable “Caps Lock also locks uppercase” in Settings → Input → Mode switching to restore traditional behavior |
 
 **To switch to English without locking uppercase:** enable the system option. ABC works immediately, or use **Unicode Hex Input** in place of Linnet's raw ASCII:
 
@@ -239,7 +239,7 @@ Use the complete `Linnet.pkg` for first installation or app repair. Repair prese
 | Situation | Action |
 | --- | --- |
 | Version 0.1.27 and later | Download and apply Core updates in Settings |
-| Version 0.1.26 and earlier | Manually run the 0.1.27 complete installer over the existing app once; personal data and input-source state are preserved |
+| Version 0.1.26 and earlier | Manually run the latest complete `Linnet.pkg` over the existing app once to migrate the signing certificate; personal data and input-source state are preserved |
 | Ad-hoc versions 0.1.7 and earlier, or a missing/damaged app or mismatched release identity | Repair with the complete `Linnet.pkg` |
 | Same-version app repair | Use the complete `Linnet.pkg`; online Core updates only install higher versions |
 

@@ -6,9 +6,11 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
-## 0.1.28 — 未发布
+## 0.1.28 — 2026-10-09
 
 - Caps Lock 切换到原始 ASCII 时，默认正常输入小写、Shift 输入大写。设置新增“Caps Lock 同时锁定大写”，需要时可恢复传统行为。
+- 开启 macOS“使用大写锁定键切换输入源”时，轻按 Caps Lock 会切换到上次使用的拉丁输入源，长按才锁定大写。可使用 ABC，或添加 Unicode Hex Input 后先选它、再选 Linnet，实现正常大小写的英文输入。具体步骤见 [Caps Lock 使用指南](README.md#caps-lock切换输入源还是原始-ascii)。
+- 签名已在 0.1.27 更换：0.1.26 及更早版本请手动用本版本完整 `Linnet.pkg` 覆盖安装一次，无需卸载，个人数据和输入源状态会保留；0.1.27 可直接在设置内应用 Core 更新。
 
 ## 0.1.27 — 2026-10-09
 
