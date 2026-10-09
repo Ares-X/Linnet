@@ -12,7 +12,7 @@ README, documentation, CI, build and release-script changes are not product vers
 
 ## 0.1.26 — 2026-09-21
 
-[Stable release 0.1.26 (108)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26) promotes the September 13 preview with identical installer and Core update bytes.
+[Stable release 0.1.26 (108)](https://github.com/Ares-X/Linnet/tree/v0.1.26) promotes the September 13 preview with identical installer and Core update bytes.
 
 - Improved homophone composition during continuous Chinese input. Rare dictionary phrases such as “异径连接” no longer suppress common combinations such as “已经连接／已经链接”, while technical terms and learned preferences remain available.
 - Kept reasonable complete homophone alternatives selectable, including “链接” combinations after frequent use of “连接”. Explicit choices continue to share learning across full and double pinyin.
@@ -20,7 +20,7 @@ README, documentation, CI, build and release-script changes are not product vers
 
 ## 0.1.25 — 2026-09-11
 
-[Stable release 0.1.25 (107)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.25) includes the fixes below and the continuous Chinese/English composition improvements from preview 0.1.24.
+[Stable release 0.1.25 (107)](https://github.com/Ares-X/Linnet/tree/v0.1.25) includes the fixes below and the continuous Chinese/English composition improvements from preview 0.1.24.
 
 - Fixed the duplicated `.linnet-data` extension in the default personal-data export filename.
 - Core update confirmations, language-pack version details and backup dates now follow the selected interface language.
@@ -35,7 +35,7 @@ README, documentation, CI, build and release-script changes are not product vers
 
 ## 0.1.23 — 2026-09-09
 
-[Stable release 0.1.23 (105)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.23) includes the settings improvements below and the Chinese correction and fuzzy-pinyin improvements from previews 0.1.21 and 0.1.22.
+[Stable release 0.1.23 (105)](https://github.com/Ares-X/Linnet/tree/v0.1.23) includes the settings improvements below and the Chinese correction and fuzzy-pinyin improvements from previews 0.1.21 and 0.1.22.
 
 ### Settings
 
