@@ -11,6 +11,9 @@ or install a daemon, launch item, privileged helper, or background updater.
 
 This community package is not signed with an Apple Developer ID and is not
 notarized. Download from the project Release; its SHA-256 is available for checking the file.
+If upgrading from Linnet 0.1.26 or earlier, run this 0.1.27 complete installer once
+over the existing app to update its signing identity. Do not uninstall; personal data
+and input-source state are preserved. Future Core updates can then be applied in Settings.
 README provides direct offline uninstall commands. Open the package from Finder with Control-click or right-click >
 Open; if macOS still blocks it, use System Settings > Privacy & Security > Open
 Anyway. Never disable Gatekeeper or clear quarantine attributes. Stop if the
@@ -99,6 +102,9 @@ Linnet 是面向 Apple 芯片 Mac 的本地中文与智能英文输入法。按�
 中按住 Control 点击或右键点击安装包，选择“打开”；若仍被拦截，请前往
 系统设置 → 隐私与安全性 → 仍要打开。不要关闭 Gatekeeper，也不要清除
 隔离属性。若校验和不一致，或系统报告文件损坏、含恶意软件，请停止安装。
+
+从 0.1.26 及更早版本升级时，请用本 0.1.27 完整安装包覆盖安装一次以迁移签名身份。
+不要卸载；个人数据和输入源状态会保留，之后恢复 Settings 内的 Core 更新。
 
 安装完成后：
 

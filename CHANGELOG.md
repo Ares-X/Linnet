@@ -6,6 +6,10 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.27 — 2026-10-09
+
+- 更新应用签名证书。0.1.26 及更早版本需要手动用 0.1.27 完整安装包覆盖安装一次；无需卸载，个人数据和输入源状态会保留，之后恢复设置内 Core 在线更新。
+
 ## 0.1.26 — 2026-09-21
 
 [正式版 0.1.26（108）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26) 由 9 月 13 日的预览版晋升，安装包与核心更新保持相同字节。
