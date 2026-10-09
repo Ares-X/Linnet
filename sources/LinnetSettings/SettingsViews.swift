@@ -434,13 +434,22 @@ struct InputTabView: View {
   private var modeSection: some View {
     GroupBox("Mode switching") {
       VStack(alignment: .leading, spacing: 10) {
-        Text("Tap Shift to switch between Chinese and Smart English. Caps Lock remains the explicit raw ASCII mode.")
+        Text("Tap Shift to switch between Chinese and Smart English. With macOS Caps Lock input-source switching off, Caps Lock enters or leaves raw ASCII.")
+        Toggle(
+          "Caps Lock also locks uppercase",
+          isOn: $model.configuration.documentDraft.input.capsLockUppercase
+        )
+        Text("Leave this off to type normal lowercase text in raw ASCII mode. Hold Shift for uppercase letters.")
+          .font(.caption).foregroundStyle(.secondary)
+        Text("This controls letter case inside Linnet; the system Caps Lock state is unchanged.")
+          .font(.caption).foregroundStyle(.secondary)
         Text("The menu-bar label comes from Rime: 双 or 中 for Chinese, A for raw ASCII, and En for Smart English.")
           .font(.callout).foregroundStyle(.secondary)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
     }
+    .disabled(!model.configuration.canEdit)
   }
 
   private var englishCandidateSuggestions: some View {

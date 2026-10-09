@@ -8,11 +8,10 @@
 
 import Foundation
 
-/// Canonical settings document (schema v11). Every default below matches the
-/// bundled distribution defaults, so a fresh install renders an identical
-/// configuration without emitting any projection file.
+/// Canonical settings document. User defaults match the bundled distribution;
+/// Core-owned projections also override retained older language packs.
 struct LinnetSettingsDocument: Codable, Equatable, Sendable {
-  static let currentSchemaVersion = 11
+  static let currentSchemaVersion = 12
 
   var schemaVersion: Int
   var appearance: Appearance
@@ -336,6 +335,7 @@ extension LinnetSettingsDocument {
     var traditionalChinese: Bool
     var asciiPunctuationDefault: Bool
     var singleCharacterSearchDefault: Bool
+    var capsLockUppercase: Bool
     var chineseLearningPolicy: ChineseLearningPolicy
     var pinyinReverseTrigger: PinyinReverseTrigger
     var fuzzyPinyin: [FuzzyPinyinPair]
@@ -356,6 +356,7 @@ extension LinnetSettingsDocument {
       traditionalChinese: Bool,
       asciiPunctuationDefault: Bool,
       singleCharacterSearchDefault: Bool = false,
+      capsLockUppercase: Bool = false,
       chineseLearningPolicy: ChineseLearningPolicy = .enhanced,
       pinyinReverseTrigger: PinyinReverseTrigger,
       fuzzyPinyin: [FuzzyPinyinPair] = []
@@ -365,6 +366,7 @@ extension LinnetSettingsDocument {
       self.traditionalChinese = traditionalChinese
       self.asciiPunctuationDefault = asciiPunctuationDefault
       self.singleCharacterSearchDefault = singleCharacterSearchDefault
+      self.capsLockUppercase = capsLockUppercase
       self.chineseLearningPolicy = chineseLearningPolicy
       self.pinyinReverseTrigger = pinyinReverseTrigger
       self.fuzzyPinyin = fuzzyPinyin
@@ -394,6 +396,9 @@ extension LinnetSettingsDocument {
       singleCharacterSearchDefault =
         try container.decodeIfPresent(Bool.self, forKey: .singleCharacterSearchDefault)
         ?? Input.default.singleCharacterSearchDefault
+      capsLockUppercase =
+        try container.decodeIfPresent(Bool.self, forKey: .capsLockUppercase)
+        ?? Input.default.capsLockUppercase
       if container.contains(.chineseLearningPolicy) {
         let learningValue = try? container.decode(
           String.self, forKey: .chineseLearningPolicy)

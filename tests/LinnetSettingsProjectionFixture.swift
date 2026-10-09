@@ -16,6 +16,12 @@ struct LinnetSettingsProjectionFixture {
     case "default":
       guard arguments.count == 3 else { fail() }
       directory = URL(filePath: arguments[2], directoryHint: .isDirectory)
+    case "caps-lock-uppercase":
+      guard arguments.count == 4,
+        let uppercase = Bool(arguments[2])
+      else { fail() }
+      document.input.capsLockUppercase = uppercase
+      directory = URL(filePath: arguments[3], directoryHint: .isDirectory)
     case "profile":
       guard arguments.count == 5,
         let profile = LinnetSettingsContract.ChineseProfile(rawValue: arguments[2]),

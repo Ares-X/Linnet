@@ -42,7 +42,8 @@ enum LinnetSettingsProjectionRenderer {
     }
     projections[defaultCustomFile] = renderDefaultCustom(
       pageSize: document.appearance.pageSize,
-      chineseProfile: document.input.chineseProfile
+      chineseProfile: document.input.chineseProfile,
+      capsLockUppercase: document.input.capsLockUppercase
     )
     for profile in LinnetSettingsContract.ChineseProfile.allCases {
       if let schemaCustom = renderChineseSchemaCustom(
@@ -219,12 +220,14 @@ private extension LinnetSettingsProjectionRenderer {
 
   private static func renderDefaultCustom(
     pageSize: Int,
-    chineseProfile: LinnetSettingsContract.ChineseProfile
+    chineseProfile: LinnetSettingsContract.ChineseProfile,
+    capsLockUppercase: Bool
   ) -> String {
     // Core-only updates do not replace the language pack. Reconciliation runs
     // before every Rime start, so this projection is the installed-product
     // owner for policies that must override an older Active pack immediately.
     var entries = [
+      ("ascii_composer/good_old_caps_lock", capsLockUppercase ? "true" : "false"),
       ("ascii_composer/switch_key/Caps_Lock", "commit_code"), ("ascii_composer/switch_key/Shift_L", "commit_code"), ("ascii_composer/switch_key/Shift_R", "commit_code"),
       ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern)),
       ("punctuator/half_shape/,", "{ commit: \"，\" }"),

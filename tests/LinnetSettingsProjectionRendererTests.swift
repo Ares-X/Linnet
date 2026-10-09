@@ -13,6 +13,7 @@ struct LinnetSettingsProjectionRendererTests {
     do {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       testDefaultInteractionProjection()
+      try testCapsLockPreference(in: directory)
       testThemeFamilyAndAppearanceMapping()
       testFontPresetProjection()
       testCandidateLayoutMapping()
@@ -38,6 +39,31 @@ struct LinnetSettingsProjectionRendererTests {
       print("LinnetSettingsProjectionRendererTests: PASS")
     } catch {
       fail("unexpected error: \(error)")
+    }
+  }
+
+  private static func testCapsLockPreference(in directory: URL) throws {
+    let preferenceDirectory = directory.appending(path: "caps-lock-preference")
+    try FileManager.default.createDirectory(
+      at: preferenceDirectory, withIntermediateDirectories: true)
+    let legacy = try JSONDecoder().decode(
+      LinnetSettingsDocument.self,
+      from: Data("{\"schemaVersion\":11,\"input\":{}}".utf8))
+    require(!legacy.input.capsLockUppercase,
+      "older settings must adopt normal-case Caps Lock input")
+    for uppercase in [true, false] {
+      var document = legacy
+      document.input.capsLockUppercase = uppercase
+      let restored = try JSONDecoder().decode(
+        LinnetSettingsDocument.self, from: JSONEncoder().encode(document))
+      require(restored == document, "Caps Lock preference must survive saving")
+      try LinnetSettingsProjectionRenderer.reconcile(
+        document: restored, to: preferenceDirectory)
+      let projected = try String(contentsOf: preferenceDirectory.appending(
+        path: LinnetSettingsProjectionRenderer.defaultCustomFile), encoding: .utf8)
+      require(projected.contains(
+        "\"ascii_composer/good_old_caps_lock\": \(uppercase ? "true" : "false")"),
+        "Caps Lock preference must override older packs and the previous choice")
     }
   }
 
@@ -72,13 +98,13 @@ struct LinnetSettingsProjectionRendererTests {
   }
 
   private static func testThemeFamilyAndAppearanceMapping() {
-    guard LinnetSettingsDocument.currentSchemaVersion == 11,
+    guard LinnetSettingsDocument.currentSchemaVersion == 12,
       LinnetSettingsDocument.ThemeFamily.allCases.map(\.rawValue) == [
         "paper_ledger", "moon_jade", "sidecar_slate", "clay_tiles", "mist_jade",
         "native_glass", "ink_cinnabar",
       ]
     else {
-      fail("the settings codec must publish exactly the seven ordered theme families in schema v11")
+      fail("the settings codec must preserve the seven ordered theme families in schema v12")
     }
     let families: [(LinnetSettingsDocument.ThemeFamily, String)] = [
       (.paperLedger, "linnet_paper"),
@@ -1121,6 +1147,7 @@ struct LinnetSettingsProjectionRendererTests {
 
   private static let coreInteractionProjection = """
     patch:
+      "ascii_composer/good_old_caps_lock": false
       "ascii_composer/switch_key/Caps_Lock": commit_code
       "ascii_composer/switch_key/Shift_L": commit_code
       "ascii_composer/switch_key/Shift_R": commit_code

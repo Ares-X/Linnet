@@ -6,6 +6,12 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.28 — 2026-10-09
+
+- Caps Lock raw ASCII now types normal lowercase by default, with Shift for uppercase. Enable the new “Caps Lock also locks uppercase” setting to restore traditional behavior.
+- With macOS Caps Lock input-source switching enabled, a short press switches to the last used Latin input source; hold to lock uppercase. Use ABC, or add Unicode Hex Input and select it before returning to Linnet, for normal-case English input. See the [Caps Lock guide](README.en.md#caps-lock-input-source-switching-or-raw-ascii) for steps.
+- The signing certificate changed in 0.1.27. Versions 0.1.26 and earlier must manually install this version's complete `Linnet.pkg` over the existing app once. Do not uninstall; personal data and input-source state are preserved. Users on 0.1.27 can apply the Core update in Settings.
+
 ## 0.1.27 — 2026-10-09
 
 - Updated the application signing certificate. Versions 0.1.26 and earlier require one manual installation of the 0.1.27 complete package over the existing app. Do not uninstall; personal data and input-source state are preserved. Settings Core updates work normally afterward.

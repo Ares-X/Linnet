@@ -22,9 +22,9 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法，将中文�
 
 **[下载最新版 Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-正式版：**[0.1.27（109）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.27)**，更换应用签名证书。各版本功能与修复见[版本记录](CHANGELOG.md)。
+正式版：**[0.1.28（110）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.28)**，修复 Caps Lock 原始 ASCII 输入的大小写。各版本功能与修复见[版本记录](CHANGELOG.md)。
 
-0.1.27 及更新版本的用户可在 **Settings → 数据与更新 → 正式版** 下载并应用 Core 更新；0.1.26 及更早版本请先手动覆盖安装 0.1.27 完整包。
+0.1.27 及更新版本的用户可在 **Settings → 数据与更新 → 正式版** 下载并应用 Core 更新；0.1.26 及更早版本因签名证书更换，请先手动用最新版完整 `Linnet.pkg` 覆盖安装，无需卸载。
 
 [产品体验](#产品体验) · [安装](#安装) · [使用指南](#使用指南) · [升级与卸载](#升级与卸载) · [隐私](#隐私) · [参与贡献](#参与贡献)
 
@@ -51,7 +51,7 @@ Linnet 基于 Squirrel／librime，结合万象词库、RIME-LMDG 模型、rime-
 | Smart English | `En` | 英文补全、纠错、释义、发音与上下文预测 |
 | 原始 ASCII | `A` | 代码、密码、终端和任何不希望被转换的文本 |
 
-轻按左 Shift 或右 Shift 切换中文与 Smart English；Caps Lock 进入或退出原始 ASCII。光标旁和菜单栏都会提示当前状态。
+轻按左 Shift 或右 Shift 切换中文与 Smart English。光标旁和菜单栏都会提示当前状态。Caps Lock 的行为取决于下面的 macOS 开关。
 
 <details>
 <summary>查看三种状态的光标提示</summary>
@@ -59,6 +59,25 @@ Linnet 基于 Squirrel／librime，结合万象词库、RIME-LMDG 模型、rime-
 ![Linnet 中文、Smart English 与原始 ASCII 三种输入状态的真实光标提示](resources/readme/input-modes.png)
 
 </details>
+
+### Caps Lock：切换输入源还是原始 ASCII
+
+打开 **系统设置 → 键盘 → 文本输入 → 编辑**，查看“使用大写锁定键切换输入源”（名称也可能显示为“使用大写锁定键切换‘ABC’输入法”或“切换上次所用的拉丁输入法和当前输入法”）。
+
+| 系统开关 | 轻按 Caps Lock | 英文输入由谁处理 |
+| --- | --- | --- |
+| 开启 | 在 Linnet 与上次使用的拉丁输入源间切换；长按才锁定大写 | ABC、Unicode Hex Input 等系统键盘布局，正常输入小写，Shift 输入大写 |
+| 关闭 | 保持 Linnet 输入源，进入或退出菜单栏显示 `A` 的原始 ASCII | Linnet；0.1.27 及更早版本会同时输入大写。0.1.28 起默认正常输入小写、Shift 输入大写，可在设置 → 输入 → 模式切换中开启“Caps Lock 同时锁定大写”恢复传统行为 |
+
+**希望 Caps Lock 只切换英文而不锁定大写：**开启系统开关即可，ABC 是现成的选择，也可用 **Unicode Hex Input（Unicode十六进制输入）** 代替 Linnet 的原始 ASCII：
+
+1. 在同一个“编辑”窗口点击 **＋**，搜索 `Unicode`，添加“Unicode十六进制输入”（归在“其他”语言下）。
+2. 开启上述系统开关，点击“完成”。在菜单栏先选择 Unicode Hex Input，再选择 Linnet，使它成为最近使用的拉丁输入源。
+3. 轻按 Caps Lock 即可在两者之间往返。如果之后手动用了 ABC 或其他拉丁布局，系统会改为返回那个最近使用的布局；重新选择一次 Unicode Hex Input 即可恢复。
+
+这条路径在当前发行版也可用。切到系统键盘布局后，普通英文字母直接输入，Linnet 的 Smart English 补全和候选不参与；需要 Smart English 时，切回 Linnet 并轻按 Shift。若此前长按已锁定大写，先解除大写锁定再切换。
+
+关闭系统开关时，Linnet 的大小写选项只影响它内部的原始 ASCII，不改变 macOS 全局大写锁定状态；切到别的输入源或不接受输入法的密码框时，仍以系统状态为准。需要真正避免系统大写锁定时，请使用上面的系统输入源切换方案。[macOS 输入源设置说明](https://support.apple.com/zh-cn/guide/mac-help/mchl84525d76/mac)
 
 ### 中文输入
 
@@ -220,7 +239,7 @@ Smart English 中直接输入当前拼音编码，无需触发键。普通英文
 | 情况 | 处理方式 |
 | --- | --- |
 | 0.1.27 及更新版本 | 在 Settings 下载并应用 Core 更新 |
-| 0.1.26 及更早版本 | 手动运行 0.1.27 完整安装包覆盖一次；保留个人数据和输入源状态，无需卸载 |
+| 0.1.26 及更早版本 | 手动运行最新版完整 `Linnet.pkg` 覆盖一次以迁移签名；保留个人数据和输入源状态，无需卸载 |
 | 0.1.7 及更早的 ad-hoc 版本，或 App 缺失、损坏、发布身份不符 | 使用完整 `Linnet.pkg` 修复 |
 | 同版本 App 修复 | 使用完整 `Linnet.pkg`；在线 Core 仅升级到更高版本 |
 

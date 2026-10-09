@@ -52,6 +52,7 @@
 macOS 只看到一个 Linnet 输入源。Rime 内部包含八个中文 profile 和一个 `linnet_en`：
 
 - `ascii_composer` 负责独立 Shift、组合键、长按、未上位编码的原样提交和 Caps Lock；
+- Settings 的 `input.capsLockUppercase` 投影到 Rime 原生 `ascii_composer/good_old_caps_lock`，默认关闭，Caps Lock 原始 ASCII 正常输入小写、Shift 输入大写；用户可恢复传统大写锁定。Core 每次协调都写入该策略，覆盖仍保留的旧语言包；不改变 macOS 全局 Caps Lock 或引入按键拦截器。
 - 紧随其后的 `linnet_mode_switch_processor` 只把已确认的 Shift 转换映射为中文/Smart English schema 切换；
 - 当前 `Context` 保存直接 Shift 的来源中文 schema，返回后清空；
 - Settings typed document 唯一拥有中文方案选择；fresh document 默认全拼，已有 document 的显式选择保持不变。renderer 将同一选择投影为 `default.custom.yaml` 的首个中文 schema、Smart English 反查 Prism 和直接 Shift 返回目标；
