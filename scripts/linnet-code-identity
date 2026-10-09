@@ -8,8 +8,8 @@ readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly host_bundle_id='io.github.ares-x.inputmethod.Linnet'
 readonly settings_bundle_id='io.github.ares-x.inputmethod.Linnet.settings'
 readonly community_signing_config="${project_root}/config/linnet-community-signing.json"
-readonly community_keychain_relative='Library/Keychains/Linnet-Community-CMS.keychain-db'
-readonly community_password_relative='Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password'
+readonly community_keychain_relative='Library/Keychains/Ares-X-Code-Signing.keychain-db'
+readonly community_password_relative='Library/Application Support/Ares-X Signing/keychain-password'
 
 fail_identity() {
   echo "linnet-code-identity: $1" >&2

@@ -6,6 +6,10 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.27 — 2026-10-09
+
+- Updated the application signing certificate. Versions 0.1.26 and earlier require one manual installation of the 0.1.27 complete package over the existing app. Do not uninstall; personal data and input-source state are preserved. Settings Core updates work normally afterward.
+
 ## 0.1.26 — 2026-09-21
 
 [Stable release 0.1.26 (108)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26) promotes the September 13 preview with identical installer and Core update bytes.

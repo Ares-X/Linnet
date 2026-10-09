@@ -22,9 +22,9 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 **[Download the latest Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-Stable: **[0.1.26 (108)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26)**, with improved Chinese homophone composition and alternatives alongside continuous Chinese/English input. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
+Stable: **[0.1.27 (109)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.27)**, with an updated application signing certificate. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
 
-Existing users can download and apply the Core update in **Settings → Data & Updates → Stable**.
+Users on 0.1.27 and later can download and apply Core updates in **Settings → Data & Updates → Stable**. Versions 0.1.26 and earlier must first install the 0.1.27 complete package manually over the existing app.
 
 [Features](#features) · [Installation](#installation) · [Usage](#usage) · [Updating and uninstalling](#updating-and-uninstalling) · [Privacy](#privacy) · [Contributing](#contributing)
 
@@ -134,8 +134,8 @@ Sizes use decimal MB; check the corresponding release for exact package sizes.
 
 | Content | Reference size | Includes |
 | --- | --- | --- |
-| [0.1.26 complete installer](https://github.com/Ares-X/Linnet/releases/tag/v0.1.26) | **About 428 MB** | App, Chinese/English dictionaries, local model and supplementary data |
-| [0.1.26 Core update](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.26) | **About 7 MB** | App only; reuses installed language data |
+| [0.1.27 complete installer](https://github.com/Ares-X/Linnet/releases/tag/v0.1.27) | **About 428 MB** | App, Chinese/English dictionaries, local model and supplementary data |
+| [0.1.27 Core update](https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.27) | **About 7 MB** | App only; reuses installed language data |
 | [Pinned LTS model](upstreams.lock.json) | **420.25 MB** | Uncompressed model file, already included in the complete installation |
 
 Download size is not installed disk usage: extracted data, generated schemas, learning records and backups also take space. The model's file size is not its resident memory usage.
@@ -166,7 +166,7 @@ Linnet installs in your user directory without administrator privileges, daemons
 
 Trust only files from this project's releases. Stop if a checksum differs or the file is reported damaged; do not disable Gatekeeper, clear quarantine attributes or run installation commands from unknown sources.
 
-For later versions, use [Core updates in Settings](#applying-a-core-update) without adding the source again or logging out. See [Updating and uninstalling](#updating-and-uninstalling) for legacy upgrades, same-version repair or a damaged app.
+To upgrade from 0.1.26 or earlier, manually run the 0.1.27 complete installer over the existing app once. Do not uninstall; personal data and input-source state are preserved. Afterward, use [Core updates in Settings](#applying-a-core-update) without adding the source again or logging out. See [Updating and uninstalling](#updating-and-uninstalling) for legacy upgrades, same-version repair or a damaged app.
 
 ## Usage
 
@@ -205,7 +205,7 @@ Appearance changes can be previewed; input behavior changes require **Apply Chan
 
 Routine upgrades use Core updates in Settings and reuse language data, without closing other apps, entering a password or logging out. Core is never modified automatically in the background. Language-data updates also use Settings.
 
-Use the complete `Linnet.pkg` for first installation or app repair. Repair preserves healthy packs and personal data; uninstalling first is unnecessary. Complete, Core and language-data releases appear on stable, `core-v<version>` and `data-<sequence>` pages respectively; the latter two do not become Latest Release.
+Use the complete `Linnet.pkg` for first installation or app repair. Repair preserves healthy packs and personal data; uninstalling first is unnecessary. Versions 0.1.26 and earlier must first be covered by the 0.1.27 complete installer once to migrate the signing identity; do not uninstall. Complete, Core and language-data releases appear on stable, `core-v<version>` and `data-<sequence>` pages respectively; the latter two do not become Latest Release.
 
 ### Applying a Core update
 
@@ -219,8 +219,8 @@ Use the complete `Linnet.pkg` for first installation or app repair. Repair prese
 
 | Situation | Action |
 | --- | --- |
-| Fixed-CMS versions that have completed the 0.1.15 bridge | Download and apply later Core updates in Settings; no manual asset selection or hash comparison needed |
-| Fixed-CMS versions 0.1.14 and earlier | Complete the one-time 0.1.15 bridge through **Open Legacy Installer…**, then click **Apply Installed Update…** |
+| Version 0.1.27 and later | Download and apply Core updates in Settings |
+| Version 0.1.26 and earlier | Manually run the 0.1.27 complete installer over the existing app once; personal data and input-source state are preserved |
 | Ad-hoc versions 0.1.7 and earlier, or a missing/damaged app or mismatched release identity | Repair with the complete `Linnet.pkg` |
 | Same-version app repair | Use the complete `Linnet.pkg`; online Core updates only install higher versions |
 
