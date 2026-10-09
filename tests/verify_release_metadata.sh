@@ -75,8 +75,8 @@ set -e
 ruby -e '
   provisioner, signer = ARGV.map { |path| File.binread(path) }
   required = [
-    "Library/Application Support/Linnet Maintainer/Signing/community-cms",
-    "Library/Keychains/Linnet-Community-CMS.keychain-db",
+    "Library/Application Support/Ares-X Signing",
+    "Library/Keychains/Ares-X-Code-Signing.keychain-db",
     "require_owned_mode \"${p12_path}\" 600",
     "require_owned_mode \"${p12_password_path}\" 600",
     "/usr/bin/security create-keychain -p",
@@ -103,7 +103,7 @@ ruby -e '
   abort "daily signer took over Keychain provisioning" if
     signer.match?(/security (create-keychain|import|set-key-partition-list)/)
   abort "daily signer and provisioner disagree on their fixed local paths" unless
-    signer.include?("Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password")
+    signer.include?("Library/Application Support/Ares-X Signing/keychain-password")
   abort "daily signer can report success while leaving its Keychain unlocked" unless
     signer.include?("local original_status=$?") &&
       signer.include?("if [[ \"${final_status}\" -eq 0 ]]; then final_status=1; fi") &&

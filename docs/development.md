@@ -327,43 +327,34 @@ App target 与独立的 `.local-build.settings` 身份。构建前后不会调�
 Xcode 本地产物与可安装生产身份仍保持分离。
 
 普通贡献者运行到 `release` 即可，不需要证书或 Keychain。正式 `archive` lane
-由 macOS release Action 使用仓库钉住的固定 community CMS leaf；缺少精确身份时
-会在打包前失败，不会回退到 ad-hoc。维护者 Mac 上的同身份 `archive` 只作预检，
-不能成为候选或上传源。旧 `candidate` lane 与自定义 UAT 签名 profile 已删除；
-任何可安装候选只认固定 production CMS identity。
+由 macOS release Action 使用统一个人 CMS leaf；身份不匹配时会在打包前失败，不会
+回退到 ad-hoc。维护者 Mac 上的同身份 `archive` 只作预检，不能成为候选或上传源。
+旧 `candidate` lane 与自定义 UAT 签名 profile 已删除；任何可安装候选只认当前 production
+CMS identity。当前证书 SHA-1 为 `066AF413DC67F84BD8C2EA06B5CF0BAA14E5CAFD`，
+SHA-256 为 `e39f468d1dd2735ca8221e703999659c8f53efbab66408edfd310ecf02477104`。
 
 ## 社区版打包
 
 ### 一次性配置本机预检签名身份
 
-本地预检身份属于维护者工具，不属于 Linnet 产品数据，README 的离线卸载命令也不会清理它。先把固定
-P12 和它的一行密码分别放到以下仓库外路径，两者都必须是当前用户拥有、权限为
-`0600` 的普通文件：
+本地预检身份属于维护者工具，不属于 Linnet 产品数据，README 的离线卸载命令也不会清理它。个人通用 P12 与其单行密码位于以下仓库外路径，均应由当前用户拥有且权限为 `0600`：
 
-- `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/community-cms.p12`
-- `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/p12-password`
+- `~/Library/Application Support/Ares-X Signing/code-signing.p12`
+- `~/Library/Application Support/Ares-X Signing/p12-password`
 
-只在这台 Mac 从未配置过该身份时运行一次：
+新机器运行一次 `scripts/provision-community-signing`，创建共用 Keychain
+`~/Library/Keychains/Ares-X-Code-Signing.keychain-db` 和随机密码文件
+`~/Library/Application Support/Ares-X Signing/keychain-password`。已有共用身份时直接使用，
+不要重跑配置。它核对证书指纹、配置 codesign 访问分区、完成签名探针并锁回 Keychain。
+其证书名称为 `Ares-X Code Signing`；不要把 P12 或密码提交到仓库、日志或发布资产。
+共用 Keychain 的本地签名须串行：先完成其他项目的签名，再运行 Linnet 的本地
+archive 或 provisioning；Linnet signer 完成后会锁回 Keychain。
 
-```bash
-scripts/provision-community-signing
-```
-
-这个唯一 provisioning owner 会核对仓库钉住的 SHA-1/SHA-256，随机生成 Linnet
-专用 Keychain 密码，配置 `/usr/bin/codesign` 的访问分区，完成一次非交互签名探针，
-再把 Keychain 锁回。输出固定为
-`~/Library/Keychains/Linnet-Community-CMS.keychain-db` 和权限 `0600` 的
-`~/Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password`。
-任一输出已经存在都会直接停止；命令没有 replace、repair 或 delete 模式。失败时只
-清理本次创建的精确目标并恢复原 Keychain 搜索列表。P12 密码和随机 Keychain 密码都
-不是 macOS 登录密码；如果配置或之后的 `archive` 弹出密码框，应取消并排查，不要
-输入登录密码、删除既有目标或重复运行配置命令。本地预检 signer 只消费这两个固定输出。
-
-发布维护者可以在自己的 Mac 上预检固定 production CMS 打包。前提是：
+发布维护者可以在自己的 Mac 上预检当前 production CMS 打包。前提是：
 
 - 工作树已经形成一个干净的本地 commit，`LINNET_CANDIDATE_REVISION` 精确等于 HEAD；
 - focused、`tests/verify_development.sh` 和普通 `./action-build.sh release` 已通过；
-- 固定生产 Keychain 已一次性配置，且脚本能从权限 `0600` 的仓库外密码文件
+- 统一个人生产 Keychain 已配置，且脚本能从权限 `0600` 的仓库外密码文件
   非交互解锁；
 - 输出目录是贡献者新建的空绝对目录。
 
@@ -374,7 +365,7 @@ export ARCHIVE_OUTPUT_DIR=/absolute/path/to/new-empty-output
 ./action-build.sh archive
 ```
 
-`archive` 会沿同一链生成并验证固定 CMS leaf 的 App、未签名的 Complete/Core
+`archive` 会沿同一链生成并验证当前 CMS leaf 的 App、未签名的 Complete/Core
 两个 PKG、确定性语言包和 sidecar；卸载命令从对应版本源码标签读取，不是发布资产。
 不要另写脚本重签或修补输出。由于 CMS
 签名时间会改变字节，这个本地产物不是正式发布候选；正式安装验收必须下载
@@ -396,17 +387,17 @@ revision、Draft Release SHA-256 和候选 metadata 后，才可以使用 macOS 
 唯一一次真正的注销/登录、系统输入源添加与允许、从 macOS 输入菜单选择 Linnet
 和真实输入。
 
-Core 直升只接受固定 CMS App，公开 0.1.8 是最低直接升级版本。0.1.7 或更早的旧
-ad-hoc App 由 Complete 修复；Core 必须在 payload 前拒绝并给出该操作提示。package
-lifecycle 直接验证 Core 拒绝时不修改 App/Runtime，并验证 Complete 接受旧身份时保留
-个人数据和输入源状态。
+Core 更新要求候选与已安装 App 使用同一张 CMS 证书。0.1.26 及更早的旧
+leaf App 由 0.1.27 Complete 覆盖安装一次；0.1.7 及更早的 ad-hoc App 也由 Complete
+修复。旧 Settings 无法完成这次证书迁移；Core 的证书校验会拒绝新 leaf，并显示下载
+校验失败。用户须手动下载 Complete。package lifecycle 直接验证
+Core 拒绝时不修改 App/Runtime，并验证 Complete 接受旧身份时保留个人数据和输入源状态。
 
-每个精确候选仍须在同一真实账号使用 Action 生成的 Draft Release 原字节完成
-“两轮同 leaf Core 升级”：每轮都从前一已验收的固定 CMS 版（首次公开后即前一公开版）
-升级到同一候选。第二轮按正常卸载、安装流程重建较低版本基线；基线重建的注销与数据
-恢复单独记录，不属于在线升级。在线 Core 只接受更高版本；同版本 App 修复由 Complete
-负责，不能替代 Core 升级验收。两轮升级都要证明无需 Installer、密码或注销、登录会话不变，并保留
-enabled/selected、UserData、输入菜单、Settings 和真实输入。Complete 修复旧身份和
+按[发布政策](release.md#安装验收)使用 Action 生成的 Draft Release 原字节验收。
+正常 Core 候选从受支持公开基线完成一次有序升级；签名证书迁移则验证旧版 Complete
+覆盖安装和首次安装。同版本 Complete 修复不能代替有序 Core 升级，未执行的后续
+Core 升级如实记录。验收分别核对登录会话、enabled/selected、UserData、输入菜单、
+Settings 和真实输入。Complete 修复旧身份和
 同 leaf Core 更新都不重新 register、enable 或 select。旧式 Core PKG 的 preinstall 只验证候选、已安装
 App、Active data 与 package-owned read-only typed TIS 状态；脚本不关闭 Host 或任何
 用户应用，也不调用 `osascript`。旧式 Core PKG 与 Complete 均不声明 `must-close`；安装过程
@@ -585,7 +576,7 @@ Rime 的 schema 配置在同一进程的会话之间共享。原生测试需要�
 tests/verify_product.sh release
 ```
 
-该命令用于已经冻结、具有准确 release metadata 且由固定 community CMS leaf 完成
+该命令用于已经冻结、具有准确 release metadata 且由当前统一个人 CMS leaf 完成
 签名的 Release App。结果仍需与可见 Settings、真实输入源、Terminal/VS Code/
 Chrome/Apple Notes/Word/Teams 六应用、安装/升级/卸载和远程发布证据分开报告。
 

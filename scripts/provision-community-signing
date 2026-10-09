@@ -27,11 +27,11 @@ user_home="$(/usr/bin/ruby -retc -e '
 ')" || fail_provisioning "the current user home is unavailable"
 readonly project_root user_home
 readonly signing_config="${project_root}/config/linnet-community-signing.json"
-readonly signing_root="${user_home}/Library/Application Support/Linnet Maintainer/Signing/community-cms"
-readonly p12_path="${signing_root}/community-cms.p12"
+readonly signing_root="${user_home}/Library/Application Support/Ares-X Signing"
+readonly p12_path="${signing_root}/code-signing.p12"
 readonly p12_password_path="${signing_root}/p12-password"
 readonly keychain_password_path="${signing_root}/keychain-password"
-readonly keychain_path="${user_home}/Library/Keychains/Linnet-Community-CMS.keychain-db"
+readonly keychain_path="${user_home}/Library/Keychains/Ares-X-Code-Signing.keychain-db"
 readonly provision_lock="${signing_root}/.provision-community-signing.lock"
 
 canonical_directory() {
@@ -81,7 +81,7 @@ canonical_directory "${signing_root}" ||
   fail_provisioning "the fixed community signing directory is unavailable"
 require_owned_mode "${p12_path}" 600 &&
   canonical_regular_file "${p12_path}" ||
-  fail_provisioning "community-cms.p12 must be a current-user-owned mode 0600 regular file"
+  fail_provisioning "code-signing.p12 must be a current-user-owned mode 0600 regular file"
 require_owned_mode "${p12_password_path}" 600 &&
   canonical_regular_file "${p12_password_path}" ||
   fail_provisioning "p12-password must be a current-user-owned mode 0600 regular file"
@@ -118,7 +118,7 @@ cleanup_provisioning() {
         "${original_keychains[@]}" >/dev/null 2>&1 || cleanup_failed=true
     fi
     if [[ "${keychain_created_this_run}" == true &&
-      "${keychain_path}" == "${user_home}/Library/Keychains/Linnet-Community-CMS.keychain-db" &&
+      "${keychain_path}" == "${user_home}/Library/Keychains/Ares-X-Code-Signing.keychain-db" &&
       ( -e "${keychain_path}" || -L "${keychain_path}" ) ]]; then
       /usr/bin/security lock-keychain "${keychain_path}" >/dev/null 2>&1 || true
       /usr/bin/security delete-keychain "${keychain_path}" >/dev/null 2>&1 ||

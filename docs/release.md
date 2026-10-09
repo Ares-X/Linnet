@@ -2,9 +2,12 @@
 
 Linnet 的公开发行采用无付费证书的社区模式：PKG 不含 Apple Developer ID
 Installer 签名，也不经过 Apple 公证；App 内的 Host、Settings、动态库和插件
-使用同一张长期固定的自签 CMS 证书与 hardened runtime。固定 leaf 为跨版本
-身份连续提供一致依据，但不等同于 Apple Developer ID 或公证，仍须逐版做真实
-升级验收。首次使用需按 macOS 提示手动确认；Release 提供源码标签、文件清单和 SHA-256 供核对。
+使用个人通用自签 CMS 证书 `Ares-X Code Signing` 与 hardened runtime。当前证书
+SHA-1 为 `066AF413DC67F84BD8C2EA06B5CF0BAA14E5CAFD`，SHA-256 为
+`e39f468d1dd2735ca8221e703999659c8f53efbab66408edfd310ecf02477104`；它不等同于
+Apple Developer ID 或公证。0.1.27 更换了签名 leaf，0.1.26 及更早版本必须手动用
+0.1.27 完整安装包覆盖安装一次，之后才能使用正常 Core 在线更新。首次使用仍需按
+macOS 提示手动确认；Release 提供源码标签、文件清单和 SHA-256 供核对。
 
 ## 用户信任边界
 
@@ -38,19 +41,19 @@ App 完整性事实。Core 在写入前核对已公布的精确差分基线；Co
 
 ## 本地预检与 Action 正式候选
 
-普通开发构建不需要证书。维护者 Mac 仍可用仓库外固定 CMS 身份做一次可选
+普通开发构建不需要证书。维护者 Mac 可用仓库外统一个人 CMS 身份做可选
 `archive` 预检，但它不是公开候选，也不能上传或授权发布。正式候选的唯一构建和
 签名 owner 是 `.github/workflows/release-ci.yml` 的 macOS GitHub Action。
 
-首次配置维护者 Mac 的本地预检身份时，把当前用户拥有且权限为 `0600` 的固定输入放到：
+本地预检使用 Ares-X 共用的自签证书。首次配置新机器时，将 P12 与其单行密码放在以下仓库外路径，均由当前用户拥有，权限为 `0600`：
 
-- `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/community-cms.p12`
-- `~/Library/Application Support/Linnet Maintainer/Signing/community-cms/p12-password`
+- `~/Library/Application Support/Ares-X Signing/code-signing.p12`
+- `~/Library/Application Support/Ares-X Signing/p12-password`
 
-然后只运行一次 `scripts/provision-community-signing`。它在创建任何 Keychain 前核对
-仓库钉住的证书 SHA-1/SHA-256，配置 `/usr/bin/codesign` 的访问分区，完成非交互
-签名探针并锁回。任一固定输出已经存在时都会失败，且没有 replace、repair 或 delete
-入口；失败只回滚本次创建的精确目标并恢复原搜索列表。成功后不要在每次发版前重跑。
+运行一次 `scripts/provision-community-signing`，核对证书指纹并创建共用 Keychain
+`~/Library/Keychains/Ares-X-Code-Signing.keychain-db`；随机密码写入
+`~/Library/Application Support/Ares-X Signing/keychain-password`。已有共用身份的机器直接使用，
+无需重新配置。不得把 P12 或密码提交到仓库、日志或发布资产。
 
 可选本地预检命令是：
 
@@ -99,8 +102,9 @@ direct commit，但 byte-identical 的不可变 pack 可以跨候选 revision �
 
 `config/linnet-update-baselines.json` 锁定前一公开 Complete 的 revision、字节数和
 SHA-256，以及每个目标词包对应的基线内容身份。`package/prepare_update_baseline`
-通过现有下载 owner 获取同仓库资产并缓存；旧 App 按它自己的已发布 revision 验证
-CMS 和资源，不能拿当前源码重新推算旧版 metadata。Core 基线与词包基线独立推进，
+通过现有下载 owner 获取同仓库资产并在 `.noindex` 内缓存；旧 App 按它自己的已发布
+revision、同 leaf CMS 与资源封印验证，不要求旧基线使用当前证书，不能拿当前源码
+重新推算旧版 metadata。新候选仍必须匹配当前钉住的签名证书。Core 基线与词包基线独立推进，
 修改 Core 不能隐式增加任何词包的 sequence。
 
 Core 包只携带差分和安装工具；已有词包下载与其内容匹配的 `.linnetdelta`，没有变化
@@ -183,19 +187,19 @@ macOS Action 生成新候选。`v<VERSION>` 只标识公开版本；data seed、
 把已有序号重新编号，或允许同一序号对应不同内容。Catalog 的词包快照序号遵循
 相同的顺序规则，Core-only 变化不推进词包序号。
 
-Core 更新只接受已安装的固定 CMS 身份；此前公开的旧 ad-hoc App 必须使用
-Complete 修复，不能进入 Core 的就地更新路径。
-Complete 仍须验证旧 App 的代码完整性和明确身份，在不修改既有 TIS 状态与个人数据的
-前提下替换 App；仅在变更涉及此路径时补做相应修复验收。
+Core 更新只接受当前统一个人 CMS 身份。0.1.26 及更早版本由旧 leaf 签名，必须先用
+0.1.27 完整安装包覆盖安装一次；Complete 保留既有个人数据和输入源状态，此后 Core
+在线更新恢复可用。
+Complete 在实际写入边界验证新 App 的签名与目标字节，并保留既有 TIS 状态和个人数据；
+旧 App 损坏或使用旧证书不妨碍修复。签名身份变化需验收旧版覆盖安装与首次安装。
 
 Settings 只读取用户明确选择的 `data-channel` 或 `preview-channel` 指针，不读取
 可变 Release 别名，也不维护第二份 Core 版本清单；默认始终是正式频道，未知保存值
 回到正式频道，不存在自动回退路径。
 
-GitHub 令牌只用于把已经验证的字节写入当前仓库；固定 P12 与密码分别存放在
-`community-signing` Environment 的
-`LINNET_COMMUNITY_CMS_P12_BASE64` 和 `LINNET_COMMUNITY_CMS_P12_PASSWORD`
-Secrets 中。它们不是 Apple 开发者凭据，也不会被打包、写入日志或公开。
+GitHub 令牌只用于把已经验证的字节写入当前仓库；P12 与密码存放在仓库级 Secrets `ARES_X_CODE_SIGNING_P12_BASE64` 和
+`ARES_X_CODE_SIGNING_P12_PASSWORD` 中。它们不是 Apple 开发者凭据，也不会被打包、写入
+日志或公开。签名 job 使用 `community-signing` Environment，并读取这两个仓库级 Secrets。
 
 ## 安装验收
 

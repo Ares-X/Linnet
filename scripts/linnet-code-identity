@@ -8,8 +8,8 @@ readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly host_bundle_id='io.github.ares-x.inputmethod.Linnet'
 readonly settings_bundle_id='io.github.ares-x.inputmethod.Linnet.settings'
 readonly community_signing_config="${project_root}/config/linnet-community-signing.json"
-readonly community_keychain_relative='Library/Keychains/Linnet-Community-CMS.keychain-db'
-readonly community_password_relative='Library/Application Support/Linnet Maintainer/Signing/community-cms/keychain-password'
+readonly community_keychain_relative='Library/Keychains/Ares-X-Code-Signing.keychain-db'
+readonly community_password_relative='Library/Application Support/Ares-X Signing/keychain-password'
 
 fail_identity() {
   echo "linnet-code-identity: $1" >&2
@@ -424,7 +424,10 @@ verify_product() (
   actual_leaf="$(verify_code "${host_app}" "${expected_leaf}" \
     "${verification_scratch}" host-bundle "${host_bundle_id}")"
   [[ "${actual_leaf}" == "${expected_leaf}" ]] || fail_identity "Host leaf mismatch"
-  if [[ "${signing_profile}" == community-cms ]]; then
+  # Historical baselines are already bound to an immutable whole-package
+  # digest by prepare_update_baseline. Their sealed metadata and actual code
+  # must agree on one leaf, but that leaf may predate the current certificate.
+  if [[ "${signing_profile}" == community-cms && -z "${published_revision}" ]]; then
     [[ "${expected_leaf}" == "$(community_certificate_contract | sed -n '2p')" ]] ||
       fail_identity "public product does not use the pinned community CMS leaf"
   fi

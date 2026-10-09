@@ -164,13 +164,13 @@ jobs:
 
       - name: Import the pinned community signing identity
         env:
-          LINNET_COMMUNITY_CMS_P12_BASE64: ${{ secrets.LINNET_COMMUNITY_CMS_P12_BASE64 }}
-          LINNET_COMMUNITY_CMS_P12_PASSWORD: ${{ secrets.LINNET_COMMUNITY_CMS_P12_PASSWORD }}
+          ARES_X_CODE_SIGNING_P12_BASE64: ${{ secrets.ARES_X_CODE_SIGNING_P12_BASE64 }}
+          ARES_X_CODE_SIGNING_P12_PASSWORD: ${{ secrets.ARES_X_CODE_SIGNING_P12_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
-          test -n "${LINNET_COMMUNITY_CMS_P12_BASE64}"
-          test -n "${LINNET_COMMUNITY_CMS_P12_PASSWORD}"
+          test -n "${ARES_X_CODE_SIGNING_P12_BASE64}"
+          test -n "${ARES_X_CODE_SIGNING_P12_PASSWORD}"
           signing_root="${RUNNER_TEMP}/linnet-community-signing"
           keychain="${signing_root}/community-cms.keychain-db"
           password_file="${signing_root}/keychain-password"
@@ -182,7 +182,7 @@ jobs:
             sed -E 's/^[[:space:]]*"([^"].*)"[[:space:]]*$/\1/' \
               >"${original_keychains}"
           test -s "${original_keychains}"
-          printf '%s' "${LINNET_COMMUNITY_CMS_P12_BASE64}" |
+          printf '%s' "${ARES_X_CODE_SIGNING_P12_BASE64}" |
             base64 -D >"${p12_file}"
           openssl rand -hex 32 >"${password_file}"
           chmod 0600 "${p12_file}" "${password_file}" "${original_keychains}"
@@ -191,7 +191,7 @@ jobs:
           security set-keychain-settings -lut 21600 "${keychain}"
           security unlock-keychain -p "${keychain_password}" "${keychain}"
           security import "${p12_file}" -k "${keychain}" \
-            -P "${LINNET_COMMUNITY_CMS_P12_PASSWORD}" -T /usr/bin/codesign
+            -P "${ARES_X_CODE_SIGNING_P12_PASSWORD}" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "${keychain_password}" "${keychain}"
           keychains=()
