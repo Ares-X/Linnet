@@ -1649,6 +1649,30 @@ void ExpectIndependentMixedDictionary(RimeApi_stdbool* api) {
   }
 }
 
+void ExpectReviewedChinesePronunciations(RimeApi_stdbool* api) {
+  struct ReadingCase {
+    const char* full_pinyin;
+    const char* natural_code;
+    const char* expected;
+  };
+  constexpr std::array<ReadingCase, 3> kCases{{
+      {"jineijin", "jinzjn", "鸡内金"},
+      {"jineijinpian", "jinzjnpm", "鸡内金片"},
+      {"jineijinsan", "jinzjnsj", "鸡内金散"},
+  }};
+  for (const auto& schema : {"linnet_zh_pinyin", "linnet_zh"}) {
+    const auto session = CreateSchemaSession(api, schema);
+    for (const auto& sample : kCases) {
+      ExpectFirstCandidate(api, session,
+                           std::string(schema) == "linnet_zh_pinyin"
+                               ? sample.full_pinyin
+                               : sample.natural_code,
+                           sample.expected);
+    }
+    api->destroy_session(session);
+  }
+}
+
 void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
   constexpr char kExpected[] = "希尔瓦娜斯";
   constexpr std::array<std::pair<const char*, const char*>, 8> kProfiles = {{
@@ -7685,6 +7709,7 @@ int main(int argc, char** argv) {
   }
 
   if (mixed_input_probe) {
+    ExpectReviewedChinesePronunciations(api);
     ExpectSupplementalExtendedChineseCoverage(api);
     ExpectNativeMixedInput(api);
     ExpectIndependentMixedDictionary(api);
@@ -7900,6 +7925,7 @@ int main(int argc, char** argv) {
   ExpectCuratedPhonexRuntimeProjection(english);
   ExpectFullShapeOff(api, english, "linnet_en");
   ExpectFullShapeOff(api, chinese, "linnet_zh");
+  ExpectReviewedChinesePronunciations(api);
   ExpectFormalProfileKeyMatrix(api);
   ExpectSmartEnglishHyphenBoundary(api);
   ExpectDateShortcutProfileIsolation(api);

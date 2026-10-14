@@ -44,3 +44,7 @@ wanxiang	温庭筠	wēn tíng jūn	wēn tíng yún	“筠”在温庭筠姓名�
 rime_ice	丙泊酚注射液	bǐng pō fēn zhù shè yè	bǐng bó fēn zhù shè yè	药名“丙泊酚”的“泊”应读bó；锁定rime-ice源误标pō	full=bingbofenzhusheye; old-code-absent
 rime_ice	希尔瓦娜斯	xi er wa na si	xī ěr wǎ nà sī	锁定ext源只有无声调拼音；逐字多音统计推断不作为接纳证据	full=xierwanasi; reviewed-only
 rime_ice	希尔瓦娜斯风行者	xi er wa na si feng xing zhe	xī ěr wǎ nà sī fēng xíng zhě	锁定ext源只有无声调拼音；专名扩展必须沿用人工审读读音	full=xierwanasifengxingzhe; reviewed-only
+wanxiang	鸡内金	jī nà jīn	jī nèi jīn	词语“鸡内金”的“内”应读nèi；回移万象v18.1.2纠音	full=jineijin; old-code-absent
+wanxiang	鸡内金片	jī nà jīn piàn	jī nèi jīn piàn	沿用药名“鸡内金”的nèi读音；回移万象v18.1.2纠音	full=jineijinpian; old-code-absent
+wanxiang	鸡内金散	jī nà jīn sàn	jī nèi jīn sàn	沿用药名“鸡内金”的nèi读音；回移万象v18.1.2纠音	full=jineijinsan; old-code-absent
+wanxiang	应力	yīng lì	yìng lì	力学术语“应力”的“应”应读yìng；回移万象v18.1.2纠音	full=yingli; old-code-absent

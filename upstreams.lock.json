@@ -41,7 +41,7 @@
     "librime_lua_state_lifetime": {
       "target": "sources.librime.bundled_plugins.lua",
       "path": "patches/librime-lua-linnet-state-lifetime.patch",
-      "sha256": "ccec11ebaf8e4fd93532ea68b2d761b5e22cb0de16527f2078ad8c1149ca5191"
+      "sha256": "9a62369c334ec2d9d2e42832ee398dcf4ffde8a4ddf90f72f55ea0d03d317f1a"
     },
     "librime_predict_session_state": {
       "target": "sources.librime.bundled_plugins.predict",

@@ -193,8 +193,8 @@ patch --batch --forward --fuzz=0 -s -d "${scratch}" -p1 < "${source_patch}" ||
 awk -F '\t' 'NR > 1 && $1 == "wanxiang" { print $2 "\t" $3 }' \
   data/chinese/overrides/reviewed_pronunciations.tsv |
   LC_ALL=C sort > "${scratch}/retired.tsv"
-[[ "$(wc -l < "${scratch}/retired.tsv" | tr -d ' ')" == 42 ]] ||
-  fail "the retired Wanxiang wrong-code set is not exactly 42 rows"
+[[ "$(wc -l < "${scratch}/retired.tsv" | tr -d ' ')" == 46 ]] ||
+  fail "the retired Wanxiang wrong-code set is not exactly 46 rows"
 
 for table in jichu lianxiang zi cuoyin; do
   awk -F '\t' 'NF >= 2 { print $1 "\t" $2 }' \
@@ -215,8 +215,8 @@ awk -F '\t' '
   $0 == "..." { body = 1; next }
   body && $0 !~ /^#/ && NF >= 3 { print $1 "\t" $2 }
 ' "${reviewed_dictionary}" | LC_ALL=C sort > "${scratch}/actual-reviewed.tsv"
-[[ "$(wc -l < "${scratch}/actual-reviewed.tsv" | tr -d ' ')" == 57 ]] ||
-  fail "the reviewed dictionary must contain exactly 57 accepted rows"
+[[ "$(wc -l < "${scratch}/actual-reviewed.tsv" | tr -d ' ')" == 61 ]] ||
+  fail "the reviewed dictionary must contain exactly 61 accepted rows"
 diff -u "${scratch}/expected-reviewed.tsv" "${scratch}/actual-reviewed.tsv" >/dev/null ||
   fail "the reviewed dictionary diverges from the accepted pronunciation/ranking ledgers"
 

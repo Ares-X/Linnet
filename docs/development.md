@@ -71,6 +71,8 @@ Linnet 差异只有两个人工 owner：
 
 维护更新必须修改唯一 review ledger/source patch，而不是生成第二份中文词典或运行时修正规则。
 
+万象 v18.1.2 的“鸡内金／片／散”和“应力”纠音已回移到上述 owner，保留原词频；词典 pin 仍为 v17.9.7。本轮完整词典升级在“当阳峪窑”等输入中出现整词回退，新 LTS `20aca767f06a` 也使“你也可以试试”等句子退步，因此未整体升级词典或模型。
+
 ### Smart English
 
 标准 Rime table translator 拥有普通英文 prefix 和 userdb。Linnet 原生 plugin 只拥有成熟 Rime 没有提供的边界：
@@ -469,6 +471,8 @@ Git 创建哈希控制标签。随后唯一 GitHub Action publisher 从 Release 
 引擎性能回移保持现有版本与单一 owner：核心交互补丁包含 librime [`1d0df6e`](https://github.com/rime/librime/commit/1d0df6e40cdcac17a986adc65e4668ae84ae0ada) 的 Prism / Syllabifier 临时字符串优化及上游边界测试；Lua 补丁包含 librime-lua [`ec52e48`](https://github.com/hchunhui/librime-lua/commit/ec52e48ea18f11af37717a01c337f853215cf70b) 的增量 GC。不引入该提交之前无关的 ReverseDb 路径变化，仍使用 Lua 5.4.8。Prism 的 C++ 参数类型改变，必须由 `no_download=1 ./action-install.sh` 一次重建引擎及插件，不能只替换单个 dylib。相关验收使用 `tests/verify_rime_runtime.sh --profile-key-matrix-probe` 与 `--mixed-input-probe`，不要求 App 或发布矩阵。
 
 ### Lua
+
+Lua 补丁同时回移 librime-lua [`643bdc8`](https://github.com/hchunhui/librime-lua/commit/643bdc8fecb1e3efa4b8091bf488ecac2018b7c3)，在 `LuaImpl::wrap_common` 中使 `C_State` 的栈上存储满足对象对齐要求。它不改变 Lua 版本、嵌入模块、状态生命周期或 GC 调度；验收复用 Lua lifetime 与 native runtime 的真实调用路径。
 
 产品使用的 rime-ice Lua 源由 allowlist 选择并嵌入锁定 librime-lua plugin。日期/UUID 对 `linnet_pinyin` tag 的边界修正以精确 patch 应用。Lua state 生命周期补丁仍是当前 pin 的必要部分。只有未来上游明确保证 Lua state 晚于所有 gear/translation 销毁，或保证它们在 `Registry::Clear` / `lua_close` 前全部销毁，才可移除该补丁；移除时必须同时更新 lock/build wiring，并重跑 Lua lifetime、embedding、runtime 和 product gates。
 
