@@ -6,6 +6,10 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## Unreleased
+
+- Correct the pronunciation and input codes for 鸡内金, 鸡内金片, and 鸡内金散 so their correct full- and double-pinyin inputs reach the complete terms. Correct the pronunciation of 应力.
+
 ## 0.1.28 — 2026-10-09
 
 - Caps Lock raw ASCII now types normal lowercase by default, with Shift for uppercase. Enable the new “Caps Lock also locks uppercase” setting to restore traditional behavior.
