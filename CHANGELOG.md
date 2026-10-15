@@ -6,7 +6,7 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
-## 未发布
+## 0.1.29 — 2026-10-15
 
 - 修正“鸡内金”“鸡内金片”“鸡内金散”的读音和输入编码，使正确的全拼与双拼能够选到整词；纠正“应力”的注音。
 
