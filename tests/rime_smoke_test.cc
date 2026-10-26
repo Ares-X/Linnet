@@ -62,6 +62,7 @@ constexpr char kPredictionNavigationProperty[] =
     "linnet/prediction_navigation_v1";
 constexpr char kSentenceBoundaryProperty[] =
     "linnet/sentence_boundary_v1";
+constexpr char kHostDocumentStartProperty[] = "linnet/host_document_start_v1";
 constexpr char kModeReturnSchemaProperty[] =
     "linnet/mode_return_schema_v1";
 constexpr char kCandidateExpansionRequestProperty[] =
@@ -7515,7 +7516,7 @@ void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
   // so the focused selector and the full suite exercise the same options.
   const RimeSessionId config_owner = CreateSchemaSession(api, "linnet_en");
   // Sentence capitalization is opt-in and follows sentence boundaries
-  // observed by this Rime session, without assuming the host caret position.
+  // observed by this Rime session or explicitly reported by its host.
   const RimeSessionId capitalization_disabled =
       CreateSchemaSession(api, "linnet_en");
   if (api->process_key(capitalization_disabled, '.', 0)) {
@@ -7529,6 +7530,14 @@ void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
                               kSentenceBoundaryProperty,
                               "disabled sentence capitalization");
   api->destroy_session(capitalization_disabled);
+  const RimeSessionId disabled_document_start =
+      CreateSchemaSession(api, "linnet_en");
+  api->set_property(disabled_document_start, kHostDocumentStartProperty, "1");
+  if (SelectNormalizedCandidate(api, disabled_document_start, "noted", "noted") !=
+      "noted") {
+    Fail("a host document start ignored the disabled capitalization option");
+  }
+  api->destroy_session(disabled_document_start);
   for (const auto& prefix : {". ", "{Return}"}) {
     const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
     api->simulate_key_sequence(session, prefix);
@@ -7545,6 +7554,47 @@ void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
     Fail("a fresh session inferred a sentence start at an unknown host caret");
   }
   api->destroy_session(unknown_caret);
+  for (const auto& word : {"good", "noted"}) {
+    const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+    api->set_property(session, kHostDocumentStartProperty, "1");
+    ContinueInput(api, session, word);
+    std::string expected = word;
+    expected.front() = static_cast<char>(expected.front() - 'a' + 'A');
+    const auto candidates = Candidates(api, session);
+    if (candidates.empty() || candidates.front().text != expected) {
+      std::cerr << "document-start first candidate: "
+                << (candidates.empty() ? "<none>" : candidates.front().text)
+                << ", boundary="
+                << rime::Service::instance().GetSession(session)->context()
+                       ->get_property(kSentenceBoundaryProperty) << '\n';
+      Fail("known host document start did not capitalize " + std::string(word));
+    }
+    if (!api->process_key(session, XK_space, 0)) {
+      Fail("known host document start failed Space acceptance");
+    }
+    const auto committed = TakeCommit(api, session);
+    if (committed != expected + " ") {
+      Fail("known host document start committed '" + committed + "'");
+    }
+    ExpectSessionPropertyAbsent(api, session, kHostDocumentStartProperty,
+                                "consumed host document start");
+    if (ContinueAndSelectNormalizedCandidate(api, session, "noted", "noted") !=
+        "noted") {
+      Fail("host document start leaked into a following word");
+    }
+    api->destroy_session(session);
+  }
+  const RimeSessionId composing = CreateSchemaSession(api, "linnet_en");
+  ContinueInput(api, composing, "no");
+  api->set_property(composing, kHostDocumentStartProperty, "1");
+  ContinueInput(api, composing, "ted");
+  if (!api->process_key(composing, XK_space, 0) ||
+      TakeCommit(api, composing) != "noted ") {
+    Fail("a host position report changed an in-progress word");
+  }
+  ExpectSessionPropertyAbsent(api, composing, kHostDocumentStartProperty,
+                              "host report during composition");
+  api->destroy_session(composing);
   // Exercise the host keys between sentences, not just the candidate casing
   // immediately after a period. An explicit space must not erase the pending
   // sentence start or result in another automatically inserted space.
