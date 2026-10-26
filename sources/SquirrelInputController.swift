@@ -83,6 +83,14 @@ final class SquirrelInputController: IMKInputController {
         keycode: keyCode, keychar: keyChars?.first,
         shift: modifiers.contains(.shift), caps: modifiers.contains(.capsLock))
       if rimeKeycode != UInt32(XK_VoidSymbol) {
+        if rimeAPI.get_input(session)?.pointee == 0 {
+          // Only the client knows the document position. Report that fact at
+          // composition start; Rime still owns sentence casing and its option.
+          let atDocumentStart = activeClient?.selectedRange() ==
+            NSRange(location: 0, length: 0)
+          rimeAPI.set_property(
+            session, "linnet/host_document_start_v1", atDocumentStart ? "1" : "")
+        }
         let rimeModifiers = SquirrelKeycode.osxModifiersToRime(modifiers: modifiers)
         let handled = processKey(
           rimeKeycode,

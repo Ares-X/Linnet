@@ -52,6 +52,7 @@ constexpr char kSuppressFollowingSpaceProperty[] = "linnet/suppress_following_sp
                kModeReturnSchemaProperty[] = "linnet/mode_return_schema_v1",
                kCandidatePreviousRowProperty[] = "linnet/candidate_previous_row_v1",
                kCandidateNextRowProperty[] = "linnet/candidate_next_row_v1",
+               kHostDocumentStartProperty[] = "linnet/host_document_start_v1",
                kCandidateExpansionRequestProperty[] =
                    "linnet/candidate_expansion_request_v1";
 constexpr std::size_t kPinyinKeyLimit = 64,
@@ -252,6 +253,19 @@ class LinnetInteractionProcessor : public Processor {
         predict_engine_(
             PredictEngineComponent::Shared()->GetInstance(ticket)) {
     if (engine_ && engine_->context()) {
+      host_position_connection_ =
+          engine_->context()->property_update_notifier().connect(
+              [this](Context* context, const string& property) {
+                if (property != kHostDocumentStartProperty ||
+                    context->get_property(property) != "1") return;
+                // Recognizer can accept letters before this processor runs.
+                // Consume the client's position before that key is routed;
+                // ordinary edits and shortcuts still clear the boundary.
+                context->set_property(property, "");
+                if (context->input().empty() && options_.sentence_capitalization) {
+                  SetSentenceBoundary(context, true);
+                }
+              });
       abort_connection_ = engine_->context()->abort_notifier().connect(
           [this](Context* context) { OnAbort(context); });
       unhandled_connection_ =
@@ -263,6 +277,7 @@ class LinnetInteractionProcessor : public Processor {
   }
 
   ~LinnetInteractionProcessor() override {
+    host_position_connection_.disconnect();
     abort_connection_.disconnect();
     unhandled_connection_.disconnect();
   }
@@ -334,9 +349,8 @@ class LinnetInteractionProcessor : public Processor {
                  : kRejected;
     }
 
-    if (IsEditBoundary(key.keycode())) {
-      SetSentenceBoundary(context, false);
-    }
+    // Editing the current spelling does not move the host's sentence start.
+    // OnUnhandledKey resets it only when an edit reaches the client.
     return kNoop;
   }
 
@@ -709,8 +723,21 @@ class LinnetInteractionProcessor : public Processor {
     // ProcessKeyEvent already rejected host shortcuts before touching IME
     // state. The unhandled notification must preserve that same boundary.
     if (HasHostShortcutModifier(key)) return;
+    if (key.keycode() == XK_space && IsPlainKey(key)) {
+      // The host receives this space. Retire automatic spacing, but keep a
+      // sentence start observed before one or more explicit spaces.
+      const bool sentence_boundary = SentenceBoundaryObserved(context);
+      HardStop(context);
+      SetSentenceBoundary(context, sentence_boundary);
+      return;
+    }
     if (IsEditBoundary(key.keycode())) {
       HardStop(context);
+      // A Return used to accept a candidate never reaches this callback.
+      // Only a Return passed to the host starts a new line/message.
+      if (key.keycode() == XK_Return) {
+        SetSentenceBoundary(context, options_.sentence_capitalization);
+      }
       return;
     }
     if ((key.modifier() & ~(kShiftMask | kLockMask)) != 0 ||
@@ -740,6 +767,7 @@ class LinnetInteractionProcessor : public Processor {
   const string schema_id_;
   const InteractionOptions options_;
   const an<PredictEngine> predict_engine_;
+  rime::connection host_position_connection_;
   rime::connection abort_connection_;
   rime::connection unhandled_connection_;
 };

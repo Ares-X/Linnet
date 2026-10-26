@@ -6,6 +6,11 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.30 — 2026-10-26
+
+- Fix Smart English sentence capitalization at the start of an empty text field, after sentence punctuation and spaces, and after a newline. Accepting a candidate with Return does not start a new sentence.
+- Keep sentence capitalization when correcting the first word with Backspace or editing its spelling before committing it.
+
 ## 0.1.29 — 2026-10-15
 
 - Correct the pronunciation and input codes for 鸡内金, 鸡内金片, and 鸡内金散 so their correct full- and double-pinyin inputs reach the complete terms. Correct the pronunciation of 应力.

@@ -87,6 +87,14 @@ Linnet 差异只有两个人工 owner：
 
 不要把普通 prefix、学习或 schema 选择重新实现进 plugin，也不要新增 SQLite、网络、系统拼写检查器或第二个英文词典运行时。
 
+句首大写由当前 session 的已观察边界驱动：英文 `. ! ?` 建立句首状态，
+透传空格保留该状态并消除待补空格；透传给宿主的回车建立下一句的状态。
+用回车接受候选不算换行，英文词上屏后结束句首状态。开始组合输入时，Host
+通过 IMKTextInput 的 selectedRange 报告已知文档起点，Rime 将其作为一次性
+边界事实；未知光标位置和文档中间位置不推断句首。原文、代码和 Text Expander
+继续沿用各自的提交行为。当前组合拼写内的编辑保留句首状态，编辑键实际透传
+到宿主时才由 unhandled 回调清除，避免改正首词拼写后丢失大写。
+
 ### 连续中英混输
 
 Core 的 `ProjectionRenderer` 为八个中文方案生成 `sentence_dictionary` 与权重配置，
@@ -532,6 +540,7 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
 | App 内嵌 Rime 与插件 | `tests/verify_packaged_rime.sh APP APP/Contents/Applications/Settings.app`；直接加载产物中的库，不使用开发机的动态库搜索路径 |
 | 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
+| 英文句首大写、句间空格与回车 | `tests/verify_rime_runtime.sh --sentence-capitalization-probe`；覆盖开关、候选与上屏、句中小写、回车选词和换行，以及标点／被动预测退出回归 |
 | 中文纠错与模糊音 | `tests/verify_swift_units.sh --only projection-renderer,settings-data-coordinator` 和 `tests/verify_rime_runtime.sh --chinese-spelling-probe`；真实设置应用与打字在专用 VM 验收 |
 | 右键忘记候选与焦点 | `tests/verify_rime_runtime.sh --candidate-forget-probe` |
 | 原文光标编辑与代码词 | `tests/verify_rime_runtime.sh --raw-editing-probe`；混输边界同时运行 `--mixed-input-probe` |

@@ -62,6 +62,7 @@ constexpr char kPredictionNavigationProperty[] =
     "linnet/prediction_navigation_v1";
 constexpr char kSentenceBoundaryProperty[] =
     "linnet/sentence_boundary_v1";
+constexpr char kHostDocumentStartProperty[] = "linnet/host_document_start_v1";
 constexpr char kModeReturnSchemaProperty[] =
     "linnet/mode_return_schema_v1";
 constexpr char kCandidateExpansionRequestProperty[] =
@@ -7510,7 +7511,256 @@ static void ExpectCandidateForgetFocus(RimeApi_stdbool* api) {
   std::cout << "candidate forget preserves Chinese/English focus before/after selection: PASS\n";
 }
 
+void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
+  // Rime caches ConfigData weakly. Keep it alive while changing the setting
+  // so the focused selector and the full suite exercise the same options.
+  const RimeSessionId config_owner = CreateSchemaSession(api, "linnet_en");
+  // Sentence capitalization is opt-in and follows sentence boundaries
+  // observed by this Rime session or explicitly reported by its host.
+  const RimeSessionId capitalization_disabled =
+      CreateSchemaSession(api, "linnet_en");
+  if (api->process_key(capitalization_disabled, '.', 0)) {
+    Fail("disabled capitalization swallowed period");
+  }
+  if (!api->simulate_key_sequence(capitalization_disabled, "cloud")) {
+    Fail("could not type disabled capitalization probe");
+  }
+  NormalizedCandidateIndex(api, capitalization_disabled, "cloud");
+  ExpectSessionPropertyAbsent(api, capitalization_disabled,
+                              kSentenceBoundaryProperty,
+                              "disabled sentence capitalization");
+  api->destroy_session(capitalization_disabled);
+  const RimeSessionId disabled_document_start =
+      CreateSchemaSession(api, "linnet_en");
+  api->set_property(disabled_document_start, kHostDocumentStartProperty, "1");
+  if (SelectNormalizedCandidate(api, disabled_document_start, "noted", "noted") !=
+      "noted") {
+    Fail("a host document start ignored the disabled capitalization option");
+  }
+  api->destroy_session(disabled_document_start);
+  for (const auto& prefix : {". ", "{Return}"}) {
+    const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+    api->simulate_key_sequence(session, prefix);
+    if (SelectNormalizedCandidate(api, session, "noted", "noted") != "noted") {
+      Fail("disabled capitalization changed the committed word");
+    }
+    api->destroy_session(session);
+  }
+
+  SetSchemaBool(api, "linnet_en",
+                "linnet_english_interaction/sentence_capitalization", true);
+  const RimeSessionId unknown_caret = CreateSchemaSession(api, "linnet_en");
+  if (SelectNormalizedCandidate(api, unknown_caret, "noted", "noted") != "noted") {
+    Fail("a fresh session inferred a sentence start at an unknown host caret");
+  }
+  api->destroy_session(unknown_caret);
+  for (const auto& word : {"good", "noted"}) {
+    const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+    api->set_property(session, kHostDocumentStartProperty, "1");
+    ContinueInput(api, session, word);
+    std::string expected = word;
+    expected.front() = static_cast<char>(expected.front() - 'a' + 'A');
+    const auto candidates = Candidates(api, session);
+    if (candidates.empty() || candidates.front().text != expected) {
+      std::cerr << "document-start first candidate: "
+                << (candidates.empty() ? "<none>" : candidates.front().text)
+                << ", boundary="
+                << rime::Service::instance().GetSession(session)->context()
+                       ->get_property(kSentenceBoundaryProperty) << '\n';
+      Fail("known host document start did not capitalize " + std::string(word));
+    }
+    if (!api->process_key(session, XK_space, 0)) {
+      Fail("known host document start failed Space acceptance");
+    }
+    const auto committed = TakeCommit(api, session);
+    if (committed != expected + " ") {
+      Fail("known host document start committed '" + committed + "'");
+    }
+    ExpectSessionPropertyAbsent(api, session, kHostDocumentStartProperty,
+                                "consumed host document start");
+    if (ContinueAndSelectNormalizedCandidate(api, session, "noted", "noted") !=
+        "noted") {
+      Fail("host document start leaked into a following word");
+    }
+    api->destroy_session(session);
+  }
+  const RimeSessionId composing = CreateSchemaSession(api, "linnet_en");
+  ContinueInput(api, composing, "no");
+  api->set_property(composing, kHostDocumentStartProperty, "1");
+  ContinueInput(api, composing, "ted");
+  if (!api->process_key(composing, XK_space, 0) ||
+      TakeCommit(api, composing) != "noted ") {
+    Fail("a host position report changed an in-progress word");
+  }
+  ExpectSessionPropertyAbsent(api, composing, kHostDocumentStartProperty,
+                              "host report during composition");
+  api->destroy_session(composing);
+  for (const auto& spelling : {"notex{BackSpace}d",
+                               "notexd{Left}{Left}{Delete}{Right}"}) {
+    const RimeSessionId editing = CreateSchemaSession(api, "linnet_en");
+    api->set_property(editing, kHostDocumentStartProperty, "1");
+    api->simulate_key_sequence(editing, spelling);
+    const auto candidates = Candidates(api, editing);
+    if (candidates.empty() || candidates.front().text != "Noted" ||
+        !api->process_key(editing, XK_space, 0) ||
+        TakeCommit(api, editing) != "Noted ") {
+      Fail("editing a sentence-initial spelling lost its capitalization");
+    }
+    if (ContinueAndSelectNormalizedCandidate(api, editing, "good", "good") !=
+        "good") {
+      Fail("editing a sentence-initial spelling capitalized the next word");
+    }
+    api->destroy_session(editing);
+  }
+  // Exercise the host keys between sentences, not just the candidate casing
+  // immediately after a period. An explicit space must not erase the pending
+  // sentence start or result in another automatically inserted space.
+  for (const auto& prefix : std::vector<std::vector<int>>{
+           {'.', ' '}, {'!', ' ', ' '}, {'?', ' '}, {XK_Return}}) {
+    for (const auto& word : {"good", "noted"}) {
+      const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+      for (const int key : prefix) {
+        if (api->process_key(session, key, 0)) {
+          Fail("sentence separator did not reach the host");
+        }
+      }
+      ExpectNoCommit(api, session, "host sentence separator");
+      std::string expected = word;
+      expected.front() = static_cast<char>(expected.front() - 'a' + 'A');
+      ContinueInput(api, session, word);
+      const auto candidates = Candidates(api, session);
+      if (candidates.empty() || candidates.front().text != expected) {
+        Fail("sentence capitalization did not reach the first candidate for " +
+             std::string(word));
+      }
+      if (!api->process_key(session, XK_space, 0) ||
+          TakeCommit(api, session) != expected + " ") {
+        Fail("sentence capitalization or Space commit changed for " +
+             std::string(word));
+      }
+      if (ContinueAndSelectNormalizedCandidate(api, session, "noted", "noted") !=
+          "noted") {
+        Fail("sentence capitalization leaked into the next word");
+      }
+      api->destroy_session(session);
+    }
+  }
+  const RimeSessionId return_selection = CreateSchemaSession(api, "linnet_en");
+  Enter(api, return_selection, "noted");
+  if (CandidateIndex(api, return_selection, "noted") != 0 ||
+      !api->process_key(return_selection, XK_Return, 0) ||
+      TakeCommit(api, return_selection) != "noted") {
+    Fail("Return did not accept the current word");
+  }
+  ExpectSessionPropertyAbsent(api, return_selection, kSentenceBoundaryProperty,
+                              "Return candidate acceptance");
+  if (ContinueAndSelectNormalizedCandidate(
+          api, return_selection, "noted", "noted") != "noted") {
+    Fail("Return candidate acceptance changed the following word");
+  }
+  api->destroy_session(return_selection);
+
+  const RimeSessionId prediction = CreatePassivePrediction(api, "sentence Return");
+  if (api->process_key(prediction, XK_Return, 0)) {
+    Fail("Return after a passive prediction did not reach the host");
+  }
+  ExpectNoCommit(api, prediction, "sentence Return after prediction");
+  if (ContinueAndSelectNormalizedCandidate(api, prediction, "noted", "Noted") !=
+      "Noted") {
+    Fail("Return after prediction did not capitalize the next sentence");
+  }
+  api->destroy_session(prediction);
+  for (const auto& test_case :
+       std::vector<std::pair<std::string, std::string>>{
+           {"cloud", "Cloud"}, {"Cloud", "Cloud"}, {"CLOUD", "CLOUD"}}) {
+    const RimeSessionId sentence_case =
+        CreateSchemaSession(api, "linnet_en");
+    if (api->process_key(sentence_case, '.', 0)) {
+      Fail("sentence capitalization swallowed period");
+    }
+    ExpectSessionProperty(api, sentence_case, kSentenceBoundaryProperty, "1",
+                          "observed sentence terminator");
+    if (!api->simulate_key_sequence(sentence_case, test_case.first.c_str())) {
+      Fail("could not type sentence capitalization case");
+    }
+    NormalizedCandidateIndex(api, sentence_case, test_case.second);
+    api->destroy_session(sentence_case);
+  }
+  for (const char punctuation_value : {',', ':'}) {
+    const RimeSessionId non_sentence =
+        CreateSchemaSession(api, "linnet_en");
+    if (api->process_key(non_sentence, '.', 0) ||
+        api->process_key(non_sentence, punctuation_value, 0)) {
+      Fail("non-sentence punctuation was swallowed");
+    }
+    ExpectSessionPropertyAbsent(api, non_sentence,
+                                kSentenceBoundaryProperty,
+                                "non-sentence punctuation");
+    if (!api->simulate_key_sequence(non_sentence, "cloud")) {
+      Fail("could not type punctuation boundary probe");
+    }
+    NormalizedCandidateIndex(api, non_sentence, "cloud");
+    api->destroy_session(non_sentence);
+  }
+  for (const int edit_key : {kBackSpace, 0xff51, 0xff53}) {
+    const RimeSessionId edit_boundary =
+        CreateSchemaSession(api, "linnet_en");
+    if (api->process_key(edit_boundary, '.', 0)) {
+      Fail("edit boundary setup swallowed period");
+    }
+    api->process_key(edit_boundary, edit_key, 0);
+    ExpectSessionPropertyAbsent(api, edit_boundary,
+                                kSentenceBoundaryProperty,
+                                "cursor/edit boundary");
+    if (!api->simulate_key_sequence(edit_boundary, "cloud")) {
+      Fail("could not type edit boundary probe");
+    }
+    NormalizedCandidateIndex(api, edit_boundary, "cloud");
+    api->destroy_session(edit_boundary);
+  }
+  const RimeSessionId shortcut_boundary =
+      CreateSchemaSession(api, "linnet_en");
+  if (api->process_key(shortcut_boundary, '.', 0)) {
+    Fail("shortcut boundary setup swallowed period");
+  }
+  api->process_key(shortcut_boundary, 'v', 1 << 2);
+  ExpectSessionPropertyAbsent(api, shortcut_boundary,
+                              kSentenceBoundaryProperty,
+                              "host shortcut boundary");
+  api->destroy_session(shortcut_boundary);
+  for (const std::string& hard_input : {"URLSession", "x;br"}) {
+    const RimeSessionId hard_boundary =
+        CreateSchemaSession(api, "linnet_en");
+    if (api->process_key(hard_boundary, '.', 0) ||
+        !api->simulate_key_sequence(hard_boundary, hard_input.c_str())) {
+      Fail("could not prepare code/Text Expander boundary");
+    }
+    if (hard_input == "x;br") {
+      const size_t index = CandidateIndex(api, hard_boundary, "Best regards,");
+      if (!api->select_candidate(hard_boundary, index)) {
+        Fail("could not commit Text Expander boundary");
+      }
+    } else if (!api->process_key(hard_boundary, kReturn, 0)) {
+      Fail("could not commit code-token boundary");
+    }
+    TakeCommit(api, hard_boundary);
+    ExpectSessionPropertyAbsent(api, hard_boundary,
+                                kSentenceBoundaryProperty,
+                                "code/Text Expander boundary");
+    if (!api->simulate_key_sequence(hard_boundary, "cloud")) {
+      Fail("could not type after hard boundary");
+    }
+    NormalizedCandidateIndex(api, hard_boundary, "cloud");
+    api->destroy_session(hard_boundary);
+  }
+  SetSchemaBool(api, "linnet_en",
+                "linnet_english_interaction/sentence_capitalization", false);
+  api->destroy_session(config_owner);
+}
+
 int main(int argc, char** argv) {
+  const bool sentence_capitalization_probe =
+      argc == 4 && std::strcmp(argv[3], "--sentence-capitalization-probe") == 0;
   const bool caps_lock_probe =
       argc == 5 && std::strcmp(argv[3], "--caps-lock-probe") == 0 &&
       (std::strcmp(argv[4], "true") == 0 ||
@@ -7558,7 +7808,7 @@ int main(int argc, char** argv) {
       argc == 4 && std::strcmp(argv[3], "--warm-session-probe") == 0;
   const bool cold_client_probe =
       argc == 4 && std::strcmp(argv[3], "--cold-client-probe") == 0;
-  if (argc != 3 && !input_options_probe && !input_switches_probe &&
+  if (argc != 3 && !sentence_capitalization_probe && !input_options_probe && !input_switches_probe &&
       !caps_lock_probe &&
       !settings_off_probe && !learning_off_probe && !candidate_forget_probe && !raw_editing_probe &&
       !profile_key_matrix_probe &&
@@ -7570,7 +7820,8 @@ int main(int argc, char** argv) {
       !mixed_learning_off_probe &&
       !mixed_latency_probe && !warm_session_probe && !cold_client_probe && !live_sync_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
-         "[--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|"
+         "[--sentence-capitalization-probe|"
+         "--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|"
          "--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|"
          "--caps-lock-probe true|false|"
          "--lifecycle-raw-exit-probe|"
@@ -7622,6 +7873,14 @@ int main(int argc, char** argv) {
     Fail("octagram module was not loaded");
   }
   ExpectSchemaList(api);
+  if (sentence_capitalization_probe) {
+    ExpectSentenceCapitalization(api);
+    ExpectPredictionPunctuationExitContract(api);
+    ExpectPassivePredictionExitContract(api);
+    api->finalize();
+    std::cout << "rime_smoke_test: sentence capitalization: PASS\n";
+    return 0;
+  }
   if (caps_lock_probe) {
     const bool uppercase = std::strcmp(argv[4], "true") == 0;
     for (const auto& schema_id : RuntimeProductSchemaIDs(api)) {
@@ -8039,109 +8298,7 @@ int main(int argc, char** argv) {
   SetSchemaBool(api, "linnet_en",
                 "linnet_english_interaction/learning_enabled", true);
 
-  // Sentence capitalization is disabled by default and only follows a
-  // sentence terminator observed by this Rime session when explicitly on.
-  const RimeSessionId capitalization_disabled =
-      CreateSchemaSession(api, "linnet_en");
-  if (api->process_key(capitalization_disabled, '.', 0)) {
-    Fail("disabled capitalization swallowed period");
-  }
-  if (!api->simulate_key_sequence(capitalization_disabled, "cloud")) {
-    Fail("could not type disabled capitalization probe");
-  }
-  NormalizedCandidateIndex(api, capitalization_disabled, "cloud");
-  ExpectSessionPropertyAbsent(api, capitalization_disabled,
-                              kSentenceBoundaryProperty,
-                              "disabled sentence capitalization");
-  api->destroy_session(capitalization_disabled);
-
-  SetSchemaBool(api, "linnet_en",
-                "linnet_english_interaction/sentence_capitalization", true);
-  for (const auto& test_case :
-       std::vector<std::pair<std::string, std::string>>{
-           {"cloud", "Cloud"}, {"Cloud", "Cloud"}, {"CLOUD", "CLOUD"}}) {
-    const RimeSessionId sentence_case =
-        CreateSchemaSession(api, "linnet_en");
-    if (api->process_key(sentence_case, '.', 0)) {
-      Fail("sentence capitalization swallowed period");
-    }
-    ExpectSessionProperty(api, sentence_case, kSentenceBoundaryProperty, "1",
-                          "observed sentence terminator");
-    if (!api->simulate_key_sequence(sentence_case, test_case.first.c_str())) {
-      Fail("could not type sentence capitalization case");
-    }
-    NormalizedCandidateIndex(api, sentence_case, test_case.second);
-    api->destroy_session(sentence_case);
-  }
-  for (const char punctuation_value : {',', ':'}) {
-    const RimeSessionId non_sentence =
-        CreateSchemaSession(api, "linnet_en");
-    if (api->process_key(non_sentence, '.', 0) ||
-        api->process_key(non_sentence, punctuation_value, 0)) {
-      Fail("non-sentence punctuation was swallowed");
-    }
-    ExpectSessionPropertyAbsent(api, non_sentence,
-                                kSentenceBoundaryProperty,
-                                "non-sentence punctuation");
-    if (!api->simulate_key_sequence(non_sentence, "cloud")) {
-      Fail("could not type punctuation boundary probe");
-    }
-    NormalizedCandidateIndex(api, non_sentence, "cloud");
-    api->destroy_session(non_sentence);
-  }
-  for (const int edit_key : {kBackSpace, 0xff51, 0xff53}) {
-    const RimeSessionId edit_boundary =
-        CreateSchemaSession(api, "linnet_en");
-    if (api->process_key(edit_boundary, '.', 0)) {
-      Fail("edit boundary setup swallowed period");
-    }
-    api->process_key(edit_boundary, edit_key, 0);
-    ExpectSessionPropertyAbsent(api, edit_boundary,
-                                kSentenceBoundaryProperty,
-                                "cursor/edit boundary");
-    if (!api->simulate_key_sequence(edit_boundary, "cloud")) {
-      Fail("could not type edit boundary probe");
-    }
-    NormalizedCandidateIndex(api, edit_boundary, "cloud");
-    api->destroy_session(edit_boundary);
-  }
-  const RimeSessionId shortcut_boundary =
-      CreateSchemaSession(api, "linnet_en");
-  if (api->process_key(shortcut_boundary, '.', 0)) {
-    Fail("shortcut boundary setup swallowed period");
-  }
-  api->process_key(shortcut_boundary, 'v', 1 << 2);
-  ExpectSessionPropertyAbsent(api, shortcut_boundary,
-                              kSentenceBoundaryProperty,
-                              "host shortcut boundary");
-  api->destroy_session(shortcut_boundary);
-  for (const std::string& hard_input : {"URLSession", "x;br"}) {
-    const RimeSessionId hard_boundary =
-        CreateSchemaSession(api, "linnet_en");
-    if (api->process_key(hard_boundary, '.', 0) ||
-        !api->simulate_key_sequence(hard_boundary, hard_input.c_str())) {
-      Fail("could not prepare code/Text Expander boundary");
-    }
-    if (hard_input == "x;br") {
-      const size_t index = CandidateIndex(api, hard_boundary, "Best regards,");
-      if (!api->select_candidate(hard_boundary, index)) {
-        Fail("could not commit Text Expander boundary");
-      }
-    } else if (!api->process_key(hard_boundary, kReturn, 0)) {
-      Fail("could not commit code-token boundary");
-    }
-    TakeCommit(api, hard_boundary);
-    ExpectSessionPropertyAbsent(api, hard_boundary,
-                                kSentenceBoundaryProperty,
-                                "code/Text Expander boundary");
-    if (!api->simulate_key_sequence(hard_boundary, "cloud")) {
-      Fail("could not type after hard boundary");
-    }
-    NormalizedCandidateIndex(api, hard_boundary, "cloud");
-    api->destroy_session(hard_boundary);
-  }
-  SetSchemaBool(api, "linnet_en",
-                "linnet_english_interaction/sentence_capitalization", false);
+  ExpectSentenceCapitalization(api);
 
   // The native processor owns Tab policy before the inherited key binder.
   SetSchemaString(api, "linnet_en",

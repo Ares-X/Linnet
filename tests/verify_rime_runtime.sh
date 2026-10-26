@@ -15,6 +15,7 @@ if [[ "${1:-}" == --chinese-phrase-ranking-probe ||
       "${1:-}" == --mixed-input-probe ||
       "${1:-}" == --candidate-forget-probe ||
       "${1:-}" == --raw-editing-probe ||
+      "${1:-}" == --sentence-capitalization-probe ||
       "${1:-}" == --mixed-latency-probe ||
       "${1:-}" == --warm-session-probe ||
       "${1:-}" == --cold-client-probe ||
@@ -23,7 +24,7 @@ if [[ "${1:-}" == --chinese-phrase-ranking-probe ||
       "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--chinese-phrase-ranking-probe|--chinese-spelling-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
+  echo "usage: $0 [--chinese-phrase-ranking-probe|--chinese-spelling-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--sentence-capitalization-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -331,6 +332,8 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime candidate forget focus: PASS"
   elif [[ "${runtime_probe}" == --raw-editing-probe ]]; then
     echo "Linnet native Rime raw spelling navigation: PASS"
+  elif [[ "${runtime_probe}" == --sentence-capitalization-probe ]]; then
+    echo "Linnet native Rime sentence capitalization: PASS"
   else
     echo "Linnet native Rime focused mixed-input probe: PASS"
   fi
