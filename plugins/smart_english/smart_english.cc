@@ -709,8 +709,21 @@ class LinnetInteractionProcessor : public Processor {
     // ProcessKeyEvent already rejected host shortcuts before touching IME
     // state. The unhandled notification must preserve that same boundary.
     if (HasHostShortcutModifier(key)) return;
+    if (key.keycode() == XK_space && IsPlainKey(key)) {
+      // The host receives this space. Retire automatic spacing, but keep a
+      // sentence start observed before one or more explicit spaces.
+      const bool sentence_boundary = SentenceBoundaryObserved(context);
+      HardStop(context);
+      SetSentenceBoundary(context, sentence_boundary);
+      return;
+    }
     if (IsEditBoundary(key.keycode())) {
       HardStop(context);
+      // A Return used to accept a candidate never reaches this callback.
+      // Only a Return passed to the host starts a new line/message.
+      if (key.keycode() == XK_Return) {
+        SetSentenceBoundary(context, options_.sentence_capitalization);
+      }
       return;
     }
     if ((key.modifier() & ~(kShiftMask | kLockMask)) != 0 ||
