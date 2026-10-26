@@ -10,6 +10,15 @@
       "bytes": 426812801,
       "sha256": "0505451203d01d4900dd3902e7057b59339444e956c62e8e420288025e6e7fcf"
     },
+    "data_49_chinese_delta": {
+      "repository": "https://github.com/Ares-X/Linnet.git",
+      "release": "data-49",
+      "revision": "278455c21fecd8343816c4c5231ae486560e2431",
+      "asset": "Linnet-Chinese-from-eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7.linnetdelta",
+      "asset_download_url": "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-Chinese-from-eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7.linnetdelta",
+      "bytes": 131351064,
+      "sha256": "3e55a4e0e8d10824c9e1b1d564dd32e580fd39dd53367e211cb94e87123bc624"
+    },
     "data_48_english_delta": {
       "repository": "https://github.com/Ares-X/Linnet.git",
       "release": "data-48",
@@ -32,6 +41,7 @@
   "pack_baselines": {
     "chinese": {
       "source": "release_0_1_15",
+      "delta_source": "data_49_chinese_delta",
       "target_sequence": 38,
       "content_sha256": "eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7"
     },
