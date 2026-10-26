@@ -7595,6 +7595,23 @@ void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
   ExpectSessionPropertyAbsent(api, composing, kHostDocumentStartProperty,
                               "host report during composition");
   api->destroy_session(composing);
+  for (const auto& spelling : {"notex{BackSpace}d",
+                               "notexd{Left}{Left}{Delete}{Right}"}) {
+    const RimeSessionId editing = CreateSchemaSession(api, "linnet_en");
+    api->set_property(editing, kHostDocumentStartProperty, "1");
+    api->simulate_key_sequence(editing, spelling);
+    const auto candidates = Candidates(api, editing);
+    if (candidates.empty() || candidates.front().text != "Noted" ||
+        !api->process_key(editing, XK_space, 0) ||
+        TakeCommit(api, editing) != "Noted ") {
+      Fail("editing a sentence-initial spelling lost its capitalization");
+    }
+    if (ContinueAndSelectNormalizedCandidate(api, editing, "good", "good") !=
+        "good") {
+      Fail("editing a sentence-initial spelling capitalized the next word");
+    }
+    api->destroy_session(editing);
+  }
   // Exercise the host keys between sentences, not just the candidate casing
   // immediately after a period. An explicit space must not erase the pending
   // sentence start or result in another automatically inserted space.

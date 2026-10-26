@@ -349,9 +349,8 @@ class LinnetInteractionProcessor : public Processor {
                  : kRejected;
     }
 
-    if (IsEditBoundary(key.keycode())) {
-      SetSentenceBoundary(context, false);
-    }
+    // Editing the current spelling does not move the host's sentence start.
+    // OnUnhandledKey resets it only when an edit reaches the client.
     return kNoop;
   }
 
