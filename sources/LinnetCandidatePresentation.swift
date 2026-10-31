@@ -417,31 +417,47 @@ extension LinnetCandidatePresentation {
   /// Runtime and Settings share the same packing; neither reorders candidates.
   static func expandedGrid(
     widths: [CGFloat], columns: Int, spacing: CGFloat, maximumWidth: CGFloat,
-    visibleRows: Range<Int>, highlighted: Int? = nil
+    visibleRows: Range<Int>, highlighted: Int? = nil,
+    firstCandidateIndex: Int = 0, firstVisibleCandidateIndex: Int? = nil
   ) -> ExpandedGrid {
     guard !widths.isEmpty, columns > 0 else {
       return ExpandedGrid(columnWidths: [], placements: [], visibleRows: 0..<0)
     }
     // Keep whole words and shared column guides. The configured count is the
     // upper limit, not a reason to squeeze each word into an equal-width slot.
-    for count in stride(from: min(columns, widths.count), through: 1, by: -1) {
+    // A complete short list at the beginning needs no empty column guides.
+    // A later iterator window keeps all guides to preserve absolute columns.
+    let maximumColumns = firstCandidateIndex == 0 ? min(columns, widths.count) : columns
+    for count in stride(from: maximumColumns, through: 1, by: -1) {
       let rowCount = max(1, visibleRows.count)
-      var firstRow = min(visibleRows.lowerBound, max(0, (widths.count - 1) / count - rowCount + 1))
+      // Iterator windows move by Rime pages, independently of the fitted
+      // column count. Absolute candidate positions keep overlapping words on
+      // the same row/column when that window changes. The viewport also keeps
+      // a candidate anchor so fitting fewer columns can reproject it.
+      let firstLoadedRow = firstCandidateIndex / count
+      let lastLoadedRow = (firstCandidateIndex + widths.count - 1) / count
+      let requestedRow = firstVisibleCandidateIndex.map { $0 / count }
+        ?? visibleRows.lowerBound
+      var firstRow = max(firstLoadedRow,
+        min(requestedRow, max(firstLoadedRow, lastLoadedRow - rowCount + 1)))
       if let highlighted {
-        let selectedRow = highlighted / count
+        let selectedRow = (firstCandidateIndex + highlighted) / count
         firstRow = min(firstRow, selectedRow)
         firstRow = max(firstRow, selectedRow - rowCount + 1)
       }
       let rows = firstRow..<(firstRow + rowCount)
       var columnWidths = [CGFloat](repeating: 1, count: count)
-      for item in widths.indices where rows.contains(item / count) {
-        columnWidths[item % count] = max(columnWidths[item % count], widths[item])
+      for item in widths.indices where rows.contains((firstCandidateIndex + item) / count) {
+        let column = (firstCandidateIndex + item) % count
+        columnWidths[column] = max(columnWidths[column], widths[item])
       }
       let total = columnWidths.reduce(0, +) + spacing * CGFloat(count - 1)
       if total <= maximumWidth || count == 1 {
         columnWidths = columnWidths.map { min(max(1, maximumWidth), $0) }
         let placements = widths.indices.map { item in
-          ExpandedGrid.Placement(item: item, row: item / count, column: item % count)
+          ExpandedGrid.Placement(
+            item: item, row: (firstCandidateIndex + item) / count,
+            column: (firstCandidateIndex + item) % count)
         }
         return ExpandedGrid(columnWidths: columnWidths, placements: placements, visibleRows: rows)
       }

@@ -21,10 +21,11 @@ if [[ "${1:-}" == --chinese-phrase-ranking-probe ||
       "${1:-}" == --cold-client-probe ||
       "${1:-}" == --profile-key-matrix-probe ||
       "${1:-}" == --fast-config-reload-probe ||
+      "${1:-}" == --predict-db-lifecycle-probe ||
       "${1:-}" == --live-sync-probe ]]; then
   :
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--chinese-phrase-ranking-probe|--chinese-spelling-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--sentence-capitalization-probe|--fast-config-reload-probe|--live-sync-probe]" >&2
+  echo "usage: $0 [--chinese-phrase-ranking-probe|--chinese-spelling-probe|--mixed-input-probe|--mixed-latency-probe|--warm-session-probe|--cold-client-probe|--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|--sentence-capitalization-probe|--fast-config-reload-probe|--predict-db-lifecycle-probe|--live-sync-probe]" >&2
   exit 64
 fi
 
@@ -253,6 +254,17 @@ if [[ -z "${runtime_probe}" || "${runtime_probe}" == --mixed-input-probe ]]; the
 fi
 end_phase "compile native smoke harnesses"
 
+if [[ -z "${runtime_probe}" || "${runtime_probe}" == --predict-db-lifecycle-probe ]]; then
+  begin_phase "build PredictDb activation fixtures"
+  for fixture in a b; do
+    if [[ "${fixture}" == a ]]; then word=alpha; else word=bravo; fi
+    printf 'n/lifecycle\t%s\t1\n' "${word}" | \
+      DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+        librime/dist/bin/build_predict "${scratch}/predict-${fixture}.db"
+  done
+  end_phase "build PredictDb activation fixtures"
+fi
+
 begin_phase "run native candidate matrix"
 # Candidate/commit checks intentionally learn phrases. The separate learning
 # policy test starts from deployed settings, before those selections accumulate.
@@ -265,6 +277,9 @@ fi
 smoke_args=("${shared}" "${user}")
 if [[ -n "${runtime_probe}" ]]; then
   smoke_args+=("${runtime_probe}")
+  if [[ "${runtime_probe}" == --predict-db-lifecycle-probe ]]; then
+    smoke_args+=("${scratch}/predict-a.db" "${scratch}/predict-b.db")
+  fi
 fi
 if ! DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     "${scratch}/rime-smoke" "${smoke_args[@]}" \
@@ -332,6 +347,9 @@ if [[ -n "${runtime_probe}" ]]; then
     echo "Linnet native Rime candidate forget focus: PASS"
   elif [[ "${runtime_probe}" == --raw-editing-probe ]]; then
     echo "Linnet native Rime raw spelling navigation: PASS"
+  elif [[ "${runtime_probe}" == --predict-db-lifecycle-probe ]]; then
+    test "$(LC_ALL=C grep -a -F -c 'loading predict db:' "${scratch}/stderr")" -eq 3
+    echo "Linnet native Rime same-process PredictDb activation: PASS"
   elif [[ "${runtime_probe}" == --sentence-capitalization-probe ]]; then
     echo "Linnet native Rime sentence capitalization: PASS"
   else
@@ -553,5 +571,13 @@ DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
   "${scratch}/rime-smoke" "${shared}" "${lifecycle_user}" \
     --lifecycle-raw-exit-probe
 end_phase "verify lifecycle exits with the F4 switcher"
+
+begin_phase "verify same-process PredictDb activation and rollback"
+DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+  "${scratch}/rime-smoke" "${shared}" "${lifecycle_user}" \
+    --predict-db-lifecycle-probe "${scratch}/predict-a.db" "${scratch}/predict-b.db" \
+    2>"${scratch}/predict-lifecycle-stderr"
+test "$(LC_ALL=C grep -a -F -c 'loading predict db:' "${scratch}/predict-lifecycle-stderr")" -eq 3
+end_phase "verify same-process PredictDb activation and rollback"
 
 echo "Linnet native Rime runtime: PASS (Chinese, 8-profile Smart English, direct Shift, Caps Lock raw, learning, graphical English and input settings)"

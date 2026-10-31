@@ -45,6 +45,12 @@ App 完整性事实。Core 在写入前核对已公布的精确差分基线；Co
 `archive` 预检，但它不是公开候选，也不能上传或授权发布。正式候选的唯一构建和
 签名 owner 是 `.github/workflows/release-ci.yml` 的 macOS GitHub Action。
 
+Action 在签名前将安装器所用 `linnet-pack` 和 `linnet-runtime-inspector` 的
+SHA-256 写入 App 的 `VERSION.json`，由 App 的 CMS 签名封印。包验证核对所有安装器副本
+与该封印一致，不要求维护者用另一版本编译器重建出逐字节相同的工具。
+固定旧包摘要与 revision 的历史基线验证仍接受发布时未含此字段的 metadata；
+当锁定基线全部迁移后，才可移除这条历史读取路径。
+
 本地预检使用 Ares-X 共用的自签证书。首次配置新机器时，将 P12 与其单行密码放在以下仓库外路径，均由当前用户拥有，权限为 `0600`：
 
 - `~/Library/Application Support/Ares-X Signing/code-signing.p12`

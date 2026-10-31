@@ -22,7 +22,7 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 **[Download the latest Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-Stable: **[0.1.30 (112)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.30)**, fixing Smart English sentence capitalization and preserving it while correcting the first word. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
+Stable: **[0.1.31 (113)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.31)**, fixing numeric periods in Chinese mode, expanded candidate navigation and settings interactions, and improving responsiveness during live appearance changes. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
 
 Users on 0.1.27 and later can download and apply Core updates in **Settings → Data & Updates → Stable**. Because the signing certificate changed, versions 0.1.26 and earlier must first install the latest complete `Linnet.pkg` manually over the existing app. Do not uninstall.
 
@@ -301,6 +301,7 @@ Input processing is local, with no accounts, telemetry, ads or analytics SDK, an
 
 - Automatic sync checks at most once an hour; immediate sync is also available. You can keep typing, with no need to have used both modes or keep a document open.
 - Settings reports local merge/export times and failure or retry status. Local completion does not mean another Mac has received the data; iCloud Drive handles delivery.
+- Clearing learning affects only the selected categories on this Mac. With learning sync enabled, records retained on other Macs may return during a later sync.
 - **Data & Updates** supports uploading and reviewing incremental recovery backups, viewing transaction recovery records, and importing/exporting data. Imports require confirmation and first create a local backup. With no usable cloud history, uploads add a full backup without deleting existing backups.
 - Other Rime/Hallelujah data is read only when you explicitly import it. Exported files may contain personal data; you manage their storage and deletion.
 

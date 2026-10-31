@@ -80,6 +80,23 @@ struct LinnetRimeTraitValues {
   }
 }
 
+/// Schema availability consumes configured IDs. Rime's schema-list API also
+/// opens every schema to build display names, which are not readiness checks.
+func rimeConfiguredSchemaIDs(using api: RimeApi_stdbool) -> Set<String> {
+  var config = RimeConfig()
+  guard api.config_open("default", &config) else { return [] }
+  defer { _ = api.config_close(&config) }
+  var identifiers = Set<String>()
+  for index in 0..<api.config_list_size(&config, "schema_list") {
+    let path = "schema_list/@\(index)/schema"
+    guard let identifier = path.withCString({ api.config_get_cstring(&config, $0) }),
+      identifier.pointee != 0
+    else { continue }
+    identifiers.insert(String(cString: identifier))
+  }
+  return identifiers
+}
+
 infix operator ?= : AssignmentPrecedence
 // swiftlint:disable:next function_name_whitespace
 func ?=<T>(left: inout T, right: T?) {

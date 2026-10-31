@@ -272,7 +272,7 @@ debug: $(DEPS_CHECK) verify-rime-binaries
 	mkdir -p $(DERIVED_DATA_PATH)
 	$(call build-linnet-app,Debug)
 
-community: release
+community: release linnet-pack-tool linnet-runtime-inspector
 	$(call finalize-linnet-candidate)
 
 community-verified: community
@@ -284,7 +284,7 @@ community-verified: community
 # wraps the component with visible license, upstream notice and privacy pages.
 # Creation and static expansion do not install, launch or register the App.
 # Runtime acceptance is explicit (community-verified), not a packaging side effect.
-package: community linnet-pack-tool linnet-runtime-inspector
+package: community
 	mkdir -p "$(ARCHIVE_OUTPUT_DIR)"
 	LINNET_RELEASE_TOOL="$(abspath $(LINNET_PACK_TOOL))" \
 	SOURCE_DATE_EPOCH=1704067200 bash package/make_package \

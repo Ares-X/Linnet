@@ -2675,6 +2675,77 @@ void ExpectSharedPredictIdentity(RimeSessionId session_id) {
                "PASS\n";
 }
 
+void ExpectPredictDbRuntimeLifecycle(RimeApi_stdbool* api,
+                                     RimeTraits* traits,
+                                     const std::string& fixture_a,
+                                     const std::string& fixture_b) {
+  const auto active_db =
+      std::filesystem::path(traits->shared_data_dir) / "linnet.smart.db";
+  const auto replace_active_db = [&](const std::string& fixture) {
+    // Rename replaces the Active file identity without writing through an
+    // existing runtime's read-only mapping, just like a language activation.
+    auto candidate = active_db;
+    candidate += ".candidate";
+    std::filesystem::copy_file(
+        fixture, candidate, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::rename(candidate, active_db);
+  };
+  const auto expect_entry = [](const rime::an<rime::PredictEngine>& engine,
+                               const std::string& expected) {
+    std::vector<rime::predict::RawEntry> entries;
+    if (!engine || !engine->LookupCopy("n/lifecycle", &entries) ||
+        entries.size() != 1 || entries.front().text != expected) {
+      Fail("runtime PredictDb did not read the active " + expected + " fixture");
+    }
+  };
+
+  // Keep one process and one Active pathname for upgrade, rollback and repair.
+  // Version metadata does not own this resource: each initialized runtime must
+  // read the bytes active at its own setup/init boundary.
+  for (const auto& generation :
+       std::array<std::pair<std::string, std::string>, 3>{{
+           {fixture_a, "alpha"}, {fixture_b, "bravo"}, {fixture_a, "alpha"},
+       }}) {
+    replace_active_db(generation.first);
+    api->setup(traits);
+    api->initialize(nullptr);
+    rime::weak<rime::PredictEngineComponent> retired_factory;
+    rime::weak<rime::PredictEngine> retired_engine;
+    {
+      const RimeSessionId english = CreateSchemaSession(api, "linnet_en");
+      ExpectSharedPredictIdentity(english);
+      const auto factory = rime::PredictEngineComponent::Shared();
+      const auto english_session =
+          rime::Service::instance().GetSession(english);
+      const auto engine = factory->GetInstance(
+          rime::Ticket(english_session->schema(), "linnet_english_translator"));
+      expect_entry(engine, generation.second);
+      retired_factory = factory;
+      retired_engine = engine;
+
+      // A second schema must reuse the mapping already opened in this runtime,
+      // even if Active has changed. There is no per-session or per-key reload.
+      replace_active_db(generation.second == "alpha" ? fixture_b : fixture_a);
+      const RimeSessionId chinese = CreateSchemaSession(api, "linnet_zh_pinyin");
+      const auto chinese_session =
+          rime::Service::instance().GetSession(chinese);
+      const auto chinese_engine = factory->GetInstance(
+          rime::Ticket(chinese_session->schema(), "predictor"));
+      expect_entry(chinese_engine, generation.second);
+      expect_entry(engine, generation.second);
+      api->destroy_session(chinese);
+      api->destroy_session(english);
+    }
+    api->finalize();
+    if (!retired_factory.expired() || !retired_engine.expired() ||
+        rime::PredictEngineComponent::Shared()) {
+      Fail("Predict factory or engine survived its finalized runtime");
+    }
+  }
+  std::cout << "rime_smoke_test: same-process PredictDb A/B/A activation and "
+               "within-runtime sharing: PASS\n";
+}
+
 std::vector<std::string> LoadReviewedLowercaseNewWords() {
   constexpr char kPath[] =
       "data/linnet/linnet_en_zh_new_words.tsv";
@@ -6706,7 +6777,32 @@ void ExpectFormalProfileKeyMatrix(RimeApi_stdbool* api) {
       }
     }
 
-    for (const std::string& numeric : {"1,000", "3.14", "12:30"}) {
+    // Numeric periods commit on the same key, including the final period;
+    // waiting for the next digit would reorder or lose decimal separators.
+    const std::array<std::pair<const char*, const char*>, 7> chinese_numbers = {{
+        {"123.456", "123.456"},
+        {"123.456.789", "123.456.789"},
+        {"123.", "123."},
+        {"123..456", "123.。456"},
+        {"123 .", "123 。"},
+        {"1,000", "1，000"},
+        {"12:30", "12：30"},
+    }};
+    for (const auto& [input, expected] : chinese_numbers) {
+      const RimeSessionId numeric_session =
+          CreateSchemaSession(api, schema_id.c_str());
+      const std::string actual = SimulateHostText(api, numeric_session, input);
+      const auto after = ReadKeyInteractionSnapshot(api, numeric_session);
+      api->destroy_session(numeric_session);
+      if (actual != expected || !after.input.empty() ||
+          after.composition_size != 0 || !after.candidates.empty()) {
+        Fail(schema_id + " Chinese-punctuation numeric input '" + input +
+             "' produced '" + actual + "' instead of '" + expected + "'");
+      }
+    }
+
+    for (const std::string& numeric :
+         {"1,000", "3.14", "12:30", "123.456.789", "123."}) {
       const RimeSessionId numeric_session =
           CreateSchemaSession(api, schema_id.c_str());
       api->set_option(numeric_session, "ascii_punct", true);
@@ -7538,7 +7634,7 @@ void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
     Fail("a host document start ignored the disabled capitalization option");
   }
   api->destroy_session(disabled_document_start);
-  for (const auto& prefix : {". ", "{Return}"}) {
+  for (const auto& prefix : {". ", "{Return}", "\"", "(", ".\" ", ".) "}) {
     const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
     api->simulate_key_sequence(session, prefix);
     if (SelectNormalizedCandidate(api, session, "noted", "noted") != "noted") {
@@ -7581,6 +7677,79 @@ void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
     if (ContinueAndSelectNormalizedCandidate(api, session, "noted", "noted") !=
         "noted") {
       Fail("host document start leaked into a following word");
+    }
+    api->destroy_session(session);
+  }
+  // A host report occurs before the opening mark at document position zero.
+  // Subsequent host positions are unknown to Rime; the paired marks must
+  // preserve only the boundary already observed, through the native key path.
+  for (const auto& prefix : {"\"", "'", "(", "[", "{", "\"(",
+                              ".\" ", ".) ", "!'] ", "?}) "}) {
+    const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+    api->set_property(session, kHostDocumentStartProperty, "1");
+    for (const char punctuation : std::string(prefix)) {
+      if (api->process_key(session, punctuation, 0)) {
+        Fail("paired sentence punctuation did not reach the host: " +
+             std::string(prefix));
+      }
+      api->set_property(session, kHostDocumentStartProperty, "");
+    }
+    ExpectNoCommit(api, session, "paired sentence punctuation");
+    ContinueInput(api, session, "noted");
+    const auto candidates = Candidates(api, session);
+    if (candidates.empty() || candidates.front().text != "Noted" ||
+        !api->process_key(session, XK_space, 0) ||
+        TakeCommit(api, session) != "Noted ") {
+      Fail("paired punctuation lost a known sentence start: " +
+           std::string(prefix));
+    }
+    api->destroy_session(session);
+  }
+  for (const auto& prefix : {"\"", "'", "(", "[", "{", ")", "]", "}"}) {
+    for (const bool previous_word : {false, true}) {
+      const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+      if (previous_word &&
+          SelectNormalizedCandidate(api, session, "noted", "noted") != "noted") {
+        Fail("could not prepare paired punctuation within a sentence");
+      }
+      if (api->process_key(session, prefix[0], 0)) {
+        Fail("non-initial paired punctuation did not reach the host");
+      }
+      ExpectSessionPropertyAbsent(api, session, kSentenceBoundaryProperty,
+                                  "paired mark without a known sentence start");
+      ContinueInput(api, session, "noted");
+      NormalizedCandidateIndex(api, session, "noted");
+      api->destroy_session(session);
+    }
+  }
+  for (const auto& fragment :
+       std::vector<std::pair<char, std::string>>{{'"', ".\" "},
+                                                {'(', ".) "}}) {
+    const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+    api->set_property(session, kHostDocumentStartProperty, "1");
+    api->process_key(session, fragment.first, 0);
+    if (ContinueAndSelectNormalizedCandidate(api, session, "noted", "Noted") !=
+        "Noted") {
+      Fail("could not commit a sentence inside paired punctuation");
+    }
+    for (const char punctuation : fragment.second) {
+      if (api->process_key(session, punctuation, 0)) {
+        Fail("sentence-closing paired punctuation did not reach the host");
+      }
+    }
+    if (ContinueAndSelectNormalizedCandidate(api, session, "noted", "Noted") !=
+        "Noted") {
+      Fail("a closed sentence fragment lost the following sentence start");
+    }
+    api->destroy_session(session);
+  }
+  for (const auto& spelling : {"Noted", "NOTED"}) {
+    const RimeSessionId session = CreateSchemaSession(api, "linnet_en");
+    api->set_property(session, kHostDocumentStartProperty, "1");
+    api->process_key(session, '(', 0);
+    if (ContinueAndSelectNormalizedCandidate(api, session, spelling, spelling) !=
+        spelling) {
+      Fail("paired punctuation changed explicit capitalization");
     }
     api->destroy_session(session);
   }
@@ -7759,6 +7928,8 @@ void ExpectSentenceCapitalization(RimeApi_stdbool* api) {
 }
 
 int main(int argc, char** argv) {
+  const bool predict_db_lifecycle_probe =
+      argc == 6 && std::strcmp(argv[3], "--predict-db-lifecycle-probe") == 0;
   const bool sentence_capitalization_probe =
       argc == 4 && std::strcmp(argv[3], "--sentence-capitalization-probe") == 0;
   const bool caps_lock_probe =
@@ -7808,7 +7979,7 @@ int main(int argc, char** argv) {
       argc == 4 && std::strcmp(argv[3], "--warm-session-probe") == 0;
   const bool cold_client_probe =
       argc == 4 && std::strcmp(argv[3], "--cold-client-probe") == 0;
-  if (argc != 3 && !sentence_capitalization_probe && !input_options_probe && !input_switches_probe &&
+  if (argc != 3 && !predict_db_lifecycle_probe && !sentence_capitalization_probe && !input_options_probe && !input_switches_probe &&
       !caps_lock_probe &&
       !settings_off_probe && !learning_off_probe && !candidate_forget_probe && !raw_editing_probe &&
       !profile_key_matrix_probe &&
@@ -7820,7 +7991,7 @@ int main(int argc, char** argv) {
       !mixed_learning_off_probe &&
       !mixed_latency_probe && !warm_session_probe && !cold_client_probe && !live_sync_probe) {
     Fail("usage: rime_smoke_test SHARED_DATA_DIR USER_DATA_DIR "
-         "[--sentence-capitalization-probe|"
+         "[--predict-db-lifecycle-probe DB_A DB_B|--sentence-capitalization-probe|"
          "--input-options-probe|--input-switches-probe|--settings-off-probe|--learning-off-probe|"
          "--profile-key-matrix-probe|--candidate-forget-probe|--raw-editing-probe|"
          "--caps-lock-probe true|false|"
@@ -7861,6 +8032,11 @@ int main(int argc, char** argv) {
   traits.app_name = "rime.linnet-tests";
   traits.min_log_level = 2;
   traits.log_dir = "";
+
+  if (predict_db_lifecycle_probe) {
+    ExpectPredictDbRuntimeLifecycle(api, &traits, argv[4], argv[5]);
+    return 0;
+  }
 
   api->setup(&traits);
   api->initialize(nullptr);

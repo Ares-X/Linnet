@@ -7,6 +7,10 @@
 
 import Carbon
 import InputMethodKit
+import os
+
+private let inputPerformanceLog = OSLog(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet", category: "Performance")
 
 final class SquirrelInputController: IMKInputController {
   static var unknownAppCount: UInt = 0
@@ -29,6 +33,16 @@ final class SquirrelInputController: IMKInputController {
     guard let event,
       let senderClient = sender as? IMKTextInput
     else { return false }
+    let traceStart = event.type == .keyDown && inputPerformanceLog.isEnabled(type: .debug)
+      ? ProcessInfo.processInfo.systemUptime : nil
+    defer {
+      if let traceStart {
+        os_log(.debug, log: inputPerformanceLog,
+          "input event=%{public}.6f age_ms=%{public}.3f duration_ms=%{public}.3f",
+          event.timestamp, (traceStart - event.timestamp) * 1000,
+          (ProcessInfo.processInfo.systemUptime - traceStart) * 1000)
+      }
+    }
     activeClient = senderClient
     // A Settings data transaction can keep this controller alive after
     // cleanup_all_sessions + finalize. Pass input through until Host has

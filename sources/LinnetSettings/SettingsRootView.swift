@@ -73,7 +73,7 @@ struct SettingsRootView: View {
       }
     }
     .confirmationDialog(
-      "Clear selected learning data?",
+      "Clear selected learning data on this Mac?",
       isPresented: presented($pendingClear),
       titleVisibility: .visible
     ) {
@@ -83,9 +83,15 @@ struct SettingsRootView: View {
       }
       Button("Cancel", role: .cancel) { pendingClear = nil }
     } message: {
-      Text(
-        "Personal words, disabled words, Text Expander, and English interaction settings are preserved. An automatic backup is created first."
+      let localClearMessage = Text(
+        "Only the selected learning data on this Mac is cleared. Personal words, disabled words, Text Expander, and English interaction settings are preserved. An automatic backup is created first."
       )
+      if model.cloudSyncEnabled {
+        localClearMessage + Text("\n\n")
+          + Text("Records kept on other Macs may return during the next learning sync.")
+      } else {
+        localClearMessage
+      }
     }
     .confirmationDialog(
       "Replace categories from this portable archive?",

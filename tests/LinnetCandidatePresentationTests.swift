@@ -576,6 +576,13 @@ struct LinnetCandidatePresentationTests {
       columns: 3, spacing: 8, maximumWidth: 600, visibleRows: 0..<2)
     require(compact.columnWidths == [35, 80, 50],
       "columns must fit their own visible words, not the global or hidden longest word")
+    for count in [1, 2] {
+      let shortList = LinnetCandidatePresentation.expandedGrid(
+        widths: Array(repeating: 40, count: count), columns: 5, spacing: 8,
+        maximumWidth: 600, visibleRows: 0..<3)
+      require(shortList.columnWidths == Array(repeating: 40, count: count),
+        "a complete short candidate list acquired empty column guides")
+    }
   }
 
   private static func require(_ condition: @autoclosure () -> Bool, _ message: String) {

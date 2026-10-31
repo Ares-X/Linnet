@@ -241,6 +241,12 @@ private extension LinnetCloudRecoveryArchive {
       guard try LinnetDirectoryDelta.digest(output) == delta.targetDigest else {
         throw Failure.invalid("delta target")
       }
+      // Only reconstructed generations belong to this candidate workspace.
+      // Keep the cloud base and the previous generation until its successor
+      // has been fully applied and verified.
+      if current != base {
+        try FileManager.default.removeItem(at: current)
+      }
       current = output
     }
     guard try LinnetDirectoryDelta.digest(current) == head.targetDigest else {

@@ -28,6 +28,9 @@ extension SquirrelInputController {
     let isLastPage: Bool
     let canExpand: Bool
     let isExpanded: Bool
+    /// Exclusive absolute end observed by the builder; nil means the bounded
+    /// iterator has not established the end of Rime's candidate list.
+    let candidateListEnd: Int?
   }
 
   func selectCandidate(absoluteIndex: Int) -> Bool {
