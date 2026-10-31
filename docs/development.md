@@ -247,6 +247,11 @@ release identity。定时 GitHub workflow 只报告候选更新，不得自动�
 Periphery 可单独运行 `scripts/run_periphery.sh`，作为代码清理建议。
 发布接受项目的 SSH 或 HTTPS remote，授权现有产物不要求本地保留候选标签；
 源码 revision 与产物摘要仍须一致。
+修改安装器工具的身份或验证边界后，用正式候选运行
+`tests/verify_installer_helper_binding.rb /absolute/candidate/Linnet.pkg`。
+它验证正常重打包仍可接受，以及 Core/Profile 工具被篡改后会拒绝；不安装或执行包内工具，
+通过后清理自己的夹具。
+
 Settings UI 按需在专用测试桌面运行 `scripts/release-control verify-settings-ui`。
 独立 bundle ID、数据目录和 `CFFIXED_USER_HOME` 不隔离鼠标、键盘、焦点或输入源会话；
 不得在维护者正在使用的桌面运行 XCUITest。
