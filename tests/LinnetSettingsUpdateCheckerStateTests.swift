@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 
@@ -307,6 +308,13 @@ struct LinnetSettingsUpdateCheckerStateTests {
       require(cancelledChecker.coreDownloadState == .failed(core: core),
         "cancelled Core activation lost its failure state")
 
+      if let executable = ProcessInfo.processInfo.environment["LINNET_CORE_UPDATE_HOST_FIXTURE"] {
+        try await verifyCoreHostRecovery(
+          executable: URL(fileURLWithPath: executable), installed: installed, core: core)
+      } else {
+        print("Core Host subprocess recovery: NOT_EXERCISED (fixture executable not supplied)")
+      }
+
       let cancelledInstalledChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: RuntimeRequester(
@@ -486,8 +494,264 @@ struct LinnetSettingsUpdateCheckerStateTests {
     let settings: Bundle
   }
 
+  @MainActor private static func verifyCoreHostRecovery(
+    executable: URL,
+    installed: LinnetSettingsContract.ProductIdentity,
+    core: LinnetDataChannel.Core
+  ) async throws {
+    for scenario in HostRecoveryScenario.allCases {
+      let identifier = "io.github.ares-x.LinnetCoreRecoveryFixture.\(UUID().uuidString)"
+      let fixture = try makeBundleFixture(identity: installed, bundleIdentifier: identifier)
+      let app = fixture.root.appending(path: "Linnet.app")
+      let lease = FixtureHostLease(app: app, identifier: identifier)
+      defer {
+        lease.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+      }
+      let executableURL = app.appending(path: "Contents/MacOS/Linnet")
+      try FileManager.default.createDirectory(
+        at: executableURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try FileManager.default.copyItem(at: executable, to: executableURL)
+      let originalAppDigest = try LinnetDirectoryDelta.digest(app)
+      let configuration = NSWorkspace.OpenConfiguration()
+      configuration.activates = false
+      configuration.addsToRecentItems = false
+      configuration.allowsRunningApplicationSubstitution = false
+      let oldHost: NSRunningApplication = try await withCheckedThrowingContinuation {
+        continuation in
+        NSWorkspace.shared.openApplication(at: app, configuration: configuration) { app, error in
+          if let error { continuation.resume(throwing: error) }
+          else if let app { continuation.resume(returning: app) }
+          else { continuation.resume(throwing: FixtureFailure.invalidBundle) }
+        }
+      }
+      lease.openedPID = oldHost.processIdentifier
+      let requester = ProcessRuntimeRequester(
+        app: app, identifier: identifier, oldHost: oldHost, scenario: scenario)
+      try await waitForFixture("fixture Host did not report its loaded identity", attempts: 500) {
+        requester.loadedIdentity() == installed
+      }
+      let prepared = LinnetPreparedCoreUpdate(
+        core: core, baseIdentity: installed, installedApp: app,
+        stagingRoot: fixture.root.appending(path: "staging"),
+        candidateApp: fixture.root.appending(path: "staging/Linnet.payload"),
+        baseSHA256: "unused", targetSHA256: "unused")
+      let originalVersion = try Data(contentsOf: app.appending(
+        path: "Contents/Resources/LinnetRelease/VERSION.json"))
+      let installer = FailingExchangeInstaller(
+        prepared: prepared, oldHost: oldHost, executable: executableURL, scenario: scenario)
+      let checker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: requester,
+        coreDownloader: StubCoreDownloader(destination: fixture.root.appending(path: "Core.linnetcore")),
+        coreInstaller: installer)
+      checker.refreshRuntime()
+      try await waitForFixture("fixture Host was not current") {
+        checker.runtimeVersionState == .current(installed)
+      }
+      checker.downloadCoreUpdate(core, source: .direct)
+      try await waitForFixture("fixture Core was not ready") {
+        checker.coreDownloadState == .ready(core: core, update: prepared)
+      }
+      checker.applyDownloadedCoreUpdate()
+      try await waitForFixture("fixture activation did not reach its terminal state", attempts: 1500) {
+        !checker.activationInProgress
+      }
+      let expected: LinnetSettingsUpdateChecker.CoreDownloadState =
+        scenario == .restartFailure ? .recoveryRequired(core: core)
+        : scenario == .exchangeFailure || scenario == .rollback ? .restored(core: core)
+        : .failed(core: core)
+      if scenario == .rejected {
+        try fixtureRequire(checker.coreDownloadState == .blocked(
+          core: core, update: prepared, issue: .inputSourceActive), "fixture rejection was lost")
+      } else {
+        try fixtureRequire(checker.coreDownloadState == expected, "fixture recovery lost its failure state")
+      }
+      let exits = scenario == .exchangeFailure || scenario == .restartFailure || scenario == .rollback
+      try fixtureRequire(oldHost.isTerminated == exits, "activation did not preserve the expected real Host exit")
+      try fixtureRequire(installer.exchangeCount == (scenario == .rollback ? 2 : exits ? 1 : 0),
+        "exchange ran before a confirmed exit, or rollback was omitted")
+      try fixtureRequire(requester.launchCount() == (scenario == .exchangeFailure || scenario == .rollback ? 2 : 1),
+        "old Host was not restarted exactly once, or a running Host was duplicated")
+      let restoredVersion = try Data(contentsOf: app.appending(
+        path: "Contents/Resources/LinnetRelease/VERSION.json"))
+      try fixtureRequire(restoredVersion == originalVersion,
+        "pre-swap failure or rollback changed the original App identity")
+      if scenario != .restartFailure {
+        let restoredAppDigest = try LinnetDirectoryDelta.digest(app)
+        try fixtureRequire(restoredAppDigest == originalAppDigest,
+          "pre-swap failure or rollback changed the original App bytes")
+      }
+      if scenario == .exchangeFailure || scenario == .rollback {
+        try await waitForFixture("restarted fixture Host did not pass identity/health verification") {
+          checker.runtimeVersionState == .current(installed)
+        }
+        try fixtureRequire(requester.loadedIdentity() == installed, "restart inferred identity from installed files")
+      }
+      print("Core Host subprocess recovery: PASS \(scenario)")
+    }
+  }
+
+  // Keep the launch PID and the fixture's own launch records. Bundle URLs
+  // include a directory slash that constructed URLs may omit; compare canonical
+  // paths so that URL representation cannot silently omit a running process.
+  @MainActor private final class FixtureHostLease {
+    let app: URL
+    let identifier: String
+    var openedPID: pid_t?
+
+    init(app: URL, identifier: String) {
+      self.app = app.resolvingSymlinksInPath()
+      self.identifier = identifier
+    }
+
+    func close() {
+      var pids = Set<pid_t>()
+      if let openedPID { pids.insert(openedPID) }
+      let record = app.deletingLastPathComponent().appending(path: "host-launches.jsonl")
+      if let data = try? Data(contentsOf: record) {
+        for line in data.split(separator: 0x0a) {
+          guard let launch = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+            let pid = launch["pid"] as? Int32
+          else { require(false, "invalid fixture Host launch record"); return }
+          pids.insert(pid)
+        }
+      }
+      for pid in pids {
+        guard pid > 0 else {
+          require(false, "invalid fixture Host PID; refusing process-group signaling")
+          return
+        }
+        if kill(pid, 0) == -1 && errno == ESRCH { continue }
+        let process = NSRunningApplication(processIdentifier: pid)
+        guard let process,
+          process.bundleIdentifier == identifier,
+          process.bundleURL?.resolvingSymlinksInPath().path == app.path,
+          process.executableURL?.resolvingSymlinksInPath().path
+            == app.appending(path: "Contents/MacOS/Linnet").path
+        else {
+          require(false, "fixture Host ownership changed before cleanup: pid=\(pid) "
+            + "bundle=\(process?.bundleIdentifier ?? "nil") "
+            + "app=\(process?.bundleURL?.path ?? "nil") expected=\(app.path) "
+            + "executable=\(process?.executableURL?.path ?? "nil")")
+          return
+        }
+        require(kill(pid, SIGTERM) == 0 || errno == ESRCH, "fixture Host refused SIGTERM")
+        // Observe OS process exit, independent of main-run-loop AppKit updates.
+        for _ in 0..<300 {
+          if kill(pid, 0) == -1 && errno == ESRCH { break }
+          usleep(10_000)
+        }
+        require(kill(pid, 0) == -1 && errno == ESRCH,
+          "fixture Host remained running after cleanup")
+      }
+      print("Core Host fixture cleanup: PASS (\(pids.count) launched PIDs confirmed exited)")
+    }
+  }
+
+  private enum HostRecoveryScenario: CaseIterable {
+    case exchangeFailure, restartFailure, rollback, rejected, timeout, cancelled
+  }
+
+  private final class ProcessRuntimeRequester: LinnetSettingsTransactionRequesting,
+    @unchecked Sendable
+  {
+    let app: URL
+    let identifier: String
+    let oldHost: NSRunningApplication
+    let scenario: HostRecoveryScenario
+
+    init(app: URL, identifier: String, oldHost: NSRunningApplication, scenario: HostRecoveryScenario) {
+      self.app = app
+      self.identifier = identifier
+      self.oldHost = oldHost
+      self.scenario = scenario
+    }
+
+    private func launches() -> [[String: Any]] {
+      guard let data = try? Data(contentsOf: app.deletingLastPathComponent()
+        .appending(path: "host-launches.jsonl")) else { return [] }
+      return data.split(separator: 0x0a).compactMap {
+        (try? JSONSerialization.jsonObject(with: Data($0))) as? [String: Any]
+      }
+    }
+
+    func launchCount() -> Int { launches().count }
+
+    func loadedIdentity() -> LinnetSettingsContract.ProductIdentity? {
+      let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+      guard let launch = launches().last,
+        let pid = launch["pid"] as? Int32,
+        running.contains(where: { $0.processIdentifier == pid && !$0.isTerminated }),
+        let version = launch["version"] as? String,
+        let buildText = launch["build"] as? String, let build = UInt64(buildText),
+        let source = launch["source"] as? [String: Any],
+        let revision = source["candidate_revision"] as? String
+      else { return nil }
+      return .init(version: version, build: build, revision: revision)
+    }
+
+    func request(
+      _ request: LinnetSettingsContract.DataRequest,
+      timeout _: TimeInterval,
+      onProgress _: @escaping @Sendable (LinnetSettingsContract.RuntimeReply) -> Void
+    ) async throws -> LinnetSettingsContract.RuntimeReply {
+      if request.command == .diagnose {
+        return .init(transactionID: request.transactionID, status: .running,
+          code: .diagnosticsReady, detail: "Fixture loaded-process diagnostics",
+          health: loadedIdentity().map { LinnetSettingsUpdateCheckerStateTests.health(productIdentity: $0) })
+      }
+      if scenario == .cancelled { throw CancellationError() }
+      if scenario == .rejected {
+        return .init(transactionID: request.transactionID, status: .rejected,
+          code: .coreActivationInputSourceActive, detail: "Fixture retained Host", health: nil)
+      }
+      if scenario != .timeout {
+        try fixtureRequire(oldHost.terminate(), "fixture Host refused the accepted exit")
+      }
+      return .init(transactionID: request.transactionID, status: .terminating,
+        code: .coreActivationAccepted, detail: "Fixture accepted exit", health: nil)
+    }
+  }
+
+  private final class FailingExchangeInstaller: LinnetCoreUpdateInstalling, @unchecked Sendable {
+    let prepared: LinnetPreparedCoreUpdate
+    let oldHost: NSRunningApplication
+    let executable: URL
+    let scenario: HostRecoveryScenario
+    private let lock = NSLock()
+    private var exchanges = 0
+    var exchangeCount: Int { lock.withLock { exchanges } }
+
+    init(prepared: LinnetPreparedCoreUpdate, oldHost: NSRunningApplication,
+      executable: URL, scenario: HostRecoveryScenario) {
+      self.prepared = prepared
+      self.oldHost = oldHost
+      self.executable = executable
+      self.scenario = scenario
+    }
+
+    func prepare(_ core: LinnetDataChannel.Core, artifact: URL, installedApp: URL)
+      async throws -> LinnetPreparedCoreUpdate { prepared }
+
+    func exchange(_ update: LinnetPreparedCoreUpdate) async throws {
+      try fixtureRequire(oldHost.isTerminated, "exchange did not wait for the actual old Host process exit")
+      let count = lock.withLock { exchanges += 1; return exchanges }
+      let savedExecutable = executable.appendingPathExtension("saved")
+      if scenario == .restartFailure || (scenario == .rollback && count == 1) {
+        try FileManager.default.moveItem(at: executable, to: savedExecutable)
+      } else if scenario == .rollback {
+        try FileManager.default.moveItem(at: savedExecutable, to: executable)
+      }
+      if scenario != .rollback { throw FixtureFailure.exchangeFailed }
+    }
+
+    func discard(_ update: LinnetPreparedCoreUpdate) async { }
+  }
+
   private static func makeBundleFixture(
-    identity: LinnetSettingsContract.ProductIdentity
+    identity: LinnetSettingsContract.ProductIdentity,
+    bundleIdentifier: String = "io.github.ares-x.inputmethod.Linnet"
   ) throws -> BundleFixture {
     let root = LinnetTestScratch.directory.appending(
       path: "LinnetSettingsUpdateCheckerTests-\(UUID().uuidString)",
@@ -501,9 +765,10 @@ struct LinnetSettingsUpdateCheckerStateTests {
       values: [
         "CFBundleDisplayName": "Linnet",
         "CFBundleExecutable": "Linnet",
-        "CFBundleIdentifier": "io.github.ares-x.inputmethod.Linnet",
+        "CFBundleIdentifier": bundleIdentifier,
         "CFBundleName": "Linnet",
         "CFBundlePackageType": "APPL",
+        "LSUIElement": true,
         "CFBundleShortVersionString": identity.version,
         "CFBundleVersion": String(identity.build),
         "InputMethodConnectionName": "Linnet_Test_Connection",
@@ -514,7 +779,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
       values: [
         "CFBundleDisplayName": "Linnet Settings",
         "CFBundleExecutable": "Settings",
-        "CFBundleIdentifier": "io.github.ares-x.inputmethod.Linnet.settings",
+        "CFBundleIdentifier": "\(bundleIdentifier).settings",
         "CFBundleName": "Settings",
         "CFBundlePackageType": "APPL",
       ]
@@ -546,9 +811,10 @@ struct LinnetSettingsUpdateCheckerStateTests {
 
   @MainActor private static func waitUntil(
     _ message: String,
+    attempts: Int = 100,
     condition: () -> Bool
   ) async {
-    for _ in 0..<100 {
+    for _ in 0..<attempts {
       if condition() { return }
       try? await Task.sleep(nanoseconds: 10_000_000)
     }
@@ -595,5 +861,24 @@ struct LinnetSettingsUpdateCheckerStateTests {
     exit(1)
   }
 
-  private enum FixtureFailure: Error { case invalidBundle }
+  @MainActor private static func waitForFixture(
+    _ message: String,
+    attempts: Int = 100,
+    condition: () -> Bool
+  ) async throws {
+    for _ in 0..<attempts {
+      if condition() { return }
+      try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    throw FixtureFailure.assertion(message)
+  }
+
+  private static func fixtureRequire(_ condition: @autoclosure () -> Bool, _ message: String)
+    throws {
+    guard condition() else { throw FixtureFailure.assertion(message) }
+  }
+
+  private enum FixtureFailure: Error {
+    case invalidBundle, exchangeFailed, assertion(String)
+  }
 }

@@ -149,9 +149,12 @@ final class LinnetCandidateGridView: NSView {
   private var placements: [Placement] = []
   private var displayedPlacements: [Placement] = []
   private var columnCount = 0
+  private var fittedColumnCount = 0
   private var itemCount = 0
   private var highlighted = 0
-  private var firstVisibleRow = 0
+  private var firstCandidateIndex = 0
+  private var candidateListEnd: Int?
+  private var firstVisibleCandidateIndex = 0
   private var maximumRows = 3
   private var columnSpacing: CGFloat = 0
   private var rowSpacing: CGFloat = 0
@@ -173,12 +176,15 @@ final class LinnetCandidateGridView: NSView {
     maximumRows: Int,
     lines: [LinnetCandidatePresentation.CandidateLine],
     highlighted: Int,
+    firstCandidateIndex: Int = 0,
+    candidateListEnd: Int?,
     verticalText: Bool,
     columnSpacing: CGFloat,
     rowSpacing: CGFloat
   ) {
-    let columnCount = min(columns, lines.count)
+    let columnCount = columns
     guard columnCount > 0,
+      !lines.isEmpty,
       lines.count <= LinnetCandidatePresentation.maximumExpandedCandidateCount
     else {
       clear()
@@ -191,9 +197,10 @@ final class LinnetCandidateGridView: NSView {
     }
     self.columnCount = columnCount
     self.maximumRows = max(1, maximumRows)
-    if itemCount != lines.count { firstVisibleRow = 0 }
     self.itemCount = lines.count
     self.highlighted = highlighted
+    self.firstCandidateIndex = firstCandidateIndex
+    self.candidateListEnd = candidateListEnd
     self.columnSpacing = max(0, columnSpacing)
     self.rowSpacing = max(0, rowSpacing)
     // macOS keeps a stable label slot: rows without selection keys start
@@ -218,9 +225,12 @@ final class LinnetCandidateGridView: NSView {
   func clear() {
     cellPool.forEach { $0.clear() }
     placements = []
+    fittedColumnCount = 0
     displayedPlacements = []
     itemCount = 0
-    firstVisibleRow = 0
+    firstCandidateIndex = 0
+    candidateListEnd = nil
+    firstVisibleCandidateIndex = 0
     gridSize = .zero
     isHidden = true
     frame = .zero
@@ -236,16 +246,19 @@ final class LinnetCandidateGridView: NSView {
     let layout = LinnetCandidatePresentation.expandedGrid(
       widths: widths, columns: columnCount, spacing: columnSpacing,
       maximumWidth: maximumWidth ?? ((widths.max() ?? 1) * CGFloat(columnCount) + spacing),
-      visibleRows: firstVisibleRow..<(firstVisibleRow + maximumRows), highlighted: highlighted)
+      visibleRows: 0..<maximumRows, highlighted: highlighted,
+      firstCandidateIndex: firstCandidateIndex,
+      firstVisibleCandidateIndex: firstVisibleCandidateIndex)
     let packed = layout.placements
+    fittedColumnCount = layout.columnWidths.count
     let visibleRows = layout.visibleRows
-    firstVisibleRow = visibleRows.lowerBound
+    let firstVisibleRow = visibleRows.lowerBound
+    firstVisibleCandidateIndex = firstVisibleRow * layout.columnWidths.count
     let selectedRow = packed[highlighted].row
     placements = packed
-    let activeItems = packed.filter { $0.row == selectedRow }.map(\.item)
     for placement in packed {
       cellPool[placement.item].displaySelectionLabel(
-        activeItems.firstIndex(of: placement.item).map { $0 + 1 })
+        placement.row == selectedRow ? placement.column + 1 : nil)
     }
     let visible = packed.filter { visibleRows.contains($0.row) }
     displayedPlacements = visible
@@ -276,19 +289,26 @@ final class LinnetCandidateGridView: NSView {
     invalidateIntrinsicContentSize()
   }
 
-  func adjacentItem(from index: Int, up towardPreviousRow: Bool) -> Int? {
+  func adjacentCandidateIndex(from index: Int, up towardPreviousRow: Bool) -> Int? {
     guard let current = placements.first(where: { $0.item == index }) else { return nil }
     let targetRow = current.row + (towardPreviousRow ? -1 : 1)
-    return placements.filter { $0.row == targetRow }.min {
-      abs($0.column - current.column) < abs($1.column - current.column)
-    }?.item
+    let currentAbsolute = firstCandidateIndex + index
+    guard targetRow >= 0 else { return currentAbsolute }
+    let target = targetRow * fittedColumnCount + current.column
+    // The iterator boundary is not the candidate-list boundary. Preserve the
+    // visual column even when its target is outside the bounded snapshot.
+    // Only a known Rime list end can clamp a genuinely short final row.
+    if let candidateListEnd {
+      guard targetRow <= (candidateListEnd - 1) / fittedColumnCount else { return currentAbsolute }
+      return min(target, candidateListEnd - 1)
+    }
+    return target
   }
 
   func itemForSelectionNumber(_ number: Int) -> Int? {
     guard let row = placements.first(where: { $0.item == highlighted })?.row,
       number > 0 else { return nil }
-    let items = placements.filter { $0.row == row }
-    return items.indices.contains(number - 1) ? items[number - 1].item : nil
+    return placements.first { $0.row == row && $0.column == number - 1 }?.item
   }
 
   func geometries(in target: NSView) -> [CellGeometry] {

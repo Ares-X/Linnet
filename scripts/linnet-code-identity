@@ -432,7 +432,7 @@ verify_product() (
       fail_identity "public product does not use the pinned community CMS leaf"
   fi
   metadata_projection="$(ruby -rjson -rdigest -e '
-    path, profile, leaf, product_version, product_build = ARGV
+    path, profile, leaf, product_version, product_build, published_revision = ARGV
     root = File.dirname(path)
     metadata_entries = Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH)
       .reject { |item| %w[. ..].include?(File.basename(item)) }
@@ -445,7 +445,16 @@ verify_product() (
       architecture build channel direct_product_upstreams distribution format
       minimum_macos product sbom_sha256 source upstream_lock_sha256 version
     ]
-    abort "release metadata shape mismatch" unless document.keys.sort == expected_top
+    # Pinned historical packages predate this sealed helper binding. Their
+    # exact package bytes and revision remain required by verify-published.
+    if published_revision.empty? || document.key?("installer_tools_sha256")
+      expected_top << "installer_tools_sha256"
+      helpers = document["installer_tools_sha256"]
+      abort "release Installer helper binding is invalid" unless
+        helpers.is_a?(Hash) && helpers.keys.sort == %w[linnet-pack linnet-runtime-inspector] &&
+        helpers.values.all? { |digest| digest.is_a?(String) && digest.match?(/\A[0-9a-f]{64}\z/) }
+    end
+    abort "release metadata shape mismatch" unless document.keys.sort == expected_top.sort
     abort "release metadata format mismatch" unless document.fetch("format") == 2
     abort "release product identity mismatch" unless
       document.fetch("product") == "Linnet" &&
@@ -492,7 +501,8 @@ verify_product() (
       "candidate_revision" => revision,
     })
   ' "${host_app}/Contents/Resources/LinnetRelease/VERSION.json" \
-    "${signing_profile}" "${expected_leaf}" "${product_version}" "${product_build}")" ||
+    "${signing_profile}" "${expected_leaf}" "${product_version}" "${product_build}" \
+    "${published_revision}")" ||
     fail_identity "signed release metadata is invalid"
   if [[ -n "${published_revision}" ]]; then
     # The caller has pinned the historical package bytes. Verify that signed
@@ -500,11 +510,14 @@ verify_product() (
     [[ "$(printf '%s' "${metadata_projection}" | plutil -extract candidate_revision raw -o - -)" == \
       "${published_revision}" ]] || fail_identity "published App revision differs from its pinned baseline"
   else
+    installer_tools_projection="$(plutil -extract installer_tools_sha256 json -o - \
+      "${host_app}/Contents/Resources/LinnetRelease/VERSION.json")" ||
+      fail_identity "signed Installer helper binding is unavailable"
     "${project_root}/scripts/generate-release-metadata" \
       "${project_root}/upstreams.lock.json" \
       "${verification_scratch}/expected-release-metadata" \
       "${product_version}" "${product_build}" 1704067200 \
-      "${metadata_projection}" >/dev/null ||
+      "${metadata_projection}" "${installer_tools_projection}" >/dev/null ||
       fail_identity "canonical release metadata cannot be projected"
     diff -qr "${verification_scratch}/expected-release-metadata" \
       "${host_app}/Contents/Resources/LinnetRelease" >/dev/null ||

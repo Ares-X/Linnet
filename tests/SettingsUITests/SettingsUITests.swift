@@ -157,6 +157,41 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
+  func testAddingDictionaryRowsRevealsAndFocusesFirstField() throws {
+    let app = try launchSettings()
+    defer { app.terminate() }
+    clickTab("Dictionary", in: app)
+
+    for (addLabel, fieldLabel, prefix) in [
+      ("Add Custom words", "Value", "custom"),
+      ("Add Disabled English words", "word", "disabled"),
+      ("Add Text Expander", "Expansion", "expansion"),
+    ] {
+      // Start with the fixture's existing rows, then grow each section beyond
+      // one viewport. Type through the application without clicking the field.
+      for index in 0..<24 {
+        let add = app.buttons[addLabel]
+        try reveal(add, named: addLabel, in: app)
+        add.click()
+        let fields = app.textFields.matching(NSPredicate(
+          format: "placeholderValue == %@ OR label == %@ OR identifier == %@",
+          fieldLabel, fieldLabel, fieldLabel))
+        let newField = fields.matching(NSPredicate(format: "value == %@", "")).firstMatch
+        XCTAssertTrue(newField.waitForExistence(timeout: 3))
+        let value = "\(prefix)\(index)"
+        app.typeText(value)
+        let edited = fields.matching(NSPredicate(format: "value == %@", value)).firstMatch
+        XCTAssertTrue(
+          edited.waitForExistence(timeout: 3),
+          "Add did not focus the new \(fieldLabel) field for direct keyboard input")
+        XCTAssertTrue(
+          app.scrollViews["settings.page.scroll"].firstMatch.frame.contains(edited.frame),
+          "The new \(fieldLabel) field is outside the visible dictionary viewport")
+      }
+    }
+  }
+
+  @MainActor
   func testAppearanceControlsAndPreviewRemainResponsive() throws {
     let app = try launchSettings()
     defer { app.terminate() }
@@ -434,7 +469,7 @@ final class SettingsUITests: XCTestCase {
       let item = app.menuItems[option]
       XCTAssertTrue(item.waitForExistence(timeout: 3))
       item.click()
-      try cancelConfirmation("Clear selected learning data?", in: app)
+      try cancelConfirmation("Clear selected learning data on this Mac?", in: app)
     }
 
     let importExisting = app.buttons["Import Existing"]

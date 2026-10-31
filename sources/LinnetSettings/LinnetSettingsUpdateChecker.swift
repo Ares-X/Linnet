@@ -206,6 +206,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
       issue: LinnetSettingsContract.CoreActivationBlocker)
     case applied(LinnetSettingsContract.ProductIdentity)
     case failed(core: LinnetDataChannel.Core)
+    case restored(core: LinnetDataChannel.Core)
     case recoveryRequired(core: LinnetDataChannel.Core)
 
     var core: LinnetDataChannel.Core? {
@@ -214,7 +215,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
         nil
       case .downloading(let core, _), .installerPackage(let core, _),
         .ready(let core, _), .applying(let core, _),
-        .blocked(let core, _, _), .failed(let core), .recoveryRequired(let core):
+        .blocked(let core, _, _), .failed(let core), .restored(let core),
+        .recoveryRequired(let core):
         core
       }
     }
@@ -524,6 +526,7 @@ extension LinnetSettingsUpdateChecker {
     coreDownloadState = .applying(core: core, update: update)
     runtimeTask = Task { [weak self] in
       guard let self else { return }
+      var hostExited = false
       var exchanged = false
       do {
         let reply = try await request(.activateCore, timeout: 4)
@@ -537,6 +540,7 @@ extension LinnetSettingsUpdateChecker {
           reply.code == .coreActivationAccepted
         else { throw ActivationFailure.hostRejectedActivation }
         try await awaitHostExit()
+        hostExited = true
         try await coreInstaller.exchange(update)
         exchanged = true
         try await launchCanonicalHost()
@@ -551,6 +555,8 @@ extension LinnetSettingsUpdateChecker {
           NSApp.terminate(nil)
         }
       } catch {
+        linnetUpdateLogger.error(
+          "Core activation failed: \(String(describing: error), privacy: .private)")
         // Recovery must finish even when the activation task was cancelled.
         await Task { @MainActor in
           if exchanged {
@@ -560,12 +566,26 @@ extension LinnetSettingsUpdateChecker {
               try await self.launchCanonicalHost()
               _ = try await self.awaitInstalledHost(identity: update.baseIdentity)
               await self.coreInstaller.discard(update)
-              self.coreDownloadState = .failed(core: core)
+              self.coreDownloadState = .restored(core: core)
             } catch {
+              linnetUpdateLogger.error(
+                "Core rollback failed: \(String(describing: error), privacy: .private)")
               self.coreDownloadState = .recoveryRequired(core: core)
             }
           } else {
-            self.coreDownloadState = .failed(core: core)
+            do {
+              // A failed exchange leaves the old App at the canonical path,
+              // but its Host has already exited to permit that exchange.
+              if hostExited {
+                try await self.launchCanonicalHost()
+                _ = try await self.awaitInstalledHost(identity: update.baseIdentity)
+              }
+              self.coreDownloadState = hostExited ? .restored(core: core) : .failed(core: core)
+            } catch {
+              linnetUpdateLogger.error(
+                "Original Core restart failed: \(String(describing: error), privacy: .private)")
+              self.coreDownloadState = .recoveryRequired(core: core)
+            }
             await self.coreInstaller.discard(update)
           }
           self.runtimeTask = nil

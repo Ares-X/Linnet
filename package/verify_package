@@ -10,7 +10,6 @@ source_core_app="${2:-}"
 edition="${3:-}"
 verification_scope="${4:-}"
 release_tool="${LINNET_RELEASE_TOOL:-}"
-runtime_inspector="${project_root}/build/linnet-runtime-inspector"
 unset LINNET_RELEASE_TOOL
 
 fail_verification() {
@@ -30,10 +29,6 @@ esac
   fail_verification "SOURCE_CORE_APP must be an absolute App bundle"
 [[ "${release_tool}" == /* && -x "${release_tool}" && ! -L "${release_tool}" ]] ||
   fail_verification "LINNET_RELEASE_TOOL must name the verified pack CLI"
-[[ -f "${runtime_inspector}" && ! -L "${runtime_inspector}" &&
-   -x "${runtime_inspector}" ]] ||
-  fail_verification "installed-runtime inspector is unavailable"
-
 for required_tool in bash cmp codesign file find grep installer lipo nm otool pkgutil plutil \
     readlink ruby sed shasum sort stat tr wc xar; do
   command -v "${required_tool}" >/dev/null 2>&1 ||
@@ -93,15 +88,18 @@ for direct_upstream in Squirrel Rime rime-ice Hallelujah Wanxiang; do
     fail_verification "installer notice omits ${direct_upstream}"
 done
 
+source_code_identity="$("${project_root}/scripts/linnet-code-identity" \
+  verify-product "${source_core_app}")" ||
+  fail_verification "source Core App code identity or release metadata is invalid"
 core_version="$(plutil -extract CFBundleShortVersionString raw -o - \
   "${source_core_app}/Contents/Info.plist")"
 core_build="$(plutil -extract CFBundleVersion raw -o - \
   "${source_core_app}/Contents/Info.plist")"
 core_tree_sha256="$("${release_tool}" tree-digest --root "${source_core_app}")" ||
   fail_verification "accepted Core tree identity is unavailable"
-ruby -rjson -rrexml/document -e '
+ruby -rjson -rdigest -rrexml/document -e '
   expanded, edition, core_version, product_build, project, source_app,
-    verification_scope, release_tool, core_tree_sha256 = ARGV
+    verification_scope, core_tree_sha256 = ARGV
   components = edition == "core" ? %w[core] : %w[core chinese english lts extended profile]
   names = {"core" => "Core", "chinese" => "Chinese", "english" => "English",
     "lts" => "LTS", "extended" => "Extended", "profile" => "Profile"}
@@ -255,6 +253,7 @@ ruby -rjson -rrexml/document -e '
 
   version_document = JSON.parse(File.binread(File.join(
     source_app, "Contents/Resources/LinnetRelease/VERSION.json")))
+  installer_tools_sha256 = version_document.fetch("installer_tools_sha256")
   distribution = version_document.fetch("distribution")
   signature = distribution.fetch("application_code_signature")
   candidate_identity = {
@@ -293,13 +292,11 @@ ruby -rjson -rrexml/document -e '
   candidate_identity = JSON.generate(candidate_identity) + "\n"
   identity_helper = File.binread(File.join(
     project, "package/installer-scripts/candidate-app-identity.sh"))
-  runtime_inspector = File.binread(File.join(
-    project, "build/linnet-runtime-inspector"))
   core_scripts = {"candidate-app-identity.json" => [0o644, candidate_identity],
     "candidate-app-identity.sh" => [0o755, identity_helper],
     "candidate-core-version" => [0o644, "#{core_version}\n"],
-    "linnet-pack" => [0o755, File.binread(release_tool)],
-    "linnet-runtime-inspector" => [0o755, runtime_inspector],
+    "linnet-pack" => [0o755, installer_tools_sha256.fetch("linnet-pack")],
+    "linnet-runtime-inspector" => [0o755, installer_tools_sha256.fetch("linnet-runtime-inspector")],
     "install-mode" => [0o644, edition == "core" ? "core-update\n" : "complete\n"],
     "preinstall" => [0o755, File.binread(File.join(project, "package/core-installer-scripts/preinstall"))]}
   if edition == "core"
@@ -315,8 +312,8 @@ ruby -rjson -rrexml/document -e '
       "install-mode" => [0o644, "complete\n"],
       "lifecycle-postinstall" => [0o755,
         File.binread(File.join(project, "package/installer-scripts/postinstall"))],
-      "linnet-pack" => [0o755, File.binread(release_tool)],
-      "linnet-runtime-inspector" => [0o755, runtime_inspector],
+      "linnet-pack" => [0o755, installer_tools_sha256.fetch("linnet-pack")],
+      "linnet-runtime-inspector" => [0o755, installer_tools_sha256.fetch("linnet-runtime-inspector")],
       "postinstall" => [0o755,
         File.binread(File.join(project, "package/installer-scripts/complete-postinstall"))]},
   }
@@ -334,15 +331,21 @@ ruby -rjson -rrexml/document -e '
             (entry.mode & 0o7777) == 0o755
           next
         end
-        abort "unsafe Installer script" unless entry.file? && !entry.symlink? &&
-          (entry.mode & 0o7777) == mode && (bytes.nil? ? entry.size.positive? : File.binread(path) == bytes)
+        abort "unsafe Installer script: #{kind}/#{name}" unless
+          entry.file? && !entry.symlink? && (entry.mode & 0o7777) == mode
+        matches = if %w[linnet-pack linnet-runtime-inspector].include?(name)
+          Digest::SHA256.file(path).hexdigest == bytes
+        else
+          File.binread(path) == bytes
+        end
+        abort "Installer content mismatch: #{kind}/#{name}" unless matches
       end
     else
       abort "data component gained a Scripts entry" if File.exist?(scripts) || File.symlink?(scripts)
     end
   end
 ' "${expanded}" "${edition}" "${core_version}" "${core_build}" "${project_root}" \
-  "${source_core_app}" "${verification_scope}" "${release_tool}" \
+  "${source_core_app}" "${verification_scope}" \
   "${core_tree_sha256}" ||
   fail_verification "canonical Installer metadata contract failed"
 
@@ -372,10 +375,7 @@ fi
   fail_verification "Core SharedSupport is not empty"
 bash -n "${core_component}/Scripts/preinstall"
 bash -n "${core_component}/Scripts/candidate-app-identity.sh"
-cmp -s "${runtime_inspector}" \
-  "${core_component}/Scripts/linnet-runtime-inspector" ||
-  fail_verification "installed-runtime inspector differs from the canonical build tool"
-if otool -L "${runtime_inspector}" | tail -n +2 | awk '{ print $1 }' |
+if otool -L "${core_component}/Scripts/linnet-runtime-inspector" | tail -n +2 | awk '{ print $1 }' |
     grep -Ev '^(/System/Library/|/usr/lib/)'; then
   fail_verification "installed-runtime inspector gained a non-system dependency"
 fi
@@ -406,9 +406,6 @@ payload_tree="$("${release_tool}" tree-digest --root "${payload_core_app}")"
 candidate_revision="${LINNET_CANDIDATE_REVISION:-}"
 [[ "${candidate_revision}" =~ ^[0-9a-f]{40}$ ]] ||
   fail_verification "verification requires LINNET_CANDIDATE_REVISION"
-source_code_identity="$("${project_root}/scripts/linnet-code-identity" \
-  verify-product "${source_core_app}")" ||
-  fail_verification "source Core App code identity or release metadata is invalid"
 payload_code_identity="$("${project_root}/scripts/linnet-code-identity" \
   verify-product "${payload_core_app}")" ||
   fail_verification "packaged Core App code identity or release metadata is invalid"
@@ -512,11 +509,6 @@ if [[ "${edition}" != core ]]; then
   bash -n "${profile_component}/Scripts/postinstall"
   bash -n "${profile_component}/Scripts/lifecycle-postinstall"
   bash -n "${profile_component}/Scripts/candidate-app-identity.sh"
-  cmp -s "${runtime_inspector}" \
-    "${profile_component}/Scripts/linnet-runtime-inspector" ||
-    fail_verification "profile runtime inspector differs from the canonical build tool"
-  cmp -s "${release_tool}" "${profile_component}/Scripts/linnet-pack" ||
-    fail_verification "profile pack CLI differs from the canonical build tool"
   grep -Fq '"${identity_helper}" installed' \
     "${profile_component}/Scripts/lifecycle-postinstall" ||
     fail_verification "Complete installed identity gate is incomplete"

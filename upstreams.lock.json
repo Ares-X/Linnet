@@ -46,7 +46,7 @@
     "librime_predict_session_state": {
       "target": "sources.librime.bundled_plugins.predict",
       "path": "patches/librime-predict-linnet-session-state.patch",
-      "sha256": "00074e8aad35bea37ca6872b9b10c7ca833cc1731a80e73f1c94395a060556e3"
+      "sha256": "4cabcb33797063759971f1ebea4e8fd444232da2d7bf2a5d6a0ca716f8cc3d0a"
     }
   },
   "sources": {

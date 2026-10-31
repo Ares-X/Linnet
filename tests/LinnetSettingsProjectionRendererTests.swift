@@ -1152,6 +1152,8 @@ struct LinnetSettingsProjectionRendererTests {
       "ascii_composer/switch_key/Shift_L": commit_code
       "ascii_composer/switch_key/Shift_R": commit_code
       "linnet/recognizer_patterns/zz_code_token": "^(?:(?:www[.]|https?:|ftp[.:]|mailto:|file:).*|(?:[a-z]+[A-Z]|[A-Z][a-z]+[A-Z]|[A-Z]{2,}[a-z]|v[0-9]+|[A-Z][A-Za-z]*[0-9]|[A-Z]{2,}[._/@:+-])[0-9A-Za-z._/@:+?&=%#~-]*)$"
+      "punctuator/digit_separators": "."
+      "punctuator/digit_separator_action": commit
       "punctuator/half_shape/,": { commit: "，" }
       "punctuator/half_shape/.": { commit: "。" }
       "punctuator/half_shape/:": { commit: "：" }

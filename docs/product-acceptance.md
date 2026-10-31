@@ -1,5 +1,49 @@
 # Linnet product acceptance
 
+## Runtime, Settings and recovery audit fixes (#67–#75)
+
+Treat the audit reports as hypotheses and validate the current owners. The
+focused acceptance for this batch is:
+
+| Issue | Required behavior | Executed owner evidence |
+| --- | --- | --- |
+| #67 | One Predict DB per initialized runtime; finalize and pack activation/rollback release old mappings | Same-process valid A→B→A DB lookup and sharing checks in `--predict-db-lifecycle-probe`; full native runtime |
+| #68 | Latest live appearance converges after in-flight commits and ordinary Apply, while Apply-only fields stay in the draft | Real `SettingsModel`, coordinator and authenticated IPC with controlled replies in `settings-appearance-scheduling`; existing coordinator/session regressions |
+| #69 | Absolute visual rows/columns survive bounded window movement; Up/Down follows the fitted column and clamps only at a known list end | Builder→grid→navigation→new snapshot, labels/hits and real panel geometry in `candidate-snapshot-builder,candidate-window` |
+| #70 | Paired marks preserve a known sentence boundary without creating an unknown one | Real native sentence-capitalization selector and full runtime |
+| #71 | A pre-swap failure after confirmed Host exit restores the intact original Host, with verified identity and accurate recovery status | Six real, windowless test-process cases in `settings-update-checker`; these do not establish InputMethodKit or a real package swap |
+| #72 | Release only consumed workspace generations after the successor is verified; retain base, final result and corrupt-chain fallback | `backup-store`, including >1024 history and corrupt middle delta; APFS N=1/10/100 changing-payload reconstruction with full final hashes |
+| #73 | Measure actual appearance publication concurrently with input before deciding whether optimization is needed; health enumeration consumes configured IDs without rebuilding display names | Actual-Rime `rime-health` checks configured availability independently of labels; opt-in, text-free Host input/IPC debug timings and a separate real-client measurement establish latency; component timings alone are insufficient |
+| #74 | Learning cleanup clearly says this Mac; synced-record return notice follows the learning-sync option | Current deletion/merge owners and conditional localized dialog reviewed; backend sync semantics are unchanged |
+| #75 | Add reveals the new UUID and focuses its first editable field for all three dictionary sections | Settings App and UI regression build; dedicated-desktop keyboard/focus execution remains a separate product row |
+
+The App and UI regression targets build locally without driving the maintainer's
+desktop. Installed rows must bind the Action artifact bytes and separately
+exercise typing, rapid appearance choices, cross-window candidate navigation,
+dictionary focus and online Core activation. Actual concurrent measurement and
+unexecuted installed/iCloud/lifecycle rows remain `NOT_EXERCISED` until observed;
+owner tests do not imply those rows passed. This batch changes Core behavior,
+not language-pack contents or public backup formats.
+
+## Numeric periods in Chinese mode (issue #65)
+
+Chinese input must commit `123.456` and `123.456.789` exactly, including an
+immediate final period in `123.`. Ordinary Chinese punctuation and spelling
+must remain unchanged. A second consecutive period uses the ordinary Chinese
+mapping, so `123..456` becomes `123.。456`; comma and colon retain their selected
+punctuation mode.
+
+The old Core reproduced `123。456` in the native engine and
+`123。456。789` in Safari on the dedicated 0.1.30 VM. Core's existing Settings
+projection now selects Rime's native numeric-period and immediate-commit policy;
+it overrides the retained language pack without changing pack identities.
+`tests/verify_swift_units.sh --only projection-renderer` and
+`tests/verify_rime_runtime.sh --profile-key-matrix-probe` pass, including all
+eight Chinese profiles, idle/active punctuation and the explicit ASCII mode.
+Installed acceptance must bind the Action candidate bytes, exercise the same
+sequences and ordinary Chinese typing, and complete the supported-baseline
+online Core update without logout or lost application connections.
+
 ## Chinese homophone composition (candidate)
 
 With an empty learning state, continuous Natural Code `yijylmjx` and full pinyin

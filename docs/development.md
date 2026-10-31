@@ -247,6 +247,11 @@ release identity。定时 GitHub workflow 只报告候选更新，不得自动�
 Periphery 可单独运行 `scripts/run_periphery.sh`，作为代码清理建议。
 发布接受项目的 SSH 或 HTTPS remote，授权现有产物不要求本地保留候选标签；
 源码 revision 与产物摘要仍须一致。
+修改安装器工具的身份或验证边界后，用正式候选运行
+`tests/verify_installer_helper_binding.rb /absolute/candidate/Linnet.pkg`。
+它验证正常重打包仍可接受，以及 Core/Profile 工具被篡改后会拒绝；不安装或执行包内工具，
+通过后清理自己的夹具。
+
 Settings UI 按需在专用测试桌面运行 `scripts/release-control verify-settings-ui`。
 独立 bundle ID、数据目录和 `CFFIXED_USER_HOME` 不隔离鼠标、键盘、焦点或输入源会话；
 不得在维护者正在使用的桌面运行 XCUITest。
@@ -535,11 +540,15 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | --- | --- |
 | 候选投影、Grid、面板几何 | `tests/verify_swift_units.sh --only candidate-presentation,candidate-snapshot-builder,panel-geometry,candidate-window` |
 | Settings ↔ Host 事务 | `tests/verify_swift_units.sh --only settings-ipc,settings-update-checker,settings-data-coordinator` |
+| 实时外观最终意图 | `tests/verify_swift_units.sh --only settings-appearance-scheduling`；真实 coordinator/IPC 回复交错覆盖快速返回旧值、Apply、Discard、失败与冲突 |
+| 英文数据库 runtime 生命周期 | `tests/verify_rime_runtime.sh --predict-db-lifecycle-probe`；在同一进程 finalize/init 之间替换有效 A/B 数据，验证 A→B→A 和 runtime 内共享 |
 | 个人数据或备份 | `tests/verify_swift_units.sh --only personal-data,settings-session,backup-store` |
 | Rime 路径或 session | `tests/verify_swift_units.sh --only rime-path,rime-session-lease` |
+| Runtime 健康状态的方案 ID | `tests/verify_swift_units.sh --only rime-health`；通过 Rime 的 `default/schema_list` 读取配置 ID，不为健康计数重建方案显示名称；实际 session 就绪仍由激活 owner 验证 |
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
 | App 内嵌 Rime 与插件 | `tests/verify_packaged_rime.sh APP APP/Contents/Applications/Settings.app`；直接加载产物中的库，不使用开发机的动态库搜索路径 |
 | 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
+| 数字后句点 | `tests/verify_swift_units.sh --only projection-renderer` 与 `tests/verify_rime_runtime.sh --profile-key-matrix-probe`；Core 配置投影将 Rime 的 `digit_separators` 设为 `.`、`digit_separator_action` 设为 `commit`，由原生 punctuator 的提交历史判断数字上下文并立即上屏，保留旧词包也生效 |
 | 英文句首大写、句间空格与回车 | `tests/verify_rime_runtime.sh --sentence-capitalization-probe`；覆盖开关、候选与上屏、句中小写、回车选词和换行，以及标点／被动预测退出回归 |
 | 中文纠错与模糊音 | `tests/verify_swift_units.sh --only projection-renderer,settings-data-coordinator` 和 `tests/verify_rime_runtime.sh --chinese-spelling-probe`；真实设置应用与打字在专用 VM 验收 |
 | 右键忘记候选与焦点 | `tests/verify_rime_runtime.sh --candidate-forget-probe` |
@@ -550,6 +559,8 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 
 Swift 夹具通过 `LinnetTestScratch.directory` 使用本轮测试专属目录；不要直接使用
 Foundation 的 `temporaryDirectory`（macOS 上不会随 `TMPDIR` 重定向）。
+
+输入与外观 IPC 的并发计时使用系统统一日志的 `Performance` category，仅在启用 debug 收集时记录事件时间、Host 入口事件年龄、处理耗时及 Settings 主队列等待／执行耗时，不记录输入文本或按键内容。例如在专用测试桌面按精确 Host PID 收集：`log stream --level debug --style ndjson --process PID --predicate 'category == "Performance"'`。事件年龄包含到达 Host 前的客户端与 IMK 传递；处理完成时间不是屏幕像素呈现时间。将这些区间与真实客户端回调、实际外观发布和有界主线程采样对齐，不能用独立组件计时替代真实并发验收。
 `verify_swift_units.sh` 负责在成功、失败退出或 INT/TERM 中断后回收目录，包括只读
 词包；删除失败会使测试门失败，不会静默忽略。编译缓存不在回收范围内。
 强制杀死父进程（SIGKILL）或断电无法执行退出清理，不在此保证内。

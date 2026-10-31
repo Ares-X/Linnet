@@ -84,7 +84,15 @@ void SetSentenceBoundary(Context* context, bool observed) {
   if (context) context->set_property(kSentenceBoundaryProperty, observed ? "1" : "");
 }
 
-bool IsSentenceEndingPunctuation(char punctuation) { return punctuation == '.' || punctuation == '!' || punctuation == '?'; }
+void ObserveSentencePunctuation(Context* context, char punctuation,
+                                bool sentence_capitalization) {
+  // Quotes and parentheses can surround a sentence boundary, but cannot
+  // establish one when the host position or preceding text is unknown.
+  const bool paired = string("()[]{}\"'").find(punctuation) != string::npos;
+  const bool ending = punctuation == '.' || punctuation == '!' || punctuation == '?';
+  SetSentenceBoundary(context, sentence_capitalization &&
+      (ending || (paired && SentenceBoundaryObserved(context))));
+}
 
 void ClearPredictionContext(Context* context,
                             const an<PredictEngine>& predict_engine) {
@@ -757,10 +765,8 @@ class LinnetInteractionProcessor : public Processor {
         SpacingState::Load(context->get_property(kSpacingProperty));
     ApplyPunctuation(punctuation, &spacing);
     context->set_property(kSpacingProperty, spacing.Serialize());
-    SetSentenceBoundary(
-        context,
-        options_.sentence_capitalization &&
-            IsSentenceEndingPunctuation(punctuation));
+    ObserveSentencePunctuation(context, punctuation,
+                               options_.sentence_capitalization);
   }
 
   Selector prediction_selector_;
@@ -1095,7 +1101,8 @@ class SmartEnglishTranslator : public Translator {
           auto spacing = SpacingState::Load(context->get_property(kSpacingProperty));
           ApplyPunctuation(classified.punctuation, &spacing);
           StoreSpacing(context, spacing);
-          SetSentenceBoundary(context, options_.sentence_capitalization && IsSentenceEndingPunctuation(classified.punctuation));
+          ObserveSentencePunctuation(context, classified.punctuation,
+                                     options_.sentence_capitalization);
           break;
         }
         case CommitClass::kHardBoundary:

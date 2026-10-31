@@ -230,6 +230,8 @@ private extension LinnetSettingsProjectionRenderer {
       ("ascii_composer/good_old_caps_lock", capsLockUppercase ? "true" : "false"),
       ("ascii_composer/switch_key/Caps_Lock", "commit_code"), ("ascii_composer/switch_key/Shift_L", "commit_code"), ("ascii_composer/switch_key/Shift_R", "commit_code"),
       ("linnet/recognizer_patterns/zz_code_token", quoted(codeTokenRecognizerPattern)),
+      ("punctuator/digit_separators", quoted(".")),
+      ("punctuator/digit_separator_action", "commit"),
       ("punctuator/half_shape/,", "{ commit: \"，\" }"),
       ("punctuator/half_shape/.", "{ commit: \"。\" }"),
       ("punctuator/half_shape/:", "{ commit: \"：\" }"),
