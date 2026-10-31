@@ -101,6 +101,7 @@ end
 fail_release("Installer helper projection is invalid") unless
   installer_tools.is_a?(Hash) && installer_tools.keys.sort == installer_tool_names &&
   installer_tools.values.all? { |digest| digest.is_a?(String) && digest.match?(/\A[0-9a-f]{64}\z/) }
+installer_tools = installer_tool_names.to_h { |name| [name, installer_tools.fetch(name)] }
 sources = lock.fetch("sources")
 squirrel = sources.fetch("squirrel")
 librime = sources.fetch("librime")

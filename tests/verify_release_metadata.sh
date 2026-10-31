@@ -188,6 +188,10 @@ generate() {
 generate "${scratch}/first"
 generate "${scratch}/second"
 diff -qr "${scratch}/first" "${scratch}/second" >/dev/null
+sealed_tool_projection="$(plutil -extract installer_tools_sha256 json -o - \
+  "${scratch}/first/VERSION.json")"
+generate "${scratch}/reverified" "${sealed_tool_projection}"
+diff -qr "${scratch}/first" "${scratch}/reverified" >/dev/null
 
 ruby -rjson -rdigest -e '
   document = JSON.parse(File.binread(ARGV.fetch(0)))
