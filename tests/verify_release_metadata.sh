@@ -168,21 +168,28 @@ rg -Fq 'actual_identity="$(shasum "${certificate}0"' \
   exit 1
 }
 
+make -C "${project_root}" --no-print-directory linnet-pack-tool linnet-runtime-inspector >/dev/null
+
 generate() {
   local destination="$1"
   local projection
   projection="$(printf \
     '{"format":4,"profile":"community-cms","leaf_certificate_sha256":"%s","candidate_revision":"%s"}' \
     "${leaf_sha256}" "${revision}")"
-  "${generator}" "${lock}" "${destination}" 0.1.1 1 1704067200 \
-    "${projection}"
+  if [[ "$#" -eq 2 ]]; then
+    "${generator}" "${lock}" "${destination}" 0.1.1 1 1704067200 \
+      "${projection}" "$2"
+  else
+    "${generator}" "${lock}" "${destination}" 0.1.1 1 1704067200 \
+      "${projection}"
+  fi
 }
 
 generate "${scratch}/first"
 generate "${scratch}/second"
 diff -qr "${scratch}/first" "${scratch}/second" >/dev/null
 
-ruby -rjson -e '
+ruby -rjson -rdigest -e '
   document = JSON.parse(File.binread(ARGV.fetch(0)))
   abort "release metadata format is stale" unless document.fetch("format") == 2
   distribution = document.fetch("distribution")
@@ -204,7 +211,27 @@ ruby -rjson -e '
   end
   abort "unexpected source projection" unless
     document.fetch("source") == {"candidate_revision" => ARGV.fetch(2)}
-' "${scratch}/first/VERSION.json" "${leaf_sha256}" "${revision}"
+  abort "Installer helper bytes are not bound before signing" unless
+    document.fetch("installer_tools_sha256") == {
+      "linnet-pack" => Digest::SHA256.file(ARGV.fetch(3)).hexdigest,
+      "linnet-runtime-inspector" => Digest::SHA256.file(ARGV.fetch(4)).hexdigest,
+    }
+' "${scratch}/first/VERSION.json" "${leaf_sha256}" "${revision}" \
+  "${project_root}/build/linnet-pack" "${project_root}/build/linnet-runtime-inspector"
+
+# Reverification consumes the signature-verified candidate hashes, even when
+# this machine builds different helper bytes with another compiler.
+tool_projection="$(ruby -rjson -e \
+  'puts JSON.generate("linnet-pack" => "c" * 64, "linnet-runtime-inspector" => "d" * 64)')"
+generate "${scratch}/projected" "${tool_projection}"
+ruby -rjson -e '
+  abort "sealed helper identities were recomputed from the local compiler" unless
+    JSON.parse(File.binread(ARGV[0])).fetch("installer_tools_sha256") == JSON.parse(ARGV[1])
+' "${scratch}/projected/VERSION.json" "${tool_projection}"
+if generate "${scratch}/invalid-tools" '{"linnet-pack":"invalid"}' >/dev/null 2>&1; then
+  echo 'Malformed Installer helper identities were accepted.' >&2
+  exit 1
+fi
 rg -Fq 'public community build uses an explicit external CMS identity' \
   "${scratch}/first/PRIVACY.md"
 rg -Fq 'SHA-256 files and approve the package' \

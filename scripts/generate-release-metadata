@@ -59,10 +59,10 @@ def verify_locked_file(path, digest, label)
       Digest::SHA256.file(path).hexdigest == digest
 end
 
-lock_path, output_path, version, build, source_epoch, code_identity_json = ARGV
+lock_path, output_path, version, build, source_epoch, code_identity_json, installer_tools_json = ARGV
 fail_release(
-  "usage: LOCK OUTPUT VERSION BUILD SOURCE_DATE_EPOCH CODE_IDENTITY_JSON"
-) unless ARGV.length == 6
+  "usage: LOCK OUTPUT VERSION BUILD SOURCE_DATE_EPOCH CODE_IDENTITY_JSON [INSTALLER_TOOLS_JSON]"
+) unless (6..7).cover?(ARGV.length)
 fail_release("invalid product version") unless version.match?(/\A[0-9]+\.[0-9]+\.[0-9]+(?:[-.][0-9A-Za-z]+)*\z/)
 fail_release("invalid product build") unless build.match?(/\A[0-9]+\z/)
 fail_release("invalid source epoch") unless source_epoch.match?(/\A[0-9]+\z/)
@@ -84,6 +84,23 @@ candidate_revision = code_identity.fetch("candidate_revision")
 
 lock = JSON.parse(File.read(lock_path))
 source_root = File.dirname(File.expand_path(lock_path))
+installer_tool_names = %w[linnet-pack linnet-runtime-inspector]
+begin
+  installer_tools = if installer_tools_json
+    JSON.parse(installer_tools_json)
+  else
+    installer_tool_names.to_h do |name|
+      path = File.join(source_root, "build", name)
+      fail_release("Installer helper is unavailable: #{name}") unless File.file?(path)
+      [name, Digest::SHA256.file(path).hexdigest]
+    end
+  end
+rescue JSON::ParserError
+  fail_release("Installer helper projection is not valid JSON")
+end
+fail_release("Installer helper projection is invalid") unless
+  installer_tools.is_a?(Hash) && installer_tools.keys.sort == installer_tool_names &&
+  installer_tools.values.all? { |digest| digest.is_a?(String) && digest.match?(/\A[0-9a-f]{64}\z/) }
 sources = lock.fetch("sources")
 squirrel = sources.fetch("squirrel")
 librime = sources.fetch("librime")
@@ -604,6 +621,7 @@ version_manifest = {
   "distribution" => distribution,
   "upstream_lock_sha256" => lock_sha256,
   "sbom_sha256" => sbom_sha256,
+  "installer_tools_sha256" => installer_tools,
   "direct_product_upstreams" => [
     {
       "group" => "squirrel_rime",
