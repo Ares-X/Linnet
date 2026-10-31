@@ -16,6 +16,8 @@ struct LinnetBackupStoreTests {
       try testCloneIsolation(root: root)
       try testPortableCodec()
       try testCloudRecoveryArchive(root: root.appending(path: "cloud-recovery", directoryHint: .isDirectory))
+      try testCloudRecoveryIntermediateCleanup(
+        root: root.appending(path: "cloud-recovery-cleanup", directoryHint: .isDirectory))
       try testBackupHistory(root: root)
       try testLegacyV3Compatibility(root: root.appending(path: "legacy-v3", directoryHint: .isDirectory))
       try testSymlinkAndVersionGuards(root: root)
@@ -218,6 +220,13 @@ struct LinnetBackupStoreTests {
       in: root, workspace: longWorkspace), try Data(contentsOf: longResult) == changed else {
       fail("valid recovery history beyond 1024 steps was rejected")
     }
+    let retainedGenerations = try fileManager.contentsOfDirectory(
+      at: longResult.deletingLastPathComponent().deletingLastPathComponent(),
+      includingPropertiesForKeys: nil)
+    guard retainedGenerations == [longResult.deletingLastPathComponent()],
+      try Data(contentsOf: publishedPayload) == first else {
+      fail("long recovery retained consumed generations or changed the original base")
+    }
     try originalHead.write(to: newestHead)
     try fileManager.removeItem(at: longWorkspace)
     let direct = root.appending(path: "direct-delta", directoryHint: .isDirectory)
@@ -263,6 +272,67 @@ struct LinnetBackupStoreTests {
       let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: head)) as? [String: Any],
       let deltas = metadata["deltas"] as? [Any], deltas.isEmpty else {
       fail("recovery publication did not start a fresh baseline")
+    }
+  }
+
+  private static func testCloudRecoveryIntermediateCleanup(root: URL) throws {
+    let fileManager = FileManager.default
+    try makeDirectory(root)
+    defer { try? fileManager.removeItem(at: root) }
+    var payloads: [Data] = []
+    for generation in 0...3 {
+      let payload = try LinnetBackupStore.encodePortable(
+        personalData: .init(
+          customWords: [.init(value: "generation-\(generation)", code: "generation")],
+          disabledWords: [], expansions: []),
+        learning: [:], categories: [.customWords],
+        createdAt: Date(timeIntervalSince1970: 1_800_000_000 + Double(generation)),
+        appVersion: "1.0.0", dataVersion: "2026.08.31")
+      payloads.append(payload)
+      _ = try LinnetCloudRecoveryArchive.publish(portable: payload, in: root)
+    }
+    let cloudRoot = LinnetCloudRecoveryArchive.root(in: root)
+    let heads = try fileManager.contentsOfDirectory(
+      at: cloudRoot.appending(path: "heads"), includingPropertiesForKeys: nil)
+      .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    let newestHead = try JSONSerialization.jsonObject(
+      with: Data(contentsOf: heads[0])) as! [String: Any]
+    let steps = newestHead["deltas"] as! [[String: Any]]
+    let corruptDelta = cloudRoot.appending(path: "deltas/" + (steps[1]["name"] as! String))
+    let corruptBytes = Data("corrupt middle delta".utf8)
+    try corruptBytes.write(to: corruptDelta)
+    var cloudBytes: [URL: Data] = [:]
+    for case let file as URL in fileManager.enumerator(
+      at: cloudRoot, includingPropertiesForKeys: [.isRegularFileKey])! {
+      if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+        cloudBytes[file] = try Data(contentsOf: file)
+      }
+    }
+    let workspace = root.appending(path: "fallback", directoryHint: .isDirectory)
+    try makeDirectory(workspace)
+    guard let result = try LinnetCloudRecoveryArchive.materializeLatest(
+      in: root, workspace: workspace), try Data(contentsOf: result) == payloads[1] else {
+      fail("corrupt middle delta blocked the last valid older head")
+    }
+    let candidates = try fileManager.contentsOfDirectory(
+      at: workspace, includingPropertiesForKeys: nil)
+    let generation = result.deletingLastPathComponent()
+    guard candidates == [generation.deletingLastPathComponent()],
+      try fileManager.contentsOfDirectory(
+        at: candidates[0], includingPropertiesForKeys: nil) == [generation] else {
+      fail("failed recovery candidates or consumed generations were retained")
+    }
+    for (file, bytes) in cloudBytes {
+      guard try Data(contentsOf: file) == bytes else {
+        fail("workspace cleanup changed cloud recovery objects or corruption evidence")
+      }
+    }
+    let attributes = try fileManager.attributesOfItem(atPath: result.path)
+    let directoryAttributes = try fileManager.attributesOfItem(atPath: generation.path)
+    guard (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+      (directoryAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o700,
+      try LinnetBackupStore.decodePortable(Data(contentsOf: result)).categories == [.customWords] else {
+      fail("recovery cleanup changed portable categories or private file permissions")
     }
   }
 

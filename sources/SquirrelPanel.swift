@@ -355,6 +355,8 @@ extension SquirrelPanel {
         maximumRows: linear ? theme.expandedHorizontalRows : 3,
         lines: candidateLines,
         highlighted: index,
+        firstCandidateIndex: candidates.items.first?.absoluteIndex ?? 0,
+        candidateListEnd: candidates.candidateListEnd,
         verticalText: vertical,
         columnSpacing: view.separatorWidth,
         rowSpacing: theme.linespace)

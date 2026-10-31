@@ -18,6 +18,9 @@ private let linnetRuntimeLogger = Logger(
   category: "Runtime"
 )
 
+private let settingsPerformanceLog = OSLog(
+  subsystem: Bundle.main.bundleIdentifier ?? "Linnet", category: "Performance")
+
 extension SquirrelApplicationDelegate {
   enum RimeStartup {
     case deployedConfiguration(fullCheck: Bool)
@@ -273,7 +276,18 @@ extension SquirrelApplicationDelegate {
 
     do {
       let host = try LinnetSettingsTransactionIPC.Host { [weak self] request, reply in
+        let queuedAt = settingsPerformanceLog.isEnabled(type: .debug)
+          ? ProcessInfo.processInfo.systemUptime : nil
         DispatchQueue.main.async {
+          let startedAt = queuedAt.map { _ in ProcessInfo.processInfo.systemUptime }
+          defer {
+            if let queuedAt, let startedAt {
+              os_log(.debug, log: settingsPerformanceLog,
+                "settings command=%{public}@ start=%{public}.6f queue_ms=%{public}.3f duration_ms=%{public}.3f",
+                request.command.rawValue, startedAt, (startedAt - queuedAt) * 1000,
+                (ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+            }
+          }
           self?.dataRequested(request, transactionReply: reply)
         }
       }

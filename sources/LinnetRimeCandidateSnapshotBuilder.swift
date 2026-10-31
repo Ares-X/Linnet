@@ -18,7 +18,7 @@ enum LinnetRimeCandidateSnapshotBuilder {
     guard menuPage.pageSize > 0 else {
       return .init(
         items: [], currentPage: 0, pageSize: 0, highlightedItemIndex: 0,
-        isLastPage: true, canExpand: false, isExpanded: false)
+        isLastPage: true, canExpand: false, isExpanded: false, candidateListEnd: 0)
     }
     let currentPage = menuPage.currentPage
     let pageSize = menuPage.pageSize
@@ -52,7 +52,8 @@ enum LinnetRimeCandidateSnapshotBuilder {
       highlightedItemIndex: highlightedOnPage,
       isLastPage: context.menu.is_last_page,
       canExpand: currentPage > 0 || !context.menu.is_last_page,
-      isExpanded: false)
+      isExpanded: false,
+      candidateListEnd: context.menu.is_last_page ? currentPageStart + currentCount : nil)
     guard let expansionAnchorPage,
       let expandedBounds = LinnetCandidatePresentation.expandedCandidateRange(
         anchorPage: expansionAnchorPage,
@@ -68,9 +69,13 @@ enum LinnetRimeCandidateSnapshotBuilder {
     defer { rimeAPI.candidate_list_end(&iterator) }
 
     var expandedItems = [SquirrelInputController.CandidateItem]()
+    var exhausted = false
     expandedItems.reserveCapacity(expandedBounds.count)
-    while expandedItems.count < expandedBounds.count,
-      rimeAPI.candidate_list_next(&iterator) {
+    while expandedItems.count < expandedBounds.count {
+      guard rimeAPI.candidate_list_next(&iterator) else {
+        exhausted = true
+        break
+      }
       let absoluteIndex = Int(iterator.index)
       guard expandedBounds.contains(absoluteIndex) else { break }
       let page = absoluteIndex / pageSize
@@ -97,6 +102,8 @@ enum LinnetRimeCandidateSnapshotBuilder {
       highlightedItemIndex: expandedHighlighted,
       isLastPage: context.menu.is_last_page,
       canExpand: currentPage > 0 || !context.menu.is_last_page,
-      isExpanded: true)
+      isExpanded: true,
+      candidateListEnd: context.menu.is_last_page ? currentPageStart + currentCount
+        : (exhausted ? expandedItems.last!.absoluteIndex + 1 : nil))
   }
 }

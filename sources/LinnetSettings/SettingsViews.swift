@@ -565,86 +565,125 @@ struct InputTabView: View {
 struct DictionaryTabView: View {
   @Environment(\.locale) private var locale
   @ObservedObject var model: SettingsModel
+  @State private var addedEntryID: UUID?
+  @State private var pendingEntryFocusID: UUID?
+  @FocusState private var focusedEntryID: UUID?
 
   var body: some View {
-    LinnetSettingsPage(
-      "Dictionary",
-      summary: "Keep personal words, exclusions, and text expansions in one place.",
-      systemImage: "text.book.closed"
-    ) {
-      VStack(alignment: .leading, spacing: 16) {
-        if let message = model.personalValidationMessage(locale: locale) {
-          Label(message, systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.red)
-            .accessibilityLabel(message)
-        } else if model.personalValidationPending {
-          Label("Checking personal dictionary…", systemImage: "hourglass")
-            .foregroundStyle(.secondary)
-        }
-        GroupBox("Personal dictionary") {
-          VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(
-              "Custom words", help: "Value and lowercase Rime code", add: model.addCustomWord)
-            LazyVStack(alignment: .leading, spacing: 8) {
-              let rows = model.configuration.personalDraft.customWords
-              ForEach(
-                rows.indices.lazy.map { ($0, rows[$0].id) }, id: \.1
-              ) { index, _ in
-                let row = rows[index]
-                let rowBinding = model.customWordBinding(row, at: index)
-                HStack {
-                  TextField("Value", text: rowBinding.value)
-                  TextField("code", text: rowBinding.code).frame(width: 170)
-                  removeButton("Remove custom word") { model.removeCustomWord(id: row.id) }
-                }
-              }
-            }
-            Divider()
-            sectionHeader(
-              "Disabled English words", help: "Case-insensitive exact words",
-              add: model.addDisabledWord
-            )
-            LazyVStack(alignment: .leading, spacing: 8) {
-              let rows = model.configuration.personalDraft.disabledWords
-              ForEach(
-                rows.indices.lazy.map { ($0, rows[$0].identifier) }, id: \.1
-              ) { index, _ in
-                let row = rows[index]
-                let rowBinding = model.disabledWordBinding(row, at: index)
-                HStack {
-                  TextField("word", text: rowBinding.value)
-                  removeButton("Remove disabled word") {
-                    model.removeDisabledWord(id: row.identifier)
+    ScrollViewReader { scrollProxy in
+      LinnetSettingsPage(
+        "Dictionary",
+        summary: "Keep personal words, exclusions, and text expansions in one place.",
+        systemImage: "text.book.closed"
+      ) {
+        VStack(alignment: .leading, spacing: 16) {
+          if let message = model.personalValidationMessage(locale: locale) {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.red)
+              .accessibilityLabel(message)
+          } else if model.personalValidationPending {
+            Label("Checking personal dictionary…", systemImage: "hourglass")
+              .foregroundStyle(.secondary)
+          }
+          GroupBox("Personal dictionary") {
+            VStack(alignment: .leading, spacing: 12) {
+              sectionHeader(
+                "Custom words", help: "Value and lowercase Rime code",
+                add: { editAddedEntry(model.addCustomWord()) })
+              LazyVStack(alignment: .leading, spacing: 8) {
+                let rows = model.configuration.personalDraft.customWords
+                ForEach(
+                  rows.indices.lazy.map { ($0, rows[$0].id) }, id: \.1
+                ) { index, _ in
+                  let row = rows[index]
+                  let rowBinding = model.customWordBinding(row, at: index)
+                  HStack {
+                    TextField("Value", text: rowBinding.value)
+                      .focused($focusedEntryID, equals: row.id)
+                      .onAppear {
+                        if pendingEntryFocusID == row.id {
+                          focusedEntryID = row.id
+                          pendingEntryFocusID = nil
+                        }
+                      }
+                    TextField("code", text: rowBinding.code).frame(width: 170)
+                    removeButton("Remove custom word") { model.removeCustomWord(id: row.id) }
                   }
+                  .id(row.id)
                 }
               }
-            }
-            Divider()
-            sectionHeader(
-              "Text Expander", help: "Explicit triggers begin with x;", add: model.addExpansion)
-            LazyVStack(alignment: .leading, spacing: 8) {
-              let rows = model.configuration.personalDraft.expansions
-              ForEach(
-                rows.indices.lazy.map { ($0, rows[$0].id) }, id: \.1
-              ) { index, _ in
-                let row = rows[index]
-                let rowBinding = model.expansionBinding(row, at: index)
-                HStack {
-                  TextField("Expansion", text: rowBinding.value)
-                  TextField("x;trigger", text: rowBinding.trigger).frame(width: 170)
-                  removeButton("Remove text expansion") { model.removeExpansion(id: row.id) }
+              Divider()
+              sectionHeader(
+                "Disabled English words", help: "Case-insensitive exact words",
+                add: { editAddedEntry(model.addDisabledWord()) }
+              )
+              LazyVStack(alignment: .leading, spacing: 8) {
+                let rows = model.configuration.personalDraft.disabledWords
+                ForEach(
+                  rows.indices.lazy.map { ($0, rows[$0].identifier) }, id: \.1
+                ) { index, _ in
+                  let row = rows[index]
+                  let rowBinding = model.disabledWordBinding(row, at: index)
+                  HStack {
+                    TextField("word", text: rowBinding.value)
+                      .focused($focusedEntryID, equals: row.identifier)
+                      .onAppear {
+                        if pendingEntryFocusID == row.identifier {
+                          focusedEntryID = row.identifier
+                          pendingEntryFocusID = nil
+                        }
+                      }
+                    removeButton("Remove disabled word") {
+                      model.removeDisabledWord(id: row.identifier)
+                    }
+                  }
+                  .id(row.identifier)
                 }
               }
-            }
-            Text("Apply Changes is revision-checked and creates an automatic backup.")
-              .font(.callout).foregroundStyle(.secondary)
-          }.padding(8)
+              Divider()
+              sectionHeader(
+                "Text Expander", help: "Explicit triggers begin with x;",
+                add: { editAddedEntry(model.addExpansion()) })
+              LazyVStack(alignment: .leading, spacing: 8) {
+                let rows = model.configuration.personalDraft.expansions
+                ForEach(
+                  rows.indices.lazy.map { ($0, rows[$0].id) }, id: \.1
+                ) { index, _ in
+                  let row = rows[index]
+                  let rowBinding = model.expansionBinding(row, at: index)
+                  HStack {
+                    TextField("Expansion", text: rowBinding.value)
+                      .focused($focusedEntryID, equals: row.id)
+                      .onAppear {
+                        if pendingEntryFocusID == row.id {
+                          focusedEntryID = row.id
+                          pendingEntryFocusID = nil
+                        }
+                      }
+                    TextField("x;trigger", text: rowBinding.trigger).frame(width: 170)
+                    removeButton("Remove text expansion") { model.removeExpansion(id: row.id) }
+                  }
+                  .id(row.id)
+                }
+              }
+              Text("Apply Changes is revision-checked and creates an automatic backup.")
+                .font(.callout).foregroundStyle(.secondary)
+            }.padding(8)
+          }
+          .disabled(!model.configuration.canEdit)
         }
-        .disabled(!model.configuration.canEdit)
+      }
+      .onChange(of: addedEntryID) { entryID in
+        guard let entryID else { return }
+        scrollProxy.scrollTo(entryID, anchor: .center)
       }
     }
   }
 
+  private func editAddedEntry(_ entryID: UUID) {
+    pendingEntryFocusID = entryID
+    addedEntryID = entryID
+  }
 }
 
 // MARK: - Data
@@ -783,7 +822,7 @@ struct DataTabView: View {
       }
       Divider()
       HStack {
-        Text("Reset learning data").font(.callout.weight(.medium))
+        Text("Clear learning data on this Mac").font(.callout.weight(.medium))
         Spacer()
         Menu("Clear Learning") {
           Button("Chinese…") { pendingClear = [.chinese] }

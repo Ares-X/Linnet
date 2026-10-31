@@ -127,6 +127,7 @@ final class SquirrelInputController {
     let isLastPage: Bool
     let isExpanded: Bool
     let canExpand: Bool
+    let candidateListEnd: Int?
   }
 
   private(set) var selectedCandidateIndices: [Int] = []
@@ -183,6 +184,7 @@ struct LinnetCandidateWindowInteractionTests {
     testDefaultNineCandidateNaturalSize()
     testEnglishMetadataFooterNaturalSize()
     testExpandedGridLayoutMatrix()
+    testExpandedGridWindowIdentity()
     testHorizontalGridDimensions()
     testExpandedEnglishDetailFitsContent()
     testExpandedChineseCommentsDoNotCreateEnglishPlaceholder()
@@ -249,7 +251,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: true,
       isExpanded: false,
-      canExpand: false)
+      canExpand: false, candidateListEnd: 5)
     let coldStarted = ProcessInfo.processInfo.systemUptime
     let published = panel.update(
       preedit: "ceshi", selRange: .empty, caretPos: 5,
@@ -292,7 +294,7 @@ struct LinnetCandidateWindowInteractionTests {
           absoluteIndex: index, selectionLabel: index < 5 ? String(index + 1) : nil)
       },
       pageSize: 5, currentPage: 0, isLastPage: false,
-      isExpanded: true, canExpand: true)
+      isExpanded: true, canExpand: true, candidateListEnd: expandedValues.count)
     var expandedSamples: [Double] = []
     var expandedRowIdentities: [ObjectIdentifier]?
     for highlighted in 0..<20 {
@@ -358,7 +360,7 @@ struct LinnetCandidateWindowInteractionTests {
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: .init(
         items: [], pageSize: 0, currentPage: 0, isLastPage: true,
-        isExpanded: false, canExpand: false),
+        isExpanded: false, canExpand: false, candidateListEnd: 0),
       highlighted: 0, update: true,
       controller: controller)
     let text = panel.contentView?.subviews.compactMap { $0 as? NSTextView }.first?
@@ -422,7 +424,7 @@ struct LinnetCandidateWindowInteractionTests {
           absoluteIndex: index, selectionLabel: index < 3 ? String(index + 1) : nil)
       },
       pageSize: 3, currentPage: 0, isLastPage: false,
-      isExpanded: true, canExpand: true)
+      isExpanded: true, canExpand: true, candidateListEnd: 6)
     let expandedPublished = panel.update(
       preedit: "shuru", selRange: .empty, caretPos: 5,
       candidates: expanded, highlighted: 0, update: true,
@@ -464,7 +466,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 2,
       isLastPage: false,
       isExpanded: false,
-      canExpand: true)
+      canExpand: true, candidateListEnd: nil)
     require(!panel.candidateExpansionRequested,
             "expandable browsing did not begin with a compact candidate page")
     panel.requestCandidateExpansionForKeyboardPaging()
@@ -473,7 +475,7 @@ struct LinnetCandidateWindowInteractionTests {
       "an accepted keyboard page switch did not anchor expansion to the visible page")
     panel.candidateSnapshot = .init(
       items: [], pageSize: 9, currentPage: 3, isLastPage: false,
-      isExpanded: true, canExpand: true)
+      isExpanded: true, canExpand: true, candidateListEnd: nil)
     panel.requestCandidateExpansionForKeyboardPaging()
     require(
       panel.candidateExpansionAnchorPage == 2,
@@ -524,7 +526,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: true,
       isExpanded: false,
-      canExpand: false)
+      canExpand: false, candidateListEnd: 2)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
@@ -899,7 +901,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 1,
       isLastPage: false,
       isExpanded: false,
-      canExpand: false)
+      canExpand: false, candidateListEnd: nil)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
@@ -1176,7 +1178,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: true,
       isExpanded: false,
-      canExpand: false)
+      canExpand: false, candidateListEnd: candidates.last.map { $0.absoluteIndex + 1 } ?? 0)
   }
 
   private static func sendCandidateMouse(
@@ -1466,7 +1468,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: true,
       isExpanded: false,
-      canExpand: true)
+      canExpand: true, candidateListEnd: values.count)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
@@ -1534,7 +1536,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 1,
       isLastPage: false,
       isExpanded: false,
-      canExpand: false)
+      canExpand: false, candidateListEnd: nil)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: middlePage, highlighted: 0, update: true,
@@ -1562,7 +1564,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 2,
       isLastPage: true,
       isExpanded: false,
-      canExpand: false)
+      canExpand: false, candidateListEnd: values.count * 2 + 3)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: lastPage, highlighted: 0, update: true,
@@ -1593,7 +1595,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: false,
       isExpanded: true,
-      canExpand: true)
+      canExpand: true, candidateListEnd: expandedValues.count)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: expanded, highlighted: 0, update: true,
@@ -1640,7 +1642,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 1,
       isLastPage: false,
       isExpanded: true,
-      canExpand: true)
+      canExpand: true, candidateListEnd: expandedValues.count)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: shiftedLabels, highlighted: values.count,
@@ -1812,7 +1814,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: true,
       isExpanded: false,
-      canExpand: canExpand)
+      canExpand: canExpand, candidateListEnd: values.count)
     _ = panel.update(
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: candidates, highlighted: 0, update: true,
@@ -1906,7 +1908,7 @@ struct LinnetCandidateWindowInteractionTests {
               selectionLabel: String(index + 1))
           },
           pageSize: edit.values.count, currentPage: 0, isLastPage: true,
-          isExpanded: false, canExpand: false),
+          isExpanded: false, canExpand: false, candidateListEnd: edit.values.count),
         highlighted: 0, update: true, controller: controller)
       render(panel.view)
     }
@@ -1970,7 +1972,7 @@ struct LinnetCandidateWindowInteractionTests {
           currentPage: 0,
           isLastPage: false,
           isExpanded: true,
-          canExpand: true)
+          canExpand: true, candidateListEnd: values.count)
         _ = panel.update(
           preedit: "", selRange: .empty, caretPos: 0,
           candidates: snapshot, highlighted: highlighted, update: true,
@@ -2066,17 +2068,18 @@ struct LinnetCandidateWindowInteractionTests {
             index.isMultiple(of: 4)
               ? "candidate-\(index)-with-a-long-name" : "候选\(index)"
           }
-          let snapshot = SquirrelInputController.CandidateSnapshot(
-            items: values.enumerated().map { index, value in
-              .init(
-                text: value, comment: "", page: index / pageSize,
-                indexOnPage: index % pageSize, absoluteIndex: index,
-                selectionLabel: index / pageSize == 1
-                  ? String(index % pageSize + 1) : nil)
-            },
-            pageSize: pageSize, currentPage: 1, isLastPage: false,
-            isExpanded: true, canExpand: true)
           for highlighted in [0, pageSize + 1, count - 1] {
+            let currentPage = highlighted / pageSize
+            let snapshot = SquirrelInputController.CandidateSnapshot(
+              items: values.enumerated().map { index, value in
+                .init(
+                  text: value, comment: "", page: index / pageSize,
+                  indexOnPage: index % pageSize, absoluteIndex: index,
+                  selectionLabel: nil)
+              },
+              pageSize: pageSize, currentPage: currentPage,
+              isLastPage: currentPage == (count - 1) / pageSize,
+              isExpanded: true, canExpand: true, candidateListEnd: count)
             let published = panel.update(
               preedit: "", selRange: .empty, caretPos: 0,
               candidates: snapshot, highlighted: highlighted,
@@ -2148,23 +2151,89 @@ struct LinnetCandidateWindowInteractionTests {
             if let target = panel.expandedCandidateNavigationTarget(up: false),
               let from = geometry.first(where: { $0.itemIndex == highlighted }),
               let to = geometry.first(where: { $0.itemIndex == target }) {
-              require(to.cellFrame.midY > from.cellFrame.midY,
-                "\(context) Down did not move to the actual next visual row")
+              if target == highlighted {
+                require(highlighted / expectedGrid.columnWidths.count
+                  == (count - 1) / expectedGrid.columnWidths.count,
+                  "\(context) Down stopped before the genuine final visual row")
+              } else {
+                require(to.cellFrame.midY > from.cellFrame.midY,
+                  "\(context) Down did not move to the actual next visual row")
+              }
             }
           }
-          require(panel.expandedCandidateNavigationTarget(up: false) == count,
-            "expanded Down skipped words beyond the loaded candidate window")
+          require(panel.expandedCandidateNavigationTarget(up: false) == count - 1,
+            "expanded Down moved beyond the genuine final row")
           panel.hide()
         }
       }
     }
   }
 
+  private static func testExpandedGridWindowIdentity() {
+    let panel = SquirrelPanel(position: NSRect(x: 260, y: 420, width: 2, height: 20))
+    let controller = SquirrelInputController()
+    panel.bind(controller: controller)
+    let view = panel.view
+    for theme in [view.lightTheme, view.darkTheme] {
+      theme.linear = true
+      theme.vertical = false
+      theme.candidateExpansionAllowed = true
+      theme.expandedHorizontalCount = 5
+      theme.expandedHorizontalRows = 3
+      theme.candidateFormat = "[label] [candidate]"
+      theme.highlightedAttrs = theme.attrs
+      theme.labelAttrs = theme.attrs
+      theme.labelHighlightedAttrs = theme.attrs
+    }
+    for (range, absolute) in [
+      (0..<27, 24), (0..<27, 26), (9..<36, 35),
+      (9..<36, 27), (18..<45, 36), (9..<36, 9), (0..<27, 8)
+    ] {
+      let snapshot = SquirrelInputController.CandidateSnapshot(
+        items: range.map {
+          .init(text: "word\($0)", comment: "", page: $0 / 9,
+            indexOnPage: $0 % 9, absoluteIndex: $0, selectionLabel: nil)
+        },
+        pageSize: 9, currentPage: absolute / 9, isLastPage: false,
+        isExpanded: true, canExpand: true, candidateListEnd: nil)
+      let highlighted = absolute - range.lowerBound
+      require(panel.update(preedit: "", selRange: .empty, caretPos: 0,
+        candidates: snapshot, highlighted: highlighted, update: true, controller: controller),
+        "a shifted expanded candidate snapshot did not publish")
+      let cells = view.candidateGridView.geometries(in: view)
+      for cell in cells {
+        let item = snapshot.items[cell.itemIndex]
+        require(view.click(at: cell.cellFrame.center) == .candidate(cell.itemIndex),
+          "shifted snapshot click geometry lost its local-to-absolute candidate mapping")
+        if item.absoluteIndex / 5 == absolute / 5 {
+          let number = item.absoluteIndex % 5 + 1
+          require(panel.expandedCandidateSelectionTarget(number: number) == item.absoluteIndex,
+            "shifted snapshot numeric selection targeted a different absolute candidate")
+          let textView = view.candidateGridView.subviews[cell.itemIndex].subviews.first as! NSTextView
+          let text = textView.textContentStorage?.attributedString?.string ?? ""
+          require(text.hasPrefix("\(number) "),
+            "shifted snapshot labels restarted at the first loaded candidate")
+        }
+      }
+      if absolute == 9 {
+        require(panel.expandedCandidateNavigationTarget(up: true) == 4,
+          "Up lost the corresponding column before a partial loaded row")
+        require(panel.expandedCandidateSelectionTarget(number: 1) == nil,
+          "a partial loaded row offered a number for a candidate outside its snapshot")
+      }
+      if [24, 26, 35].contains(absolute) {
+        require(panel.expandedCandidateNavigationTarget(up: false) == absolute + 5,
+          "Down used the loaded edge instead of the corresponding visual column")
+      }
+    }
+    panel.hide()
+  }
+
   private static func testHorizontalGridDimensions() {
     let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 16)]
     for columns in 3...5 {
       for rows in 3...5 {
-        for count in [2, 27] {
+        for count in [1, 2, 27] {
           let grid = LinnetCandidateGridView(frame: .zero)
           let lines = (0..<count).map { index in
             LinnetCandidatePresentation.candidateLine(
@@ -2173,6 +2242,7 @@ struct LinnetCandidateWindowInteractionTests {
           }
           for selected in [0, count - 1] {
             grid.publish(columns: columns, maximumRows: rows, lines: lines, highlighted: selected,
+              candidateListEnd: count,
               verticalText: false, columnSpacing: 8, rowSpacing: 6)
             grid.fitColumns(to: 600)
             let cells = grid.geometries(in: grid)
@@ -2216,7 +2286,7 @@ struct LinnetCandidateWindowInteractionTests {
           selectionLabel: index < 3 ? String(index + 1) : nil)
       },
       pageSize: 3, currentPage: 0, isLastPage: false,
-      isExpanded: true, canExpand: true)
+      isExpanded: true, canExpand: true, candidateListEnd: 6)
     _ = panel.update(
       preedit: "ui", selRange: .empty, caretPos: 2,
       candidates: snapshot, highlighted: 1, update: true,
@@ -2283,7 +2353,7 @@ struct LinnetCandidateWindowInteractionTests {
           currentPage: 0,
           isLastPage: true,
           isExpanded: false,
-          canExpand: false),
+          canExpand: false, candidateListEnd: values.count),
         highlighted: 0,
         update: true,
         controller: controller)
@@ -2395,7 +2465,7 @@ struct LinnetCandidateWindowInteractionTests {
           currentPage: 0,
           isLastPage: false,
           isExpanded: false,
-          canExpand: false),
+          canExpand: false, candidateListEnd: nil),
         highlighted: 0,
         update: true,
         controller: controller)
@@ -2427,7 +2497,7 @@ struct LinnetCandidateWindowInteractionTests {
           currentPage: 0,
           isLastPage: false,
           isExpanded: false,
-          canExpand: false),
+          canExpand: false, candidateListEnd: nil),
         highlighted: 0,
         update: true,
         controller: controller)
@@ -2459,7 +2529,7 @@ struct LinnetCandidateWindowInteractionTests {
           currentPage: 1,
           isLastPage: true,
           isExpanded: false,
-          canExpand: false),
+          canExpand: false, candidateListEnd: values.count * 2),
         highlighted: 0,
         update: true,
         controller: controller)
@@ -2535,7 +2605,7 @@ struct LinnetCandidateWindowInteractionTests {
               currentPage: 0,
               isLastPage: true,
               isExpanded: false,
-              canExpand: false),
+              canExpand: false, candidateListEnd: values.count),
             highlighted: 0,
             update: true,
             controller: controller)
@@ -3038,7 +3108,7 @@ struct LinnetCandidateWindowInteractionTests {
       preedit: "", selRange: .empty, caretPos: 0,
       candidates: .init(
         items: [], pageSize: 9, currentPage: 0, isLastPage: true,
-        isExpanded: false, canExpand: false),
+        isExpanded: false, canExpand: false, candidateListEnd: 0),
       highlighted: 0, update: true,
       controller: controller)
     panel.displayIfNeeded()
@@ -3111,7 +3181,7 @@ struct LinnetCandidateWindowInteractionTests {
       currentPage: 0,
       isLastPage: true,
       isExpanded: false,
-      canExpand: false)
+      canExpand: false, candidateListEnd: items.count)
     _ = panel.update(
       preedit: preedit,
       selRange: NSRange(location: 0, length: preedit.utf16.count),

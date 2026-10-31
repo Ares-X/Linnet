@@ -187,8 +187,11 @@ extension SettingsModel {
     }
   }
 
-  func addCustomWord() {
-    configuration.personalDraft.customWords.append(.init(value: "", code: ""))
+  @discardableResult
+  func addCustomWord() -> UUID {
+    let row = LinnetPersonalData.CustomWord(value: "", code: "")
+    configuration.personalDraft.customWords.append(row)
+    return row.id
   }
 
   func customWordBinding(
@@ -214,8 +217,11 @@ extension SettingsModel {
     configuration.personalDraft.customWords.removeAll { $0.id == wordID }
   }
 
-  func addDisabledWord() {
-    configuration.personalDraft.disabledWords.append(.init(value: ""))
+  @discardableResult
+  func addDisabledWord() -> UUID {
+    let row = LinnetPersonalData.DisabledWord(value: "")
+    configuration.personalDraft.disabledWords.append(row)
+    return row.identifier
   }
 
   func disabledWordBinding(
@@ -243,8 +249,11 @@ extension SettingsModel {
     configuration.personalDraft.disabledWords.removeAll { $0.identifier == wordID }
   }
 
-  func addExpansion() {
-    configuration.personalDraft.expansions.append(.init(value: "", trigger: "x;"))
+  @discardableResult
+  func addExpansion() -> UUID {
+    let row = LinnetPersonalData.Expansion(value: "", trigger: "x;")
+    configuration.personalDraft.expansions.append(row)
+    return row.id
   }
 
   func expansionBinding(

@@ -9,6 +9,11 @@ README, documentation, CI, build and release-script changes are not product vers
 ## 0.1.31 — 2026-10-31
 
 - In Chinese mode, periods after digits now remain `.` and commit immediately, including sequences such as `123.456` and `123.456.789`.
+- Fixed stale prediction data after English pack activation. Quotes and brackets now preserve a known Smart English sentence boundary.
+- Fixed the latest appearance choice being lost during rapid changes or while applying other settings.
+- Kept expanded candidate rows, columns and number selection continuous across loaded windows.
+- Failed Core updates restore the intact original version. Cloud recovery releases consumed intermediate generations sooner to reduce temporary disk use.
+- Adding a personal entry reveals and focuses its first field. Learning cleanup now states its local scope and warns about records returning from other Macs when sync is enabled.
 
 ## 0.1.30 — 2026-10-26
 

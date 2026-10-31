@@ -535,6 +535,8 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | --- | --- |
 | 候选投影、Grid、面板几何 | `tests/verify_swift_units.sh --only candidate-presentation,candidate-snapshot-builder,panel-geometry,candidate-window` |
 | Settings ↔ Host 事务 | `tests/verify_swift_units.sh --only settings-ipc,settings-update-checker,settings-data-coordinator` |
+| 实时外观最终意图 | `tests/verify_swift_units.sh --only settings-appearance-scheduling`；真实 coordinator/IPC 回复交错覆盖快速返回旧值、Apply、Discard、失败与冲突 |
+| 英文数据库 runtime 生命周期 | `tests/verify_rime_runtime.sh --predict-db-lifecycle-probe`；在同一进程 finalize/init 之间替换有效 A/B 数据，验证 A→B→A 和 runtime 内共享 |
 | 个人数据或备份 | `tests/verify_swift_units.sh --only personal-data,settings-session,backup-store` |
 | Rime 路径或 session | `tests/verify_swift_units.sh --only rime-path,rime-session-lease` |
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
@@ -551,6 +553,8 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 
 Swift 夹具通过 `LinnetTestScratch.directory` 使用本轮测试专属目录；不要直接使用
 Foundation 的 `temporaryDirectory`（macOS 上不会随 `TMPDIR` 重定向）。
+
+输入与外观 IPC 的并发计时使用系统统一日志的 `Performance` category，仅在启用 debug 收集时记录事件时间、Host 入口事件年龄、处理耗时及 Settings 主队列等待／执行耗时，不记录输入文本或按键内容。例如在专用测试桌面按精确 Host PID 收集：`log stream --level debug --style ndjson --process PID --predicate 'category == "Performance"'`。事件年龄包含到达 Host 前的客户端与 IMK 传递；处理完成时间不是屏幕像素呈现时间。将这些区间与真实客户端回调、实际外观发布和有界主线程采样对齐，不能用独立组件计时替代真实并发验收。
 `verify_swift_units.sh` 负责在成功、失败退出或 INT/TERM 中断后回收目录，包括只读
 词包；删除失败会使测试门失败，不会静默忽略。编译缓存不在回收范围内。
 强制杀死父进程（SIGKILL）或断电无法执行退出清理，不在此保证内。

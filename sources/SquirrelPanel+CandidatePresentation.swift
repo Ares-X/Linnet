@@ -122,17 +122,7 @@ extension SquirrelPanel {
     guard let publication, publicationIsCurrent(publication),
       let candidateSnapshot, candidateSnapshot.isExpanded, !candidateSnapshot.items.isEmpty
     else { return nil }
-    if let target = view.candidateGridView.adjacentItem(from: index, up: towardPreviousRow),
-      candidateSnapshot.items.indices.contains(target) {
-      return candidateSnapshot.items[target].absoluteIndex
-    }
-    // Crossing the loaded window requests its next neighbour, not an entire
-    // Rime page: page-sized steps would skip words in a variable-length row.
-    let edge = towardPreviousRow ? candidateSnapshot.items.first! : candidateSnapshot.items.last!
-    if towardPreviousRow && edge.absoluteIndex == 0 {
-      return candidateSnapshot.items[index].absoluteIndex
-    }
-    return max(0, edge.absoluteIndex + (towardPreviousRow ? -1 : 1))
+    return view.candidateGridView.adjacentCandidateIndex(from: index, up: towardPreviousRow)
   }
 
   func expandedCandidateSelectionTarget(number: Int) -> Int? {

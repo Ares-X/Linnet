@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-owners='hallelujah-importer personal-data projection-renderer appearance-preview settings-page-layout presentation-status cloud-sync-location rime-sync-controller settings-session settings-window-close settings-update-checker backup-store candidate-presentation candidate-snapshot-builder macos-keycodes rime-session-lease input-activation-policy input-source-lifecycle host-entrypoints preedit-geometry panel-geometry candidate-window client-appearance settings-contract data-registry data-channel download-transport download-source pack rime-path rime-user-data-bridge settings-data-coordinator settings-ipc'
+owners='hallelujah-importer personal-data projection-renderer appearance-preview settings-page-layout presentation-status cloud-sync-location rime-sync-controller settings-session settings-appearance-scheduling settings-window-close settings-update-checker backup-store candidate-presentation candidate-snapshot-builder macos-keycodes rime-session-lease input-activation-policy input-source-lifecycle host-entrypoints preedit-geometry panel-geometry candidate-window client-appearance settings-contract data-registry data-channel download-transport download-source pack rime-path rime-user-data-bridge settings-data-coordinator settings-ipc'
 selection=all
 case "$#:${1:-}" in
   0:) ;;
@@ -152,6 +152,12 @@ compile_run_selected settings-session \
 compile_run_selected settings-window-close -framework AppKit -framework SwiftUI \
   sources/LinnetSettings/SettingsWindowCloseGuard.swift \
   tests/SettingsWindowCloseCoordinatorTests.swift
+if selected settings-update-checker; then
+  linnet_swift_compile core-update-host-fixture -parse-as-library \
+    -warnings-as-errors -sdk "${sdk}" -framework AppKit \
+    tests/LinnetCoreUpdateHostFixture.swift
+  export LINNET_CORE_UPDATE_HOST_FIXTURE="${LINNET_SWIFT_COMPILED_BINARY}"
+fi
 compile_run_selected settings-update-checker -framework AppKit \
   sources/LinnetPackContract.swift \
   sources/LinnetDataChannel.swift \
@@ -189,6 +195,7 @@ compile_run_selected candidate-snapshot-builder -target "${target}" -framework A
   sources/LinnetDataRegistry.swift sources/LinnetDirectoryDelta.swift sources/LinnetDataRegistryTransactions.swift sources/LinnetDataRegistryStorage.swift \
   sources/LinnetSettings/SettingsContract.swift \
   sources/LinnetCandidatePresentation.swift \
+  sources/LinnetCandidateGridView.swift \
   sources/LinnetRimeCandidateSnapshotBuilder.swift \
   tests/LinnetRimeCandidateSnapshotBuilderTests.swift
 compile_run_selected macos-keycodes -target "${target}" -framework AppKit \
@@ -330,6 +337,38 @@ if selected settings-data-coordinator; then
   fi
   rg -Fq 'SettingsDataCoordinatorTests: PASS' "${scratch}/settings-data.out"
   end_phase "Settings data coordinator"
+fi
+
+if selected settings-appearance-scheduling; then
+  begin_phase "Settings appearance scheduling"
+  linnet_swift_compile settings-appearance-scheduling \
+    -warnings-as-errors -sdk "${sdk}" -target "${target}" -framework AppKit -framework SwiftUI \
+    -import-objc-header sources/LinnetSettings/Settings-Bridging-Header.h \
+    -I librime/dist/include \
+    "${common_settings_sources[@]}" \
+    sources/LinnetSettings/LinnetSettingsTransactionIPC.swift \
+    sources/LinnetSettings/LinnetSettingsProjectionRenderer.swift \
+    sources/LinnetSettings/LinnetSettingsMutationLease.swift \
+    sources/LinnetSettings/SettingsRuntimeReachability.swift \
+    sources/LinnetSettings/LinnetCloudSyncLocation.swift \
+    sources/LinnetSettings/SettingsOperationPhase.swift \
+    sources/LinnetSettings/SettingsDataCoordinator.swift \
+    sources/LinnetSettings/SettingsDataCoordinatorMutation.swift \
+    sources/LinnetSettings/SettingsDataCoordinatorRuntime.swift \
+    sources/LinnetSettings/SettingsSessionState.swift \
+    sources/LinnetSettings/SettingsPresentationStatus.swift \
+    sources/LinnetSettings/SettingsMain.swift \
+    sources/LinnetSettings/SettingsModelPresentation.swift \
+    sources/LinnetSettings/SettingsModelLanguageData.swift \
+    sources/LinnetSettings/LinnetSettingsDownloadSource.swift \
+    sources/LinnetSettings/LinnetSettingsDownloadTransport.swift \
+    sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift \
+    sources/LinnetSettings/LinnetCoreUpdateInstaller.swift \
+    sources/LinnetSettings/LinnetSettingsUpdateChecker.swift \
+    tests/SettingsAppearanceSchedulingTests.swift -L lib -lrime.1
+  DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+    "${LINNET_SWIFT_COMPILED_BINARY}"
+  end_phase "Settings appearance scheduling"
 fi
 
 if selected settings-ipc; then

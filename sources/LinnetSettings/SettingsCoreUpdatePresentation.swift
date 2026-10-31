@@ -42,7 +42,8 @@ extension DataTabView {
           .disabled(model.pendingChanges || model.operationActive)
       case .applying(let applyingCore, _) where applyingCore == core:
         ProgressView().controlSize(.small)
-      case .failed(let failedCore) where failedCore == core:
+      case .failed(let failedCore) where failedCore == core,
+        .restored(let failedCore) where failedCore == core:
         Button("Try Download Again") {
           if let source = model.configuredDownloadSource {
             updateChecker.downloadCoreUpdate(core, source: source)
@@ -79,6 +80,8 @@ extension DataTabView {
       "Core update applied"
     case .recoveryRequired(let failedCore) where failedCore == core:
       "Core update needs repair"
+    case .restored(let failedCore) where failedCore == core:
+      "Core update failed; original Core restored"
     case .failed(let failedCore) where failedCore == core:
       "Core download failed"
     default:
@@ -102,7 +105,8 @@ extension DataTabView {
       "checkmark.circle.fill"
     case .recoveryRequired(let failedCore) where failedCore == core:
       "exclamationmark.octagon.fill"
-    case .failed(let failedCore) where failedCore == core:
+    case .failed(let failedCore) where failedCore == core,
+      .restored(let failedCore) where failedCore == core:
       "exclamationmark.triangle.fill"
     default:
       "arrow.down.circle.fill"
@@ -123,7 +127,8 @@ extension DataTabView {
       .accentColor
     case .recoveryRequired(let failedCore) where failedCore == core:
       .red
-    case .failed(let failedCore) where failedCore == core:
+    case .failed(let failedCore) where failedCore == core,
+      .restored(let failedCore) where failedCore == core:
       .red
     case .downloading(let downloadingCore, _) where downloadingCore == core:
       .accentColor
@@ -148,6 +153,8 @@ extension DataTabView {
       "The new Core is running. Settings will close and reopen cleanly the next time you choose it."
     case .recoveryRequired(let failedCore) where failedCore == core:
       "The update could not be verified or rolled back automatically. Run Linnet.pkg once to repair the installation."
+    case .restored(let failedCore) where failedCore == core:
+      "The update could not be applied. The original Core has restarted and is ready to use."
     case .failed(let failedCore) where failedCore == core:
       "The update was not downloaded, extracted, or verified. The installed Core was not changed."
     default:

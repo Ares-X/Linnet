@@ -625,7 +625,7 @@ index a90fcae..edbd5f9 100644
  #include "predict_db.h"
  #include <rime/candidate.h>
  #include <rime/context.h>
-@@ -15,37 +17,104 @@
+@@ -15,37 +17,95 @@
  
  namespace rime {
  
@@ -673,15 +673,6 @@ index a90fcae..edbd5f9 100644
 +    keys.push_back(std::move(key));
 +  }
 +  return keys;
-+}
-+
-+an<PredictDb> SharedPredictDb() {
-+  static const an<PredictDb> db = [] {
-+    auto resolver = make_unique<ResourceResolver>(kPredictDbResourceType);
-+    resolver->set_root_path(Service::instance().deployer().shared_data_dir);
-+    return New<PredictDb>(resolver->ResolvePath(kPredictDbName));
-+  }();
-+  return db;
 +}
 +
 +}  // namespace
@@ -748,7 +739,7 @@ index a90fcae..edbd5f9 100644
    int end = int(ctx->input().length());
    Segment segment(end, end);
    segment.tags.insert("prediction");
-@@ -55,49 +124,65 @@ void PredictEngine::CreatePredictSegment(Context* ctx) const {
+@@ -55,49 +115,63 @@ void PredictEngine::CreatePredictSegment(Context* ctx) const {
    DLOG(INFO) << "segments: " << ctx->composition();
  }
  
@@ -795,14 +786,12 @@ index a90fcae..edbd5f9 100644
 +  return db_->LookupCopy(query, result);
 +}
 +
-+an<PredictEngineComponent> PredictEngineComponent::Shared() {
-+  static const an<PredictEngineComponent> factory =
-+      New<PredictEngineComponent>();
-+  return factory;
++PredictEngineComponent::PredictEngineComponent() {
++  ResourceResolver resolver(kPredictDbResourceType);
++  resolver.set_root_path(Service::instance().deployer().shared_data_dir);
++  db_ = New<PredictDb>(resolver.ResolvePath(kPredictDbName));
  }
  
-+PredictEngineComponent::PredictEngineComponent() {}
-+
  PredictEngineComponent::~PredictEngineComponent() {}
  
  PredictEngine* PredictEngineComponent::Create(const Ticket& ticket) {
@@ -825,7 +814,7 @@ index a90fcae..edbd5f9 100644
 +  // Linnet contract: this database is an immutable product resource resolved
 +  // only below shared_data_dir. Remove when upstream offers the same fixed,
 +  // no-user/no-staging resource boundary and session-state ownership.
-+  if (auto db = SharedPredictDb()) {
++  if (auto db = db_) {
      if (db->IsOpen() || db->Load()) {
 -      return new PredictEngine(db, max_iterations, max_candidates);
 +      return new PredictEngine(db, max_candidates);
@@ -847,7 +836,7 @@ index ae62eeb..ac7201a 100644
  
  namespace rime {
  
-@@ -12,44 +11,46 @@ struct Segment;
+@@ -12,44 +11,48 @@ struct Segment;
  struct Ticket;
  class Translation;
  
@@ -910,6 +899,8 @@ index ae62eeb..ac7201a 100644
   protected:
    map<string, weak<PredictEngine>> predict_engine_by_schema_id;
 -  DbPool<PredictDb> db_pool_;
++  // The module owns this factory for one initialized Rime runtime.
++  an<PredictDb> db_;
  };
  
  }  // namespace rime
@@ -917,15 +908,39 @@ diff --git a/src/predict_module.cc b/src/predict_module.cc
 index dd43859..a3805b7 100644
 --- a/src/predict_module.cc
 +++ b/src/predict_module.cc
-@@ -10,7 +10,7 @@ using namespace rime;
+@@ -8,14 +8,30 @@
  
+ using namespace rime;
+ 
++namespace {
++
++an<PredictEngineComponent> engine_factory;
++
++}  // namespace
++
++namespace rime {
++
++an<PredictEngineComponent> PredictEngineComponent::Shared() {
++  return engine_factory;
++}
++
++}  // namespace rime
++
  static void rime_predict_initialize() {
    Registry& r = Registry::instance();
 -  an<PredictEngineComponent> engine_factory = New<PredictEngineComponent>();
-+  an<PredictEngineComponent> engine_factory = PredictEngineComponent::Shared();
++  engine_factory = New<PredictEngineComponent>();
    r.Register("predictor", new PredictorComponent(engine_factory));
    r.Register("predict_translator",
               new PredictTranslatorComponent(engine_factory));
+ }
+ 
+-static void rime_predict_finalize() {}
++static void rime_predict_finalize() {
++  engine_factory.reset();
++}
+ 
+ RIME_REGISTER_MODULE(predict)
 diff --git a/src/predict_translator.cc b/src/predict_translator.cc
 index 5768baa..26ec0d3 100644
 --- a/src/predict_translator.cc

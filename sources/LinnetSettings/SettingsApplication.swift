@@ -112,29 +112,3 @@ struct LinnetSettingsApp: App {
     .windowResizability(.contentMinSize)
   }
 }
-
-struct SettingsActiveOperation: Equatable {
-  let kind: SettingsOperationKind
-  var phase: SettingsOperationPhase
-  var cancellationAvailable: Bool
-  var cancellationRequested: Bool
-
-  var cancellable: Bool { cancellationAvailable && !cancellationRequested }
-}
-
-enum SettingsLegacyImportState {
-  case unavailable
-  case checking
-  case none
-  case compatible(SettingsDataCoordinator.LegacyImportCandidate)
-  case failed
-}
-
-enum SettingsLanguageDataUpdateTarget: Equatable {
-  case currentEdition
-  case completeOffline
-
-  var presentationPack: SettingsPresentationPack {
-    self == .completeOffline ? .longTailDictionaries : .languageData
-  }
-}

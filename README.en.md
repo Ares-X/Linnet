@@ -301,6 +301,7 @@ Input processing is local, with no accounts, telemetry, ads or analytics SDK, an
 
 - Automatic sync checks at most once an hour; immediate sync is also available. You can keep typing, with no need to have used both modes or keep a document open.
 - Settings reports local merge/export times and failure or retry status. Local completion does not mean another Mac has received the data; iCloud Drive handles delivery.
+- Clearing learning affects only the selected categories on this Mac. With learning sync enabled, records retained on other Macs may return during a later sync.
 - **Data & Updates** supports uploading and reviewing incremental recovery backups, viewing transaction recovery records, and importing/exporting data. Imports require confirmation and first create a local backup. With no usable cloud history, uploads add a full backup without deleting existing backups.
 - Other Rime/Hallelujah data is read only when you explicitly import it. Exported files may contain personal data; you manage their storage and deletion.
 

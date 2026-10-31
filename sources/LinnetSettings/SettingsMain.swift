@@ -192,7 +192,9 @@ extension SettingsModel {
   func publishAppearance(_ appearance: LinnetSettingsDocument.Appearance) {
     guard configuration.canPersist, let baseline = configuration.documentBaseline else { return }
     let projectedAppearance = appearance.livePanelProjection(over: baseline.appearance)
-    guard projectedAppearance != baseline.appearance else {
+    // A selection equal to the old baseline is still work when another
+    // appearance is in flight. Its commit will advance that baseline.
+    guard projectedAppearance != baseline.appearance || appearancePublishActive else {
       cancelPendingAppearancePublish()
       return
     }
@@ -577,7 +579,12 @@ extension SettingsModel {
       recoveryAfterCommit: acceptance.recoveryAfterCommit
     ) {
     case .accepted:
-      if kind == .apply { cancelPendingAppearancePublish() }
+      switch outcome.documentEffect {
+      case .submittedDraft, .externalReplacement:
+        refreshPendingAppearancePublish()
+      case .observed, .submittedAppearance:
+        break
+      }
       status = success(outcome)
       return true
     case .conflict:
@@ -588,13 +595,26 @@ extension SettingsModel {
     return false
   }
 
-  /// Apply and Discard are terminal for work queued by the live appearance
-  /// path. Keeping cancellation and payload removal together prevents a stale
-  /// debounce wake-up from publishing after either terminal transition.
+  /// Discard cancels queued work, including its debounce wake-up. An in-flight
+  /// commit still reconciles against the resulting draft when it completes.
   private func cancelPendingAppearancePublish() {
     appearanceDebounceTask?.cancel()
     appearanceDebounceTask = nil
     pendingAppearance = nil
+  }
+
+  private func refreshPendingAppearancePublish() {
+    guard configuration.canPersist, let baseline = configuration.documentBaseline else {
+      cancelPendingAppearancePublish()
+      return
+    }
+    let appearance = configuration.documentDraft.appearance.livePanelProjection(
+      over: baseline.appearance)
+    if appearance == baseline.appearance {
+      cancelPendingAppearancePublish()
+    } else {
+      pendingAppearance = appearance
+    }
   }
 
   func startPendingAppearancePublish() {
@@ -621,16 +641,14 @@ extension SettingsModel {
           appearancePublishTask = nil
           return
         }
-        if pendingAppearance == nil {
+        refreshPendingAppearancePublish()
+        if configuration.canPersist, pendingAppearance == nil {
           status = .appearanceLive
         }
       } catch SettingsDataCoordinator.Failure.staleRevision {
         presentStaleAppearancePublish()
       } catch SettingsDataCoordinator.Failure.cancelled {
-        if let baseline = configuration.documentBaseline {
-          pendingAppearance = configuration.documentDraft.appearance.livePanelProjection(
-            over: baseline.appearance)
-        }
+        refreshPendingAppearancePublish()
       } catch {
         settingsModelLogger.error(
           "Candidate appearance publish failed: \(error.localizedDescription, privacy: .private)"
@@ -772,4 +790,30 @@ extension SettingsModel {
     }
   }
 
+}
+
+struct SettingsActiveOperation: Equatable {
+  let kind: SettingsOperationKind
+  var phase: SettingsOperationPhase
+  var cancellationAvailable: Bool
+  var cancellationRequested: Bool
+
+  var cancellable: Bool { cancellationAvailable && !cancellationRequested }
+}
+
+enum SettingsLegacyImportState {
+  case unavailable
+  case checking
+  case none
+  case compatible(SettingsDataCoordinator.LegacyImportCandidate)
+  case failed
+}
+
+enum SettingsLanguageDataUpdateTarget: Equatable {
+  case currentEdition
+  case completeOffline
+
+  var presentationPack: SettingsPresentationPack {
+    self == .completeOffline ? .longTailDictionaries : .languageData
+  }
 }
