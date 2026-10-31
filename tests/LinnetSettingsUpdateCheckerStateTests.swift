@@ -503,15 +503,9 @@ struct LinnetSettingsUpdateCheckerStateTests {
       let identifier = "io.github.ares-x.LinnetCoreRecoveryFixture.\(UUID().uuidString)"
       let fixture = try makeBundleFixture(identity: installed, bundleIdentifier: identifier)
       let app = fixture.root.appending(path: "Linnet.app")
+      let lease = FixtureHostLease(app: app, identifier: identifier)
       defer {
-        // Only this fixture's uniquely identified, canonical-path processes.
-        let owned = NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
-          .filter { $0.bundleURL?.standardizedFileURL == app.standardizedFileURL }
-        for process in owned { require(process.terminate(), "fixture Host refused cleanup") }
-        for _ in 0..<300 where owned.contains(where: { !$0.isTerminated }) {
-          usleep(10_000)
-        }
-        require(owned.allSatisfy(\.isTerminated), "fixture Host remained running after cleanup")
+        lease.close()
         try? FileManager.default.removeItem(at: fixture.root)
       }
       let executableURL = app.appending(path: "Contents/MacOS/Linnet")
@@ -531,6 +525,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
           else { continuation.resume(throwing: FixtureFailure.invalidBundle) }
         }
       }
+      lease.openedPID = oldHost.processIdentifier
       let requester = ProcessRuntimeRequester(
         app: app, identifier: identifier, oldHost: oldHost, scenario: scenario)
       try await waitForFixture("fixture Host did not report its loaded identity", attempts: 500) {
@@ -594,6 +589,63 @@ struct LinnetSettingsUpdateCheckerStateTests {
         try fixtureRequire(requester.loadedIdentity() == installed, "restart inferred identity from installed files")
       }
       print("Core Host subprocess recovery: PASS \(scenario)")
+    }
+  }
+
+  // Keep the launch PID and the fixture's own launch records. Bundle URLs
+  // include a directory slash that constructed URLs may omit; compare canonical
+  // paths so that URL representation cannot silently omit a running process.
+  @MainActor private final class FixtureHostLease {
+    let app: URL
+    let identifier: String
+    var openedPID: pid_t?
+
+    init(app: URL, identifier: String) {
+      self.app = app.resolvingSymlinksInPath()
+      self.identifier = identifier
+    }
+
+    func close() {
+      var pids = Set<pid_t>()
+      if let openedPID { pids.insert(openedPID) }
+      let record = app.deletingLastPathComponent().appending(path: "host-launches.jsonl")
+      if let data = try? Data(contentsOf: record) {
+        for line in data.split(separator: 0x0a) {
+          guard let launch = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+            let pid = launch["pid"] as? Int32
+          else { require(false, "invalid fixture Host launch record"); return }
+          pids.insert(pid)
+        }
+      }
+      for pid in pids {
+        guard pid > 0 else {
+          require(false, "invalid fixture Host PID; refusing process-group signaling")
+          return
+        }
+        if kill(pid, 0) == -1 && errno == ESRCH { continue }
+        let process = NSRunningApplication(processIdentifier: pid)
+        guard let process,
+          process.bundleIdentifier == identifier,
+          process.bundleURL?.resolvingSymlinksInPath().path == app.path,
+          process.executableURL?.resolvingSymlinksInPath().path
+            == app.appending(path: "Contents/MacOS/Linnet").path
+        else {
+          require(false, "fixture Host ownership changed before cleanup: pid=\(pid) "
+            + "bundle=\(process?.bundleIdentifier ?? "nil") "
+            + "app=\(process?.bundleURL?.path ?? "nil") expected=\(app.path) "
+            + "executable=\(process?.executableURL?.path ?? "nil")")
+          return
+        }
+        require(kill(pid, SIGTERM) == 0 || errno == ESRCH, "fixture Host refused SIGTERM")
+        // Observe OS process exit, independent of main-run-loop AppKit updates.
+        for _ in 0..<300 {
+          if kill(pid, 0) == -1 && errno == ESRCH { break }
+          usleep(10_000)
+        }
+        require(kill(pid, 0) == -1 && errno == ESRCH,
+          "fixture Host remained running after cleanup")
+      }
+      print("Core Host fixture cleanup: PASS (\(pids.count) launched PIDs confirmed exited)")
     }
   }
 
