@@ -566,7 +566,6 @@ struct DictionaryTabView: View {
   @Environment(\.locale) private var locale
   @ObservedObject var model: SettingsModel
   @State private var addedEntryID: UUID?
-  @State private var pendingEntryFocusID: UUID?
   @FocusState private var focusedEntryID: UUID?
 
   var body: some View {
@@ -600,11 +599,10 @@ struct DictionaryTabView: View {
                   HStack {
                     TextField("Value", text: rowBinding.value)
                       .focused($focusedEntryID, equals: row.id)
-                      .onAppear {
-                        if pendingEntryFocusID == row.id {
-                          focusedEntryID = row.id
-                          pendingEntryFocusID = nil
-                        }
+                      .task(id: addedEntryID) { @MainActor in
+                        guard !Task.isCancelled, addedEntryID == row.id else { return }
+                        focusedEntryID = row.id
+                        addedEntryID = nil
                       }
                     TextField("code", text: rowBinding.code).frame(width: 170)
                     removeButton("Remove custom word") { model.removeCustomWord(id: row.id) }
@@ -627,11 +625,10 @@ struct DictionaryTabView: View {
                   HStack {
                     TextField("word", text: rowBinding.value)
                       .focused($focusedEntryID, equals: row.identifier)
-                      .onAppear {
-                        if pendingEntryFocusID == row.identifier {
-                          focusedEntryID = row.identifier
-                          pendingEntryFocusID = nil
-                        }
+                      .task(id: addedEntryID) { @MainActor in
+                        guard !Task.isCancelled, addedEntryID == row.identifier else { return }
+                        focusedEntryID = row.identifier
+                        addedEntryID = nil
                       }
                     removeButton("Remove disabled word") {
                       model.removeDisabledWord(id: row.identifier)
@@ -654,11 +651,10 @@ struct DictionaryTabView: View {
                   HStack {
                     TextField("Expansion", text: rowBinding.value)
                       .focused($focusedEntryID, equals: row.id)
-                      .onAppear {
-                        if pendingEntryFocusID == row.id {
-                          focusedEntryID = row.id
-                          pendingEntryFocusID = nil
-                        }
+                      .task(id: addedEntryID) { @MainActor in
+                        guard !Task.isCancelled, addedEntryID == row.id else { return }
+                        focusedEntryID = row.id
+                        addedEntryID = nil
                       }
                     TextField("x;trigger", text: rowBinding.trigger).frame(width: 170)
                     removeButton("Remove text expansion") { model.removeExpansion(id: row.id) }
@@ -681,7 +677,6 @@ struct DictionaryTabView: View {
   }
 
   private func editAddedEntry(_ entryID: UUID) {
-    pendingEntryFocusID = entryID
     addedEntryID = entryID
   }
 }
