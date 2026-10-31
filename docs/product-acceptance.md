@@ -1,5 +1,24 @@
 # Linnet product acceptance
 
+## Numeric periods in Chinese mode (issue #65)
+
+Chinese input must commit `123.456` and `123.456.789` exactly, including an
+immediate final period in `123.`. Ordinary Chinese punctuation and spelling
+must remain unchanged. A second consecutive period uses the ordinary Chinese
+mapping, so `123..456` becomes `123.。456`; comma and colon retain their selected
+punctuation mode.
+
+The old Core reproduced `123。456` in the native engine and
+`123。456。789` in Safari on the dedicated 0.1.30 VM. Core's existing Settings
+projection now selects Rime's native numeric-period and immediate-commit policy;
+it overrides the retained language pack without changing pack identities.
+`tests/verify_swift_units.sh --only projection-renderer` and
+`tests/verify_rime_runtime.sh --profile-key-matrix-probe` pass, including all
+eight Chinese profiles, idle/active punctuation and the explicit ASCII mode.
+Installed acceptance must bind the Action candidate bytes, exercise the same
+sequences and ordinary Chinese typing, and complete the supported-baseline
+online Core update without logout or lost application connections.
+
 ## Chinese homophone composition (candidate)
 
 With an empty learning state, continuous Natural Code `yijylmjx` and full pinyin

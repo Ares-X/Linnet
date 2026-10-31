@@ -540,6 +540,7 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |
 | App 内嵌 Rime 与插件 | `tests/verify_packaged_rime.sh APP APP/Contents/Applications/Settings.app`；直接加载产物中的库，不使用开发机的动态库搜索路径 |
 | 输入方案、按键或词频 | 对应的 `verify_profile_golden.rb`、`verify_chinese_grammar.sh`、`verify_chinese_learning_policy.sh` 或 `verify_rime_runtime.sh` 单门 |
+| 数字后句点 | `tests/verify_swift_units.sh --only projection-renderer` 与 `tests/verify_rime_runtime.sh --profile-key-matrix-probe`；Core 配置投影将 Rime 的 `digit_separators` 设为 `.`、`digit_separator_action` 设为 `commit`，由原生 punctuator 的提交历史判断数字上下文并立即上屏，保留旧词包也生效 |
 | 英文句首大写、句间空格与回车 | `tests/verify_rime_runtime.sh --sentence-capitalization-probe`；覆盖开关、候选与上屏、句中小写、回车选词和换行，以及标点／被动预测退出回归 |
 | 中文纠错与模糊音 | `tests/verify_swift_units.sh --only projection-renderer,settings-data-coordinator` 和 `tests/verify_rime_runtime.sh --chinese-spelling-probe`；真实设置应用与打字在专用 VM 验收 |
 | 右键忘记候选与焦点 | `tests/verify_rime_runtime.sh --candidate-forget-probe` |

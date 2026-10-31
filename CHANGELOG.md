@@ -6,6 +6,10 @@
 README、文档、CI、构建及发布脚本调整不属于版本更新。继承的 Squirrel 历史请查阅
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md)。
 
+## 0.1.31 — 2026-10-31
+
+- 中文模式下，数字后的句点保留为 `.` 并立即上屏，可连续输入 `123.456`、`123.456.789`。
+
 ## 0.1.30 — 2026-10-26
 
 - 修复 Smart English 开启句首自动大写后，空白输入框、句末标点加空格及换行后的首词仍为小写的问题；回车选词不会把下一个词误当作新句。

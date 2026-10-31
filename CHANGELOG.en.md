@@ -6,6 +6,10 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.31 — 2026-10-31
+
+- In Chinese mode, periods after digits now remain `.` and commit immediately, including sequences such as `123.456` and `123.456.789`.
+
 ## 0.1.30 — 2026-10-26
 
 - Fix Smart English sentence capitalization at the start of an empty text field, after sentence punctuation and spaces, and after a newline. Accepting a candidate with Return does not start a new sentence.

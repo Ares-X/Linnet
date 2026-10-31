@@ -6706,7 +6706,32 @@ void ExpectFormalProfileKeyMatrix(RimeApi_stdbool* api) {
       }
     }
 
-    for (const std::string& numeric : {"1,000", "3.14", "12:30"}) {
+    // Numeric periods commit on the same key, including the final period;
+    // waiting for the next digit would reorder or lose decimal separators.
+    const std::array<std::pair<const char*, const char*>, 7> chinese_numbers = {{
+        {"123.456", "123.456"},
+        {"123.456.789", "123.456.789"},
+        {"123.", "123."},
+        {"123..456", "123.。456"},
+        {"123 .", "123 。"},
+        {"1,000", "1，000"},
+        {"12:30", "12：30"},
+    }};
+    for (const auto& [input, expected] : chinese_numbers) {
+      const RimeSessionId numeric_session =
+          CreateSchemaSession(api, schema_id.c_str());
+      const std::string actual = SimulateHostText(api, numeric_session, input);
+      const auto after = ReadKeyInteractionSnapshot(api, numeric_session);
+      api->destroy_session(numeric_session);
+      if (actual != expected || !after.input.empty() ||
+          after.composition_size != 0 || !after.candidates.empty()) {
+        Fail(schema_id + " Chinese-punctuation numeric input '" + input +
+             "' produced '" + actual + "' instead of '" + expected + "'");
+      }
+    }
+
+    for (const std::string& numeric :
+         {"1,000", "3.14", "12:30", "123.456.789", "123."}) {
       const RimeSessionId numeric_session =
           CreateSchemaSession(api, schema_id.c_str());
       api->set_option(numeric_session, "ascii_punct", true);
