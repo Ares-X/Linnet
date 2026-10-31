@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-owners='hallelujah-importer personal-data projection-renderer appearance-preview settings-page-layout presentation-status cloud-sync-location rime-sync-controller settings-session settings-appearance-scheduling settings-window-close settings-update-checker backup-store candidate-presentation candidate-snapshot-builder macos-keycodes rime-session-lease input-activation-policy input-source-lifecycle host-entrypoints preedit-geometry panel-geometry candidate-window client-appearance settings-contract data-registry data-channel download-transport download-source pack rime-path rime-user-data-bridge settings-data-coordinator settings-ipc'
+owners='hallelujah-importer personal-data projection-renderer appearance-preview settings-page-layout presentation-status cloud-sync-location rime-sync-controller settings-session settings-appearance-scheduling settings-window-close settings-update-checker backup-store candidate-presentation candidate-snapshot-builder macos-keycodes rime-session-lease input-activation-policy input-source-lifecycle host-entrypoints preedit-geometry panel-geometry candidate-window client-appearance settings-contract data-registry data-channel download-transport download-source pack rime-path rime-health rime-user-data-bridge settings-data-coordinator settings-ipc'
 selection=all
 case "$#:${1:-}" in
   0:) ;;
@@ -262,26 +262,32 @@ compile_run_selected pack \
   tools/LinnetPackEncoder.swift \
   tests/LinnetPackTests.swift
 
-if selected rime-path; then
-  begin_phase "Rime filesystem projection"
+if selected rime-path || selected rime-health; then
+  begin_phase "Rime filesystem and schema configuration"
   linnet_swift_compile rime-path -parse-as-library -warnings-as-errors -sdk "${sdk}" \
     -target "${target}" \
     -import-objc-header sources/Squirrel-Bridging-Header.h \
-    -I librime/dist/include sources/BridgingFunctions.swift \
+    -I librime/dist/include tests/LinnetTestScratch.swift sources/BridgingFunctions.swift \
     tests/RimeFilesystemPathProjectionTests.swift \
     lib/librime.1.dylib \
     lib/rime-plugins/librime-lua.dylib \
     lib/rime-plugins/librime-octagram.dylib \
     lib/rime-plugins/librime-predict.dylib \
     lib/rime-plugins/librime-smart-english.dylib
-  external_rime_cwd="${scratch}/Rime external cwd"
-  mkdir -p "${external_rime_cwd}"
-  (
-    cd "${external_rime_cwd}"
+  if selected rime-path; then
+    external_rime_cwd="${scratch}/Rime external cwd"
+    mkdir -p "${external_rime_cwd}"
+    (
+      cd "${external_rime_cwd}"
+      DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
+        "${LINNET_SWIFT_COMPILED_BINARY}" "${repo_root}"
+    )
+  fi
+  if selected rime-health; then
     DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
-      "${LINNET_SWIFT_COMPILED_BINARY}" "${repo_root}"
-  )
-  end_phase "Rime filesystem projection"
+      "${LINNET_SWIFT_COMPILED_BINARY}" --schema-ids
+  fi
+  end_phase "Rime filesystem and schema configuration"
 fi
 
 common_settings_sources=(

@@ -304,21 +304,7 @@ extension SquirrelApplicationDelegate {
     let octagramLoaded = "octagram".withCString {
       rimeAPI.find_module($0) != nil
     }
-    var deployedSchemas = Set<String>()
-    var schemaList = RimeSchemaList()
-    if rimeAPI.get_schema_list(&schemaList) {
-      defer { rimeAPI.free_schema_list(&schemaList) }
-      if let entries = schemaList.list {
-        for index in 0..<Int(schemaList.size) {
-          guard let schemaID = entries[index].schema_id,
-            let schemaName = entries[index].name,
-            schemaID.pointee != 0,
-            schemaName.pointee != 0
-          else { continue }
-          deployedSchemas.insert(String(cString: schemaID))
-        }
-      }
-    }
+    let deployedSchemas = rimeConfiguredSchemaIDs(using: rimeAPI)
     let available = Set(requiredSchemas).intersection(deployedSchemas).count
     let healthy = isRimeRunning && !isRimeInputSuspended
       && smartEnglishLoaded && octagramLoaded && available == requiredSchemas.count
