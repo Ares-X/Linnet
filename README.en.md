@@ -22,7 +22,7 @@ Linnet (双韵) is an open-source bilingual input method for macOS. Chinese inpu
 
 **[Download the latest Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-Stable: **[0.1.30 (112)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.30)**, fixing Smart English sentence capitalization and preserving it while correcting the first word. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
+Stable: **[0.1.31 (113)](https://github.com/Ares-X/Linnet/releases/tag/v0.1.31)**, fixing numeric periods in Chinese mode, expanded candidate navigation and settings interactions, and improving responsiveness during live appearance changes. See the [changelog](CHANGELOG.en.md) for features and fixes in each version.
 
 Users on 0.1.27 and later can download and apply Core updates in **Settings → Data & Updates → Stable**. Because the signing certificate changed, versions 0.1.26 and earlier must first install the latest complete `Linnet.pkg` manually over the existing app. Do not uninstall.
 

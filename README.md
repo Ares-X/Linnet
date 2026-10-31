@@ -22,7 +22,7 @@ Linnet（双韵）是一款为 macOS 打造的开源双语输入法，将中文�
 
 **[下载最新版 Linnet.pkg](https://github.com/Ares-X/Linnet/releases/latest)**
 
-正式版：**[0.1.30（112）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.30)**，修复 Smart English 句首大写及修改首词拼写后大写失效的问题。各版本功能与修复见[版本记录](CHANGELOG.md)。
+正式版：**[0.1.31（113）](https://github.com/Ares-X/Linnet/releases/tag/v0.1.31)**，修复中文数字句点、展开候选导航及设置交互，并改善实时外观更新时的响应。各版本功能与修复见[版本记录](CHANGELOG.md)。
 
 0.1.27 及更新版本的用户可在 **Settings → 数据与更新 → 正式版** 下载并应用 Core 更新；0.1.26 及更早版本因签名证书更换，请先手动用最新版完整 `Linnet.pkg` 覆盖安装，无需卸载。
 
