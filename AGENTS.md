@@ -233,3 +233,18 @@ useful objective; do not churn the implementation to satisfy a time budget.
 The handoff must state changed files, behavior owner, removed paths, before/after
 authority counts, tests run/not run, runtime/product status, and remaining risk.
 Do not claim completion because the code compiles or a large suite passed.
+
+## 11. User-Reported Issues
+
+- Reply to user reports in the reporter's language with the released version/link,
+  the concrete fix and tests actually run. Write briefly as a maintainer; omit AI
+  phrasing, internal process reports and unverified claims.
+- Keep the issue open for the reporter to test. Merge, release, passing local
+  tests or inactivity do not justify closure. Close after the reporter confirms
+  resolution or the maintainer explicitly requests it.
+- Use `Refs #N` or `Related #N` for user reports in PR descriptions and commits,
+  never auto-closing keywords such as `Closes`, `Fixes` or `Resolves`. Distinguish
+  user reports from self-created audit issues by their origin, not just account
+  bot flags. Validated self-created audit issues may close with their fix.
+- If a user report was closed prematurely, reopen it and post the fix/version
+  and actual test results, leaving it open for the reporter's confirmation.
