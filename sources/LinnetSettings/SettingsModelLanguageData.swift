@@ -11,14 +11,16 @@ private let linnetLanguageDataLogger = Logger(
 extension SettingsModel {
   enum GrammarModelStatus: Equatable {
     case checking
-    case ltsActive
+    case ltsInstalled
     case missing
+    case unavailable
 
     var label: LocalizedStringKey {
       switch self {
       case .checking: return "Detecting grammar model…"
-      case .ltsActive: return "Wanxiang LTS grammar data (about 420 MB) — Active"
+      case .ltsInstalled: return "Wanxiang LTS grammar data (about 420 MB) — Installed"
       case .missing: return "Model data missing"
+      case .unavailable: return "Grammar model installation status unavailable"
       }
     }
   }
@@ -47,8 +49,12 @@ extension SettingsModel {
   }
 
   func detectGrammarModel() {
+    guard dataServicesAvailable else {
+      grammarModelStatus = .unavailable
+      return
+    }
     grammarModelStatus = installedPacks.contains(where: { $0.kind == .lts })
-      ? .ltsActive : .missing
+      ? .ltsInstalled : .missing
   }
 
   func updateLanguageData() {

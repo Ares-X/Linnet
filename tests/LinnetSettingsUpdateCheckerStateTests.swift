@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -232,6 +233,8 @@ struct LinnetSettingsUpdateCheckerStateTests {
         releaseURL: URL(
           string: "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.11")!
       )
+      try await verifyDownloadCleanup(core: core, root: fixture.root)
+
       let downloaded = fixture.root.appending(
         path: "Linnet-0.1.11-arm64-Core.linnetcore",
         directoryHint: .notDirectory)
@@ -243,13 +246,15 @@ struct LinnetSettingsUpdateCheckerStateTests {
         candidateApp: fixture.root.appending(path: ".linnet-core-update.fixture/Linnet.payload"),
         baseSHA256: String(repeating: "a", count: 64),
         targetSHA256: String(repeating: "b", count: 64))
+      let downloadReleases = DownloadReleases()
       var revealed: [URL] = []
       let mirrorSource = try LinnetSettingsDownloadSource.customMirror(
         prefix: "https://mirror.example.com/")
       let downloadChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: requester,
-        coreDownloader: StubCoreDownloader(destination: downloaded, expectedSource: mirrorSource),
+        coreDownloader: StubCoreDownloader(
+          destination: downloaded, expectedSource: mirrorSource, releases: downloadReleases),
         coreInstaller: StubCoreInstaller(prepared: prepared),
         revealCorePackage: { revealed.append($0) })
       downloadChecker.downloadCoreUpdate(core, source: mirrorSource)
@@ -260,6 +265,35 @@ struct LinnetSettingsUpdateCheckerStateTests {
         revealed.isEmpty,
         "the verified App archive was exposed to Finder or Installer"
       )
+
+      require(downloadReleases.files == [downloaded],
+        "prepared App archive was not released")
+      let failingInstallerChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: requester,
+        coreDownloader: StubCoreDownloader(destination: downloaded, releases: downloadReleases),
+        coreInstaller: StubCoreInstaller(prepared: prepared, rejectsPreparation: true))
+      failingInstallerChecker.downloadCoreUpdate(core, source: .direct)
+      await waitUntil("failed preparation did not finish") {
+        failingInstallerChecker.coreDownloadState == .failed(core: core)
+      }
+      require(downloadReleases.files == [downloaded, downloaded],
+        "failed preparation retained its App archive")
+
+      let staleDownloader = SuspendedCoreDownloader(destination: downloaded)
+      let staleChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: requester, coreDownloader: staleDownloader,
+        coreInstaller: StubCoreInstaller(prepared: prepared))
+      staleChecker.downloadCoreUpdate(core, source: .direct)
+      await waitUntil("cancel fixture download did not start") { staleDownloader.started }
+      staleChecker.cancelCoreDownload()
+      staleDownloader.finish()
+      await waitUntil("late cancelled download retained its artifact") {
+        staleDownloader.released
+      }
+      require(staleChecker.coreDownloadState == .idle,
+        "a late download overwrote the cancelled state")
 
       let applyingRequester = RuntimeRequester(health: health(productIdentity: installed))
       let applyingChecker = LinnetSettingsUpdateChecker(
@@ -342,7 +376,8 @@ struct LinnetSettingsUpdateCheckerStateTests {
       let legacyChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: requester,
-        coreDownloader: StubCoreDownloader(destination: legacyPackage),
+        coreDownloader: StubCoreDownloader(
+          destination: legacyPackage, releases: downloadReleases),
         coreInstaller: StubCoreInstaller(prepared: prepared),
         revealCorePackage: { revealed.append($0) })
       legacyChecker.downloadCoreUpdate(legacyCore, source: .direct)
@@ -355,6 +390,10 @@ struct LinnetSettingsUpdateCheckerStateTests {
         revealed == [legacyPackage],
         "the temporary bridge PKG did not require an explicit Installer action"
       )
+
+      legacyChecker.cancelCoreDownload()
+      require(!downloadReleases.files.contains(legacyPackage),
+        "a downloaded legacy Installer package was removed before the user used it")
 
       let failedDownloadChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
@@ -458,6 +497,9 @@ struct LinnetSettingsUpdateCheckerStateTests {
   private struct StubCoreDownloader: LinnetCoreDownloading {
     let destination: URL?
     var expectedSource: LinnetSettingsDownloadSource = .direct
+    var releases: DownloadReleases? = nil
+
+    func discard(_ artifact: URL) { releases?.append(artifact) }
 
     func download(
       _ core: LinnetDataChannel.Core,
@@ -476,17 +518,96 @@ struct LinnetSettingsUpdateCheckerStateTests {
 
   private struct StubCoreInstaller: LinnetCoreUpdateInstalling {
     let prepared: LinnetPreparedCoreUpdate
+    var rejectsPreparation = false
 
     func prepare(
       _: LinnetDataChannel.Core,
       artifact _: URL,
       installedApp _: URL
     ) async throws -> LinnetPreparedCoreUpdate {
-      prepared
+      if rejectsPreparation { throw FixtureFailure.exchangeFailed }
+      return prepared
     }
 
     func exchange(_: LinnetPreparedCoreUpdate) async throws { }
     func discard(_: LinnetPreparedCoreUpdate) async { }
+  }
+
+  private final class DownloadReleases: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [URL] = []
+    var files: [URL] { lock.withLock { storage } }
+    func append(_ file: URL) { lock.withLock { storage.append(file) } }
+  }
+
+  private final class SuspendedCoreDownloader: LinnetCoreDownloading, @unchecked Sendable {
+    let destination: URL
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<URL, Never>?
+    private var didRelease = false
+    var started: Bool { lock.withLock { continuation != nil } }
+    var released: Bool { lock.withLock { didRelease } }
+    init(destination: URL) { self.destination = destination }
+    func download(
+      _: LinnetDataChannel.Core, source _: LinnetSettingsDownloadSource,
+      progress _: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+      await withCheckedContinuation { value in lock.withLock { continuation = value } }
+    }
+    func finish() {
+      let value = lock.withLock {
+        let value = continuation
+        continuation = nil
+        return value
+      }
+      value?.resume(returning: destination)
+    }
+    func discard(_: URL) { lock.withLock { didRelease = true } }
+  }
+
+  private static func downloadsAreEmpty(_ directory: URL) -> Bool {
+    (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) == []
+  }
+
+  @MainActor private static func verifyDownloadCleanup(
+    core: LinnetDataChannel.Core, root: URL
+  ) async throws {
+    let downloads = root.appending(path: "download-cleanup", directoryHint: .isDirectory)
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [CoreDownloadURLProtocol.self]
+    let downloader = LinnetCoreDownloader(downloadsDirectory: downloads, configuration: configuration)
+    func artifact(_ leaf: String, digest: String) -> LinnetDataChannel.Core {
+      .init(version: core.version, build: core.build, revision: core.revision,
+        bytes: 4, sha256: digest, artifactFormat: .appArchive,
+        artifactURL: core.artifactURL.deletingLastPathComponent().appending(path: leaf),
+        releaseURL: core.releaseURL)
+    }
+    let digest = SHA256.hash(data: Data("core".utf8)).map { String(format: "%02x", $0) }.joined()
+    for leaf in ["failure.linnetcore", "invalid-hash.linnetcore"] {
+      do {
+        _ = try await downloader.download(
+          artifact(leaf, digest: String(repeating: "0", count: 64)),
+          source: .direct, progress: { _ in })
+        fail("invalid download succeeded")
+      } catch { }
+      require(downloadsAreEmpty(downloads),
+        "failed Core download retained its directory or bytes")
+    }
+    let task = Task {
+      try await downloader.download(artifact("cancel.linnetcore", digest: digest),
+        source: .direct, progress: { _ in })
+    }
+    await waitUntil("cancel fixture transfer did not start") { CoreDownloadURLProtocol.cancelStarted }
+    task.cancel()
+    do { _ = try await task.value; fail("cancelled download succeeded") } catch { }
+    require(downloadsAreEmpty(downloads),
+      "cancelled Core download retained its directory or partial bytes")
+    let file = try await downloader.download(artifact("valid.linnetcore", digest: digest),
+      source: .direct, progress: { _ in })
+    require(FileManager.default.fileExists(atPath: file.path), "valid download was removed early")
+    downloader.discard(file)
+    require(downloadsAreEmpty(downloads),
+      "released Core download retained its directory")
   }
 
   private struct BundleFixture {
@@ -881,4 +1002,26 @@ struct LinnetSettingsUpdateCheckerStateTests {
   private enum FixtureFailure: Error {
     case invalidBundle, exchangeFailed, assertion(String)
   }
+}
+
+private final class CoreDownloadURLProtocol: URLProtocol, @unchecked Sendable {
+  private static let lock = NSLock()
+  private static var startedCancellation = false
+  static var cancelStarted: Bool { lock.withLock { startedCancellation } }
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    guard let url = request.url else { return }
+    let failure = url.lastPathComponent == "failure.linnetcore"
+    let response = HTTPURLResponse(url: url, statusCode: failure ? 503 : 200,
+      httpVersion: "HTTP/1.1", headerFields: ["Content-Length": "4"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    if url.lastPathComponent == "cancel.linnetcore" {
+      Self.lock.withLock { Self.startedCancellation = true }
+      return
+    }
+    client?.urlProtocol(self, didLoad: Data("core".utf8))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() { }
 }

@@ -43,7 +43,7 @@ enum LinnetRimeSyncOutcome {
   case failed
 }
 
-/// The Host-owned terminal meaning of one explicit synchronization request.
+/// The Host-owned terminal meaning of a reload or explicit synchronization request.
 /// Settings must never infer completion from request dispatch alone.
 enum LinnetRimeSyncResult: Equatable {
   case completed
@@ -105,6 +105,8 @@ final class LinnetRimeSyncController: @unchecked Sendable {
     cycleCompletion?(.deferred)
   }
 
+  /// Ordinary reloads finish when the configuration is installed, including a
+  /// disabled configuration. Immediate requests instead wait for the sync cycle.
   func reload(
     synchronizeImmediately: Bool = false,
     completion: ((LinnetRimeSyncResult) -> Void)? = nil
@@ -137,24 +139,27 @@ final class LinnetRimeSyncController: @unchecked Sendable {
       let loaded = try result.get()
       guard let syncDirectory = loaded.syncDirectory else {
         if synchronizeImmediately { recordResult(.unavailable) }
-        completion?(.unavailable)
+        completion?(synchronizeImmediately ? .unavailable : .completed)
         return
       }
       let now = Date()
       let next = synchronizeImmediately ? now : LinnetRimeSyncSchedule.nextAutomaticDate(
         now: now, lastAttempt: loaded.lastAttempt)
       if next <= now {
-        begin(at: now, syncDirectory: syncDirectory, completion: completion)
+        begin(
+          at: now, syncDirectory: syncDirectory,
+          completion: synchronizeImmediately ? completion : nil)
       } else {
         scheduleAutomatic(at: next)
       }
+      if !synchronizeImmediately { completion?(.completed) }
     } catch {
       linnetSyncLogger.error(
         "Learning sync configuration is unavailable: \(error.localizedDescription, privacy: .private)"
       )
       recordResult(.unavailable)
-      completion?(.unavailable)
       scheduleAutomatic(at: Date().addingTimeInterval(LinnetRimeSyncSchedule.automaticInterval))
+      completion?(.unavailable)
     }
   }
 

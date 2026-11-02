@@ -104,6 +104,7 @@ enum SettingsPresentationStatus: Equatable {
   case cloudBackupUploaded(Date)
   case cloudBackupUnchanged(Date)
   case cloudSyncDisabled
+  case cloudSyncPreferenceSaved(SettingsPresentationFailure)
   case backupRestored
   case backupRecordRemoved
   case backupRecordRemovalFailed
@@ -202,6 +203,12 @@ enum SettingsPresentationStatus: Equatable {
       pair = (
         "iCloud Drive learning synchronization disabled. No data was deleted.",
         "已停用 iCloud Drive 学习词同步，未删除任何数据。"
+      )
+    case .cloudSyncPreferenceSaved(let failure):
+      let reason = failureText(failure)
+      pair = (
+        "Your learning sync preference was saved, but the input method has not confirmed the change. \(reason.english)",
+        "学习同步偏好已保存，但输入法尚未确认生效。\(reason.chinese)"
       )
     case .backupRestored:
       pair = ("Verified backup restored. The previous state was backed up first.", "已恢复通过校验的备份，并先备份了原状态。")
@@ -313,6 +320,7 @@ enum SettingsPresentationStatus: Equatable {
       .pack(_, .cancelling):
       .progress
     case .staleDataReloaded,
+      .cloudSyncPreferenceSaved,
       .configurationConflict,
       .diagnosticsUnreachable,
       .backupIncomplete,

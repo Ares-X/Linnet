@@ -541,6 +541,8 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | 候选投影、Grid、面板几何 | `tests/verify_swift_units.sh --only candidate-presentation,candidate-snapshot-builder,panel-geometry,candidate-window` |
 | Settings ↔ Host 事务 | `tests/verify_swift_units.sh --only settings-ipc,settings-update-checker,settings-data-coordinator` |
 | 实时外观最终意图 | `tests/verify_swift_units.sh --only settings-appearance-scheduling`；真实 coordinator/IPC 回复交错覆盖快速返回旧值、Apply、Discard、失败与冲突 |
+| 学习同步配置确认 | `tests/verify_swift_units.sh --only rime-sync-controller,settings-data-coordinator,settings-appearance-scheduling,presentation-status`；普通 reload 确认配置已加载或停用，立即同步仍等待实际同步终态；IPC 失败保留偏好并明确未确认生效 |
+| 候选加词入口与模型安装状态 | `tests/verify_swift_units.sh --only settings-appearance-scheduling`；真实 Model 覆盖草稿与最新词条 ID、无 Host 的已安装状态和无法验证的 Registry。`SettingsUITests/testCandidateCustomWordRequestsRevealAndFocusCode` 在专用桌面验证冷启动、换页、长列表及编码焦点 |
 | 英文数据库 runtime 生命周期 | `tests/verify_rime_runtime.sh --predict-db-lifecycle-probe`；在同一进程 finalize/init 之间替换有效 A/B 数据，验证 A→B→A 和 runtime 内共享 |
 | 个人数据或备份 | `tests/verify_swift_units.sh --only personal-data,settings-session,backup-store` |
 | Rime 路径或 session | `tests/verify_swift_units.sh --only rime-path,rime-session-lease` |

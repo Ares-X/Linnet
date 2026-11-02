@@ -13,6 +13,9 @@ protocol LinnetCoreDownloading: Sendable {
     source: LinnetSettingsDownloadSource,
     progress: @escaping @Sendable (Double) -> Void
   ) async throws -> URL
+
+  /// Releases an artifact returned by this downloader, including its owned directory.
+  func discard(_ artifact: URL)
 }
 
 /// Downloads the Catalog-owned Core artifact through Settings' existing byte
@@ -20,9 +23,14 @@ protocol LinnetCoreDownloading: Sendable {
 /// exposing the file to the user.
 struct LinnetCoreDownloader: LinnetCoreDownloading {
   private let downloadsDirectory: URL?
+  private let configuration: URLSessionConfiguration
 
-  init(downloadsDirectory: URL? = nil) {
+  init(
+    downloadsDirectory: URL? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) {
     self.downloadsDirectory = downloadsDirectory
+    self.configuration = configuration
   }
 
   func download(
@@ -43,7 +51,10 @@ struct LinnetCoreDownloader: LinnetCoreDownloading {
       path: core.artifactURL.lastPathComponent,
       directoryHint: .notDirectory
     )
-    let transport = LinnetSettingsDownloadTransport(source: source)
+    var completed = false
+    defer { if !completed { discard(destination) } }
+    let transport = LinnetSettingsDownloadTransport(
+      source: source, configuration: configuration)
     try await transport.downloadArtifact(
       from: core.artifactURL,
       expectedBytes: core.bytes,
@@ -52,7 +63,17 @@ struct LinnetCoreDownloader: LinnetCoreDownloading {
     )
     try LinnetDataChannel.verifyDownloadedArtifact(
       bytes: core.bytes, sha256: core.sha256, at: destination)
+    try Task.checkCancellation()
+    completed = true
     return destination
+  }
+
+  func discard(_ artifact: URL) {
+    do {
+      try FileManager.default.removeItem(at: artifact.deletingLastPathComponent())
+    } catch {
+      linnetUpdateLogger.error("Could not remove Core download directory: \(error, privacy: .public)")
+    }
   }
 
   private func resolvedDownloadsDirectory() throws -> URL {
@@ -468,8 +489,11 @@ extension LinnetSettingsUpdateChecker {
               progress, core: core, cycle: activeCycle)
           }
         }
+        var retainedForUser = false
+        defer { if !retainedForUser { coreDownloader.discard(file) } }
         guard !Task.isCancelled, activeCycle == coreDownloadCycle else { return }
         if core.artifactFormat == .installerPackage {
+          retainedForUser = true
           coreDownloadState = .installerPackage(core: core, file: file)
         } else {
           guard let hostBundleURL else { throw ActivationFailure.missingInstalledHost }

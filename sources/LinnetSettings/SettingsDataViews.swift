@@ -476,10 +476,10 @@ extension DataTabView {
     GroupBox("Chinese sentence model") {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          Image(systemName: model.grammarModelStatus == .ltsActive
+          Image(systemName: model.grammarModelStatus == .ltsInstalled
             ? "brain.head.profile.fill" : "brain.head.profile")
             .font(.title2)
-            .foregroundStyle(model.grammarModelStatus == .ltsActive ? .green : .secondary)
+            .foregroundStyle(model.grammarModelStatus == .ltsInstalled ? .blue : .secondary)
             .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 4) {
             Text(model.grammarModelStatus.label)
@@ -500,8 +500,9 @@ extension DataTabView {
 
   @ViewBuilder var grammarModelDescription: some View {
     switch model.grammarModelStatus {
-    case .ltsActive: Text("Better prediction for long Chinese sentences.")
-    case .missing: Text("The recommended Chinese grammar model is not active.")
+    case .ltsInstalled: Text("Installed and available to the Chinese input engine.")
+    case .missing: Text("The recommended Chinese grammar model is not installed.")
+    case .unavailable: Text("The language data installation could not be verified.")
     case .checking: EmptyView()
     }
   }

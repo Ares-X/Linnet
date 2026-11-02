@@ -6,6 +6,13 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.32 — 2026-11-02
+
+- Adding a candidate to custom words reveals the new row and focuses its code field for immediate editing.
+- Learning sync reports a preference change as applied only after the input method confirms it. Unconfirmed changes are clearly identified as saved preferences.
+- Core updates release disposable downloads after cancellation, verification failure or preparation, while keeping legacy installers available to open manually.
+- The Chinese grammar model shows its verified installation status instead of treating installed data as proof that the model is running.
+
 ## 0.1.31 — 2026-11-01
 
 - In Chinese mode, periods after digits now remain `.` and commit immediately, including sequences such as `123.456` and `123.456.789`.

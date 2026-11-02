@@ -563,10 +563,15 @@ struct InputTabView: View {
 // MARK: - Dictionary
 
 struct DictionaryTabView: View {
+  private enum EditingField: Hashable {
+    case value(UUID)
+    case code(UUID)
+  }
+
   @Environment(\.locale) private var locale
   @ObservedObject var model: SettingsModel
   @State private var addedEntryID: UUID?
-  @FocusState private var focusedEntryID: UUID?
+  @FocusState private var focusedField: EditingField?
 
   var body: some View {
     ScrollViewReader { scrollProxy in
@@ -598,8 +603,10 @@ struct DictionaryTabView: View {
                   let rowBinding = model.customWordBinding(row, at: index)
                   HStack {
                     TextField("Value", text: rowBinding.value)
-                      .focused($focusedEntryID, equals: row.id)
-                    TextField("code", text: rowBinding.code).frame(width: 170)
+                      .focused($focusedField, equals: .value(row.id))
+                    TextField("code", text: rowBinding.code)
+                      .focused($focusedField, equals: .code(row.id))
+                      .frame(width: 170)
                     removeButton("Remove custom word") { model.removeCustomWord(id: row.id) }
                   }
                   .id(row.id)
@@ -619,7 +626,7 @@ struct DictionaryTabView: View {
                   let rowBinding = model.disabledWordBinding(row, at: index)
                   HStack {
                     TextField("word", text: rowBinding.value)
-                      .focused($focusedEntryID, equals: row.identifier)
+                      .focused($focusedField, equals: .value(row.identifier))
                     removeButton("Remove disabled word") {
                       model.removeDisabledWord(id: row.identifier)
                     }
@@ -640,7 +647,7 @@ struct DictionaryTabView: View {
                   let rowBinding = model.expansionBinding(row, at: index)
                   HStack {
                     TextField("Expansion", text: rowBinding.value)
-                      .focused($focusedEntryID, equals: row.id)
+                      .focused($focusedField, equals: .value(row.id))
                     TextField("x;trigger", text: rowBinding.trigger).frame(width: 170)
                     removeButton("Remove text expansion") { model.removeExpansion(id: row.id) }
                   }
@@ -658,12 +665,22 @@ struct DictionaryTabView: View {
         guard let entryID else { return }
         scrollProxy.scrollTo(entryID, anchor: .center)
       }
+      .onAppear { editRequestedCustomWord() }
+      .onChange(of: model.customWordToEdit) { _ in editRequestedCustomWord() }
+      .onChange(of: model.configuration.canEdit) { _ in editRequestedCustomWord() }
     }
   }
 
   private func editAddedEntry(_ entryID: UUID) {
-    focusedEntryID = entryID
+    focusedField = .value(entryID)
     addedEntryID = entryID
+  }
+
+  private func editRequestedCustomWord() {
+    guard model.configuration.canEdit, let entryID = model.customWordToEdit else { return }
+    focusedField = .code(entryID)
+    addedEntryID = entryID
+    model.customWordToEdit = nil
   }
 }
 

@@ -19,6 +19,11 @@ struct SettingsAppearanceSchedulingTests {
     try directory(root)
     let product = "LT" + UUID().uuidString.prefix(8)
     let bundle = try makeBundle(at: root, product: String(product))
+    defer {
+      if let identifier = bundle.bundleIdentifier {
+        UserDefaults(suiteName: identifier)?.removePersistentDomain(forName: identifier)
+      }
+    }
     guard let registry = LinnetSettingsContract.dataRegistry(startingAt: bundle) else {
       throw FixtureFailure(message: "fixture registry unavailable")
     }
@@ -31,7 +36,19 @@ struct SettingsAppearanceSchedulingTests {
         try FileManager.default.removeItem(at: root)
       } catch { fail("fixture cleanup failed: \(error)") }
     }
+    let unavailableModel = SettingsModel(bundle: bundle)
+    await unavailableModel.prepareInitialState()
+    try require(unavailableModel.grammarModelStatus == .unavailable,
+      "an unverified Registry was reported as missing or installed")
     try makeRuntime(registry)
+    let offlineModel = SettingsModel(bundle: bundle)
+    await offlineModel.prepareInitialState()
+    try require(offlineModel.grammarModelStatus == .ltsInstalled,
+      "verified LTS data without a Host must be reported as installed")
+    offlineModel.installedPacks.removeAll { $0.kind == .lts }
+    offlineModel.detectGrammarModel()
+    try require(offlineModel.grammarModelStatus == .missing,
+      "a verified installation without LTS must report missing data")
     let control = root.appending(path: "control")
     try directory(control)
     let helper = Process()
@@ -49,6 +66,20 @@ struct SettingsAppearanceSchedulingTests {
     try await wait("configuration did not become ready") {
       model.configuration.canPersist && !model.personalValidationPending
     }
+    let personalBeforeEdit = try LinnetPersonalDataStore.snapshot(from: registry.userDataDirectory)
+    model.editCustomWord(value: "候选一")
+    let firstWordID = model.customWordToEdit
+    model.editCustomWord(value: "候选二")
+    try require(model.selectedTab == 2 && model.customWordToEdit != firstWordID
+      && model.customWordToEdit == model.configuration.personalDraft.customWords.first?.id
+      && model.configuration.personalDraft.customWords.prefix(2).map(\.value) == ["候选二", "候选一"]
+      && model.configuration.personalDraft.customWords.prefix(2).allSatisfy { $0.code.isEmpty },
+      "candidate requests did not retain distinct draft rows and the latest editing target")
+    try require(try LinnetPersonalDataStore.snapshot(from: registry.userDataDirectory) == personalBeforeEdit,
+      "candidate requests saved personal data without Apply")
+    model.discardPendingChanges()
+    try require(model.customWordToEdit == nil && !model.pendingChanges,
+      "Discard retained a candidate editing request or its draft")
     let live = registry.userDataDirectory
     var requests = 0
     var prematureLiveSuccess = false
@@ -214,6 +245,33 @@ struct SettingsAppearanceSchedulingTests {
     try require(model.configuration.documentDraft == external && !model.pendingChanges,
       "Discard did not accept the external baseline")
     try require(!prematureLiveSuccess, "live success was shown before the latest selection converged")
+
+    // The toggle reflects the saved preference; only a Host acknowledgement
+    // establishes that the running scheduler applied it. Disabling requires no
+    // cloud filesystem access and keeps this fixture isolated from real iCloud.
+    for action in ["fail", "timeout", "accept"] {
+      try require(LinnetSettingsContract.setCloudSyncEnabled(true, startingAt: bundle),
+        "fixture learning preference unavailable")
+      let syncModel = SettingsModel(bundle: bundle)
+      try require(syncModel.cloudSyncEnabled, "model did not read its product preference")
+      let change = Task { await syncModel.setCloudSyncEnabled(false) }
+      try await nextRequest(.reloadLearningSync)
+      try require(syncModel.cloudSyncPreparing && !syncModel.cloudSyncEnabled
+        && syncModel.status != .cloudSyncDisabled,
+        "saved preference was reported as an applied scheduler change")
+      try release(action)
+      await change.value
+      try require(!syncModel.cloudSyncPreparing && !syncModel.cloudSyncEnabled
+        && !LinnetSettingsContract.cloudSyncEnabled(startingAt: bundle),
+        "unconfirmed reload rolled back or lost the saved preference")
+      let expected: SettingsPresentationStatus = switch action {
+      case "fail": .cloudSyncPreferenceSaved(.cloudSyncUnavailable)
+      case "timeout": .cloudSyncPreferenceSaved(.timedOut)
+      default: .cloudSyncDisabled
+      }
+      try require(syncModel.status == expected,
+        "toggle did not distinguish Host acknowledgement, failure and timeout")
+    }
     print("SettingsAppearanceSchedulingTests: PASS")
   }
 
@@ -238,7 +296,7 @@ struct SettingsAppearanceSchedulingTests {
             code: .diagnosticsReady, detail: "fixture running", health: try health()))
           return
         }
-        guard [.refresh, .reloadConfiguration, .pause, .cancel].contains(request.command)
+        guard [.refresh, .reloadConfiguration, .pause, .cancel, .reloadLearningSync].contains(request.command)
         else { fail("unexpected helper command") }
         sequence += 1
         try JSONEncoder().encode(request).write(
@@ -248,6 +306,20 @@ struct SettingsAppearanceSchedulingTests {
         while !exists(release), Date() < deadline { Thread.sleep(forTimeInterval: 0.002) }
         guard exists(release) else { fail("fixture reply was not released") }
         let action = try String(contentsOf: release, encoding: .utf8)
+        if request.command == .reloadLearningSync {
+          if action == "timeout" {
+            // Keep the channel open beyond the client's real IPC deadline.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+              withExtendedLifetime(reply) {}
+            }
+            return
+          }
+          reply(.init(transactionID: request.transactionID,
+            status: action == "fail" ? .rejected : .running,
+            code: action == "fail" ? .learningSyncUnavailable : .learningSyncConfigurationReloaded,
+            detail: "fixture learning sync configuration result", health: try health()))
+          return
+        }
         if request.command == .pause || request.command == .cancel {
           let pausing = request.command == .pause
           reply(.init(transactionID: request.transactionID,
