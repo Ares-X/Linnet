@@ -189,8 +189,17 @@ extension SettingsModel {
 
   @discardableResult
   func addCustomWord() -> UUID {
-    let row = LinnetPersonalData.CustomWord(value: "", code: "")
-    configuration.personalDraft.customWords.append(row)
+    insertCustomWord(value: "", at: configuration.personalDraft.customWords.count)
+  }
+
+  func editCustomWord(value: String) {
+    customWordToEdit = insertCustomWord(value: value, at: 0)
+    selectedTab = 2
+  }
+
+  private func insertCustomWord(value: String, at index: Int) -> UUID {
+    let row = LinnetPersonalData.CustomWord(value: value, code: "")
+    configuration.personalDraft.customWords.insert(row, at: index)
     return row.id
   }
 

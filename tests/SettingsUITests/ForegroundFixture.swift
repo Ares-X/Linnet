@@ -4,6 +4,7 @@ import AppKit
 @MainActor
 final class ForegroundFixture: NSObject {
   private let result = NSTextField(labelWithString: "Ready")
+  private var candidateNumber = 0
 
   @MainActor
   static func main() {
@@ -15,8 +16,11 @@ final class ForegroundFixture: NSObject {
     window.title = "Settings UI foreground fixture"
     let button = NSButton(title: "Open Settings", target: fixture, action: #selector(openSettings))
     button.frame = NSRect(x: 40, y: 180, width: 200, height: 40)
-    fixture.result.frame = NSRect(x: 40, y: 130, width: 400, height: 30)
+    let add = NSButton(title: "Add Candidate Word", target: fixture, action: #selector(addCustomWord))
+    add.frame = NSRect(x: 40, y: 130, width: 200, height: 40)
+    fixture.result.frame = NSRect(x: 40, y: 80, width: 400, height: 30)
     window.contentView?.addSubview(button)
+    window.contentView?.addSubview(add)
     window.contentView?.addSubview(fixture.result)
     window.makeKeyAndOrderFront(nil)
     application.activate(ignoringOtherApps: true)
@@ -25,6 +29,15 @@ final class ForegroundFixture: NSObject {
 
   @MainActor
   @objc private func openSettings() {
+    openSettings(customWord: nil)
+  }
+
+  @objc private func addCustomWord() {
+    candidateNumber += 1
+    openSettings(customWord: "Candidate \(candidateNumber)")
+  }
+
+  private func openSettings(customWord: String?) {
     // XCTest operates this normal UI; only the unsandboxed fixture owns the
     // Host-like open. Sandboxed NSWorkspace discards both arguments and HOME.
     let settingsURL = Bundle.main.bundleURL.deletingLastPathComponent()
@@ -45,11 +58,24 @@ final class ForegroundFixture: NSObject {
     configuration.allowsRunningApplicationSubstitution = false
     configuration.environment = ["HOME": isolatedHome, "CFFIXED_USER_HOME": isolatedHome]
     configuration.arguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-    NSWorkspace.shared.openApplication(at: settingsURL, configuration: configuration) { [self] opened, error in
+    let completion: (NSRunningApplication?, Error?) -> Void = { [self] opened, error in
       let succeeded = opened != nil && error == nil
       Task { @MainActor in
         result.stringValue = succeeded ? "Settings open delivered" : "Settings open failed"
       }
+    }
+    if let customWord {
+      var components = URLComponents()
+      components.scheme = "linnet-settings"
+      components.host = "custom-word"
+      components.queryItems = [.init(name: "value", value: customWord)]
+      guard let url = components.url else { return }
+      NSWorkspace.shared.open(
+        [url], withApplicationAt: settingsURL, configuration: configuration,
+        completionHandler: completion)
+    } else {
+      NSWorkspace.shared.openApplication(
+        at: settingsURL, configuration: configuration, completionHandler: completion)
     }
   }
 }

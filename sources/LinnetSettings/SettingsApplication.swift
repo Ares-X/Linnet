@@ -21,8 +21,7 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   func application(_ application: NSApplication, open urls: [URL]) {
     for url in urls {
       guard let value = LinnetSettingsContract.customWordValue(from: url) else { continue }
-      model.configuration.personalDraft.customWords.insert(.init(value: value, code: ""), at: 0)
-      model.selectedTab = 2
+      model.editCustomWord(value: value)
       requestSettingsWindowPresentation(in: application)
     }
   }

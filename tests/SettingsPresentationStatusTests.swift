@@ -26,6 +26,9 @@ struct SettingsPresentationStatusTests {
     )
     guard SettingsPresentationStatus.cloudSyncDeferred.presentation(locale: chinese).severity
       == .informational else { fail("deferred learning sync was presented as an error or success") }
+    guard SettingsPresentationStatus.cloudSyncPreferenceSaved(.timedOut)
+      .presentation(locale: chinese).severity == .warning
+    else { fail("an unconfirmed learning sync preference was presented as success") }
     for status: SettingsPresentationStatus in [
       .cloudSyncDeferred, .operationFailed(.cloudSyncUnavailable), .operationFailed(.cloudSyncFailed)
     ] {

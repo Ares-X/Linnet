@@ -706,6 +706,22 @@ struct SettingsDataCoordinatorTests {
         fail("learning synchronization did not use the typed Host IPC boundary")
       }
       for code: LinnetSettingsContract.RuntimeReplyCode in [
+        .learningSyncDeferred, .learningSyncUnavailable, .learningSyncFailed
+      ] {
+        let reloadCoordinator = SettingsDataCoordinator(
+          bundle: settings, timeout: 10, dataRegistry: registry,
+          transactionRequester: FixtureTransactionRequester { request, _, _ in
+            .init(transactionID: request.transactionID, status: .rejected,
+              code: code, detail: "fixture reload failure", health: nil)
+          })
+        do {
+          try await reloadCoordinator.reloadLearningSyncConfiguration()
+          fail("an unconfirmed learning sync configuration was reported as reloaded")
+        } catch SettingsDataCoordinator.Failure.requestFailed(let actual) {
+          guard actual == code else { fail("reload lost its Host failure identity") }
+        }
+      }
+      for code: LinnetSettingsContract.RuntimeReplyCode in [
         .learningSyncDeferred, .learningSyncUnavailable, .learningSyncFailed, .transactionBusy
       ] {
         let syncCoordinator = SettingsDataCoordinator(

@@ -22,6 +22,7 @@ private let settingsModelLogger = Logger(
 @MainActor
 final class SettingsModel: ObservableObject {
   @Published var selectedTab = 0
+  @Published var customWordToEdit: UUID?
   @Published var backupRetentionPolicy: LinnetSettingsContract.BackupRetentionPolicy
   @Published var configuration: SettingsConfigurationSession {
     didSet {
@@ -241,6 +242,7 @@ extension SettingsModel {
 
   func discardPendingChanges() {
     cancelPendingAppearancePublish()
+    customWordToEdit = nil
     configuration.discardPendingChanges()
   }
 
@@ -311,41 +313,40 @@ extension SettingsModel {
     guard !operationActive, !cloudSyncPreparing else { return }
     cloudSyncPreparing = true
     defer { cloudSyncPreparing = false }
+    let bundle = coordinator.bundle
     if enabled {
       do {
         let location = try await coordinator.prepareCloudSyncLocation()
         guard !Task.isCancelled else { return }
-        guard LinnetSettingsContract.setCloudSyncEnabled(true) else {
+        guard LinnetSettingsContract.setCloudSyncEnabled(true, startingAt: bundle) else {
           status = .operationFailed(.unavailable)
           return
         }
         cloudSyncEnabled = true
         cloudSyncLocation = location
-        try await coordinator.reloadLearningSyncConfiguration()
-        status = .cloudSyncEnabled
       } catch {
         settingsModelLogger.error(
           "Linnet iCloud Drive folder is unavailable: \(error.localizedDescription, privacy: .private)"
         )
         status = .operationFailed(.unavailable)
+        return
       }
     } else {
-      guard LinnetSettingsContract.setCloudSyncEnabled(false) else {
+      guard LinnetSettingsContract.setCloudSyncEnabled(false, startingAt: bundle) else {
         status = .operationFailed(.unavailable)
         return
       }
       cloudSyncEnabled = false
       cloudSyncLocation = nil
-      do {
-        try await coordinator.reloadLearningSyncConfiguration()
-      } catch {
-        settingsModelLogger.error(
-          "Learning sync configuration reload failed: \(error.localizedDescription, privacy: .private)"
-        )
-        status = .operationFailed(presentationFailure(error))
-        return
-      }
-      status = .cloudSyncDisabled
+    }
+    do {
+      try await coordinator.reloadLearningSyncConfiguration()
+      status = enabled ? .cloudSyncEnabled : .cloudSyncDisabled
+    } catch {
+      settingsModelLogger.error(
+        "Learning sync configuration reload failed: \(error.localizedDescription, privacy: .private)"
+      )
+      status = .cloudSyncPreferenceSaved(presentationFailure(error))
     }
   }
 
