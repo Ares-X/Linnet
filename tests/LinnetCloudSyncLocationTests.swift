@@ -68,6 +68,9 @@ struct LinnetCloudSyncLocationTests {
     try FileManager.default.createSymbolicLink(
       at: location.learningDirectory,
       withDestinationURL: root)
+    guard try LinnetCloudSyncLocation.productLocation(libraryDirectory: safeLibrary) == location else {
+      fail("an unusable learning directory blocked access to the independent recovery folder")
+    }
     expectFailure("a symlink was accepted as Rime's learning sync directory") {
       _ = try location.prepareLearningDirectory()
     }

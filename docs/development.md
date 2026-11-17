@@ -545,6 +545,8 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | 候选加词入口与模型安装状态 | `tests/verify_swift_units.sh --only settings-appearance-scheduling`；真实 Model 覆盖草稿与最新词条 ID、无 Host 的已安装状态和无法验证的 Registry。`SettingsUITests/testCandidateCustomWordRequestsRevealAndFocusCode` 在专用桌面验证冷启动、换页、长列表及编码焦点 |
 | 英文数据库 runtime 生命周期 | `tests/verify_rime_runtime.sh --predict-db-lifecycle-probe`；在同一进程 finalize/init 之间替换有效 A/B 数据，验证 A→B→A 和 runtime 内共享 |
 | 个人数据或备份 | `tests/verify_swift_units.sh --only personal-data,settings-session,backup-store` |
+| 个人表的真实 Rime 导入 | `tests/verify_swift_units.sh --only rime-user-data-bridge`；经 Levers、stabledb 和真实 session 验证同码多词、开头的 `#` 与文本展开首尾空格 |
+| 语言下载与初始恢复 | `tests/verify_swift_units.sh --only download-transport,settings-appearance-scheduling`；真实 Model→transport→Registry 验证首包／多包字节进度、差分恢复、网络和存储错误不回退、取消、首次 Registry 失败重试与备份列表复用 |
 | Rime 路径或 session | `tests/verify_swift_units.sh --only rime-path,rime-session-lease` |
 | Runtime 健康状态的方案 ID | `tests/verify_swift_units.sh --only rime-health`；通过 Rime 的 `default/schema_list` 读取配置 ID，不为健康计数重建方案显示名称；实际 session 就绪仍由激活 owner 验证 |
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |

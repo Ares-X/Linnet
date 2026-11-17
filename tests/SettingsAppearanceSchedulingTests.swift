@@ -40,7 +40,25 @@ struct SettingsAppearanceSchedulingTests {
     await unavailableModel.prepareInitialState()
     try require(unavailableModel.grammarModelStatus == .unavailable,
       "an unverified Registry was reported as missing or installed")
+    unavailableModel.editCustomWord(value: "retained draft")
     try makeRuntime(registry)
+    await unavailableModel.prepareInitialState()
+    try require(unavailableModel.configuration.canEdit
+      && unavailableModel.configuration.personalDraft.customWords.first?.value == "retained draft",
+      "retrying a restored Registry did not recover editability while preserving the draft")
+    unavailableModel.discardPendingChanges()
+    let personalFile = registry.userDataDirectory.appending(path: LinnetPersonalDataStore.customWordsFile)
+    let originalPersonalFile = try? Data(contentsOf: personalFile)
+    try Data("invalid row without a code\n".utf8).write(to: personalFile)
+    let unreadableModel = SettingsModel(bundle: bundle)
+    await unreadableModel.prepareInitialState()
+    try require(unreadableModel.configuration.readiness == .sourceUnreadable,
+      "valid Registry data incorrectly unlocked an unreadable personal source")
+    if let originalPersonalFile {
+      try originalPersonalFile.write(to: personalFile)
+    } else {
+      try FileManager.default.removeItem(at: personalFile)
+    }
     let offlineModel = SettingsModel(bundle: bundle)
     await offlineModel.prepareInitialState()
     try require(offlineModel.grammarModelStatus == .ltsInstalled,
@@ -80,6 +98,21 @@ struct SettingsAppearanceSchedulingTests {
     model.discardPendingChanges()
     try require(model.customWordToEdit == nil && !model.pendingChanges,
       "Discard retained a candidate editing request or its draft")
+    for locale in [Locale(identifier: "en"), Locale(identifier: "zh-Hans")] {
+      var summaries: [String] = []
+      for timestamp: TimeInterval in [1_700_000_000, 1_700_086_400] {
+        let data = try LinnetBackupStore.encodePortable(
+          personalData: .empty, learning: [:], categories: [.customWords],
+          createdAt: Date(timeIntervalSince1970: timestamp), appVersion: "1.0.0", dataVersion: "fixture")
+        let archive = try LinnetBackupStore.decodePortable(data)
+        let candidate = SettingsDataCoordinator.PortableImportCandidate(
+          categories: [.customWords], recordCount: 0, appVersion: archive.appVersion,
+          dataVersion: archive.dataVersion, archive: archive)
+        summaries.append(model.portableImportSummary(candidate, locale: locale))
+      }
+      try require(summaries[0] != summaries[1] && summaries.allSatisfy { $0.contains("2023") },
+        "recovery confirmation could not distinguish otherwise identical archives from different dates")
+    }
     let live = registry.userDataDirectory
     var requests = 0
     var prematureLiveSuccess = false
@@ -246,6 +279,34 @@ struct SettingsAppearanceSchedulingTests {
       "Discard did not accept the external baseline")
     try require(!prematureLiveSuccess, "live success was shown before the latest selection converged")
 
+    // A diagnostic result contains the same verified records as its counts.
+    // Insert an entry after the scan but before the Host reply: an unsolicited
+    // second scan would change the history (or leave it loading).
+    let holdDiagnostics = control.appending(path: "hold-diagnostics")
+    try Data().write(to: holdDiagnostics)
+    model.refreshDiagnostics()
+    try await nextRequest(.diagnose)
+    let lateID = UUID()
+    let lateEntry = registry.backupsDirectory.appending(path: lateID.uuidString)
+    try directory(lateEntry)
+    try release()
+    try await wait("diagnostics did not finish") { !model.operationActive }
+    if case .loaded(let records) = model.backupHistory {
+      try require(!records.contains { $0.transactionID == lateID },
+        "diagnostics scheduled another history verification after its own scan")
+    } else {
+      throw FixtureFailure(message: "diagnostics did not publish its verified history")
+    }
+    try FileManager.default.removeItem(at: holdDiagnostics)
+    model.refreshBackups()
+    try await wait("explicit history refresh did not observe the new entry") {
+      if case .loaded(let records) = model.backupHistory {
+        return records.contains { $0.transactionID == lateID }
+      }
+      return false
+    }
+    try FileManager.default.removeItem(at: lateEntry)
+
     // The toggle reflects the saved preference; only a Host acknowledgement
     // establishes that the running scheduler applied it. Disabling requires no
     // cloud filesystem access and keeps this fixture isolated from real iCloud.
@@ -272,6 +333,7 @@ struct SettingsAppearanceSchedulingTests {
       try require(syncModel.status == expected,
         "toggle did not distinguish Host acknowledgement, failure and timeout")
     }
+    try await SettingsLanguageDataIntegrationTests.run(bundle: bundle, registry: registry)
     print("SettingsAppearanceSchedulingTests: PASS")
   }
 
@@ -291,12 +353,13 @@ struct SettingsAppearanceSchedulingTests {
     }
     let host = try LinnetSettingsTransactionIPC.Host(startingAt: bundle) { request, reply in
       do {
-        if request.command == .diagnose {
+        if request.command == .diagnose && !exists(control.appending(path: "hold-diagnostics")) {
           reply(.init(transactionID: request.transactionID, status: .running,
             code: .diagnosticsReady, detail: "fixture running", health: try health()))
           return
         }
-        guard [.refresh, .reloadConfiguration, .pause, .cancel, .reloadLearningSync].contains(request.command)
+        guard [.refresh, .reloadConfiguration, .pause, .cancel, .reloadLearningSync, .diagnose]
+          .contains(request.command)
         else { fail("unexpected helper command") }
         sequence += 1
         try JSONEncoder().encode(request).write(
@@ -306,6 +369,11 @@ struct SettingsAppearanceSchedulingTests {
         while !exists(release), Date() < deadline { Thread.sleep(forTimeInterval: 0.002) }
         guard exists(release) else { fail("fixture reply was not released") }
         let action = try String(contentsOf: release, encoding: .utf8)
+        if request.command == .diagnose {
+          reply(.init(transactionID: request.transactionID, status: .running,
+            code: .diagnosticsReady, detail: "fixture running", health: try health()))
+          return
+        }
         if request.command == .reloadLearningSync {
           if action == "timeout" {
             // Keep the channel open beyond the client's real IPC deadline.

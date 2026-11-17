@@ -12,6 +12,19 @@ struct MacOSKeyCodesTests {
   static func main() {
     verifyModifierTransitionState()
     verifyComposingKeypadEquivalents()
+    for (physical, character) in [
+      (kVK_ANSI_2, Character("é")),
+      (kVK_ANSI_A, Character("ä")),
+      (kVK_ANSI_E, Character("e\u{0301}")),
+    ] {
+      require(SquirrelKeycode.osxKeycodeToRime(
+        keycode: UInt16(physical), keychar: character, shift: false, caps: false)
+          == UInt32(XK_VoidSymbol),
+        "a non-ASCII character was reinterpreted as a QWERTY key")
+    }
+    require(SquirrelKeycode.osxKeycodeToRime(
+      keycode: UInt16(kVK_ANSI_2), keychar: "2", shift: false, caps: false) == UInt32(XK_2),
+      "an ASCII digit lost its actual character")
     require(
       SquirrelKeycode.osxKeycodeToRime(
         keycode: UInt16(kVK_LeftArrow), keychar: nil, shift: false, caps: false)

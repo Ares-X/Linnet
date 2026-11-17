@@ -153,7 +153,7 @@ struct PersonalDataStoreTests {
         in: .init(
           customWords: [], disabledWordRows: [invalidDisabledWord], expansions: [])
       )
-      let duplicateCustom = LinnetPersonalData.CustomWord(value: "Other", code: "rime duo")
+      let duplicateCustom = LinnetPersonalData.CustomWord(value: " Linnet ", code: " RIME DUO ")
       expectIssue(
         .init(location: .customWord(duplicateCustom.id, .code), reason: .duplicate),
         in: .init(
@@ -226,10 +226,67 @@ struct PersonalDataStoreTests {
       try testStreamingLoad(
         in: directory.appending(path: "bounded-stream", directoryHint: .isDirectory)
       )
+      try testLiteralPersonalContent(in: directory.appending(path: "literal-content"))
       print("PersonalDataStoreTests: PASS")
     } catch {
       fail("unexpected error: \(error)")
     }
+  }
+
+  private static func testLiteralPersonalContent(in directory: URL) throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let source = LinnetPersonalData(
+      customWords: [
+        .init(value: "银行", code: " YIN HANG "),
+        .init(value: "银航", code: "yin hang"),
+        .init(value: "银行", code: "yinhang"),
+        .init(value: "#标签", code: "tag"),
+        .init(value: "中#间", code: "middle"),
+      ], disabledWords: [], expansions: [
+        .init(value: "# TODO", trigger: "x;todo"),
+        .init(value: "#版本号", trigger: "x;version"),
+        .init(value: "Best regards, ", trigger: " x;br "),
+        .init(value: "  TODO", trigger: "x;indent"),
+        .init(value: " A B ", trigger: "x;space"),
+        .init(value: "中文 ", trigger: "x;zh"),
+        .init(value: "   ", trigger: "x;"),
+      ])
+    let normalized = try LinnetPersonalDataStore.normalized(source)
+    guard normalized.customWords.map(\.id) == source.customWords.map(\.id),
+      normalized.customWords.map(\.code) == ["yin hang", "yin hang", "yinhang", "tag", "middle"],
+      normalized.expansions.map(\.value) == source.expansions.dropLast().map(\.value)
+    else { fail("literal normalization changed text, ordering or editable identities") }
+    try LinnetPersonalDataStore.writePersonalFiles(source, to: directory)
+    let first = try LinnetPersonalDataStore.snapshot(from: directory)
+    let revision = try LinnetPersonalDataStore.revision(for: normalized)
+    guard first.data.customWords.map(\.value) == normalized.customWords.map(\.value),
+      first.data.customWords.map(\.code) == normalized.customWords.map(\.code),
+      first.data.expansions.map(\.value) == normalized.expansions.map(\.value),
+      first.data.expansions.map(\.trigger) == normalized.expansions.map(\.trigger),
+      first.revision == revision
+    else { fail("literal personal tables did not round trip through snapshot") }
+    let bytes = try Data(contentsOf: directory.appending(path: LinnetPersonalDataStore.expansionsFile))
+    try LinnetPersonalDataStore.writePersonalFiles(first.data, to: directory)
+    guard try Data(contentsOf: directory.appending(path: LinnetPersonalDataStore.expansionsFile)) == bytes,
+      try LinnetPersonalDataStore.snapshot(from: directory).revision == revision
+    else { fail("literal table content changed after a second write") }
+    var changed = first.data
+    changed.expansions[2].value.removeLast()
+    guard try LinnetPersonalDataStore.revision(for: changed) != revision else {
+      fail("personal revision ignored an expansion's trailing space")
+    }
+    for control in ["\t", "\n", "\r", "\0"] {
+      for value in [" \(control)body ", control] {
+        let invalid = LinnetPersonalData.Expansion(value: value, trigger: "x;bad")
+        expectIssue(
+          .init(location: .expansion(invalid.id, .value), reason: .invalid),
+          in: .init(customWords: [], disabledWords: [], expansions: [invalid]))
+      }
+    }
+    let blank = LinnetPersonalData.Expansion(value: "   ", trigger: "x;blank")
+    expectIssue(
+      .init(location: .expansion(blank.id, .value), reason: .missing),
+      in: .init(customWords: [], disabledWords: [], expansions: [blank]))
   }
 
   private static func testStreamingLoad(in directory: URL) throws {
@@ -250,6 +307,12 @@ struct PersonalDataStoreTests {
     guard boundary.customWords.map({ "\($0.value)\t\($0.code)" }) == ["云\tyun"] else {
       fail("UTF-8 split across a read chunk or CRLF parsing changed a row")
     }
+
+    try "# old header\r\n# no comment \r\n#标签\ttag\r\n普通\tplain\r\n".write(
+      to: custom, atomically: true, encoding: .utf8)
+    guard try LinnetPersonalDataStore.load(from: directory).customWords.map(\.value)
+      == ["#标签", "普通"]
+    else { fail("the standard no-comment directive did not preserve literal hash rows") }
 
     try LinnetPersonalDataStore.writePersonalFiles(.empty, to: directory)
     try LinnetPersonalDataStore.writeRuntimeSettings(.empty, to: directory)

@@ -134,10 +134,37 @@ struct LinnetSettingsUpdateCheckerStateTests {
         "runtime refresh triggered Core activation without user confirmation"
       )
 
+      for (state, phase) in [
+        (LinnetSettingsContract.RuntimeStatus.paused, LinnetSettingsContract.RuntimePhase.paused),
+        (.degraded, .recovering), (.running, .verifying), (.running, .running),
+      ] {
+        let reportedHealth = health(productIdentity: installed, state: state, phase: phase)
+        requester.replaceHealth(reportedHealth)
+        checker.refreshRuntime()
+        await waitUntil("Core page discarded Host health independently of version identity") {
+          checker.runtimeHealth == reportedHealth
+        }
+        require(checker.runtimeVersionState == .current(installed),
+          "input readiness replaced the known Core version identity")
+      }
+      let degradedOlder = health(productIdentity: older, state: .degraded, phase: .recovering)
+      requester.replaceHealth(degradedOlder)
+      checker.refreshRuntime()
+      await waitUntil("degraded Host identity or health was lost") {
+        checker.runtimeHealth == degradedOlder
+          && checker.runtimeVersionState == .pending(installed: installed, running: older)
+      }
+      requester.replaceHealth(health(productIdentity: nil))
+      checker.refreshRuntime()
+      await waitUntil("identity-free fixture was not restored") {
+        checker.runtimeVersionState == .unavailable(installed: installed)
+      }
+      let diagnosisCount = requester.commands.count
+
       checker.activateInstalledCore()
       require(
         checker.runtimeVersionState == .unavailable(installed: installed)
-          && requester.commands == [.diagnose],
+          && requester.commands.count == diagnosisCount,
         "identity-free Host received an unsafe Core activation request"
       )
 
@@ -247,6 +274,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
         baseSHA256: String(repeating: "a", count: 64),
         targetSHA256: String(repeating: "b", count: 64))
       let downloadReleases = DownloadReleases()
+      let preparedReleases = DownloadReleases()
       var revealed: [URL] = []
       let mirrorSource = try LinnetSettingsDownloadSource.customMirror(
         prefix: "https://mirror.example.com/")
@@ -255,7 +283,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
         transactionRequester: requester,
         coreDownloader: StubCoreDownloader(
           destination: downloaded, expectedSource: mirrorSource, releases: downloadReleases),
-        coreInstaller: StubCoreInstaller(prepared: prepared),
+        coreInstaller: StubCoreInstaller(prepared: prepared, releases: preparedReleases),
         revealCorePackage: { revealed.append($0) })
       downloadChecker.downloadCoreUpdate(core, source: mirrorSource)
       await waitUntil("verified Core download did not become ready") {
@@ -268,6 +296,15 @@ struct LinnetSettingsUpdateCheckerStateTests {
 
       require(downloadReleases.files == [downloaded],
         "prepared App archive was not released")
+      require(preparedReleases.files.isEmpty,
+        "ready Core candidate was discarded before the session ended")
+      await downloadChecker.endSession()
+      require(preparedReleases.files == [prepared.stagingRoot]
+        && downloadChecker.coreDownloadState == .idle,
+        "Quit finished before its ready Core staging was released")
+      await downloadChecker.endSession()
+      require(preparedReleases.files == [prepared.stagingRoot],
+        "ending the same session discarded its payload twice")
       let failingInstallerChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: requester,
@@ -295,12 +332,30 @@ struct LinnetSettingsUpdateCheckerStateTests {
       require(staleChecker.coreDownloadState == .idle,
         "a late download overwrote the cancelled state")
 
+      let endingDownloader = SuspendedCoreDownloader(destination: downloaded)
+      let endingChecker = LinnetSettingsUpdateChecker(
+        edition: nil, installedPacks: [], bundle: fixture.settings,
+        transactionRequester: requester, coreDownloader: endingDownloader,
+        coreInstaller: StubCoreInstaller(prepared: prepared))
+      endingChecker.downloadCoreUpdate(core, source: .direct)
+      await waitUntil("Quit fixture download did not start") { endingDownloader.started }
+      var sessionEnded = false
+      let endingTask = Task { await endingChecker.endSession(); sessionEnded = true }
+      await waitUntil("Quit did not cancel its active download") {
+        endingChecker.coreDownloadState == .idle
+      }
+      require(!sessionEnded, "Quit did not wait for its active download to release ownership")
+      endingDownloader.finish()
+      await endingTask.value
+      require(endingDownloader.released && endingChecker.coreDownloadState == .idle,
+        "Quit retained a late download or published it after session shutdown")
+
       let applyingRequester = RuntimeRequester(health: health(productIdentity: installed))
       let applyingChecker = LinnetSettingsUpdateChecker(
         edition: nil, installedPacks: [], bundle: fixture.settings,
         transactionRequester: applyingRequester,
         coreDownloader: StubCoreDownloader(destination: downloaded),
-        coreInstaller: StubCoreInstaller(prepared: prepared))
+        coreInstaller: StubCoreInstaller(prepared: prepared, releases: preparedReleases))
       applyingChecker.refreshRuntime()
       await waitUntil("current Host identity was not ready for an online Core update") {
         applyingChecker.runtimeVersionState == .current(installed)
@@ -318,6 +373,9 @@ struct LinnetSettingsUpdateCheckerStateTests {
         applyingRequester.commands == [.diagnose, .activateCore],
         "online Core activation bypassed or duplicated the Host exit owner"
       )
+      await applyingChecker.endSession()
+      require(preparedReleases.files == [prepared.stagingRoot, prepared.stagingRoot],
+        "Quit retained a Host-blocked Core payload")
 
       // Cancellation is a failed activation, never a permanently busy UI.
       let cancelledRequester = RuntimeRequester(
@@ -391,7 +449,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
         "the temporary bridge PKG did not require an explicit Installer action"
       )
 
-      legacyChecker.cancelCoreDownload()
+      await legacyChecker.endSession()
       require(!downloadReleases.files.contains(legacyPackage),
         "a downloaded legacy Installer package was removed before the user used it")
 
@@ -434,7 +492,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
     LinnetSettingsTransactionRequesting, @unchecked Sendable
   {
     private let lock = NSLock()
-    private let health: LinnetSettingsContract.RuntimeHealth
+    private var health: LinnetSettingsContract.RuntimeHealth
     private let activationReplyCode: LinnetSettingsContract.RuntimeReplyCode
     private let cancelActivation: Bool
     private var recordedCommands: [LinnetSettingsContract.DataCommand] = []
@@ -454,6 +512,10 @@ struct LinnetSettingsUpdateCheckerStateTests {
       lock.withLock { recordedCommands }
     }
 
+    func replaceHealth(_ health: LinnetSettingsContract.RuntimeHealth) {
+      lock.withLock { self.health = health }
+    }
+
     func request(
       _ request: LinnetSettingsContract.DataRequest,
       timeout _: TimeInterval,
@@ -466,7 +528,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
           status: .running,
           code: .diagnosticsReady,
           detail: "Runtime diagnostics are available.",
-          health: health
+          health: lock.withLock { health }
         )
       }
       if cancelActivation { throw CancellationError() }
@@ -519,6 +581,7 @@ struct LinnetSettingsUpdateCheckerStateTests {
   private struct StubCoreInstaller: LinnetCoreUpdateInstalling {
     let prepared: LinnetPreparedCoreUpdate
     var rejectsPreparation = false
+    var releases: DownloadReleases? = nil
 
     func prepare(
       _: LinnetDataChannel.Core,
@@ -530,7 +593,10 @@ struct LinnetSettingsUpdateCheckerStateTests {
     }
 
     func exchange(_: LinnetPreparedCoreUpdate) async throws { }
-    func discard(_: LinnetPreparedCoreUpdate) async { }
+    func discard(_ update: LinnetPreparedCoreUpdate) async {
+      await Task.yield()
+      releases?.append(update.stagingRoot)
+    }
   }
 
   private final class DownloadReleases: @unchecked Sendable {
@@ -951,12 +1017,14 @@ struct LinnetSettingsUpdateCheckerStateTests {
   }
 
   private static func health(
-    productIdentity: LinnetSettingsContract.ProductIdentity?
+    productIdentity: LinnetSettingsContract.ProductIdentity?,
+    state: LinnetSettingsContract.RuntimeStatus = .running,
+    phase: LinnetSettingsContract.RuntimePhase = .running
   ) -> LinnetSettingsContract.RuntimeHealth {
     .init(
       productIdentity: productIdentity,
-      state: .running,
-      phase: .running,
+      state: state,
+      phase: phase,
       rimeVersion: "1.17.0",
       smartEnglishAvailable: true,
       octagramAvailable: true,

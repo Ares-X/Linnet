@@ -371,6 +371,8 @@ if selected settings-appearance-scheduling; then
     sources/LinnetSettings/LinnetSettingsExclusiveFileSink.swift \
     sources/LinnetSettings/LinnetCoreUpdateInstaller.swift \
     sources/LinnetSettings/LinnetSettingsUpdateChecker.swift \
+    tools/LinnetPackEncoder.swift \
+    tests/SettingsLanguageDataIntegrationTests.swift \
     tests/SettingsAppearanceSchedulingTests.swift -L lib -lrime.1
   DYLD_LIBRARY_PATH="${repo_root}/lib:${repo_root}/lib/rime-plugins" \
     "${LINNET_SWIFT_COMPILED_BINARY}"

@@ -36,6 +36,7 @@ enum SettingsPresentationPack: Equatable {
 
 enum SettingsPresentationPackState: Equatable {
   case downloading
+  case downloadingCompletePack
   case verifying
   case activating
   case active(version: String?)
@@ -103,6 +104,7 @@ enum SettingsPresentationStatus: Equatable {
   case cloudSyncDeferred
   case cloudBackupUploaded(Date)
   case cloudBackupUnchanged(Date)
+  case cloudBackupNotFound
   case cloudSyncDisabled
   case cloudSyncPreferenceSaved(SettingsPresentationFailure)
   case backupRestored
@@ -192,13 +194,15 @@ enum SettingsPresentationStatus: Equatable {
     case .cloudBackupUploaded(let verifiedAt):
       let timestamp = verifiedAt.formatted(Date.FormatStyle().locale(locale))
       pair = (
-        "Incremental recovery backup verified at \(timestamp).",
-        "增量恢复备份已于 \(timestamp) 校验完成。")
+        "This Mac saved and verified the recovery backup at \(timestamp). iCloud Drive may still be uploading it.",
+        "此 Mac 已于 \(timestamp) 保存并校验恢复备份。iCloud Drive 可能仍在上传。")
     case .cloudBackupUnchanged(let verifiedAt):
       let timestamp = verifiedAt.formatted(Date.FormatStyle().locale(locale))
       pair = (
-        "Recovery data is unchanged; the verified backup is from \(timestamp).",
-        "恢复数据没有变化；已校验备份时间为 \(timestamp)。")
+        "Recovery data is unchanged; this Mac verified the backup from \(timestamp). iCloud Drive may still be uploading it.",
+        "恢复数据没有变化；此 Mac 已校验时间为 \(timestamp) 的备份。iCloud Drive 可能仍在上传。")
+    case .cloudBackupNotFound:
+      pair = ("No recovery backup was found in iCloud Drive.", "iCloud Drive 中没有可用的恢复备份。")
     case .cloudSyncDisabled:
       pair = (
         "iCloud Drive learning synchronization disabled. No data was deleted.",
@@ -285,6 +289,7 @@ enum SettingsPresentationStatus: Equatable {
     switch self {
     case .ready,
       .cloudSyncDeferred,
+      .cloudBackupNotFound,
       .operationCancelled,
       .pack(_, .cancelled),
       .runtime(.paused):
@@ -315,6 +320,7 @@ enum SettingsPresentationStatus: Equatable {
       .publishingAppearance,
       .appearanceStaleRetry,
       .pack(_, .downloading),
+      .pack(_, .downloadingCompletePack),
       .pack(_, .verifying),
       .pack(_, .activating),
       .pack(_, .cancelling):
@@ -426,8 +432,8 @@ private func failureText(_ failure: SettingsPresentationFailure) -> SettingsLoca
   case .staleHostState: ("Language data changed before activation. Refresh and try again.", "语言数据在激活前已发生变化，请刷新后重试。")
   case .hostRejected: ("The input method rejected the operation.", "输入法拒绝了此操作。")
   case .cloudSyncUnavailable:
-    ("The iCloud learning sync folder is unavailable. Check iCloud Drive and retry.",
-      "无法访问 iCloud 学习同步文件夹，请检查 iCloud Drive 后重试。")
+    ("The Linnet iCloud Drive folder is unavailable. Check iCloud Drive and retry.",
+      "无法访问 Linnet 的 iCloud Drive 文件夹，请检查 iCloud Drive 后重试。")
   case .cloudSyncFailed:
     ("Learning synchronization could not finish. Your local learning is kept; retry later.",
       "学习词同步未能完成。本机学习记录已保留，可稍后重试。")
@@ -447,6 +453,8 @@ private func packText(
   let titleName = pack == .languageData ? "Language data" : "Long-tail dictionaries"
   switch state {
   case .downloading: return ("Downloading \(name.english)…", "正在下载\(name.chinese)…")
+  case .downloadingCompletePack:
+    return ("Downloading complete \(name.english) pack…", "正在下载完整\(name.chinese)包…")
   case .verifying: return ("Verifying \(name.english)…", "正在校验\(name.chinese)…")
   case .activating: return ("Activating \(name.english)…", "正在激活\(name.chinese)…")
   case .active(let version):

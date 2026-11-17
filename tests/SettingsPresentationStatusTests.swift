@@ -40,8 +40,8 @@ struct SettingsPresentationStatusTests {
     }
     expect(
       .cloudBackupUploaded(Date(timeIntervalSince1970: 0)),
-      en: "Incremental recovery backup verified at \(Date(timeIntervalSince1970: 0).formatted(Date.FormatStyle().locale(english))).",
-      zh: "增量恢复备份已于 \(Date(timeIntervalSince1970: 0).formatted(Date.FormatStyle().locale(chinese))) 校验完成。",
+      en: "This Mac saved and verified the recovery backup at \(Date(timeIntervalSince1970: 0).formatted(Date.FormatStyle().locale(english))). iCloud Drive may still be uploading it.",
+      zh: "此 Mac 已于 \(Date(timeIntervalSince1970: 0).formatted(Date.FormatStyle().locale(chinese))) 保存并校验恢复备份。iCloud Drive 可能仍在上传。",
       english,
       chinese
     )

@@ -14,6 +14,7 @@ struct LinnetSettingsDownloadTransportTests {
     do {
       try await catalogMatrix()
       try await packMatrix()
+      try await streamingProgressAndOfflineFailure()
       try await redirectMatrix()
       try await publicMirrorMatrix()
       try await mirrorMatrix()
@@ -224,6 +225,56 @@ struct LinnetSettingsDownloadTransportTests {
     try require(try Data(contentsOf: sentinel) == Data("sentinel".utf8), "appeared target")
     try require(try partials(in: root).isEmpty, "appeared destination left partial")
     try await waitForStop(generation: appearedGeneration)
+  }
+
+  private static func streamingProgressAndOfflineFailure() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let destination = root.appending(path: "streaming.linnetpack")
+    let progress = DownloadProgressRecorder()
+    // Avoid CFNetwork MIME sniffing buffering this deliberately tiny chunk.
+    StubURLProtocol.install([
+      .response(headers: ["Content-Type": "application/octet-stream"]),
+      .data(Data("pa".utf8)), .suspend,
+      .data(Data("ck".utf8)), .finish,
+    ])
+    let download = Task {
+      try await transport().downloadArtifact(
+        from: artifact(bytes: 4).url, expectedBytes: 4, to: destination,
+        progress: { progress.record($0) })
+    }
+    do {
+      try await waitForPartial(in: root)
+      try require(progress.values == [0.5], "progress did not advance before the first pack finished")
+      try require(!FileManager.default.fileExists(atPath: destination.path),
+        "a partially received pack was published")
+      StubURLProtocol.resume()
+      try await download.value
+    } catch {
+      download.cancel()
+      StubURLProtocol.resume()
+      _ = try? await download.value
+      throw error
+    }
+    try require(progress.values == [0.5, 1], "progress did not track the streamed byte count")
+    try require(try Data(contentsOf: destination) == Data("pack".utf8),
+      "progress observation changed the downloaded bytes")
+
+    let offlineDestination = root.appending(path: "offline.linnetdelta")
+    let generation = StubURLProtocol.install([
+      .response(headers: [:]), .data(Data("pa".utf8)), .failure(.notConnectedToInternet),
+    ])
+    do {
+      try await transport().downloadArtifact(
+        from: artifact(bytes: 4).url, expectedBytes: 4, to: offlineDestination)
+      throw TestFailure.message("offline transfer succeeded")
+    } catch let error as URLError {
+      try require(error.code == .notConnectedToInternet,
+        "offline transfer lost its original failure")
+    }
+    try require(StubURLProtocol.requests.count == 1, "offline transport repeated the request")
+    try assertUnpublished(offlineDestination, root: root, label: "offline failure")
+    try await waitForStop(generation: generation)
   }
 
   private static func redirectMatrix() async throws {
@@ -759,6 +810,23 @@ struct LinnetSettingsDownloadTransportTests {
   }
 }
 
+private final class DownloadProgressRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: [Double] = []
+
+  func record(_ progress: Double) {
+    lock.lock()
+    recorded.append(progress)
+    lock.unlock()
+  }
+
+  var values: [Double] {
+    lock.lock()
+    defer { lock.unlock() }
+    return recorded
+  }
+}
+
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
   enum Event {
     case response(status: Int = 200, headers: [String: String] = [:])
@@ -768,6 +836,7 @@ private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     case suspend
     case redirect(URL)
     case finish
+    case failure(URLError.Code)
   }
 
   private static let stateLock = NSLock()
@@ -903,6 +972,8 @@ private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
           return
         case .finish:
           self.client?.urlProtocolDidFinishLoading(self)
+        case .failure(let code):
+          self.client?.urlProtocol(self, didFailWithError: URLError(code))
         }
         let nextDelay: TimeInterval
         if events.indices.contains(index + 1),

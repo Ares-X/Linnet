@@ -1719,10 +1719,17 @@ struct SettingsDataCoordinatorTests {
       else { fail("portable inspection summary did not come from the validated archive") }
       let cloudRecovery = fixtureRoot.appending(path: "cloud-recovery", directoryHint: .isDirectory)
       try fileManager.createDirectory(at: cloudRecovery, withIntermediateDirectories: false)
+      // A damaged learning-sync child must not block the independent manual
+      // recovery reader or be repaired as a side effect of reviewing a backup.
+      let invalidLearningDirectory = cloudRecovery.appending(path: "Linnet-Rime-Sync")
+      let invalidLearningContents = Data("not a learning directory".utf8)
+      try invalidLearningContents.write(to: invalidLearningDirectory)
       _ = try LinnetCloudRecoveryArchive.publish(
         portable: portableData, in: cloudRecovery)
       let cloudCandidate = try await coordinator.inspectCloudRecovery(in: cloudRecovery)
-      guard cloudCandidate?.archive == portableCandidate.archive else {
+      guard cloudCandidate?.archive == portableCandidate.archive,
+        try Data(contentsOf: invalidLearningDirectory) == invalidLearningContents
+      else {
         fail("cloud recovery inspection did not use the validated portable archive")
       }
       verifyOperationContracts(

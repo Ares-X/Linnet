@@ -199,9 +199,9 @@ In Smart English, enter the current pinyin code directly, without a trigger. Ord
 
 Configure these in **Settings → Dictionary**, then click **Apply Changes**:
 
-- **Custom words:** Display text plus a lowercase Rime code, participating in normal candidates and learning. You can also add a candidate through its right-click menu, confirm the draft code and save.
+- **Custom words:** Display text plus a lowercase Rime code, participating in normal candidates and learning. Different words can share the same code. You can also add a candidate through its right-click menu, confirm the draft code and save.
 - **Disabled English words:** Hide case-insensitive whole-word matches across static, learned, correction, pronunciation and prediction candidates. Forgetting a candidate's learning record only removes learning; built-in words may still appear.
-- **Text Expander:** Triggers beginning with `x;` expand fixed text—for example, `x;addr` for your full address. Unknown triggers remain unchanged; expansions receive no further capitalization, spacing or definition processing.
+- **Text Expander:** Triggers beginning with `x;` expand fixed text—for example, `x;addr` for your full address. Leading and trailing spaces and an initial `#` are preserved. Unknown triggers remain unchanged; expansions receive no further capitalization, spacing or definition processing.
 
 Personal dictionary edits reload only the entries that changed.
 
@@ -302,7 +302,7 @@ Input processing is local, with no accounts, telemetry, ads or analytics SDK, an
 - Automatic sync checks at most once an hour; immediate sync is also available. You can keep typing, with no need to have used both modes or keep a document open.
 - Settings reports local merge/export times and failure or retry status. Local completion does not mean another Mac has received the data; iCloud Drive handles delivery.
 - Clearing learning affects only the selected categories on this Mac. With learning sync enabled, records retained on other Macs may return during a later sync.
-- **Data & Updates** supports uploading and reviewing incremental recovery backups, viewing transaction recovery records, and importing/exporting data. Imports require confirmation and first create a local backup. With no usable cloud history, uploads add a full backup without deleting existing backups.
+- **Data & Updates** supports uploading and reviewing incremental recovery backups even with learning sync off. iCloud Drive may still be uploading after this Mac saves and verifies a backup. Before migrating or erasing the old Mac, review the backup on the destination Mac, confirm it is readable and check its creation date. You can also view transaction recovery records and import/export data; imports require confirmation and first create a local backup. With no usable cloud history, uploads add a full backup without deleting existing backups.
 - Other Rime/Hallelujah data is read only when you explicitly import it. Exported files may contain personal data; you manage their storage and deletion.
 
 </details>

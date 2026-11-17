@@ -1,5 +1,37 @@
 # Linnet product acceptance
 
+## Settings and input follow-ups (#77–#96)
+
+The current branch contains the following fixes. The listed focused tests have
+executed locally; they establish owner behavior, not installed product acceptance.
+
+| Issues | Behavior and owner evidence |
+| --- | --- |
+| #77, #91 | UpdateChecker releases disposable downloads and waits for late preparation cleanup after accepted Quit; `settings-update-checker` covers ready, blocked, cancellation and delayed preparation, preserving legacy PKGs |
+| #78, #81 | Candidate requests retain drafts and select the new custom-word row; installed-model status comes from Registry verification; `settings-appearance-scheduling` |
+| #80 | Learning-sync preference confirmation follows the authenticated Host reply; accepted, failed and timed-out reloads in `settings-appearance-scheduling` |
+| #83, #84, #93 | Manual cloud backup/review prepares the product folder independently of learning sync; `cloud-sync-location,settings-data-coordinator` cover folder ownership, including a broken learning subdirectory. Recovery summary uses archive creation time in both languages; Model test covers distinct dates. Copy distinguishes local verification from iCloud delivery |
+| #85, #88, #95 | Personal TSV honors the native no-comment directive, preserves nonblank expansion whitespace and accepts different values for one code; `personal-data,settings-session,backup-store` and real Levers/stabledb/session coverage in `rime-user-data-bridge` |
+| #86, #96 | Real Model→transport→Registry tests cover offline, timeout, storage errors and cancellation without complete fallback; invalid hash/404 recover through a valid complete pack. First/second-pack streaming progress is byte weighted and rebased for fallback; `download-transport,settings-appearance-scheduling` |
+| #87 | A failed initial Registry read can be retried while retaining drafts; an unreadable personal source remains unreadable; `settings-appearance-scheduling` |
+| #89 | Host runtime health is retained independently of version equality and shown separately; `settings-update-checker,presentation-status` |
+| #90 | Printable non-ASCII characters bypass the US-key fallback after existing raw composition is committed; `macos-keycodes` covers accented/combining input and retained ASCII mappings |
+| #94 | Diagnostics returns its verified backup list rather than starting another scan; `settings-appearance-scheduling` proves the single snapshot and later explicit refresh. `backup-store` covers cancelled reads; cancellation is checked between complete records, not during a single file hash |
+
+Dedicated-desktop acceptance must exercise candidate right-click focus, manual
+cloud backup/review with learning sync off, archive-date confirmation, visible
+streaming progress, degraded/paused health, accepted/cancelled Quit and actual
+staging removal. Real typing must cover accented/dead-key input before and during
+Chinese/English composition without lost or reordered text, followed by ordinary
+candidate selection and typing. Use exact Action candidate bytes for the online
+Core upgrade and continued application connections without logout. A second
+iCloud endpoint must read the backup before claiming cross-device delivery.
+
+These runtime, product and release rows remain `NOT_EXERCISED` while the dedicated
+VM is unavailable. No language-pack identity or dependency version changes in
+this batch. #92 was withdrawn after checking the original fixed commit; #1 stays
+an upstream tracker, #76 an audit record and #55 awaits its reporter's confirmation.
+
 ## Runtime, Settings and recovery audit fixes (#67–#75)
 
 Treat the audit reports as hypotheses and validate the current owners. The

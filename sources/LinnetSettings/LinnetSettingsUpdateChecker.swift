@@ -249,6 +249,8 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   @Published private(set) var installedIdentity: LinnetSettingsContract.ProductIdentity?
   @Published private(set) var runtimeVersionState: RuntimeVersionState =
     .checking(installed: nil)
+  /// Host owns input readiness; version equality alone does not establish it.
+  @Published private(set) var runtimeHealth: LinnetSettingsContract.RuntimeHealth?
   @Published private(set) var updateChannel: UpdateChannel
   @Published private(set) var coreDownloadState: CoreDownloadState = .idle
 
@@ -276,6 +278,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
   private var task: Task<Void, Never>?
   private var runtimeTask: Task<Void, Never>?
   private var coreDownloadTask: Task<Void, Never>?
+  private var coreCleanupTask: Task<Void, Never>?
   private var cycle: UInt64 = 0
   private var runtimeCycle: UInt64 = 0
   private var coreDownloadCycle: UInt64 = 0
@@ -334,6 +337,7 @@ final class LinnetSettingsUpdateChecker: ObservableObject {
     runtimeTask?.cancel()
     runtimeCycle &+= 1
     let activeCycle = runtimeCycle
+    runtimeHealth = nil
     runtimeVersionState = .checking(installed: installedIdentity)
     runtimeTask = Task { [weak self] in
       guard let self else { return }
@@ -476,8 +480,7 @@ extension LinnetSettingsUpdateChecker {
       downloadingCore == core {
       return
     }
-    coreDownloadTask?.cancel()
-    coreDownloadCycle &+= 1
+    resetCoreDownload()
     let activeCycle = coreDownloadCycle
     coreDownloadState = .downloading(core: core, progress: 0)
     coreDownloadTask = Task { [weak self] in
@@ -541,8 +544,8 @@ extension LinnetSettingsUpdateChecker {
     guard refreshInstalledIdentity() == update.baseIdentity,
       runtimeVersionState == .current(update.baseIdentity)
     else {
+      resetCoreDownload()
       coreDownloadState = .failed(core: core)
-      Task { await coreInstaller.discard(update) }
       return
     }
     runtimeTask?.cancel()
@@ -570,7 +573,7 @@ extension LinnetSettingsUpdateChecker {
         try await launchCanonicalHost()
         let target = LinnetSettingsContract.ProductIdentity(
           version: core.version, build: core.build, revision: core.revision)
-        _ = try await awaitInstalledHost(identity: target)
+        runtimeHealth = try await awaitInstalledHost(identity: target)
         await coreInstaller.discard(update)
         coreDownloadState = .applied(target)
         runtimeVersionState = .applied(target)
@@ -639,11 +642,29 @@ extension LinnetSettingsUpdateChecker {
     case .ready(_, let update), .blocked(_, let update, _): update
     default: nil
     }
-    coreDownloadTask?.cancel()
+    let download = coreDownloadTask
+    download?.cancel()
     coreDownloadTask = nil
     coreDownloadCycle &+= 1
     coreDownloadState = .idle
-    if let prepared { Task { await coreInstaller.discard(prepared) } }
+    if prepared != nil || download != nil {
+      let previousCleanup = coreCleanupTask
+      coreCleanupTask = Task {
+        await previousCleanup?.value
+        await download?.value
+        if let prepared { await coreInstaller.discard(prepared) }
+      }
+    }
+  }
+
+  /// Called only after Quit has been accepted. Wait for preparation to return
+  /// its owned payload before ending the process; legacy PKGs belong to the user.
+  func endSession() async {
+    resetCoreDownload()
+    task?.cancel()
+    runtimeTask?.cancel()
+    await coreCleanupTask?.value
+    coreCleanupTask = nil
   }
 
   private func request(
@@ -761,11 +782,13 @@ extension LinnetSettingsUpdateChecker {
   ) {
     guard activeCycle == runtimeCycle else { return }
     runtimeTask = nil
+    runtimeHealth = health
     runtimeVersionState = .resolved(installed: installedIdentity, health: health)
   }
 
   private func finishRuntimeUnavailable(cycle activeCycle: UInt64) {
     guard activeCycle == runtimeCycle else { return }
+    runtimeHealth = nil
     runtimeVersionState = .unavailable(installed: installedIdentity)
     runtimeTask = nil
   }
@@ -807,6 +830,7 @@ extension LinnetSettingsUpdateChecker {
     guard let identity = health.productIdentity,
       finishRuntimeTransition(.applied(identity), cycle: activeCycle)
     else { return }
+    runtimeHealth = health
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
       NSApp.terminate(nil)
     }

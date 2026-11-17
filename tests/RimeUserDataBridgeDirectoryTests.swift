@@ -103,7 +103,120 @@ struct RimeUserDataBridgeDirectoryTests {
         fail("preparing both personal tables omitted \(dictionary.rawValue)")
       }
     }
+    try testPersonalTableEngine(in: root.appending(path: "table-engine"), bridge: bridge)
     print("RimeUserDataBridgeDirectoryTests: PASS")
+  }
+
+  private static func testPersonalTableEngine(in directory: URL, bridge: RimeUserDataBridge) throws {
+    try makeDirectory(directory)
+    try LinnetPersonalDataStore.writePersonalFiles(
+      .init(customWords: [
+        .init(value: "银行", code: "yinhang"),
+        .init(value: "银航", code: "yinhang"),
+        .init(value: "#标签", code: "biaoqian"),
+      ], disabledWords: [], expansions: [
+        .init(value: "# TODO", trigger: "x;todo"),
+        .init(value: "  A B ", trigger: "x;space"),
+      ]), to: directory)
+    try """
+      schema:
+        schema_id: personal_table_test
+        name: Personal Table Test
+        version: '1'
+      engine:
+        processors: [speller, selector, express_editor]
+        segmentors: [abc_segmentor]
+        translators: [table_translator@custom_words, table_translator@text_expander]
+      speller:
+        alphabet: abcdefghijklmnopqrstuvwxyz;
+        delimiter: " '"
+      custom_words:
+        dictionary: ''
+        user_dict: linnet_custom_words
+        db_class: stabledb
+        enable_user_dict: true
+        enable_completion: false
+        enable_sentence: false
+      text_expander:
+        dictionary: ''
+        user_dict: linnet_text_expander
+        db_class: stabledb
+        enable_user_dict: true
+        enable_completion: false
+        enable_sentence: false
+      """.appending("\n").write(
+        to: directory.appending(path: "personal_table_test.schema.yaml"),
+        atomically: true, encoding: .utf8)
+    try bridge.preparePersonalDictionaries(
+      candidate: directory, shared: directory, product: "LinnetPersonalTableTests",
+      dictionaries: Set(RimeUserDataBridge.PersonalDictionary.allCases))
+
+    let rime = rime_get_api_stdbool().pointee
+    directory.path.withCString { path in
+      var traits = RimeTraits()
+      traits.data_size = Int32(MemoryLayout<RimeTraits>.size - MemoryLayout<Int32>.size)
+      traits.shared_data_dir = path
+      traits.user_data_dir = path
+      traits.staging_dir = path
+      traits.prebuilt_data_dir = path
+      traits.min_log_level = 2
+      rime.setup(&traits)
+      rime.initialize(nil)
+    }
+    defer { rime.finalize() }
+    guard let module = "levers_stdbool".withCString({ rime.find_module($0) }),
+      let raw = module.pointee.get_api?()
+    else { fail("native Levers API is unavailable") }
+    let levers = UnsafeMutableRawPointer(raw).assumingMemoryBound(
+      to: RimeLeversApi_stdbool.self).pointee
+    for (name, expectedRows) in [("linnet_custom_words", 3), ("linnet_text_expander", 2)] {
+      let output = directory.appending(path: "\(name)-export.txt")
+      let rows = name.withCString { name in
+        output.path.withCString { levers.export_user_dict(name, $0) }
+      }
+      guard rows == expectedRows else { fail("Levers lost personal rows for \(name): \(rows)") }
+      let contents = try String(contentsOf: output, encoding: .utf8)
+      let expected = name == "linnet_custom_words"
+        ? ["银行\tyinhang\t", "银航\tyinhang\t", "#标签\tbiaoqian\t"]
+        : ["# TODO\tx;todo\t", "  A B \tx;space\t"]
+      guard expected.allSatisfy(contents.contains) else {
+        fail("Levers export changed personal text for \(name)")
+      }
+    }
+    for (input, expected) in [
+      ("yinhang", ["银行", "银航"]),
+      ("biaoqian", ["#标签"]),
+      ("x;todo", ["# TODO"]),
+      ("x;space", ["  A B "]),
+    ] {
+      // Reopen for every selection to verify persistence and independent
+      // sessions instead of relying on a previously built menu.
+      for value in expected {
+        let session = rime.create_session()
+        guard session != 0,
+          "personal_table_test".withCString({ rime.select_schema(session, $0) }),
+          input.withCString({ rime.simulate_key_sequence(session, $0) })
+        else { fail("could not open native personal-table input \(input)") }
+        defer { _ = rime.destroy_session(session) }
+        var context = RimeContext_stdbool()
+        context.data_size = Int32(MemoryLayout<RimeContext_stdbool>.size - MemoryLayout<Int32>.size)
+        guard rime.get_context(session, &context) else { fail("missing native table context") }
+        let candidates = (0..<Int(context.menu.num_candidates)).compactMap { index in
+          context.menu.candidates.map { String(cString: $0[index].text) }
+        }
+        _ = rime.free_context(&context)
+        guard Set(expected).isSubset(of: Set(candidates)),
+          let index = candidates.firstIndex(of: value),
+          rime.select_candidate(session, index), rime.commit_composition(session)
+        else { fail("native table candidates did not preserve \(input): \(candidates)") }
+        var commit = RimeCommit()
+        commit.data_size = Int32(MemoryLayout<RimeCommit>.size - MemoryLayout<Int32>.size)
+        guard rime.get_commit(session, &commit) else { fail("native table did not commit") }
+        let committed = String(cString: commit.text)
+        _ = rime.free_commit(&commit)
+        guard committed == value else { fail("native table committed changed text: \(committed)") }
+      }
+    }
   }
 
   private static func seedDictionary(

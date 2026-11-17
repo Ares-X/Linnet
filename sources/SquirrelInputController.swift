@@ -112,6 +112,13 @@ final class SquirrelInputController: IMKInputController {
         rimeUpdate()
         return handled
       }
+      if let character = keyChars?.first, !character.isASCII,
+        event.specialKey == nil,
+        modifiers.intersection([.command, .control]).isEmpty {
+        // Preserve the existing raw preedit before the application inserts a
+        // printable character that this Rime keysym boundary cannot represent.
+        commitCurrentComposition()
+      }
       return false
 
     default:

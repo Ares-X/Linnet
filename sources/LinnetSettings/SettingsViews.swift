@@ -753,13 +753,14 @@ struct DataTabView: View {
           }
           Spacer()
           if model.packDownloadActive {
-            ProgressView(value: model.packDownloadProgress)
+            ProgressView(value: model.languageDataTransferActive ? model.packDownloadProgress : nil)
               .frame(width: 72)
               .accessibilityLabel("Language data download")
               .accessibilityValue(
-                Text(
+                model.languageDataTransferActive ? Text(
                   model.packDownloadProgress,
-                  format: .percent.precision(.fractionLength(0))))
+                  format: .percent.precision(.fractionLength(0)))
+                  : Text(verbatim: model.status.text(locale: locale)))
           }
           Button("Update Language Data") { model.updateLanguageData() }
             .disabled(
@@ -781,13 +782,14 @@ struct DataTabView: View {
           }
           Spacer()
           if model.languageDataUpdateTarget == .completeOffline {
-            ProgressView(value: model.packDownloadProgress)
+            ProgressView(value: model.languageDataTransferActive ? model.packDownloadProgress : nil)
               .frame(width: 72)
               .accessibilityLabel("Long-tail data download")
               .accessibilityValue(
-                Text(
+                model.languageDataTransferActive ? Text(
                   model.packDownloadProgress,
-                  format: .percent.precision(.fractionLength(0))))
+                  format: .percent.precision(.fractionLength(0)))
+                  : Text(verbatim: model.status.text(locale: locale)))
           }
           if model.dataEdition == .standard {
             Button("Install Long-tail Data") {
