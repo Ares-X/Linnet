@@ -6,6 +6,22 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
+## 0.1.32 — 2026-11-17
+
+- Added the sāi reading for 于思／于思于思, lì for 郦, and jì for 系着, preserving other valid readings.
+- Fixed learning-record parsing for extremely small weights and removed the fixed-buffer limit from long-text pinyin transliteration.
+- Corrected wrapping boundaries for emoji and combining characters in custom candidate formats.
+- Adding a candidate to custom words reveals the new row and focuses its code field for immediate editing.
+- Learning sync reports a preference change as applied only after the input method confirms it. Unconfirmed changes are clearly identified as saved preferences.
+- Core updates release disposable downloads after cancellation, verification failure or preparation, and clean prepared directories when Settings quits. Legacy installers remain available to open manually.
+- The Chinese grammar model shows its verified installation status instead of treating installed data as proof that the model is running.
+- Different custom words can share a code. Fixed lost entries beginning with `#` and stripped spaces around Text Expander content.
+- Recovery backups can be saved and reviewed with learning sync off. Recovery shows the backup creation date and distinguishes local verification from iCloud delivery.
+- Language downloads report progress by transferred bytes. Offline, cancellation and local storage errors no longer trigger a full-pack download; invalid deltas can still fall back to the complete pack.
+- Settings can recheck after its initial data read fails. Backup checks avoid duplicate scans, and cancelling a refresh stops subsequent reads.
+- Data & Updates shows input-engine health separately from the installed Core version, keeping paused or degraded states visible.
+- Fixed accented characters on non-US keyboard layouts being replaced by characters from the corresponding US keys.
+
 ## 0.1.31 — 2026-11-01
 
 - In Chinese mode, periods after digits now remain `.` and commit immediately, including sequences such as `123.456` and `123.456.789`.

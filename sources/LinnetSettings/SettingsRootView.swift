@@ -52,9 +52,12 @@ struct SettingsRootView: View {
     }
     .task {
       await model.prepareInitialState()
-      model.refreshBackups()
       model.refreshLegacyImportCandidate()
-      if model.diagnostics == nil { model.refreshDiagnostics() }
+      if model.diagnostics == nil {
+        model.refreshDiagnostics()
+      } else {
+        model.refreshBackups()
+      }
     }
     .confirmationDialog(
       "Import existing Rime / Hallelujah data?",
@@ -238,11 +241,13 @@ struct SettingsRootView: View {
         Button("Cancel") { model.cancelActiveOperation() }
           .disabled(!active.cancellable)
       } else if model.packDownloadCancellable {
-        ProgressView(value: model.packDownloadProgress)
+        ProgressView(value: model.languageDataTransferActive ? model.packDownloadProgress : nil)
           .frame(width: 80)
           .accessibilityLabel("Language data download")
           .accessibilityValue(
-            Text(model.packDownloadProgress, format: .percent.precision(.fractionLength(0))))
+            model.languageDataTransferActive
+              ? Text(model.packDownloadProgress, format: .percent.precision(.fractionLength(0)))
+              : Text(verbatim: model.status.text(locale: interfaceLanguage.locale)))
         Button("Cancel Download") { model.cancelLanguagePackDownload() }
       }
       Picker(selection: interfaceLanguageBinding) {

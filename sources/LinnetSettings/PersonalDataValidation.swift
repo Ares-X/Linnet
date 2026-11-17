@@ -123,7 +123,7 @@ private extension LinnetPersonalDataStore {
     _ rows: [LinnetPersonalData.CustomWord],
     checkCancellation: CancellationCheck
   ) rethrows -> ValidationResult<[LinnetPersonalData.CustomWord]> {
-    var customCodes = Set<String>()
+    var customEntries = Set<CustomWordKey>()
     var customWords: [LinnetPersonalData.CustomWord] = []
     for row in rows {
       try checkCancellation()
@@ -133,12 +133,17 @@ private extension LinnetPersonalDataStore {
       case .invalid(let issue): return .invalid(issue)
       }
       guard let customWord else { continue }
-      guard customCodes.insert(customWord.code).inserted else {
+      guard customEntries.insert(.init(value: customWord.value, code: customWord.code)).inserted else {
         return invalid(.customWord(row.id, .code), .duplicate)
       }
       customWords.append(customWord)
     }
     return .valid(customWords)
+  }
+
+  struct CustomWordKey: Hashable {
+    let value: String
+    let code: String
   }
 
   static func normalizedCustomWord(
@@ -186,15 +191,16 @@ private extension LinnetPersonalDataStore {
   static func normalizedExpansion(
     _ row: LinnetPersonalData.Expansion
   ) -> ValidationResult<LinnetPersonalData.Expansion?> {
-    let value = row.value.trimmingCharacters(in: .whitespaces)
+    let value = row.value
+    let isBlankValue = value.trimmingCharacters(in: .whitespaces).isEmpty
     let trigger = row.trigger.trimmingCharacters(in: .whitespaces)
-    if value.isEmpty, trigger.isEmpty || trigger == "x;" { return .valid(nil) }
-    if value.isEmpty { return invalid(.expansion(row.id, .value), .missing) }
+    guard value.isEmpty || validValue(value) else {
+      return invalid(.expansion(row.id, .value), .invalid)
+    }
+    if isBlankValue, trigger.isEmpty || trigger == "x;" { return .valid(nil) }
+    if isBlankValue { return invalid(.expansion(row.id, .value), .missing) }
     if trigger.isEmpty || trigger == "x;" {
       return invalid(.expansion(row.id, .trigger), .missing)
-    }
-    guard validValue(value) else {
-      return invalid(.expansion(row.id, .value), .invalid)
     }
     guard expansionTriggerExpression.firstMatch(
       in: trigger,

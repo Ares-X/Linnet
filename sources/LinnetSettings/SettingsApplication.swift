@@ -6,6 +6,7 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   let model = SettingsModel()
   var interfaceLocale = Locale.autoupdatingCurrent
   private var settingsWindowPresentationPending = false
+  private var terminationPending = false
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     guard let application = notification.object as? NSApplication else { return }
@@ -21,8 +22,7 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   func application(_ application: NSApplication, open urls: [URL]) {
     for url in urls {
       guard let value = LinnetSettingsContract.customWordValue(from: url) else { continue }
-      model.configuration.personalDraft.customWords.insert(.init(value: value, code: ""), at: 0)
-      model.selectedTab = 2
+      model.editCustomWord(value: value)
       requestSettingsWindowPresentation(in: application)
     }
   }
@@ -44,11 +44,15 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if terminationPending { return .terminateLater }
     if model.operationActive {
       NSSound.beep()
       return .terminateCancel
     }
-    guard model.pendingChanges else { return .terminateNow }
+    guard model.pendingChanges else {
+      finishTermination(in: sender)
+      return .terminateLater
+    }
     if sender.windows.contains(where: { $0.attachedSheet != nil }) {
       return .terminateCancel
     }
@@ -60,16 +64,25 @@ final class SettingsApplicationDelegate: NSObject, NSApplicationDelegate {
       switch choice {
       case .apply:
         model.applyConfiguration { accepted in
-          sender.reply(toApplicationShouldTerminate: accepted)
+          if accepted { self.finishTermination(in: sender) }
+          else { sender.reply(toApplicationShouldTerminate: false) }
         }
       case .discard:
         model.discardPendingChanges()
-        sender.reply(toApplicationShouldTerminate: true)
+        self.finishTermination(in: sender)
       case .cancel:
         sender.reply(toApplicationShouldTerminate: false)
       }
     }
     return .terminateLater
+  }
+
+  private func finishTermination(in application: NSApplication) {
+    terminationPending = true
+    Task {
+      await model.updateChecker.endSession()
+      application.reply(toApplicationShouldTerminate: true)
+    }
   }
 
   func requestSettingsWindowPresentation(in application: NSApplication) {

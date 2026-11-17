@@ -681,7 +681,8 @@ extension SettingsDataCoordinator {
       documentEffect: .observed,
       importReport: nil,
       legacyImportedCount: 0,
-      diagnostics: diagnostics
+      diagnostics: diagnostics,
+      backupRecords: backups
     )
   }
 

@@ -270,8 +270,15 @@ extension LinnetPersonalDataStore {
   fileprivate static func readTable(_ file: URL) throws -> [TableRow] {
     guard FileManager.default.fileExists(atPath: file.path) else { return [] }
     var rows: [TableRow] = []
+    var commentsEnabled = true
     try forEachLine(in: file) { line in
-      if line.hasPrefix("#") || line.trimmingCharacters(in: .whitespaces).isEmpty { return }
+      if line.trimmingCharacters(in: .whitespaces).isEmpty { return }
+      if commentsEnabled, line.hasPrefix("#") {
+        if line.trimmingCharacters(in: .whitespaces) == "# no comment" {
+          commentsEnabled = false
+        }
+        return
+      }
       let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
       guard fields.count == 2 else { throw Failure.invalidFile(file.lastPathComponent) }
       let value = String(fields[0])
@@ -524,7 +531,7 @@ extension LinnetPersonalDataStore {
       # coding: utf-8
       #@/db_name\t\(name)
       #@/db_type\ttabledb
-      #
+      # no comment
       \(body)
       """ + "\n"
   }

@@ -4,7 +4,7 @@ import Foundation
 
 @main
 struct LinnetBackupStoreTests {
-  static func main() {
+  static func main() async {
     let root = LinnetTestScratch.directory.appending(
       path: "LinnetBackupStoreTests-\(UUID().uuidString)",
       directoryHint: .isDirectory
@@ -15,6 +15,7 @@ struct LinnetBackupStoreTests {
       try testUnchangedWriters(root: root)
       try testCloneIsolation(root: root)
       try testPortableCodec()
+      try testLiteralPersonalBackup(root: root.appending(path: "literal-personal-backup"))
       try testCloudRecoveryArchive(root: root.appending(path: "cloud-recovery", directoryHint: .isDirectory))
       try testCloudRecoveryIntermediateCleanup(
         root: root.appending(path: "cloud-recovery-cleanup", directoryHint: .isDirectory))
@@ -23,6 +24,7 @@ struct LinnetBackupStoreTests {
       try testSymlinkAndVersionGuards(root: root)
       try testRetention(root: root.appending(path: "retention", directoryHint: .isDirectory))
       try testLargeHistory(root: root.appending(path: "history-limit", directoryHint: .isDirectory))
+      try await testCancelledHistory(root: root)
       try testRegularFileReader(
         root: root.appending(path: "bounded-reader", directoryHint: .isDirectory)
       )
@@ -33,6 +35,18 @@ struct LinnetBackupStoreTests {
     } catch {
       fail("unexpected error: \(error)")
     }
+  }
+
+  @MainActor
+  private static func testCancelledHistory(root: URL) async throws {
+    let task = Task { @MainActor in
+      try LinnetBackupStore.listBackups(in: root)
+    }
+    task.cancel()
+    do {
+      _ = try await task.value
+      fail("a cancelled history scan returned a history")
+    } catch is CancellationError {}
   }
 
   private static func testUnchangedWriters(root: URL) throws {
@@ -334,6 +348,40 @@ struct LinnetBackupStoreTests {
       try LinnetBackupStore.decodePortable(Data(contentsOf: result)).categories == [.customWords] else {
       fail("recovery cleanup changed portable categories or private file permissions")
     }
+  }
+
+  private static func testLiteralPersonalBackup(root: URL) throws {
+    try makeDirectory(root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let original = LinnetPersonalData(
+      customWords: [
+        .init(value: "银行", code: "yinhang"),
+        .init(value: "银航", code: "yinhang"),
+        .init(value: "#标签", code: "tag"),
+      ], disabledWords: [], expansions: [
+        .init(value: "# TODO", trigger: "x;todo"),
+        .init(value: "  Best regards, ", trigger: "x;br"),
+      ])
+    let revision = try LinnetPersonalDataStore.revision(for: original)
+    let encoded = try LinnetBackupStore.encodePortable(
+      personalData: original, learning: [:], categories: [.customWords, .textExpander],
+      createdAt: Date(timeIntervalSince1970: 0), appVersion: "1", dataVersion: "1")
+    let archive = try LinnetBackupStore.decodePortable(encoded)
+    let replacement = try LinnetBackupStore.replacement(currentPersonalData: .empty, archive: archive)
+    guard try LinnetPersonalDataStore.revision(for: replacement.personalData) == revision else {
+      fail("portable backup changed literal personal text or same-code entries")
+    }
+    let source = root.appending(path: "source")
+    let stable = root.appending(path: "stable")
+    let restored = root.appending(path: "restored")
+    for directory in [source, stable, restored] { try makeDirectory(directory) }
+    try LinnetPersonalDataStore.writePersonalFiles(replacement.personalData, to: source)
+    try LinnetPersonalDataStore.writeRuntimeSettings(replacement.personalData, to: source)
+    let snapshot = try LinnetBackupStore.snapshotStable(from: source, to: stable)
+    try LinnetBackupStore.copyStable(from: stable, to: restored)
+    guard snapshot.revision == revision,
+      try LinnetPersonalDataStore.snapshot(from: restored).revision == revision
+    else { fail("stable backup restore changed literal personal content") }
   }
 
   private static func testPortableCodec() throws {

@@ -22,6 +22,7 @@ private let settingsModelLogger = Logger(
 @MainActor
 final class SettingsModel: ObservableObject {
   @Published var selectedTab = 0
+  @Published var customWordToEdit: UUID?
   @Published var backupRetentionPolicy: LinnetSettingsContract.BackupRetentionPolicy
   @Published var configuration: SettingsConfigurationSession {
     didSet {
@@ -59,6 +60,7 @@ final class SettingsModel: ObservableObject {
   let updateChecker: LinnetSettingsUpdateChecker
 
   let coordinator: SettingsDataCoordinator
+  let downloadSessionConfiguration: URLSessionConfiguration
   let dataRegistry: LinnetDataRegistry?
   let userDirectory: URL?
   private let backupsRoot: URL?
@@ -66,6 +68,7 @@ final class SettingsModel: ObservableObject {
   private let legacyRimeDirectory: URL?
   private var operationTask: Task<Void, Never>?
   var packDownloadTask: Task<Void, Never>?
+  var languageDataDownloadID: UUID?
   private var appearanceDebounceTask: Task<Void, Never>?
   private var appearancePublishTask: Task<Void, Never>?
   private var backupRefreshTask: Task<Void, Never>?
@@ -74,8 +77,13 @@ final class SettingsModel: ObservableObject {
   private let personalValidationExecutor = SettingsPersonalValidationExecutor()
   private var pendingAppearance: LinnetSettingsDocument.Appearance?
   private var initialStatePrepared = false
+  private var initialStatePreparing = false
 
-  init(bundle: Bundle = .main) {
+  init(
+    bundle: Bundle = .main,
+    downloadSessionConfiguration: URLSessionConfiguration = .ephemeral
+  ) {
+    self.downloadSessionConfiguration = downloadSessionConfiguration
     let host = LinnetSettingsContract.hostBundle(startingAt: bundle)
     productName =
       host?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
@@ -150,14 +158,24 @@ final class SettingsModel: ObservableObject {
 
 extension SettingsModel {
   func prepareInitialState() async {
-    guard !initialStatePrepared else { return }
-    initialStatePrepared = true
+    guard !initialStatePrepared, !initialStatePreparing else { return }
+    initialStatePreparing = true
+    defer { initialStatePreparing = false }
     updateChecker.refreshRuntime()
     let registry = dataRegistry
-    let snapshot = await Task.detached(priority: .userInitiated) {
-      registry.flatMap { try? $0.runtimeSnapshot() }
+    let result = await Task.detached(priority: .userInitiated) {
+      Result { try registry?.runtimeSnapshot() }
     }.value
+    let snapshot: LinnetDataRegistry.RuntimeSnapshot?
+    do {
+      snapshot = try result.get()
+    } catch {
+      snapshot = nil
+      settingsModelLogger.error(
+        "Language data could not be verified: \(error.localizedDescription, privacy: .private)")
+    }
     dataServicesAvailable = snapshot != nil
+    initialStatePrepared = dataServicesAvailable
     installedPacks = snapshot?.state.packs ?? []
     dataEdition = snapshot?.state.edition
     configuration.setServicesAvailable(dataServicesAvailable)
@@ -241,6 +259,7 @@ extension SettingsModel {
 
   func discardPendingChanges() {
     cancelPendingAppearancePublish()
+    customWordToEdit = nil
     configuration.discardPendingChanges()
   }
 
@@ -311,46 +330,44 @@ extension SettingsModel {
     guard !operationActive, !cloudSyncPreparing else { return }
     cloudSyncPreparing = true
     defer { cloudSyncPreparing = false }
+    let bundle = coordinator.bundle
     if enabled {
       do {
         let location = try await coordinator.prepareCloudSyncLocation()
         guard !Task.isCancelled else { return }
-        guard LinnetSettingsContract.setCloudSyncEnabled(true) else {
+        guard LinnetSettingsContract.setCloudSyncEnabled(true, startingAt: bundle) else {
           status = .operationFailed(.unavailable)
           return
         }
         cloudSyncEnabled = true
         cloudSyncLocation = location
-        try await coordinator.reloadLearningSyncConfiguration()
-        status = .cloudSyncEnabled
       } catch {
         settingsModelLogger.error(
           "Linnet iCloud Drive folder is unavailable: \(error.localizedDescription, privacy: .private)"
         )
         status = .operationFailed(.unavailable)
+        return
       }
     } else {
-      guard LinnetSettingsContract.setCloudSyncEnabled(false) else {
+      guard LinnetSettingsContract.setCloudSyncEnabled(false, startingAt: bundle) else {
         status = .operationFailed(.unavailable)
         return
       }
       cloudSyncEnabled = false
-      cloudSyncLocation = nil
-      do {
-        try await coordinator.reloadLearningSyncConfiguration()
-      } catch {
-        settingsModelLogger.error(
-          "Learning sync configuration reload failed: \(error.localizedDescription, privacy: .private)"
-        )
-        status = .operationFailed(presentationFailure(error))
-        return
-      }
-      status = .cloudSyncDisabled
+    }
+    do {
+      try await coordinator.reloadLearningSyncConfiguration()
+      status = enabled ? .cloudSyncEnabled : .cloudSyncDisabled
+    } catch {
+      settingsModelLogger.error(
+        "Learning sync configuration reload failed: \(error.localizedDescription, privacy: .private)"
+      )
+      status = .cloudSyncPreferenceSaved(presentationFailure(error))
     }
   }
 
   func synchronizeLearningNow() {
-    guard cloudSyncLocation != nil, !operationActive, !cloudSyncPreparing else { return }
+    guard cloudSyncEnabled, cloudSyncLocation != nil, !operationActive, !cloudSyncPreparing else { return }
     cloudSyncPreparing = true
     Task { [weak self] in
       guard let self else { return }
@@ -369,13 +386,29 @@ extension SettingsModel {
       }
     }
   }
-  func uploadCloudBackupArchive() {
-    guard let cloudFolder = cloudSyncLocation?.folder, !operationActive else { return }
+  func uploadCloudBackupArchive() async {
+    guard !operationActive, !cloudSyncPreparing, !portableInspectionActive else { return }
+    cloudSyncPreparing = true
+    defer { cloudSyncPreparing = false }
+    let location: LinnetCloudSyncLocation
+    do {
+      location = try await coordinator.prepareCloudSyncLocation()
+      guard !Task.isCancelled else { status = .operationCancelled; return }
+      cloudSyncLocation = location
+    } catch {
+      cloudSyncLocation = nil
+      settingsModelLogger.error(
+        "Cloud recovery folder preparation failed: \(error.localizedDescription, privacy: .private)"
+      )
+      status = .operationFailed(.cloudSyncUnavailable)
+      return
+    }
+    guard !operationActive else { return }
     run(
       .cloudBackup,
       operation: .exportCloudRecovery(
         categories: Set(LinnetBackupStore.Category.allCases),
-        cloudFolder: cloudFolder
+        cloudFolder: location.folder
       )
     ) { outcome in
       guard let recovery = outcome.cloudRecovery else { return .operationFailed(.unknown) }
@@ -387,24 +420,37 @@ extension SettingsModel {
   }
 
   func inspectCloudBackupArchive() async -> SettingsDataCoordinator.PortableImportCandidate? {
-    guard configuration.canPersist, !operationActive, !portableInspectionActive,
-      let cloudFolder = cloudSyncLocation?.folder
+    guard configuration.canPersist, !operationActive, !portableInspectionActive, !cloudSyncPreparing
     else {
       status = .operationFailed(.unavailable)
       return nil
     }
     portableInspectionActive = true
+    cloudSyncPreparing = true
     status = .operationProgress(.portableImport, .preflight)
-    defer { portableInspectionActive = false }
+    defer {
+      portableInspectionActive = false
+      cloudSyncPreparing = false
+    }
     do {
-      guard let candidate = try await coordinator.inspectCloudRecovery(in: cloudFolder) else {
-        status = .operationFailed(.unavailable)
+      let location = try await coordinator.prepareCloudSyncLocation()
+      cloudSyncLocation = location
+      guard !Task.isCancelled else { status = .operationCancelled; return nil }
+      guard let candidate = try await coordinator.inspectCloudRecovery(in: location.folder) else {
+        status = .cloudBackupNotFound
         return nil
       }
       status = .ready
       return candidate
     } catch SettingsDataCoordinator.Failure.cancelled {
       status = .operationCancelled; return nil
+    } catch let error as LinnetCloudSyncLocation.Failure {
+      cloudSyncLocation = nil
+      settingsModelLogger.error(
+        "Cloud recovery folder preparation failed: \(error.localizedDescription, privacy: .private)"
+      )
+      status = .operationFailed(.cloudSyncUnavailable)
+      return nil
     } catch {
       settingsModelLogger.error(
         "Cloud recovery inspection failed: \(error.localizedDescription, privacy: .private)"
@@ -483,6 +529,10 @@ extension SettingsModel {
   }
 
   func refreshDiagnostics() {
+    guard operationTask == nil else { return }
+    backupRefreshTask?.cancel()
+    backupRefreshTask = nil
+    backupHistory.beginLoading()
     run(.diagnostics, operation: .diagnose) { [weak self] outcome in
       self?.diagnostics = outcome.diagnostics
       return outcome.diagnostics?.reachability == .unreachable ? .diagnosticsUnreachable : .diagnosticsRefreshed
@@ -527,7 +577,12 @@ extension SettingsModel {
         acceptance: acceptance,
         success: success
       )
-      refreshBackups()
+      switch kind {
+      case .apply, .legacy, .portableImport, .restore, .removeBackup, .clearLearning:
+        refreshBackups()
+      case .diagnostics, .portableExport, .cloudBackup:
+        break
+      }
       activeOperation = nil
       operationTask = nil
       startPendingAppearancePublish()
@@ -542,6 +597,7 @@ extension SettingsModel {
     success: @escaping @MainActor (SettingsDataCoordinator.Outcome) -> SettingsPresentationStatus
   ) async -> Bool {
     do {
+      if kind == .diagnostics { await prepareInitialState() }
       let outcome = try await coordinator.run(operation) { [weak self] update in
         Task { @MainActor [weak self] in self?.setProgress(update, for: kind) }
       }
@@ -563,6 +619,7 @@ extension SettingsModel {
         ? .backupRecordRemovalFailed
         : .operationFailed(presentationFailure(error))
     }
+    if kind == .diagnostics { backupHistory.failLoading() }
     return false
   }
 
@@ -724,6 +781,7 @@ extension SettingsModel {
     recoveryAfterCommit: Bool
   ) -> SettingsOutcomeAcceptance {
     if let result = outcome.diagnostics { diagnostics = result }
+    if let records = outcome.backupRecords { backupHistory.finishLoading(records) }
     if recoveryAfterCommit {
       guard case .externalReplacement = outcome.personalEffect,
         case .externalReplacement = outcome.documentEffect,
@@ -773,18 +831,23 @@ extension SettingsModel {
     backupRefreshTask?.cancel()
     backupHistory.beginLoading()
     backupRefreshTask = Task { [weak self] in
-      let result = await Task.detached(priority: .utility) {
+      let work = Task.detached(priority: .utility) {
         Result { try LinnetBackupStore.listBackups(in: backupsRoot) }
-      }.value
+      }
+      let result = await withTaskCancellationHandler {
+        await work.value
+      } onCancel: {
+        work.cancel()
+      }
       guard !Task.isCancelled, let self else { return }
       switch result {
       case .success(let records):
         backupHistory.finishLoading(records)
-      case .failure:
-        // Preserve the last verified view. An unreadable or over-limit history
-        // is unavailable, never authoritative evidence that no backups exist.
+      case .failure(let error):
+        // An unreadable history is not evidence that no backups exist.
         backupHistory.failLoading()
-        settingsModelLogger.error("Backups could not be read within the bounded history contract.")
+        settingsModelLogger.error(
+          "Backups could not be read: \(error.localizedDescription, privacy: .private)")
       }
       backupRefreshTask = nil
     }

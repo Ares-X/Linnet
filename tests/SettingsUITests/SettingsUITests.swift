@@ -192,6 +192,61 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
+  func testCandidateCustomWordRequestsRevealAndFocusCode() async throws {
+    let settingsURL = settingsApplicationURL().resolvingSymlinksInPath().standardizedFileURL
+    try await terminateIsolatedSettings(at: settingsURL)
+    let isolatedHome = URL(fileURLWithPath: "/private/tmp/linnet-settings-ui-uat-active-\(getuid())")
+    XCTAssertTrue(FileManager.default.fileExists(
+      atPath: isolatedHome.appending(path: ".linnet-settings-ui-uat-fixture").path))
+    let wordsFile = isolatedHome.appending(
+      path: "Library/Application Support/Linnet/UserData/linnet_custom_words.txt")
+    let originalWords = try? Data(contentsOf: wordsFile)
+    let rows = (0..<36).map { index in
+      let suffix = String(UnicodeScalar(97 + index / 26)!) + String(UnicodeScalar(97 + index % 26)!)
+      return "Fixture \(index)\tfixture\(suffix)\n"
+    }.joined()
+    try Data(rows.utf8).write(to: wordsFile, options: .atomic)
+    defer {
+      if let originalWords {
+        try? originalWords.write(to: wordsFile, options: .atomic)
+      } else {
+        try? FileManager.default.removeItem(at: wordsFile)
+      }
+    }
+    let app = XCUIApplication(url: settingsURL)
+    let fixtureURL = Bundle.main.bundleURL.deletingLastPathComponent()
+      .appending(path: "ForegroundFixture.app", directoryHint: .isDirectory)
+    let launcher = XCUIApplication(url: fixtureURL)
+    launcher.launch()
+    defer {
+      app.terminate()
+      launcher.terminate()
+    }
+    for index in 1...3 {
+      launcher.activate()
+      launcher.buttons["Add Candidate Word"].click()
+      XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
+      let value = app.textFields.matching(NSPredicate(
+        format: "value == %@", "Candidate \(index)")).firstMatch
+      XCTAssertTrue(value.waitForExistence(timeout: 3))
+      let enteredCode = "candidatecode" + ["a", "b", "c"][index - 1]
+      app.typeText(enteredCode)
+      let code = app.textFields.matching(NSPredicate(
+        format: "value == %@", enteredCode)).firstMatch
+      XCTAssertTrue(code.waitForExistence(timeout: 3),
+        "Candidate request did not focus its new code field")
+      XCTAssertTrue(app.scrollViews["settings.page.scroll"].firstMatch.frame.contains(code.frame),
+        "Candidate code field is outside the dictionary viewport")
+      try waitUntilEnabled(app.buttons["Apply Changes"], timeout: 10)
+      if index == 1 {
+        clickTab("Appearance", in: app)
+      } else if index == 2 {
+        try reveal(app.buttons["Add Text Expander"], named: "Add Text Expander", in: app)
+      }
+    }
+  }
+
+  @MainActor
   func testAppearanceControlsAndPreviewRemainResponsive() throws {
     let app = try launchSettings()
     defer { app.terminate() }

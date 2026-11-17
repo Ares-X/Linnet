@@ -71,20 +71,27 @@ extension DataTabView {
 
       HStack {
         Button("Sync Learning Now") { model.synchronizeLearningNow() }
-          .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
-        Button("Upload Recovery Backup…") { model.uploadCloudBackupArchive() }
-          .disabled(model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
+          .disabled(!model.cloudSyncEnabled || model.cloudSyncLocation == nil || model.operationActive || model.cloudSyncPreparing)
+        Button("Upload Recovery Backup…") {
+          Task { await model.uploadCloudBackupArchive() }
+        }
+        .disabled(model.operationActive || model.portableInspectionActive || model.cloudSyncPreparing)
         Button("Review Recovery Backup…") {
           Task {
             pendingPortableImport = await model.inspectCloudBackupArchive()
           }
         }
         .disabled(
-          model.cloudSyncLocation == nil || !model.configuration.canPersist
-            || model.operationActive || model.portableInspectionActive || model.cloudSyncPreparing)
+          !model.configuration.canPersist || model.operationActive
+            || model.portableInspectionActive || model.cloudSyncPreparing)
       }
       Text(
-        "Recovery backups are uploaded manually. They also include custom words, disabled words, and Text Expander entries; enabling learning sync does not upload them automatically."
+        "Recovery backups are saved manually, even when learning sync is off. They also include custom words, disabled words, and Text Expander entries; enabling learning sync does not save them automatically."
+      )
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+      Text(
+        "iCloud Drive may still be uploading after this Mac saves and verifies a backup. Before erasing or moving from this Mac, use Review Recovery Backup on the destination Mac to confirm it can read the backup."
       )
       .font(.caption2)
       .foregroundStyle(.secondary)
@@ -137,6 +144,7 @@ extension DataTabView {
     GroupBox("Core update") {
       VStack(alignment: .leading, spacing: 10) {
         runtimeVersionRow
+        runtimeHealthRow
         updateChannelPicker
         updateCheckRow
         Divider()
@@ -249,6 +257,23 @@ extension DataTabView {
         .foregroundStyle(.secondary)
         Button("Check Runtime Again") { updateChecker.refreshRuntime() }
       }
+    }
+  }
+
+  @ViewBuilder var runtimeHealthRow: some View {
+    if let health = updateChecker.runtimeHealth {
+      let reachability: SettingsRuntimeReachability = switch health.state {
+      case .running: .running
+      case .paused: .paused
+      case .degraded: .degraded
+      default: .unreachable
+      }
+      let presentation = SettingsPresentationStatus.runtime(reachability).presentation(locale: locale)
+      LabeledContent("Input engine") {
+        Label(presentation.text, systemImage: presentation.systemImage)
+          .foregroundStyle(reachability == .running ? Color.green : Color.orange)
+      }
+      .accessibilityIdentifier("settings.data.core.health")
     }
   }
 
@@ -476,10 +501,10 @@ extension DataTabView {
     GroupBox("Chinese sentence model") {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          Image(systemName: model.grammarModelStatus == .ltsActive
+          Image(systemName: model.grammarModelStatus == .ltsInstalled
             ? "brain.head.profile.fill" : "brain.head.profile")
             .font(.title2)
-            .foregroundStyle(model.grammarModelStatus == .ltsActive ? .green : .secondary)
+            .foregroundStyle(model.grammarModelStatus == .ltsInstalled ? .blue : .secondary)
             .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 4) {
             Text(model.grammarModelStatus.label)
@@ -500,8 +525,9 @@ extension DataTabView {
 
   @ViewBuilder var grammarModelDescription: some View {
     switch model.grammarModelStatus {
-    case .ltsActive: Text("Better prediction for long Chinese sentences.")
-    case .missing: Text("The recommended Chinese grammar model is not active.")
+    case .ltsInstalled: Text("Installed and available to the Chinese input engine.")
+    case .missing: Text("The recommended Chinese grammar model is not installed.")
+    case .unavailable: Text("The language data installation could not be verified.")
     case .checking: EmptyView()
     }
   }

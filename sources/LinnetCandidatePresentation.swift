@@ -273,11 +273,14 @@ enum LinnetCandidatePresentation {
       remainingFormat = String(remainingFormat[next.range.upperBound...])
     }
 
-    if line.length > 1, line.length <= 10 {
+    let renderedLine = line.string
+    if line.length <= 10, renderedLine.count > 1 {
+      let firstCharacterEnd = renderedLine.index(after: renderedLine.startIndex)
+        .utf16Offset(in: renderedLine)
       line.addAttribute(
         NSAttributedString.Key("noBreak"),
         value: true,
-        range: NSRange(location: 1, length: line.length - 1))
+        range: NSRange(location: firstCharacterEnd, length: line.length - firstCharacterEnd))
     }
     return CandidateLine(
       attributedString: NSAttributedString(attributedString: line),

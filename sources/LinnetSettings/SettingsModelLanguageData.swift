@@ -11,14 +11,16 @@ private let linnetLanguageDataLogger = Logger(
 extension SettingsModel {
   enum GrammarModelStatus: Equatable {
     case checking
-    case ltsActive
+    case ltsInstalled
     case missing
+    case unavailable
 
     var label: LocalizedStringKey {
       switch self {
       case .checking: return "Detecting grammar model…"
-      case .ltsActive: return "Wanxiang LTS grammar data (about 420 MB) — Active"
+      case .ltsInstalled: return "Wanxiang LTS grammar data (about 420 MB) — Installed"
       case .missing: return "Model data missing"
+      case .unavailable: return "Grammar model installation status unavailable"
       }
     }
   }
@@ -47,8 +49,12 @@ extension SettingsModel {
   }
 
   func detectGrammarModel() {
+    guard dataServicesAvailable else {
+      grammarModelStatus = .unavailable
+      return
+    }
     grammarModelStatus = installedPacks.contains(where: { $0.kind == .lts })
-      ? .ltsActive : .missing
+      ? .ltsInstalled : .missing
   }
 
   func updateLanguageData() {
@@ -137,9 +143,11 @@ extension SettingsModel {
       return
     }
     languageDataUpdateTarget = target
+    languageDataDownloadID = nil
     packDownloadProgress = 0
     setLanguageDataUpdateState(target, .downloading)
     let coordinator = coordinator
+    let downloadSessionConfiguration = downloadSessionConfiguration
     let catalogURL = updateChecker.updateChannel.catalogURL
     packDownloadTask = Task.detached { [weak self, registry, downloadSource, coordinator, catalogURL] in
       do {
@@ -148,7 +156,8 @@ extension SettingsModel {
           at: registry.settingsMutationLeaseURL, timeout: 300)
         defer { _ = lease }
         try Task.checkCancellation()
-        let transport = LinnetSettingsDownloadTransport(source: downloadSource)
+        let transport = LinnetSettingsDownloadTransport(
+          source: downloadSource, configuration: downloadSessionConfiguration)
         let catalogData = try await transport.downloadCatalog(at: catalogURL)
         try Task.checkCancellation()
         await self?.setLanguageDataUpdateState(target, .verifying)
@@ -164,10 +173,19 @@ extension SettingsModel {
         let downloadDirectory = update.downloadDirectory
         defer { try? registry.cancelDataChannelUpdate(transactionID: update.transactionID) }
         var targetPacks: [LinnetDataRegistry.ActivePack] = []
-        for artifact in selected.packs {
+        let transfers = selected.packs.map { artifact in
+          artifact.transfer(
+            from: snapshot.state.packs.first { $0.kind == artifact.kind },
+            allowCompleteRepair: allowCompleteRepair)
+        }
+        var totalDownloadBytes = zip(selected.packs, transfers).reduce(0.0) {
+          $0 + Self.languageDataTransferBytes(artifact: $1.0, transfer: $1.1)
+        }
+        var completedDownloadBytes = 0.0
+        for (artifact, initialTransfer) in zip(selected.packs, transfers) {
           try Task.checkCancellation()
-          let installed = snapshot.state.packs.first { $0.kind == artifact.kind }
-          var transfer = artifact.transfer(from: installed, allowCompleteRepair: allowCompleteRepair)
+          var transfer = initialTransfer
+          var usingCompleteFallback = false
           if case .current(let pack) = transfer {
             targetPacks.append(pack)
             continue
@@ -181,26 +199,45 @@ extension SettingsModel {
             }
             let package = downloadDirectory.appending(path: url.lastPathComponent)
             do {
-              await self?.setLanguageDataUpdateState(target, .downloading)
-              try await transport.downloadArtifact(from: url, expectedBytes: bytes, to: package)
+              let downloadID = UUID()
+              let completedBytes = completedDownloadBytes
+              let totalBytes = totalDownloadBytes
+              await self?.beginLanguageDataTransfer(
+                target, downloadID: downloadID,
+                progress: completedBytes / totalBytes,
+                isCompleteFallback: usingCompleteFallback)
+              try await transport.downloadArtifact(
+                from: url, expectedBytes: bytes, to: package,
+                progress: { [weak self] progress in
+                  Task { @MainActor [weak self] in
+                    self?.setPackDownloadProgress(
+                      (completedBytes + Double(bytes) * progress) / totalBytes,
+                      downloadID: downloadID)
+                  }
+                })
               try Task.checkCancellation()
               await self?.setLanguageDataUpdateState(target, .verifying)
               let staged = try registry.verifyAndStagePack(
                 package: package, artifact: artifact, transfer: transfer,
                 allowCompleteRepair: allowCompleteRepair)
               targetPacks.append(staged)
+              completedDownloadBytes += Double(bytes)
               break
             } catch {
               try Task.checkCancellation()
-              guard case .delta = transfer else { throw error }
+              guard case .delta(let delta, _) = transfer,
+                Self.languageDataDeltaCanRecover(from: error) else { throw error }
               linnetLanguageDataLogger.error(
                 "Language-data delta failed; downloading complete pack: \(error.localizedDescription, privacy: .private)"
               )
+              // The failed delta is no longer part of the download plan. A
+              // complete pack has a different byte budget, so rebase progress
+              // when its transfer starts instead of retaining a false 100%.
+              totalDownloadBytes += Double(artifact.bytes) - Double(delta.bytes)
               transfer = .complete
+              usingCompleteFallback = true
             }
           }
-          await self?.setPackDownloadProgress(
-            Double(targetPacks.count) / Double(selected.packs.count))
           try Task.checkCancellation()
         }
         try Task.checkCancellation()
@@ -223,8 +260,56 @@ extension SettingsModel {
     }
   }
 
-  private func setPackDownloadProgress(_ progress: Double) {
+  private func beginLanguageDataTransfer(
+    _ target: SettingsLanguageDataUpdateTarget, downloadID: UUID, progress: Double,
+    isCompleteFallback: Bool
+  ) {
+    guard languageDataUpdateTarget == target else { return }
+    languageDataDownloadID = downloadID
     packDownloadProgress = progress
+    status = .pack(
+      target.presentationPack, isCompleteFallback ? .downloadingCompletePack : .downloading)
+  }
+
+  private func setPackDownloadProgress(_ progress: Double, downloadID: UUID) {
+    guard languageDataDownloadID == downloadID else { return }
+    packDownloadProgress = max(packDownloadProgress, progress)
+  }
+
+  nonisolated private static func languageDataTransferBytes(
+    artifact: LinnetDataChannel.Artifact, transfer: LinnetDataChannel.PackTransfer
+  ) -> Double {
+    switch transfer {
+    case .current: return 0
+    case .delta(let delta, _): return Double(delta.bytes)
+    case .complete: return Double(artifact.bytes)
+    }
+  }
+
+  nonisolated private static func languageDataDeltaCanRecover(from error: Error) -> Bool {
+    if let failure = error as? LinnetSettingsDownloadTransport.Failure {
+      switch failure {
+      case .lengthMismatch, .responseTooLarge: return true
+      case .httpStatus(404), .httpStatus(410): return true
+      default: return false
+      }
+    }
+    if let failure = error as? LinnetDataChannel.Failure {
+      if case .invalidArtifact = failure { return true }
+      return false
+    }
+    if let failure = error as? LinnetPackContract.Failure {
+      switch failure {
+      case .invalidContainer, .unsupportedContainer, .manifestTooLarge,
+        .invalidManifest, .invalidPayload: return true
+      case .incompatibleCore, .unsafePath, .outputNotEmpty: return false
+      }
+    }
+    if let failure = error as? LinnetDirectoryDelta.Failure {
+      if case .invalid = failure { return true }
+      return false
+    }
+    return (error as? LinnetDataRegistry.Failure) == .invalidActiveState
   }
 
   private func setLanguageDataUpdateState(
@@ -232,11 +317,13 @@ extension SettingsModel {
     _ state: SettingsPresentationPackState
   ) {
     guard languageDataUpdateTarget == target else { return }
+    languageDataDownloadID = nil
     status = .pack(target.presentationPack, state)
   }
 
   private func beginLanguageDataActivation(_ target: SettingsLanguageDataUpdateTarget) {
     guard languageDataUpdateTarget == target else { return }
+    languageDataDownloadID = nil
     packDownloadTask = nil
     status = .pack(target.presentationPack, .activating)
   }
@@ -253,6 +340,10 @@ extension SettingsModel {
     }
     if let urlError = error as? URLError {
       return packUpdateFailure(for: urlError)
+    }
+    if let deltaFailure = error as? LinnetDirectoryDelta.Failure,
+      case .filesystem = deltaFailure {
+      return .storageFailed
     }
     let failure = error as NSError
     if isPackUpdateStorageFailure(failure) { return .storageFailed }
@@ -299,6 +390,7 @@ extension SettingsModel {
     failure: SettingsPresentationPackState? = nil
   ) {
     guard languageDataUpdateTarget == target || languageDataUpdateTarget == nil else { return }
+    languageDataDownloadID = nil
     if let failure {
       status = .pack(target.presentationPack, failure)
     } else {
@@ -320,12 +412,14 @@ extension SettingsModel {
 
   func cancelLanguagePackDownload() {
     guard packDownloadCancellable, let target = languageDataUpdateTarget else { return }
+    languageDataDownloadID = nil
     status = .pack(target.presentationPack, .cancelling)
     packDownloadTask?.cancel()
   }
 
   func finishPackDownloadCancellation(_ target: SettingsLanguageDataUpdateTarget) {
     guard languageDataUpdateTarget == target else { return }
+    languageDataDownloadID = nil
     packDownloadProgress = 0
     languageDataUpdateTarget = nil
     packDownloadTask = nil

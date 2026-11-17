@@ -196,6 +196,7 @@ struct SquirrelKeycode {
     // supplies no character payload. Printable keys must never be inferred
     // from their QWERTY position in that state.
     guard let keychar else { return UInt32(XK_VoidSymbol) }
+    guard keychar.isASCII else { return UInt32(XK_VoidSymbol) }
     if keychar.isASCII, let codeValue = keychar.unicodeScalars.first?.value {
       // NOTE: IBus/Rime use different keycodes for uppercase/lowercase letters.
       if keychar.isLowercase && (shift != caps) {

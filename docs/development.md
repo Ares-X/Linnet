@@ -64,7 +64,7 @@ macOS 只看到一个 Linnet 输入源。Rime 内部包含八个中文 profile �
 
 Linnet 差异只有两个人工 owner：
 
-- `reviewed_pronunciations.tsv`：已接受的读音替换；
+- `reviewed_pronunciations.tsv`：已接受的读音替换与补全；`old-code-absent` 替换错音，`old-code-retained` 补读并保留合法旧音；
 - `reviewed_rankings.tsv`：已接受的精确排序行。
 
 精确 source patch 删除被拒绝的 `(text, code)`，`linnet_reviewed` 表添加接受行。锁定的 `rime-ice/cn_dicts/ext.dict.yaml` 是唯一中文补充输入：构建期投影器只接收万象核心尚未拥有的三字及以上行，使用万象 `zi` 表转换声调编码，拒绝歧义或无法验证的读音，再以低权重导入同一个 Rime dictionary graph。不存在提交进仓库的生成词典、第二个运行时 translator、自动猜音或运行时 fallback。
@@ -72,6 +72,10 @@ Linnet 差异只有两个人工 owner：
 维护更新必须修改唯一 review ledger/source patch，而不是生成第二份中文词典或运行时修正规则。
 
 万象 v18.1.2 的“鸡内金／片／散”和“应力”纠音已回移到上述 owner，保留原词频；词典 pin 仍为 v17.9.7。本轮完整词典升级在“当阳峪窑”等输入中出现整词回退，新 LTS `20aca767f06a` 也使“你也可以试试”等句子退步，因此未整体升级词典或模型。
+
+另从 v18.1.13 回移“于思／于思于思 sāi、郦 lì、系着 jì”读音补全，沿用原词频，不删除其他合法读音。只推进实际变化的中文包身份；英文、LTS、长尾包保持原字节。词典、模型和八方案 algebra 的整体迁移仍需独立对照。
+
+Rime 保持 1.17.0，现有 core-interactions patch 回移上游 `8bf987ab0c1fbda866b26ed6ad510a26c8e03cc2`（极小学习权重继续解析计数和时间）与 `e00da759c60017b396ed6a94236f4eb5283244db`（长文本 xlit）。`rime_smoke_test` 直接调用重建库的真实 parser 和 transliteration，再运行既有输入路径。Squirrel `d220b92ae7d0c916f4cce50df42d9a136668ea52` 的字符边界修正在当前 candidateLine owner 完成，不移植另一套面板。
 
 ### Smart English
 
@@ -541,8 +545,12 @@ Swift owner 测试可以先用 `tests/verify_swift_units.sh --list` 查看名称
 | 候选投影、Grid、面板几何 | `tests/verify_swift_units.sh --only candidate-presentation,candidate-snapshot-builder,panel-geometry,candidate-window` |
 | Settings ↔ Host 事务 | `tests/verify_swift_units.sh --only settings-ipc,settings-update-checker,settings-data-coordinator` |
 | 实时外观最终意图 | `tests/verify_swift_units.sh --only settings-appearance-scheduling`；真实 coordinator/IPC 回复交错覆盖快速返回旧值、Apply、Discard、失败与冲突 |
+| 学习同步配置确认 | `tests/verify_swift_units.sh --only rime-sync-controller,settings-data-coordinator,settings-appearance-scheduling,presentation-status`；普通 reload 确认配置已加载或停用，立即同步仍等待实际同步终态；IPC 失败保留偏好并明确未确认生效 |
+| 候选加词入口与模型安装状态 | `tests/verify_swift_units.sh --only settings-appearance-scheduling`；真实 Model 覆盖草稿与最新词条 ID、无 Host 的已安装状态和无法验证的 Registry。`SettingsUITests/testCandidateCustomWordRequestsRevealAndFocusCode` 在专用桌面验证冷启动、换页、长列表及编码焦点 |
 | 英文数据库 runtime 生命周期 | `tests/verify_rime_runtime.sh --predict-db-lifecycle-probe`；在同一进程 finalize/init 之间替换有效 A/B 数据，验证 A→B→A 和 runtime 内共享 |
 | 个人数据或备份 | `tests/verify_swift_units.sh --only personal-data,settings-session,backup-store` |
+| 个人表的真实 Rime 导入 | `tests/verify_swift_units.sh --only rime-user-data-bridge`；经 Levers、stabledb 和真实 session 验证同码多词、开头的 `#` 与文本展开首尾空格 |
+| 语言下载与初始恢复 | `tests/verify_swift_units.sh --only download-transport,settings-appearance-scheduling`；真实 Model→transport→Registry 验证首包／多包字节进度、差分恢复、网络和存储错误不回退、取消、首次 Registry 失败重试与备份列表复用 |
 | Rime 路径或 session | `tests/verify_swift_units.sh --only rime-path,rime-session-lease` |
 | Runtime 健康状态的方案 ID | `tests/verify_swift_units.sh --only rime-health`；通过 Rime 的 `default/schema_list` 读取配置 ID，不为健康计数重建方案显示名称；实际 session 就绪仍由激活 owner 验证 |
 | Settings 可见交互 | `tests/verify_visible_settings_fixture.sh --ui-test TEST_NAME` |

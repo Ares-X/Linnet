@@ -1,12 +1,14 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -19,9 +21,11 @@
 #include "rime_api_stdbool.h"
 #include "rime_api.h"
 #include <rime/candidate.h>
+#include <rime/algo/calculus.h>
 #include <rime/context.h>
 #include <rime/dict/user_dictionary.h>
 #include <rime/dict/level_db.h>
+#include <rime/dict/user_db.h>
 #include <rime/deployer.h>
 #include <rime/gear/translator_commons.h>
 #include <rime/key_table.h>
@@ -1661,6 +1665,17 @@ void ExpectReviewedChinesePronunciations(RimeApi_stdbool* api) {
       {"jineijinpian", "jinzjnpm", "鸡内金片"},
       {"jineijinsan", "jinzjnsj", "鸡内金散"},
   }};
+  // These additions preserve valid alternative readings. Low-frequency names
+  // and literary words must remain selectable, without imposing first place.
+  constexpr std::array<ReadingCase, 7> kSupplementalCases{{
+      {"yusai", "yusl", "于思"},
+      {"yusaiyusai", "yuslyusl", "于思于思"},
+      {"li", "li", "郦"},
+      {"jizhe", "jive", "系着"},
+      {"yusi", "yusi", "于思"},
+      {"yusiyusi", "yusiyusi", "于思于思"},
+      {"xizhe", "xive", "系着"},
+  }};
   for (const auto& schema : {"linnet_zh_pinyin", "linnet_zh"}) {
     const auto session = CreateSchemaSession(api, schema);
     for (const auto& sample : kCases) {
@@ -1670,8 +1685,47 @@ void ExpectReviewedChinesePronunciations(RimeApi_stdbool* api) {
                                : sample.natural_code,
                            sample.expected);
     }
+    for (const auto& sample : kSupplementalCases) {
+      Enter(api, session, std::string(schema) == "linnet_zh_pinyin"
+                              ? sample.full_pinyin
+                              : sample.natural_code);
+      const auto index = CandidateIndex(api, session, sample.expected);
+      if (!api->select_candidate(session, index) ||
+          TakeCommit(api, session) != sample.expected) {
+        Fail("supplemental or retained Chinese reading could not be selected");
+      }
+    }
     api->destroy_session(session);
   }
+}
+
+void ExpectUpstreamRimeCorrectness() {
+  rime::UserDbValue record;
+  if (!record.Unpack("c=16 d=9.88131e-324 t=1449225") ||
+      record.commits != 16 || record.tick != 1449225 || record.dee != 0 ||
+      !std::isfinite(record.dee)) {
+    Fail("an underflowed learning weight discarded the record timestamp");
+  }
+  if (!record.Unpack("c=2 d=1.25 t=42") || record.commits != 2 ||
+      record.tick != 42 || record.dee != 1.25) {
+    Fail("ordinary learning values changed after the underflow fix");
+  }
+
+  std::unique_ptr<rime::Calculation> transliteration(
+      rime::Transliteration::Parse({"xlit", "ā", "a"}));
+  if (!transliteration) Fail("native transliteration could not be created");
+  for (const std::string& prefix : {std::string(), std::string(300, 'x'),
+                                   std::string("😀")}) {
+    rime::Spelling spelling(prefix + "ā");
+    if (!transliteration->Apply(&spelling) || spelling.str != prefix + "a") {
+      Fail("native transliteration truncated or skipped a long Unicode input");
+    }
+  }
+  rime::Spelling unchanged(std::string(300, 'x'));
+  if (transliteration->Apply(&unchanged) || unchanged.str != std::string(300, 'x')) {
+    Fail("native transliteration changed an unmapped input");
+  }
+  std::cout << "rime_smoke_test: upstream parser and transliteration fixes: PASS\n";
 }
 
 void ExpectSupplementalExtendedChineseCoverage(RimeApi_stdbool* api) {
@@ -8040,6 +8094,7 @@ int main(int argc, char** argv) {
 
   api->setup(&traits);
   api->initialize(nullptr);
+  ExpectUpstreamRimeCorrectness();
   if (!api->find_module("smart_english")) {
     api->finalize();
     Fail("smart_english module was not loaded");

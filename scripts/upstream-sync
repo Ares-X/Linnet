@@ -549,18 +549,35 @@ def release_asset_status(source)
   repository_slug = repository_path.delete_prefix("/").delete_suffix(".git")
   release = URI.encode_www_form_component(source.fetch("release"))
   uri = URI("https://api.github.com/repos/#{repository_slug}/releases/tags/#{release}")
-  request = Net::HTTP::Get.new(uri)
-  request["Accept"] = "application/vnd.github+json"
-  request["X-GitHub-Api-Version"] = "2022-11-28"
-  request["User-Agent"] = "linnet-upstream-sync"
   token = ENV["GH_TOKEN"]
-  request["Authorization"] = "Bearer #{token}" if token && !token.empty?
-  response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
-    http.request(request)
+  visited = []
+  response = loop do
+    fail_lock("GitHub release redirect loop for #{repository_slug}") if visited.include?(uri.to_s)
+    visited << uri.to_s
+    request = Net::HTTP::Get.new(uri)
+    request["Accept"] = "application/vnd.github+json"
+    request["X-GitHub-Api-Version"] = "2022-11-28"
+    request["User-Agent"] = "linnet-upstream-sync"
+    request["Authorization"] = "Bearer #{token}" if token && !token.empty?
+    result = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+    break result unless result.is_a?(Net::HTTPRedirection)
+    location = result["location"]
+    fail_lock("GitHub release redirect has no location") if location.to_s.empty?
+    uri = URI.join(uri.to_s, location)
+    # Keep the API token on GitHub's HTTPS API when following repository moves.
+    fail_lock("GitHub release redirect left the GitHub API") unless
+      uri.scheme == "https" && uri.host == "api.github.com" && uri.port == 443 && !uri.userinfo
   end
   fail_lock("GitHub release lookup failed for #{repository_slug}: HTTP #{response.code}") unless
     response.is_a?(Net::HTTPSuccess)
   release_json = JSON.parse(response.body)
+  canonical_release = release_json.fetch("html_url").match(
+    %r{\Ahttps://github\.com/([^/]+/[^/]+)/releases/tag/#{Regexp.escape(release)}\z}
+  )
+  fail_lock("remote grammar release URL is inconsistent") unless canonical_release
+  canonical_repository_slug = canonical_release[1]
   assets = release_json.fetch("assets")
   matches = assets.select { |asset| asset["name"] == source.fetch("asset") }
   fail_lock("expected one #{source.fetch('asset')} asset in #{source.fetch('release')}") unless
@@ -573,11 +590,12 @@ def release_asset_status(source)
   fail_lock("invalid remote grammar asset identity") unless
     asset["state"] == "uploaded" && asset_id.is_a?(Integer) && asset_id.positive? &&
       bytes.is_a?(Integer) && bytes.positive? && SHA256.match?(sha256)
-  expected_url = "https://api.github.com/repos/#{repository_slug}/releases/assets/#{asset_id}"
+  expected_url = "https://api.github.com/repos/#{canonical_repository_slug}/releases/assets/#{asset_id}"
   fail_lock("remote grammar asset API URL is inconsistent") unless
     asset.fetch("url") == expected_url
   fail_lock("remote grammar download URL is inconsistent") unless
-    asset.fetch("browser_download_url") == source.fetch("asset_download_url")
+    asset.fetch("browser_download_url") ==
+      "https://github.com/#{canonical_repository_slug}/releases/download/#{release}/#{source.fetch('asset')}"
   current = asset_id == source.fetch("asset_id") &&
     bytes == source.fetch("bytes") && sha256 == source.fetch("sha256")
   status = current ? "current" : "review #{sha256[0, 12]} (asset #{asset_id})"

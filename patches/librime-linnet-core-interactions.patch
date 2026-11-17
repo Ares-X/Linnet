@@ -2533,10 +2533,23 @@ index 6740e99..3b9f6ba 100644
  
  class UserDbImporter : public Sink {
 diff --git a/src/rime/dict/user_db.cc b/src/rime/dict/user_db.cc
-index e8f6788..b4123b9 100644
+index e8f6788..19cd154 100644
 --- a/src/rime/dict/user_db.cc
 +++ b/src/rime/dict/user_db.cc
-@@ -126,10 +126,11 @@ bool UserDbHelper::UniformBackup(const path& snapshot_file) {
+@@ -38,7 +38,11 @@ bool UserDbValue::Unpack(const string& value) {
+       if (k == "c") {
+         commits = std::stoi(v);
+       } else if (k == "d") {
+-        dee = (std::min)(10000.0, std::stod(v));
++        try {
++          dee = (std::min)(10000.0, std::stod(v));
++        } catch (std::out_of_range) {
++          dee = 0;
++        }
+       } else if (k == "t") {
+         tick = std::stoul(v);
+       }
+@@ -126,10 +130,11 @@ bool UserDbHelper::UniformBackup(const path& snapshot_file) {
    return true;
  }
  
@@ -2549,7 +2562,7 @@ index e8f6788..b4123b9 100644
    DbSink sink(db_);
    try {
      reader >> sink;
-@@ -169,7 +170,7 @@ string UserDbHelper::GetRimeVersion() {
+@@ -169,7 +174,7 @@ string UserDbHelper::GetRimeVersion() {
    return version;
  }
  
@@ -2558,7 +2571,7 @@ index e8f6788..b4123b9 100644
    string tick;
    if (db && db->MetaFetch("/tick", &tick)) {
      try {
-@@ -177,11 +178,11 @@ static TickCount get_tick_count(Db* db) {
+@@ -177,11 +182,11 @@ static TickCount get_tick_count(Db* db) {
      } catch (...) {
      }
    }
@@ -2572,7 +2585,7 @@ index e8f6788..b4123b9 100644
    their_tick_ = 0;
    max_tick_ = our_tick_;
  }
-@@ -194,49 +195,64 @@ bool UserDbMerger::MetaPut(const string& key, const string& value) {
+@@ -194,49 +199,64 @@ bool UserDbMerger::MetaPut(const string& key, const string& value) {
    if (key == "/tick") {
      try {
        their_tick_ = std::stoul(value);
@@ -4191,3 +4204,61 @@ diff --git a/src/rime/dict/table.h b/src/rime/dict/table.h
  
   private:
    bool Walk(SyllableId syllable_id);
+diff --git a/src/rime/algo/calculus.cc b/src/rime/algo/calculus.cc
+index 504f8da..47674bc 100644
+--- a/src/rime/algo/calculus.cc
++++ b/src/rime/algo/calculus.cc
+@@ -70,27 +70,38 @@ Calculation* Transliteration::Parse(const vector<string>& args) {
+ bool Transliteration::Apply(Spelling* spelling) {
+   if (!spelling || spelling->str.empty())
+     return false;
++
++  const char* const start = spelling->str.c_str();
++  const char* const end = start + spelling->str.size();
++
++  string result;
+   bool modified = false;
+-  const char* p = spelling->str.c_str();
+-  const int buffer_len = 256;
+-  char buffer[buffer_len] = "";
+-  char* q = buffer;
+-  uint32_t c;
+-  while ((c = utf8::unchecked::next(p))) {
+-    if (q - buffer > buffer_len - 7) {  // insufficient space
+-      modified = false;
+-      break;
++
++  const char* p = start;
++  while (p < end) {
++    const char* here = p;
++    uint32_t c = utf8::unchecked::next(p);
++
++    auto it = char_map_.find(c);
++    if (it != char_map_.end()) {
++      if (!modified) {
++        // allocate space and copy unmodified prefix up to this point
++        modified = true;
++        result.reserve(spelling->str.size());
++        result.assign(start, here - start);
++      }
++      c = it->second;  // replace character
+     }
+-    if (char_map_.find(c) != char_map_.end()) {
+-      c = char_map_[c];
+-      modified = true;
++
++    if (modified) {
++      utf8::unchecked::append(c, std::back_inserter(result));
+     }
+-    q = utf8::unchecked::append(c, q);
+   }
++
+   if (modified) {
+-    *q = '\0';
+-    spelling->str.assign(buffer);
++    spelling->str = std::move(result);
+   }
++
+   return modified;
+ }
+ 

@@ -10,6 +10,7 @@ struct LinnetRimeSyncControllerTests {
         try testDurableMarkerBlocksOperation(root: root)
         try testUnavailableDirectoryRecoversOnManualRequest(root: root)
         try testDisabledSyncDoesNotRun(root: root)
+        testReloadReportsConfigurationResult(root: root)
         try testSlowConfigurationDoesNotBlockInput(root: root)
         try testIncrementalWorkYieldsAndCancellationStopsIt(root: root)
         try testWaitingWorkUsesLowFrequencyPolling(root: root)
@@ -238,6 +239,39 @@ struct LinnetRimeSyncControllerTests {
     try body(root)
   }
 
+  private static func testReloadReportsConfigurationResult(root: URL) {
+    let configurations: [LinnetRimeSyncConfiguration] = [
+      .init(syncDirectory: root, lastAttempt: Date()),
+      .init(syncDirectory: root, lastAttempt: nil),
+      .init(syncDirectory: nil, lastAttempt: nil),
+    ]
+    for (index, configuration) in configurations.enumerated() {
+      var replies: [LinnetRimeSyncResult] = []
+      var operations = 0
+      var syncResults: [LinnetRimeSyncResult] = []
+      let controller = LinnetRimeSyncController(
+        loadConfiguration: { configuration }, recordAttempt: { _ in true },
+        recordResult: { syncResults.append($0) },
+        operation: { _ in operations += 1; return .failed }, cancelOperation: {})
+      controller.reload { replies.append($0) }
+      waitUntil { !replies.isEmpty }
+      controller.stop()
+      guard replies == [.completed], operations == (index == 1 ? 1 : 0),
+        syncResults == (index == 1 ? [.failed] : [])
+      else { fail("reload did not acknowledge installed, scheduled or disabled configuration once") }
+    }
+
+    var replies: [LinnetRimeSyncResult] = []
+    let controller = LinnetRimeSyncController(
+      loadConfiguration: { throw POSIXError(.ENOENT) }, recordAttempt: { _ in true },
+      recordResult: { _ in }, operation: { _ in fail("failed reload started synchronization") },
+      cancelOperation: {})
+    controller.reload { replies.append($0) }
+    waitUntil { !replies.isEmpty }
+    controller.stop()
+    guard replies == [.unavailable] else { fail("failed reload was reported as successful") }
+  }
+
   private static func testSlowConfigurationDoesNotBlockInput(root: URL) throws {
     let user = try makeUserDirectory(root: root, name: "SlowCloud")
     let before = try Data(contentsOf: user.appending(component: "installation.yaml"))
@@ -245,31 +279,40 @@ struct LinnetRimeSyncControllerTests {
     let cloudReleased = DispatchSemaphore(value: 0)
     let cloudFinished = DispatchSemaphore(value: 0)
     var operations = 0
+    var replies: [LinnetRimeSyncResult] = []
+    var configurationLoads = 0
     let controller = LinnetRimeSyncController(
       loadConfiguration: {
         guard !Thread.isMainThread else { fail("cloud I/O ran on the input thread") }
-        cloudStarted.signal()
-        cloudReleased.wait()
-        cloudFinished.signal()
-        return .init(syncDirectory: root, lastAttempt: nil)
+        configurationLoads += 1
+        if configurationLoads == 1 {
+          cloudStarted.signal()
+          cloudReleased.wait()
+          cloudFinished.signal()
+        }
+        return .init(syncDirectory: root, lastAttempt: Date())
       }, recordAttempt: { _ in true }, recordResult: { _ in }, operation: { _ in
         operations += 1
         return .completed
       }, cancelOperation: {})
     let started = Date()
-    controller.start()
+    controller.reload { replies.append($0) }
     guard Date().timeIntervalSince(started) < 0.05,
       cloudStarted.wait(timeout: .now() + 1) == .success
     else { fail("configuration loading blocked the input run loop") }
-    // Cloud I/O is deliberately still blocked while input work runs and cancels.
+    // Cloud I/O stays blocked while input work and a newer reload proceed.
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-    controller.stop()
+    guard replies.isEmpty else { fail("reload replied before configuration finished") }
+    var replacementReplies: [LinnetRimeSyncResult] = []
+    controller.reload { replacementReplies.append($0) }
+    guard replies == [.deferred] else { fail("superseded reload did not finish once as deferred") }
     cloudReleased.signal()
     guard cloudFinished.wait(timeout: .now() + 1) == .success else {
       fail("cloud fixture did not finish")
     }
-    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-    guard operations == 0,
+    waitUntil { !replacementReplies.isEmpty }
+    controller.stop()
+    guard operations == 0, replies == [.deferred], replacementReplies == [.completed],
       try Data(contentsOf: user.appending(component: "installation.yaml")) == before
     else { fail("cancelled configuration wrote or started stale sync work") }
   }

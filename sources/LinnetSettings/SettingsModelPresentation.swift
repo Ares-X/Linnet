@@ -163,6 +163,12 @@ extension SettingsModel {
   }
 
   var packDownloadActive: Bool { languageDataUpdateTarget != nil }
+  var languageDataTransferActive: Bool {
+    switch status {
+    case .pack(_, .downloading), .pack(_, .downloadingCompletePack): true
+    default: false
+    }
+  }
   var canRestoreBackup: Bool {
     dataServicesAvailable
       && (configuration.canPersist || configuration.readiness == .sourceUnreadable)
@@ -189,8 +195,17 @@ extension SettingsModel {
 
   @discardableResult
   func addCustomWord() -> UUID {
-    let row = LinnetPersonalData.CustomWord(value: "", code: "")
-    configuration.personalDraft.customWords.append(row)
+    insertCustomWord(value: "", at: configuration.personalDraft.customWords.count)
+  }
+
+  func editCustomWord(value: String) {
+    customWordToEdit = insertCustomWord(value: value, at: 0)
+    selectedTab = 2
+  }
+
+  private func insertCustomWord(value: String, at index: Int) -> UUID {
+    let row = LinnetPersonalData.CustomWord(value: value, code: "")
+    configuration.personalDraft.customWords.insert(row, at: index)
     return row.id
   }
 
@@ -377,6 +392,8 @@ extension SettingsModel {
     locale: Locale
   ) -> String {
     let chinese = locale.usesSimplifiedChineseSettingsCopy
+    let createdAt = candidate.archive.createdAt.formatted(
+      Date.FormatStyle(date: .long, time: .complete).locale(locale))
     let categories = candidate.categories.map { category in
       switch category {
       case .customWords: chinese ? "自定义词" : "Custom words"
@@ -387,10 +404,10 @@ extension SettingsModel {
       }
     }.joined(separator: chinese ? "、" : ", ")
     if chinese {
-      return "归档版本：应用 \(candidate.appVersion)，数据 \(candidate.dataVersion)。将替换："
+      return "备份创建时间：\(createdAt)。归档版本：应用 \(candidate.appVersion)，数据 \(candidate.dataVersion)。将替换："
         + "\(categories)（共 \(candidate.recordCount) 条记录）；其他类别保持不变，操作前会自动备份。"
     }
-    return "Archive version: app \(candidate.appVersion), data \(candidate.dataVersion). "
+    return "Backup created: \(createdAt). Archive version: app \(candidate.appVersion), data \(candidate.dataVersion). "
       + "Replace \(categories) (\(candidate.recordCount) records); preserve all other categories "
       + "and back up the current state first."
   }

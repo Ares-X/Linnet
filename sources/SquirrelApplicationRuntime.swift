@@ -402,15 +402,18 @@ extension SquirrelApplicationDelegate {
     case .reloadConfiguration:
       publishSettingsCandidate(request, scope: .configuration)
     case .reloadLearningSync:
-      rimeSyncController.reload()
-      let health = runtimeHealth()
-      reply(
-        to: request.transactionID,
-        status: health.state,
-        code: .learningSyncConfigurationReloaded,
-        detail: "The learning synchronization configuration was reloaded.",
-        health: health
-      )
+      rimeSyncController.reload { [weak self] result in
+        guard let self else { return }
+        let health = runtimeHealth()
+        transactionReply(.init(
+          transactionID: request.transactionID,
+          status: result == .completed ? health.state : .rejected,
+          code: result == .completed ? .learningSyncConfigurationReloaded : result.replyCode,
+          detail: result == .completed
+            ? "The learning synchronization configuration was reloaded."
+            : "The learning synchronization configuration was not loaded: \(result.replyCode.rawValue).",
+          health: health))
+      }
     case .synchronizeLearning:
       rimeSyncController.synchronizeNow { [weak self] result in
         guard let self else { return }

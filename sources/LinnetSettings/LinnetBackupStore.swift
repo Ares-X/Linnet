@@ -492,16 +492,24 @@ extension LinnetBackupStore {
   }
 
   static func listBackups(in transactionsRoot: URL) throws -> [BackupRecord] {
+    try Task.checkCancellation()
     guard FileManager.default.fileExists(atPath: transactionsRoot.path) else { return [] }
-    return try backupRecords(in: transactionsRoot)
+    return try backupRecords(in: transactionsRoot, checkingCancellation: true)
   }
 
   fileprivate static func backupRecords(
-    in transactionsRoot: URL) throws -> [BackupRecord] {
+    in transactionsRoot: URL,
+    checkingCancellation: Bool = false
+  ) throws -> [BackupRecord] {
     try requireDirectory(transactionsRoot)
     let entries = try immediateChildren(
       of: transactionsRoot)
-    return entries.map(backupRecord).sorted {
+    return try entries.map { entry in
+      if checkingCancellation { try Task.checkCancellation() }
+      let record = backupRecord(entry)
+      if checkingCancellation { try Task.checkCancellation() }
+      return record
+    }.sorted {
       let left = $0.createdAt ?? .distantPast
       let right = $1.createdAt ?? .distantPast
       if left != right { return left > right }

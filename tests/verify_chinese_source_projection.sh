@@ -190,11 +190,20 @@ done
 patch --batch --forward --fuzz=0 -s -d "${scratch}" -p1 < "${source_patch}" ||
   fail "the reviewed source patch does not apply exactly"
 
-awk -F '\t' 'NR > 1 && $1 == "wanxiang" { print $2 "\t" $3 }' \
+awk -F '\t' '
+  NR > 1 && $1 == "wanxiang" {
+    absent = $6 ~ /(^|; )old-code-absent($|;)/
+    retained = $6 ~ /(^|; )old-code-retained($|;)/
+    if (absent == retained) exit 1
+  }
+' data/chinese/overrides/reviewed_pronunciations.tsv ||
+  fail "a reviewed Wanxiang reading has no unambiguous old-code disposition"
+awk -F '\t' 'NR > 1 && $1 == "wanxiang" && $6 ~ /(^|; )old-code-absent($|;)/ { print $2 "\t" $3 }' \
   data/chinese/overrides/reviewed_pronunciations.tsv |
   LC_ALL=C sort > "${scratch}/retired.tsv"
-[[ "$(wc -l < "${scratch}/retired.tsv" | tr -d ' ')" == 46 ]] ||
-  fail "the retired Wanxiang wrong-code set is not exactly 46 rows"
+awk -F '\t' 'NR > 1 && $1 == "wanxiang" && $6 ~ /(^|; )old-code-retained($|;)/ { print $2 "\t" $3 }' \
+  data/chinese/overrides/reviewed_pronunciations.tsv |
+  LC_ALL=C sort > "${scratch}/retained.tsv"
 
 for table in jichu lianxiang zi cuoyin; do
   awk -F '\t' 'NF >= 2 { print $1 "\t" $2 }' \
@@ -203,6 +212,10 @@ done | LC_ALL=C sort > "${scratch}/patched-pairs.tsv"
 if comm -12 "${scratch}/retired.tsv" "${scratch}/patched-pairs.tsv" |
     grep -q .; then
   fail "a reviewed wrong-code row remains after the exact source patch"
+fi
+if comm -23 "${scratch}/retained.tsv" "${scratch}/patched-pairs.tsv" |
+    grep -q .; then
+  fail "a supplemental reading removed its retained source pronunciation"
 fi
 
 {
@@ -215,8 +228,6 @@ awk -F '\t' '
   $0 == "..." { body = 1; next }
   body && $0 !~ /^#/ && NF >= 3 { print $1 "\t" $2 }
 ' "${reviewed_dictionary}" | LC_ALL=C sort > "${scratch}/actual-reviewed.tsv"
-[[ "$(wc -l < "${scratch}/actual-reviewed.tsv" | tr -d ' ')" == 61 ]] ||
-  fail "the reviewed dictionary must contain exactly 61 accepted rows"
 diff -u "${scratch}/expected-reviewed.tsv" "${scratch}/actual-reviewed.tsv" >/dev/null ||
   fail "the reviewed dictionary diverges from the accepted pronunciation/ranking ledgers"
 

@@ -130,6 +130,7 @@ actor SettingsDataCoordinator {
     let legacyImportedCount: Int
     let diagnostics: Diagnostics?
     let cloudRecovery: LinnetCloudRecoveryArchive.Outcome?
+    let backupRecords: [LinnetBackupStore.BackupRecord]?
 
     init(
       backupDirectory: URL?,
@@ -139,7 +140,8 @@ actor SettingsDataCoordinator {
       importReport: HallelujahSubstitutionImporter.Report?,
       legacyImportedCount: Int,
       diagnostics: Diagnostics?,
-      cloudRecovery: LinnetCloudRecoveryArchive.Outcome? = nil
+      cloudRecovery: LinnetCloudRecoveryArchive.Outcome? = nil,
+      backupRecords: [LinnetBackupStore.BackupRecord]? = nil
     ) {
       self.backupDirectory = backupDirectory
       self.personalSnapshot = personalSnapshot
@@ -149,6 +151,7 @@ actor SettingsDataCoordinator {
       self.legacyImportedCount = legacyImportedCount
       self.diagnostics = diagnostics
       self.cloudRecovery = cloudRecovery
+      self.backupRecords = backupRecords
     }
   }
 
@@ -324,10 +327,10 @@ extension SettingsDataCoordinator {
   }
 
   /// Filesystem preparation belongs to this actor, not the Settings UI executor.
+  /// The Host prepares its learning directory; manual recovery only needs the
+  /// shared product folder, even when learning synchronization is disabled.
   func prepareCloudSyncLocation() throws -> LinnetCloudSyncLocation {
-    let location = try LinnetCloudSyncLocation.productLocation()
-    _ = try location.prepareLearningDirectory()
-    return location
+    try LinnetCloudSyncLocation.productLocation()
   }
 
   /// Cloud recovery reconstruction can invoke rsync and read a full archive;
