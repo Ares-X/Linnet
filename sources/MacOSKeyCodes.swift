@@ -8,6 +8,119 @@
 import Carbon
 import AppKit
 
+/// Continues native dead-key composition after Rime rejects its prefix. Layout
+/// data and Apple's opaque state stay together for the composition's lifetime.
+/// The controller decides when to start, commit, or cancel the composition.
+final class SquirrelNativeKeyboardComposer {
+  enum TranslationError: Error {
+    case keyboardLayoutUnavailable(String?)
+    case translationFailed(OSStatus)
+  }
+
+  private let layoutData: CFData
+  // UCKeyTranslate documents LMGetKbdType as the physical keyboard type owner.
+  private let keyboardType = UInt32(LMGetKbdType())
+  private var deadKeyState: UInt32 = 0
+  private(set) var isComposing = false
+
+  init(keyboardLayoutName: String?) throws {
+    let source: TISInputSource
+    if let keyboardLayoutName {
+      let filter = [kTISPropertyInputSourceID as String: keyboardLayoutName] as CFDictionary
+      guard let sourceList = TISCreateInputSourceList(filter, true)?.takeRetainedValue() else {
+        throw TranslationError.keyboardLayoutUnavailable(keyboardLayoutName)
+      }
+      let sources = sourceList as! [TISInputSource]
+      guard let matched = sources.first else {
+        throw TranslationError.keyboardLayoutUnavailable(keyboardLayoutName)
+      }
+      source = matched
+    } else {
+      guard let current = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue() else {
+        throw TranslationError.keyboardLayoutUnavailable(nil)
+      }
+      source = current
+    }
+    guard let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+      throw TranslationError.keyboardLayoutUnavailable(keyboardLayoutName)
+    }
+    layoutData = Unmanaged<CFData>.fromOpaque(property).takeUnretainedValue()
+  }
+
+  func translate(_ event: NSEvent) throws -> String {
+    let flags = event.modifierFlags
+    var modifiers: UInt32 = 0
+    if flags.contains(.command) { modifiers |= UInt32(cmdKey) }
+    if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }
+    if flags.contains(.capsLock) { modifiers |= UInt32(alphaLock) }
+    if flags.contains(.option) { modifiers |= UInt32(optionKey) }
+    if flags.contains(.control) { modifiers |= UInt32(controlKey) }
+    var nextState = deadKeyState
+    let text = try translate(
+      keyCode: event.keyCode,
+      action: UInt16(event.isARepeat ? kUCKeyActionAutoKey : kUCKeyActionDown),
+      modifiers: (modifiers >> 8) & 0xff, state: &nextState)
+    // The opaque value can retain previous-event metadata when no accent is
+    // pending. Translate the same event from the same prior state while
+    // forbidding NEW dead keys (completion of existing keys remains enabled).
+    // Comparing the results distinguishes pending state without reading private
+    // bits or inferring composition from the output text.
+    var completedState = deadKeyState
+    _ = try translate(
+      keyCode: event.keyCode,
+      action: UInt16(event.isARepeat ? kUCKeyActionAutoKey : kUCKeyActionDown),
+      modifiers: (modifiers >> 8) & 0xff,
+      options: OptionBits(kUCKeyTranslateNoDeadKeysMask), state: &completedState)
+    // Autorepeat can preserve an existing pending state in both calls; an
+    // unchanged opaque state retains its already known composition status.
+    isComposing = nextState != completedState || (nextState == deadKeyState && isComposing)
+    deadKeyState = nextState
+    return text
+  }
+
+  /// A spacing accent is produced by the layout itself. Reading the preview
+  /// must not consume the pending state needed by the next keyboard event.
+  func preview() throws -> String {
+    guard isComposing else { return "" }
+    var previewState = deadKeyState
+    return try translate(
+      keyCode: UInt16(kVK_Space), action: UInt16(kUCKeyActionDown),
+      modifiers: 0, options: OptionBits(kUCKeyTranslateNoDeadKeysMask), state: &previewState)
+  }
+
+  func finish() throws -> String {
+    let text = try preview()
+    reset()
+    return text
+  }
+
+  func reset() {
+    deadKeyState = 0
+    isComposing = false
+  }
+
+  private func translate(
+    keyCode: UInt16, action: UInt16, modifiers: UInt32,
+    options: OptionBits = 0, state: inout UInt32
+  ) throws -> String {
+    let layout = UnsafeRawPointer(CFDataGetBytePtr(layoutData))!
+      .assumingMemoryBound(to: UCKeyboardLayout.self)
+    // 255 UTF-16 units is UCKeyTranslate's documented maximum output, including
+    // sequences. Preserve the complete result without character normalization.
+    var characters = [UniChar](repeating: 0, count: 255)
+    var count = 0
+    let status = withExtendedLifetime(layoutData) {
+      UCKeyTranslate(
+        layout, keyCode, action, modifiers, keyboardType, options,
+        &state, characters.count, &count, &characters)
+    }
+    guard status == noErr else {
+      throw TranslationError.translationFailed(status)
+    }
+    return String(utf16CodeUnits: characters, count: count)
+  }
+}
+
 /// Converts InputMethodKit's aggregate flags into side-aware physical events.
 /// Aggregate flags cannot distinguish a second Shift down from the first Shift
 /// up while its counterpart remains held, so the physical key code owns that
@@ -179,7 +292,9 @@ struct SquirrelKeycode {
       // key. Preserve that complete payload instead of reducing it to a key.
       return (UInt32(XK_VoidSymbol), true)
     }
-    var keyChars = event.charactersIgnoringModifiers
+    var keyChars = modifiers.contains(.option)
+      ? event.characters(byApplyingModifiers: modifiers.intersection([.shift, .capsLock]))
+      : event.charactersIgnoringModifiers
     if let code = keyChars?.first {
       let capitalModifiers = modifiers.isSubset(of: [.shift, .capsLock])
       if (capitalModifiers && !code.isLetter) || (!capitalModifiers && !code.isASCII) {

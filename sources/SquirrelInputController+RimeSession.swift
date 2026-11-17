@@ -240,7 +240,7 @@ extension SquirrelInputController {
   private func effectiveRimeKeycode(for keycode: UInt32) -> UInt32 {
     guard let keypadEquivalent =
       SquirrelKeycode.composingKeypadEquivalent(keycode),
-      hasPendingRimeInput
+      hasPendingInput
     else { return keycode }
     return keypadEquivalent
   }

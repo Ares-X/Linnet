@@ -3336,7 +3336,28 @@ void ExpectOverlappingShiftRepressDoesNotToggle(RimeApi_stdbool* api) {
   api->destroy_session(session);
 }
 
+void ExpectNativeTextDoesNotToggleShift(RimeApi_stdbool* api) {
+  for (const char* schema : {"linnet_zh_pinyin", "linnet_en"}) {
+    for (const auto& shift : kShiftKeyCases) {
+      const auto session = CreateSchemaSession(api, schema);
+      api->process_key(session, shift.keycode, kShiftMask);
+      if (api->process_key(session, XK_VoidSymbol, kShiftMask)) {
+        Fail("native text without a Rime keysym was consumed");
+      }
+      api->process_key(session, shift.keycode, kReleaseMask);
+      ExpectCurrentSchema(api, session, schema,
+                          "Shift with native text must remain a chord");
+      ExpectNoCommit(api, session, "native text observer must not commit");
+      if (const char* input = api->get_input(session); input && *input) {
+        Fail("native text observer started Rime input");
+      }
+      api->destroy_session(session);
+    }
+  }
+}
+
 void ExpectDirectShiftSmartEnglish(RimeApi_stdbool* api) {
+  ExpectNativeTextDoesNotToggleShift(api);
   ExpectOverlappingShiftRepressDoesNotToggle(api);
   ExpectShiftPreservesExplicitPrefix(api);
   for (const auto& chinese_schema : RuntimeChineseSchemaIDs(api)) {

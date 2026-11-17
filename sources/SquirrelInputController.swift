@@ -20,6 +20,8 @@ final class SquirrelInputController: IMKInputController {
   private var preedit: String = ""
   private var selRange: NSRange = .empty
   private var caretPos: Int = 0
+  private var nativeKeyboardComposer: SquirrelNativeKeyboardComposer?
+  private var nativeKeyboardLayoutName: String?
   private var modifierTransitions = SquirrelModifierTransitionState(hardwareFlags: [])
   var sessionLease: LinnetRimeSessionLease?
   var session: RimeSessionId { sessionLease?.identifier ?? 0 }
@@ -87,6 +89,11 @@ final class SquirrelInputController: IMKInputController {
       // translate osx keyevents to rime keyevents; special physical keys do
       // not require a client-provided character payload.
       let input = SquirrelKeycode.osxKeyEventToRime(event)
+      if let handled = handleNativeKeyboardEvent(event, input: input) {
+        return handled
+      }
+      let deadKey = modifiers.isDisjoint(with: [.command, .control])
+        && (server()?.lastKeyEventWasDeadKey() ?? false)
       if input.keycode != UInt32(XK_VoidSymbol) {
         if rimeAPI.get_input(session)?.pointee == 0 {
           // Only the client knows the document position. Report that fact at
@@ -100,19 +107,20 @@ final class SquirrelInputController: IMKInputController {
         let handled = processKey(
           input.keycode,
           modifiers: rimeModifiers)
-        if !handled, input.nativeText {
+        if !handled, input.nativeText || deadKey {
           // Option bindings stay with Rime. An unhandled native text event
           // must follow the existing raw preedit in the application.
           commitCurrentComposition()
-          return false
+          return deadKey ? beginNativeKeyboardComposition(event) : false
         }
         rimeUpdate()
         return handled
       }
-      if input.nativeText {
+      if input.nativeText || deadKey {
         // Preserve the existing raw preedit before the application inserts a
         // printable character that this Rime keysym boundary cannot represent.
         commitCurrentComposition()
+        if deadKey { return beginNativeKeyboardComposition(event) }
       }
       return false
 
@@ -148,6 +156,8 @@ final class SquirrelInputController: IMKInputController {
   override func activateServer(_ sender: Any!) {
     guard let activatingClient = sender as? IMKTextInput else { return }
     inputModeIdentity = nil
+    finishNativeKeyboardComposition(to: activeClient)
+    nativeKeyboardComposer = nil
     activeClient = activatingClient
     // This callback precedes the first event even when Rime is temporarily
     // suspended. Rebasing during recovery from the first flagsChanged event
@@ -168,8 +178,9 @@ final class SquirrelInputController: IMKInputController {
       updateAppOptions()
     }
     let configuredLayout = NSApp.squirrelAppDelegate.config?.getString("keyboard_layout")
-    if let keyboardLayout = LinnetInputActivationPolicy.keyboardLayoutName(
-      configured: configuredLayout) {
+    nativeKeyboardLayoutName = LinnetInputActivationPolicy.keyboardLayoutName(
+      configured: configuredLayout)
+    if let keyboardLayout = nativeKeyboardLayoutName {
       activatingClient.overrideKeyboard(withKeyboardNamed: keyboardLayout)
     }
     preedit = ""
@@ -192,6 +203,7 @@ final class SquirrelInputController: IMKInputController {
     // activation triggered by the commit then becomes the sole new owner.
     activeClient = nil
     NSApp.squirrelAppDelegate.panel?.unbind(controller: self)
+    finishNativeKeyboardComposition(to: deactivatingClient)
     commitRawComposition(to: deactivatingClient)
   }
 
@@ -320,6 +332,9 @@ extension SquirrelInputController {
     announcesTransition: Bool
   ) -> Bool {
     let previousIdentity = inputModeIdentity
+    if let previousIdentity, previousIdentity != currentIdentity {
+      finishNativeKeyboardComposition(to: activeClient)
+    }
     let modeLabel = announcesTransition
       ? LinnetCandidatePresentation.inputModeTransitionLabel(
         previous: previousIdentity,
@@ -347,7 +362,8 @@ extension SquirrelInputController {
     return modeLabel != nil
   }
 
-  var hasPendingRimeInput: Bool {
+  var hasPendingInput: Bool {
+    if nativeKeyboardComposer?.isComposing == true { return true }
     guard activeClient != nil,
       sessionIsCurrent(), let input = rimeAPI.get_input(session)
     else { return false }
@@ -364,6 +380,111 @@ extension SquirrelInputController {
 }
 
 extension SquirrelInputController {
+
+  private func handleNativeKeyboardEvent(
+    _ event: NSEvent,
+    input: (keycode: UInt32, nativeText: Bool)
+  ) -> Bool? {
+    guard let composer = nativeKeyboardComposer,
+      composer.isComposing || event.isARepeat
+    else {
+      nativeKeyboardComposer = nil
+      return nil
+    }
+    let modifiers = event.modifierFlags
+    if !modifiers.isDisjoint(with: [.command, .control]) {
+      finishNativeKeyboardComposition(to: activeClient)
+      return nil
+    }
+    let rimeModifiers = SquirrelKeycode.osxModifiersToRime(modifiers: modifiers)
+    if modifiers.contains(.option), input.keycode != UInt32(XK_VoidSymbol) {
+      if processKey(input.keycode, modifiers: rimeModifiers) {
+        finishNativeKeyboardComposition(to: activeClient)
+        rimeUpdate()
+        return true
+      }
+    } else {
+      // Native text still represents a real nonmodifier key. The reserved
+      // unmapped keysym lets Rime classify its Shift chord without consuming
+      // the keyboard layout's Unicode result.
+      _ = processKey(UInt32(XK_VoidSymbol), modifiers: rimeModifiers)
+    }
+    switch Int32(input.keycode) {
+    case XK_Escape, XK_BackSpace, XK_Delete:
+      cancelNativeKeyboardComposition()
+      return true
+    case XK_Return, XK_Tab, XK_Left, XK_Right, XK_Up, XK_Down,
+      XK_Home, XK_End, XK_Page_Up, XK_Page_Down:
+      finishNativeKeyboardComposition(to: activeClient)
+      return false
+    default:
+      if event.specialKey != nil {
+        finishNativeKeyboardComposition(to: activeClient)
+        return false
+      }
+      return consumeNativeKeyboardEvent(event, composer: composer)
+    }
+  }
+
+  private func beginNativeKeyboardComposition(_ event: NSEvent) -> Bool {
+    do {
+      let composer = try SquirrelNativeKeyboardComposer(
+        keyboardLayoutName: nativeKeyboardLayoutName)
+      nativeKeyboardComposer = composer
+      return consumeNativeKeyboardEvent(event, composer: composer)
+    } catch {
+      os_log(.error, log: inputPerformanceLog,
+        "Native keyboard layout unavailable: %{private}@", String(describing: error))
+      return false
+    }
+  }
+
+  private func consumeNativeKeyboardEvent(
+    _ event: NSEvent,
+    composer: SquirrelNativeKeyboardComposer
+  ) -> Bool {
+    guard let targetClient = activeClient else { return false }
+    do {
+      let text = try composer.translate(event)
+      if !text.isEmpty { commit(string: text, to: targetClient) }
+      guard nativeKeyboardComposer === composer else { return true }
+      if composer.isComposing {
+        let preview = try composer.preview()
+        targetClient.setMarkedText(
+          NSAttributedString(string: preview),
+          selectionRange: NSRange(location: preview.utf16.count, length: 0),
+          replacementRange: .empty)
+      } else if text.isEmpty {
+        cancelNativeKeyboardComposition()
+      }
+      return true
+    } catch {
+      os_log(.error, log: inputPerformanceLog,
+        "Native keyboard translation failed: %{private}@", String(describing: error))
+      finishNativeKeyboardComposition(to: targetClient)
+      return false
+    }
+  }
+
+  private func finishNativeKeyboardComposition(to targetClient: IMKTextInput?) {
+    guard let composer = nativeKeyboardComposer else { return }
+    nativeKeyboardComposer = nil
+    do {
+      let text = try composer.finish()
+      if !text.isEmpty { commit(string: text, to: targetClient) }
+    } catch {
+      os_log(.error, log: inputPerformanceLog,
+        "Native keyboard composition could not finish: %{private}@", String(describing: error))
+    }
+  }
+
+  private func cancelNativeKeyboardComposition() {
+    nativeKeyboardComposer?.reset()
+    nativeKeyboardComposer = nil
+    activeClient?.setMarkedText(
+      NSAttributedString(string: ""),
+      selectionRange: NSRange(location: 0, length: 0), replacementRange: .empty)
+  }
 
   private func rimeConsumeCommittedText(to targetClient: IMKTextInput?) {
     guard NSApp.squirrelAppDelegate.canAcceptRimeInput, sessionIsCurrent() else { return }
@@ -389,6 +510,7 @@ extension SquirrelInputController {
   /// The single active-session exit. Rime owns raw-input semantics; the panel
   /// independently rejects a hide from a controller it no longer presents.
   private func commitActiveComposition(to targetClient: IMKTextInput) {
+    finishNativeKeyboardComposition(to: targetClient)
     commitRawComposition(to: targetClient)
     NSApp.squirrelAppDelegate.panel?.hide(controller: self)
   }
@@ -551,6 +673,8 @@ extension SquirrelInputController {
       rimeAPI.get_option(session, "force_marked_text_for_direct_commit")
     let beginsMarkedText = forceMarkedText && preedit.isEmpty && !string.isEmpty
     preedit = ""
+    caretPos = 0
+    selRange = NSRange(location: 0, length: 0)
 
     // Some NSTextInputClient implementations accept a direct Rime commit only
     // after a marked-text phase. This is the upstream Squirrel opt-in path;

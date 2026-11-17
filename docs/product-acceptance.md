@@ -1,22 +1,49 @@
 # Linnet product acceptance
 
-## Native character follow-up (#90)
+## Native character and Core-exit follow-up (#77, #90, #91)
 
-Dedicated-VM acceptance of Action-built 0.1.32/114 found an uncovered ingress
-case: Option+e followed by e during Smart English composition produced ordinary
-e, while the same physical keys under ABC produced é. The key-event translator
-now preserves the actual composed Unicode result or complete multi-character
-payload even when its unmodified character is an ASCII letter. Option bindings retain Rime priority; an unhandled native
-text event follows the committed raw preedit. No dead-key state machine or
-modifier-update suppression is introduced. Focused event tests construct actual
-NSEvents for composed/decomposed accents, Option text and empty dead-key prefixes,
-Command/Control bindings, shifted punctuation and cursor keys.
+Exact Action-built0.1.33/115 source854ad7f2bf0063759132e3cf4f0f761db3006bb2
+failed dedicated-VM accent acceptance and remains Draft. IMK tracing then proved
+that Option+e arrived with U+00B4 and the server's dead-key flag; its continuation
+arrived as ordinary e, which Rime accepted. Returning both events to the client
+also failed to compose. Preserving one event's Unicode payload was insufficient.
 
-This correction requires a new 0.1.33/115 candidate because 0.1.32 has already
-been published to Preview. Chinese39 and Catalog50 remain unchanged; the already
-published Chinese38-to-39 delta is reused by its immutable size and digest.
-The corrected installed keyboard path remains `NOT_EXERCISED` until its new
-candidate is loaded and tested.
+The native keyboard owner now uses the retained macOS layout and UCKeyTranslate's
+opaque state, without accent tables or private state bits. A same-event
+NoDeadKeys translation identifies newly pending state; unchanged platform state
+retains its known status. The controller projects the native preview and complete
+output, keeps Option bindings with Rime, and reports native continuation through
+the reserved unmapped keysym so Rime sees a real Shift chord. Native composition
+ends through the existing commit, client-deactivation and mode-transition paths;
+its pending state also participates in the Core activation decision.
+
+Local fixed-CMS source66c77f47e8c5cc2961c631655827e1c119002873,
+CompleteSHAa18f8be82b3ec93caeece25db0c724139a7bdd9f595f61855de82b14b76b1d0c,
+loaded Host9745 in the dedicated macOS26.6.2 VM. Actual typing passed idle é,
+Chinese and SmartEnglish helloé, ü, unsupported ´x, repeated dead-key ´é,
+Space completion, Esc/Backspace cancellation and normal following input.
+Physical Parallels Option/e and Shift/e edges produced É, then the same Chinese
+profile committed 你好 without an accidental mode switch. Leaving a pending
+accent in TextEdit committed it there; Safari then received x∫ without leaked
+composition. TextEdit4205, Terminal60905 and Safari6283 stayed open.
+
+The same investigation found Core-success Quit invoked from an active main
+queue callback, trapping MainActor cleanup inside AppKit's terminateLater loop.
+Only these two Core-success calls now schedule actual termination through the
+main RunLoop. Normal Quit prompts, awaited cleanup and system-session termination
+semantics remain unchanged. Settings8973 and9704 exited after explicit installed
+Core Apply with this correction; earlier stuck processes were sampled before
+bounded recovery and are not successful Quit evidence.
+
+TEST: macos-keycodes passed real ABC composition, repeat, multi-output, modifier,
+preview/finish/reset and missing-layout cases. The native mixed-input probe
+passed reserved-key Shift-chord behavior in Chinese and SmartEnglish. The final
+Host/Settings build and settings-update-checker selector passed. Temporary event
+tracing is removed from final source. New formal Action bytes, ordered online
+upgrade and ready-Core Quit cleanup remain NOT_EXERCISED until recorded.
+
+Chinese39 and Catalog50 are unchanged. Because0.1.33 has remained Draft, the
+corrected candidate may retain0.1.33/115; no Preview bytes are rewritten.
 
 ## 0.1.32 installed acceptance (2026-11-17)
 
@@ -72,8 +99,10 @@ regressions pass. The full Chinese39 container verifies and a delta from the
 published Chinese38 pack reconstructs its exact manifest/files. Host, Settings
 and SettingsUITests build-for-testing pass without driving the desktop.
 The installed rows above establish the observed upgrade and Settings paths.
-New reading selection and TextKit wrapping remain `NOT_EXERCISED` until recorded;
-native-character acceptance requires the corrected candidate above.
+The dedicated VM showed 于思 for NaturalCode yusl and 于思于思 for yuslyusl.
+Other new/retained readings retain their native-engine evidence; live TextKit
+wrapping remains NOT_EXERCISED. Formal native-character acceptance requires the
+corrected candidate above.
 
 ## Settings and input follow-ups (#77–#96)
 
