@@ -13,7 +13,9 @@ opaque state, without accent tables or private state bits. A same-event
 NoDeadKeys translation identifies newly pending state; unchanged platform state
 retains its known status. The controller projects the native preview and complete
 output, keeps Option bindings with Rime, and reports native continuation through
-the reserved unmapped keysym so Rime sees a real Shift chord. Native composition
+the reserved unmapped keysym so Rime sees a real Shift chord. Direct Unicode
+events without a Rime keysym report that same nonmodifier observation before
+passing the complete text to the client. Native composition
 ends through the existing commit, client-deactivation and mode-transition paths;
 its pending state also participates in the Core activation decision.
 
