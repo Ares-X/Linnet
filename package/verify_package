@@ -53,7 +53,7 @@ for helper in linnet-pack linnet-runtime-inspector; do
     fail_verification "${helper} is not thin arm64"
   helper_minos="$(otool -l "${helper_path}" | awk '
     $1 == "cmd" && $2 == "LC_BUILD_VERSION" { build = 1; next }
-    build && $1 == "minos" { print $2; exit }
+    build && $1 == "minos" { print $2; build = 0 }
   ')"
   [[ "${helper_minos}" == 13.0 ]] ||
     fail_verification "${helper} requires macOS ${helper_minos}; package supports macOS 13.0"
