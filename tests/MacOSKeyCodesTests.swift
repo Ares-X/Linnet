@@ -12,6 +12,7 @@ struct MacOSKeyCodesTests {
   static func main() {
     verifyModifierTransitionState()
     verifyComposingKeypadEquivalents()
+    verifyNativeTextEvents()
     for (physical, character) in [
       (kVK_ANSI_2, Character("é")),
       (kVK_ANSI_A, Character("ä")),
@@ -60,6 +61,43 @@ struct MacOSKeyCodesTests {
 }
 
 private extension MacOSKeyCodesTests {
+
+  private static func verifyNativeTextEvents() {
+    func input(
+      _ characters: String, ignoring: String,
+      key: Int = kVK_ANSI_E, modifiers: NSEvent.ModifierFlags = []
+    ) -> (keycode: UInt32, nativeText: Bool) {
+      let event = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: modifiers,
+        timestamp: 0, windowNumber: 0, context: nil,
+        characters: characters, charactersIgnoringModifiers: ignoring,
+        isARepeat: false, keyCode: UInt16(key))!
+      return SquirrelKeycode.osxKeyEventToRime(event)
+    }
+
+    for text in ["é", "e\u{0301}", "eé", "^x"] {
+      let result = input(text, ignoring: "e")
+      require(result.keycode == UInt32(XK_VoidSymbol) && result.nativeText,
+        "a native text payload was reduced to its unmodified ASCII letter")
+    }
+    let optionText = input("∫", ignoring: "b", key: kVK_ANSI_B, modifiers: [.option])
+    require(optionText.keycode == UInt32(XK_b) && optionText.nativeText,
+      "an Option binding lost Rime priority or its unhandled native text")
+    let deadKey = input("", ignoring: "e", modifiers: [.option])
+    require(deadKey.keycode == UInt32(XK_e) && !deadKey.nativeText,
+      "an empty dead-key prefix was mistaken for a completed text character")
+    for modifiers: NSEvent.ModifierFlags in [[.command], [.control]] {
+      let shortcut = input("é", ignoring: "e", modifiers: modifiers)
+      require(shortcut.keycode == UInt32(XK_e) && !shortcut.nativeText,
+        "a Command or Control shortcut was treated as native text")
+    }
+    let punctuation = input("!", ignoring: "1", key: kVK_ANSI_1, modifiers: [.shift])
+    require(punctuation.keycode == UInt32(XK_exclam) && !punctuation.nativeText,
+      "shifted ASCII punctuation lost its actual character")
+    let arrow = input("\u{F702}", ignoring: "\u{F702}", key: kVK_LeftArrow)
+    require(arrow.keycode == UInt32(XK_Left) && !arrow.nativeText,
+      "a physical cursor key was treated as native Unicode text")
+  }
 
   private static func verifyModifierTransitionState() {
     verifySingleShiftTransport(

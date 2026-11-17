@@ -1,5 +1,51 @@
 # Linnet product acceptance
 
+## Native character follow-up (#90)
+
+Dedicated-VM acceptance of Action-built 0.1.32/114 found an uncovered ingress
+case: Option+e followed by e during Smart English composition produced ordinary
+e, while the same physical keys under ABC produced é. The key-event translator
+now preserves the actual composed Unicode result or complete multi-character
+payload even when its unmodified character is an ASCII letter. Option bindings retain Rime priority; an unhandled native
+text event follows the committed raw preedit. No dead-key state machine or
+modifier-update suppression is introduced. Focused event tests construct actual
+NSEvents for composed/decomposed accents, Option text and empty dead-key prefixes,
+Command/Control bindings, shifted punctuation and cursor keys.
+
+This correction requires a new 0.1.33/115 candidate because 0.1.32 has already
+been published to Preview. Chinese39 and Catalog50 remain unchanged; the already
+published Chinese38-to-39 delta is reused by its immutable size and digest.
+The corrected installed keyboard path remains `NOT_EXERCISED` until its new
+candidate is loaded and tested.
+
+## 0.1.32 installed acceptance (2026-11-17)
+
+Action44083930474, source31213783a15316e7182639761b48e022c37b975d, was verified
+and published to Preview. The dedicated macOS26.6.2 VM completed a real online
+Core update from public0.1.31/113 to0.1.32/114 without Installer, password or
+logout. The App root inode and personal configuration/custom-word/expansion
+digests stayed unchanged; existing TextEdit and Terminal processes remained.
+The selected-source refusal preserved the old Host; after a normal menu switch
+to ABC, explicit Apply loaded the new Host. TextEdit candidates worked afterward.
+Chinese38 updated to39 and activated without changing the other three packs.
+
+Candidate right-click Add revealed the new custom-word row, focused its code
+field and accepted a physical keystroke. The uncommitted test row was removed.
+New Settings independently displayed healthy runtime and verified installed LTS
+data. Learning-sync off/on both reached authenticated Host-confirmed status.
+With learning sync off, manual recovery upload and review worked; the review
+showed the archive creation time including timezone and was cancelled before
+replacement. The preference was restored. The native iCloud endpoint on the
+development Mac later reconstructed the same archive through the canonical
+reader: created2026-11-17T13:14:02Z, five categories/17679 rows and a verified
+target digest. Head arrival alone was not counted as payload delivery.
+
+The small language delta completed before the attempted cancellation; that
+attempt is not cancellation evidence. Ready-Core Quit cleanup, transport faults,
+Registry-read retry, diagnostics cancellation and other unobserved branches
+retain their focused `TEST` evidence; installed execution is `NOT_EXERCISED`.
+Stable publication is withheld for the native-character correction above.
+
 ## Narrow upstream backports
 
 The upstream batch adds four reviewed readings without deleting valid original
@@ -25,8 +71,9 @@ all eight profile goldens (222 cases each), grammar A/B and learning-policy
 regressions pass. The full Chinese39 container verifies and a delta from the
 published Chinese38 pack reconstructs its exact manifest/files. Host, Settings
 and SettingsUITests build-for-testing pass without driving the desktop.
-Real keyboard, TextKit wrapping, installed learning/update and VM acceptance
-remain `NOT_EXERCISED` until the maintainer unlocks the dedicated environment.
+The installed rows above establish the observed upgrade and Settings paths.
+New reading selection and TextKit wrapping remain `NOT_EXERCISED` until recorded;
+native-character acceptance requires the corrected candidate above.
 
 ## Settings and input follow-ups (#77–#96)
 
@@ -55,8 +102,8 @@ candidate selection and typing. Use exact Action candidate bytes for the online
 Core upgrade and continued application connections without logout. A second
 iCloud endpoint must read the backup before claiming cross-device delivery.
 
-These runtime, product and release rows remain `NOT_EXERCISED` while the dedicated
-VM is unavailable. These Settings fixes do not change dependency versions; the
+Unobserved runtime/product rows remain `NOT_EXERCISED`; the installed acceptance
+above does not promote owner tests into product results. These Settings fixes do not change dependency versions; the
 separate upstream reading additions advance only Chinese data. #92 was withdrawn after checking the original fixed commit; #1 stays
 an upstream tracker, #76 an audit record and #55 awaits its reporter's confirmation.
 

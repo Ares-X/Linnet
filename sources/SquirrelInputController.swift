@@ -84,19 +84,10 @@ final class SquirrelInputController: IMKInputController {
       return false
 
     case .keyDown:
-      let keyCode = event.keyCode
-      var keyChars = event.charactersIgnoringModifiers
-      let capitalModifiers = modifiers.isSubset(of: [.shift, .capsLock])
-      if let code = keyChars?.first,
-         (capitalModifiers && !code.isLetter) || (!capitalModifiers && !code.isASCII) {
-        keyChars = event.characters
-      }
       // translate osx keyevents to rime keyevents; special physical keys do
       // not require a client-provided character payload.
-      let rimeKeycode = SquirrelKeycode.osxKeycodeToRime(
-        keycode: keyCode, keychar: keyChars?.first,
-        shift: modifiers.contains(.shift), caps: modifiers.contains(.capsLock))
-      if rimeKeycode != UInt32(XK_VoidSymbol) {
+      let input = SquirrelKeycode.osxKeyEventToRime(event)
+      if input.keycode != UInt32(XK_VoidSymbol) {
         if rimeAPI.get_input(session)?.pointee == 0 {
           // Only the client knows the document position. Report that fact at
           // composition start; Rime still owns sentence casing and its option.
@@ -107,14 +98,18 @@ final class SquirrelInputController: IMKInputController {
         }
         let rimeModifiers = SquirrelKeycode.osxModifiersToRime(modifiers: modifiers)
         let handled = processKey(
-          rimeKeycode,
+          input.keycode,
           modifiers: rimeModifiers)
+        if !handled, input.nativeText {
+          // Option bindings stay with Rime. An unhandled native text event
+          // must follow the existing raw preedit in the application.
+          commitCurrentComposition()
+          return false
+        }
         rimeUpdate()
         return handled
       }
-      if let character = keyChars?.first, !character.isASCII,
-        event.specialKey == nil,
-        modifiers.intersection([.command, .control]).isEmpty {
+      if input.nativeText {
         // Preserve the existing raw preedit before the application inserts a
         // printable character that this Rime keysym boundary cannot represent.
         commitCurrentComposition()
