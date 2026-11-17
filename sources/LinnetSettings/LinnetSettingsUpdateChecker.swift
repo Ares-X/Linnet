@@ -578,9 +578,7 @@ extension LinnetSettingsUpdateChecker {
         coreDownloadState = .applied(target)
         runtimeVersionState = .applied(target)
         runtimeTask = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-          NSApp.terminate(nil)
-        }
+        scheduleSettingsTermination()
       } catch {
         linnetUpdateLogger.error(
           "Core activation failed: \(String(describing: error), privacy: .private)")
@@ -831,8 +829,18 @@ extension LinnetSettingsUpdateChecker {
       finishRuntimeTransition(.applied(identity), cycle: activeCycle)
     else { return }
     runtimeHealth = health
+    scheduleSettingsTermination()
+  }
+
+  private func scheduleSettingsTermination() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-      NSApp.terminate(nil)
+      // AppKit's terminateLater loop must not retain a main-dispatch callback:
+      // accepted Quit cleanup needs that queue to finish before replying.
+      RunLoop.main.perform(inModes: [.common]) {
+        MainActor.assumeIsolated {
+          NSApp.terminate(nil)
+        }
+      }
     }
   }
 

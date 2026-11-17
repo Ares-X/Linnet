@@ -491,7 +491,7 @@ extension SquirrelApplicationDelegate {
         currentIdentifier: LinnetInputSourceRegistration.currentInputSourceID(),
         linnetIdentifier: SquirrelApp.bundleIdentifier),
       compositionIsActive:
-        panel?.isVisible == true || panel?.inputController?.hasPendingRimeInput == true,
+        panel?.isVisible == true || panel?.inputController?.hasPendingInput == true,
       dataTransactionIsActive: activeDataTransaction != nil,
       requesterIsAlive: LinnetSettingsContract.requesterIsAlive(requesterPID)
     )

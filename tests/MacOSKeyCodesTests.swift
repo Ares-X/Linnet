@@ -9,10 +9,11 @@ struct MacOSKeyCodesTests {
     let modifiers: UInt32
   }
 
-  static func main() {
+  static func main() throws {
     verifyModifierTransitionState()
     verifyComposingKeypadEquivalents()
     verifyNativeTextEvents()
+    try verifyNativeKeyboardComposition()
     for (physical, character) in [
       (kVK_ANSI_2, Character("é")),
       (kVK_ANSI_A, Character("ä")),
@@ -86,6 +87,12 @@ private extension MacOSKeyCodesTests {
     let deadKey = input("", ignoring: "e", modifiers: [.option])
     require(deadKey.keycode == UInt32(XK_e) && !deadKey.nativeText,
       "an empty dead-key prefix was mistaken for a completed text character")
+    let imkDeadKey = input("´", ignoring: "´", modifiers: [.option])
+    require(imkDeadKey.keycode == UInt32(XK_e) && imkDeadKey.nativeText,
+      "IMK's spacing-accent dead-key payload hid the Option-e Rime binding")
+    let emptyKey = input("", ignoring: "")
+    require(emptyKey.keycode == UInt32(XK_VoidSymbol) && !emptyKey.nativeText,
+      "an empty native payload inferred the server's separate dead-key fact")
     for modifiers: NSEvent.ModifierFlags in [[.command], [.control]] {
       let shortcut = input("é", ignoring: "e", modifiers: modifiers)
       require(shortcut.keycode == UInt32(XK_e) && !shortcut.nativeText,
@@ -97,6 +104,91 @@ private extension MacOSKeyCodesTests {
     let arrow = input("\u{F702}", ignoring: "\u{F702}", key: kVK_LeftArrow)
     require(arrow.keycode == UInt32(XK_Left) && !arrow.nativeText,
       "a physical cursor key was treated as native Unicode text")
+  }
+
+  private static func verifyNativeKeyboardComposition() throws {
+    // Loading ABC's installed Unicode layout is read-only; neither the active
+    // input source nor the user's keyboard preferences are changed.
+    let composer = try SquirrelNativeKeyboardComposer(keyboardLayoutName: "com.apple.keylayout.ABC")
+    func key(
+      _ code: Int, modifiers: NSEvent.ModifierFlags = [], isARepeat: Bool = false
+    ) throws -> String {
+      let event = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: modifiers,
+        timestamp: 0, windowNumber: 0, context: nil,
+        characters: "", charactersIgnoringModifiers: "",
+        isARepeat: isARepeat, keyCode: UInt16(code))!
+      return try composer.translate(event)
+    }
+    func acutePrefix() throws {
+      let output = try key(kVK_ANSI_E, modifiers: [.option])
+      require(output.isEmpty && composer.isComposing, "ABC Option-e did not begin a native dead key")
+    }
+
+    require(!composer.isComposing, "a new composer inherited a pending dead key")
+    try acutePrefix()
+    let preview = try composer.preview()
+    require(preview == "´" && composer.isComposing, "preview consumed the native acute state")
+    let prefixRepeat = try key(kVK_ANSI_E, modifiers: [.option], isARepeat: true)
+    require(prefixRepeat.isEmpty && composer.isComposing,
+      "autorepeating ABC's Option-e prefix emitted a spacing accent")
+    let accented = try key(kVK_ANSI_E)
+    require(accented == "é" && !composer.isComposing,
+      "ABC Option-e followed by e did not produce é: \(accented.debugDescription), composing=\(composer.isComposing)")
+    let accentedRepeat = try key(kVK_ANSI_E, isARepeat: true)
+    require(accentedRepeat == "é" && !composer.isComposing,
+      "autorepeating a completed native accent lost the platform's repeat metadata")
+    let following = try key(kVK_ANSI_E)
+    require(following == "e" && !composer.isComposing,
+      "a new e keydown reused the completed accent's autorepeat metadata")
+
+    try acutePrefix()
+    let spacing = try key(kVK_Space)
+    require(spacing == "´" && !composer.isComposing, "ABC Space did not finish a spacing acute accent")
+
+    try acutePrefix()
+    let unsupported = try key(kVK_ANSI_X)
+    require(unsupported == "´x" && !composer.isComposing,
+      "ABC's unsupported acute combination lost part of its multi-character output")
+
+    try acutePrefix()
+    let repeated = try key(kVK_ANSI_E, modifiers: [.option])
+    require(repeated == "´" && composer.isComposing,
+      "ABC's repeated dead key did not emit the old accent and begin the next one")
+    let afterRepeated = try key(kVK_ANSI_E)
+    require(afterRepeated == "é" && !composer.isComposing,
+      "ABC's repeated accent did not retain the next composition")
+
+    try acutePrefix()
+    let uppercase = try key(kVK_ANSI_E, modifiers: [.shift])
+    require(uppercase == "É" && !composer.isComposing, "native composition lost Shift")
+
+    try acutePrefix()
+    let caps = try key(kVK_ANSI_E, modifiers: [.capsLock])
+    require(caps == "É" && !composer.isComposing, "native composition lost Caps Lock")
+
+    try acutePrefix()
+    let shiftedCaps = try key(kVK_ANSI_E, modifiers: [.capsLock, .shift])
+    require(shiftedCaps == "É" && !composer.isComposing,
+      "native composition did not preserve ABC's Shift plus Caps Lock behavior: \(shiftedCaps.debugDescription)")
+
+    try acutePrefix()
+    let flushed = try composer.finish()
+    require(flushed == "´" && !composer.isComposing, "finishing discarded the pending spacing accent")
+    let finishedAgain = try composer.finish()
+    require(finishedAgain.isEmpty, "finishing an idle composer inserted a Space")
+
+    try acutePrefix()
+    composer.reset()
+    let ordinary = try key(kVK_ANSI_E)
+    require(ordinary == "e" && !composer.isComposing, "reset left native accent state in the next client")
+
+    do {
+      _ = try SquirrelNativeKeyboardComposer(keyboardLayoutName: "invalid.test.keyboard-layout")
+      require(false, "a missing explicitly configured layout silently used another layout")
+    } catch SquirrelNativeKeyboardComposer.TranslationError.keyboardLayoutUnavailable(let identifier) {
+      require(identifier == "invalid.test.keyboard-layout", "a missing-layout error lost its identifier")
+    }
   }
 
   private static func verifyModifierTransitionState() {

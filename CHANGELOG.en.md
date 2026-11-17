@@ -8,8 +8,9 @@ README, documentation, CI, build and release-script changes are not product vers
 
 ## 0.1.33 — 2026-11-17
 
-- Fixed composed accents still being treated as ordinary English letters, and preserve the complete text produced by one keypress.
+- Fixed lost Option dead-key accents in Chinese and Smart English, including marked previews, key repeats, Space completion and Escape/Backspace cancellation.
 - Existing raw composition commits before unhandled native text, preventing lost or reordered input while preserving Rime Option bindings and Command/Control shortcuts.
+- Fixed Settings getting stuck while quitting after a successful Core activation.
 - Includes the Wanxiang reading additions, personal-dictionary, iCloud recovery, download-progress and update-cleanup fixes from Preview 0.1.32.
 
 ## 0.1.32 — 2026-11-17 (Preview)
