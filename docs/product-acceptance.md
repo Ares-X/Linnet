@@ -1,9 +1,59 @@
 # Linnet product acceptance
 
+## 0.1.33 released acceptance (2026-11-18)
+
+[Action44127752500](https://github.com/Ares-X/Linnet/actions/runs/44127752500)
+built source `0c9abadd02afdbb48f51e53708c00252af9c3548` as 0.1.33/115,
+Chinese 39 and Catalog 50. The canonical publication and remote-stage verifiers
+passed. The exact ten-asset set SHA-256 is
+`0ff6f106031fa6bb8c8fb0f6836574b862f3ecd32e78ec878a3b8a41f94bcfb3`;
+the Complete SHA-256 is
+`72446506767b25973082cc0503dfca41b6396c27ba0575434f8e942020dbbacb`.
+[0.1.33 is Stable](https://github.com/Ares-X/Linnet/releases/tag/v0.1.33):
+Latest points to this source and exact Complete; both public channels match the
+verified Catalog. Installed Settings checked Stable and reported current,
+installed/running 0.1.33/115 and healthy runtime; its original Preview preference
+was restored. Published bytes are frozen.
+
+The dedicated macOS 26.6.2 arm64 VM installed these exact Action bytes, then
+completed a real ordered online Core update from public 0.1.31/113 to 0.1.33/115.
+It required no Installer, password, logout or application closure during the
+online update. The App root inode and three personal-file digests stayed equal;
+old Host and Settings exited normally and the canonical new Host loaded.
+Existing TextEdit, Terminal and Safari connections continued receiving input;
+a newly opened Script Editor also committed 你好é. Terminal composition was
+cancelled without executing a command and Safari input was not submitted.
+
+Actual keys on the final candidate passed Chinese/SmartEnglish helloé, ü,
+unsupported ´x, repeated prefix, Space completion, Esc/Backspace cancellation,
+held-key repetition, Shift+accent→É and following Chinese selection. A physical
+German-layout Shift+[ produced Ü followed by 你好. Pending composition finished
+in its original client without leaking to the next application. Caps Lock
+passed hello, Shift for the initial capital in Hello, and return to Chinese. Temporary keyboard, Dictation
+and OS Caps-switch preferences were restored to their original values.
+
+Core-success Apply on final Settings exited normally. Separately, Settings 114
+(the unchanged normal-Quit owner) downloaded the public final Core to Ready:
+Keep Editing preserved process, draft and staging; Discard and Quit exited and
+removed that staging, preserving personal-file digests. This was cleanup-owner
+evidence, not an ordered upgrade: the actual ordered update above used a running
+public 113 Host. Chinese38→39, personal-word/expansion workflows, recovery review,
+Host-confirmed sync and second-endpoint iCloud delivery retain the installed
+0.1.32 evidence below; those owners and data are unchanged in 0.1.33.
+
+CODE/TEST, RUNTIME_LOADED, PRODUCT and RELEASED pass for the stated paths.
+Network/storage fault injection, paused/degraded runtime, unreadable Registry,
+long-history cancellation, long-download cancellation and live TextKit wrapping
+remain VM `NOT_EXERCISED`; their focused local tests are not product evidence.
+Full uninstall/reinstall, login, logout and reboot lifecycle rows were not rerun.
+The 17 self-created audit reports have fix/test replies; #55 stays open for the
+reporter, #1 remains an upstream tracker and #76 an ongoing audit record.
+
 ## Native character and Core-exit follow-up (#77, #90, #91)
 
 Exact Action-built0.1.33/115 source854ad7f2bf0063759132e3cf4f0f761db3006bb2
-failed dedicated-VM accent acceptance and remains Draft. IMK tracing then proved
+failed dedicated-VM accent acceptance. That rejected Draft was replaced before
+Preview publication; its local failure evidence is retained. IMK tracing proved
 that Option+e arrived with U+00B4 and the server's dead-key flag; its continuation
 arrived as ordinary e, which Rime accepted. Returning both events to the client
 also failed to compose. Preserving one event's Unicode payload was insufficient.
@@ -39,11 +89,11 @@ TEST: macos-keycodes passed real ABC composition, repeat, multi-output, modifier
 preview/finish/reset and missing-layout cases. The native mixed-input probe
 passed reserved-key Shift-chord behavior in Chinese and SmartEnglish. The final
 Host/Settings build and settings-update-checker selector passed. Temporary event
-tracing is removed from final source. New formal Action bytes, ordered online
-upgrade and ready-Core Quit cleanup remain NOT_EXERCISED until recorded.
+tracing is removed from final source. The final Action, ordered online upgrade
+and ready-Core Quit results are recorded in the released-acceptance section above.
 
-Chinese39 and Catalog50 are unchanged. Because0.1.33 has remained Draft, the
-corrected candidate may retain0.1.33/115; no Preview bytes are rewritten.
+Chinese39 and Catalog50 are unchanged. Corrections retained0.1.33/115 while
+Draft-only; final Preview and Stable bytes are frozen.
 
 ## 0.1.32 installed acceptance (2026-11-17)
 
@@ -68,10 +118,11 @@ reader: created2026-11-17T13:14:02Z, five categories/17679 rows and a verified
 target digest. Head arrival alone was not counted as payload delivery.
 
 The small language delta completed before the attempted cancellation; that
-attempt is not cancellation evidence. Ready-Core Quit cleanup, transport faults,
-Registry-read retry, diagnostics cancellation and other unobserved branches
-retain their focused `TEST` evidence; installed execution is `NOT_EXERCISED`.
-Stable publication is withheld for the native-character correction above.
+attempt is not cancellation evidence. Ready-Core Quit cleanup was subsequently
+observed as recorded above. Transport faults, Registry-read retry, diagnostics
+cancellation and other unobserved branches retain focused `TEST` evidence;
+their installed execution remains `NOT_EXERCISED`. The final corrected0.1.33
+has since passed the stated acceptance and reached Stable.
 
 ## Narrow upstream backports
 
@@ -101,8 +152,8 @@ and SettingsUITests build-for-testing pass without driving the desktop.
 The installed rows above establish the observed upgrade and Settings paths.
 The dedicated VM showed 于思 for NaturalCode yusl and 于思于思 for yuslyusl.
 Other new/retained readings retain their native-engine evidence; live TextKit
-wrapping remains NOT_EXERCISED. Formal native-character acceptance requires the
-corrected candidate above.
+wrapping remains NOT_EXERCISED. The released-acceptance section records formal
+native-character acceptance on the corrected Action candidate.
 
 ## Settings and input follow-ups (#77–#96)
 
@@ -119,7 +170,7 @@ executed locally; they establish owner behavior, not installed product acceptanc
 | #86, #96 | Real Model→transport→Registry tests cover offline, timeout, storage errors and cancellation without complete fallback; invalid hash/404 recover through a valid complete pack. First/second-pack streaming progress is byte weighted and rebased for fallback; `download-transport,settings-appearance-scheduling` |
 | #87 | A failed initial Registry read can be retried while retaining drafts; an unreadable personal source remains unreadable; `settings-appearance-scheduling` |
 | #89 | Host runtime health is retained independently of version equality and shown separately; `settings-update-checker,presentation-status` |
-| #90 | Printable non-ASCII characters bypass the US-key fallback after existing raw composition is committed; `macos-keycodes` covers accented/combining input and retained ASCII mappings |
+| #90 | Printable non-ASCII characters bypass the US-key fallback; native dead keys continue through the macOS layout owner described above. `macos-keycodes` covers composition, repeat, complete Unicode output and retained ASCII mappings |
 | #94 | Diagnostics returns its verified backup list rather than starting another scan; `settings-appearance-scheduling` proves the single snapshot and later explicit refresh. `backup-store` covers cancelled reads; cancellation is checked between complete records, not during a single file hash |
 
 Dedicated-desktop acceptance must exercise candidate right-click focus, manual
