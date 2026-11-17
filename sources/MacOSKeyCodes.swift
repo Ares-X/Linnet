@@ -167,6 +167,32 @@ struct SquirrelModifierTransitionState {
 
 struct SquirrelKeycode {
 
+  static func osxKeyEventToRime(_ event: NSEvent) -> (keycode: UInt32, nativeText: Bool) {
+    let modifiers = event.modifierFlags
+    let nativeCharacters = event.characters ?? event.charactersIgnoringModifiers ?? ""
+    let nativeText = (nativeCharacters.count > 1 || nativeCharacters.contains { !$0.isASCII })
+      && event.specialKey == nil
+      && modifiers.isDisjoint(with: [.command, .control])
+
+    if nativeText && !modifiers.contains(.option) {
+      // AppKit can deliver a composed accent or several characters from one
+      // key. Preserve that complete payload instead of reducing it to a key.
+      return (UInt32(XK_VoidSymbol), true)
+    }
+    var keyChars = event.charactersIgnoringModifiers
+    if let code = keyChars?.first {
+      let capitalModifiers = modifiers.isSubset(of: [.shift, .capsLock])
+      if (capitalModifiers && !code.isLetter) || (!capitalModifiers && !code.isASCII) {
+        keyChars = event.characters
+      }
+    }
+    return (
+      osxKeycodeToRime(
+        keycode: event.keyCode, keychar: keyChars?.first,
+        shift: modifiers.contains(.shift), caps: modifiers.contains(.capsLock)),
+      nativeText)
+  }
+
   static func osxModifiersToRime(modifiers: NSEvent.ModifierFlags) -> UInt32 {
     var ret: UInt32 = 0
     if modifiers.contains(.capsLock) {
