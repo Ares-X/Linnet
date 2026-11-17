@@ -94,7 +94,6 @@ final class SquirrelInputController: IMKInputController {
       }
       let deadKey = modifiers.isDisjoint(with: [.command, .control])
         && (server()?.lastKeyEventWasDeadKey() ?? false)
-      let rimeModifiers = SquirrelKeycode.osxModifiersToRime(modifiers: modifiers)
       if input.keycode != UInt32(XK_VoidSymbol) {
         if rimeAPI.get_input(session)?.pointee == 0 {
           // Only the client knows the document position. Report that fact at
@@ -104,6 +103,7 @@ final class SquirrelInputController: IMKInputController {
           rimeAPI.set_property(
             session, "linnet/host_document_start_v1", atDocumentStart ? "1" : "")
         }
+        let rimeModifiers = SquirrelKeycode.osxModifiersToRime(modifiers: modifiers)
         let handled = processKey(
           input.keycode,
           modifiers: rimeModifiers)
@@ -117,9 +117,6 @@ final class SquirrelInputController: IMKInputController {
         return handled
       }
       if input.nativeText || deadKey {
-        // Even text without a Rime keysym ends a physical modifier chord.
-        // The reserved unmapped symbol observes that key without consuming it.
-        _ = processKey(UInt32(XK_VoidSymbol), modifiers: rimeModifiers)
         // Preserve the existing raw preedit before the application inserts a
         // printable character that this Rime keysym boundary cannot represent.
         commitCurrentComposition()
