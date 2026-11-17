@@ -23,6 +23,7 @@ struct LinnetCandidatePresentationTests {
     )
     testCanonicalTypography()
     testCandidateLineTypographyOwner()
+    testShortCandidateLineCharacterBoundaries()
     testCanonicalInlineMetricsAndMaterial()
     testCandidateDetailGeometry()
     testInputModeTransitions()
@@ -247,6 +248,50 @@ struct LinnetCandidatePresentationTests {
       LinnetCandidatePresentation.platformFont(
         fontNames: ["Avenir Next-Demi Bold"], size: 16).familyName == "Avenir Next",
       "legacy family-face candidate font names stopped resolving")
+  }
+
+  private static func testShortCandidateLineCharacterBoundaries() {
+    let candidateFont = NSFont.systemFont(ofSize: 16)
+    let labelFont = NSFont.systemFont(ofSize: 10)
+    let noBreak = NSAttributedString.Key("noBreak")
+    let cases: [(format: String, candidate: String, rendered: String)] = [
+      ("[candidate]", "🙂字", "🙂字"),
+      ("👩‍💻[candidate]", "字", "👩‍💻字"),
+      ("e\u{301}[candidate]", "字", "e\u{301}字"),
+      ("[candidate]", "🙂", "🙂"),
+      ("👩‍💻", "", "👩‍💻"),
+      ("e\u{301}", "", "e\u{301}"),
+      ("[candidate]", "字", "字"),
+      ("[candidate]", "", ""),
+    ]
+    for fixture in cases {
+      let line = LinnetCandidatePresentation.candidateLine(
+        candidateFormat: fixture.format,
+        label: "",
+        candidate: fixture.candidate,
+        comment: "",
+        candidateAttributes: [.font: candidateFont, .foregroundColor: NSColor.labelColor],
+        labelAttributes: [.font: labelFont, .foregroundColor: NSColor.secondaryLabelColor],
+        commentAttributes: [:]).attributedString
+      require(line.string == fixture.rendered,
+        "short-line wrapping changed the candidate text or format")
+      for (characterIndex, character) in fixture.rendered.enumerated() {
+        let prefix = String(fixture.rendered.prefix(characterIndex))
+        let start = prefix.utf16.count
+        for offset in start..<(start + String(character).utf16.count) {
+          require((line.attribute(noBreak, at: offset, effectiveRange: nil) as? Bool) ==
+            (characterIndex == 0 ? nil : true),
+            "short-line wrapping split a Character or joined its first Character backward")
+          let isCandidate = fixture.format == "[candidate]" || characterIndex > 0
+          require((line.attribute(.font, at: offset, effectiveRange: nil) as? NSFont) ==
+            (isCandidate ? candidateFont : labelFont),
+            "short-line wrapping changed candidate or literal typography")
+          require((line.attribute(.foregroundColor, at: offset, effectiveRange: nil) as? NSColor) ==
+            (isCandidate ? NSColor.labelColor : NSColor.secondaryLabelColor),
+            "short-line wrapping changed candidate or literal color")
+        }
+      }
+    }
   }
 
   private static func testCandidateLineTypographyOwner() {

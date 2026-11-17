@@ -8,6 +8,9 @@ README, documentation, CI, build and release-script changes are not product vers
 
 ## 0.1.32 — 2026-11-17
 
+- Added the sāi reading for 于思／于思于思, lì for 郦, and jì for 系着, preserving other valid readings.
+- Fixed learning-record parsing for extremely small weights and removed the fixed-buffer limit from long-text pinyin transliteration.
+- Corrected wrapping boundaries for emoji and combining characters in custom candidate formats.
 - Adding a candidate to custom words reveals the new row and focuses its code field for immediate editing.
 - Learning sync reports a preference change as applied only after the input method confirms it. Unconfirmed changes are clearly identified as saved preferences.
 - Core updates release disposable downloads after cancellation, verification failure or preparation, and clean prepared directories when Settings quits. Legacy installers remain available to open manually.

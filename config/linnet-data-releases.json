@@ -1,14 +1,14 @@
 {
-  "catalog_sequence": 49,
+  "catalog_sequence": 50,
   "core_artifact_format": "app-tar-gzip",
   "format": "io.github.ares-x.linnet.data-releases.v1",
   "packs": {
     "chinese": {
-      "version": "0.5.30",
-      "sequence": 38,
+      "version": "0.5.31",
+      "sequence": 39,
       "data_abi": 2,
       "min_core": "0.1.10",
-      "content_sha256": "f3eae76068fd77cc0ab6df52f35e9a64eebd8e8724c243c38d646b96255ea4d3"
+      "content_sha256": "401e6737207a7926363b653ab46677e86223e1122e4e9d95334dfa2892fa4753"
     },
     "english": {
       "version": "0.4.20",

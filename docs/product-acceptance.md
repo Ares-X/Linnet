@@ -1,5 +1,33 @@
 # Linnet product acceptance
 
+## Narrow upstream backports
+
+The upstream batch adds four reviewed readings without deleting valid original
+readings: 于思／于思于思 sāi, 郦 lì and 系着 jì. The existing ledger explicitly
+distinguishes replacement from supplementation. Source projection checks compare
+the complete accepted set and verify retained source pairs. Native acceptance
+keeps the existing first-choice corrections and selects/commits both new and
+retained readings in full pinyin and Natural Code; untoned li alone does not
+prove the tone, which remains a source-pair assertion.
+
+The rebuilt Rime library must preserve count/timestamp parsing with an underflowed
+learning weight, retain ordinary numeric values, transliterate short/long/Unicode
+input and leave unmapped input unchanged. These assertions run in the existing
+native smoke harness, including its focused mixed-input selector. The Squirrel
+candidate-line tests check no-break attributes across whole Characters, preserving
+text, fonts and colors for emoji, ZWJ and decomposed accents.
+
+Only Chinese data advances to 0.5.31/39 and Catalog50; English, LTS and Extended
+identities stay unchanged. The delta base is published 0.1.31 Chinese data, not
+the obsolete delta to the prior target. No upstream dependency pin changes.
+Local source projection, candidate presentation/snapshot, native mixed input,
+all eight profile goldens (222 cases each), grammar A/B and learning-policy
+regressions pass. The full Chinese39 container verifies and a delta from the
+published Chinese38 pack reconstructs its exact manifest/files. Host, Settings
+and SettingsUITests build-for-testing pass without driving the desktop.
+Real keyboard, TextKit wrapping, installed learning/update and VM acceptance
+remain `NOT_EXERCISED` until the maintainer unlocks the dedicated environment.
+
 ## Settings and input follow-ups (#77–#96)
 
 The current branch contains the following fixes. The listed focused tests have
@@ -28,8 +56,8 @@ Core upgrade and continued application connections without logout. A second
 iCloud endpoint must read the backup before claiming cross-device delivery.
 
 These runtime, product and release rows remain `NOT_EXERCISED` while the dedicated
-VM is unavailable. No language-pack identity or dependency version changes in
-this batch. #92 was withdrawn after checking the original fixed commit; #1 stays
+VM is unavailable. These Settings fixes do not change dependency versions; the
+separate upstream reading additions advance only Chinese data. #92 was withdrawn after checking the original fixed commit; #1 stays
 an upstream tracker, #76 an audit record and #55 awaits its reporter's confirmation.
 
 ## Runtime, Settings and recovery audit fixes (#67–#75)

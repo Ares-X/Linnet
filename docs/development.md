@@ -64,7 +64,7 @@ macOS 只看到一个 Linnet 输入源。Rime 内部包含八个中文 profile �
 
 Linnet 差异只有两个人工 owner：
 
-- `reviewed_pronunciations.tsv`：已接受的读音替换；
+- `reviewed_pronunciations.tsv`：已接受的读音替换与补全；`old-code-absent` 替换错音，`old-code-retained` 补读并保留合法旧音；
 - `reviewed_rankings.tsv`：已接受的精确排序行。
 
 精确 source patch 删除被拒绝的 `(text, code)`，`linnet_reviewed` 表添加接受行。锁定的 `rime-ice/cn_dicts/ext.dict.yaml` 是唯一中文补充输入：构建期投影器只接收万象核心尚未拥有的三字及以上行，使用万象 `zi` 表转换声调编码，拒绝歧义或无法验证的读音，再以低权重导入同一个 Rime dictionary graph。不存在提交进仓库的生成词典、第二个运行时 translator、自动猜音或运行时 fallback。
@@ -72,6 +72,10 @@ Linnet 差异只有两个人工 owner：
 维护更新必须修改唯一 review ledger/source patch，而不是生成第二份中文词典或运行时修正规则。
 
 万象 v18.1.2 的“鸡内金／片／散”和“应力”纠音已回移到上述 owner，保留原词频；词典 pin 仍为 v17.9.7。本轮完整词典升级在“当阳峪窑”等输入中出现整词回退，新 LTS `20aca767f06a` 也使“你也可以试试”等句子退步，因此未整体升级词典或模型。
+
+另从 v18.1.13 回移“于思／于思于思 sāi、郦 lì、系着 jì”读音补全，沿用原词频，不删除其他合法读音。只推进实际变化的中文包身份；英文、LTS、长尾包保持原字节。词典、模型和八方案 algebra 的整体迁移仍需独立对照。
+
+Rime 保持 1.17.0，现有 core-interactions patch 回移上游 `8bf987ab0c1fbda866b26ed6ad510a26c8e03cc2`（极小学习权重继续解析计数和时间）与 `e00da759c60017b396ed6a94236f4eb5283244db`（长文本 xlit）。`rime_smoke_test` 直接调用重建库的真实 parser 和 transliteration，再运行既有输入路径。Squirrel `d220b92ae7d0c916f4cce50df42d9a136668ea52` 的字符边界修正在当前 candidateLine owner 完成，不移植另一套面板。
 
 ### Smart English
 
