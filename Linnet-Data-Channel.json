@@ -4,23 +4,23 @@
       "edition" : "standard",
       "packs" : [
         {
-          "bytes" : 70793059,
-          "container_sha256" : "84b21a7f6468c8a1f104fb88d9a9c8770b5b8e053da2039051b9e5e098ea338c",
-          "content_sha256" : "f3eae76068fd77cc0ab6df52f35e9a64eebd8e8724c243c38d646b96255ea4d3",
+          "bytes" : 70793068,
+          "container_sha256" : "58cef119759d3f875a3a0bea122c74c7579b700e6510b994411b487c9917f87d",
+          "content_sha256" : "401e6737207a7926363b653ab46677e86223e1122e4e9d95334dfa2892fa4753",
           "data_abi" : 2,
           "deltas" : [
             {
-              "base_content_sha256" : "eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7",
-              "bytes" : 131351064,
-              "sha256" : "3e55a4e0e8d10824c9e1b1d564dd32e580fd39dd53367e211cb94e87123bc624",
-              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-Chinese-from-eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7.linnetdelta"
+              "base_content_sha256" : "f3eae76068fd77cc0ab6df52f35e9a64eebd8e8724c243c38d646b96255ea4d3",
+              "bytes" : 1243973,
+              "sha256" : "a65eb6145733089684935f8af643804a567d10a153a4ce07f4cae1e2f6da5f5e",
+              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-Chinese-from-f3eae76068fd77cc0ab6df52f35e9a64eebd8e8724c243c38d646b96255ea4d3.linnetdelta"
             }
           ],
           "kind" : "chinese",
           "min_core" : "0.1.10",
-          "sequence" : 38,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-Chinese.linnetpack",
-          "version" : "0.5.30"
+          "sequence" : 39,
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-Chinese.linnetpack",
+          "version" : "0.5.31"
         },
         {
           "bytes" : 39106480,
@@ -32,13 +32,13 @@
               "base_content_sha256" : "5ab01a718e36634ee2fcb80429ecb487bb2efc18ac40e3661a2dfe3c424a6cec",
               "bytes" : 26270,
               "sha256" : "efa16442a94f0e53cdc2af5641af3ffd8a581f890a433343a55d7187e2c1f2cc",
-              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-English-from-5ab01a718e36634ee2fcb80429ecb487bb2efc18ac40e3661a2dfe3c424a6cec.linnetdelta"
+              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-English-from-5ab01a718e36634ee2fcb80429ecb487bb2efc18ac40e3661a2dfe3c424a6cec.linnetdelta"
             }
           ],
           "kind" : "english",
           "min_core" : "0.1.16",
           "sequence" : 25,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-English.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-English.linnetpack",
           "version" : "0.4.20"
         },
         {
@@ -49,7 +49,7 @@
           "kind" : "lts",
           "min_core" : "0.1.0",
           "sequence" : 5,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-LTS.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-LTS.linnetpack",
           "version" : "c5fca7cf43af"
         }
       ]
@@ -58,23 +58,23 @@
       "edition" : "full",
       "packs" : [
         {
-          "bytes" : 70793059,
-          "container_sha256" : "84b21a7f6468c8a1f104fb88d9a9c8770b5b8e053da2039051b9e5e098ea338c",
-          "content_sha256" : "f3eae76068fd77cc0ab6df52f35e9a64eebd8e8724c243c38d646b96255ea4d3",
+          "bytes" : 70793068,
+          "container_sha256" : "58cef119759d3f875a3a0bea122c74c7579b700e6510b994411b487c9917f87d",
+          "content_sha256" : "401e6737207a7926363b653ab46677e86223e1122e4e9d95334dfa2892fa4753",
           "data_abi" : 2,
           "deltas" : [
             {
-              "base_content_sha256" : "eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7",
-              "bytes" : 131351064,
-              "sha256" : "3e55a4e0e8d10824c9e1b1d564dd32e580fd39dd53367e211cb94e87123bc624",
-              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-Chinese-from-eca9451f942e90969c5d82ee3e12c32554c256d24140b1331f4a8e27c2bb0bf7.linnetdelta"
+              "base_content_sha256" : "f3eae76068fd77cc0ab6df52f35e9a64eebd8e8724c243c38d646b96255ea4d3",
+              "bytes" : 1243973,
+              "sha256" : "a65eb6145733089684935f8af643804a567d10a153a4ce07f4cae1e2f6da5f5e",
+              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-Chinese-from-f3eae76068fd77cc0ab6df52f35e9a64eebd8e8724c243c38d646b96255ea4d3.linnetdelta"
             }
           ],
           "kind" : "chinese",
           "min_core" : "0.1.10",
-          "sequence" : 38,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-Chinese.linnetpack",
-          "version" : "0.5.30"
+          "sequence" : 39,
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-Chinese.linnetpack",
+          "version" : "0.5.31"
         },
         {
           "bytes" : 39106480,
@@ -86,13 +86,13 @@
               "base_content_sha256" : "5ab01a718e36634ee2fcb80429ecb487bb2efc18ac40e3661a2dfe3c424a6cec",
               "bytes" : 26270,
               "sha256" : "efa16442a94f0e53cdc2af5641af3ffd8a581f890a433343a55d7187e2c1f2cc",
-              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-English-from-5ab01a718e36634ee2fcb80429ecb487bb2efc18ac40e3661a2dfe3c424a6cec.linnetdelta"
+              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-English-from-5ab01a718e36634ee2fcb80429ecb487bb2efc18ac40e3661a2dfe3c424a6cec.linnetdelta"
             }
           ],
           "kind" : "english",
           "min_core" : "0.1.16",
           "sequence" : 25,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-English.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-English.linnetpack",
           "version" : "0.4.20"
         },
         {
@@ -103,7 +103,7 @@
           "kind" : "lts",
           "min_core" : "0.1.0",
           "sequence" : 5,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-LTS.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-LTS.linnetpack",
           "version" : "c5fca7cf43af"
         },
         {
@@ -116,13 +116,13 @@
               "base_content_sha256" : "8df604e4e5447abbd3ea45274c7b685a3556a0c238635d3b01f8e81c8837f84d",
               "bytes" : 868266,
               "sha256" : "2dc59f5d1a8929cd84cf343d335278dc3405b0fb42e5c14d1c19b71795d30e21",
-              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-Extended-from-8df604e4e5447abbd3ea45274c7b685a3556a0c238635d3b01f8e81c8837f84d.linnetdelta"
+              "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-Extended-from-8df604e4e5447abbd3ea45274c7b685a3556a0c238635d3b01f8e81c8837f84d.linnetdelta"
             }
           ],
           "kind" : "extended",
           "min_core" : "0.1.0",
           "sequence" : 9,
-          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-49/Linnet-Extended.linnetpack",
+          "url" : "https://github.com/Ares-X/Linnet/releases/download/data-50/Linnet-Extended.linnetpack",
           "version" : "0.2.5"
         }
       ]
@@ -130,14 +130,14 @@
   ],
   "core" : {
     "artifact_format" : "app-tar-gzip",
-    "artifact_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.31/Linnet-0.1.31-arm64-Core.linnetcore",
-    "build" : 113,
-    "bytes" : 6692597,
-    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.31",
-    "revision" : "89da8a82c8262e34628c5040b65b84eeae031d38",
-    "sha256" : "aecc45db246173c065480948f27763d302e4b4fe58ac0551e30c7856fea62d00",
-    "version" : "0.1.31"
+    "artifact_url" : "https://github.com/Ares-X/Linnet/releases/download/core-v0.1.32/Linnet-0.1.32-arm64-Core.linnetcore",
+    "build" : 114,
+    "bytes" : 6722729,
+    "release_url" : "https://github.com/Ares-X/Linnet/releases/tag/core-v0.1.32",
+    "revision" : "31213783a15316e7182639761b48e022c37b975d",
+    "sha256" : "0241e3813d2503c81c76f1e72dbec41916e01261b70530c709be6ff9367895af",
+    "version" : "0.1.32"
   },
   "format" : 2,
-  "sequence" : 49
+  "sequence" : 50
 }
