@@ -6,7 +6,13 @@ This file records application features, fixes, interaction improvements, and ins
 README, documentation, CI, build and release-script changes are not product version changes. For inherited Squirrel history, see the
 [Squirrel changelog](https://github.com/rime/squirrel/blob/master/CHANGELOG.md).
 
-## 0.1.32 — 2026-11-17
+## 0.1.33 — 2026-11-17
+
+- Fixed composed accents still being treated as ordinary English letters, and preserve the complete text produced by one keypress.
+- Existing raw composition commits before unhandled native text, preventing lost or reordered input while preserving Rime Option bindings and Command/Control shortcuts.
+- Includes the Wanxiang reading additions, personal-dictionary, iCloud recovery, download-progress and update-cleanup fixes from Preview 0.1.32.
+
+## 0.1.32 — 2026-11-17 (Preview)
 
 - Added the sāi reading for 于思／于思于思, lì for 郦, and jì for 系着, preserving other valid readings.
 - Fixed learning-record parsing for extremely small weights and removed the fixed-buffer limit from long-text pinyin transliteration.
